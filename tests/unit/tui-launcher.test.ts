@@ -67,6 +67,33 @@ test("tui launcher formats daemon startup socket failures with doctor/reopen gui
   assert.match(message, /temporary maintenance mode/);
 });
 
+test("tui launcher classifies transient rpc startup failures as maintenance fallbacks", () => {
+  assert.equal(
+    launcher.isRecoverableRpcStartupError(
+      new Error("connect ECONNREFUSED /run/user/1001/rin-daemon/daemon.sock"),
+    ),
+    true,
+  );
+  assert.equal(
+    launcher.isRecoverableRpcStartupError(new Error("rin_timeout:get_state")),
+    true,
+  );
+  assert.equal(launcher.isRecoverableRpcStartupError(new Error("boom")), false);
+
+  const notice = launcher.formatTuiMaintenanceFallbackNotice(
+    new Error("rin_timeout:rpc_session_ready"),
+  );
+  assert.match(notice, /Entering temporary maintenance mode/);
+  assert.match(notice, /rin doctor/);
+});
+
+test("tui launcher startup timeout rejects with a bounded startup error", async () => {
+  await assert.rejects(
+    launcher.withTuiStartupTimeout(new Promise(() => {}), 10, "demo"),
+    /rin_timeout:demo/,
+  );
+});
+
 test("tui launcher leaves unrelated startup errors unchanged", () => {
   assert.equal(launcher.formatTuiStartupError(new Error("boom")), "boom");
 });
@@ -113,6 +140,22 @@ test("tui launcher treats daemon status as the rpc startup health check", async 
       true,
     );
     assert.equal(requests[0].type, "daemon_status");
+    assert.equal(
+      await launcher.shouldStartMaintenanceMode({
+        env: { RIN_TUI_RUNTIME_ROLE: "rpc-frontend" },
+        socketPath,
+        timeoutMs: 500,
+      }),
+      false,
+    );
+    assert.equal(
+      await launcher.shouldStartMaintenanceMode({
+        env: { RIN_TUI_RUNTIME_ROLE: "maintenance-tui" },
+        socketPath: path.join(runtimeDir, "missing.sock"),
+        timeoutMs: 1,
+      }),
+      true,
+    );
   } finally {
     await new Promise((resolve) => server.close(() => resolve()));
     await fs.rm(runtimeDir, { recursive: true, force: true });
