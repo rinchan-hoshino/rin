@@ -362,21 +362,20 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       installPowerShellWrapper,
       /^\$defaultBootstrapBranch = "bootstrap"$/m,
     );
-    assert.match(
+    assert.doesNotMatch(
       installPowerShellWrapper,
       /\[CmdletBinding\(PositionalBinding = \$false\)\]/,
     );
-    assert.match(installPowerShellWrapper, /\[switch\]\$Git/);
+    assert.match(installPowerShellWrapper, /return ,\$result/);
     assert.match(
       installPowerShellWrapper,
-      /if \(\$Git\) \{ \$args \+= "--git" \}/,
+      /\$bootstrapArgs = @\(Build-BootstrapArgs \$args\)/,
     );
-    assert.match(
-      bootstrapPowerShell,
-      /\[CmdletBinding\(PositionalBinding = \$false\)\]/,
-    );
-    assert.match(bootstrapPowerShell, /\[switch\]\$Git/);
-    assert.match(bootstrapPowerShell, /if \(\$Git\) \{ \$args \+= "--git" \}/);
+    assert.doesNotMatch(bootstrapPowerShell, /\[switch\]\$Git/);
+    assert.match(bootstrapPowerShell, /function Is-Flag/);
+    assert.match(bootstrapPowerShell, /Is-Flag \$arg "git"/);
+    assert.match(bootstrapPowerShell, /Is-Flag \$arg "mode"/);
+    assert.match(bootstrapPowerShell, /Parse-Args @\(\$args/);
     assert.equal(fs.existsSync(path.join(tempDir, "stale.txt")), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

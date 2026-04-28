@@ -1,22 +1,101 @@
-[CmdletBinding(PositionalBinding = $false)]
-param(
-  [ValidateSet("install", "update")]
-  [string]$Mode = "install",
-  [switch]$Stable,
-  [switch]$Beta,
-  [switch]$Nightly,
-  [switch]$Git,
-  [string]$Branch,
-  [string]$Version,
-  [Alias("h")]
-  [switch]$Help,
-  [Parameter(ValueFromRemainingArguments = $true)]
-  [string[]]$RemainingArgs
-)
-
 $ErrorActionPreference = "Stop"
 
-if ($Mode -eq "update") {
+$mode = "install"
+$channel = "stable"
+$branch = ""
+$version = ""
+$gitSelector = ""
+$explicitChannel = ""
+$expectGitSelector = $false
+
+function Is-Flag([string]$Value, [string]$Name) {
+  return $Value -ieq "-$Name" -or $Value -ieq "--$Name"
+}
+
+function Read-OptionValue([string[]]$Values, [ref]$Index, [string]$DisplayName) {
+  if ($Index.Value + 1 -ge $Values.Count) { throw "missing value for $DisplayName" }
+  $Index.Value += 1
+  return $Values[$Index.Value]
+}
+
+function Looks-Like-Git-Ref([string]$Value) {
+  return $Value -match "^(refs/|v[0-9]|.*[~^:].*)" -or $Value -match "^[0-9a-fA-F]{7,40}$"
+}
+
+function Set-Channel([string]$Requested) {
+  if ($script:explicitChannel -and $script:explicitChannel -ne $Requested) {
+    throw "cannot combine conflicting release channel selectors"
+  }
+  $script:channel = $Requested
+  $script:explicitChannel = $Requested
+}
+
+function Show-Usage {
+  @"
+Usage: install.ps1 [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
+
+Defaults to the stable release channel.
+--beta installs the current weekly beta candidate.
+--nightly installs the current nightly build.
+--git main or --git deadbeef selects a branch or ref directly.
+Legacy flags such as --branch/--version remain supported.
+"@ | Write-Host
+}
+
+function Parse-Args([string[]]$Values) {
+  for ($i = 0; $i -lt $Values.Count; $i++) {
+    $arg = $Values[$i]
+    if (Is-Flag $arg "mode") {
+      $script:mode = (Read-OptionValue $Values ([ref]$i) "--mode").ToLowerInvariant()
+      if ($script:mode -notin @("install", "update")) { throw "invalid mode: $script:mode" }
+      continue
+    }
+    if (Is-Flag $arg "stable") { Set-Channel "stable"; $script:expectGitSelector = $false; continue }
+    if (Is-Flag $arg "beta") { Set-Channel "beta"; $script:expectGitSelector = $false; continue }
+    if (Is-Flag $arg "nightly") { Set-Channel "nightly"; $script:expectGitSelector = $false; continue }
+    if (Is-Flag $arg "git") { Set-Channel "git"; $script:expectGitSelector = $true; continue }
+    if (Is-Flag $arg "branch") {
+      $script:branch = Read-OptionValue $Values ([ref]$i) "--branch"
+      $script:expectGitSelector = $false
+      continue
+    }
+    if (Is-Flag $arg "version") {
+      $script:version = Read-OptionValue $Values ([ref]$i) "--version"
+      $script:expectGitSelector = $false
+      continue
+    }
+    if ((Is-Flag $arg "h") -or (Is-Flag $arg "help")) {
+      Show-Usage
+      exit 0
+    }
+    if ($script:expectGitSelector -and -not $script:gitSelector -and -not $arg.StartsWith("-")) {
+      $script:gitSelector = $arg
+      $script:expectGitSelector = $false
+      continue
+    }
+    if ($script:channel -in @("stable", "beta", "nightly")) {
+      throw "$script:channel does not support a flag selector"
+    }
+    throw "unknown argument: $arg"
+  }
+
+  if (-not $script:branch -and -not $script:version -and $script:gitSelector) {
+    if (Looks-Like-Git-Ref $script:gitSelector) {
+      $script:version = $script:gitSelector
+    } else {
+      $script:branch = $script:gitSelector
+    }
+  }
+
+  if ($script:branch -and $script:version) { throw "cannot combine --branch and --version" }
+  if ($script:channel -eq "stable" -and $script:branch) { throw "stable does not support --branch" }
+  if ($script:channel -eq "beta" -and ($script:branch -or $script:version)) { throw "beta does not support explicit selectors" }
+  if ($script:channel -eq "nightly" -and ($script:branch -or $script:version)) { throw "nightly does not support explicit selectors" }
+}
+
+Parse-Args @($args | ForEach-Object { [string]$_ })
+
+if ($mode -eq "update") {
   $prefix = "rin-update"
   $workPrefix = "rin-update"
   $fetchLabel = "Fetching updater source"
@@ -43,26 +122,6 @@ $srcDir = Join-Path $workDir "src"
 $manifestPath = Join-Path $workDir "release-manifest.json"
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
-$channel = "stable"
-$branch = ""
-$version = ""
-$gitSelector = ""
-$explicitChannel = ""
-$expectGitSelector = $false
-
-function Build-ParsedArgs {
-  $args = @()
-  if ($Stable) { $args += "--stable" }
-  if ($Beta) { $args += "--beta" }
-  if ($Nightly) { $args += "--nightly" }
-  if ($Git) { $args += "--git" }
-  if ($Branch) { $args += @("--branch", $Branch) }
-  if ($Version) { $args += @("--version", $Version) }
-  if ($Help) { $args += "--help" }
-  $args += $RemainingArgs
-  return $args
-}
-
 function Say([string]$Message) {
   Write-Host "[$prefix] $Message"
 }
@@ -73,78 +132,6 @@ function Fetch-File([string]$Url, [string]$OutFile) {
 
 function Url-Encode-Path([string]$Value) {
   (($Value -split "/") | ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join "/"
-}
-
-function Looks-Like-Git-Ref([string]$Value) {
-  return $Value -match "^(refs/|v[0-9]|.*[~^:].*)" -or $Value -match "^[0-9a-fA-F]{7,40}$"
-}
-
-function Set-Channel([string]$Requested) {
-  if ($script:explicitChannel -and $script:explicitChannel -ne $Requested) {
-    throw "cannot combine conflicting release channel selectors"
-  }
-  $script:channel = $Requested
-  $script:explicitChannel = $Requested
-}
-
-function Parse-Args([string[]]$Args) {
-  for ($i = 0; $i -lt $Args.Count; $i++) {
-    $arg = $Args[$i]
-    switch ($arg) {
-      "--stable" { Set-Channel "stable"; $script:expectGitSelector = $false; continue }
-      "--beta" { Set-Channel "beta"; $script:expectGitSelector = $false; continue }
-      "--nightly" { Set-Channel "nightly"; $script:expectGitSelector = $false; continue }
-      "--git" { Set-Channel "git"; $script:expectGitSelector = $true; continue }
-      "--branch" {
-        if ($i + 1 -ge $Args.Count) { throw "missing value for --branch" }
-        $script:branch = $Args[++$i]
-        $script:expectGitSelector = $false
-        continue
-      }
-      "--version" {
-        if ($i + 1 -ge $Args.Count) { throw "missing value for --version" }
-        $script:version = $Args[++$i]
-        $script:expectGitSelector = $false
-        continue
-      }
-      { $_ -in @("-h", "--help") } {
-        @"
-Usage: install.ps1 [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
-
-Defaults to the stable release channel.
---beta installs the current weekly beta candidate.
---nightly installs the current nightly build.
---git main or --git deadbeef selects a branch or ref directly.
-Legacy flags such as --branch/--version remain supported.
-"@ | Write-Host
-        exit 0
-      }
-      default {
-        if ($script:expectGitSelector -and -not $script:gitSelector -and -not $arg.StartsWith("-")) {
-          $script:gitSelector = $arg
-          $script:expectGitSelector = $false
-          continue
-        }
-        if ($script:channel -in @("stable", "beta", "nightly")) {
-          throw "$script:channel does not support a flag selector"
-        }
-        throw "unknown argument: $arg"
-      }
-    }
-  }
-
-  if (-not $script:branch -and -not $script:version -and $script:gitSelector) {
-    if (Looks-Like-Git-Ref $script:gitSelector) {
-      $script:version = $script:gitSelector
-    } else {
-      $script:branch = $script:gitSelector
-    }
-  }
-
-  if ($script:branch -and $script:version) { throw "cannot combine --branch and --version" }
-  if ($script:channel -eq "stable" -and $script:branch) { throw "stable does not support --branch" }
-  if ($script:channel -eq "beta" -and ($script:branch -or $script:version)) { throw "beta does not support explicit selectors" }
-  if ($script:channel -eq "nightly" -and ($script:branch -or $script:version)) { throw "nightly does not support explicit selectors" }
 }
 
 function Fetch-Manifest {
@@ -240,12 +227,10 @@ function Set-Release-Env($Release) {
   $env:RIN_RELEASE_REF = $Release.Ref
   $env:RIN_RELEASE_SOURCE_LABEL = $Release.SourceLabel
   $env:RIN_RELEASE_ARCHIVE_URL = $Release.ArchiveUrl
-  if ($Mode -eq "update") { $env:RIN_INSTALL_MODE = "update" }
+  if ($mode -eq "update") { $env:RIN_INSTALL_MODE = "update" }
 }
 
 try {
-  $parsedArgs = Build-ParsedArgs
-  Parse-Args $parsedArgs
   Say "Fetching release manifest"
   Fetch-Manifest
   $release = Resolve-Release
