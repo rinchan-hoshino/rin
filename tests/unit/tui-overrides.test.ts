@@ -370,6 +370,51 @@ test("rpc session resync rebinds runtime state and rerenders history", async () 
   assert.ok(renders >= 1);
 });
 
+test("rpc local user echo suppresses the matching daemon echo", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const messages = [];
+  let renders = 0;
+  const instance = {
+    isInitialized: true,
+    ui: {
+      requestRender() {
+        renders += 1;
+      },
+    },
+    footer: { invalidate() {} },
+    addMessageToChat(message) {
+      messages.push(message);
+    },
+    updatePendingMessagesDisplay() {},
+  };
+
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_local_user_message",
+    text: "hello",
+  });
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "message_start",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: "hello" }],
+    },
+  });
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "message_start",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: "different" }],
+    },
+  });
+
+  assert.deepEqual(
+    messages.map((message) => message.content[0]?.text),
+    ["hello", "different"],
+  );
+  assert.equal(renders, 2);
+});
+
 test("rpc compaction start keeps the dedicated compaction loader", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
