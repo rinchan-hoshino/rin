@@ -77,6 +77,10 @@ export async function withTuiStartupTimeout<T>(
   }
 }
 
+function waitForRpcStartupStep<T>(operation: Promise<T>, label: string) {
+  return withTuiStartupTimeout(operation, RPC_STARTUP_READY_TIMEOUT_MS, label);
+}
+
 export async function isDaemonReadyForRpcStartup(
   options: { socketPath?: string; timeoutMs?: number } = {},
 ) {
@@ -210,14 +214,9 @@ async function startRpcTui(
   let interactiveMode: InteractiveMode | undefined;
   try {
     await rpcSession.prepareForInteractiveStartup();
-    await withTuiStartupTimeout(
-      rpcSession.connect(),
-      RPC_STARTUP_READY_TIMEOUT_MS,
-      "rpc_connect",
-    );
-    await withTuiStartupTimeout(
+    await waitForRpcStartupStep(rpcSession.connect(), "rpc_connect");
+    await waitForRpcStartupStep(
       rpcSession.ensureSessionReady(),
-      RPC_STARTUP_READY_TIMEOUT_MS,
       "rpc_session_ready",
     );
     runtimeHost = createRpcRuntimeHost(rpcSession);
