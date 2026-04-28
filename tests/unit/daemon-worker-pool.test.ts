@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -16,14 +16,67 @@ const { WorkerPool } = await import(
   ).href
 );
 
+const activeDirs = new Set<string>();
+const activePools = new Set<any>();
+const activeChildren = new Set<any>();
+const originalCreateWorker = WorkerPool.prototype.createWorker;
+
+WorkerPool.prototype.createWorker = function trackedCreateWorker(...args) {
+  activePools.add(this);
+  const worker = originalCreateWorker.apply(this, args);
+  activeChildren.add(worker.child);
+  worker.child.once("exit", () => {
+    activeChildren.delete(worker.child);
+  });
+  return worker;
+};
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForChildExit(child: any, timeoutMs = 1000) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+      resolve();
+    }, timeoutMs);
+    timer.unref?.();
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+afterEach(async () => {
+  for (const pool of activePools) {
+    pool.destroyAll();
+  }
+  activePools.clear();
+  const children = Array.from(activeChildren);
+  for (const child of children) {
+    try {
+      child.kill("SIGTERM");
+    } catch {}
+  }
+  await Promise.all(children.map((child) => waitForChildExit(child)));
+  activeChildren.clear();
+  for (const dir of activeDirs) {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+  activeDirs.clear();
+});
+
 async function makeTempDir(prefix) {
   const root = process.env.RIN_TEST_TMPDIR || "/home/rin/tmp";
   await fs.mkdir(root, { recursive: true });
-  return await fs.mkdtemp(path.join(root, prefix));
+  const dir = await fs.mkdtemp(path.join(root, prefix));
+  activeDirs.add(dir);
+  return dir;
 }
 
 test("getRestorableSessionSelectors keeps live session workers and remembers turn state", async () => {
