@@ -90,10 +90,17 @@ test("web search query helpers normalize request", () => {
 test("web search query helpers normalize domain filters", () => {
   const req = query.normalizeSearchRequest({
     q: "docs",
-    domains: ["https://www.example.com/docs", "example.com/docs"],
+    domains: [
+      "https://www.example.com/docs",
+      "example.com/docs",
+      "site:*.example.org/blog",
+    ],
   });
-  assert.deepEqual(req.domains, ["example.com/docs"]);
-  assert.equal(query.buildSearchQuery(req), "docs site:example.com/docs");
+  assert.deepEqual(req.domains, ["example.com/docs", "example.org/blog"]);
+  assert.equal(
+    query.buildSearchQuery(req),
+    "docs site:example.com/docs site:example.org/blog",
+  );
 });
 
 test("web search query helpers discard invalid freshness", () => {

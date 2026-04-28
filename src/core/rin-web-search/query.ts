@@ -91,6 +91,7 @@ function isSupportedFreshness(value: string): value is WebSearchFreshness {
 function normalizeSiteConstraint(value: string): SearchSiteConstraint | null {
   const input = safeText(value)
     .replace(/^['"]+|['"),.]+$/g, "")
+    .replace(/^site:/i, "")
     .replace(/^\*\./, "");
   if (!input) return null;
 
