@@ -87,6 +87,15 @@ test("web search query helpers normalize request", () => {
   assert.equal(query.buildSearchQuery(req), "hello site:a.com site:b.com");
 });
 
+test("web search query helpers normalize domain filters", () => {
+  const req = query.normalizeSearchRequest({
+    q: "docs",
+    domains: ["https://www.example.com/docs", "example.com/docs"],
+  });
+  assert.deepEqual(req.domains, ["example.com/docs"]);
+  assert.equal(query.buildSearchQuery(req), "docs site:example.com/docs");
+});
+
 test("web search query helpers discard invalid freshness", () => {
   const req = query.normalizeSearchRequest({
     q: " demo ",
