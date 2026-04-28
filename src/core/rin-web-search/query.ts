@@ -116,6 +116,17 @@ function formatSiteConstraint(constraint: SearchSiteConstraint): string {
   return `${constraint.domain}${constraint.pathPrefix}`;
 }
 
+function normalizeDomainFilters(domains: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      domains
+        .map((item) => normalizeSiteConstraint(safeText(item)))
+        .filter((item): item is SearchSiteConstraint => Boolean(item))
+        .map(formatSiteConstraint),
+    ),
+  ).slice(0, 8);
+}
+
 function extractSiteConstraints(
   query: string,
   domains: string[],
@@ -153,14 +164,7 @@ export function normalizeSearchRequest(
     ? freshnessValue
     : undefined;
   const domainValues = Array.isArray(raw?.domains) ? raw.domains : [];
-  const domains = Array.from(
-    new Set(
-      domainValues
-        .map((item) => normalizeSiteConstraint(safeText(item)))
-        .filter((item): item is SearchSiteConstraint => Boolean(item))
-        .map(formatSiteConstraint),
-    ),
-  ).slice(0, 8);
+  const domains = normalizeDomainFilters(domainValues);
   const siteConstraints = extractSiteConstraints(q, domains);
   return { q, limit, language, freshness, domains, siteConstraints };
 }
