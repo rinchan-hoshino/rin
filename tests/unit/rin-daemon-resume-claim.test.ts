@@ -106,7 +106,7 @@ async function makeTempDir(prefix) {
   return await fs.mkdtemp(path.join(root, prefix));
 }
 
-test("daemon serves empty session and catalog commands locally without spawning a worker", async () => {
+test("daemon serves sessionless catalog commands locally without spawning a worker", async () => {
   const agentDir = await makeTempDir("rin-daemon-local-");
   const socketPath = path.join(agentDir, "daemon.sock");
   const workerPath = path.join(agentDir, "fake-worker.mjs");
@@ -139,23 +139,17 @@ process.stdin.on("data", (chunk) => {
   try {
     await waitForSocket(socketPath);
 
-    const state = await rpc(socketPath, { id: "1", type: "get_state" });
-    const messages = await rpc(socketPath, { id: "2", type: "get_messages" });
+    const messages = await rpc(socketPath, { id: "1", type: "get_messages" });
     const snapshot = await rpc(socketPath, {
-      id: "3",
+      id: "2",
       type: "get_session_snapshot",
     });
-    const commands = await rpc(socketPath, { id: "4", type: "get_commands" });
+    const commands = await rpc(socketPath, { id: "3", type: "get_commands" });
     const models = await rpc(socketPath, {
-      id: "5",
+      id: "4",
       type: "get_available_models",
     });
-    const oauth = await rpc(socketPath, { id: "6", type: "get_oauth_state" });
-
-    assert.equal(state.success, true);
-    assert.equal(state.data?.sessionId, "");
-    assert.equal(state.data?.model, null);
-    assert.equal(state.data?.messageCount, 0);
+    const oauth = await rpc(socketPath, { id: "5", type: "get_oauth_state" });
     assert.equal(messages.success, true);
     assert.deepEqual(messages.data, { messages: [] });
     assert.equal(snapshot.success, true);
@@ -175,6 +169,111 @@ process.stdin.on("data", (chunk) => {
       // ignore
     }
     assert.equal(workerLog.trim(), "");
+  } finally {
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("daemon routes session listing through the warm empty worker", async () => {
+  const agentDir = await makeTempDir("rin-daemon-list-sessions-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.mjs");
+  const logPath = path.join(agentDir, "commands.log");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + "\\n");
+    if (command.type === "get_state") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionId: "", isStreaming: false, isCompacting: false } });
+      continue;
+    }
+    if (command.type === "list_sessions") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessions: [{ id: "session-1", path: "/tmp/session-1.jsonl", firstMessage: "hello", modified: "2026-04-18T00:00:00.000Z", messageCount: 1, allMessagesText: "hello" }] } });
+      continue;
+    }
+    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+  }
+});
+`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  try {
+    await waitForSocket(socketPath);
+
+    const socket = net.createConnection(socketPath);
+    await new Promise((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+
+    let buffer = "";
+    const waitForResponse = (wantedId) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`payload_timeout:${wantedId}`)),
+          5000,
+        );
+        const onData = (chunk) => {
+          buffer += String(chunk);
+          while (true) {
+            const idx = buffer.indexOf("\n");
+            if (idx < 0) break;
+            let line = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 1);
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            if (!line.trim()) continue;
+            const payload = JSON.parse(line);
+            if (payload?.type === "response" && payload?.id === wantedId) {
+              clearTimeout(timer);
+              socket.off("data", onData);
+              resolve(payload);
+              return;
+            }
+          }
+        };
+        socket.on("data", onData);
+        socket.once("error", (error) => {
+          clearTimeout(timer);
+          socket.off("data", onData);
+          reject(error);
+        });
+      });
+
+    socket.write(`${JSON.stringify({ id: "1", type: "get_state" })}\n`);
+    const state = await waitForResponse("1");
+    socket.write(`${JSON.stringify({ id: "2", type: "list_sessions" })}\n`);
+    const listed = await waitForResponse("2");
+
+    assert.equal(state.success, true);
+    assert.equal(listed.success, true);
+    assert.equal(listed.data?.sessions?.[0]?.id, "session-1");
+    assert.equal(listed.data?.sessions?.[0]?.cwd, undefined);
+    assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
+      "get_state",
+      "list_sessions",
+    ]);
+    socket.destroy();
   } finally {
     try {
       daemon.kill("SIGKILL");

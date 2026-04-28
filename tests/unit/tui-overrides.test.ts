@@ -313,7 +313,7 @@ test("rpc session selector loads sessions through the daemon instead of local Se
   assert.equal(sessions[0].firstMessage, "demo");
   assert.equal(sessions[0].modified instanceof Date, true);
   assert.equal(sessions[0].messageCount, 3);
-  assert.equal(sessions[0].cwd, "/tmp");
+  assert.equal(sessions[0].cwd, undefined);
   assert.equal(sessions[0].allMessagesText, "demo follow up");
   assert.deepEqual(renamed, [["/tmp/demo.jsonl", "renamed"]]);
 });

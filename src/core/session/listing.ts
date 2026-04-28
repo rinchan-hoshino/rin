@@ -140,8 +140,10 @@ function createNormalizedBoundSessionDetails(
   item: BoundSessionListItem,
   source?: BoundSessionSource,
 ): NormalizedBoundSessionDetails {
+  const displayItem =
+    item.cwd === undefined ? item : { ...item, cwd: undefined };
   return {
-    item,
+    item: displayItem,
     resolvedPath: resolveNormalizedSessionPath(item.path),
     title: resolveBoundSessionDisplayTitle(item),
     subtitle: resolveBoundSessionSubtitle(source, item),
@@ -174,8 +176,11 @@ function normalizeBoundSessionDetails(
     firstMessage,
     modified: resolveBoundSessionModified(source),
     messageCount: normalizeSessionCount(source?.messageCount),
-    cwd: normalizeSessionValue(source?.cwd),
-    allMessagesText: normalizeSessionText(source?.allMessagesText, firstMessage),
+    cwd: undefined,
+    allMessagesText: normalizeSessionText(
+      source?.allMessagesText,
+      firstMessage,
+    ),
   } satisfies BoundSessionListItem;
 
   return createNormalizedBoundSessionDetails(item, source);
@@ -257,7 +262,9 @@ export function describeBoundSessions(
 }
 
 export function getBoundSessionDisplayTitle(session: unknown): string {
-  return normalizeBoundSessionDetails(session)?.title || DEFAULT_SESSION_DISPLAY_NAME;
+  return (
+    normalizeBoundSessionDetails(session)?.title || DEFAULT_SESSION_DISPLAY_NAME
+  );
 }
 
 export function getBoundSessionSubtitle(session: unknown): string | undefined {

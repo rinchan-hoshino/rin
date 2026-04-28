@@ -231,6 +231,13 @@ export class WorkerPool {
     this.requestWorker(worker, connection, command, true);
   }
 
+  ensureAttachedWorker(connection: ConnectionState) {
+    if (connection.attachedWorker) return connection.attachedWorker;
+    const worker = this.createWorker(connection);
+    this.attachWorker(connection, worker);
+    return worker;
+  }
+
   hasSelectedSession(connection: ConnectionState) {
     return hasSessionSelector(this.getConnectionSelector(connection));
   }
