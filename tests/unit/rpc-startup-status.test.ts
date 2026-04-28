@@ -13,8 +13,8 @@ const { RpcInteractiveSession } = await import(
     .href
 );
 
-test("rpc frontend reports Starting during initial TUI startup", () => {
-  const client = {
+function createClient() {
+  return {
     subscribe() {
       return () => {};
     },
@@ -29,12 +29,54 @@ test("rpc frontend reports Starting during initial TUI startup", () => {
     listSessions: async () => [],
     resumeSession: async () => {},
   };
-  const session = new RpcInteractiveSession(client);
+}
+
+test("rpc frontend reports Starting during initial TUI startup", () => {
+  const session = new RpcInteractiveSession(createClient());
 
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "starting",
     label: "Starting",
     connected: false,
+  });
+});
+
+test("rpc frontend status labels follow phase priority", () => {
+  const session = new RpcInteractiveSession(createClient());
+  session.startupPending = false;
+
+  assert.deepEqual(session.getFrontendStatusEvent(), {
+    type: "rpc_frontend_status",
+    phase: "connecting",
+    label: "Connecting",
+    connected: false,
+  });
+
+  session.rpcConnected = true;
+  session.isCompacting = true;
+  assert.deepEqual(session.getFrontendStatusEvent(), {
+    type: "rpc_frontend_status",
+    phase: "compacting",
+    label: "Compacting context",
+    connected: true,
+  });
+
+  session.isCompacting = false;
+  session.remoteTurnRunning = true;
+  assert.deepEqual(session.getFrontendStatusEvent(), {
+    type: "rpc_frontend_status",
+    phase: "working",
+    label: "Working",
+    connected: true,
+  });
+
+  session.remoteTurnRunning = false;
+  session.activeTurn = { mode: "prompt", message: "hello" };
+  assert.deepEqual(session.getFrontendStatusEvent(), {
+    type: "rpc_frontend_status",
+    phase: "sending",
+    label: "Sending",
+    connected: true,
   });
 });

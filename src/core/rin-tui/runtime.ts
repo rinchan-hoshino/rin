@@ -196,6 +196,17 @@ type RpcFrontendPhase =
   | "working"
   | "connecting";
 
+const RPC_FRONTEND_PHASE_LABELS: Record<
+  Exclude<RpcFrontendPhase, "idle">,
+  string
+> = {
+  connecting: "Connecting",
+  starting: "Starting",
+  sending: "Sending",
+  compacting: "Compacting context",
+  working: "Working",
+};
+
 function getRuntimeProfile() {
   return resolveRuntimeProfile();
 }
@@ -826,16 +837,7 @@ export class RpcInteractiveSession {
   getFrontendStatusEvent() {
     const phase = this.getFrontendPhase();
     if (phase === "idle") return null;
-    const label =
-      phase === "connecting"
-        ? "Connecting"
-        : phase === "starting"
-          ? "Starting"
-          : phase === "sending"
-            ? "Sending"
-            : phase === "compacting"
-              ? "Compacting context"
-              : "Working";
+    const label = RPC_FRONTEND_PHASE_LABELS[phase];
     return {
       type: "rpc_frontend_status",
       phase,
