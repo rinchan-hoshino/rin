@@ -47,14 +47,6 @@ const googleGsaFixture = `
   </div>
 </div>`;
 
-const bingFixture = `
-<ol id="b_results">
-  <li class="b_algo">
-    <h2><a href="https://www.bing.com/ck/a?u=a1aHR0cHM6Ly9leGFtcGxlLmNvbS9iaW5nLXN1cHBvcnQ">Bing Support Result</a></h2>
-    <div><p><span class="algoSlug_icon">icon</span>Bing fallback snippet for <b>RinChan</b>.</p></div>
-  </li>
-</ol>`;
-
 const duckDuckGoLiteFixture = `
 <table>
   <tr>
@@ -66,6 +58,20 @@ const duckDuckGoLiteFixture = `
   <tr>
     <td>&nbsp;&nbsp;&nbsp;</td>
     <td class='result-snippet'>Rin personal workspace mirror managed by <b>RinChan</b>.</td>
+  </tr>
+</table>`;
+
+const openAiDocsDuckDuckGoLiteFixture = `
+<table>
+  <tr>
+    <td>1.&nbsp;</td>
+    <td>
+      <a rel="nofollow" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fplatform.openai.com%2Fdocs%2Fguides%2Fprompt-caching&amp;rut=abc" class='result-link'>OpenAI Platform</a>
+    </td>
+  </tr>
+  <tr>
+    <td>&nbsp;&nbsp;&nbsp;</td>
+    <td class='result-snippet'>Prompt caching documentation for OpenAI API requests.</td>
   </tr>
 </table>`;
 
@@ -112,16 +118,6 @@ test("google parser extracts direct results", () => {
   assert.equal(rows[0].domain, "github.com");
 });
 
-test("bing parser extracts direct results and unwraps redirects", () => {
-  const rows = query.parseBingResults(bingFixture, 5);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].engine, "bing");
-  assert.equal(rows[0].url, "https://example.com/bing-support");
-  assert.equal(rows[0].title, "Bing Support Result");
-  assert.equal(rows[0].snippet, "Bing fallback snippet for RinChan.");
-  assert.equal(rows[0].domain, "example.com");
-});
-
 test("duckduckgo lite parser extracts direct results", () => {
   const rows = query.parseDuckDuckGoLiteResults(duckDuckGoLiteFixture, 5);
   assert.equal(rows.length, 1);
@@ -139,14 +135,14 @@ test("web search service reports direct provider runtime status", () => {
   const status = service.getWebSearchStatus("/tmp/rin-agent");
   assert.equal(status.runtime.ready, true);
   assert.equal(status.runtime.mode, "direct");
-  assert.equal(status.runtime.providerCount, 3);
-  assert.deepEqual(status.runtime.providers, ["google", "bing", "duckduckgo"]);
+  assert.equal(status.runtime.providerCount, 2);
+  assert.deepEqual(status.runtime.providers, ["google", "duckduckgo"]);
   assert.deepEqual(status.instances, []);
 });
 
-test("web search uses google results first and fills gaps from bing", async () => {
+test("web search uses google results first and fills gaps from duckduckgo", async () => {
   const originalFetch = globalThis.fetch;
-  const responses = [googleFixture, bingFixture];
+  const responses = [googleFixture, openAiDocsDuckDuckGoLiteFixture];
   globalThis.fetch = (async () => ({
     ok: true,
     status: 200,
@@ -162,7 +158,10 @@ test("web search uses google results first and fills gaps from bing", async () =
       result.results.map((item: any) => [item.engine, item.url]),
       [
         ["google", "https://github.com/rinchanai/rin"],
-        ["bing", "https://example.com/bing-support"],
+        [
+          "duckduckgo",
+          "https://platform.openai.com/docs/guides/prompt-caching",
+        ],
       ],
     );
     assert.deepEqual(
@@ -173,7 +172,7 @@ test("web search uses google results first and fills gaps from bing", async () =
       ]),
       [
         ["google", true, 1],
-        ["bing", true, 1],
+        ["duckduckgo", true, 1],
       ],
     );
   } finally {
@@ -211,7 +210,7 @@ test("duckduckgo provider uses the lite endpoint directly", async () => {
   const calls: string[] = [];
   const responses = [
     "<html><body>No Google results</body></html>",
-    "<html><body>No Bing results</body></html>",
+    "<html><body>No Google results again</body></html>",
     duckDuckGoLiteFixture,
   ];
   globalThis.fetch = (async (url: any) => {
@@ -238,7 +237,6 @@ test("duckduckgo provider uses the lite endpoint directly", async () => {
     );
     assert.deepEqual(result.attempts, [
       { engine: "google", ok: true, results: 0 },
-      { engine: "bing", ok: true, results: 0 },
       { engine: "duckduckgo", ok: true, results: 1 },
     ]);
   } finally {
@@ -246,11 +244,74 @@ test("duckduckgo provider uses the lite endpoint directly", async () => {
   }
 });
 
-test("web search falls back to bing when google is challenged", async () => {
+test("web search tries duckduckgo when google has no results", async () => {
   const originalFetch = globalThis.fetch;
   const responses = [
-    "<html><body><h1>CAPTCHA</h1><p>automated queries detected</p></body></html>",
-    bingFixture,
+    "<html><body>No Google results</body></html>",
+    "<html><body>No Google results again</body></html>",
+    openAiDocsDuckDuckGoLiteFixture,
+  ];
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => responses.shift() || "",
+  })) as typeof fetch;
+  try {
+    const result = await query.searchWeb({
+      q: "OpenAI API prompt caching prompt_cache_key retention cache evicted idle 5 10 minutes",
+      limit: 1,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.engine, "duckduckgo");
+    assert.deepEqual(result.attempts, [
+      { engine: "google", ok: true, results: 0 },
+      { engine: "duckduckgo", ok: true, results: 1 },
+    ]);
+    assert.equal(
+      result.results[0].url,
+      "https://platform.openai.com/docs/guides/prompt-caching",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search applies embedded site operators after provider search", async () => {
+  const originalFetch = globalThis.fetch;
+  const responses = [
+    "<html><body>No Google results</body></html>",
+    "<html><body>No Google results again</body></html>",
+    openAiDocsDuckDuckGoLiteFixture,
+  ];
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => responses.shift() || "",
+  })) as typeof fetch;
+  try {
+    const result = await query.searchWeb({
+      q: "site:platform.openai.com/docs prompt caching prompt_cache_key cache retention",
+      limit: 1,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.engine, "duckduckgo");
+    assert.deepEqual(result.attempts, [
+      { engine: "google", ok: true, results: 0 },
+      { engine: "duckduckgo", ok: true, results: 1 },
+    ]);
+    assert.equal(result.results[0].domain, "platform.openai.com");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search retries google once before falling back", async () => {
+  const originalFetch = globalThis.fetch;
+  const responses = [
+    "<html><body>No Google results yet</body></html>",
+    googleFixture,
   ];
   globalThis.fetch = (async () => ({
     ok: true,
@@ -261,12 +322,37 @@ test("web search falls back to bing when google is challenged", async () => {
   try {
     const result = await query.searchWeb({ q: "rinchanai", limit: 1 });
     assert.equal(result.ok, true);
-    assert.equal(result.engine, "bing");
+    assert.equal(result.engine, "google");
+    assert.deepEqual(result.attempts, [
+      { engine: "google", ok: true, results: 1 },
+    ]);
+    assert.equal(result.results[0].url, "https://github.com/rinchanai/rin");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search reports failure when google is challenged and duckduckgo is empty", async () => {
+  const originalFetch = globalThis.fetch;
+  const responses = [
+    "<html><body><h1>CAPTCHA</h1><p>automated queries detected</p></body></html>",
+    "<html><body>No DuckDuckGo results</body></html>",
+  ];
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => responses.shift() || "",
+  })) as typeof fetch;
+  try {
+    const result = await query.searchWeb({ q: "rinchanai", limit: 1 });
+    assert.equal(result.ok, false);
+    assert.equal(result.engine, "google");
     assert.deepEqual(result.attempts, [
       { engine: "google", ok: false, error: "google_challenge_required" },
-      { engine: "bing", ok: true, results: 1 },
+      { engine: "duckduckgo", ok: true, results: 0 },
     ]);
-    assert.equal(result.results[0].url, "https://example.com/bing-support");
+    assert.equal(result.results.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }

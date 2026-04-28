@@ -9,11 +9,7 @@ const GOOGLE_GSA_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 10; HUAWEI P30 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36 NSTNWV";
 const SUPPORTED_FRESHNESS = ["day", "week", "month", "year"] as const;
 
-export const DIRECT_WEB_SEARCH_PROVIDERS = [
-  "google",
-  "bing",
-  "duckduckgo",
-] as const;
+export const DIRECT_WEB_SEARCH_PROVIDERS = ["google", "duckduckgo"] as const;
 
 export type WebSearchFreshness = (typeof SUPPORTED_FRESHNESS)[number];
 
@@ -51,10 +47,16 @@ export type WebSearchResponse = {
   error?: string;
 };
 
+type SearchSiteConstraint = {
+  domain: string;
+  pathPrefix: string;
+};
+
 type NormalizedWebSearchRequest = {
   q: string;
   limit: number;
   domains: string[];
+  siteConstraints: SearchSiteConstraint[];
   freshness?: WebSearchFreshness;
   language: string;
 };
@@ -80,6 +82,55 @@ function isSupportedFreshness(value: string): value is WebSearchFreshness {
   return (SUPPORTED_FRESHNESS as readonly string[]).includes(value);
 }
 
+function normalizeSiteConstraint(value: string): SearchSiteConstraint | null {
+  const input = safeText(value)
+    .replace(/^['"]+|['"),.]+$/g, "")
+    .replace(/^\*\./, "");
+  if (!input) return null;
+
+  try {
+    const url = new URL(
+      /^[a-z][a-z0-9+.-]*:/i.test(input) ? input : `https://${input}`,
+    );
+    const domain = safeText(url.hostname).replace(/^www\./, "");
+    if (!domain) return null;
+    const pathPrefix = safeText(url.pathname === "/" ? "" : url.pathname);
+    return { domain, pathPrefix };
+  } catch {
+    const [domain = "", ...pathParts] = input.split("/");
+    const normalizedDomain = safeText(domain).replace(/^www\./, "");
+    if (!normalizedDomain) return null;
+    const pathPrefix = pathParts.length ? `/${pathParts.join("/")}` : "";
+    return { domain: normalizedDomain, pathPrefix };
+  }
+}
+
+function extractSiteConstraints(
+  query: string,
+  domains: string[],
+): SearchSiteConstraint[] {
+  const constraints: SearchSiteConstraint[] = [];
+  for (const domain of domains) {
+    const constraint = normalizeSiteConstraint(domain);
+    if (constraint) constraints.push(constraint);
+  }
+
+  const pattern = /(?:^|\s)site:([^\s)]+)/gi;
+  let match: RegExpExecArray | null = null;
+  while ((match = pattern.exec(query))) {
+    const constraint = normalizeSiteConstraint(match[1] || "");
+    if (constraint) constraints.push(constraint);
+  }
+
+  const seen = new Set<string>();
+  return constraints.filter((constraint) => {
+    const key = `${constraint.domain}\n${constraint.pathPrefix}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function normalizeSearchRequest(
   raw: WebSearchRequest | null | undefined,
 ): NormalizedWebSearchRequest {
@@ -94,7 +145,8 @@ export function normalizeSearchRequest(
   const domains = Array.from(
     new Set(domainValues.map((item) => safeText(item)).filter(Boolean)),
   ).slice(0, 8);
-  return { q, limit, language, freshness, domains };
+  const siteConstraints = extractSiteConstraints(q, domains);
+  return { q, limit, language, freshness, domains, siteConstraints };
 }
 
 export function buildSearchQuery(
@@ -211,13 +263,6 @@ function mapGoogleLanguage(language: string) {
   };
 }
 
-function mapBingMarket(language: string): string {
-  const locale = parseLocale(language);
-  if (!locale) return "";
-  if (!locale.region) return "";
-  return `${locale.lang}-${locale.region}`;
-}
-
 function mapFreshness(freshness: string | undefined): string {
   const value = safeText(freshness).toLowerCase();
   if (value === "day") return "d";
@@ -240,15 +285,6 @@ function buildGoogleUrl(request: NormalizedWebSearchRequest): string {
   if (language.gl) url.searchParams.set("gl", language.gl);
   const freshness = mapFreshness(request.freshness);
   if (freshness) url.searchParams.set("tbs", `qdr:${freshness}`);
-  return url.toString();
-}
-
-function buildBingUrl(request: NormalizedWebSearchRequest): string {
-  const url = new URL("https://www.bing.com/search");
-  url.searchParams.set("q", buildSearchQuery(request));
-  url.searchParams.set("adlt", "moderate");
-  const market = mapBingMarket(request.language);
-  if (market) url.searchParams.set("mkt", market);
   return url.toString();
 }
 
@@ -330,13 +366,38 @@ function domainMatches(hostname: string, domain: string): boolean {
   return host === target || host.endsWith(`.${target}`);
 }
 
-function filterResultsByDomains(
+function pathMatches(pathname: string, pathPrefix: string): boolean {
+  const path = safeText(pathname) || "/";
+  const prefix = safeText(pathPrefix);
+  if (!prefix) return true;
+  return (
+    path === prefix ||
+    path.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`)
+  );
+}
+
+function siteConstraintMatches(
+  row: WebSearchResult,
+  constraint: SearchSiteConstraint,
+): boolean {
+  if (!domainMatches(row.domain, constraint.domain)) return false;
+  if (!constraint.pathPrefix) return true;
+  try {
+    return pathMatches(new URL(row.url).pathname, constraint.pathPrefix);
+  } catch {
+    return false;
+  }
+}
+
+function filterSearchResults(
   rows: WebSearchResult[],
-  domains: string[],
+  request: NormalizedWebSearchRequest,
 ): WebSearchResult[] {
-  if (!domains.length) return rows;
+  if (!request.siteConstraints.length) return rows;
   return rows.filter((row) =>
-    domains.some((domain) => domainMatches(row.domain, domain)),
+    request.siteConstraints.some((constraint) =>
+      siteConstraintMatches(row, constraint),
+    ),
   );
 }
 
@@ -413,26 +474,6 @@ function unwrapGoogleUrl(rawUrl: string): string {
   }
 }
 
-function unwrapBingUrl(rawUrl: string): string {
-  const value = decodeHtmlEntities(String(rawUrl || "").trim());
-  if (!value) return "";
-  try {
-    const url = new URL(value, "https://www.bing.com");
-    if (url.hostname === "www.bing.com" && url.pathname === "/ck/a") {
-      const encoded = url.searchParams.get("u") || "";
-      if (encoded.startsWith("a1")) {
-        const base64 = encoded.slice(2);
-        const padded = `${base64}${"=".repeat((4 - (base64.length % 4 || 4)) % 4)}`;
-        return Buffer.from(padded, "base64url").toString("utf8");
-      }
-      return "";
-    }
-    return url.toString();
-  } catch {
-    return value;
-  }
-}
-
 function unwrapDuckDuckGoUrl(rawUrl: string): string {
   const value = decodeHtmlEntities(String(rawUrl || "").trim());
   if (!value) return "";
@@ -492,36 +533,6 @@ export function parseGoogleResults(html: string, limit = 8): WebSearchResult[] {
   return dedupeResults(rows, limit);
 }
 
-export function parseBingResults(html: string, limit = 8): WebSearchResult[] {
-  const rows: WebSearchResult[] = [];
-  const source = String(html || "");
-  const sections = source.match(
-    /<li\b[^>]*\bclass=(['"])[^'"]*\bb_algo\b[^'"]*\1[\s\S]*?<\/li>/gi,
-  );
-
-  for (const section of sections || []) {
-    const linkMatch = section.match(/<h2[^>]*>\s*<a\b([^>]*)>([\s\S]*?)<\/a>/i);
-    if (!linkMatch) continue;
-    const url = unwrapBingUrl(extractHref(linkMatch[1] || ""));
-    const title = stripHtml(linkMatch[2] || "");
-    const snippetMatch = section.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
-    const snippet = String(snippetMatch?.[1] || "").replace(
-      /<span[^>]*class=(['"])[^'"]*algoSlug_icon[^'"]*\1[^>]*>[\s\S]*?<\/span>/gi,
-      " ",
-    );
-    const row = buildResultRow(
-      url,
-      title,
-      stripHtml(snippet),
-      "bing",
-      rows.length + 1,
-    );
-    if (row) rows.push(row);
-  }
-
-  return dedupeResults(rows, limit);
-}
-
 export function parseDuckDuckGoLiteResults(
   html: string,
   limit = 8,
@@ -546,39 +557,50 @@ export function parseDuckDuckGoLiteResults(
   return dedupeResults(rows, limit);
 }
 
-async function searchGoogle(request: NormalizedWebSearchRequest) {
-  const html = await fetchText(buildGoogleUrl(request), {
-    headers: {
-      Accept: "*/*",
-      "Accept-Language": buildAcceptLanguage(request.language),
-      Cookie: "CONSENT=YES+",
-      Referer: "https://www.google.com/",
-      "User-Agent": GOOGLE_GSA_USER_AGENT,
-    },
-  });
-  if (isChallengePage(html)) {
-    throw new Error("google_challenge_required");
+async function fetchGoogleHtml(request: NormalizedWebSearchRequest) {
+  try {
+    const html = await fetchText(buildGoogleUrl(request), {
+      headers: {
+        Accept: "*/*",
+        "Accept-Language": buildAcceptLanguage(request.language),
+        Cookie: "CONSENT=YES+",
+        Referer: "https://www.google.com/",
+        "User-Agent": GOOGLE_GSA_USER_AGENT,
+      },
+    });
+    if (isChallengePage(html)) {
+      throw new Error("google_challenge_required");
+    }
+    return html;
+  } catch (error: unknown) {
+    if (isChallengePage(String(error))) {
+      throw new Error("google_challenge_required");
+    }
+    throw error;
   }
-  return filterResultsByDomains(
-    parseGoogleResults(html, request.limit),
-    request.domains,
-  );
 }
 
-async function searchBing(request: NormalizedWebSearchRequest) {
-  const html = await fetchText(buildBingUrl(request), {
-    headers: {
-      "Accept-Language": buildAcceptLanguage(request.language),
-      Referer: "https://www.bing.com/",
-    },
-  });
-  if (isChallengePage(html)) {
-    throw new Error("bing_challenge_required");
+async function searchGoogle(request: NormalizedWebSearchRequest) {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const html = await fetchGoogleHtml(request);
+      const results = filterSearchResults(
+        parseGoogleResults(html, request.limit),
+        request,
+      );
+      if (results.length > 0 || attempt > 0) return results;
+    } catch (error: unknown) {
+      const message = safeText(error instanceof Error ? error.message : error);
+      if (message === "google_challenge_required") {
+        throw error;
+      }
+      lastError = error;
+      if (attempt > 0) throw error;
+    }
   }
-  return filterResultsByDomains(
-    parseBingResults(html, request.limit),
-    request.domains,
-  );
+  if (lastError) throw lastError;
+  return [];
 }
 
 async function searchDuckDuckGo(request: NormalizedWebSearchRequest) {
@@ -591,15 +613,14 @@ async function searchDuckDuckGo(request: NormalizedWebSearchRequest) {
   if (isChallengePage(lite)) {
     throw new Error("duckduckgo_challenge_required");
   }
-  return filterResultsByDomains(
+  return filterSearchResults(
     parseDuckDuckGoLiteResults(lite, request.limit),
-    request.domains,
+    request,
   );
 }
 
 const DIRECT_PROVIDER_HANDLERS: DirectProvider[] = [
   { name: "google", search: searchGoogle },
-  { name: "bing", search: searchBing },
   { name: "duckduckgo", search: searchDuckDuckGo },
 ];
 
