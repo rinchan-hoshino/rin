@@ -115,6 +115,16 @@ function stripClearScrollback(data: string) {
     : data;
 }
 
+async function renameSessionIfNamed(
+  rename: (sessionFilePath: string, nextName: string) => Promise<void> | void,
+  sessionFilePath: string,
+  nextName: string | undefined,
+) {
+  const next = (nextName ?? "").trim();
+  if (!next) return;
+  await rename(sessionFilePath, next);
+}
+
 function preserveScrollbackOnFullRedraw() {
   const processTerminalProto: any = ProcessTerminal?.prototype as any;
   if (
@@ -140,16 +150,6 @@ function preserveScrollbackOnFullRedraw() {
 }
 
 function createSessionSelectorLoaders(instance: any) {
-  const renameSessionIfNamed = async (
-    rename: (sessionFilePath: string, nextName: string) => Promise<void> | void,
-    sessionFilePath: string,
-    nextName: string | undefined,
-  ) => {
-    const next = (nextName ?? "").trim();
-    if (!next) return;
-    await rename(sessionFilePath, next);
-  };
-
   if (!isRpcTransportControlled(instance)) {
     const loadSessions = () =>
       listBoundSessions({
