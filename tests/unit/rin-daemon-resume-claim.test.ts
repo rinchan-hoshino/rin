@@ -87,13 +87,19 @@ async function openRpcConnection(socketPath) {
   };
 }
 
-async function rpc(socketPath, command, timeoutMs = 5000) {
+async function withRpcConnection(socketPath, callback) {
   const client = await openRpcConnection(socketPath);
   try {
-    return await client.request(command, timeoutMs);
+    return await callback(client);
   } finally {
     client.close();
   }
+}
+
+async function rpc(socketPath, command, timeoutMs = 5000) {
+  return await withRpcConnection(socketPath, (client) =>
+    client.request(command, timeoutMs),
+  );
 }
 
 function spawnDaemon(agentDir, socketPath, workerPath) {
@@ -234,19 +240,19 @@ process.stdin.on("data", (chunk) => {
   try {
     await waitForSocket(socketPath);
 
-    const client = await openRpcConnection(socketPath);
-    const state = await client.request({ id: "1", type: "get_state" });
-    const listed = await client.request({ id: "2", type: "list_sessions" });
+    await withRpcConnection(socketPath, async (client) => {
+      const state = await client.request({ id: "1", type: "get_state" });
+      const listed = await client.request({ id: "2", type: "list_sessions" });
 
-    assert.equal(state.success, true);
-    assert.equal(listed.success, true);
-    assert.equal(listed.data?.sessions?.[0]?.id, "session-1");
-    assert.equal(listed.data?.sessions?.[0]?.cwd, undefined);
-    assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
-      "get_state",
-      "list_sessions",
-    ]);
-    client.close();
+      assert.equal(state.success, true);
+      assert.equal(listed.success, true);
+      assert.equal(listed.data?.sessions?.[0]?.id, "session-1");
+      assert.equal(listed.data?.sessions?.[0]?.cwd, undefined);
+      assert.deepEqual(
+        (await fs.readFile(logPath, "utf8")).trim().split("\n"),
+        ["get_state", "list_sessions"],
+      );
+    });
   } finally {
     try {
       daemon.kill("SIGKILL");
@@ -420,23 +426,22 @@ process.stdin.on("data", (chunk) => {
   const daemon = spawnDaemon(agentDir, socketPath, workerPath);
   try {
     await waitForSocket(socketPath);
-    const client = await openRpcConnection(socketPath);
-    const selected = await client.request({
-      id: "1",
-      type: "select_session",
-      sessionPath: sessionFile,
+    await withRpcConnection(socketPath, async (client) => {
+      const selected = await client.request({
+        id: "1",
+        type: "select_session",
+        sessionPath: sessionFile,
+      });
+      const state = await client.request({ id: "2", type: "get_state" });
+
+      assert.equal(selected.success, true);
+      assert.equal(state.success, true);
+      assert.equal(state.data?.sessionFile, sessionFile);
+      assert.deepEqual(
+        (await fs.readFile(logPath, "utf8")).trim().split("\n").filter(Boolean),
+        ["switch_session", "get_state"],
+      );
     });
-    const state = await client.request({ id: "2", type: "get_state" });
-
-    assert.equal(selected.success, true);
-    assert.equal(state.success, true);
-    assert.equal(state.data?.sessionFile, sessionFile);
-    assert.deepEqual(
-      (await fs.readFile(logPath, "utf8")).trim().split("\n").filter(Boolean),
-      ["switch_session", "get_state"],
-    );
-
-    client.close();
   } finally {
     try {
       daemon.kill("SIGKILL");
