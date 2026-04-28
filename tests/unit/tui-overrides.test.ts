@@ -146,6 +146,11 @@ test("rpc working status does not create a parallel status animation", async () 
     retryCountdown: undefined,
     retryLoader: undefined,
     loadingAnimation: undefined,
+    workingVisible: true,
+    stopWorkingLoader() {},
+    createWorkingLoader() {
+      return { stop() {} };
+    },
   };
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {

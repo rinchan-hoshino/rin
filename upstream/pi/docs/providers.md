@@ -51,27 +51,28 @@ export ANTHROPIC_API_KEY=sk-ant-...
 pi
 ```
 
-| Provider               | Environment Variable   | `auth.json` key          |
-| ---------------------- | ---------------------- | ------------------------ |
-| Anthropic              | `ANTHROPIC_API_KEY`    | `anthropic`              |
-| Azure OpenAI Responses | `AZURE_OPENAI_API_KEY` | `azure-openai-responses` |
-| OpenAI                 | `OPENAI_API_KEY`       | `openai`                 |
-| DeepSeek               | `DEEPSEEK_API_KEY`     | `deepseek`               |
-| Google Gemini          | `GEMINI_API_KEY`       | `google`                 |
-| Mistral                | `MISTRAL_API_KEY`      | `mistral`                |
-| Groq                   | `GROQ_API_KEY`         | `groq`                   |
-| Cerebras               | `CEREBRAS_API_KEY`     | `cerebras`               |
-| xAI                    | `XAI_API_KEY`          | `xai`                    |
-| OpenRouter             | `OPENROUTER_API_KEY`   | `openrouter`             |
-| Vercel AI Gateway      | `AI_GATEWAY_API_KEY`   | `vercel-ai-gateway`      |
-| ZAI                    | `ZAI_API_KEY`          | `zai`                    |
-| OpenCode Zen           | `OPENCODE_API_KEY`     | `opencode`               |
-| OpenCode Go            | `OPENCODE_API_KEY`     | `opencode-go`            |
-| Hugging Face           | `HF_TOKEN`             | `huggingface`            |
-| Fireworks              | `FIREWORKS_API_KEY`    | `fireworks`              |
-| Kimi For Coding        | `KIMI_API_KEY`         | `kimi-coding`            |
-| MiniMax                | `MINIMAX_API_KEY`      | `minimax`                |
-| MiniMax (China)        | `MINIMAX_CN_API_KEY`   | `minimax-cn`             |
+| Provider               | Environment Variable                             | `auth.json` key          |
+| ---------------------- | ------------------------------------------------ | ------------------------ |
+| Anthropic              | `ANTHROPIC_API_KEY`                              | `anthropic`              |
+| Azure OpenAI Responses | `AZURE_OPENAI_API_KEY`                           | `azure-openai-responses` |
+| OpenAI                 | `OPENAI_API_KEY`                                 | `openai`                 |
+| DeepSeek               | `DEEPSEEK_API_KEY`                               | `deepseek`               |
+| Google Gemini          | `GEMINI_API_KEY`                                 | `google`                 |
+| Mistral                | `MISTRAL_API_KEY`                                | `mistral`                |
+| Groq                   | `GROQ_API_KEY`                                   | `groq`                   |
+| Cerebras               | `CEREBRAS_API_KEY`                               | `cerebras`               |
+| Cloudflare Workers AI  | `CLOUDFLARE_API_KEY` (+ `CLOUDFLARE_ACCOUNT_ID`) | `cloudflare-workers-ai`  |
+| xAI                    | `XAI_API_KEY`                                    | `xai`                    |
+| OpenRouter             | `OPENROUTER_API_KEY`                             | `openrouter`             |
+| Vercel AI Gateway      | `AI_GATEWAY_API_KEY`                             | `vercel-ai-gateway`      |
+| ZAI                    | `ZAI_API_KEY`                                    | `zai`                    |
+| OpenCode Zen           | `OPENCODE_API_KEY`                               | `opencode`               |
+| OpenCode Go            | `OPENCODE_API_KEY`                               | `opencode-go`            |
+| Hugging Face           | `HF_TOKEN`                                       | `huggingface`            |
+| Fireworks              | `FIREWORKS_API_KEY`                              | `fireworks`              |
+| Kimi For Coding        | `KIMI_API_KEY`                                   | `kimi-coding`            |
+| MiniMax                | `MINIMAX_API_KEY`                                | `minimax`                |
+| MiniMax (China)        | `MINIMAX_CN_API_KEY`                             | `minimax-cn`             |
 
 Reference for environment variables and `auth.json` keys: [`const envMap`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts) in [`packages/ai/src/env-api-keys.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts).
 
@@ -119,6 +120,8 @@ OAuth credentials are also stored here after `/login` and managed automatically.
 ```bash
 export AZURE_OPENAI_API_KEY=...
 export AZURE_OPENAI_BASE_URL=https://your-resource.openai.azure.com
+# also supported: https://your-resource.cognitiveservices.azure.com
+# root endpoints are auto-normalized to /openai/v1
 # or use resource name instead of base URL
 export AZURE_OPENAI_RESOURCE_NAME=your-resource
 
@@ -169,6 +172,18 @@ export AWS_BEDROCK_SKIP_AUTH=1
 # Set if your proxy only supports HTTP/1.1
 export AWS_BEDROCK_FORCE_HTTP1=1
 ```
+
+### Cloudflare Workers AI
+
+`CLOUDFLARE_API_KEY` can be set via `/login`. `CLOUDFLARE_ACCOUNT_ID` must be set as an environment variable.
+
+```bash
+export CLOUDFLARE_API_KEY=...           # or use /login
+export CLOUDFLARE_ACCOUNT_ID=...
+pi --provider cloudflare-workers-ai --model "@cf/moonshotai/kimi-k2.6"
+```
+
+Pi automatically sets `x-session-affinity` for [prefix caching](https://developers.cloudflare.com/workers-ai/features/prompt-caching/) discounts.
 
 ### Google Vertex AI
 
