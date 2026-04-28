@@ -16,6 +16,12 @@ const CLEAR_SCROLLBACK_SEQUENCE = "\u001b[3J";
 const PRESERVE_SCROLLBACK_PATCH = Symbol.for(
   "rin.tui.preserve_scrollback_full_redraw",
 );
+const RPC_TRANSPORT_REAPPLY_EVENTS = new Set([
+  "agent_end",
+  "compaction_end",
+  "auto_retry_start",
+  "auto_retry_end",
+]);
 
 function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
@@ -102,6 +108,19 @@ function syncLocalTransportLoader(instance: any) {
     currentLabel ||
       queuedLabel ||
       String(instance?.defaultWorkingMessage || "Working..."),
+  );
+}
+
+function shouldReapplyRpcTransportAfterEvent(instance: any, event: any) {
+  return (
+    isRpcTransportControlled(instance) &&
+    RPC_TRANSPORT_REAPPLY_EVENTS.has(String(event?.type || ""))
+  );
+}
+
+function shouldReapplyLocalTransportAfterEvent(instance: any, event: any) {
+  return (
+    !isRpcTransportControlled(instance) && event?.type === "compaction_end"
   );
 }
 
@@ -337,14 +356,14 @@ export async function applyRinTuiOverrides() {
         }
       }
 
-      const shouldReapplyRpcTransport =
-        isRpcTransportControlled(this) &&
-        (event?.type === "agent_end" ||
-          event?.type === "compaction_end" ||
-          event?.type === "auto_retry_start" ||
-          event?.type === "auto_retry_end");
-      const shouldReapplyLocalTransport =
-        !isRpcTransportControlled(this) && event?.type === "compaction_end";
+      const shouldReapplyRpcTransport = shouldReapplyRpcTransportAfterEvent(
+        this,
+        event,
+      );
+      const shouldReapplyLocalTransport = shouldReapplyLocalTransportAfterEvent(
+        this,
+        event,
+      );
 
       await originalHandleEvent.call(this, event);
 
