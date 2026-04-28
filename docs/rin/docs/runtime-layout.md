@@ -32,7 +32,7 @@ Typical metadata paths:
 - Linux: `~/.config/rin/install.json`
 - macOS: `~/Library/Application Support/rin/install.json`
 
-The installer writes these launchers for both the current installer user and the selected daemon target user when those accounts differ. Current and target users can therefore both run `rin` after install.
+The installer writes these launchers for both the current installer user and the selected daemon target user when those accounts differ. If the current shell PATH does not include the launcher directory, the installer prints the absolute launcher path and a PATH hint instead of relying on a bare `rin` command.
 
 This metadata records the current user's default `targetUser` and `installDir`. It is useful when recovering or auditing an installed target, but normal agent-facing guidance should use the `rin` command instead of asking agents to locate runtime entry files.
 

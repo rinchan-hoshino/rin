@@ -115,6 +115,26 @@ test("installer interactive helpers describe dir state and plan text", () => {
   });
   assert.ok(initExit.includes("open Rin: rin -u bob"));
   assert.ok(initExit.includes("/init"));
+
+  const launcherPath = "/home/alice/.local/bin/rin";
+  const pathMissingInitExit = interactive.buildPostInstallInitExitText({
+    currentUser: "alice",
+    targetUser: "alice",
+    rinPath: launcherPath,
+    pathValue: "/usr/bin:/bin",
+  });
+  assert.ok(pathMissingInitExit.includes(`open Rin: ${launcherPath}`));
+  assert.ok(pathMissingInitExit.includes("PATH"));
+  assert.ok(pathMissingInitExit.includes("/home/alice/.local/bin"));
+
+  const pathReadyInitExit = interactive.buildPostInstallInitExitText({
+    currentUser: "alice",
+    targetUser: "alice",
+    rinPath: launcherPath,
+    pathValue: "/home/alice/.local/bin:/usr/bin:/bin",
+  });
+  assert.ok(pathReadyInitExit.includes("open Rin: rin"));
+  assert.equal(pathReadyInitExit.includes("PATH note"), false);
 });
 
 test("installer interactive helpers compute final requirements", () => {

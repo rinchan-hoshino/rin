@@ -172,6 +172,9 @@ type InstallerDisplayCopy = {
   buildPostInstallInitExitText: (options: {
     currentUser: string;
     targetUser: string;
+    rinCommand?: string;
+    launcherDir?: string;
+    launcherDirOnPath?: boolean;
   }) => string;
   buildFinalRequirements: (options: {
     installServiceNow: boolean;
@@ -428,17 +431,28 @@ const INSTALLER_DISPLAY_COPY = {
         .join("\n");
     },
     buildPostInstallInitExitText(options) {
+      const rinCommand = options.rinCommand || "rin";
       const userSuffix =
         options.currentUser === options.targetUser
           ? ""
           : ` -u ${options.targetUser}`;
+      const pathHint =
+        options.launcherDir && options.launcherDirOnPath === false
+          ? [
+              "",
+              "PATH note:",
+              `- the current shell PATH does not include ${options.launcherDir}; add it to PATH to use plain rin.`,
+              `- temporary fix: export PATH="${options.launcherDir}:$PATH"`,
+            ]
+          : [];
       return [
         "Initialization TUI exited.",
         "",
         "Next time:",
-        `- open Rin: rin${userSuffix}`,
-        `- check daemon state if needed: rin doctor${userSuffix}`,
+        `- open Rin: ${rinCommand}${userSuffix}`,
+        `- check daemon state if needed: ${rinCommand} doctor${userSuffix}`,
         "- restart onboarding from inside Rin with `/init`",
+        ...pathHint,
       ].join("\n");
     },
     buildFinalRequirements(options) {
@@ -709,17 +723,28 @@ const INSTALLER_DISPLAY_COPY = {
         .join("\n");
     },
     buildPostInstallInitExitText(options) {
+      const rinCommand = options.rinCommand || "rin";
       const userSuffix =
         options.currentUser === options.targetUser
           ? ""
           : ` -u ${options.targetUser}`;
+      const pathHint =
+        options.launcherDir && options.launcherDirOnPath === false
+          ? [
+              "",
+              "PATH 提示：",
+              `- 当前 shell 的 PATH 尚未包含 ${options.launcherDir}；如需直接输入 rin，请将它加入 PATH。`,
+              `- 临时修复: export PATH="${options.launcherDir}:$PATH"`,
+            ]
+          : [];
       return [
         "初始化 TUI 已退出。",
         "",
         "下次可用：",
-        `- 打开 Rin: rin${userSuffix}`,
-        `- 如有需要，检查守护进程状态: rin doctor${userSuffix}`,
+        `- 打开 Rin: ${rinCommand}${userSuffix}`,
+        `- 如有需要，检查守护进程状态: ${rinCommand} doctor${userSuffix}`,
         "- 在 Rin 内通过 `/init` 重新开始引导",
+        ...pathHint,
       ].join("\n");
     },
     buildFinalRequirements(options) {

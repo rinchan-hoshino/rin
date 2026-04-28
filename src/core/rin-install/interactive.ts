@@ -423,14 +423,37 @@ export function buildPlainInstallerSection(title: string, body: string) {
     .join("\n");
 }
 
+function pathListIncludesDir(pathList: string, dir: string) {
+  const targetDir = path.resolve(dir);
+  return String(pathList || "")
+    .split(path.delimiter)
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .some((entry) => path.resolve(entry) === targetDir);
+}
+
 export function buildPostInstallInitExitText(
   options: {
     currentUser: string;
     targetUser: string;
+    rinPath?: string;
+    pathValue?: string;
   },
   i18n: InstallerI18n = createInstallerI18n(),
 ) {
-  return i18n.buildPostInstallInitExitText(options);
+  const rinPath = String(options.rinPath || "").trim();
+  if (!rinPath) return i18n.buildPostInstallInitExitText(options);
+  const launcherDir = path.dirname(rinPath);
+  const launcherDirOnPath = pathListIncludesDir(
+    options.pathValue ?? process.env.PATH ?? "",
+    launcherDir,
+  );
+  return i18n.buildPostInstallInitExitText({
+    ...options,
+    rinCommand: launcherDirOnPath ? "rin" : rinPath,
+    launcherDir,
+    launcherDirOnPath,
+  });
 }
 
 export function buildFinalRequirements(

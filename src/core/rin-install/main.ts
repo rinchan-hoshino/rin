@@ -323,7 +323,10 @@ export async function startInstaller() {
       sourceRoot: repoRootFromHere(),
     });
     note(
-      buildPostInstallInitExitText({ currentUser, targetUser }, i18n),
+      buildPostInstallInitExitText(
+        { currentUser, targetUser, rinPath: written.rinPath },
+        i18n,
+      ),
       i18n.afterInitTitle,
     );
   }
