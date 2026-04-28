@@ -9,7 +9,7 @@ const rootDir = path.resolve(
 );
 const { createAuthStorageProxy } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "rpc-auth.js"))
-    .href,
+    .href
 );
 
 test("rpc auth proxy normalizes oauth state snapshots", async () => {

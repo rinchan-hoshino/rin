@@ -2,10 +2,7 @@ import {
   applyRegexReplacements,
   type RegexReplacement,
 } from "./regex-utils.js";
-import {
-  decodeHtmlEntities,
-  normalizePlainText,
-} from "./text-utils.js";
+import { decodeHtmlEntities, normalizePlainText } from "./text-utils.js";
 
 const HTML_PRE_HIDDEN_REPLACEMENTS: RegexReplacement[] = [
   [/<!--[\s\S]*?-->/g, " "],

@@ -7,10 +7,5 @@
   "syncMethod": "git sparse-checkout",
   "packageName": "@mariozechner/pi-coding-agent",
   "packageVersion": "0.70.2",
-  "paths": [
-    "README.md",
-    "CHANGELOG.md",
-    "docs",
-    "examples"
-  ]
+  "paths": ["README.md", "CHANGELOG.md", "docs", "examples"]
 }

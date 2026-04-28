@@ -11,7 +11,7 @@ const rootDir = path.resolve(
   "..",
 );
 const shared = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "shared.js")).href,
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "shared.js")).href
 );
 
 test("cleanupStaleUpdateWorkDirs prunes only stale work dirs", async () => {
@@ -41,7 +41,9 @@ test("cleanupStaleUpdateWorkDirs prunes only stale work dirs", async () => {
 
 test("updateWorkRoot prefers explicit installer tmpdir", async () => {
   const previous = process.env.RIN_INSTALL_TMPDIR;
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-install-explicit-"));
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-install-explicit-"),
+  );
   try {
     process.env.RIN_INSTALL_TMPDIR = path.join(root, " custom ", "..");
     assert.equal(shared.updateWorkRoot(), path.resolve(root));

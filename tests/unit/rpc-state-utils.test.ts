@@ -183,4 +183,3 @@ test("rpc state utils stop branch traversal on parent cycles", () => {
     ["1", "2"],
   );
 });
-

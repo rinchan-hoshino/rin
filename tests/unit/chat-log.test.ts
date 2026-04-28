@@ -112,7 +112,11 @@ test("chat chat log reuses message-store projection for fallback text and timest
       strippedContent: "",
     });
 
-    const { entries } = chatLog.readChatLog(root, "telegram/123:456", "2026-04-04");
+    const { entries } = chatLog.readChatLog(
+      root,
+      "telegram/123:456",
+      "2026-04-04",
+    );
     assert.deepEqual(entries, [
       {
         version: 1,

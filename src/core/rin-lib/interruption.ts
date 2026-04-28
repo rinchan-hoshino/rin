@@ -31,4 +31,3 @@ export function createInterruptedToolResultMessage(toolCall: any) {
     timestamp: Date.now(),
   } as any;
 }
-

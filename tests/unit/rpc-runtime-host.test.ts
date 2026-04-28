@@ -44,7 +44,9 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
 
   const runtimeHost = createRpcRuntimeHost(session);
 
-  runtimeHost.setBeforeSessionInvalidate(() => calls.push(["beforeInvalidate"]));
+  runtimeHost.setBeforeSessionInvalidate(() =>
+    calls.push(["beforeInvalidate"]),
+  );
   runtimeHost.setRebindSession(async (nextSession) =>
     calls.push(["rebind", nextSession.id]),
   );

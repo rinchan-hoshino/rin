@@ -15,7 +15,9 @@ const rootDir = path.resolve(
 test("chat main consumes inbound help messages through the inbox path only once", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -75,15 +77,19 @@ test("chat main consumes inbound help messages through the inbox path only once"
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
       },
-      timeout: 15000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -92,7 +98,9 @@ test("chat main consumes inbound help messages through the inbox path only once"
 test("chat main treats /resume as a normal prompt after the command is removed", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -171,15 +179,19 @@ test("chat main treats /resume as a normal prompt after the command is removed",
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
       },
-      timeout: 15000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -188,7 +200,9 @@ test("chat main treats /resume as a normal prompt after the command is removed",
 test("chat main ignores removed /auth commands instead of mutating chat identity", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -238,15 +252,19 @@ test("chat main ignores removed /auth commands instead of mutating chat identity
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 10000,
       },
-      timeout: 10000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -255,7 +273,9 @@ test("chat main ignores removed /auth commands instead of mutating chat identity
 test("chat main does not retry a queued prompt while the controller is already handling that inbound message", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -357,15 +377,19 @@ test("chat main does not retry a queued prompt while the controller is already h
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 25000,
       },
-      timeout: 25000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -374,7 +398,9 @@ test("chat main does not retry a queued prompt while the controller is already h
 test("chat main retries a transient daemon startup failure without leaking the socket error into chat", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -479,15 +505,19 @@ test("chat main retries a transient daemon startup failure without leaking the s
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 20000,
       },
-      timeout: 20000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -496,7 +526,9 @@ test("chat main retries a transient daemon startup failure without leaking the s
 test("chat main retries a disposed frontend turn without leaking the dispose error into chat", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -607,15 +639,19 @@ test("chat main retries a disposed frontend turn without leaking the dispose err
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 20000,
       },
-      timeout: 20000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -624,7 +660,9 @@ test("chat main retries a disposed frontend turn without leaking the dispose err
 test("chat main retries an offline-queued frontend turn without leaking the disconnect error into chat", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -733,15 +771,19 @@ test("chat main retries an offline-queued frontend turn without leaking the disc
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 20000,
       },
-      timeout: 20000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -750,7 +792,9 @@ test("chat main retries an offline-queued frontend turn without leaking the disc
 test("chat main passes quoted reply session metadata through one normal prompt submission", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -845,15 +889,19 @@ test("chat main passes quoted reply session metadata through one normal prompt s
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
       },
-      timeout: 15000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -862,7 +910,9 @@ test("chat main passes quoted reply session metadata through one normal prompt s
 test("chat main does not downgrade a quoted reply to a plain turn when linked session selection times out", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
-  const agentDir = await fs.mkdtemp(path.join(tempRoot, "rin-chat-main-queue-"));
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
   try {
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
@@ -951,15 +1001,19 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
       process.exit(0);
     `;
 
-    await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
-      cwd: rootDir,
-      env: {
-        ...process.env,
-        RIN_REPO_ROOT: rootDir,
-        RIN_DIR: agentDir,
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
       },
-      timeout: 15000,
-    });
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

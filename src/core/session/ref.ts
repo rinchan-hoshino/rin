@@ -43,9 +43,7 @@ function normalizeStoredSessionPath(value: string) {
 }
 
 function isSessionDirRelativePath(value: string) {
-  return (
-    Boolean(value) && !value.startsWith("..") && !path.isAbsolute(value)
-  );
+  return Boolean(value) && !value.startsWith("..") && !path.isAbsolute(value);
 }
 
 export function toStoredSessionFile(agentDir: string, value: unknown) {

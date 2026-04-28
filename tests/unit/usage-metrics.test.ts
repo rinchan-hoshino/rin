@@ -8,7 +8,7 @@ const rootDir = path.resolve(
   "../..",
 );
 const usageMetrics = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "usage-metrics.js")).href,
+  pathToFileURL(path.join(rootDir, "dist", "core", "usage-metrics.js")).href
 );
 
 test("usage metrics derive total tokens from one shared fallback", () => {

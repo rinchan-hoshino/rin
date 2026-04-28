@@ -8,8 +8,7 @@ const rootDir = path.resolve(
   "../..",
 );
 const support = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js"))
-    .href,
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href
 );
 
 test("chat support infers chat types from normalized targets", () => {
@@ -60,10 +59,7 @@ test("chat support keeps compose, parse, and normalize symmetric across bot requ
     botId: "",
     chatId: "channel-1",
   });
-  assert.equal(
-    support.normalizeChatKey(" discord/:channel-1 "),
-    undefined,
-  );
+  assert.equal(support.normalizeChatKey(" discord/:channel-1 "), undefined);
   assert.equal(
     support.normalizeChatKey(" discord:channel-1 "),
     "discord:channel-1",
@@ -238,11 +234,8 @@ test("chat support normalizes trust lookup and bot selection over dirty metadata
       { platform: "discord", selfId: "1", name: "dc" },
     ],
   };
-  assert.equal(
-    support.findBot(app, "telegram", "8623230033")?.name,
-    "tg",
-  );
-  assert.equal(support.findBot(app, "telegram") , null);
+  assert.equal(support.findBot(app, "telegram", "8623230033")?.name, "tg");
+  assert.equal(support.findBot(app, "telegram"), null);
   assert.equal(support.findBot(app, "discord")?.name, "dc");
   assert.equal(support.findBot(app, "onebot", "1"), null);
 });

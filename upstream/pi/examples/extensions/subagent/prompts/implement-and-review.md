@@ -1,6 +1,7 @@
 ---
 description: Worker implements, reviewer reviews, worker applies feedback
 ---
+
 Use the subagent tool with the chain parameter to execute this workflow:
 
 1. First, use the "worker" agent to implement: $@

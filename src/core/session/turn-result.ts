@@ -44,7 +44,9 @@ function buildTextOnlyTurnResult(text: unknown): TurnResult {
     : { messages: [] };
 }
 
-function normalizeTurnMessages(messages: TurnResultMessage[] | null | undefined) {
+function normalizeTurnMessages(
+  messages: TurnResultMessage[] | null | undefined,
+) {
   return Array.isArray(messages) ? messages.filter(Boolean) : [];
 }
 

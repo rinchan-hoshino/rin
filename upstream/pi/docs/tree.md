@@ -8,12 +8,12 @@ Sessions are stored as trees where each entry has an `id` and `parentId`. The "l
 
 ### Comparison with `/fork`
 
-| Feature | `/fork` | `/tree` |
-|---------|---------|---------|
-| View | Flat list of user messages | Full tree structure |
-| Action | Extracts path to **new session file** | Changes leaf in **same session** |
-| Summary | Never | Optional (user prompted) |
-| Events | `session_before_fork` / `session_start` (`reason: "fork"`) | `session_before_tree` / `session_tree` |
+| Feature | `/fork`                                                    | `/tree`                                |
+| ------- | ---------------------------------------------------------- | -------------------------------------- |
+| View    | Flat list of user messages                                 | Full tree structure                    |
+| Action  | Extracts path to **new session file**                      | Changes leaf in **same session**       |
+| Summary | Never                                                      | Optional (user prompted)               |
+| Events  | `session_before_fork` / `session_start` (`reason: "fork"`) | `session_before_tree` / `session_tree` |
 
 Use `/clone` when you want a new session file containing the full current active branch without rewinding to an earlier user message.
 
@@ -32,17 +32,17 @@ Use `/clone` when you want a new session file containing the full current active
 
 ### Controls
 
-| Key | Action |
-|-----|--------|
-| ↑/↓ | Navigate (depth-first order) |
-| ←/→ | Page up/down |
-| Ctrl+←/Ctrl+→ or Alt+←/Alt+→ | Fold/unfold and jump between branch segments |
-| Shift+L | Set or clear a label on the selected node |
-| Shift+T | Toggle label timestamps |
-| Enter | Select node |
-| Escape/Ctrl+C | Cancel |
-| Ctrl+U | Toggle: user messages only |
-| Ctrl+O | Toggle: show all (including custom/label entries) |
+| Key                          | Action                                            |
+| ---------------------------- | ------------------------------------------------- |
+| ↑/↓                          | Navigate (depth-first order)                      |
+| ←/→                          | Page up/down                                      |
+| Ctrl+←/Ctrl+→ or Alt+←/Alt+→ | Fold/unfold and jump between branch segments      |
+| Shift+L                      | Set or clear a label on the selected node         |
+| Shift+T                      | Toggle label timestamps                           |
+| Enter                        | Select node                                       |
+| Escape/Ctrl+C                | Cancel                                            |
+| Ctrl+U                       | Toggle: user messages only                        |
+| Ctrl+O                       | Toggle: show all (including custom/label entries) |
 
 `Ctrl+←` or `Alt+←` folds the current node if it is foldable. Foldable nodes are roots and branch segment starts that have visible children. If the current node is not foldable, or is already folded, the selection jumps up to the previous visible branch segment start.
 
@@ -63,17 +63,21 @@ Use `/clone` when you want a new session file containing the full current active
 ## Selection Behavior
 
 ### User Message or Custom Message
+
 1. Leaf set to **parent** of selected node (or `null` if root)
 2. Message text placed in **editor** for re-submission
 3. User edits and submits, creating a new branch
 
 ### Non-User Message (assistant, compaction, etc.)
+
 1. Leaf set to **selected node**
 2. Editor stays empty
 3. User continues from that point
 
 ### Selecting Root User Message
+
 If user selects the very first message (has no parent):
+
 1. Leaf reset to `null` (empty conversation)
 2. Message text placed in editor
 3. User effectively restarts from scratch
@@ -98,6 +102,7 @@ A → B → C → D → E → F  ← old leaf
 Abandoned path: D → E → F (summarized)
 
 Summarization stops at:
+
 1. Common ancestor (always)
 2. Compaction node (if encountered first)
 
@@ -109,11 +114,11 @@ Stored as `BranchSummaryEntry`:
 interface BranchSummaryEntry {
   type: "branch_summary";
   id: string;
-  parentId: string;      // New leaf position
+  parentId: string; // New leaf position
   timestamp: string;
-  fromId: string;        // Old leaf we abandoned
-  summary: string;       // LLM-generated summary
-  details?: unknown;     // Optional hook data
+  fromId: string; // Old leaf we abandoned
+  summary: string; // LLM-generated summary
+  details?: unknown; // Optional hook data
 }
 ```
 
@@ -134,12 +139,14 @@ async navigateTree(
 ```
 
 Options:
+
 - `summarize`: Whether to generate a summary of the abandoned branch
 - `customInstructions`: Custom instructions for the summarizer
 - `replaceInstructions`: If true, `customInstructions` replaces the default prompt instead of being appended
 - `label`: Label to attach to the branch summary entry (or target entry if not summarizing)
 
 Flow:
+
 1. Validate target, check no-op (target === current leaf)
 2. Find common ancestor between old leaf and target
 3. Collect entries to summarize (if requested)
@@ -162,6 +169,7 @@ Flow:
 ### InteractiveMode
 
 `/tree` command shows `TreeSelectorComponent`, then:
+
 1. Prompt for summarization
 2. Call `session.navigateTree()`
 3. Clear and re-render chat
@@ -192,9 +200,9 @@ interface SessionBeforeTreeEvent {
 interface SessionBeforeTreeResult {
   cancel?: boolean;
   summary?: { summary: string; details?: unknown };
-  customInstructions?: string;    // Override custom instructions
-  replaceInstructions?: boolean;  // Override replace mode
-  label?: string;                 // Override label
+  customInstructions?: string; // Override custom instructions
+  replaceInstructions?: boolean; // Override replace mode
+  label?: string; // Override label
 }
 ```
 
@@ -215,12 +223,14 @@ interface SessionTreeEvent {
 ### Example: Custom Summarizer
 
 ```typescript
-export default function(pi: HookAPI) {
+export default function (pi: HookAPI) {
   pi.on("session_before_tree", async (event, ctx) => {
     if (!event.preparation.userWantsSummary) return;
     if (event.preparation.entriesToSummarize.length === 0) return;
-    
-    const summary = await myCustomSummarizer(event.preparation.entriesToSummarize);
+
+    const summary = await myCustomSummarizer(
+      event.preparation.entriesToSummarize,
+    );
     return { summary: { summary, details: { custom: true } } };
   });
 }

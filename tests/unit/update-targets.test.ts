@@ -364,17 +364,20 @@ test("discoverInstalledTargets ignores invalid managed entries and non-file look
       JSON.stringify({ targetUser: "", installDir: "" }),
       "utf8",
     );
-    await fs.mkdir(path.join(oscarHome, ".config", "systemd", "user", "rin-daemon-oscar.service"), {
-      recursive: true,
-    });
-    await fs.writeFile(
+    await fs.mkdir(
       path.join(
         oscarHome,
         ".config",
         "systemd",
         "user",
-        "rin-daemon.service",
+        "rin-daemon-oscar.service",
       ),
+      {
+        recursive: true,
+      },
+    );
+    await fs.writeFile(
+      path.join(oscarHome, ".config", "systemd", "user", "rin-daemon.service"),
       "Environment=RIN_DIR=\n",
       "utf8",
     );

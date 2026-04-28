@@ -8,8 +8,7 @@ const rootDir = path.resolve(
   "../..",
 );
 const sessionRef = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "session", "ref.js"))
-    .href,
+  pathToFileURL(path.join(rootDir, "dist", "core", "session", "ref.js")).href
 );
 
 test("session ref helpers normalize shared command/state shapes and resolve consistently", () => {
@@ -53,10 +52,7 @@ test("session ref helpers normalize shared command/state shapes and resolve cons
     false,
   );
   assert.equal(sessionRef.hasSessionRef({ sessionId: "   " }), false);
-  assert.equal(
-    sessionRef.hasSessionRef({ sessionId: "demo-session" }),
-    true,
-  );
+  assert.equal(sessionRef.hasSessionRef({ sessionId: "demo-session" }), true);
 
   assert.deepEqual(
     sessionRef.resolveSessionRef(
@@ -103,7 +99,10 @@ test("session ref helpers normalize shared command/state shapes and resolve cons
     sessionRef.readSessionFile(" /tmp/direct.jsonl "),
     "/tmp/direct.jsonl",
   );
-  assert.equal(sessionRef.readSessionFile({ sessionId: "memory-only" }), undefined);
+  assert.equal(
+    sessionRef.readSessionFile({ sessionId: "memory-only" }),
+    undefined,
+  );
   assert.equal(
     sessionRef.requireSessionFile({ sessionFile: " /tmp/required.jsonl " }),
     "/tmp/required.jsonl",

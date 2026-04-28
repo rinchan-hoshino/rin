@@ -2,7 +2,9 @@ import { RpcInteractiveSession } from "./runtime.js";
 
 export function createRpcRuntimeHost(session: RpcInteractiveSession) {
   let beforeSessionInvalidate: (() => void) | undefined;
-  let rebindSession: ((session: RpcInteractiveSession) => Promise<void>) | undefined;
+  let rebindSession:
+    | ((session: RpcInteractiveSession) => Promise<void>)
+    | undefined;
 
   async function finishReplacement(completed: boolean) {
     if (completed) {
@@ -19,7 +21,9 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     setBeforeSessionInvalidate(callback?: () => void) {
       beforeSessionInvalidate = callback;
     },
-    setRebindSession(callback?: (session: RpcInteractiveSession) => Promise<void>) {
+    setRebindSession(
+      callback?: (session: RpcInteractiveSession) => Promise<void>,
+    ) {
       rebindSession = callback;
     },
     async newSession(options?: { parentSession?: string }) {

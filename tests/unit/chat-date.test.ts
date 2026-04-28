@@ -8,7 +8,7 @@ const rootDir = path.resolve(
   "../..",
 );
 const chatDate = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "date.js")).href,
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "date.js")).href
 );
 
 test("formatLocalDateOnly keeps local calendar date formatting stable", () => {
@@ -41,7 +41,10 @@ test("normalizeLocalDateOnly rejects invalid text before using date-like fallbac
     chatDate.normalizeLocalDateOnly("2026-04-23abc", fallback),
     "2026-04-24",
   );
-  assert.equal(chatDate.normalizeLocalDateOnly(new Date("invalid"), fallback), "2026-04-24");
+  assert.equal(
+    chatDate.normalizeLocalDateOnly(new Date("invalid"), fallback),
+    "2026-04-24",
+  );
 });
 
 test("normalizeLocalDateOnly accepts Date and finite timestamp inputs", () => {

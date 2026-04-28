@@ -184,7 +184,12 @@ test("chat bridge setup rejects non-websocket Minecraft URLs", async () => {
       createPromptHarness({
         confirm: [true],
         select: ["minecraft"],
-        text: ["https://example.com/bridge", "minecraft", "Survival", "demo-token"],
+        text: [
+          "https://example.com/bridge",
+          "minecraft",
+          "Survival",
+          "demo-token",
+        ],
       }),
     ),
     /Use a ws:\/\/ or wss:\/\/ URL\./,

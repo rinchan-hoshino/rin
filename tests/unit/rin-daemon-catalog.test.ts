@@ -77,7 +77,9 @@ test("daemon catalog reads oauth state directly", async () => {
 
 test("daemon catalog restores process cwd after read-only queries", async () => {
   await withTestAgentDir(async (agentDir) => {
-    const queryCwd = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-cwd-"));
+    const queryCwd = await fs.mkdtemp(
+      path.join(os.tmpdir(), "rin-catalog-cwd-"),
+    );
     const previousCwd = process.cwd();
     try {
       await listCatalogCommands({ cwd: queryCwd, agentDir });

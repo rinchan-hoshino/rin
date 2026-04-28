@@ -12,7 +12,8 @@ const rootDir = path.resolve(
   "../..",
 );
 const daemonClient = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "client.js")).href,
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "client.js"))
+    .href
 );
 
 function runNodeEval(script) {
@@ -41,7 +42,9 @@ function runNodeEval(script) {
 }
 
 test("canConnectDaemonSocket reflects socket availability", async () => {
-  const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-daemon-client-"));
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-client-"),
+  );
   const socketDir = path.join(runtimeDir, "rin-daemon");
   const socketPath = path.join(socketDir, "daemon.sock");
   await fs.mkdir(socketDir, { recursive: true });
@@ -53,17 +56,25 @@ test("canConnectDaemonSocket reflects socket availability", async () => {
   });
 
   try {
-    assert.equal(await daemonClient.canConnectDaemonSocket(socketPath, 200), true);
+    assert.equal(
+      await daemonClient.canConnectDaemonSocket(socketPath, 200),
+      true,
+    );
   } finally {
     await new Promise((resolve) => server.close(() => resolve()));
   }
 
-  assert.equal(await daemonClient.canConnectDaemonSocket(socketPath, 200), false);
+  assert.equal(
+    await daemonClient.canConnectDaemonSocket(socketPath, 200),
+    false,
+  );
   await fs.rm(runtimeDir, { recursive: true, force: true });
 });
 
 test("requestDaemonCommand reuses the shared daemon JSONL client", async () => {
-  const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-daemon-client-"));
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-client-"),
+  );
   const socketDir = path.join(runtimeDir, "rin-daemon");
   const socketPath = path.join(socketDir, "daemon.sock");
   await fs.mkdir(socketDir, { recursive: true });
@@ -123,7 +134,9 @@ test("requestDaemonCommand reuses the shared daemon JSONL client", async () => {
 });
 
 test("daemon probe/status scripts share the same socket protocol", async () => {
-  const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-daemon-client-"));
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-client-"),
+  );
   const socketDir = path.join(runtimeDir, "rin-daemon");
   const socketPath = path.join(socketDir, "daemon.sock");
   await fs.mkdir(socketDir, { recursive: true });
@@ -160,7 +173,9 @@ test("daemon probe/status scripts share the same socket protocol", async () => {
   });
 
   try {
-    await runNodeEval(daemonClient.buildDaemonSocketProbeScript(socketPath, 300));
+    await runNodeEval(
+      daemonClient.buildDaemonSocketProbeScript(socketPath, 300),
+    );
 
     const { stdout } = await runNodeEval(
       daemonClient.buildDaemonStatusScript(socketPath, 1500, "doctor_1"),
@@ -175,7 +190,9 @@ test("daemon probe/status scripts share the same socket protocol", async () => {
 });
 
 test("requestDaemonCommand surfaces invalid json and daemon errors distinctly", async () => {
-  const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-daemon-client-"));
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-client-"),
+  );
   const socketDir = path.join(runtimeDir, "rin-daemon");
   const socketPath = path.join(socketDir, "daemon.sock");
   await fs.mkdir(socketDir, { recursive: true });

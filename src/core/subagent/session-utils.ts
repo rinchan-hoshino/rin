@@ -3,10 +3,7 @@ import path from "node:path";
 
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
 import { getManagedSubagentSessionDir } from "../session/managed-paths.js";
-import type {
-  SubagentSessionConfig,
-  SubagentSessionMode,
-} from "./types.js";
+import type { SubagentSessionConfig, SubagentSessionMode } from "./types.js";
 
 const HOME_DIR = os.homedir();
 const SESSION_FILE_TARGET_DESCRIPTION =
@@ -19,14 +16,17 @@ export const VALID_SUBAGENT_SESSION_MODES = [
   "fork",
 ] as const satisfies SubagentSessionMode[];
 
-export type NormalizedSubagentSessionConfig =
-  Required<Pick<SubagentSessionConfig, "mode">> &
-    SubagentSessionConfig & {
-      invalidMode?: string;
-    };
+export type NormalizedSubagentSessionConfig = Required<
+  Pick<SubagentSessionConfig, "mode">
+> &
+  SubagentSessionConfig & {
+    invalidMode?: string;
+  };
 
 function normalizeSessionMode(value: unknown) {
-  const mode = String(value || "").trim().toLowerCase();
+  const mode = String(value || "")
+    .trim()
+    .toLowerCase();
   if (!mode) return { mode: "memory" as SubagentSessionMode };
   if ((VALID_SUBAGENT_SESSION_MODES as readonly string[]).includes(mode)) {
     return { mode: mode as SubagentSessionMode };
@@ -54,9 +54,7 @@ function normalizeStoredSessionFile(value: unknown) {
 }
 
 function isAgentRelativeSessionFile(value: string) {
-  return (
-    Boolean(value) && !value.startsWith("..") && !path.isAbsolute(value)
-  );
+  return Boolean(value) && !value.startsWith("..") && !path.isAbsolute(value);
 }
 
 function getSubagentSessionFileGuidanceText() {

@@ -10,7 +10,7 @@ const rootDir = path.resolve(
 const responseUtils = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "fetch", "response-utils.js"),
-  ).href,
+  ).href
 );
 
 test("fetch response utils normalize supported URLs", () => {

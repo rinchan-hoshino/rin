@@ -87,7 +87,9 @@ export function applyRpcSessionState(
   // The worker owns authoritative turn activity. `isStreaming` is the lower-
   // level session flag and may drop during internal checkpoints such as
   // compaction, while `turnActive` tracks the whole in-flight turn.
-  const nextRemoteTurnRunning = Boolean(state?.turnActive ?? state?.isStreaming);
+  const nextRemoteTurnRunning = Boolean(
+    state?.turnActive ?? state?.isStreaming,
+  );
   if (!nextRemoteTurnRunning && target.remoteTurnRunning) {
     target.activeTurn = null;
   }
@@ -161,4 +163,3 @@ export function getSessionBranch(
   }
   return branch.reverse();
 }
-

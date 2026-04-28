@@ -8,10 +8,7 @@ import {
   isImageMimeType,
   isImageName,
 } from "../chat/file-utils.js";
-import {
-  normalizeMessageText,
-  renderMessageText,
-} from "../message-content.js";
+import { normalizeMessageText, renderMessageText } from "../message-content.js";
 import { ensureDir } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 
@@ -22,10 +19,7 @@ const ALL_TEXT_MIME_EXTENSION_OPTIONS = {
 export { ensureDir, ensureFileName, isImageMimeType, isImageName, safeString };
 
 export function extensionFromMimeType(mimeType: string) {
-  return extensionFromSharedMimeType(
-    mimeType,
-    ALL_TEXT_MIME_EXTENSION_OPTIONS,
-  );
+  return extensionFromSharedMimeType(mimeType, ALL_TEXT_MIME_EXTENSION_OPTIONS);
 }
 
 export function ensureExtension(fileName: string, mimeType = "") {

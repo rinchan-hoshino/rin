@@ -51,27 +51,27 @@ export ANTHROPIC_API_KEY=sk-ant-...
 pi
 ```
 
-| Provider | Environment Variable | `auth.json` key |
-|----------|----------------------|------------------|
-| Anthropic | `ANTHROPIC_API_KEY` | `anthropic` |
+| Provider               | Environment Variable   | `auth.json` key          |
+| ---------------------- | ---------------------- | ------------------------ |
+| Anthropic              | `ANTHROPIC_API_KEY`    | `anthropic`              |
 | Azure OpenAI Responses | `AZURE_OPENAI_API_KEY` | `azure-openai-responses` |
-| OpenAI | `OPENAI_API_KEY` | `openai` |
-| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek` |
-| Google Gemini | `GEMINI_API_KEY` | `google` |
-| Mistral | `MISTRAL_API_KEY` | `mistral` |
-| Groq | `GROQ_API_KEY` | `groq` |
-| Cerebras | `CEREBRAS_API_KEY` | `cerebras` |
-| xAI | `XAI_API_KEY` | `xai` |
-| OpenRouter | `OPENROUTER_API_KEY` | `openrouter` |
-| Vercel AI Gateway | `AI_GATEWAY_API_KEY` | `vercel-ai-gateway` |
-| ZAI | `ZAI_API_KEY` | `zai` |
-| OpenCode Zen | `OPENCODE_API_KEY` | `opencode` |
-| OpenCode Go | `OPENCODE_API_KEY` | `opencode-go` |
-| Hugging Face | `HF_TOKEN` | `huggingface` |
-| Fireworks | `FIREWORKS_API_KEY` | `fireworks` |
-| Kimi For Coding | `KIMI_API_KEY` | `kimi-coding` |
-| MiniMax | `MINIMAX_API_KEY` | `minimax` |
-| MiniMax (China) | `MINIMAX_CN_API_KEY` | `minimax-cn` |
+| OpenAI                 | `OPENAI_API_KEY`       | `openai`                 |
+| DeepSeek               | `DEEPSEEK_API_KEY`     | `deepseek`               |
+| Google Gemini          | `GEMINI_API_KEY`       | `google`                 |
+| Mistral                | `MISTRAL_API_KEY`      | `mistral`                |
+| Groq                   | `GROQ_API_KEY`         | `groq`                   |
+| Cerebras               | `CEREBRAS_API_KEY`     | `cerebras`               |
+| xAI                    | `XAI_API_KEY`          | `xai`                    |
+| OpenRouter             | `OPENROUTER_API_KEY`   | `openrouter`             |
+| Vercel AI Gateway      | `AI_GATEWAY_API_KEY`   | `vercel-ai-gateway`      |
+| ZAI                    | `ZAI_API_KEY`          | `zai`                    |
+| OpenCode Zen           | `OPENCODE_API_KEY`     | `opencode`               |
+| OpenCode Go            | `OPENCODE_API_KEY`     | `opencode-go`            |
+| Hugging Face           | `HF_TOKEN`             | `huggingface`            |
+| Fireworks              | `FIREWORKS_API_KEY`    | `fireworks`              |
+| Kimi For Coding        | `KIMI_API_KEY`         | `kimi-coding`            |
+| MiniMax                | `MINIMAX_API_KEY`      | `minimax`                |
+| MiniMax (China)        | `MINIMAX_CN_API_KEY`   | `minimax-cn`             |
 
 Reference for environment variables and `auth.json` keys: [`const envMap`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts) in [`packages/ai/src/env-api-keys.ts`](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts).
 

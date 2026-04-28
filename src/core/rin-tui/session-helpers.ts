@@ -18,9 +18,7 @@ function getReusableUsage(message: any) {
   const usage = message?.usage;
   if (!usage || typeof usage !== "object") return undefined;
   const stopReason = String(message?.stopReason || "").trim();
-  return stopReason === "aborted" || stopReason === "error"
-    ? undefined
-    : usage;
+  return stopReason === "aborted" || stopReason === "error" ? undefined : usage;
 }
 
 export function getLastAssistantText(messages: AgentMessage[]) {

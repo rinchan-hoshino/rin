@@ -12,11 +12,14 @@ const rootDir = path.resolve(
   "..",
 );
 const chatBridgeModule = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-bridge.js")).href,
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-bridge.js"))
+    .href
 );
 
 test("chat_bridge only forwards valid current chat session names", async () => {
-  const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-bridge-runtime-"));
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-bridge-runtime-"),
+  );
   const socketDir = path.join(runtimeDir, "rin-daemon");
   const socketPath = path.join(socketDir, "daemon.sock");
   await fs.mkdir(socketDir, { recursive: true });

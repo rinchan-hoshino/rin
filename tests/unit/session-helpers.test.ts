@@ -10,12 +10,12 @@ const rootDir = path.resolve(
 const sessionHelpers = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-tui", "session-helpers.js"),
-  ).href,
+  ).href
 );
 const providerAuth = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-install", "provider-auth.js"),
-  ).href,
+  ).href
 );
 
 test("session helpers share deterministic thinking-level availability", () => {
@@ -102,7 +102,6 @@ test("estimateContextTokens falls back to estimating every message when no usage
   assert.equal(sessionHelpers.estimateContextTokens(messages), 6);
   assert.equal(sessionHelpers.estimateMessageTokens(messages[2]), 3);
 });
-
 
 test("session helpers guard against non-array and malformed message inputs", () => {
   assert.equal(sessionHelpers.getLastAssistantText(null), undefined);

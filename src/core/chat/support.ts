@@ -40,9 +40,7 @@ function normalizeChatId(chatId: unknown) {
 
 function normalizeTrust(value: unknown) {
   const nextTrust = safeString(value).trim().toUpperCase();
-  return nextTrust === "OWNER" || nextTrust === "TRUSTED"
-    ? nextTrust
-    : "OTHER";
+  return nextTrust === "OWNER" || nextTrust === "TRUSTED" ? nextTrust : "OTHER";
 }
 
 function platformRequiresBotId(platform: string) {
@@ -332,7 +330,8 @@ export function updateIdentityTrust(options: {
     options.actorTrust || trustOf(identity, actorPlatform, actorUserId),
   );
   const trust = normalizeTrust(options.trust);
-  const targetPlatform = safeString(options.targetPlatform).trim() || actorPlatform;
+  const targetPlatform =
+    safeString(options.targetPlatform).trim() || actorPlatform;
   const targetUserId = safeString(options.targetUserId).trim() || actorUserId;
   const targetName =
     safeString(options.targetName).trim() ||
@@ -351,7 +350,11 @@ export function updateIdentityTrust(options: {
     throw new Error("identity_owner_required");
   }
 
-  const existingAlias = findIdentityAlias(identity, targetPlatform, targetUserId);
+  const existingAlias = findIdentityAlias(
+    identity,
+    targetPlatform,
+    targetUserId,
+  );
   const existingTrust = normalizeTrust(
     identity?.persons?.[safeString(existingAlias?.personId).trim()]?.trust,
   );
@@ -403,7 +406,9 @@ export function canAccessAgentInput({
   if (chatType === "private") {
     return nextTrust === "OWNER" || nextTrust === "TRUSTED";
   }
-  return Boolean(mentionLike) && (nextTrust === "OWNER" || nextTrust === "TRUSTED");
+  return (
+    Boolean(mentionLike) && (nextTrust === "OWNER" || nextTrust === "TRUSTED")
+  );
 }
 
 const TRUSTED_COMMANDS = new Set(["new", "abort", "status"]);

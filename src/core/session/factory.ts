@@ -36,12 +36,14 @@ export async function openBoundSession(options: {
   });
 }
 
-export async function listBoundSessions(options: {
-  cwd?: string;
-  agentDir?: string;
-  sessionDir?: string;
-  SessionManager?: any;
-} = {}) {
+export async function listBoundSessions(
+  options: {
+    cwd?: string;
+    agentDir?: string;
+    sessionDir?: string;
+    SessionManager?: any;
+  } = {},
+) {
   const { cwd, agentDir } = resolveRuntimeProfile(options);
   const sessionDir = options.sessionDir || getRuntimeSessionDir(cwd, agentDir);
   const { SessionManager } = options.SessionManager

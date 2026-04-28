@@ -241,7 +241,12 @@ test("chat transport keeps local image and file parts as file urls", async () =>
       h,
     );
     const fileNode = await transport.messagePartToNode(
-      { type: "file", path: filePath, mimeType: "text/plain", name: "demo.txt" },
+      {
+        type: "file",
+        path: filePath,
+        mimeType: "text/plain",
+        name: "demo.txt",
+      },
       h,
     );
     assert.equal(imageNode.type, "image");
@@ -321,11 +326,14 @@ test("chat transport direct send helpers prepend quotes and reuse file urls", as
 test("chat transport rejects invalid parts and empty deliveries early", async () => {
   await withTempDir(async (dir) => {
     await assert.rejects(
-      transport.messagePartToNode({ type: "image" }, {
-        image(src) {
-          return { type: "image", attrs: { src } };
+      transport.messagePartToNode(
+        { type: "image" },
+        {
+          image(src) {
+            return { type: "image", attrs: { src } };
+          },
         },
-      }),
+      ),
       /chat_outbox_invalid_part:image/,
     );
 

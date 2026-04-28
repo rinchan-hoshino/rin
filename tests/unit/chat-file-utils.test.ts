@@ -10,15 +10,14 @@ const rootDir = path.resolve(
 );
 const chatFileUtils = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "file-utils.js"))
-    .href,
+    .href
 );
 const chatSupport = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js"))
-    .href,
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href
 );
 const chatRuntimeCommon = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "common.js"))
-    .href,
+    .href
 );
 
 function assertSharedMimeParity(mimeType: string, expected: string) {
@@ -79,7 +78,10 @@ test("chat file helpers stay consistent across shared and re-exported surfaces",
     ),
     "%E0%A4%A.txt",
   );
-  assert.equal(chatSupport.ensureExtension("notes", "text/markdown"), "notes.md");
+  assert.equal(
+    chatSupport.ensureExtension("notes", "text/markdown"),
+    "notes.md",
+  );
   assert.equal(
     chatRuntimeCommon.ensureExtension("notes", "text/markdown"),
     "notes.md",

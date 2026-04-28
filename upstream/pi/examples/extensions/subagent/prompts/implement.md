@@ -1,6 +1,7 @@
 ---
 description: Full implementation workflow - scout gathers context, planner creates plan, worker implements
 ---
+
 Use the subagent tool with the chain parameter to execute this workflow:
 
 1. First, use the "scout" agent to find all code relevant to: $@

@@ -64,7 +64,11 @@ test("tui stats get context usage preserves post-compaction unknown state", () =
       { type: "compaction" },
       {
         type: "message",
-        message: { role: "assistant", stopReason: "aborted", usage: { input: 1 } },
+        message: {
+          role: "assistant",
+          stopReason: "aborted",
+          usage: { input: 1 },
+        },
       },
     ],
   );

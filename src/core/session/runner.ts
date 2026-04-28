@@ -18,7 +18,8 @@ export async function runSessionPrompt(options: {
     const text = extractMessageText(event.message.content, { trim: true });
     if (text) latestAssistantText = text;
   });
-  const unsubscribe = typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
+  const unsubscribe =
+    typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
   try {
     latestAssistantText = "";
     await session.prompt(options.prompt, {

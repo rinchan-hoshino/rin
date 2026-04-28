@@ -12,15 +12,15 @@ const rootDir = path.resolve(
 const normalization = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "chat", "inbound-normalization.js"),
-  ).href,
+  ).href
 );
 const helpers = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js"))
-    .href,
+    .href
 );
 const messageStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
-    .href,
+    .href
 );
 
 async function withTempDir(fn) {

@@ -10,7 +10,7 @@ const rootDir = path.resolve(
   "../..",
 );
 const chatDate = await import(
-  new URL("../../dist/core/chat/date.js", import.meta.url).href,
+  new URL("../../dist/core/chat/date.js", import.meta.url).href
 );
 
 async function runInTimezone(source, timezone = "Asia/Shanghai") {

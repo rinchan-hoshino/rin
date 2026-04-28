@@ -9,7 +9,10 @@ import type {
   ChatBridgePromptFieldValue,
   ChatBridgePromptFieldValues,
 } from "./adapters.js";
-import { createInstallerI18n, type InstallerI18n } from "../rin-install/i18n.js";
+import {
+  createInstallerI18n,
+  type InstallerI18n,
+} from "../rin-install/i18n.js";
 
 export type ChatBridgePromptApi = {
   ensureNotCancelled: <T>(value: T | symbol | undefined | null) => T;
@@ -39,7 +42,11 @@ function localizePromptField(
   field: ChatBridgePromptFieldSpec,
   i18n: InstallerI18n,
 ): ChatBridgePromptFieldSpec {
-  if (adapterKey === "telegram" && field.key === "token" && field.kind === "text") {
+  if (
+    adapterKey === "telegram" &&
+    field.key === "token" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -50,7 +57,11 @@ function localizePromptField(
       ),
     };
   }
-  if (adapterKey === "onebot" && field.key === "endpoint" && field.kind === "url") {
+  if (
+    adapterKey === "onebot" &&
+    field.key === "endpoint" &&
+    field.kind === "url"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -61,7 +72,11 @@ function localizePromptField(
       ),
     };
   }
-  if (adapterKey === "onebot" && field.key === "selfId" && field.kind === "text") {
+  if (
+    adapterKey === "onebot" &&
+    field.key === "selfId" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -72,7 +87,11 @@ function localizePromptField(
       ),
     };
   }
-  if (adapterKey === "onebot" && field.key === "token" && field.kind === "text") {
+  if (
+    adapterKey === "onebot" &&
+    field.key === "token" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -132,7 +151,11 @@ function localizePromptField(
       ],
     };
   }
-  if (adapterKey === "lark" && field.key === "platform" && field.kind === "select") {
+  if (
+    adapterKey === "lark" &&
+    field.key === "platform" &&
+    field.kind === "select"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -153,32 +176,30 @@ function localizePromptField(
   if (adapterKey === "lark" && field.key === "appId" && field.kind === "text") {
     return {
       ...field,
-      message: withGuide(
-        i18n,
-        i18n.larkAppIdMessage,
-        i18n.larkAppIdGuide,
-        [
-          "Feishu https://open.feishu.cn/app?lang=zh-CN",
-          "Lark https://open.larksuite.com/",
-        ],
-      ),
+      message: withGuide(i18n, i18n.larkAppIdMessage, i18n.larkAppIdGuide, [
+        "Feishu https://open.feishu.cn/app?lang=zh-CN",
+        "Lark https://open.larksuite.com/",
+      ]),
     };
   }
-  if (adapterKey === "lark" && field.key === "appSecret" && field.kind === "text") {
+  if (
+    adapterKey === "lark" &&
+    field.key === "appSecret" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
-      message: withGuide(
-        i18n,
-        i18n.larkAppSecretMessage,
-        i18n.larkAppIdGuide,
-        [
-          "Feishu https://open.feishu.cn/app?lang=zh-CN",
-          "Lark https://open.larksuite.com/",
-        ],
-      ),
+      message: withGuide(i18n, i18n.larkAppSecretMessage, i18n.larkAppIdGuide, [
+        "Feishu https://open.feishu.cn/app?lang=zh-CN",
+        "Lark https://open.larksuite.com/",
+      ]),
     };
   }
-  if (adapterKey === "discord" && field.key === "token" && field.kind === "text") {
+  if (
+    adapterKey === "discord" &&
+    field.key === "token" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -189,7 +210,11 @@ function localizePromptField(
       ),
     };
   }
-  if (adapterKey === "slack" && field.key === "token" && field.kind === "text") {
+  if (
+    adapterKey === "slack" &&
+    field.key === "token" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -200,7 +225,11 @@ function localizePromptField(
       ),
     };
   }
-  if (adapterKey === "slack" && field.key === "botToken" && field.kind === "text") {
+  if (
+    adapterKey === "slack" &&
+    field.key === "botToken" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -211,7 +240,11 @@ function localizePromptField(
       ),
     };
   }
-  if (adapterKey === "minecraft" && field.key === "url" && field.kind === "url") {
+  if (
+    adapterKey === "minecraft" &&
+    field.key === "url" &&
+    field.kind === "url"
+  ) {
     return {
       ...field,
       message: withGuide(
@@ -221,19 +254,31 @@ function localizePromptField(
       ),
     };
   }
-  if (adapterKey === "minecraft" && field.key === "selfId" && field.kind === "text") {
+  if (
+    adapterKey === "minecraft" &&
+    field.key === "selfId" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: i18n.minecraftSelfIdMessage,
     };
   }
-  if (adapterKey === "minecraft" && field.key === "serverName" && field.kind === "text") {
+  if (
+    adapterKey === "minecraft" &&
+    field.key === "serverName" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: i18n.minecraftServerNameMessage,
     };
   }
-  if (adapterKey === "minecraft" && field.key === "token" && field.kind === "text") {
+  if (
+    adapterKey === "minecraft" &&
+    field.key === "token" &&
+    field.kind === "text"
+  ) {
     return {
       ...field,
       message: i18n.minecraftTokenMessage,

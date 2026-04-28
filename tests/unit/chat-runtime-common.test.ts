@@ -12,7 +12,7 @@ const rootDir = path.resolve(
 );
 const chatRuntimeCommon = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "common.js"))
-    .href,
+    .href
 );
 
 test("chat runtime common helpers normalize and render nodes consistently", () => {
@@ -70,7 +70,7 @@ test("chat runtime common helpers preserve binary payload naming for buffers and
   const bufferPayload = await chatRuntimeCommon.readBinaryFromNode(
     chatRuntimeCommon.normalizeNode("file", {
       data: Buffer.from("demo"),
-      name: 'bad:/\\name?*',
+      name: "bad:/\\name?*",
       mimeType: "image/png",
     }),
   );

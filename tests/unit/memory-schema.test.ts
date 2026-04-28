@@ -10,12 +10,7 @@ const rootDir = path.resolve(
 );
 const schema = await import(
   pathToFileURL(
-    path.join(
-      rootDir,
-      "dist", "core", "self-improve",
-      "core",
-      "schema.js",
-    ),
+    path.join(rootDir, "dist", "core", "self-improve", "core", "schema.js"),
   ).href
 );
 

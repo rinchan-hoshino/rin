@@ -45,9 +45,9 @@ export function readSessionMetadata(
 ): SessionMetadata {
   const sessionSource =
     (source as SessionSourceLike | null | undefined) || undefined;
-  const sessionManager = (sessionSource?.sessionManager || source || undefined) as
-    | SessionManagerLike
-    | undefined;
+  const sessionManager = (sessionSource?.sessionManager ||
+    source ||
+    undefined) as SessionManagerLike | undefined;
   const { sessionId, sessionFile } = resolveSessionRef(
     {
       sessionId: sessionSource?.sessionId,
@@ -79,12 +79,19 @@ export function readSessionMetadata(
       ) || "",
     sessionPersisted: Boolean(
       (sessionSource?.sessionPersisted ?? sessionManager?.isPersisted?.()) &&
-        sessionFile,
+      sessionFile,
     ),
   };
 }
 
-export function readSessionIdentity(source: SessionSourceLike | SessionManagerLike | null | undefined) {
+export function readSessionIdentity(
+  source: SessionSourceLike | SessionManagerLike | null | undefined,
+) {
   const metadata = readSessionMetadata(source);
-  return metadata.sessionFile || metadata.sessionId || metadata.cwd || "unknown-session";
+  return (
+    metadata.sessionFile ||
+    metadata.sessionId ||
+    metadata.cwd ||
+    "unknown-session"
+  );
 }

@@ -139,11 +139,7 @@ function readClaimedOutboxPayload(claimedPath: string) {
   }
 }
 
-function warnChatOutboxFailure(
-  logger: any,
-  filePath: string,
-  error: unknown,
-) {
+function warnChatOutboxFailure(logger: any, filePath: string, error: unknown) {
   logger.warn(
     `chat outbox failed file=${filePath} err=${safeString((error as any)?.message || error)}`,
   );

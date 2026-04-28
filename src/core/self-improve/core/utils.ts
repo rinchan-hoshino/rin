@@ -49,4 +49,3 @@ export function cjkBigrams(value: string): string[] {
 export function conceptTokens(value: string): string[] {
   return uniqueStrings([...latinTokens(value), ...cjkBigrams(value)]);
 }
-

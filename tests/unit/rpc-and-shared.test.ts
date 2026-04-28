@@ -203,7 +203,6 @@ test("TUI launch environment enables maintenance mode only when the daemon is un
     },
   );
   assert.equal(unavailable.runtimeEnv.BASE, "1");
-  assert.equal(unavailable.runtimeEnv.RIN_TUI_MAINTENANCE_MODE, "1");
   assert.equal(unavailable.runtimeEnv.RIN_TUI_RUNTIME_ROLE, "maintenance-tui");
   assert.match(
     unavailable.maintenanceModeNotice,

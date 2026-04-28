@@ -7,7 +7,6 @@ import {
 } from "../rin-lib/system.js";
 import { PI_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import {
-  RIN_TUI_MAINTENANCE_MODE_ENV,
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RPC_FRONTEND_ROLE,
   RIN_TUI_RUNTIME_ROLE_ENV,
@@ -96,7 +95,6 @@ export async function resolveTuiLaunchEnvironment(
     return {
       runtimeEnv: {
         ...runtimeEnv,
-        [RIN_TUI_MAINTENANCE_MODE_ENV]: "1",
         [RIN_TUI_RUNTIME_ROLE_ENV]: RIN_TUI_MAINTENANCE_ROLE,
       },
       maintenanceModeNotice: formatMaintenanceModeNotice(error),

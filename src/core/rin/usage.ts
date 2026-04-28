@@ -28,7 +28,10 @@ export type UsageCliOptions = {
   help: boolean;
 };
 
-type UsageScope = Pick<TokenUsageQueryOptions, "agentDir" | "from" | "to" | "filters">;
+type UsageScope = Pick<
+  TokenUsageQueryOptions,
+  "agentDir" | "from" | "to" | "filters"
+>;
 
 type UsageAggregateSection = {
   title: string;
@@ -44,28 +47,30 @@ const DASHBOARD_AGGREGATE_SECTIONS: UsageAggregateSection[] = [
 ];
 
 function printUsageHelp() {
-  console.log([
-    "rin usage [options]",
-    "",
-    "Options:",
-    "  --from <time>         start time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
-    "  --to <time>           end time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
-    "  --group-by <dims>     comma-separated dimensions",
-    "  --filter <k=v>        equality filter, repeatable",
-    "  --limit <n>           row limit (default 20)",
-    "  --order-by <metric>   total_tokens, cost_total, rows, input_tokens...",
-    "  --direction <dir>     asc or desc",
-    "  --events              show raw events instead of aggregates",
-    "  --include-zero        include zero-token rows in aggregates",
-    "  --dimensions          list supported dimensions",
-    "  --help                show this help",
-    "",
-    "Examples:",
-    "  rin usage",
-    "  rin usage --group-by provider_model,capability --from 7d",
-    "  rin usage --group-by session_id,event_type --filter source=extension",
-    "  rin usage --events --limit 50 --filter session_id=abc123",
-  ].join("\n"));
+  console.log(
+    [
+      "rin usage [options]",
+      "",
+      "Options:",
+      "  --from <time>         start time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
+      "  --to <time>           end time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
+      "  --group-by <dims>     comma-separated dimensions",
+      "  --filter <k=v>        equality filter, repeatable",
+      "  --limit <n>           row limit (default 20)",
+      "  --order-by <metric>   total_tokens, cost_total, rows, input_tokens...",
+      "  --direction <dir>     asc or desc",
+      "  --events              show raw events instead of aggregates",
+      "  --include-zero        include zero-token rows in aggregates",
+      "  --dimensions          list supported dimensions",
+      "  --help                show this help",
+      "",
+      "Examples:",
+      "  rin usage",
+      "  rin usage --group-by provider_model,capability --from 7d",
+      "  rin usage --group-by session_id,event_type --filter source=extension",
+      "  rin usage --events --limit 50 --filter session_id=abc123",
+    ].join("\n"),
+  );
 }
 
 function parsePositiveInt(value: string, fallback: number) {
@@ -100,7 +105,10 @@ function normalizeDirectionArg(value: string): "asc" | "desc" {
   return value.toLowerCase() === "asc" ? "asc" : "desc";
 }
 
-function normalizeTimeArg(input: string | undefined, boundary: "start" | "end") {
+function normalizeTimeArg(
+  input: string | undefined,
+  boundary: "start" | "end",
+) {
   const raw = safeString(input).trim();
   if (!raw) return undefined;
   const relative = raw.match(/^(\d+)([mhdw])$/i);
@@ -220,7 +228,10 @@ function renderTable(rows: Array<Record<string, unknown>>, columns: string[]) {
   for (const row of rows) {
     for (const column of columns) {
       const value = safeString(row[column] ?? "");
-      widths.set(column, Math.min(48, Math.max(widths.get(column) || 0, value.length)));
+      widths.set(
+        column,
+        Math.min(48, Math.max(widths.get(column) || 0, value.length)),
+      );
     }
   }
   const header = columns
@@ -232,7 +243,10 @@ function renderTable(rows: Array<Record<string, unknown>>, columns: string[]) {
   const body = rows.map((row) =>
     columns
       .map((column) =>
-        pad(truncate(safeString(row[column] ?? ""), widths.get(column) || 0), widths.get(column) || 0),
+        pad(
+          truncate(safeString(row[column] ?? ""), widths.get(column) || 0),
+          widths.get(column) || 0,
+        ),
       )
       .join("  "),
   );
@@ -248,7 +262,10 @@ function summarizeOverview(overview: any) {
     `tokens=${formatInt(overview?.total_tokens)} (in=${formatInt(overview?.input_tokens)}, out=${formatInt(overview?.output_tokens)}, cacheRead=${formatInt(overview?.cache_read_tokens)}, cacheWrite=${formatInt(overview?.cache_write_tokens)})`,
     `cost=$${formatCost(overview?.cost_total)}`,
   ];
-  if (safeString(overview?.first_timestamp).trim() || safeString(overview?.last_timestamp).trim()) {
+  if (
+    safeString(overview?.first_timestamp).trim() ||
+    safeString(overview?.last_timestamp).trim()
+  ) {
     lines.push(
       `range=${safeString(overview?.first_timestamp).trim() || "-"} .. ${safeString(overview?.last_timestamp).trim() || "-"}`,
     );
@@ -289,7 +306,9 @@ function renderAggregateTable(
 
 function renderEventTable(rows: Array<Record<string, unknown>>) {
   const formatted = rows.map((row) => ({
-    timestamp: safeString(row.timestamp).replace("T", " ").replace(".000Z", "Z"),
+    timestamp: safeString(row.timestamp)
+      .replace("T", " ")
+      .replace(".000Z", "Z"),
     session_id: row.session_id,
     source: row.source,
     event_type: row.event_type,
@@ -316,7 +335,10 @@ function renderEventTable(rows: Array<Record<string, unknown>>) {
   ]);
 }
 
-function buildUsageScope(agentDir: string, options: UsageCliOptions): UsageScope {
+function buildUsageScope(
+  agentDir: string,
+  options: UsageCliOptions,
+): UsageScope {
   return {
     agentDir,
     from: options.from,
@@ -336,7 +358,10 @@ function queryDashboardAggregate(
   });
 }
 
-function queryRecentMessageEvents(scope: UsageScope, limit: number): Array<Record<string, unknown>> {
+function queryRecentMessageEvents(
+  scope: UsageScope,
+  limit: number,
+): Array<Record<string, unknown>> {
   return queryTokenUsageEvents({
     ...scope,
     filters: [...scope.filters, { key: "event_type", value: "message_end" }],
@@ -344,7 +369,10 @@ function queryRecentMessageEvents(scope: UsageScope, limit: number): Array<Recor
   }).filter((row) => Number(row.total_tokens || 0) > 0);
 }
 
-export function renderUsageReport(agentDir: string, options: UsageCliOptions): string {
+export function renderUsageReport(
+  agentDir: string,
+  options: UsageCliOptions,
+): string {
   if (options.help) {
     printUsageHelp();
     return "";
@@ -357,7 +385,9 @@ export function renderUsageReport(agentDir: string, options: UsageCliOptions): s
   }
   const scope = buildUsageScope(agentDir, options);
   if (options.events) {
-    return renderEventTable(queryTokenUsageEvents({ ...scope, limit: options.limit }));
+    return renderEventTable(
+      queryTokenUsageEvents({ ...scope, limit: options.limit }),
+    );
   }
   if (options.groupBy.length > 0) {
     const rows = queryTokenUsageAggregate({
@@ -373,7 +403,11 @@ export function renderUsageReport(agentDir: string, options: UsageCliOptions): s
 
   const overview = getTokenUsageOverview(scope);
   const aggregateSections = DASHBOARD_AGGREGATE_SECTIONS.map((section) =>
-    renderAggregateTable(section.title, section.groupBy, queryDashboardAggregate(scope, section)),
+    renderAggregateTable(
+      section.title,
+      section.groupBy,
+      queryDashboardAggregate(scope, section),
+    ),
   );
   const recent = queryRecentMessageEvents(scope, 10);
 
@@ -393,7 +427,12 @@ export async function runUsageInternal(rawArgv: string[]) {
     printUsageHelp();
     return;
   }
-  console.log(renderUsageReport(process.env.RIN_DIR || process.env.PI_CODING_AGENT_DIR || "", options));
+  console.log(
+    renderUsageReport(
+      process.env.RIN_DIR || process.env.PI_CODING_AGENT_DIR || "",
+      options,
+    ),
+  );
 }
 
 export async function runUsage(parsed: ParsedArgs, rawArgv: string[]) {

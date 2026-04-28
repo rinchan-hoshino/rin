@@ -9,11 +9,11 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
 import {
-  RIN_TUI_MAINTENANCE_MODE_ENV,
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RPC_FRONTEND_ROLE,
   RIN_TUI_RUNTIME_ROLE_ENV,
 } from "../tui-runtime-env.js";
+import { requestDaemonCommand } from "../rin-daemon/client.js";
 
 import { RinDaemonFrontendClient } from "./rpc-client.js";
 import { RpcInteractiveSession } from "./runtime.js";
@@ -26,6 +26,7 @@ type TuiInteractiveOptions = Pick<
 >;
 const RPC_TUI_STARTUP_CONNECT_ERROR_RE =
   /\bconnect (?:ENOENT|ECONNREFUSED|ECONNRESET|EPIPE)\b/;
+const RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS = 5000;
 
 export function formatTuiStartupError(error: unknown) {
   const message = String((error as any)?.message || error || "").trim();
@@ -34,12 +35,21 @@ export function formatTuiStartupError(error: unknown) {
   return `RPC TUI could not connect to the daemon (${message}). Try \`rin doctor\` to inspect the daemon, or reopen Rin; the launcher will enter temporary maintenance mode if the daemon stays unavailable.`;
 }
 
-export function shouldStartMaintenanceMode(
-  env: NodeJS.ProcessEnv = process.env,
+export async function isDaemonReadyForRpcStartup(
+  options: { socketPath?: string; timeoutMs?: number } = {},
 ) {
-  return /^(1|true|yes)$/i.test(
-    String(env[RIN_TUI_MAINTENANCE_MODE_ENV] || "").trim(),
-  );
+  try {
+    const status = await requestDaemonCommand(
+      { type: "daemon_status" },
+      {
+        socketPath: options.socketPath,
+        timeoutMs: options.timeoutMs ?? RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS,
+      },
+    );
+    return Boolean(status && typeof status === "object");
+  } catch {
+    return false;
+  }
 }
 
 function startupProfiler() {
@@ -136,6 +146,8 @@ async function startRpcTui(
   let interactiveMode: InteractiveMode | undefined;
   try {
     await rpcSession.prepareForInteractiveStartup();
+    await rpcSession.connect();
+    await rpcSession.ensureSessionReady();
     runtimeHost = createRpcRuntimeHost(rpcSession);
     profile.mark("rpc-session-created");
     if (shouldPrintStartupSeparator()) {
@@ -146,8 +158,6 @@ async function startRpcTui(
       interactiveOptions,
     );
     await (interactiveMode as any).init();
-    await rpcSession.connect();
-    await rpcSession.ensureSessionReady();
     await (interactiveMode as any).rebindCurrentSession?.();
     (interactiveMode as any).renderCurrentSessionState?.();
     (interactiveMode as any).ui?.requestRender?.();
@@ -184,7 +194,7 @@ export async function startTui(
   }
 
   const argv = options.argv ?? process.argv.slice(2);
-  const maintenanceMode = shouldStartMaintenanceMode();
+  const maintenanceMode = !(await isDaemonReadyForRpcStartup());
   process.env[RIN_TUI_RUNTIME_ROLE_ENV] = maintenanceMode
     ? RIN_TUI_MAINTENANCE_ROLE
     : RIN_TUI_RPC_FRONTEND_ROLE;

@@ -158,9 +158,7 @@ test("turn completion resolver falls back to messages and payload text when need
     {
       finalText: "",
       result: {
-        messages: [
-          { type: "image", data: "abc", mimeType: "image/png" },
-        ],
+        messages: [{ type: "image", data: "abc", mimeType: "image/png" }],
       },
     },
   );

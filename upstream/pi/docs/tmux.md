@@ -46,12 +46,12 @@ Pi supports both formats, but `csi-u` is the recommended tmux setup.
 
 Without tmux extended keys, modified Enter keys collapse to legacy sequences:
 
-| Key | Without extkeys | With `csi-u` |
-|-----|-----------------|--------------|
-| Enter | `\r` | `\r` |
-| Shift+Enter | `\r` | `\x1b[13;2u` |
-| Ctrl+Enter | `\r` | `\x1b[13;5u` |
-| Alt/Option+Enter | `\x1b\r` | `\x1b[13;3u` |
+| Key              | Without extkeys | With `csi-u` |
+| ---------------- | --------------- | ------------ |
+| Enter            | `\r`            | `\r`         |
+| Shift+Enter      | `\r`            | `\x1b[13;2u` |
+| Ctrl+Enter       | `\r`            | `\x1b[13;5u` |
+| Alt/Option+Enter | `\x1b\r`        | `\x1b[13;3u` |
 
 This affects the default keybindings (`Enter` to submit, `Shift+Enter` for newline) and any custom keybindings using modified Enter.
 

@@ -267,7 +267,8 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
           }),
         ],
         detail: ({ endpoint }) => {
-          const protocol = getEndpointProtocol(endpoint) || ONEBOT_DEFAULTS.protocol;
+          const protocol =
+            getEndpointProtocol(endpoint) || ONEBOT_DEFAULTS.protocol;
           return `Chat bridge mode: ${protocol} · endpoint: ${endpoint}`;
         },
         config: ({ endpoint, selfId, token }) =>
@@ -493,11 +494,7 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
             placeholder: "ws://127.0.0.1:8080",
             required: true,
             validate: (value) =>
-              validateUrlProtocol(
-                value,
-                ["ws"],
-                "Use a ws:// or wss:// URL.",
-              ),
+              validateUrlProtocol(value, ["ws"], "Use a ws:// or wss:// URL."),
           }),
           textField("selfId", {
             message:

@@ -1,9 +1,6 @@
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
-import {
-  BuiltinModuleHost,
-  CompositeBuiltinRunner,
-} from "../builtins/host.js";
+import { BuiltinModuleHost, CompositeBuiltinRunner } from "../builtins/host.js";
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
 import { extractText } from "./session-helpers.js";
 
@@ -136,7 +133,9 @@ export async function loadRpcLocalExtensions(
 
   const compositeRunner = new CompositeBuiltinRunner(runner, builtinHost);
   compositeRunner.setUIContext(target.extensionBindings.uiContext);
-  compositeRunner.bindCommandContext(target.extensionBindings.commandContextActions);
+  compositeRunner.bindCommandContext(
+    target.extensionBindings.commandContextActions,
+  );
   if (target.extensionBindings.onError)
     compositeRunner.onError(target.extensionBindings.onError);
 

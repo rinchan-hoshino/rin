@@ -3,16 +3,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 
-const execFileAsync = promisify(execFile);
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "..",
   "..",
 );
-const tuiPath = path.join(rootDir, "dist", "app", "rin-tui", "main.js");
+const launcher = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "launcher.js"))
+    .href
+);
 
 async function withTempDir(fn: (dir: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-tui-e2e-"));
@@ -23,45 +24,17 @@ async function withTempDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
-test("rpc tui startup suggests doctor and maintenance mode on daemon socket refusal", async () => {
+test("tui startup falls back before rpc mode when daemon health check fails", async () => {
   await withTempDir(async (tempDir) => {
-    const home = path.join(tempDir, "home");
-    const agentDir = path.join(tempDir, "agent");
     const runtimeDir = path.join(tempDir, "runtime");
-    await fs.mkdir(home, { recursive: true });
-    await fs.mkdir(agentDir, { recursive: true });
     await fs.mkdir(runtimeDir, { recursive: true });
 
     const socketPath = path.join(runtimeDir, "daemon.sock");
     await fs.writeFile(socketPath, "", "utf8");
 
-    await assert.rejects(
-      execFileAsync(process.execPath, [tuiPath], {
-        cwd: rootDir,
-        env: {
-          ...process.env,
-          HOME: home,
-          XDG_CACHE_HOME: path.join(home, ".cache"),
-          XDG_RUNTIME_DIR: runtimeDir,
-          DBUS_SESSION_BUS_ADDRESS: `unix:path=${path.join(runtimeDir, "bus")}`,
-          RIN_DIR: agentDir,
-          PI_CODING_AGENT_DIR: agentDir,
-          RIN_DAEMON_SOCKET_PATH: socketPath,
-          NO_COLOR: "1",
-          TERM: "dumb",
-        },
-      }),
-      (error: any) => {
-        assert.equal(error.code, 1);
-        const stderr = String(error.stderr || "");
-        assert.match(
-          stderr,
-          /RPC TUI could not connect to the daemon \(connect ECONNREFUSED .*daemon\.sock\)\./,
-        );
-        assert.match(stderr, /Try `rin doctor`/);
-        assert.match(stderr, /temporary maintenance mode/);
-        return true;
-      },
+    assert.equal(
+      await launcher.isDaemonReadyForRpcStartup({ socketPath, timeoutMs: 100 }),
+      false,
     );
   });
 });

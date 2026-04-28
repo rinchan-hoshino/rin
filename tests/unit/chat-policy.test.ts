@@ -9,8 +9,7 @@ const rootDir = path.resolve(
   "..",
 );
 const support = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href
 );
 
 test("chat policy allows trusted users to check status, abort, and start new chat sessions", () => {
@@ -33,9 +32,18 @@ test("chat policy keeps non-help commands restricted while owners retain other c
 });
 
 test("chat policy does not reserve a special /auth bootstrap command", () => {
-  assert.equal(support.canRunCommand("OTHER", "auth", { hasOwner: false }), false);
-  assert.equal(support.canRunCommand("OTHER", "auth", { hasOwner: true }), false);
-  assert.equal(support.canRunCommand("TRUSTED", "auth", { hasOwner: true }), false);
+  assert.equal(
+    support.canRunCommand("OTHER", "auth", { hasOwner: false }),
+    false,
+  );
+  assert.equal(
+    support.canRunCommand("OTHER", "auth", { hasOwner: true }),
+    false,
+  );
+  assert.equal(
+    support.canRunCommand("TRUSTED", "auth", { hasOwner: true }),
+    false,
+  );
 });
 
 test("chat policy normalizes trust values for input access and command checks", () => {

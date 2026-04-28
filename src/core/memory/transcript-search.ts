@@ -75,8 +75,10 @@ type TranscriptSearchWriteStatements = {
   selectMaxLineNumberByArchivePath: Statement;
 };
 
-const transcriptSearchWriteStatementCache =
-  new WeakMap<Database, TranscriptSearchWriteStatements>();
+const transcriptSearchWriteStatementCache = new WeakMap<
+  Database,
+  TranscriptSearchWriteStatements
+>();
 
 const SEARCH_DB_SCHEMA_VERSION = 2;
 const DEFAULT_RESULT_LIMIT = 8;
@@ -445,7 +447,11 @@ function replaceIndexedArchiveEntries(
   const tx = db.transaction(() => {
     removeIndexedArchiveEntries(db, state.archivePath);
     for (const item of indexedEntries) insertIndexedEntry(db, item);
-    statements.upsertFileState.run(state.archivePath, state.mtimeMs, state.size);
+    statements.upsertFileState.run(
+      state.archivePath,
+      state.mtimeMs,
+      state.size,
+    );
   });
   tx();
 }
@@ -463,7 +469,11 @@ function appendIndexedArchiveEntry(
     const nextIndex = Math.max(0, Number(row?.max_line_number || 0));
     const item = toIndexedEntry(entry, state.archivePath, nextIndex);
     insertIndexedEntry(db, item);
-    statements.upsertFileState.run(state.archivePath, state.mtimeMs, state.size);
+    statements.upsertFileState.run(
+      state.archivePath,
+      state.mtimeMs,
+      state.size,
+    );
   });
   tx();
 }
@@ -497,7 +507,8 @@ async function syncTranscriptSearchIndex(db: Database, rootOverride = "") {
   );
 
   const deleteTx = db.transaction((paths: string[]) => {
-    for (const archivePath of paths) removeIndexedArchiveEntries(db, archivePath);
+    for (const archivePath of paths)
+      removeIndexedArchiveEntries(db, archivePath);
   });
   const deletedPaths = [...indexedStates.keys()].filter(
     (archivePath) => !actualStates.has(archivePath),
@@ -606,7 +617,9 @@ function loadSessionEntriesByKeys(
   sessionKeys: string[],
 ): Map<string, TranscriptArchiveEntry[]> {
   const normalizedKeys = uniqueStrings(
-    sessionKeys.map((sessionKey) => safeString(sessionKey).trim()).filter(Boolean),
+    sessionKeys
+      .map((sessionKey) => safeString(sessionKey).trim())
+      .filter(Boolean),
   );
   const grouped = new Map<string, TranscriptArchiveEntry[]>(
     normalizedKeys.map((sessionKey) => [sessionKey, []]),

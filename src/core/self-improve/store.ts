@@ -29,7 +29,9 @@ import {
 
 export { resolveSelfImproveRoot } from "./paths.js";
 
-export async function ensureSelfImproveLayout(rootOverride = ""): Promise<string> {
+export async function ensureSelfImproveLayout(
+  rootOverride = "",
+): Promise<string> {
   const rootDir = resolveSelfImproveRoot(rootOverride);
   await fs.mkdir(rootDir, { recursive: true });
   await Promise.all(

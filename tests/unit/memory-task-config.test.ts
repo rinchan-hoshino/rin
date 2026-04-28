@@ -11,7 +11,7 @@ const rootDir = path.resolve(
 const mod = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-lib", "memory-task-config.js"),
-  ).href,
+  ).href
 );
 
 test("memory task config fixes recall-related thinking at low", () => {

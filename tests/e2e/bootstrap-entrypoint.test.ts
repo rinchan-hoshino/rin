@@ -55,18 +55,21 @@ async function createReleaseManifest(tempDir) {
       },
       stable: {
         version: "1.2.3",
-        archiveUrl: "https://registry.npmjs.org/%40rinchanai%2Frin/-/rin-1.2.3.tgz",
+        archiveUrl:
+          "https://registry.npmjs.org/%40rinchanai%2Frin/-/rin-1.2.3.tgz",
         ref: "abc1234",
       },
       beta: {
         version: "1.2.4-beta.20260420",
-        archiveUrl: "https://example.invalid/releases/beta-1.2.4-beta.20260420.tar.gz",
+        archiveUrl:
+          "https://example.invalid/releases/beta-1.2.4-beta.20260420.tar.gz",
         ref: "def5678",
         promotionVersion: "1.2.4",
       },
       nightly: {
         version: "1.2.5-nightly.20260420+deadbee",
-        archiveUrl: "https://example.invalid/releases/nightly-1.2.5-nightly.20260420.tar.gz",
+        archiveUrl:
+          "https://example.invalid/releases/nightly-1.2.5-nightly.20260420.tar.gz",
         ref: "deadbeef",
         branch: "main",
       },
@@ -206,7 +209,11 @@ test("stable install and update wrappers resolve release metadata before launchi
       RIN_INSTALL_TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
-      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+        rootDir,
+        "scripts",
+        "bootstrap-entrypoint.sh",
+      ),
       RIN_BOOTSTRAP_TEST_LOG: logPath,
     };
 
@@ -248,7 +255,10 @@ test("wrapper-only main install script fetches the shared entrypoint from bootst
     await createFakeBin(fakeBin, logPath);
     await fs.mkdir(workRoot, { recursive: true });
     await fs.mkdir(wrapperDir, { recursive: true });
-    await fs.copyFile(path.join(rootDir, "install.sh"), path.join(wrapperDir, "install.sh"));
+    await fs.copyFile(
+      path.join(rootDir, "install.sh"),
+      path.join(wrapperDir, "install.sh"),
+    );
 
     const env = {
       ...process.env,
@@ -257,7 +267,11 @@ test("wrapper-only main install script fetches the shared entrypoint from bootst
       RIN_INSTALL_TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
-      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+        rootDir,
+        "scripts",
+        "bootstrap-entrypoint.sh",
+      ),
       RIN_BOOTSTRAP_TEST_LOG: logPath,
     };
 
@@ -272,7 +286,9 @@ test("wrapper-only main install script fetches the shared entrypoint from bootst
       /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/scripts\/bootstrap-entrypoint\.sh -o /,
     );
     assert.equal(
-      /curl:-fsSL https:\/\/example\.invalid\/rin\/main\/scripts\/bootstrap-entrypoint\.sh -o /.test(log),
+      /curl:-fsSL https:\/\/example\.invalid\/rin\/main\/scripts\/bootstrap-entrypoint\.sh -o /.test(
+        log,
+      ),
       false,
     );
   });
@@ -299,7 +315,9 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
       { cwd: rootDir },
     );
     assert.equal(
-      await fs.stat(path.join(bootstrapDir, "scripts", "bootstrap-entrypoint.sh")).then(() => true),
+      await fs
+        .stat(path.join(bootstrapDir, "scripts", "bootstrap-entrypoint.sh"))
+        .then(() => true),
       true,
     );
     await fs.rm(path.join(bootstrapDir, "scripts"), {
@@ -314,7 +332,11 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
       RIN_INSTALL_TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
-      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+        rootDir,
+        "scripts",
+        "bootstrap-entrypoint.sh",
+      ),
       RIN_BOOTSTRAP_TEST_LOG: logPath,
     };
 
@@ -333,7 +355,9 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
       /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/scripts\/bootstrap-entrypoint\.sh -o /,
     );
     assert.equal(
-      /curl:-fsSL https:\/\/example\.invalid\/rin\/main\/scripts\/bootstrap-entrypoint\.sh -o /.test(log),
+      /curl:-fsSL https:\/\/example\.invalid\/rin\/main\/scripts\/bootstrap-entrypoint\.sh -o /.test(
+        log,
+      ),
       false,
     );
     assert.match(
@@ -369,7 +393,11 @@ test("bootstrap wrappers forward beta nightly and git channel selections", async
       RIN_INSTALL_TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
-      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+        rootDir,
+        "scripts",
+        "bootstrap-entrypoint.sh",
+      ),
       RIN_BOOTSTRAP_TEST_LOG: logPath,
     };
 
@@ -399,7 +427,9 @@ test("piped install wrapper reattaches the installer to /dev/tty", async (t) => 
     return;
   }
 
-  const scriptPath = (await execFileAsync("sh", ["-lc", "command -v script || true"])).stdout.trim();
+  const scriptPath = (
+    await execFileAsync("sh", ["-lc", "command -v script || true"])
+  ).stdout.trim();
   if (!scriptPath) {
     t.skip("script command is unavailable");
     return;
@@ -429,7 +459,11 @@ printf x | sh "${path.join(rootDir, "install.sh")}" --git
       RIN_INSTALL_TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
-      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+        rootDir,
+        "scripts",
+        "bootstrap-entrypoint.sh",
+      ),
       RIN_BOOTSTRAP_TEST_LOG: logPath,
     };
 

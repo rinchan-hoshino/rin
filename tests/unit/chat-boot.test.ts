@@ -146,7 +146,6 @@ test("chat boot claims outbox files before sending so concurrent drains do not d
   });
 });
 
-
 test("chat boot moves failed outbox deliveries into failed storage", async () => {
   await withTempDir(async (agentDir) => {
     const outboxDir = path.join(agentDir, "data", "chat-outbox");
@@ -190,7 +189,9 @@ test("chat boot moves failed outbox deliveries into failed storage", async () =>
     const failedDir = path.join(outboxDir, "failed");
     const failedFiles = await fs.readdir(failedDir);
     assert.deepEqual(failedFiles, ["one.json"]);
-    assert.ok(warnings.some((message) => message.includes("chat outbox failed")));
+    assert.ok(
+      warnings.some((message) => message.includes("chat outbox failed")),
+    );
   });
 });
 

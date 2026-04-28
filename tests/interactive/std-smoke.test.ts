@@ -70,7 +70,6 @@ async function setupIsolatedCliEnv(tempDir: string) {
       PI_CODING_AGENT_DIR: agentDir,
       RIN_DAEMON_SOCKET_PATH: path.join(runtimeDir, "daemon.sock"),
       RIN_DAEMON_SHUTDOWN_GRACE_MS: "250",
-      RIN_TUI_MAINTENANCE_MODE: "1",
       NO_COLOR: "1",
       TERM: "xterm-256color",
     },

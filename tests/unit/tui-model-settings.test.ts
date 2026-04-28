@@ -10,7 +10,7 @@ const rootDir = path.resolve(
 const modelSettings = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-tui", "model-settings.js"),
-  ).href,
+  ).href
 );
 
 function createTarget(overrides = {}) {
@@ -101,7 +101,10 @@ test("tui model settings refresh models after rpc model mutations", async () => 
   );
 
   assert.deepEqual(calls, [
-    ["set_model", { type: "set_model", provider: "anthropic", modelId: "claude-sonnet" }],
+    [
+      "set_model",
+      { type: "set_model", provider: "anthropic", modelId: "claude-sonnet" },
+    ],
     ["cycle_model", { type: "cycle_model" }],
   ]);
   assert.equal(refreshCount, 2);

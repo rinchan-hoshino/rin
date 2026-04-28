@@ -1,4 +1,7 @@
-import type { AgentMessage as Message, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type {
+  AgentMessage as Message,
+  ThinkingLevel,
+} from "@mariozechner/pi-agent-core";
 
 export type UsageStats = {
   input: number;
