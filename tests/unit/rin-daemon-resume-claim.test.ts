@@ -37,50 +37,63 @@ async function waitForSocket(socketPath, timeoutMs = 5000) {
   throw new Error(`socket_not_ready:${socketPath}`);
 }
 
-async function rpc(socketPath, command, timeoutMs = 5000) {
+async function openRpcConnection(socketPath) {
   const socket = net.createConnection(socketPath);
   await new Promise((resolve, reject) => {
     socket.once("connect", resolve);
     socket.once("error", reject);
   });
-  return await new Promise((resolve, reject) => {
-    let buffer = "";
-    const timer = setTimeout(() => {
-      try {
-        socket.destroy();
-      } catch {
-        // ignore
-      }
-      reject(new Error("rpc_timeout"));
-    }, timeoutMs);
-    socket.on("data", (chunk) => {
-      buffer += String(chunk);
-      while (true) {
-        const idx = buffer.indexOf("\n");
-        if (idx < 0) break;
-        let line = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 1);
-        if (line.endsWith("\r")) line = line.slice(0, -1);
-        if (!line.trim()) continue;
-        const payload = JSON.parse(line);
-        if (payload?.type === "response" && payload?.id === command.id) {
-          clearTimeout(timer);
-          try {
-            socket.destroy();
-          } catch {
-            // ignore
+  let buffer = "";
+  return {
+    socket,
+    request(command, timeoutMs = 5000) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`payload_timeout:${command.id}`)),
+          timeoutMs,
+        );
+        const onData = (chunk) => {
+          buffer += String(chunk);
+          while (true) {
+            const idx = buffer.indexOf("\n");
+            if (idx < 0) break;
+            let line = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 1);
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            if (!line.trim()) continue;
+            const payload = JSON.parse(line);
+            if (payload?.type === "response" && payload?.id === command.id) {
+              clearTimeout(timer);
+              socket.off("data", onData);
+              socket.off("error", onError);
+              resolve(payload);
+              return;
+            }
           }
-          resolve(payload);
-          return;
-        }
-      }
-    });
-    socket.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    socket.write(`${JSON.stringify(command)}\n`);
-  });
+        };
+        const onError = (error) => {
+          clearTimeout(timer);
+          socket.off("data", onData);
+          reject(error);
+        };
+        socket.on("data", onData);
+        socket.once("error", onError);
+        socket.write(`${JSON.stringify(command)}\n`);
+      });
+    },
+    close() {
+      socket.destroy();
+    },
+  };
+}
+
+async function rpc(socketPath, command, timeoutMs = 5000) {
+  const client = await openRpcConnection(socketPath);
+  try {
+    return await client.request(command, timeoutMs);
+  } finally {
+    client.close();
+  }
 }
 
 function spawnDaemon(agentDir, socketPath, workerPath) {
@@ -221,49 +234,9 @@ process.stdin.on("data", (chunk) => {
   try {
     await waitForSocket(socketPath);
 
-    const socket = net.createConnection(socketPath);
-    await new Promise((resolve, reject) => {
-      socket.once("connect", resolve);
-      socket.once("error", reject);
-    });
-
-    let buffer = "";
-    const waitForResponse = (wantedId) =>
-      new Promise((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error(`payload_timeout:${wantedId}`)),
-          5000,
-        );
-        const onData = (chunk) => {
-          buffer += String(chunk);
-          while (true) {
-            const idx = buffer.indexOf("\n");
-            if (idx < 0) break;
-            let line = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 1);
-            if (line.endsWith("\r")) line = line.slice(0, -1);
-            if (!line.trim()) continue;
-            const payload = JSON.parse(line);
-            if (payload?.type === "response" && payload?.id === wantedId) {
-              clearTimeout(timer);
-              socket.off("data", onData);
-              resolve(payload);
-              return;
-            }
-          }
-        };
-        socket.on("data", onData);
-        socket.once("error", (error) => {
-          clearTimeout(timer);
-          socket.off("data", onData);
-          reject(error);
-        });
-      });
-
-    socket.write(`${JSON.stringify({ id: "1", type: "get_state" })}\n`);
-    const state = await waitForResponse("1");
-    socket.write(`${JSON.stringify({ id: "2", type: "list_sessions" })}\n`);
-    const listed = await waitForResponse("2");
+    const client = await openRpcConnection(socketPath);
+    const state = await client.request({ id: "1", type: "get_state" });
+    const listed = await client.request({ id: "2", type: "list_sessions" });
 
     assert.equal(state.success, true);
     assert.equal(listed.success, true);
@@ -273,7 +246,7 @@ process.stdin.on("data", (chunk) => {
       "get_state",
       "list_sessions",
     ]);
-    socket.destroy();
+    client.close();
   } finally {
     try {
       daemon.kill("SIGKILL");
@@ -447,51 +420,13 @@ process.stdin.on("data", (chunk) => {
   const daemon = spawnDaemon(agentDir, socketPath, workerPath);
   try {
     await waitForSocket(socketPath);
-    const socket = net.createConnection(socketPath);
-    await new Promise((resolve, reject) => {
-      socket.once("connect", resolve);
-      socket.once("error", reject);
+    const client = await openRpcConnection(socketPath);
+    const selected = await client.request({
+      id: "1",
+      type: "select_session",
+      sessionPath: sessionFile,
     });
-
-    let buffer = "";
-    const waitForResponse = (wantedId) =>
-      new Promise((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error(`payload_timeout:${wantedId}`)),
-          5000,
-        );
-        const onData = (chunk) => {
-          buffer += String(chunk);
-          while (true) {
-            const idx = buffer.indexOf("\n");
-            if (idx < 0) break;
-            let line = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 1);
-            if (line.endsWith("\r")) line = line.slice(0, -1);
-            if (!line.trim()) continue;
-            const payload = JSON.parse(line);
-            if (payload?.type === "response" && payload?.id === wantedId) {
-              clearTimeout(timer);
-              socket.off("data", onData);
-              resolve(payload);
-              return;
-            }
-          }
-        };
-        socket.on("data", onData);
-        socket.once("error", (error) => {
-          clearTimeout(timer);
-          socket.off("data", onData);
-          reject(error);
-        });
-      });
-
-    socket.write(
-      `${JSON.stringify({ id: "1", type: "select_session", sessionPath: sessionFile })}\n`,
-    );
-    const selected = await waitForResponse("1");
-    socket.write(`${JSON.stringify({ id: "2", type: "get_state" })}\n`);
-    const state = await waitForResponse("2");
+    const state = await client.request({ id: "2", type: "get_state" });
 
     assert.equal(selected.success, true);
     assert.equal(state.success, true);
@@ -501,7 +436,7 @@ process.stdin.on("data", (chunk) => {
       ["switch_session", "get_state"],
     );
 
-    socket.destroy();
+    client.close();
   } finally {
     try {
       daemon.kill("SIGKILL");
