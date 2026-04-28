@@ -274,6 +274,16 @@ function mapFreshness(freshness: string | undefined): string {
   return isSupportedFreshness(value) ? FRESHNESS_QUERY_CODES[value] : "";
 }
 
+function setFreshnessSearchParam(
+  url: URL,
+  freshness: string | undefined,
+  paramName: string,
+  formatValue: (code: string) => string = (code) => code,
+) {
+  const code = mapFreshness(freshness);
+  if (code) url.searchParams.set(paramName, formatValue(code));
+}
+
 function buildGoogleUrl(request: NormalizedWebSearchRequest): string {
   const url = new URL("https://www.google.com/search");
   const language = mapGoogleLanguage(request.language);
@@ -285,8 +295,12 @@ function buildGoogleUrl(request: NormalizedWebSearchRequest): string {
   url.searchParams.set("num", String(Math.max(request.limit, 10)));
   if (language.lr) url.searchParams.set("lr", language.lr);
   if (language.gl) url.searchParams.set("gl", language.gl);
-  const freshness = mapFreshness(request.freshness);
-  if (freshness) url.searchParams.set("tbs", `qdr:${freshness}`);
+  setFreshnessSearchParam(
+    url,
+    request.freshness,
+    "tbs",
+    (code) => `qdr:${code}`,
+  );
   return url.toString();
 }
 
@@ -297,8 +311,7 @@ function buildDuckDuckGoUrl(request: NormalizedWebSearchRequest): string {
   if (locale?.region) {
     url.searchParams.set("kl", `${locale.region.toLowerCase()}-${locale.lang}`);
   }
-  const freshness = mapFreshness(request.freshness);
-  if (freshness) url.searchParams.set("df", freshness);
+  setFreshnessSearchParam(url, request.freshness, "df");
   return url.toString();
 }
 
