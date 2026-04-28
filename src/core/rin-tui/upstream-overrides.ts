@@ -124,6 +124,16 @@ function shouldReapplyLocalTransportAfterEvent(instance: any, event: any) {
   );
 }
 
+function shouldSuppressLocalUserEcho(instance: any, event: any) {
+  if (event?.type !== "message_start") return false;
+  const nextText = extractUserTextFromEvent(event);
+  if (!nextText) return false;
+  const queue = instance.__rinLocalUserEchoQueue;
+  if (!Array.isArray(queue) || queue[0] !== nextText) return false;
+  queue.shift();
+  return true;
+}
+
 function shouldIgnoreInteractiveSigint(instance: any) {
   return instance?.ui?.stopped === true;
 }
@@ -347,14 +357,7 @@ export async function applyRinTuiOverrides() {
         return;
       }
 
-      if (event?.type === "message_start" && extractUserTextFromEvent(event)) {
-        const nextText = extractUserTextFromEvent(event);
-        const queue = this.__rinLocalUserEchoQueue;
-        if (Array.isArray(queue) && queue[0] === nextText) {
-          queue.shift();
-          return;
-        }
-      }
+      if (shouldSuppressLocalUserEcho(this, event)) return;
 
       const shouldReapplyRpcTransport = shouldReapplyRpcTransportAfterEvent(
         this,
