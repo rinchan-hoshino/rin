@@ -22,6 +22,7 @@ const RPC_TRANSPORT_REAPPLY_EVENTS = new Set([
   "auto_retry_start",
   "auto_retry_end",
 ]);
+const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
 
 function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
@@ -124,12 +125,24 @@ function shouldReapplyLocalTransportAfterEvent(instance: any, event: any) {
   );
 }
 
+function getLocalUserEchoQueue(instance: any) {
+  const queue = instance[LOCAL_USER_ECHO_QUEUE_KEY];
+  if (Array.isArray(queue)) return queue;
+  const nextQueue: string[] = [];
+  instance[LOCAL_USER_ECHO_QUEUE_KEY] = nextQueue;
+  return nextQueue;
+}
+
+function resetLocalUserEchoQueue(instance: any) {
+  instance[LOCAL_USER_ECHO_QUEUE_KEY] = [];
+}
+
 function shouldSuppressLocalUserEcho(instance: any, event: any) {
   if (event?.type !== "message_start") return false;
   const nextText = extractUserTextFromEvent(event);
   if (!nextText) return false;
-  const queue = instance.__rinLocalUserEchoQueue;
-  if (!Array.isArray(queue) || queue[0] !== nextText) return false;
+  const queue = getLocalUserEchoQueue(instance);
+  if (queue[0] !== nextText) return false;
   queue.shift();
   return true;
 }
@@ -317,7 +330,7 @@ export async function applyRinTuiOverrides() {
     interactiveModeProto.handleEvent = async function handleEventWithRpcStates(
       event: any,
     ) {
-      if (!this.__rinLocalUserEchoQueue) this.__rinLocalUserEchoQueue = [];
+      getLocalUserEchoQueue(this);
       if (!this.isInitialized) {
         await this.init();
       }
@@ -335,7 +348,7 @@ export async function applyRinTuiOverrides() {
       if (event?.type === "rpc_local_user_message") {
         const text = String(event.text || "").trim();
         if (!text) return;
-        this.__rinLocalUserEchoQueue.push(text);
+        getLocalUserEchoQueue(this).push(text);
         await originalHandleEvent.call(this, {
           type: "message_start",
           message: {
@@ -347,7 +360,7 @@ export async function applyRinTuiOverrides() {
       }
 
       if (event?.type === "rpc_session_resynced") {
-        this.__rinLocalUserEchoQueue = [];
+        resetLocalUserEchoQueue(this);
         if (typeof this.handleRuntimeSessionChange === "function") {
           await this.handleRuntimeSessionChange();
         }
