@@ -98,6 +98,31 @@ test("web search query helpers discard invalid freshness", () => {
   assert.equal(req.freshness, undefined);
 });
 
+test("web search maps freshness to direct provider query parameters", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = (async (url: any) => {
+    calls.push(String(url));
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => "<html><body>No results</body></html>",
+    };
+  }) as typeof fetch;
+  try {
+    const result = await query.searchWeb({ q: "rinchanai", freshness: "week" });
+    assert.equal(result.ok, false);
+    assert.equal(calls.length, 3);
+    const googleUrl = new URL(calls[0]);
+    const duckDuckGoUrl = new URL(calls.at(-1));
+    assert.equal(googleUrl.searchParams.get("tbs"), "qdr:w");
+    assert.equal(duckDuckGoUrl.searchParams.get("df"), "w");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("web search paths derive data root location", () => {
   const root = "/tmp/demo";
   assert.ok(

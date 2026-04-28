@@ -8,6 +8,12 @@ const USER_AGENT =
 const GOOGLE_GSA_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 10; HUAWEI P30 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36 NSTNWV";
 const SUPPORTED_FRESHNESS = ["day", "week", "month", "year"] as const;
+const FRESHNESS_QUERY_CODES: Record<WebSearchFreshness, string> = {
+  day: "d",
+  week: "w",
+  month: "m",
+  year: "y",
+};
 
 export const DIRECT_WEB_SEARCH_PROVIDERS = ["google", "duckduckgo"] as const;
 
@@ -265,11 +271,7 @@ function mapGoogleLanguage(language: string) {
 
 function mapFreshness(freshness: string | undefined): string {
   const value = safeText(freshness).toLowerCase();
-  if (value === "day") return "d";
-  if (value === "week") return "w";
-  if (value === "month") return "m";
-  if (value === "year") return "y";
-  return "";
+  return isSupportedFreshness(value) ? FRESHNESS_QUERY_CODES[value] : "";
 }
 
 function buildGoogleUrl(request: NormalizedWebSearchRequest): string {
