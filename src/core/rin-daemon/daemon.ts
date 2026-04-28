@@ -27,7 +27,7 @@ import {
   resolveRuntimeProfile,
   getRuntimeSessionDir,
 } from "../rin-lib/runtime.js";
-import { listBoundSessions, renameBoundSession } from "../session/factory.js";
+import { renameBoundSession } from "../session/factory.js";
 import { getWebSearchStatus } from "../rin-web-search/service.js";
 import { CronScheduler } from "./cron.js";
 import {
@@ -185,7 +185,6 @@ export async function startDaemon(
   const sessionlessCommandHandlers: Partial<
     Record<RinRpcCommandType, DaemonCommandHandler>
   > = {
-    get_state: () => ({ data: emptySessionState() }),
     get_messages: () => ({ data: { messages: [] } }),
     get_session_snapshot: () => ({
       data: { entries: [], tree: [], leafId: null },
@@ -264,6 +263,13 @@ export async function startDaemon(
       | "unknown";
     const selectorPresent = commandHasSessionSelector(command);
     const selectedSessionPresent = hasSelectedSession(connection);
+
+    if (type === "get_state" && !selectorPresent && !selectedSessionPresent) {
+      const worker = workerPool.ensureAttachedWorker(connection);
+      workerPool.forwardToWorker(connection, worker, command);
+      workerPool.evictDetachedWorkers();
+      return true;
+    }
 
     const sessionlessHandler = canHandleWithoutSession(
       connection,
@@ -344,13 +350,16 @@ export async function startDaemon(
       return true;
     }
     if (type === "list_sessions") {
-      const { SessionManager } = await sessionManagerModulePromise;
-      const sessions = await listBoundSessions({
-        cwd: runtime.cwd,
-        agentDir: runtime.agentDir,
-        SessionManager,
-      });
-      writeLine(connection.socket, response(id, type, true, { sessions }));
+      const worker = connection.attachedWorker;
+      if (!worker) {
+        writeLine(
+          connection.socket,
+          response(id, type, false, "rin_no_attached_session"),
+        );
+        return true;
+      }
+      workerPool.forwardToWorker(connection, worker, command);
+      workerPool.evictDetachedWorkers();
       return true;
     }
     if (type === "detach_session") {

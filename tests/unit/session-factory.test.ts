@@ -125,21 +125,16 @@ test("renameBoundSession delegates to SessionManager.open once", async () => {
   ]);
 });
 
-
 test("renameBoundSession rejects missing session file selectors", async () => {
   await assert.rejects(
     () =>
-      factory.renameBoundSession(
-        { sessionId: "memory-only" },
-        "Renamed",
-        {
-          SessionManager: {
-            open() {
-              throw new Error("should not reach open");
-            },
+      factory.renameBoundSession({ sessionId: "memory-only" }, "Renamed", {
+        SessionManager: {
+          open() {
+            throw new Error("should not reach open");
           },
         },
-      ),
+      }),
     /Session file is required/,
   );
 });

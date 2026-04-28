@@ -172,7 +172,11 @@ function createSessionSelectorLoaders(instance: any) {
     };
   }
 
-  const loadRemoteSessions = () => instance.session.listSessions("all");
+  const loadRemoteSessions = async () =>
+    (await instance.session.listSessions("all")).map((session: any) => ({
+      ...session,
+      cwd: undefined,
+    }));
 
   return {
     currentSessionsLoader: loadRemoteSessions,
