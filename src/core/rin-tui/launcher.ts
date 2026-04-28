@@ -162,6 +162,12 @@ export function shouldPrintStartupSeparator() {
   return true;
 }
 
+function applyTuiRuntimeRole(maintenanceMode: boolean) {
+  process.env[RIN_TUI_RUNTIME_ROLE_ENV] = maintenanceMode
+    ? RIN_TUI_MAINTENANCE_ROLE
+    : RIN_TUI_RPC_FRONTEND_ROLE;
+}
+
 async function runInteractiveMode(
   runtime: ConstructorParameters<typeof InteractiveMode>[0],
   interactiveOptions: TuiInteractiveOptions,
@@ -261,9 +267,7 @@ export async function startTui(
 
   const argv = options.argv ?? process.argv.slice(2);
   const maintenanceMode = await shouldStartMaintenanceMode();
-  process.env[RIN_TUI_RUNTIME_ROLE_ENV] = maintenanceMode
-    ? RIN_TUI_MAINTENANCE_ROLE
-    : RIN_TUI_RPC_FRONTEND_ROLE;
+  applyTuiRuntimeRole(maintenanceMode);
   const interactiveOptions = resolveTuiInteractiveOptions(argv);
   profile.mark(maintenanceMode ? "mode=maintenance" : "mode=rpc");
 
@@ -279,7 +283,7 @@ export async function startTui(
   } catch (error) {
     if (!isRecoverableRpcStartupError(error)) throw error;
     console.error(formatTuiMaintenanceFallbackNotice(error));
-    process.env[RIN_TUI_RUNTIME_ROLE_ENV] = RIN_TUI_MAINTENANCE_ROLE;
+    applyTuiRuntimeRole(true);
     profile.mark("mode=maintenance-after-rpc-startup-failure");
     await startStdTui(options, profile, interactiveOptions);
   }
