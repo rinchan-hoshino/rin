@@ -109,13 +109,13 @@ async function makeTempDir(prefix) {
 test("daemon serves sessionless catalog commands locally without spawning a worker", async () => {
   const agentDir = await makeTempDir("rin-daemon-local-");
   const socketPath = path.join(agentDir, "daemon.sock");
-  const workerPath = path.join(agentDir, "fake-worker.mjs");
+  const workerPath = path.join(agentDir, "fake-worker.js");
   const logPath = path.join(agentDir, "commands.log");
   await fs.writeFile(
     workerPath,
     `
-import fs from "node:fs";
-import process from "node:process";
+const fs = require("node:fs");
+const process = require("node:process");
 const logPath = ${JSON.stringify(logPath)};
 let buffer = "";
 process.stdin.setEncoding("utf8");
@@ -182,13 +182,13 @@ process.stdin.on("data", (chunk) => {
 test("daemon routes session listing through the warm empty worker", async () => {
   const agentDir = await makeTempDir("rin-daemon-list-sessions-");
   const socketPath = path.join(agentDir, "daemon.sock");
-  const workerPath = path.join(agentDir, "fake-worker.mjs");
+  const workerPath = path.join(agentDir, "fake-worker.js");
   const logPath = path.join(agentDir, "commands.log");
   await fs.writeFile(
     workerPath,
     `
-import fs from "node:fs";
-import process from "node:process";
+const fs = require("node:fs");
+const process = require("node:process");
 const logPath = ${JSON.stringify(logPath)};
 function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
 let buffer = "";
@@ -287,13 +287,13 @@ process.stdin.on("data", (chunk) => {
 test("daemon routes cron lifecycle commands locally through the scheduler", async () => {
   const agentDir = await makeTempDir("rin-daemon-cron-");
   const socketPath = path.join(agentDir, "daemon.sock");
-  const workerPath = path.join(agentDir, "fake-worker.mjs");
+  const workerPath = path.join(agentDir, "fake-worker.js");
   const logPath = path.join(agentDir, "commands.log");
   await fs.writeFile(
     workerPath,
     `
-import fs from "node:fs";
-import process from "node:process";
+const fs = require("node:fs");
+const process = require("node:process");
 const logPath = ${JSON.stringify(logPath)};
 let buffer = "";
 process.stdin.setEncoding("utf8");
@@ -406,14 +406,14 @@ process.stdin.on("data", (chunk) => {
 test("daemon attaches a selected session without a frontend switch_session round-trip", async () => {
   const agentDir = await makeTempDir("rin-daemon-select-");
   const socketPath = path.join(agentDir, "daemon.sock");
-  const workerPath = path.join(agentDir, "fake-worker.mjs");
+  const workerPath = path.join(agentDir, "fake-worker.js");
   const logPath = path.join(agentDir, "commands.log");
   const sessionFile = "/tmp/selected-session.jsonl";
   await fs.writeFile(
     workerPath,
     `
-import fs from "node:fs";
-import process from "node:process";
+const fs = require("node:fs");
+const process = require("node:process");
 const logPath = ${JSON.stringify(logPath)};
 const sessionFile = ${JSON.stringify(sessionFile)};
 function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
@@ -515,7 +515,7 @@ process.stdin.on("data", (chunk) => {
 test("daemon auto-resumes active session logs on startup without frontend help", async () => {
   const agentDir = await makeTempDir("rin-daemon-resume-");
   const socketPath = path.join(agentDir, "daemon.sock");
-  const workerPath = path.join(agentDir, "fake-worker.mjs");
+  const workerPath = path.join(agentDir, "fake-worker.js");
   const sessionFile = path.join(agentDir, "sessions", "active-session.jsonl");
   await fs.mkdir(path.dirname(sessionFile), { recursive: true });
   await fs.writeFile(
@@ -529,7 +529,7 @@ test("daemon auto-resumes active session logs on startup without frontend help",
   await fs.writeFile(
     workerPath,
     `
-import process from "node:process";
+const process = require("node:process");
 function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
 let buffer = "";
 let switched = false;
