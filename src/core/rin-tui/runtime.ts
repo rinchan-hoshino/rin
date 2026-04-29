@@ -38,11 +38,7 @@ import {
   extractText,
   getLastAssistantText,
 } from "./session-helpers.js";
-import {
-  computeSessionStats,
-  getContextUsage,
-  reconcilePendingQueues,
-} from "./stats.js";
+import { computeSessionStats, getContextUsage } from "./stats.js";
 import {
   applyRpcSessionState,
   applyRpcSessionTree,
@@ -402,18 +398,6 @@ export class RpcInteractiveSession {
     ) {
       return;
     }
-    if (
-      options?.streamingBehavior === "steer" &&
-      !this.isLocalExtensionCommand(message)
-    ) {
-      this.enqueuePending("steeringMessages", message);
-    }
-    if (
-      options?.streamingBehavior === "followUp" &&
-      !this.isLocalExtensionCommand(message)
-    ) {
-      this.enqueuePending("followUpMessages", message);
-    }
     await this.sendOrQueue({
       mode: "prompt",
       message,
@@ -440,7 +424,6 @@ export class RpcInteractiveSession {
     images?: any[],
     options?: { source?: string; requestTag?: string },
   ) {
-    this.enqueuePending("steeringMessages", message);
     await this.sendOrQueue({
       mode: "steer",
       message,
@@ -455,7 +438,6 @@ export class RpcInteractiveSession {
     images?: any[],
     options?: { source?: string; requestTag?: string },
   ) {
-    this.enqueuePending("followUpMessages", message);
     await this.sendOrQueue({
       mode: "follow_up",
       message,
@@ -990,8 +972,12 @@ export class RpcInteractiveSession {
 
     if (this.clearQueuePromise) await this.clearQueuePromise;
 
-    this.activeTurn = operation;
-    this.syncStreamingState();
+    const tracksTurn =
+      operation.mode === "prompt" && !operation.streamingBehavior;
+    if (tracksTurn) {
+      this.activeTurn = operation;
+      this.syncStreamingState();
+    }
 
     const sendOperation = async () => {
       await this.ensureRemoteSession();
@@ -1009,13 +995,17 @@ export class RpcInteractiveSession {
     } catch (error: any) {
       const message = String(error?.message || error || "");
       if (/rin_tui_not_connected|rin_disconnected/.test(message)) {
-        this.activeTurn = null;
-        this.syncStreamingState();
+        if (tracksTurn) {
+          this.activeTurn = null;
+          this.syncStreamingState();
+        }
         this.queueOfflineOperation(operation);
         return;
       }
-      this.activeTurn = null;
-      this.syncStreamingState();
+      if (tracksTurn) {
+        this.activeTurn = null;
+        this.syncStreamingState();
+      }
       throw error;
     }
   }
@@ -1127,15 +1117,6 @@ export class RpcInteractiveSession {
     this.syncPendingCount();
   }
 
-  private enqueuePending(
-    queue: "steeringMessages" | "followUpMessages",
-    message: string,
-  ) {
-    this[queue].push(message);
-    this.syncPendingCount();
-    this.emitQueueUpdate();
-  }
-
   private emitQueueUpdate() {
     this.emitEvent({
       type: "queue_update",
@@ -1243,7 +1224,6 @@ export class RpcInteractiveSession {
       flags.models ? this.modelRegistry.sync() : Promise.resolve(),
       shouldRefreshSessionData ? this.refreshSessionData() : Promise.resolve(),
     ]);
-    this.reconcilePendingQueues(this.pendingMessageCount);
     this.lastSessionStats = this.computeSessionStats();
   }
 
@@ -1309,14 +1289,6 @@ export class RpcInteractiveSession {
       this.sessionId,
       this.entries,
       this.getContextUsage(),
-    );
-  }
-
-  private reconcilePendingQueues(targetCount: number) {
-    reconcilePendingQueues(
-      this.steeringMessages,
-      this.followUpMessages,
-      targetCount,
     );
   }
 

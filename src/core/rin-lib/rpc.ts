@@ -94,7 +94,7 @@ const EMPTY_SESSION_STATE = {
   turnActive: false,
   isStreaming: false,
   isCompacting: false,
-  steeringMode: "one-at-a-time",
+  steeringMode: "all",
   followUpMode: "one-at-a-time",
   sessionFile: undefined,
   sessionId: "",

@@ -656,6 +656,20 @@ export function getRuntimeSessionDir(_cwd: string, agentDir: string) {
   return path.join(agentDir, "sessions");
 }
 
+function normalizeQueueMode(value: unknown, fallback: "all" | "one-at-a-time") {
+  return value === "all" || value === "one-at-a-time" ? value : fallback;
+}
+
+export function applyRinSettingsDefaults(settingsManager: any) {
+  if (!settingsManager || settingsManager.__rinSettingsDefaultsApplied) return;
+  settingsManager.__rinSettingsDefaultsApplied = true;
+  if (typeof settingsManager.getSteeringMode === "function") {
+    settingsManager.getSteeringMode = function getRinSteeringModeDefaultAll() {
+      return normalizeQueueMode(this.settings?.steeringMode, "all");
+    };
+  }
+}
+
 export async function createConfiguredAgentSession(
   options: {
     cwd?: string;
@@ -715,6 +729,7 @@ export async function createConfiguredAgentSession(
         additionalSkillPaths,
       },
     });
+    applyRinSettingsDefaults(services.settingsManager);
 
     let resolvedModel: any = undefined;
     const modelRef = String(options.modelRef || "").trim();

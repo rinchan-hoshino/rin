@@ -78,17 +78,3 @@ test("tui stats get context usage preserves post-compaction unknown state", () =
     percent: null,
   });
 });
-
-test("tui stats reconcile pending queues trims oldest queued messages", () => {
-  const steering = ["a", "b"];
-  const follow = ["c", "d"];
-  stats.reconcilePendingQueues(steering, follow, 2);
-  assert.deepEqual(steering, []);
-  assert.deepEqual(follow, ["c", "d"]);
-
-  const steeringOnly = ["x"];
-  const followOnly = ["y", "z"];
-  stats.reconcilePendingQueues(steeringOnly, followOnly, -1.8);
-  assert.deepEqual(steeringOnly, []);
-  assert.deepEqual(followOnly, []);
-});

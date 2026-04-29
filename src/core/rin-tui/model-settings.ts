@@ -1,7 +1,10 @@
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
-import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
+import {
+  applyRinSettingsDefaults,
+  resolveRuntimeProfile,
+} from "../rin-lib/runtime.js";
 import { computeAvailableThinkingLevels } from "./session-helpers.js";
 
 const RPC_MODE_VALUES = ["all", "one-at-a-time"] as const;
@@ -60,7 +63,9 @@ export async function getPersistentSettingsManager() {
         throw new Error("rin_missing_settings_manager");
       }
       const profile = resolveRuntimeProfile();
-      return SettingsManager.create(profile.cwd, profile.agentDir);
+      const settings = SettingsManager.create(profile.cwd, profile.agentDir);
+      applyRinSettingsDefaults(settings);
+      return settings;
     })().catch((error) => {
       persistentSettingsManagerPromise = null;
       throw error;
