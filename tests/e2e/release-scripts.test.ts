@@ -309,6 +309,14 @@ test("release workflows publish the public bootstrap branch", () => {
       content,
       /git -C "\$bootstrap_dir" push origin "HEAD:\$bootstrap_branch"/,
     );
+    assert.match(
+      content,
+      /git -C "\$bootstrap_dir" fetch origin "\$bootstrap_branch"/,
+    );
+    assert.match(
+      content,
+      /git -C "\$bootstrap_dir" rebase "origin\/\$bootstrap_branch"/,
+    );
     assert.doesNotMatch(content, /stable-bootstrap/);
   }
 });
