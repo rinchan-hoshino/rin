@@ -13,7 +13,7 @@ const { RpcInteractiveSession } = await import(
     .href
 );
 
-function createClient() {
+function createClient(overrides = {}) {
   return {
     subscribe() {
       return () => {};
@@ -28,7 +28,18 @@ function createClient() {
     getCommands: async () => [],
     listSessions: async () => [],
     resumeSession: async () => {},
+    ...overrides,
   };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 test("rpc frontend reports Starting during initial TUI startup", () => {
@@ -39,6 +50,36 @@ test("rpc frontend reports Starting during initial TUI startup", () => {
     phase: "starting",
     label: "Starting",
     connected: false,
+  });
+});
+
+test("rpc frontend reports Starting while loading resume sessions", async () => {
+  const pending = deferred();
+  const session = new RpcInteractiveSession(
+    createClient({
+      isConnected: () => true,
+      send: () => pending.promise,
+    }),
+  );
+  session.startupPending = false;
+  session.rpcConnected = true;
+
+  const events = [];
+  session.subscribe((event) => events.push(event));
+  const listPromise = session.listSessions("all");
+
+  assert.deepEqual(events.at(-1), {
+    type: "rpc_frontend_status",
+    phase: "starting",
+    label: "Starting",
+    connected: true,
+  });
+
+  pending.resolve({ success: true, data: { sessions: [] } });
+  assert.deepEqual(await listPromise, []);
+  assert.deepEqual(events.at(-1), {
+    type: "rpc_frontend_status",
+    phase: "idle",
   });
 });
 
