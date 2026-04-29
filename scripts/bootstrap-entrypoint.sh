@@ -288,13 +288,13 @@ const manifestPath = process.argv[2];
 const safeString = (value) => (value == null ? '' : String(value));
 const trimValue = (value) => safeString(value).trim();
 const repoUrl = trimValue(process.env.RIN_INSTALL_REPO_URL || 'https://github.com/rinchanai/rin').replace(/\.git$/i, '');
-const packageName = trimValue(process.env.RIN_NPM_PACKAGE || '@rinchanai/rin');
+const packageName = trimValue(process.env.RIN_NPM_PACKAGE || '@rinchanai20260422/rin');
 const channel = trimValue(process.env.RIN_RELEASE_CHANNEL || 'stable').toLowerCase() || 'stable';
 const branch = trimValue(process.env.RIN_RELEASE_BRANCH);
 const version = trimValue(process.env.RIN_RELEASE_VERSION);
 const buildNpmTarballUrl = (name, releaseVersion) => {
-  const encodedName = encodeURIComponent(name || '@rinchanai/rin');
-  const fileBase = String(name || '@rinchanai/rin').split('/').pop();
+  const encodedName = encodeURIComponent(name || '@rinchanai20260422/rin');
+  const fileBase = String(name || '@rinchanai20260422/rin').split('/').pop();
   return `https://registry.npmjs.org/${encodedName}/-/${fileBase}-${releaseVersion || '0.0.0'}.tgz`;
 };
 const defaultManifest = {
@@ -333,7 +333,7 @@ try {
   manifest = { ...defaultManifest, ...JSON.parse(fs.readFileSync(manifestPath, 'utf8')) };
 } catch {}
 const releaseRepoUrl = trimValue(manifest.repoUrl || repoUrl).replace(/\.git$/i, '');
-const releasePackageName = trimValue(manifest.packageName || packageName) || '@rinchanai/rin';
+const releasePackageName = trimValue(manifest.packageName || packageName) || '@rinchanai20260422/rin';
 const buildRefArchiveUrl = (ref) => `${releaseRepoUrl}/archive/${String(ref || 'main').split('/').map(encodeURIComponent).join('/')}.tar.gz`;
 const buildBranchArchiveUrl = (name) => `${releaseRepoUrl}/archive/refs/heads/${String(name || 'main').split('/').map(encodeURIComponent).join('/')}.tar.gz`;
 const shellEscape = (value) => `'${String(value ?? '').replace(/'/g, `"'"'"'`)}'`;
@@ -454,12 +454,12 @@ launch_published_installer() {
 }
 
 INSTALLER_ENTRY='dist/app/rin-install/main.js'
-PACKAGE_NAME=${RIN_NPM_PACKAGE:-@rinchanai/rin}
+PACKAGE_NAME=${RIN_NPM_PACKAGE:-@rinchanai20260422/rin}
 parse_args "$@"
 : >"$LOGFILE"
 run_step "$MANIFEST_LABEL" fetch_manifest
 eval "$(RIN_RELEASE_CHANNEL=$CHANNEL RIN_RELEASE_BRANCH=$BRANCH RIN_RELEASE_VERSION=$VERSION RIN_INSTALL_REPO_URL=$REPO_URL RIN_NPM_PACKAGE=$PACKAGE_NAME resolve_release)"
-PACKAGE_NAME=${PACKAGE_NAME:-${RIN_NPM_PACKAGE:-@rinchanai/rin}}
+PACKAGE_NAME=${PACKAGE_NAME:-${RIN_NPM_PACKAGE:-@rinchanai20260422/rin}}
 
 if [ "$CHANNEL" = stable ]; then
   say "[$PREFIX] $LAUNCH_LABEL"

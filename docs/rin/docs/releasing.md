@@ -5,14 +5,14 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 ## Preconditions
 
 - keep `main` as the development source of truth
-- configure npm trusted publishing for `@rinchanai/rin` on `publish-stable.yml` and `publish-hotfix.yml`
+- configure the repository secret `NPM_TOKEN` so `publish-stable.yml` and `publish-hotfix.yml` can publish `@rinchanai20260422/rin`
 - confirm the focused release validation set passes on `main`
 - update `docs/rin/CHANGELOG.md` before a promotion if release notes changed
 - keep `release-manifest.json -> train.series` aligned with the active `major.minor` line
 
 ## Channel contract
 
-- stable: default install and update channel, published to npm with dist-tag `latest` through npm trusted publishing
+- stable: default install and update channel, published to npm with dist-tag `latest`
 - beta: explicit opt-in only; `--beta` means the current weekly beta candidate
 - nightly: explicit opt-in only; `--nightly` means the current nightly build pinned from `main`
 - git: explicit opt-in only; `--git` means `main` and `--git <name>` resolves that branch or ref directly
@@ -67,7 +67,7 @@ It:
 4. checks out the beta candidate ref in a detached worktree
 5. validates that candidate with the focused release test set
 6. sets the package version only inside the candidate worktree
-7. publishes `@rinchanai/rin` to npm using dist-tag `latest` through npm trusted publishing
+7. publishes `@rinchanai20260422/rin` to npm using dist-tag `latest`
 8. updates `release-manifest.json -> stable` with the promoted ref and beta provenance
 9. tags the promoted candidate ref as `v<version>`
 10. commits the manifest update back to `main`
@@ -83,7 +83,7 @@ It:
 1. checks out the requested ref in a detached worktree
 2. validates the candidate with the focused release test set
 3. sets the requested patch version in the candidate worktree
-4. publishes that patch to npm as `latest` through npm trusted publishing
+4. publishes that patch to npm as `latest`
 5. updates `release-manifest.json -> stable`
 6. tags the hotfix ref as `v<version>`
 7. refreshes `bootstrap`

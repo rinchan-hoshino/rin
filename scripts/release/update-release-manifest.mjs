@@ -88,7 +88,7 @@ const packageName =
   trim(args.packageName) ||
   trim(process.env.RIN_NPM_PACKAGE) ||
   trim(manifest.packageName) ||
-  "@rinchanai/rin";
+  "@rinchanai20260422/rin";
 const repoUrl =
   trim(args.repoUrl) ||
   trim(process.env.RIN_RELEASE_REPO_URL || process.env.RIN_INSTALL_REPO_URL) ||

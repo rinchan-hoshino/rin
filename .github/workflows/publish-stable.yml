@@ -60,6 +60,8 @@ jobs:
         run: npm version --no-git-tag-version '${{ steps.plan.outputs.version }}'
       - name: Publish stable package
         working-directory: ${{ runner.temp }}/stable-candidate
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --tag latest --access public
       - name: Update release manifest
         run: >-

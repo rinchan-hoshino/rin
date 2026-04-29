@@ -56,7 +56,7 @@ async function createReleaseManifest(tempDir) {
       stable: {
         version: "1.2.3",
         archiveUrl:
-          "https://registry.npmjs.org/%40rinchanai%2Frin/-/rin-1.2.3.tgz",
+          "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-1.2.3.tgz",
         ref: "abc1234",
       },
       beta: {
@@ -170,7 +170,7 @@ if (args[0] === "-") {
     ],
     stable: [
       "CHANNEL='stable'",
-      "ARCHIVE_URL='https://registry.npmjs.org/%40rinchanai%2Frin/-/rin-1.2.3.tgz'",
+      "ARCHIVE_URL='https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-1.2.3.tgz'",
       "VERSION='1.2.3'",
       "BRANCH='stable'",
       "REF='abc1234'",
@@ -233,11 +233,11 @@ test("stable install and update wrappers resolve release metadata before launchi
     assert.equal(/npm:.*:run build/.test(log), false);
     assert.match(
       log,
-      /npm:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai\/rin@1\.2\.3 -- rin-install/,
+      /npm:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install/,
     );
     assert.match(
       log,
-      /npm:.*:RIN_INSTALL_MODE=update:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai\/rin@1\.2\.3 -- rin-install/,
+      /npm:.*:RIN_INSTALL_MODE=update:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install/,
     );
 
     assert.deepEqual(await fs.readdir(workRoot), []);
@@ -366,11 +366,11 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
     );
     assert.match(
       log,
-      /npm:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai\/rin@1\.2\.3 -- rin-install/,
+      /npm:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install/,
     );
     assert.match(
       log,
-      /npm:.*:RIN_INSTALL_MODE=update:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai\/rin@1\.2\.3 -- rin-install/,
+      /npm:.*:RIN_INSTALL_MODE=update:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install/,
     );
     assert.deepEqual(await fs.readdir(workRoot), []);
   });

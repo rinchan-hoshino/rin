@@ -52,6 +52,8 @@ jobs:
         run: npm version --no-git-tag-version '${{ inputs.version }}'
       - name: Publish hotfix package
         working-directory: ${{ runner.temp }}/hotfix-candidate
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --tag latest --access public
       - name: Update release manifest
         run: >-
