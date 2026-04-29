@@ -9,6 +9,7 @@ import {
   injectPromptContextHeader,
   type PromptContextMeta,
 } from "../chat-bridge/prompt-context.js";
+import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import {
   resolveStoredSessionFile,
   toStoredSessionFile,
@@ -498,6 +499,10 @@ export class ChatController {
     return "";
   }
 
+  private managedSessionLeafForFreshChat() {
+    return this.currentSessionFile() ? undefined : MANAGED_CHAT_SESSION_LEAF;
+  }
+
   private markAcceptedMessage(messageId?: string) {
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return;
@@ -702,6 +707,16 @@ export class ChatController {
       );
     }
     const skipSessionRecovery = commandName === "new";
+    const restoreSessionFile = skipSessionRecovery
+      ? ""
+      : this.getRecoverableSessionFile();
+    const managedSessionLeaf = sessionFile
+      ? undefined
+      : commandName === "new"
+        ? MANAGED_CHAT_SESSION_LEAF
+        : !restoreSessionFile
+          ? this.managedSessionLeafForFreshChat()
+          : undefined;
     await this.connect({ restoreSession: !skipSessionRecovery });
     this.setCurrentTurn({
       incomingMessageId: incomingMessageId || undefined,
@@ -710,10 +725,9 @@ export class ChatController {
     try {
       const data: any = await this.driver.runCommand(commandLine, {
         skipSessionRecovery,
-        restoreSessionFile: skipSessionRecovery
-          ? ""
-          : this.getRecoverableSessionFile(),
+        restoreSessionFile,
         sessionFile,
+        managedSessionLeaf,
       });
       this.updateStoredSessionFile(
         data?.sessionFile,
@@ -761,6 +775,7 @@ export class ChatController {
       promptMeta?: PromptContextMeta;
       model?: string;
       thinkingLevel?: string;
+      managedSessionLeaf?: string;
     },
     mode: "prompt" | "steer" = "prompt",
   ) {
@@ -768,6 +783,11 @@ export class ChatController {
       const { sessionFile: wantedSessionFile } = normalizeSessionRef(input);
       const restoreSessionFile =
         wantedSessionFile || this.getRecoverableSessionFile();
+      const managedSessionLeaf =
+        !wantedSessionFile && !restoreSessionFile
+          ? safeString(input.managedSessionLeaf).trim() ||
+            this.managedSessionLeafForFreshChat()
+          : undefined;
       await this.connect();
       const { text, images } = await restorePromptParts({
         text: input.text,
@@ -780,6 +800,7 @@ export class ChatController {
         images,
         sessionFile: wantedSessionFile,
         restoreSessionFile,
+        managedSessionLeaf,
         model: input.model,
         thinkingLevel: input.thinkingLevel,
       });
@@ -814,6 +835,11 @@ export class ChatController {
       const { sessionFile: wantedSessionFile } = normalizeSessionRef(input);
       const restoreSessionFile =
         wantedSessionFile || this.getRecoverableSessionFile();
+      const managedSessionLeaf =
+        !wantedSessionFile && !restoreSessionFile
+          ? safeString(input.managedSessionLeaf).trim() ||
+            this.managedSessionLeafForFreshChat()
+          : undefined;
       await this.connect();
       const { text, images } = await restorePromptParts({
         text: input.text,
@@ -833,6 +859,7 @@ export class ChatController {
           images,
           sessionFile: wantedSessionFile,
           restoreSessionFile,
+          managedSessionLeaf,
           model: input.model,
           thinkingLevel: input.thinkingLevel,
         });

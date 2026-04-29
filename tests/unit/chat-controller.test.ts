@@ -82,20 +82,34 @@ test("chat controller bootstraps a fresh session before the first command", asyn
     this.stagedDelivery = null;
   };
 
+  let currentSessionFile;
   controller.session = {
     sessionManager: {
-      getSessionFile: () => undefined,
+      getSessionFile: () => currentSessionFile,
       getSessionId: () => "",
       getSessionName: () => "",
+    },
+    newSession: async (options = {}) => {
+      calls.push(`newSession:${options.managedSessionLeaf}`);
+      currentSessionFile = path.join(
+        controller.agentDir,
+        "sessions",
+        "managed",
+        options.managedSessionLeaf,
+        "created-command.jsonl",
+      );
+      return true;
+    },
+    switchSession: async (sessionFile) => {
+      calls.push(
+        `switchSession:${path.relative(controller.agentDir, sessionFile)}`,
+      );
+      currentSessionFile = sessionFile;
     },
     ensureSessionReady: async () => {
       calls.push("ensureSessionReady");
       return {
-        sessionFile: path.join(
-          controller.agentDir,
-          "sessions",
-          "fresh-chat.jsonl",
-        ),
+        sessionFile: currentSessionFile,
         sessionId: "session-1",
       };
     },
@@ -107,9 +121,70 @@ test("chat controller bootstraps a fresh session before the first command", asyn
 
   await controller.runCommand("/session");
 
-  assert.deepEqual(calls, ["ensureSessionReady", "runCommand:/session"]);
+  assert.equal(calls[0], "newSession:chat");
+  assert.deepEqual(calls.slice(1), [
+    "ensureSessionReady",
+    "runCommand:/session",
+  ]);
   assert.deepEqual(deliveries, ["Session stats"]);
-  assert.equal(controller.state.sessionFile, "fresh-chat.jsonl");
+  assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
+});
+
+test("chat controller allocates fresh prompt sessions under managed chat", async () => {
+  const controller = await createController();
+  const calls = [];
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  let currentSessionFile;
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => currentSessionFile,
+      getSessionId: () => "session-prompt",
+      getSessionName: () => controller.chatKey,
+    },
+    newSession: async (options = {}) => {
+      calls.push(`newSession:${options.managedSessionLeaf}`);
+      currentSessionFile = path.join(
+        controller.agentDir,
+        "sessions",
+        "managed",
+        options.managedSessionLeaf,
+        "created-prompt.jsonl",
+      );
+      return true;
+    },
+    switchSession: async (sessionFile) => {
+      calls.push(
+        `switchSession:${path.relative(controller.agentDir, sessionFile)}`,
+      );
+      currentSessionFile = sessionFile;
+    },
+    ensureSessionReady: async () => {
+      calls.push("ensureSessionReady");
+      return {
+        sessionFile: currentSessionFile,
+        sessionId: "session-prompt",
+      };
+    },
+    prompt: async (_text, options = {}) => {
+      calls.push("prompt");
+      emitRpcTurnComplete(controller, options, "managed prompt final");
+    },
+  };
+
+  const result = await controller.runTurn({ text: "hello", attachments: [] });
+
+  assert.equal(calls[0], "newSession:chat");
+  assert.deepEqual(calls.slice(1), ["ensureSessionReady", "prompt"]);
+  assert.equal(result.finalText, "managed prompt final");
+  assert.deepEqual(deliveries, ["managed prompt final"]);
+  assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
 test("chat controller skips recovery bootstrap for /new", async () => {
@@ -121,23 +196,36 @@ test("chat controller skips recovery bootstrap for /new", async () => {
     this.stagedDelivery = null;
   };
 
+  let currentSessionFile;
   controller.connect = async function (options = {}) {
     calls.push(`connect:${String(options.restoreSession)}`);
     this.session = {
       sessionManager: {
-        getSessionFile: () =>
-          path.join(controller.agentDir, "sessions", "new-chat.jsonl"),
+        getSessionFile: () => currentSessionFile,
         getSessionId: () => "session-2",
         getSessionName: () => this.chatKey,
+      },
+      newSession: async (options = {}) => {
+        calls.push(`newSession:${options.managedSessionLeaf}`);
+        currentSessionFile = path.join(
+          controller.agentDir,
+          "sessions",
+          "managed",
+          "chat",
+          "created-new.jsonl",
+        );
+        return true;
+      },
+      switchSession: async (sessionFile) => {
+        calls.push(
+          `switchSession:${path.relative(controller.agentDir, sessionFile)}`,
+        );
+        currentSessionFile = sessionFile;
       },
       ensureSessionReady: async () => {
         calls.push("ensureSessionReady");
         return {
-          sessionFile: path.join(
-            controller.agentDir,
-            "sessions",
-            "new-chat.jsonl",
-          ),
+          sessionFile: currentSessionFile,
           sessionId: "session-2",
         };
       },
@@ -150,9 +238,11 @@ test("chat controller skips recovery bootstrap for /new", async () => {
 
   await controller.runCommand("/new");
 
-  assert.deepEqual(calls, ["connect:false", "runCommand:/new"]);
+  assert.equal(calls[0], "connect:false");
+  assert.equal(calls[1], "newSession:chat");
+  assert.deepEqual(calls.slice(2), []);
   assert.deepEqual(deliveries, ["Started a new session."]);
-  assert.equal(controller.state.sessionFile, "new-chat.jsonl");
+  assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
 test("chat controller delivers visible non-transient command errors", async () => {

@@ -11,7 +11,10 @@ import type {
 
 import { BUILTIN_MODULE_ORDER } from "../builtins/registry.js";
 import { forkSessionManagerCompat } from "../session/fork.js";
-import { getManagedSubagentSessionDir } from "../session/managed-paths.js";
+import {
+  getManagedSessionDir,
+  MANAGED_SUBAGENT_SESSION_LEAF,
+} from "../session/managed-paths.js";
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
 import {
   createConfiguredAgentSession,
@@ -111,7 +114,10 @@ async function createManagedSession(task: NormalizedSubagentTask) {
   const cwd = HOME_DIR;
   const sessionConfig = task.session;
   const profile = resolveRuntimeProfile({ cwd });
-  const sessionDir = getManagedSubagentSessionDir(profile.agentDir);
+  const sessionDir = getManagedSessionDir(
+    profile.agentDir,
+    MANAGED_SUBAGENT_SESSION_LEAF,
+  );
   const { SessionManager } = await loadSessionManagerModule();
 
   let sessionManager: any;
