@@ -323,6 +323,64 @@ test("rpc session selector loads sessions through the daemon instead of local Se
   assert.deepEqual(renamed, [["/tmp/demo.jsonl", "renamed"]]);
 });
 
+test("session selector rename ignores blank names", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  let localRenames = 0;
+  let rpcRenames = 0;
+  let selector;
+  const originalOpen = codingAgentModule.SessionManager.open;
+  codingAgentModule.SessionManager.open = () => ({
+    appendSessionInfo() {
+      localRenames += 1;
+    },
+  });
+
+  try {
+    const baseInstance = {
+      sessionManager: {
+        getSessionFile: () => "/tmp/demo.jsonl",
+        getCwd: () => "/tmp",
+        getSessionDir: () => "/tmp/.sessions",
+      },
+      keybindings: {},
+      ui: { requestRender() {} },
+      showSelector(factory) {
+        selector = factory(() => {}).component;
+        return selector;
+      },
+      handleResumeSession: async () => {},
+      shutdown: async () => {},
+    };
+
+    codingAgentModule.InteractiveMode.prototype.showSessionSelector.call(
+      baseInstance,
+    );
+    await selector.renameSession("/tmp/demo.jsonl", "   ");
+
+    codingAgentModule.InteractiveMode.prototype.showSessionSelector.call({
+      ...baseInstance,
+      session: {
+        getFrontendStatusEvent() {
+          return { type: "rpc_frontend_status", phase: "idle" };
+        },
+        async listSessions() {
+          return [];
+        },
+        async renameSession() {
+          rpcRenames += 1;
+        },
+      },
+    });
+    await selector.renameSession("/tmp/demo.jsonl", "\t");
+
+    assert.equal(localRenames, 0);
+    assert.equal(rpcRenames, 0);
+  } finally {
+    codingAgentModule.SessionManager.open = originalOpen;
+  }
+});
+
 test("rpc session resync rebinds runtime state and rerenders history", async () => {
   await overrides.applyRinTuiOverrides();
 
