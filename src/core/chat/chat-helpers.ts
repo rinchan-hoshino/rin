@@ -82,7 +82,18 @@ export {
 } from "./inbound-normalization.js";
 
 function isMediaElementType(type: string) {
-  return type === "img" || type === "image" || type === "file";
+  return [
+    "img",
+    "image",
+    "file",
+    "video",
+    "audio",
+    "voice",
+    "sticker",
+    "record",
+    "face",
+    "mface",
+  ].includes(type);
 }
 
 export function hasMediaElements(elements: any[]) {
@@ -239,7 +250,7 @@ export async function persistImageParts(
 
 function mediaKindFromElementType(type: string): SavedAttachment["kind"] | "" {
   if (!isMediaElementType(type)) return "";
-  return type === "file" ? "file" : "image";
+  return type === "image" || type === "img" ? "image" : "file";
 }
 
 function pushInboundAttachmentFailure(
@@ -290,7 +301,9 @@ export async function extractInboundAttachments(
       element?.attrs && typeof element.attrs === "object" ? element.attrs : {};
     const kind = mediaKindFromElementType(type);
     if (!kind) continue;
-    const src = safeString(attrs.src || attrs.url || attrs.file || "").trim();
+    const src = safeString(
+      attrs.src || attrs.url || attrs.file || attrs.path || "",
+    ).trim();
     if (!src) {
       pushInboundAttachmentFailure(failures, {
         type,

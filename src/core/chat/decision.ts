@@ -1,13 +1,14 @@
 import { canAccessAgentInput, composeChatKey, trustOf } from "./support.js";
 import {
   directLike,
-  elementsToText,
   getChatId,
   hasMediaElements,
   mentionLike,
   pickUserId,
   safeString,
 } from "./chat-helpers.js";
+import { renderChatNodesMarkdown } from "./rich-text.js";
+import { normalizeMessageText } from "../message-content.js";
 
 function normalizeDecisionSessionContext(session: any, identity: any) {
   const platform = safeString(session?.platform || "").trim();
@@ -60,7 +61,9 @@ export async function shouldProcessText(
   elements: any[],
   identity: any,
 ) {
-  const text = elementsToText(elements);
+  const text = normalizeMessageText(
+    renderChatNodesMarkdown(elements, { renderAt: () => "" }),
+  );
   const hasMedia = hasMediaElements(elements);
   if (!text && !hasMedia)
     return {

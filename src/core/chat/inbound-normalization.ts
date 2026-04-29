@@ -4,10 +4,8 @@ import {
   type StoredChatMessage,
 } from "./message-store.js";
 import { composeChatKey } from "./support.js";
-import {
-  extractMessageText,
-  normalizeMessageText,
-} from "../message-content.js";
+import { normalizeMessageText } from "../message-content.js";
+import { renderChatNodesMarkdown } from "./rich-text.js";
 import { cloneJsonIfObject } from "../json-utils.js";
 import { safeString } from "../text-utils.js";
 
@@ -92,7 +90,40 @@ export function mentionLike(session: any) {
 }
 
 export function elementsToText(elements: any) {
-  return normalizeMessageText(extractMessageText(elements));
+  return normalizeMessageText(renderChatNodesMarkdown(elements));
+}
+
+function isRichAttachmentElement(element: any) {
+  return [
+    "img",
+    "image",
+    "file",
+    "video",
+    "audio",
+    "voice",
+    "sticker",
+    "record",
+    "face",
+    "mface",
+  ].includes(safeString(element?.type).trim().toLowerCase());
+}
+
+function sessionElementsToText(session: any, elements: any[]) {
+  const normalizedElements = Array.isArray(elements) ? elements : [];
+  const richAttachments = normalizedElements.filter(isRichAttachmentElement);
+  const textElements = normalizedElements.filter(
+    (element) => !isRichAttachmentElement(element),
+  );
+  const baseText = normalizeMessageText(
+    renderChatNodesMarkdown(textElements, { renderAt: () => "" }),
+  );
+  const fallbackText = normalizeMessageText(session?.stripped?.content || "");
+  const richText = richAttachments.length
+    ? elementsToText(richAttachments)
+    : "";
+  return normalizeMessageText(
+    [baseText || fallbackText, richText].filter(Boolean).join("\n"),
+  );
 }
 
 export function pickSenderNickname(session: any) {
@@ -206,7 +237,7 @@ export function buildChatInboxRouting(
     chatType: getChatType(session),
     isDirect: directLike(session),
     mentionLike: mentionLike(session),
-    text: elementsToText(elements) || undefined,
+    text: sessionElementsToText(session, elements) || undefined,
     userId: pickUserId(session) || undefined,
     nickname: pickSenderNickname(session) || undefined,
     chatName: pickChatName(session) || undefined,
@@ -246,7 +277,7 @@ export function buildInboundStoredChatMessageInput(
     nickname: pickSenderNickname(session) || undefined,
     chatName: pickChatName(session) || undefined,
     trust,
-    text: elementsToText(elements) || undefined,
+    text: sessionElementsToText(session, elements) || undefined,
     rawContent: safeString(session?.content || "").trim() || undefined,
     strippedContent:
       safeString(session?.stripped?.content || "").trim() || undefined,

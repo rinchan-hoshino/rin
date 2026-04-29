@@ -29,7 +29,7 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
 
   assert.equal(
     chatRuntimeCommon.renderPlainTextFromNodes(nodes),
-    "Hello@Rinworld",
+    "Hello@Rin world",
   );
   assert.equal(
     chatRuntimeCommon.renderPlainTextFromNodes([
@@ -41,8 +41,40 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
     chatRuntimeCommon.renderPlainTextFromNodes(nodes, {
       renderAt: (attrs) => `<@${attrs.id}>`,
     }),
-    "Hello<@42>world",
+    "Hello<@42> world",
   );
+  assert.equal(
+    chatRuntimeCommon.renderPlainTextFromNodes([
+      chatRuntimeCommon.normalizeNode("markdown", {
+        content: "**bold** [link](https://example.com)",
+      }),
+      chatRuntimeCommon.normalizeNode("image", {
+        src: "https://example.com/cat.png",
+        name: "cat.png",
+      }),
+    ]),
+    "bold link\n[image: cat.png]",
+  );
+  assert.equal(
+    chatRuntimeCommon.renderPlainTextFromNodes(
+      [
+        chatRuntimeCommon.normalizeNode("markdown", {
+          content: "**bold**",
+        }),
+      ],
+      { markdown: "preserve" },
+    ),
+    "**bold**",
+  );
+  assert.match(
+    chatRuntimeCommon.renderTelegramHtmlFromNodes([
+      chatRuntimeCommon.normalizeNode("markdown", {
+        content: "**bold** [link](https://example.com)",
+      }),
+    ]),
+    /<b>bold<\/b> <a href="https:\/\/example\.com">link<\/a>/,
+  );
+
   assert.equal(
     chatRuntimeCommon.extractQuoteMessageId([
       chatRuntimeCommon.normalizeNode("quote", { id: "abc123" }),

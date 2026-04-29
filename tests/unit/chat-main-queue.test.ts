@@ -1193,6 +1193,129 @@ test("chat main passes quoted reply session metadata through one normal prompt s
   }
 });
 
+test("chat main bridges same-user quoted group message without a session as the prompt body", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const chatKey = "telegram/1:-10042";
+      const seen = [];
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+      storeMod.saveChatMessage(agentDir, {
+        chatKey,
+        platform: "telegram",
+        botId: "1",
+        chatId: "-10042",
+        chatType: "group",
+        messageId: "m-rich-source",
+        role: "user",
+        userId: "owner-1",
+        receivedAt: new Date().toISOString(),
+        text: "look at this image",
+        elements: [
+          { type: "text", attrs: { content: "look at this image" } },
+          { type: "image", attrs: { src: "https://example.com/cat.png", name: "cat.png" } },
+        ],
+      });
+
+      controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
+        seen.push({
+          mode,
+          text: input?.text || "",
+          sessionFile: input?.sessionFile || null,
+          replyToMessageId: input?.replyToMessageId || null,
+        });
+        return { retry: false };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        username: "rin_bot",
+        name: "rin_bot",
+        async sendMessage() {
+          return ["assistant-1"];
+        },
+        internal: {
+          async sendChatAction() {},
+        },
+      });
+      const node = h.createChatRuntimeH();
+      app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "-10042",
+        guildId: "-10042",
+        userId: "owner-1",
+        messageId: "m-mention-quote",
+        isDirect: false,
+        content: "@rin_bot",
+        stripped: { appel: true, content: "" },
+        quote: {
+          messageId: "m-rich-source",
+          userId: "owner-1",
+          content: "look at this image",
+        },
+        elements: [node.at("1", { name: "rin_bot" })],
+      });
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && seen.length < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (seen.length !== 1) throw new Error(JSON.stringify({ seen }));
+      const first = seen[0];
+      if (
+        first.mode !== "prompt" ||
+        first.sessionFile !== null ||
+        first.replyToMessageId !== "m-mention-quote" ||
+        !first.text.includes("look at this image") ||
+        !first.text.includes("![cat.png](https://example.com/cat.png)")
+      ) {
+        throw new Error(JSON.stringify({ seen }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main does not downgrade a quoted reply to a plain turn when linked session selection times out", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

@@ -68,6 +68,36 @@ test("telegram adapter splits oversized text sends and keeps the reply only on t
   });
 });
 
+test("telegram adapter renders markdown nodes through Telegram HTML parse mode", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+
+    const result = await app.bots[0].sendMessage("456", [
+      h.markdown("**bold** [docs](https://example.com)"),
+    ]);
+
+    assert.deepEqual(result, ["1"]);
+    assert.equal(calls[0].method, "sendMessage");
+    assert.equal(calls[0].payload.parse_mode, "HTML");
+    assert.match(calls[0].payload.text, /<b>bold<\/b>/);
+    assert.match(
+      calls[0].payload.text,
+      /<a href="https:\/\/example\.com">docs<\/a>/,
+    );
+  });
+});
+
 test("telegram adapter keeps media first and spills oversized captions into follow-up text messages", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -97,6 +127,31 @@ test("telegram adapter keeps media first and spills oversized captions into foll
     assert.equal(calls[1].method, "sendMessage");
     assert.equal(calls[1].payload.reply_to_message_id, undefined);
     assert.equal(calls[1].payload.text, "b".repeat(6));
+  });
+});
+
+test("onebot adapter strips markdown formatting instead of exposing raw markdown", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { selfId: "1", url: "ws://127.0.0.1:9" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ action: string; params: any }> = [];
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      return { message_id: "m1" };
+    };
+
+    const result = await app.bots[0].sendMessage("private:2", [
+      h.markdown("**bold** [docs](https://example.com)"),
+    ]);
+
+    assert.deepEqual(result, ["m1"]);
+    assert.equal(calls[0].action, "send_private_msg");
+    assert.equal(calls[0].params.message, "bold docs");
   });
 });
 

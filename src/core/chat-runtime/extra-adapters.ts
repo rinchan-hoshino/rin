@@ -224,6 +224,8 @@ export class DiscordAdapter {
       throw new Error(`discord_channel_not_sendable:${chatId}`);
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     const text = renderPlainTextFromNodes(work, {
+      includeMedia: false,
+      markdown: "preserve",
       renderAt(attrs) {
         const id = safeString(attrs.id).trim();
         return id ? `<@${id}>` : safeString(attrs.name).trim();
@@ -539,6 +541,8 @@ export class SlackAdapter {
   private async sendMessage(chatId: string, content: any) {
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     const text = renderPlainTextFromNodes(work, {
+      includeMedia: false,
+      markdown: "preserve",
       renderAt(attrs) {
         const id = safeString(attrs.id).trim();
         return id ? `<@${id}>` : safeString(attrs.name).trim();

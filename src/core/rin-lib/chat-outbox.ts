@@ -8,6 +8,14 @@ export type ChatMessagePart =
       text: string;
     }
   | {
+      type: "markdown";
+      text: string;
+    }
+  | {
+      type: "html";
+      text: string;
+    }
+  | {
       type: "at";
       id: string;
       name?: string;
@@ -24,6 +32,13 @@ export type ChatMessagePart =
     }
   | {
       type: "file";
+      path?: string;
+      url?: string;
+      name?: string;
+      mimeType?: string;
+    }
+  | {
+      type: "video" | "audio" | "sticker";
       path?: string;
       url?: string;
       name?: string;

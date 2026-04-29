@@ -31,7 +31,9 @@ import {
   buildInboundAttachmentNotice,
   getChatId,
   getChatType,
+  lookupReplyMessage,
   lookupReplySession,
+  mentionLike,
   persistInboundMessage,
   pickChatName,
   pickMessageId,
@@ -436,6 +438,45 @@ export async function startChatBridge(
     }
   };
 
+  const resolveQuotedInputElements = (
+    session: any,
+    elements: any[],
+    chatKey: string,
+  ) => {
+    const replyToMessageId = pickReplyToMessageId(session);
+    if (getChatType(session) !== "group" || !mentionLike(session)) {
+      return elements;
+    }
+    if (!replyToMessageId || !chatKey) return elements;
+    const quoted = lookupReplyMessage(
+      runtime.agentDir,
+      chatKey,
+      replyToMessageId,
+    );
+    if (!quoted) return elements;
+    if (safeString(quoted.sessionFile || quoted.sessionId || "").trim()) {
+      return elements;
+    }
+    const currentUserId = pickUserId(session);
+    const quotedUserId = safeString(
+      quoted.userId || session?.quote?.userId || "",
+    ).trim();
+    if (!currentUserId || !quotedUserId || currentUserId !== quotedUserId) {
+      return elements;
+    }
+    if (Array.isArray(quoted.elements) && quoted.elements.length) {
+      return quoted.elements;
+    }
+    const text = safeString(
+      quoted.text ||
+        quoted.strippedContent ||
+        quoted.rawContent ||
+        quoted.quote?.content ||
+        "",
+    ).trim();
+    return text ? [{ type: "text", attrs: { content: text } }] : elements;
+  };
+
   const handleAllowedChatTurnSession = async (
     session: any,
     elements: any[],
@@ -547,11 +588,26 @@ export async function startChatBridge(
     elements: any[],
     identity: any,
   ) => {
-    const decision = await shouldProcessText(session, elements, identity);
+    const platform = safeString(session?.platform || "").trim();
+    const rawChatKey = composeChatKey(
+      platform,
+      getChatId(session),
+      safeString(session?.selfId || session?.bot?.selfId || "").trim(),
+    );
+    const effectiveElements = resolveQuotedInputElements(
+      session,
+      elements,
+      rawChatKey,
+    );
+    const decision = await shouldProcessText(
+      session,
+      effectiveElements,
+      identity,
+    );
     if (!decision.allow) return { retry: false };
     return await handleAllowedChatTurnSession(
       session,
-      elements,
+      effectiveElements,
       identity,
       decision,
     );

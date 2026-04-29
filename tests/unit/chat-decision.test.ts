@@ -128,7 +128,7 @@ test("chat decision keeps image-only owner messages routable", async () => {
   );
 
   assert.equal(result.allow, true);
-  assert.equal(result.text, "");
+  assert.equal(result.text, "![demo.png](https://example.com/demo.png)");
 });
 
 test("chat decision allows owner group messages that explicitly at the bot even when stripped.appel is missing", async () => {
