@@ -109,6 +109,21 @@ async function processSessionSummaryUpdate(
   spawnQueuedMemoryWorker(agentDir);
 }
 
+function stripPathFromDoc(doc: any) {
+  if (!doc || typeof doc !== "object") return doc;
+  const { path: _path, ...rest } = doc;
+  return rest;
+}
+
+function stripSavePromptPaths(response: any) {
+  if (!response || typeof response !== "object") return response;
+  const { path: _path, doc, ...rest } = response;
+  return {
+    ...rest,
+    ...(doc ? { doc: stripPathFromDoc(doc) } : {}),
+  };
+}
+
 const saveSelfImprovePromptParams = Type.Object({
   slot: Type.Union(
     [
@@ -163,7 +178,6 @@ async function executeSaveSelfImprovePromptAction(params: any) {
             text: [
               `Loaded save_prompts slot: ${currentState.slot}`,
               usageLine,
-              String(currentDoc?.path || ""),
               currentState.content || "(empty)",
             ]
               .filter(Boolean)
@@ -176,7 +190,6 @@ async function executeSaveSelfImprovePromptAction(params: any) {
           slot: currentState.slot,
           usage: `${currentState.currentLines}/${currentState.maxLines} lines`,
           currentContent: currentState.content,
-          path: String(currentDoc?.path || ""),
         },
       };
     }
@@ -193,7 +206,6 @@ async function executeSaveSelfImprovePromptAction(params: any) {
             text: [
               `Stale save_prompts baseContent for slot: ${currentState.slot}`,
               usageLine,
-              String(currentDoc?.path || ""),
               currentState.content || "(empty)",
             ]
               .filter(Boolean)
@@ -206,7 +218,6 @@ async function executeSaveSelfImprovePromptAction(params: any) {
           slot: currentState.slot,
           usage: `${currentState.currentLines}/${currentState.maxLines} lines`,
           currentContent: currentState.content,
-          path: String(currentDoc?.path || ""),
         },
         isError: true,
       };
@@ -229,7 +240,6 @@ async function executeSaveSelfImprovePromptAction(params: any) {
           text: [
             `Updated save_prompts slot: ${currentState.slot}`,
             `usage=${refined.nextLines}/${refined.maxLines} lines`,
-            String(response?.doc?.path || ""),
             refined.content || "(empty)",
           ]
             .filter(Boolean)
@@ -237,12 +247,11 @@ async function executeSaveSelfImprovePromptAction(params: any) {
         },
       ],
       details: {
-        ...response,
+        ...stripSavePromptPaths(response),
         ok: true,
         status: "updated",
         slot: currentState.slot,
         usage: `${refined.nextLines}/${refined.maxLines} lines`,
-        path: String(response?.doc?.path || ""),
       },
     };
   } catch (error: any) {

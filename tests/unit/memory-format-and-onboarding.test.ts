@@ -96,7 +96,7 @@ test("self-improve format renders stable result variants", () => {
     response,
   );
   assert.match(saveText, /Saved self-improve prompt: Agent Profile/);
-  assert.match(saveText, /\/tmp\/agent.md/);
+  assert.equal(saveText.includes("/tmp/agent.md"), false);
 
   const compileText = format.formatSelfImproveResult("compile", {
     self_improve_prompt_docs: [
@@ -130,6 +130,11 @@ test("self-improve format renders stable result variants", () => {
   );
   assert.match(agentCompileText, /^self_improve compile memory$/m);
   assert.match(agentCompileText, /self_improve_prompts: 1/);
+
+  assert.equal(
+    format.formatSelfImproveAgentResult("save_self_improve_prompt", response),
+    "self_improve save_self_improve_prompt",
+  );
 
   assert.equal(
     format.formatSelfImproveResult("list", emptyResponse),

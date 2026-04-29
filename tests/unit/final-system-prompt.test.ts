@@ -352,8 +352,16 @@ test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async
     recursive: true,
   });
   fs.writeFileSync(
+    path.join(agentDir, "self_improve", "prompts", "agent_profile.md"),
+    "Test role voice.\n",
+  );
+  fs.writeFileSync(
     path.join(agentDir, "self_improve", "prompts", "user_profile.md"),
     "Test user preference.\n",
+  );
+  fs.writeFileSync(
+    path.join(agentDir, "self_improve", "prompts", "core_doctrine.md"),
+    "Test durable method.\n",
   );
   fs.writeFileSync(
     path.join(agentDir, "self_improve", "skills", "test-skill", "SKILL.md"),
@@ -375,14 +383,30 @@ test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async
   });
 
   const projectContextIdx = finalSystemPrompt.indexOf("# Project Context");
+  const rolePrefaceIdx = finalSystemPrompt.indexOf(
+    "Always use this agent profile as the standing role and speaking guide.",
+  );
+  const agentProfileIdx = finalSystemPrompt.indexOf("Agent profile:");
   const promptsIdx = finalSystemPrompt.indexOf("User profile:");
+  const methodologyPrefaceIdx = finalSystemPrompt.indexOf(
+    "Always follow this core doctrine as the standing methodology.",
+  );
+  const coreDoctrineIdx = finalSystemPrompt.indexOf("Core doctrine:");
   const skillsIdx = finalSystemPrompt.indexOf("<available_skills>");
 
   assert.notEqual(projectContextIdx, -1);
+  assert.notEqual(rolePrefaceIdx, -1);
+  assert.notEqual(agentProfileIdx, -1);
   assert.notEqual(promptsIdx, -1);
+  assert.notEqual(methodologyPrefaceIdx, -1);
+  assert.notEqual(coreDoctrineIdx, -1);
   assert.notEqual(skillsIdx, -1);
-  assert.ok(projectContextIdx < promptsIdx);
-  assert.ok(promptsIdx < skillsIdx);
+  assert.ok(projectContextIdx < agentProfileIdx);
+  assert.ok(agentProfileIdx < rolePrefaceIdx);
+  assert.ok(rolePrefaceIdx < promptsIdx);
+  assert.ok(promptsIdx < coreDoctrineIdx);
+  assert.ok(coreDoctrineIdx < methodologyPrefaceIdx);
+  assert.ok(coreDoctrineIdx < skillsIdx);
   assert.ok(!finalSystemPrompt.includes("# Self-Improve Prompts"));
   assert.ok(finalSystemPrompt.includes("<name>test-skill</name>"));
   assert.ok(
