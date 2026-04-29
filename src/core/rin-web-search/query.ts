@@ -84,6 +84,38 @@ export function safeText(value: unknown): string {
   return String(value).replace(/\s+/g, " ").trim();
 }
 
+function truncateText(value: unknown, max = 240): string {
+  const text = safeText(value);
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+function formatFetchUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return truncateText(`${url.origin}${url.pathname}${url.search}`, 260);
+  } catch {
+    return truncateText(value, 260);
+  }
+}
+
+function formatErrorSummary(error: unknown): string {
+  if (!error) return "unknown_error";
+  const name = safeText((error as { name?: unknown })?.name);
+  const message = safeText(error instanceof Error ? error.message : error);
+  const code = safeText((error as { code?: unknown })?.code);
+  const parts = [name && name !== "Error" ? name : "", code, message]
+    .filter(Boolean)
+    .join(": ");
+  return truncateText(parts || String(error), 220);
+}
+
+function formatFetchFailure(url: string, error: unknown): string {
+  const cause = (error as { cause?: unknown })?.cause;
+  const causeText = cause ? ` cause=${formatErrorSummary(cause)}` : "";
+  return `fetch_failed url=${formatFetchUrl(url)} error=${formatErrorSummary(error)}${causeText}`;
+}
+
 function isSupportedFreshness(value: string): value is WebSearchFreshness {
   return (SUPPORTED_FRESHNESS as readonly string[]).includes(value);
 }
@@ -344,20 +376,26 @@ async function fetchText(
     Math.max(1, timeoutMs),
   );
   try {
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.2",
-        "User-Agent": USER_AGENT,
-        ...headers,
-      },
-      body,
-      signal: controller.signal,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.2",
+          "User-Agent": USER_AGENT,
+          ...headers,
+        },
+        body,
+        signal: controller.signal,
+      });
+    } catch (error: unknown) {
+      throw new Error(formatFetchFailure(url, error));
+    }
+
     const text = await response.text();
     if (!response.ok) {
       throw new Error(
-        `http_${response.status}:${safeText(text || response.statusText)}`,
+        `http_${response.status} url=${formatFetchUrl(response.url || url)} status=${truncateText(response.statusText, 80)} body=${truncateText(text || response.statusText)}`,
       );
     }
     return text;

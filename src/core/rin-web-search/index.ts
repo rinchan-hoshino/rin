@@ -19,9 +19,37 @@ function trimSnippet(value: string, max = 220): string {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
+function formatAttempts(response: any, options: { maxError?: number } = {}) {
+  const attempts = Array.isArray(response?.attempts) ? response.attempts : [];
+  if (!attempts.length) return "";
+  const maxError = options.maxError ?? 260;
+  const lines = attempts.map((attempt: any) => {
+    const engine = String(attempt?.engine || "unknown").trim() || "unknown";
+    if (attempt?.ok) {
+      return `- ${engine}: ok results=${Number(attempt?.results || 0)}`;
+    }
+    const error = String(attempt?.error || "unknown_error").replace(
+      /\s+/g,
+      " ",
+    );
+    const visibleError =
+      error.length > maxError
+        ? `${error.slice(0, maxError - 1).trimEnd()}…`
+        : error;
+    return `- ${engine}: ${visibleError}`;
+  });
+  return ["attempts:", ...lines].join("\n");
+}
+
 function formatResults(response: any): string {
-  if (!response?.ok)
-    return `Web search failed: ${String(response?.error || "unknown_error")}`;
+  if (!response?.ok) {
+    return [
+      `Web search failed: ${String(response?.error || "unknown_error")}`,
+      formatAttempts(response),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   const rows = Array.isArray(response.results) ? response.results : [];
   if (!rows.length) return "No web results found.";
   return rows
@@ -37,7 +65,13 @@ function formatResults(response: any): string {
 
 function formatAgentResults(response: any): string {
   if (!response?.ok)
-    return `web_search error\nerror=${String(response?.error || "unknown_error")}`;
+    return [
+      "web_search error",
+      `error=${String(response?.error || "unknown_error")}`,
+      formatAttempts(response, { maxError: 520 }),
+    ]
+      .filter(Boolean)
+      .join("\n");
   const rows = Array.isArray(response.results) ? response.results : [];
   if (!rows.length) return "web_search 0";
   return [
@@ -157,11 +191,16 @@ export default function webSearchModule(pi: BuiltinModuleApi) {
         hiddenCount?: number;
         totalResults?: number;
         userText?: string;
+        attempts?: unknown[];
       } = {
         hiddenCount,
         totalResults: rows.length,
         userText,
       };
+
+      if (Array.isArray(response?.attempts)) {
+        details.attempts = response.attempts;
+      }
 
       if (!rows.length && response?.ok) {
         details.emptyMessage = "No web results found.";

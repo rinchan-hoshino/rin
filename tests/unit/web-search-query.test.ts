@@ -23,6 +23,11 @@ const service = await import(
     path.join(rootDir, "dist", "core", "rin-web-search", "service.js"),
   ).href
 );
+const webSearchIndex = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-web-search", "index.js"),
+  ).href
+);
 
 const googleFixture = `
 <div>
@@ -394,6 +399,64 @@ test("web search reports failure when google is challenged and duckduckgo is emp
       { engine: "duckduckgo", ok: true, results: 0 },
     ]);
     assert.equal(result.results.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search provider attempts expose fetch failure details", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    const cause = Object.assign(new Error("Connect Timeout Error"), {
+      code: "UND_ERR_CONNECT_TIMEOUT",
+    });
+    const error = new TypeError("fetch failed") as TypeError & {
+      cause?: unknown;
+    };
+    error.cause = cause;
+    throw error;
+  }) as typeof fetch;
+  try {
+    const result = await query.searchWeb({ q: "rinchanai", limit: 1 });
+    assert.equal(result.ok, false);
+    assert.equal(result.attempts?.length, 2);
+    assert.match(result.attempts?.[0].error || "", /fetch_failed/);
+    assert.match(result.attempts?.[0].error || "", /www\.google\.com\/search/);
+    assert.match(result.attempts?.[0].error || "", /UND_ERR_CONNECT_TIMEOUT/);
+    assert.match(
+      result.attempts?.[1].error || "",
+      /lite\.duckduckgo\.com\/lite\//,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search tool output includes provider attempts on failure", async () => {
+  const originalFetch = globalThis.fetch;
+  let registeredTool: any;
+  webSearchIndex.default({
+    registerTool(tool: any) {
+      registeredTool = tool;
+    },
+  });
+
+  globalThis.fetch = (async () => {
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  try {
+    const result = await registeredTool.execute("call-demo", {
+      q: "rinchanai",
+      limit: 1,
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /web_search error/);
+    assert.match(result.content[0].text, /attempts:/);
+    assert.match(result.content[0].text, /- google: fetch_failed/);
+    assert.match(result.content[0].text, /- duckduckgo: fetch_failed/);
+    assert.equal(result.details.attempts.length, 2);
+    assert.match(result.details.userText, /Web search failed:/);
+    assert.match(result.details.userText, /attempts:/);
   } finally {
     globalThis.fetch = originalFetch;
   }
