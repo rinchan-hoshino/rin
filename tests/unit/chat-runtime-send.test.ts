@@ -98,6 +98,35 @@ test("telegram adapter renders markdown nodes through Telegram HTML parse mode",
   });
 });
 
+test("telegram adapter renders structured at as a native mention link", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+
+    const result = await app.bots[0].sendMessage("456", [
+      h.at("12345", { name: "Alice" }),
+      h.text(" please check"),
+    ]);
+
+    assert.deepEqual(result, ["1"]);
+    assert.equal(calls[0].payload.parse_mode, "HTML");
+    assert.match(
+      calls[0].payload.text,
+      /<a href="tg:\/\/user\?id=12345">Alice<\/a>/,
+    );
+  });
+});
+
 test("telegram adapter keeps media first and spills oversized captions into follow-up text messages", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -130,6 +159,34 @@ test("telegram adapter keeps media first and spills oversized captions into foll
   });
 });
 
+test("telegram adapter sends sticker media without dropping following text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+
+    const result = await app.bots[0].sendMessage("456", [
+      h("sticker", { src: "https://example.com/sticker.webp" }),
+      h.text("caption after sticker"),
+    ]);
+
+    assert.deepEqual(result, ["1", "2"]);
+    assert.equal(calls[0].method, "sendSticker");
+    assert.equal(calls[0].payload.caption, undefined);
+    assert.equal(calls[1].method, "sendMessage");
+    assert.equal(calls[1].payload.text, "caption after sticker");
+  });
+});
+
 test("onebot adapter strips markdown formatting instead of exposing raw markdown", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -155,6 +212,31 @@ test("onebot adapter strips markdown formatting instead of exposing raw markdown
   });
 });
 
+test("onebot adapter renders structured at as native CQ mention", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { selfId: "1", url: "ws://127.0.0.1:9" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ action: string; params: any }> = [];
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      return { message_id: "m1" };
+    };
+
+    await app.bots[0].sendMessage("2", [
+      h.at("12345", { name: "Alice" }),
+      h.text(" hello"),
+    ]);
+
+    assert.equal(calls[0].action, "send_group_msg");
+    assert.equal(calls[0].params.message, "[CQ:at,qq=12345] hello");
+  });
+});
+
 test("discord adapter splits oversized text sends and keeps attachments on the first chunk", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -176,16 +258,52 @@ test("discord adapter splits oversized text sends and keeps attachments on the f
       h.quote("88"),
       h.text("c".repeat(2005)),
       h.image("https://example.com/demo.png"),
+      h("video", { src: "https://example.com/demo.mp4" }),
     ]);
 
     assert.deepEqual(result, ["1", "2"]);
     assert.equal(calls.length, 2);
     assert.equal(calls[0].content.length, 2000);
-    assert.equal(calls[0].files.length, 1);
+    assert.equal(calls[0].files.length, 2);
     assert.equal(calls[0].reply.messageReference, "88");
     assert.equal(calls[1].content, "c".repeat(5));
     assert.equal(calls[1].files, undefined);
     assert.equal(calls[1].reply, undefined);
+  });
+});
+
+test("lark adapter renders structured at using Lark at tags", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("oc_1", [
+      h.at("ou_123", { name: "Alice" }),
+      h.text(" hello"),
+    ]);
+
+    assert.deepEqual(result, ["m1"]);
+    assert.equal(calls[0].data.msg_type, "text");
+    assert.equal(
+      JSON.parse(calls[0].data.content).text,
+      '<at user_id="ou_123">Alice</at> hello',
+    );
   });
 });
 

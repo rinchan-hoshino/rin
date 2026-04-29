@@ -12,10 +12,6 @@ export type ChatMessagePart =
       text: string;
     }
   | {
-      type: "html";
-      text: string;
-    }
-  | {
       type: "at";
       id: string;
       name?: string;

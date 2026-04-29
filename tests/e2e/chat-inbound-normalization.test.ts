@@ -91,6 +91,41 @@ test("chat inbound normalization keeps inbox, log, and store metadata aligned", 
   assert.equal(snapshot.quote?.messageId, "old-1");
 });
 
+test("chat inbound normalization renders received rich objects as chat markdown syntax", () => {
+  const session = {
+    platform: "telegram",
+    selfId: "bot-1",
+    guildId: "g1",
+    channelId: "-100123",
+    userId: "owner-1",
+    messageId: "m-rich",
+    stripped: { content: "hello", appel: false },
+  };
+  const elements = [
+    { type: "text", attrs: { content: "hello " } },
+    { type: "at", attrs: { id: "user-2", name: "Alice" } },
+    { type: "quote", attrs: { id: "old-2" } },
+    {
+      type: "file",
+      attrs: { src: "https://example.com/spec.pdf", name: "spec.pdf" },
+    },
+    {
+      type: "sticker",
+      attrs: { src: "https://example.com/yay.webp", name: "yay" },
+    },
+  ];
+
+  const stored = normalization.buildInboundStoredChatMessageInput(
+    session,
+    elements,
+  );
+
+  assert.equal(
+    stored?.text,
+    "hello [@Alice](at:user-2)[quote:old-2]\n[file: spec.pdf](https://example.com/spec.pdf)\n\n[sticker: yay](https://example.com/yay.webp)",
+  );
+});
+
 test("chat helpers persist inbound messages with the shared normalized store shape", async () => {
   await withTempDir(async (agentDir) => {
     const session = {

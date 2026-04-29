@@ -58,6 +58,15 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("- search_memory:"));
   assert.ok(baseSystemPrompt.includes("- save_prompts:"));
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
+  assert.ok(baseSystemPrompt.includes("Chat rich content Markdown syntax:"));
+  assert.ok(
+    baseSystemPrompt.includes("Native at: [@name](at:<platform-user-id>)"),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Image/file/video/audio/sticker: [image: name](url)",
+    ),
+  );
 
   assert.ok(
     finalSystemPrompt.includes(

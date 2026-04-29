@@ -1291,7 +1291,7 @@ test("chat main bridges same-user quoted group message without a session as the 
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
         !first.text.includes("look at this image") ||
-        !first.text.includes("![cat.png](https://example.com/cat.png)")
+        !first.text.includes("[image: cat.png](https://example.com/cat.png)")
       ) {
         throw new Error(JSON.stringify({ seen }));
       }

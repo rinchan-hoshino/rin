@@ -43,6 +43,18 @@ function toSnakeCase(value: string) {
     .toLowerCase();
 }
 
+function isTelegramMediaNodeType(type: string) {
+  return ["image", "file", "video", "audio", "sticker"].includes(type);
+}
+
+function telegramMediaMethod(type: string) {
+  if (type === "image") return { method: "sendPhoto", field: "photo" };
+  if (type === "video") return { method: "sendVideo", field: "video" };
+  if (type === "audio") return { method: "sendAudio", field: "audio" };
+  if (type === "sticker") return { method: "sendSticker", field: "sticker" };
+  return { method: "sendDocument", field: "document" };
+}
+
 function isTextLikeNode(node: any) {
   const type = safeString(node?.type).toLowerCase();
   return (
@@ -652,8 +664,13 @@ class TelegramAdapter {
   }
 
   private async sendBinaryMessage(
-    method: "sendPhoto" | "sendDocument",
-    field: "photo" | "document",
+    method:
+      | "sendPhoto"
+      | "sendDocument"
+      | "sendVideo"
+      | "sendAudio"
+      | "sendSticker",
+    field: "photo" | "document" | "video" | "audio" | "sticker",
     chatId: string,
     node: any,
     caption: string,
@@ -702,30 +719,34 @@ class TelegramAdapter {
     while (cursor < work.length) {
       const node = work[cursor];
       const type = safeString(node?.type).toLowerCase();
-      if (type === "image" || type === "file") {
+      if (isTelegramMediaNodeType(type)) {
         const captionNodes: any[] = [];
         let nextCursor = cursor + 1;
         while (nextCursor < work.length && isTextLikeNode(work[nextCursor])) {
           captionNodes.push(work[nextCursor]);
           nextCursor += 1;
         }
-        const caption = renderTelegramHtmlFromNodes(captionNodes);
+        const renderedCaption = renderTelegramHtmlFromNodes(captionNodes);
         const captionChunks = splitPlainText(
-          caption,
+          renderedCaption,
           TELEGRAM_MAX_CAPTION_LENGTH,
         );
+        const media = telegramMediaMethod(type);
+        const caption = type === "sticker" ? "" : captionChunks[0] || "";
         const messageId = await this.sendBinaryMessage(
-          type === "image" ? "sendPhoto" : "sendDocument",
-          type === "image" ? "photo" : "document",
+          media.method as any,
+          media.field as any,
           chatId,
           node,
-          captionChunks[0] || "",
+          caption,
           firstReply,
-          captionChunks[0] ? "HTML" : undefined,
+          caption ? "HTML" : undefined,
         );
         if (messageId) delivered.push(messageId);
         firstReply = undefined;
-        for (const extraCaptionChunk of captionChunks.slice(1)) {
+        const spillCaptionChunks =
+          type === "sticker" ? captionChunks : captionChunks.slice(1);
+        for (const extraCaptionChunk of spillCaptionChunks) {
           const extraMessageId = await this.sendText(
             chatId,
             extraCaptionChunk,
@@ -742,7 +763,7 @@ class TelegramAdapter {
       while (nextCursor < work.length) {
         const candidate = work[nextCursor];
         const candidateType = safeString(candidate?.type).toLowerCase();
-        if (candidateType === "image" || candidateType === "file") break;
+        if (isTelegramMediaNodeType(candidateType)) break;
         textNodes.push(candidate);
         nextCursor += 1;
       }

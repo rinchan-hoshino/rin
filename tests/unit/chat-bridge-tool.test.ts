@@ -60,6 +60,22 @@ test("chat_bridge only forwards valid current chat session names", async () => {
   const tools = chatBridgeModule.default().tools || [];
   const chatBridgeTool = tools.find((tool) => tool.name === "chat_bridge");
   assert.ok(chatBridgeTool);
+  assert.match(
+    chatBridgeTool.promptGuidelines?.join("\n") || "",
+    /sending rich chat content/,
+  );
+  assert.match(
+    chatBridgeTool.parameters?.properties?.code?.description || "",
+    /can send rich chat content/,
+  );
+  assert.doesNotMatch(
+    chatBridgeTool.parameters?.properties?.code?.description || "",
+    /helpers\.send/,
+  );
+  assert.doesNotMatch(
+    chatBridgeTool.parameters?.properties?.code?.description || "",
+    /\{ type: "image"/,
+  );
 
   const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
   const previousSocketPath = process.env.RIN_DAEMON_SOCKET_PATH;

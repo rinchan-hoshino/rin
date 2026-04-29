@@ -52,7 +52,7 @@ function mediaMarkdown(type: string, attrs: Record<string, any>) {
   const label = resourceLabel(attrs) || normalizedType;
   const src = safeString(attrs.src || attrs.url || attrs.file || "").trim();
   if (normalizedType === "image") {
-    return src ? `![${label}](${src})` : `[image: ${label}]`;
+    return src ? `[image: ${label}](${src})` : `[image: ${label}]`;
   }
   return src
     ? `[${normalizedType}: ${label}](${src})`
@@ -85,8 +85,10 @@ export function stripMarkdownFormatting(text: string) {
   next = next.replace(/^\s{0,3}>\s?/gm, "");
   next = next.replace(/^\s*[-*+]\s+/gm, "- ");
   next = next.replace(/^\s*\d+[.)]\s+/gm, "");
-  next = next.replace(/(\*\*|__)(.*?)\1/g, "$2");
-  next = next.replace(/(\*|_)(.*?)\1/g, "$2");
+  next = next.replace(/\*\*([^*\n]+)\*\*/g, "$1");
+  next = next.replace(/(?<!\w)__([^_\n]+)__(?!\w)/g, "$1");
+  next = next.replace(/\*([^*\n]+)\*/g, "$1");
+  next = next.replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, "$1");
   next = next.replace(/~~(.*?)~~/g, "$1");
   return normalizeRenderedText(next);
 }
@@ -125,7 +127,8 @@ function renderNodeMarkdown(
         return safeString(options.renderAt(attrs));
       const name = safeString(attrs.name).trim();
       const id = safeString(attrs.id).trim();
-      return name ? `@${name}` : id ? `@${id}` : "@";
+      const label = name || id;
+      return id ? `[@${label}](at:${id})` : label ? `@${label}` : "@";
     }
     case "br":
       return "\n";
@@ -134,10 +137,8 @@ function renderNodeMarkdown(
         renderNodeMarkdown(childrenOf(node), options),
       );
       const id = safeString(attrs.id || attrs.messageId).trim();
-      const prefix = id ? `quote ${id}` : "quote";
-      return body
-        ? `> [${prefix}] ${body.replace(/\n/g, "\n> ")}`
-        : `[${prefix}]`;
+      const marker = id ? `[quote:${id}]` : "[quote]";
+      return body ? `${marker}\n> ${body.replace(/\n/g, "\n> ")}` : marker;
     }
     case "image":
     case "img":
@@ -177,6 +178,100 @@ export function renderChatNodesPlain(
     : stripMarkdownFormatting(markdown);
 }
 
+function richNode(type: string, attrs: Record<string, any> = {}) {
+  return { type, attrs, children: [] as any[] };
+}
+
+function pushTextNode(target: any[], type: "markdown", text: string) {
+  const content = safeString(text);
+  if (!content.trim()) return;
+  target.push(richNode(type, { content }));
+}
+
+function cleanMentionName(text: string) {
+  return stripHtmlFormatting(safeString(text)).trim().replace(/^@+/, "");
+}
+
+function compactAttrs(attrs: Record<string, any>) {
+  const next: Record<string, any> = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    const text = safeString(value).trim();
+    if (text) next[key] = text;
+  }
+  return next;
+}
+
+function mediaNode(type: string, src: string, name = "") {
+  return richNode(
+    type,
+    compactAttrs({
+      src: safeString(src).trim(),
+      name: safeString(name).trim(),
+    }),
+  );
+}
+
+function parseMarkdownRichTextNodes(text: string) {
+  const source = safeString(text);
+  const nodes: any[] = [];
+  const tokenPattern =
+    /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\((at|mention|quote):([^)]+)\)|\[(image|file|video|audio|sticker):\s*([^\]]*)\]\(([^)]+)\)|\[quote:\s*([^\]]+)\]/gi;
+  let cursor = 0;
+  for (const match of source.matchAll(tokenPattern)) {
+    const index = typeof match.index === "number" ? match.index : cursor;
+    pushTextNode(nodes, "markdown", source.slice(cursor, index));
+    cursor = index + safeString(match[0]).length;
+
+    if (match[1] !== undefined) {
+      nodes.push(mediaNode("image", match[2] || "", match[1] || ""));
+      continue;
+    }
+    if (match[3] !== undefined) {
+      const scheme = safeString(match[4]).toLowerCase();
+      if (scheme === "at" || scheme === "mention") {
+        nodes.push(
+          richNode(
+            "at",
+            compactAttrs({
+              id: match[5] || "",
+              name: cleanMentionName(match[3]),
+            }),
+          ),
+        );
+      } else {
+        nodes.push(richNode("quote", compactAttrs({ id: match[5] || "" })));
+      }
+      continue;
+    }
+    if (match[6] !== undefined) {
+      nodes.push(mediaNode(match[6] || "file", match[8] || "", match[7] || ""));
+      continue;
+    }
+    nodes.push(richNode("quote", compactAttrs({ id: match[9] || "" })));
+  }
+  pushTextNode(nodes, "markdown", source.slice(cursor));
+  return nodes.length ? nodes : [richNode("markdown", { content: source })];
+}
+
+export function expandRichTextSyntaxNodes(nodes: any[]): any[] {
+  return (Array.isArray(nodes) ? nodes : [])
+    .flatMap((node) => {
+      if (!node || typeof node !== "object") return node ? [node] : [];
+      const type = safeString(node.type).trim().toLowerCase();
+      const attrs = attrsOf(node);
+      if (type === "markdown" || type === "md") {
+        return parseMarkdownRichTextNodes(textAttr(node, attrs));
+      }
+      if (Array.isArray(node.children) && node.children.length) {
+        return [
+          { ...node, children: expandRichTextSyntaxNodes(node.children) },
+        ];
+      }
+      return [node];
+    })
+    .filter(Boolean);
+}
+
 function escapeHtml(text: string) {
   return safeString(text)
     .replace(/&/g, "&amp;")
@@ -187,6 +282,14 @@ function escapeHtml(text: string) {
 
 function escapeHtmlAttr(text: string) {
   return escapeHtml(text).replace(/'/g, "&#39;");
+}
+
+function renderTelegramAt(attrs: Record<string, any>) {
+  const id = safeString(attrs.id).trim();
+  const label =
+    safeString(attrs.name).trim() || safeString(attrs.username).trim() || id;
+  if (!id) return escapeHtml(label || "@");
+  return `<a href="tg://user?id=${escapeHtmlAttr(id)}">${escapeHtml(label || id)}</a>`;
 }
 
 function sanitizeTelegramHtml(text: string) {
@@ -257,6 +360,7 @@ export function renderChatNodesTelegramHtml(
       if (type === "markdown" || type === "md") {
         return markdownToTelegramHtml(textAttr(node, attrs));
       }
+      if (type === "at") return renderTelegramAt(attrs);
       return markdownToTelegramHtml(renderNodeMarkdown(node, options));
     })
     .join("");

@@ -266,15 +266,8 @@ function markdownNode(h: any, text: string) {
     : { type: "markdown", attrs: { content: text } };
 }
 
-function htmlNode(h: any, text: string) {
-  if (typeof h?.html === "function") return h.html(text);
-  return typeof h === "function"
-    ? h("html", { content: text })
-    : { type: "html", attrs: { content: text } };
-}
-
 function looksLikeMarkdown(text: string) {
-  return /(^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s)|```|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|!?\[[^\]]+\]\([^)]+\)/.test(
+  return /(^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s)|```|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|!?\[[^\]]+\]\([^)]+\)|\[(?:quote:\s*[^\]]+|(?:image|file|video|audio|sticker):\s*[^\]]*)\]/i.test(
     safeString(text),
   );
 }
@@ -448,11 +441,7 @@ function localAssetUrl(filePath: string) {
 function summarizeOutgoingParts(parts: ChatMessagePart[]) {
   return parts
     .map((part) => {
-      if (
-        part.type === "text" ||
-        part.type === "markdown" ||
-        part.type === "html"
-      )
+      if (part.type === "text" || part.type === "markdown")
         return safeString(part.text).trim();
       if (part.type === "at")
         return `[@] ${safeString(part.name).trim() || safeString(part.id).trim()}`;
@@ -526,11 +515,16 @@ export async function sendGenericFile(
 }
 
 export async function messagePartToNode(part: ChatMessagePart, h: any) {
-  if (part.type === "text") return h.text(part.text);
+  if (part.type === "text") {
+    const text = safeString(part.text);
+    return looksLikeMarkdown(text) ? markdownNode(h, text) : h.text(text);
+  }
   if (part.type === "markdown") return markdownNode(h, part.text);
-  if (part.type === "html") return htmlNode(h, part.text);
-  if (part.type === "at")
-    return h.at(part.id, part.name ? { name: part.name } : undefined);
+  if (part.type === "at") {
+    const id = safeString(part.id).trim();
+    if (!id) throw new Error("chat_outbox_invalid_part:at");
+    return h.at(id, part.name ? { name: part.name } : undefined);
+  }
   if (part.type === "quote") return h.quote(part.id);
   if (["image", "video", "audio", "sticker"].includes(part.type)) {
     const localPath = safeString((part as any).path).trim();
@@ -569,12 +563,7 @@ function buildPartsDeliveryRecord(rawParts: ChatMessagePart[]) {
     | undefined;
   const replyToMessageId = safeString(quotePart?.id).trim() || undefined;
   const logText = rawParts
-    .filter(
-      (part) =>
-        part.type === "text" ||
-        part.type === "markdown" ||
-        part.type === "html",
-    )
+    .filter((part) => part.type === "text" || part.type === "markdown")
     .map((part) => safeString((part as any).text).trim())
     .filter(Boolean)
     .join("\n\n")

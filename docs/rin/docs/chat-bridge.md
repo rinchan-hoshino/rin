@@ -82,10 +82,14 @@ Available globals:
 Supported parts:
 
 - `{ type: "text", text: "hello" }`
-- `{ type: "at", id: "123", name?: "name" }`
+- `{ type: "markdown", text: "**hello**" }`
+- `{ type: "at", id: "123", name?: "name" }`; `id` is required for native mentions
 - `{ type: "quote", id: "456" }`
 - `{ type: "image", path?: "/abs/file.png", url?: "https://...", mimeType?: "image/png" }`
 - `{ type: "file", path?: "/abs/file.zip", url?: "https://...", name?: "file.zip", mimeType?: "application/zip" }`
+- `{ type: "video", path?: "/abs/file.mp4", url?: "https://...", name?: "file.mp4", mimeType?: "video/mp4" }`
+- `{ type: "audio", path?: "/abs/file.mp3", url?: "https://...", name?: "file.mp3", mimeType?: "audio/mpeg" }`
+- `{ type: "sticker", path?: "/abs/file.webp", url?: "https://...", name?: "sticker.webp", mimeType?: "image/webp" }`
 
 ## Basic template
 

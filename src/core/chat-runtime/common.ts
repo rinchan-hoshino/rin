@@ -10,6 +10,7 @@ import {
 } from "../chat/file-utils.js";
 import {
   renderChatNodesPlain,
+  expandRichTextSyntaxNodes,
   renderChatNodesTelegramHtml,
   type RenderChatNodesOptions,
 } from "../chat/rich-text.js";
@@ -157,14 +158,29 @@ export function flattenNodes(value: any): any[] {
   return value.flatMap((item) => flattenNodes(item)).filter(Boolean);
 }
 
+function assertOutboundStructuredMentions(nodes: any[]) {
+  for (const node of flattenNodes(nodes)) {
+    const type = safeString(node?.type).trim().toLowerCase();
+    if (type === "at" && !safeString(node?.attrs?.id).trim()) {
+      throw new Error("chat_send_at_id_required");
+    }
+    if (Array.isArray(node?.children)) {
+      assertOutboundStructuredMentions(node.children);
+    }
+  }
+}
+
 export function prepareOutboundNodes(content: any) {
-  const nodes = flattenNodes(content)
-    .map((node) =>
-      typeof node === "string"
-        ? normalizeNode("text", { content: node })
-        : node,
-    )
-    .filter(Boolean);
+  const nodes = expandRichTextSyntaxNodes(
+    flattenNodes(content)
+      .map((node) =>
+        typeof node === "string"
+          ? normalizeNode("text", { content: node })
+          : node,
+      )
+      .filter(Boolean),
+  );
+  assertOutboundStructuredMentions(nodes);
   return {
     nodes,
     work: nodes.filter(

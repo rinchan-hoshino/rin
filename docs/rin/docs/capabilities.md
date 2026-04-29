@@ -64,8 +64,9 @@ Rin can bridge chat platforms through a framework-neutral chat bridge layer. The
 
 - the sender in a chat bridge conversation is not the local shell user; it is the chat-platform sender
 - the prompt may include `chatKey`, chat name, sender identity, and related context
-- in chat bridge conversations, avoid Markdown in replies
-- `chat_bridge` is the live bridge tool for advanced chat-platform operations
+- chat rich content is written with Markdown, including native rich objects such as at, quote, image, file, video, audio, and sticker syntax
+- native mentions require exact platform user ids; raw `@name` text is visible text only
+- `chat_bridge` is the live bridge tool for advanced chat-platform operations and rich chat sending
 - read `~/.rin/docs/rin/docs/chat-bridge.md` for runtime objects, examples, and adapter notes
 - `/chat` is the TUI command for configuring the built-in official adapters
 - `/chat` goes directly into platform selection in the TUI; the installer keeps the separate yes/no gate

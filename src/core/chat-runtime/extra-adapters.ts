@@ -234,7 +234,8 @@ export class DiscordAdapter {
     const files: any[] = [];
     for (const node of work) {
       const type = safeString(node?.type).toLowerCase();
-      if (type !== "image" && type !== "file") continue;
+      if (!["image", "file", "video", "audio", "sticker"].includes(type))
+        continue;
       const payload = await readBinaryFromNode(node);
       if (!payload) continue;
       if (payload.url) {
@@ -562,7 +563,8 @@ export class SlackAdapter {
     }
     for (const node of work) {
       const type = safeString(node?.type).toLowerCase();
-      if (type !== "image" && type !== "file") continue;
+      if (!["image", "file", "video", "audio", "sticker"].includes(type))
+        continue;
       const payload = await readBinaryFromNode(node);
       if (!payload) continue;
       if (payload.url) {
@@ -1219,7 +1221,8 @@ export class LarkAdapter {
     const text = renderPlainTextFromNodes(work, {
       renderAt(attrs) {
         const id = safeString(attrs.id).trim();
-        return id ? `@${id}` : safeString(attrs.name).trim();
+        const name = safeString(attrs.name).trim() || id;
+        return id ? `<at user_id="${id}">${name}</at>` : name;
       },
     });
     if (!text) throw new Error("lark_send_message_empty");

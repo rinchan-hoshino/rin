@@ -52,15 +52,8 @@ export function ensureSessionElements(session: any) {
   return [] as any[];
 }
 
-export function mentionLike(session: any) {
-  if (Boolean(session?.stripped?.appel)) return true;
-  const elements = ensureSessionElements(session);
-  const atElements = elements.filter(
-    (element) => safeString(element?.type).toLowerCase() === "at",
-  );
-  if (!atElements.length) return false;
-
-  const selfTokens = new Set(
+function collectSelfMentionTokens(session: any) {
+  return new Set(
     [
       session?.selfId,
       session?.bot?.selfId,
@@ -76,14 +69,26 @@ export function mentionLike(session: any) {
       .map(normalizeMentionToken)
       .filter(Boolean),
   );
+}
+
+function isSelfMention(attrs: Record<string, any>, selfTokens: Set<string>) {
+  const id = normalizeMentionToken(attrs.id);
+  const name = normalizeMentionToken(attrs.name);
+  return Boolean((id && selfTokens.has(id)) || (name && selfTokens.has(name)));
+}
+
+export function mentionLike(session: any) {
+  if (Boolean(session?.stripped?.appel)) return true;
+  const elements = ensureSessionElements(session);
+  const atElements = elements.filter(
+    (element) => safeString(element?.type).toLowerCase() === "at",
+  );
+  if (!atElements.length) return false;
+
+  const selfTokens = collectSelfMentionTokens(session);
 
   for (const element of atElements) {
-    const attrs = element?.attrs || {};
-    const id = normalizeMentionToken(attrs.id);
-    const name = normalizeMentionToken(attrs.name);
-    if ((id && selfTokens.has(id)) || (name && selfTokens.has(name))) {
-      return true;
-    }
+    if (isSelfMention(element?.attrs || {}, selfTokens)) return true;
   }
 
   return false;
@@ -114,8 +119,16 @@ function sessionElementsToText(session: any, elements: any[]) {
   const textElements = normalizedElements.filter(
     (element) => !isRichAttachmentElement(element),
   );
+  const selfTokens = collectSelfMentionTokens(session);
   const baseText = normalizeMessageText(
-    renderChatNodesMarkdown(textElements, { renderAt: () => "" }),
+    renderChatNodesMarkdown(textElements, {
+      renderAt(attrs) {
+        if (isSelfMention(attrs, selfTokens)) return "";
+        const id = safeString(attrs.id).trim();
+        const name = safeString(attrs.name).trim() || id;
+        return id ? `[@${name}](at:${id})` : name ? `@${name}` : "";
+      },
+    }),
   );
   const fallbackText = normalizeMessageText(session?.stripped?.content || "");
   const richText = richAttachments.length

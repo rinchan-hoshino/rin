@@ -671,9 +671,14 @@ export async function startChatBridge(
       };
     }
 
-    const decision = await shouldProcessText(
+    const effectiveElements = resolveQuotedInputElements(
       queuedSession,
       queuedElements,
+      envelope.chatKey,
+    );
+    const decision = await shouldProcessText(
+      queuedSession,
+      effectiveElements,
       identity,
     );
     if (!decision.allow) {
@@ -689,7 +694,7 @@ export async function startChatBridge(
         task = runClaimedInboxJob(job, () =>
           handleAllowedChatTurnSession(
             queuedSession,
-            queuedElements,
+            effectiveElements,
             identity,
             decision,
           ),

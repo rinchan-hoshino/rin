@@ -90,7 +90,7 @@ test("chat chat helpers derive incoming text from elements", () => {
       { type: "at", attrs: { id: "1" } },
       { type: "text", attrs: { content: " check /tmp/demo.log" } },
     ]),
-    "@1 check /tmp/demo.log",
+    "[@1](at:1) check /tmp/demo.log",
   );
   assert.equal(
     helpers.elementsToText([
@@ -116,11 +116,11 @@ test("chat chat helpers derive incoming text from elements", () => {
       },
       { type: "text", attrs: { content: " done" } },
     ]),
-    "@1 mixed\nelement\ndone",
+    "[@1](at:1) mixed\nelement\ndone",
   );
   assert.equal(
     helpers.elementsToText([{ type: "img", attrs: { file: "demo.png" } }]),
-    "![demo.png](demo.png)",
+    "[image: demo.png](demo.png)",
   );
   assert.equal(
     helpers.hasMediaElements([{ type: "img", attrs: { file: "demo.png" } }]),

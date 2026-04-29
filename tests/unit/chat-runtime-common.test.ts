@@ -53,7 +53,7 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
         name: "cat.png",
       }),
     ]),
-    "bold link\n[image: cat.png]",
+    "bold link\nimage: cat.png",
   );
   assert.equal(
     chatRuntimeCommon.renderPlainTextFromNodes(
@@ -73,6 +73,20 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
       }),
     ]),
     /<b>bold<\/b> <a href="https:\/\/example\.com">link<\/a>/,
+  );
+  assert.equal(
+    chatRuntimeCommon.renderPlainTextFromNodes(
+      [
+        chatRuntimeCommon.normalizeNode("at", { id: "42", name: "Rin" }),
+        chatRuntimeCommon.normalizeNode("quote", { id: "m1" }),
+        chatRuntimeCommon.normalizeNode("file", {
+          src: "https://example.com/spec.pdf",
+          name: "spec.pdf",
+        }),
+      ],
+      { markdown: "preserve" },
+    ),
+    "[@Rin](at:42)[quote:m1]\n[file: spec.pdf](https://example.com/spec.pdf)",
   );
 
   assert.equal(
@@ -96,6 +110,23 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
     ["text", "at"],
   );
   assert.equal(prepared.replyToMessageId, "abc123");
+});
+
+test("chat runtime common helpers expand markdown rich object syntax", () => {
+  const markdown = chatRuntimeCommon.prepareOutboundNodes([
+    chatRuntimeCommon.normalizeNode("markdown", {
+      content:
+        "Hello [@Rin](at:42) [quote:m1] [image: cat](https://example.com/cat.png) [file: spec.pdf](https://example.com/spec.pdf) [video: demo](https://example.com/demo.mp4) [audio: voice](https://example.com/voice.mp3) [sticker: yay](https://example.com/yay.webp)",
+    }),
+  ]);
+  assert.deepEqual(
+    markdown.nodes.map((node) => node.type),
+    ["markdown", "at", "quote", "image", "file", "video", "audio", "sticker"],
+  );
+  assert.equal(markdown.replyToMessageId, "m1");
+  assert.equal(markdown.nodes[1].attrs.id, "42");
+  assert.equal(markdown.nodes[3].attrs.src, "https://example.com/cat.png");
+  assert.equal(markdown.nodes[4].attrs.name, "spec.pdf");
 });
 
 test("chat runtime common helpers preserve binary payload naming for buffers and file urls", async () => {
