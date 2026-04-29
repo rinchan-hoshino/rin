@@ -289,6 +289,30 @@ test("plan-release script computes beta nightly and stable promotion versions", 
   }
 });
 
+test("release workflows retry main branch metadata pushes", () => {
+  for (const [workflow, followTags] of [
+    ["publish-nightly.yml", false],
+    ["publish-beta.yml", false],
+    ["publish-stable.yml", true],
+    ["publish-hotfix.yml", true],
+  ] as const) {
+    const content = fs.readFileSync(
+      path.join(rootDir, ".github", "workflows", workflow),
+      "utf8",
+    );
+    const tagSuffix = followTags ? " --follow-tags" : "";
+    assert.match(
+      content,
+      new RegExp(
+        `if ! git push origin HEAD:main${tagSuffix}; then\\n` +
+          `            git fetch origin main\\n` +
+          `            git rebase origin/main\\n` +
+          `            git push origin HEAD:main${tagSuffix}`,
+      ),
+    );
+  }
+});
+
 test("release workflows publish the public bootstrap branch", () => {
   for (const workflow of [
     "publish-nightly.yml",
