@@ -390,19 +390,34 @@ export async function startDaemon(
       }
       return true;
     }
-    if (type === "daemon_status") {
+    if (type === "daemon_status" || type === "daemon_activity") {
       const extraStatus = await options.getExtraStatus?.();
+      const workerStatus = workerPool.getStatusSnapshot();
+      const cronStatus = cronScheduler.getStatusSnapshot();
+      const activity = {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        socketPath,
+        ...workerStatus,
+        cron: cronStatus,
+        taskCount: cronStatus.taskCount,
+      };
       writeLine(
         connection.socket,
-        response(id, type, true, {
-          socketPath,
-          ...workerPool.getStatusSnapshot(),
-          taskCount: cronScheduler.listTasks().length,
-          webSearch: getWebSearchStatus(runtime.agentDir),
-          ...(extraStatus && typeof extraStatus === "object"
-            ? extraStatus
-            : {}),
-        }),
+        response(
+          id,
+          type,
+          true,
+          type === "daemon_activity"
+            ? activity
+            : {
+                ...activity,
+                webSearch: getWebSearchStatus(runtime.agentDir),
+                ...(extraStatus && typeof extraStatus === "object"
+                  ? extraStatus
+                  : {}),
+              },
+        ),
       );
       return true;
     }

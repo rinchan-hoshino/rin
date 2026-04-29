@@ -812,10 +812,10 @@ test("worker status snapshot exposes graceful shutdown state", async () => {
 
   pool.terminateWorkerGracefully(worker);
 
-  assert.equal(
-    pool.getStatusSnapshot().workers[0]?.gracefulShutdownRequested,
-    true,
-  );
+  const status = pool.getStatusSnapshot();
+  assert.equal(status.activeWorkerCount, 0);
+  assert.equal(status.workers[0]?.gracefulShutdownRequested, true);
+  assert.equal(status.workers[0]?.state, "stopping");
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

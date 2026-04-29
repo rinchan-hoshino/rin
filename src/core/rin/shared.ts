@@ -48,6 +48,7 @@ export type ParsedArgs = {
     | "stop"
     | "restart"
     | "doctor"
+    | "status"
     | "gui"
     | "usage"
     | "memory-index"

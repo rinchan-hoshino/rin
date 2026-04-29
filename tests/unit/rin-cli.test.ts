@@ -19,6 +19,9 @@ const memoryIndex = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "memory-index.js"))
     .href
 );
+const status = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "status.js")).href
+);
 const main = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "main.js")).href
 );
@@ -54,7 +57,7 @@ test("cli help omits removed hidden-session flags", () => {
   assert.doesNotMatch(output, /--(?:std|rpc)\b/);
 });
 
-test("usage and memory-index parsers ignore wrapper args around the subcommand", () => {
+test("usage, status, and memory-index parsers ignore wrapper args around the subcommand", () => {
   assert.deepEqual(
     usage.parseUsageArgs(["-u", "rin", "usage", "--events", "--limit", "5"]),
     {
@@ -104,6 +107,23 @@ test("usage and memory-index parsers ignore wrapper args around the subcommand",
       events: false,
       includeZero: false,
       dimensions: false,
+      help: false,
+    },
+  );
+
+  assert.deepEqual(
+    status.parseStatusArgs([
+      "--user=rin",
+      "status",
+      "--watch",
+      "--interval",
+      "2.5",
+      "--json",
+    ]),
+    {
+      watch: true,
+      intervalMs: 2500,
+      json: true,
       help: false,
     },
   );
@@ -177,7 +197,50 @@ test("captureInternalRinCommand forwards only subcommand args", () => {
   ]);
 });
 
-test("usage parser rejects invalid filter syntax and removed hidden-session flags", () => {
+test("status report renders live worker and cron activity", () => {
+  const report = status.renderStatusReport({
+    generatedAt: "2026-04-29T01:00:00.000Z",
+    socketPath: "/tmp/rin.sock",
+    workerCount: 1,
+    activeWorkerCount: 1,
+    workers: [
+      {
+        id: "worker_1",
+        pid: 123,
+        state: "working",
+        attachedConnections: 1,
+        pendingResponses: 2,
+        sessionFile: "/home/rin/.rin/sessions/demo.jsonl",
+      },
+    ],
+    cron: {
+      taskCount: 1,
+      enabledTaskCount: 1,
+      runningTaskCount: 1,
+      nextRunAt: "2026-04-29T02:00:00.000Z",
+      tasks: [
+        {
+          id: "cron_demo",
+          enabled: true,
+          running: true,
+          activeDurationMs: 3000,
+          runCount: 4,
+          nextRunAt: "2026-04-29T02:00:00.000Z",
+          session: { mode: "dedicated" },
+          target: { kind: "agent_prompt" },
+        },
+      ],
+    },
+  });
+
+  assert.match(report, /workers: 1 total, 1 active/);
+  assert.match(report, /worker_1/);
+  assert.match(report, /cron: 1 tasks, 1 enabled, 1 running/);
+  assert.match(report, /cron_demo/);
+  assert.match(report, /agent_prompt/);
+});
+
+test("usage and status parsers reject invalid syntax", () => {
   assert.throws(
     () => usage.parseUsageArgs(["usage", "--filter", " source= "]),
     /invalid_filter:source=/,
@@ -185,6 +248,10 @@ test("usage parser rejects invalid filter syntax and removed hidden-session flag
   assert.throws(
     () => usage.parseUsageArgs(["usage", "--session=rin-hidden"]),
     /unknown_usage_arg:--session=rin-hidden/,
+  );
+  assert.throws(
+    () => status.parseStatusArgs(["status", "--bad"]),
+    /unknown_status_arg:--bad/,
   );
 });
 
@@ -206,4 +273,14 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
   assert.ok(memoryInternal);
   assert.equal(memoryInternal.run, memoryIndex.runMemoryIndexInternal);
   assert.deepEqual(memoryInternal.args, ["repair"]);
+
+  const statusHelp = main.resolveInternalRinDispatch([
+    "-u",
+    "rin",
+    "status",
+    "--help",
+  ]);
+  assert.ok(statusHelp);
+  assert.equal(statusHelp.run, status.runStatusInternal);
+  assert.deepEqual(statusHelp.args, ["--help"]);
 });

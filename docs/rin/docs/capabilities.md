@@ -118,6 +118,18 @@ Rin provides a `fetch` tool. As an agent, you should know that:
 - prefer it over `web_search` when discovery is not needed
 - it returns readable text content rather than downloading files
 
+## Runtime activity status
+
+Rin exposes live daemon activity for workers and scheduled tasks.
+
+As an agent, you should know that:
+
+- `rin status` prints a current worker and cron/scheduled-task snapshot
+- `rin status --watch` refreshes the snapshot as a live terminal view
+- `rin status --json` returns the raw `daemon_activity` RPC payload for custom frontends or external tooling
+- RPC clients can call `daemon_activity` directly to get the same real-time worker and cron state without scraping terminal output
+- `daemon_activity` includes a top-level `schemaVersion` and redacts scheduled task prompt/command bodies from the cron snapshot
+
 ## Token usage telemetry
 
 Rin records detailed token telemetry for runtime events and assistant usage.

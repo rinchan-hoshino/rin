@@ -319,9 +319,17 @@ export class WorkerPool {
   }
 
   getStatusSnapshot() {
-    return {
-      workerCount: this.workers.size,
-      workers: Array.from(this.workers).map((worker) => ({
+    const workers = Array.from(this.workers).map((worker) => {
+      const state = worker.gracefulShutdownRequested
+        ? "stopping"
+        : worker.isCompacting
+          ? "compacting"
+          : worker.turnActive || worker.isStreaming
+            ? "working"
+            : worker.idleSince
+              ? "idle"
+              : "attached";
+      return {
         id: worker.id,
         pid: worker.child.pid ?? null,
         sessionFile: worker.sessionFile,
@@ -331,11 +339,19 @@ export class WorkerPool {
         turnActive: worker.turnActive,
         isStreaming: worker.isStreaming,
         isCompacting: worker.isCompacting,
+        state,
         lastUsedAt: worker.lastUsedAt,
         idleSince: worker.idleSince,
         gracefulShutdownRequested: worker.gracefulShutdownRequested,
         role: "session",
-      })),
+      };
+    });
+    return {
+      workerCount: workers.length,
+      activeWorkerCount: workers.filter(
+        (worker) => worker.state === "working" || worker.state === "compacting",
+      ).length,
+      workers,
     };
   }
 

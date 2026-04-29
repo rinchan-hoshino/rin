@@ -61,6 +61,7 @@ rin
 
 ```bash
 rin doctor
+rin status --watch  # 实时查看 worker 和定时任务活动
 ```
 
 安装器会提醒你安全边界，以及可能出现的额外 token 开销。这些开销可能来自初始化、记忆处理、总结压缩、subagent、定时任务和 Web 搜索等流程。
@@ -84,6 +85,7 @@ rin doctor
 ```bash
 rin            # 打开 Rin
 rin doctor     # 检查状态和配置
+rin status     # 查看 worker 和定时任务活动
 rin start      # 启动 daemon
 rin stop       # 停止 daemon
 rin restart    # 重启 daemon

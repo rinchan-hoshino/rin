@@ -475,11 +475,24 @@ test("cron scheduler derives running from live execution without persisting it",
 
     const runningTask = scheduler.getTask("cron_running_state");
     assert.equal(runningTask?.running, true);
+    assert.ok(runningTask?.activeStartedAt);
+    assert.equal(typeof runningTask?.activeDurationMs, "number");
+
+    const status = scheduler.getStatusSnapshot();
+    assert.equal(status.taskCount, 1);
+    assert.equal(status.enabledTaskCount, 1);
+    assert.equal(status.runningTaskCount, 1);
+    assert.equal(status.tasks[0]?.id, "cron_running_state");
+    assert.equal(status.tasks[0]?.running, true);
+    assert.deepEqual(status.tasks[0]?.target, { kind: "shell_command" });
+    assert.equal(status.tasks[0]?.target.command, undefined);
 
     const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
     const storedTask = rows.find((task) => task.id === "cron_running_state");
     assert.ok(storedTask);
     assert.equal(storedTask.running, false);
+    assert.equal(storedTask.activeStartedAt, undefined);
+    assert.equal(storedTask.activeDurationMs, undefined);
 
     scheduler.activeExecutions.delete("cron_running_state");
     assert.equal(scheduler.getTask("cron_running_state")?.running, false);

@@ -95,6 +95,7 @@ Check health if needed:
 
 ```bash
 rin doctor
+rin status --watch  # live worker and scheduled-task activity
 ```
 
 ## Built in today
@@ -152,6 +153,7 @@ Avoid treating repo-local workflows like `git pull`, ad-hoc rebuilds, or rerunni
 ```bash
 rin            # open Rin
 rin doctor     # inspect health and configuration
+rin status     # show live worker and scheduled-task activity
 rin start      # start the daemon
 rin stop       # stop the daemon
 rin restart    # restart the daemon

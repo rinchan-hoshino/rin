@@ -98,6 +98,8 @@ export type CronTaskRecord = {
   lastError?: string;
   runCount: number;
   running: boolean;
+  activeStartedAt?: string;
+  activeDurationMs?: number;
 };
 
 export type CronTaskInput = {
@@ -340,6 +342,31 @@ export class CronScheduler {
     return this.publicTask(task);
   }
 
+  getStatusSnapshot(options: { includeBuiltIn?: boolean } = {}) {
+    const tasks = Array.from(this.tasks.values())
+      .filter((task) => options.includeBuiltIn || !task.builtIn)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+      .map((task) => this.statusTask(task));
+    const runningTaskCount = tasks.filter((task) => task.running).length;
+    const enabledTaskCount = tasks.filter(
+      (task) => task.enabled && !task.completedAt,
+    ).length;
+    const nextRunAt = tasks
+      .map((task) => safeString(task.nextRunAt).trim())
+      .filter(Boolean)
+      .sort()[0];
+    return {
+      taskCount: tasks.length,
+      enabledTaskCount,
+      runningTaskCount,
+      builtInTaskCount: Array.from(this.tasks.values()).filter(
+        (task) => task.builtIn,
+      ).length,
+      nextRunAt,
+      tasks,
+    };
+  }
+
   upsertTask(input: CronTaskInput, defaults: CronTaskUpsertDefaults = {}) {
     const existing = input.id ? this.tasks.get(String(input.id)) : undefined;
     assertMutableTask(existing);
@@ -516,9 +543,16 @@ export class CronScheduler {
   }
 
   private snapshotTask(task: CronTaskRecord): CronTaskRecord {
+    const activeExecution = this.activeExecutions.get(task.id);
     return {
       ...task,
-      running: this.activeExecutions.has(task.id),
+      running: Boolean(activeExecution),
+      activeStartedAt: activeExecution
+        ? new Date(activeExecution.startedAt).toISOString()
+        : undefined,
+      activeDurationMs: activeExecution
+        ? Math.max(0, Date.now() - activeExecution.startedAt)
+        : undefined,
     };
   }
 
@@ -526,11 +560,36 @@ export class CronScheduler {
     return {
       ...task,
       running: false,
+      activeStartedAt: undefined,
+      activeDurationMs: undefined,
     };
   }
 
   private publicTask(task: CronTaskRecord): CronTaskRecord {
     return cloneJson(this.snapshotTask(task));
+  }
+
+  private statusTask(task: CronTaskRecord) {
+    const snapshot = this.snapshotTask(task);
+    const {
+      chatKey,
+      createdFrom,
+      dedicatedSessionFile,
+      lastError,
+      lastResultText,
+      target,
+      ...safeTask
+    } = snapshot;
+    void createdFrom;
+    void dedicatedSessionFile;
+    void lastError;
+    void lastResultText;
+    return cloneJson({
+      ...safeTask,
+      hasChatBinding: Boolean(chatKey),
+      session: { mode: snapshot.session.mode },
+      target: { kind: target.kind },
+    });
   }
 
   private save() {
