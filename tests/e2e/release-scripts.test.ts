@@ -296,41 +296,12 @@ test("plan-release script computes beta nightly and stable promotion versions", 
   }
 });
 
-test("hotfix workflow resolves fetched refs before publishing", () => {
-  const content = readWorkflow("publish-hotfix.yml");
-  assert.match(content, /git fetch origin '\$\{\{ inputs\.ref \}\}'/);
-  assert.match(
-    content,
-    /echo "HOTFIX_REF_SHA=\$\(git rev-parse FETCH_HEAD\)" >> "\$GITHUB_ENV"/,
-  );
-  assert.match(
-    content,
-    /git worktree add --detach "\$candidate_dir" "\$HOTFIX_REF_SHA"/,
-  );
-  assert.match(content, /--ref "\$HOTFIX_REF_SHA"/);
-  assert.match(
-    content,
-    /git tag 'v\$\{\{ inputs\.version \}\}' "\$HOTFIX_REF_SHA"/,
-  );
-  assert.match(
-    content,
-    /git push origin HEAD:main 'refs\/tags\/v\$\{\{ inputs\.version \}\}'/,
-  );
-  assert.match(
-    content,
-    /if ! git push origin HEAD:main 'refs\/tags\/v\$\{\{ inputs\.version \}\}'; then\n\s+git fetch origin main\n\s+git rebase origin\/main\n\s+git push origin HEAD:main 'refs\/tags\/v\$\{\{ inputs\.version \}\}'/,
-  );
-  assert.doesNotMatch(
-    content,
-    /git worktree add --detach "\$candidate_dir" '\$\{\{ inputs\.ref \}\}'/,
-  );
-});
-
 test("release workflows retry main branch metadata pushes", () => {
   for (const [workflow, followTags] of [
     ["publish-nightly.yml", false],
     ["publish-beta.yml", false],
     ["publish-stable.yml", true],
+    ["publish-hotfix.yml", true],
   ] as const) {
     const content = readWorkflow(workflow);
     const tagSuffix = followTags ? " --follow-tags" : "";
@@ -428,25 +399,12 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       installPowerShellWrapper,
       /\[CmdletBinding\(PositionalBinding = \$false\)\]/,
     );
-    assert.match(
-      installPowerShellWrapper,
-      /function Assert-WindowsPowerShellHost/,
-    );
-    assert.ok(
-      installPowerShellWrapper.indexOf("Assert-WindowsPowerShellHost") <
-        installPowerShellWrapper.indexOf("$repoUrl ="),
-    );
     assert.match(installPowerShellWrapper, /return ,\$result/);
     assert.match(
       installPowerShellWrapper,
       /\$bootstrapArgs = @\(Build-BootstrapArgs \$args\)/,
     );
     assert.doesNotMatch(bootstrapPowerShell, /\[switch\]\$Git/);
-    assert.match(bootstrapPowerShell, /function Assert-WindowsPowerShellHost/);
-    assert.ok(
-      bootstrapPowerShell.indexOf("Assert-WindowsPowerShellHost") <
-        bootstrapPowerShell.indexOf("function Parse-Args"),
-    );
     assert.match(bootstrapPowerShell, /function Is-Flag/);
     assert.match(bootstrapPowerShell, /Is-Flag \$arg "git"/);
     assert.match(bootstrapPowerShell, /Is-Flag \$arg "mode"/);

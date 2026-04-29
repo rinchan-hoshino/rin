@@ -1,14 +1,5 @@
 $ErrorActionPreference = "Stop"
 
-function Assert-WindowsPowerShellHost {
-  $isWindowsVariable = Get-Variable -Name IsWindows -ErrorAction SilentlyContinue
-  if ($null -ne $isWindowsVariable -and -not [bool]$isWindowsVariable.Value) {
-    throw "rin_powershell_installer_windows_only: use install.sh or rin update on non-Windows systems"
-  }
-}
-
-Assert-WindowsPowerShellHost
-
 $mode = "install"
 $channel = "stable"
 $branch = ""
