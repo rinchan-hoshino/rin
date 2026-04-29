@@ -97,6 +97,21 @@ function formatMaybe(value: unknown, fallback = "-") {
   return text || fallback;
 }
 
+function formatStatusUnavailable(options: Pick<StatusCliOptions, "json">) {
+  return options.json
+    ? JSON.stringify({ error: "rin_daemon_unavailable" })
+    : "Rin daemon status: unavailable";
+}
+
+function formatStatusRequestFailure(
+  options: Pick<StatusCliOptions, "json">,
+  error: unknown,
+) {
+  const detail = safeString(error).trim() || "daemon_request_failed";
+  const message = `Rin daemon status: unavailable (${detail})`;
+  return options.json ? JSON.stringify({ error: message }) : message;
+}
+
 function formatDuration(ms: unknown) {
   const value = Number(ms || 0);
   if (!Number.isFinite(value) || value <= 0) return "-";
@@ -267,8 +282,11 @@ async function runStatusLoop(options: StatusCliOptions, socketPath?: string) {
         console.log("\nPress Ctrl+C to stop.");
       }
     } catch (error: any) {
-      const message = `Rin daemon status: unavailable (${safeString(error?.message || error) || "daemon_request_failed"})`;
-      if (options.json) console.log(JSON.stringify({ error: message }));
+      const message = formatStatusRequestFailure(
+        options,
+        error?.message || error,
+      );
+      if (options.json) console.log(message);
       else {
         process.stdout.write("\x1b[2J\x1b[H");
         console.log(message);
@@ -286,11 +304,7 @@ export async function runStatusInternal(rawArgv: string[]) {
     return;
   }
   if (!(await canConnectDaemonSocket(undefined, 500))) {
-    console.log(
-      options.json
-        ? JSON.stringify({ error: "rin_daemon_unavailable" })
-        : "Rin daemon status: unavailable",
-    );
+    console.log(formatStatusUnavailable(options));
     return;
   }
   if (options.watch) return await runStatusLoop(options);
@@ -324,11 +338,7 @@ export async function runStatus(parsed: ParsedArgs, rawArgv: string[]) {
     return;
   }
   if (!(await context.canConnectSocket())) {
-    console.log(
-      options.json
-        ? JSON.stringify({ error: "rin_daemon_unavailable" })
-        : "Rin daemon status: unavailable",
-    );
+    console.log(formatStatusUnavailable(options));
     return;
   }
   if (options.watch) return await runStatusLoop(options, context.socketPath);
