@@ -178,7 +178,7 @@ function Resolve-Release {
   if ($channel -eq "beta") {
     $beta = $manifest.beta
     $resolvedRef = if ($beta.ref) { [string]$beta.ref } else { "main" }
-    $resolvedVersion = if ($beta.version) { [string]$beta.version } else { "0.0.1-beta.0" }
+    $resolvedVersion = if ($beta.version) { [string]$beta.version } else { "0.1.0-beta.0" }
     return [pscustomobject]@{
       PackageName = $packageName
       Channel = "beta"
@@ -194,7 +194,7 @@ function Resolve-Release {
     $train = $manifest.train
     $resolvedBranch = if ($nightly.branch) { [string]$nightly.branch } elseif ($train.nightlyBranch) { [string]$train.nightlyBranch } else { "main" }
     $resolvedRef = if ($nightly.ref) { [string]$nightly.ref } else { $resolvedBranch }
-    $resolvedVersion = if ($nightly.version) { [string]$nightly.version } else { "0.0.1-nightly.0" }
+    $resolvedVersion = if ($nightly.version) { [string]$nightly.version } else { "0.1.0-nightly.0" }
     return [pscustomobject]@{
       PackageName = $packageName
       Channel = "nightly"

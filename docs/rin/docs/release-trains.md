@@ -40,6 +40,12 @@ Rin uses a four-channel release model.
 - stable: once per week by promoting the previous beta candidate
 - hotfix: manual patch release outside the fixed cadence
 
+## Versioning policy
+
+- each regular stable release advances `minor + 1` and resets `patch` to `0`
+- each hotfix advances the current stable line by `patch + 1`
+- beta and nightly are prereleases of that next regular stable target
+
 ## Promotion rule
 
 Stable is not rebuilt from a fresh weekly snapshot of `main`.
@@ -54,7 +60,7 @@ That means the stable workflow publishes the beta candidate's exact pinned ref, 
 - the current beta candidate version plus pinned source ref
 - the current nightly version plus pinned source ref
 - git default branch metadata
-- train metadata such as the active `major.minor` series and nightly branch
+- train metadata such as the nightly source branch
 
 ## Automation
 

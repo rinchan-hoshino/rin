@@ -160,7 +160,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
         schemaVersion: 2,
         train: { series: "1.2", nightlyBranch: "main" },
         stable: { version: "1.2.3" },
-        beta: { version: "1.2.4-beta.20260420" },
+        beta: { version: "1.3.0-beta.20260420" },
       }),
     );
     const betaPlan = JSON.parse(
@@ -179,9 +179,9 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       ),
     );
     assert.deepEqual(betaPlan, {
-      series: "1.2",
-      promotionVersion: "1.2.4",
-      version: "1.2.4-beta.20260427",
+      series: "1.3",
+      promotionVersion: "1.3.0",
+      version: "1.3.0-beta.20260427",
     });
 
     const nightlyPlan = JSON.parse(
@@ -202,9 +202,9 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       ),
     );
     assert.deepEqual(nightlyPlan, {
-      series: "1.2",
-      promotionVersion: "1.2.4",
-      version: "1.2.4-nightly.20260427+deadbee",
+      series: "1.3",
+      promotionVersion: "1.3.0",
+      version: "1.3.0-nightly.20260427+deadbee",
     });
 
     const stablePlan = JSON.parse(
@@ -217,15 +217,15 @@ test("plan-release script computes beta nightly and stable promotion versions", 
           "--channel",
           "stable-promotion",
           "--beta-version",
-          "1.2.4-beta.20260420",
+          "1.3.0-beta.20260420",
         ],
         { cwd: rootDir, stdio: "pipe", encoding: "utf8" },
       ),
     );
     assert.deepEqual(stablePlan, {
-      series: "1.2",
-      promotionVersion: "1.2.4",
-      version: "1.2.4",
+      series: "1.3",
+      promotionVersion: "1.3.0",
+      version: "1.3.0",
     });
 
     fs.writeFileSync(
@@ -233,7 +233,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       JSON.stringify({
         schemaVersion: 2,
         train: { series: "1.2", nightlyBranch: "main" },
-        stable: { version: "1.2.4" },
+        stable: { version: "1.3.0" },
       }),
     );
     const hotfixAwareStablePlan = JSON.parse(
@@ -246,15 +246,15 @@ test("plan-release script computes beta nightly and stable promotion versions", 
           "--channel",
           "stable-promotion",
           "--beta-version",
-          "1.2.4-beta.20260420",
+          "1.3.0-beta.20260420",
         ],
         { cwd: rootDir, stdio: "pipe", encoding: "utf8" },
       ),
     );
     assert.deepEqual(hotfixAwareStablePlan, {
-      series: "1.2",
-      promotionVersion: "1.2.4",
-      version: "1.2.5",
+      series: "1.3",
+      promotionVersion: "1.3.0",
+      version: "1.3.1",
     });
 
     fs.writeFileSync(
@@ -280,9 +280,9 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       ),
     );
     assert.deepEqual(implicitSeriesBetaPlan, {
-      series: "2.3",
-      promotionVersion: "2.3.5",
-      version: "2.3.5-beta.20260427",
+      series: "2.4",
+      promotionVersion: "2.4.0",
+      version: "2.4.0-beta.20260427",
     });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

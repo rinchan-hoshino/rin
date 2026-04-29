@@ -88,31 +88,18 @@ function incrementPatch(version) {
   return formatCore({ ...core, patch: core.patch + 1 });
 }
 
-function resolveSeries(manifest) {
-  const configured = trim(manifest.train?.series);
-  if (configured) return configured;
-  const stable = parseCore(trim(manifest.stable?.version) || "0.0.0");
-  return `${stable.major}.${stable.minor}`;
-}
-
-function parseSeries(series) {
-  const [major, minor] = trim(series)
-    .split(".")
-    .map((value) => Number(value || 0));
-  return { major, minor };
-}
-
-function nextPromotionVersion(manifest) {
-  const series = resolveSeries(manifest);
-  const seriesCore = parseSeries(series);
+function nextRegularStableVersion(manifest) {
   const stableCore = parseCore(trim(manifest.stable?.version) || "0.0.0");
-  if (
-    stableCore.major === seriesCore.major &&
-    stableCore.minor === seriesCore.minor
-  ) {
-    return `${seriesCore.major}.${seriesCore.minor}.${stableCore.patch + 1}`;
-  }
-  return `${seriesCore.major}.${seriesCore.minor}.0`;
+  return formatCore({
+    major: stableCore.major,
+    minor: stableCore.minor + 1,
+    patch: 0,
+  });
+}
+
+function versionSeries(version) {
+  const core = parseCore(version);
+  return `${core.major}.${core.minor}`;
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -125,16 +112,16 @@ const shortRef = trim(ref).slice(0, 7) || "main";
 
 let result;
 if (channel === "nightly") {
-  const promotionVersion = nextPromotionVersion(manifest);
+  const promotionVersion = nextRegularStableVersion(manifest);
   result = {
-    series: resolveSeries(manifest),
+    series: versionSeries(promotionVersion),
     promotionVersion,
     version: `${promotionVersion}-nightly.${date}+${shortRef}`,
   };
 } else if (channel === "beta") {
-  const promotionVersion = nextPromotionVersion(manifest);
+  const promotionVersion = nextRegularStableVersion(manifest);
   result = {
-    series: resolveSeries(manifest),
+    series: versionSeries(promotionVersion),
     promotionVersion,
     version: `${promotionVersion}-beta.${date}`,
   };
@@ -151,7 +138,7 @@ if (channel === "nightly") {
       ? incrementPatch(currentStableVersion)
       : basePromotionVersion;
   result = {
-    series: resolveSeries(manifest),
+    series: versionSeries(targetVersion),
     promotionVersion: basePromotionVersion,
     version: targetVersion,
   };

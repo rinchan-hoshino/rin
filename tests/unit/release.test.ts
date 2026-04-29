@@ -216,8 +216,8 @@ test("readBundledReleaseManifest falls back to bundled defaults", () => {
   assert.equal(manifest.bootstrapBranch, "bootstrap");
   assert.equal(manifest.train.series, "0.0");
   assert.equal(manifest.stable.version, "0.0.0");
-  assert.equal(manifest.beta.version, "0.0.1-beta.0");
-  assert.equal(manifest.nightly.version, "0.0.1-nightly.0");
+  assert.equal(manifest.beta.version, "0.1.0-beta.0");
+  assert.equal(manifest.nightly.version, "0.1.0-nightly.0");
   assert.equal(
     manifest.stable.archiveUrl,
     "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-0.0.0.tgz",

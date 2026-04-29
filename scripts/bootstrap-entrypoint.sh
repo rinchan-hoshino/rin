@@ -312,13 +312,13 @@ const defaultManifest = {
     ref: 'main',
   },
   beta: {
-    version: '0.0.1-beta.0',
+    version: '0.1.0-beta.0',
     archiveUrl: `${repoUrl}/archive/refs/heads/main.tar.gz`,
     ref: 'main',
-    promotionVersion: '0.0.1',
+    promotionVersion: '0.1.0',
   },
   nightly: {
-    version: '0.0.1-nightly.0',
+    version: '0.1.0-nightly.0',
     archiveUrl: `${repoUrl}/archive/refs/heads/main.tar.gz`,
     ref: 'main',
     branch: 'main',
@@ -355,7 +355,7 @@ if (channel === 'stable') {
   if (branch || version) throw new Error('rin_beta_selector_not_supported');
   const beta = manifest.beta || {};
   const resolvedRef = trimValue(beta.ref) || 'main';
-  const resolvedVersion = trimValue(beta.version) || '0.0.1-beta.0';
+  const resolvedVersion = trimValue(beta.version) || '0.1.0-beta.0';
   resolved = {
     channel: 'beta',
     archiveUrl: trimValue(beta.archiveUrl) || buildRefArchiveUrl(resolvedRef),
@@ -372,10 +372,10 @@ if (channel === 'stable') {
   resolved = {
     channel: 'nightly',
     archiveUrl: trimValue(nightly.archiveUrl) || (trimValue(nightly.ref) ? buildRefArchiveUrl(resolvedRef) : buildBranchArchiveUrl(resolvedBranch)),
-    version: trimValue(nightly.version) || '0.0.1-nightly.0',
+    version: trimValue(nightly.version) || '0.1.0-nightly.0',
     branch: resolvedBranch,
     ref: resolvedRef,
-    sourceLabel: `nightly ${trimValue(nightly.version) || '0.0.1-nightly.0'}`,
+    sourceLabel: `nightly ${trimValue(nightly.version) || '0.1.0-nightly.0'}`,
   };
 } else {
   const git = manifest.git || {};

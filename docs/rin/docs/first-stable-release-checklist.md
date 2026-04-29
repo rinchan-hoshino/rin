@@ -18,7 +18,7 @@ Use this checklist before the first real stable npm promotion.
 - confirm `bootstrap` either already exists or may be created by the workflows
 - confirm GitHub Actions is enabled for the repository
 - confirm the repository token permissions allow pushing workflow-generated commits and tags
-- confirm `release-manifest.json -> train.series` is set to the intended initial stable `major.minor` line
+- confirm stable/hotfix versioning follows the current policy: each regular stable release advances `minor + 1` and resets `patch` to `0`, while each hotfix advances the current stable line by `patch + 1`
 
 ## Release metadata readiness
 
@@ -26,7 +26,6 @@ Use this checklist before the first real stable npm promotion.
   - `packageName: "@rinchanai20260422/rin"`
   - correct `repoUrl`
   - correct `bootstrapBranch`
-  - correct `train.series`
   - correct `train.nightlyBranch`
 - confirm stable still uses placeholder bootstrap metadata until the first successful npm publish completes
 - confirm beta metadata points to the intended weekly beta candidate shape
@@ -102,4 +101,4 @@ Verify all of the following after the workflow succeeds:
 - if npm publish succeeds but a later step fails, treat the published package as real state and repair Git metadata to match it
 - if bootstrap export fails, fix the export path and rerun; do not hand-edit `bootstrap`
 - if the workflow-created beta candidate is bad, do not promote it; cut a new beta candidate first
-- if a hotfix is required between beta cut and stable promotion, use `publish-hotfix.yml` and let the next stable promotion pick the next available patch version
+- if a hotfix is required between beta cut and stable promotion, use `publish-hotfix.yml` for the current stable line and let the next scheduled stable still promote the next minor target

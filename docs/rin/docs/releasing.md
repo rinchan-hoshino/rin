@@ -8,7 +8,7 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 - configure the repository secret `NPM_TOKEN` so `publish-stable.yml` and `publish-hotfix.yml` can publish `@rinchanai20260422/rin`
 - confirm the focused release validation set passes on `main`
 - update `docs/rin/CHANGELOG.md` before a promotion if release notes changed
-- keep `release-manifest.json -> train.series` aligned with the active `major.minor` line
+- keep stable/hotfix versioning aligned with the current policy: each regular stable release advances `minor + 1` and resets `patch` to `0`, while each hotfix advances the current stable line by `patch + 1`
 
 ## Channel contract
 
@@ -37,7 +37,7 @@ It must not silently replace that ref with newer `main` content.
 It:
 
 1. resolves the nightly source ref, defaulting to `main` HEAD
-2. computes a nightly version from the active train series and current date
+2. computes a nightly version as a prerelease of the next regular stable target
 3. validates the focused release test set
 4. updates `release-manifest.json -> nightly`
 5. commits the manifest update back to `main`
@@ -49,7 +49,7 @@ It:
 It:
 
 1. resolves the beta source ref, defaulting to `main` HEAD
-2. computes the next promotion version from `train.series` and the current stable version
+2. computes the next regular stable target from the current stable version by advancing `minor + 1` and resetting `patch` to `0`
 3. creates the weekly beta version for that promotion target
 4. validates the focused release test set
 5. updates `release-manifest.json -> beta`
@@ -62,8 +62,8 @@ It:
 It:
 
 1. reads the current beta candidate ref and version from `release-manifest.json`
-2. computes the stable promotion version, normally by stripping the beta suffix
-3. if a hotfix already advanced stable past that version, bumps to the next available patch version
+2. computes the stable promotion version by stripping the beta suffix
+3. if a rerun or earlier release already used that version, bumps to the next available patch version on that stable line
 4. checks out the beta candidate ref in a detached worktree
 5. validates that candidate with the focused release test set
 6. sets the package version only inside the candidate worktree
@@ -77,7 +77,7 @@ It:
 
 `publish-hotfix.yml` is manual only.
 It expects an explicit `ref` and patch `version`.
-Use it for urgent stable fixes outside the weekly train.
+Use it for urgent stable fixes outside the weekly train; the patch version should be the current stable line plus `patch + 1`.
 It:
 
 1. checks out the requested ref in a detached worktree
