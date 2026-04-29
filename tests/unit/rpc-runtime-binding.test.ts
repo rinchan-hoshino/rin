@@ -680,6 +680,69 @@ test("rpc runtime keeps steer prompts pending until the remote turn starts", asy
   assert.equal(sent[0]?.streamingBehavior, "steer");
 });
 
+test("rpc runtime clears the daemon queue before re-sending restored messages", async () => {
+  const sent = [];
+  let releaseClearQueue;
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      if (payload.type === "clear_queue") {
+        return new Promise((resolve) => {
+          releaseClearQueue = () => resolve({ success: true, data: {} });
+        });
+      }
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return true;
+    },
+    connect() {
+      return Promise.resolve();
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+
+  session.sessionId = "s1";
+  session.rpcConnected = true;
+  session.startupPending = false;
+
+  await session.prompt("hello", {
+    expandPromptTemplates: false,
+    streamingBehavior: "steer",
+  });
+  assert.deepEqual(session.getSteeringMessages(), ["hello"]);
+
+  const restored = session.clearQueue();
+  const resendPromise = session.prompt("hello", {
+    expandPromptTemplates: false,
+    streamingBehavior: "steer",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(restored, { steering: ["hello"], followUp: [] });
+  assert.deepEqual(
+    sent.map((entry) => entry.type),
+    ["prompt", "clear_queue"],
+  );
+
+  releaseClearQueue();
+  await resendPromise;
+
+  assert.deepEqual(session.getSteeringMessages(), ["hello"]);
+  assert.deepEqual(
+    sent.map((entry) => entry.type),
+    ["prompt", "clear_queue", "prompt"],
+  );
+});
+
 test("rpc runtime applies daemon queue updates before the user message starts", async () => {
   const session = new RpcInteractiveSession({
     send() {

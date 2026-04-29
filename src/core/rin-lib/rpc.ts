@@ -44,6 +44,7 @@ const SESSION_SCOPED_COMMAND_NAMES = [
   "resume_interrupted_turn",
   "steer",
   "follow_up",
+  "clear_queue",
   "abort",
   "get_state",
   "cycle_model",

@@ -403,6 +403,8 @@ export async function runCustomRpcMode(
         return run(id, type, () =>
           session.followUp(command.message, command.images),
         );
+      case "clear_queue":
+        return done(id, type, session.clearQueue());
       case "abort":
         return run(id, type, async () => {
           markTurnState(session, "aborted");

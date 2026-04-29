@@ -279,6 +279,7 @@ export class RpcInteractiveSession {
   private resourceSnapshot = emptyRpcResourceSnapshot();
   private sessionOperationPending = false;
   private recoveryPending = false;
+  private clearQueuePromise: Promise<void> | null = null;
   private lastFrontendPhase: RpcFrontendPhase | null = null;
   private nextRequestTagId = 0;
 
@@ -472,6 +473,22 @@ export class RpcInteractiveSession {
     this.steeringMessages = [];
     this.followUpMessages = [];
     this.syncPendingCount();
+    this.emitQueueUpdate();
+    if (
+      this.client.isConnected() &&
+      this.rpcConnected &&
+      !this.recoveryPending
+    ) {
+      const clearQueuePromise = this.call("clear_queue")
+        .then(() => undefined)
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.clearQueuePromise === clearQueuePromise) {
+            this.clearQueuePromise = null;
+          }
+        });
+      this.clearQueuePromise = clearQueuePromise;
+    }
     return queued;
   }
 
@@ -959,6 +976,8 @@ export class RpcInteractiveSession {
       this.queueOfflineOperation(operation);
       return;
     }
+
+    if (this.clearQueuePromise) await this.clearQueuePromise;
 
     this.activeTurn = operation;
     this.syncStreamingState();
