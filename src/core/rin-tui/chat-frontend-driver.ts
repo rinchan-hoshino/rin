@@ -156,11 +156,26 @@ export class ChatFrontendDriver {
     this.emit({ type: "frontend_status", phase: this.frontendPhase });
   }
 
-  private abortLiveTurn() {
-    if (!this.liveTurn) return;
+  private rejectLiveTurnAsAborted() {
     this.clearPendingAssistantSegmentState();
     this.setFrontendPhase("idle");
     this.failLiveTurn(new Error("chat_turn_aborted"));
+  }
+
+  interruptActiveTurnLikeTui() {
+    this.rejectLiveTurnAsAborted();
+    const session = this.session;
+    try {
+      if (typeof session?.agent?.abort === "function") {
+        session.agent.abort();
+      } else if (typeof session?.abort === "function") {
+        void Promise.resolve(session.abort()).catch(() => {});
+      }
+    } catch {}
+    return {
+      sessionId: this.currentSessionId() || undefined,
+      sessionFile: this.currentSessionFile() || undefined,
+    };
   }
 
   private resetAssistantSegmentTracking() {
@@ -318,6 +333,16 @@ export class ChatFrontendDriver {
       options.restoreSessionFile || "",
     ).trim();
     const sessionFile = safeString(options.sessionFile || "").trim();
+    if (
+      isAbortCommand(commandLine) &&
+      (this.liveTurn || this.session?.isStreaming)
+    ) {
+      return {
+        handled: true,
+        text: "Aborted current operation.",
+        ...this.interruptActiveTurnLikeTui(),
+      };
+    }
     await this.connect({
       restoreSessionFile: skipSessionRecovery ? "" : restoreSessionFile,
     });
@@ -329,7 +354,7 @@ export class ChatFrontendDriver {
       ? await this.ensureSessionReady(sessionFile || restoreSessionFile)
       : undefined;
     const data: any = await this.session.runCommand(commandLine);
-    if (isAbortCommand(commandLine)) this.abortLiveTurn();
+    if (isAbortCommand(commandLine)) this.rejectLiveTurnAsAborted();
     return {
       ...data,
       sessionId:

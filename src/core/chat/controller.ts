@@ -669,7 +669,28 @@ export class ChatController {
   ) {
     const commandName = commandNameFromCommandLine(commandLine);
     const abortingActiveTurn = commandName === "abort" && this.hasActiveTurn();
-    if (abortingActiveTurn) this.turnAbortRequested = true;
+    if (abortingActiveTurn) {
+      this.turnAbortRequested = true;
+      const data = this.driver.interruptActiveTurnLikeTui();
+      this.updateStoredSessionFile(
+        data?.sessionFile,
+        this.driver.currentSessionFile(),
+      );
+      this.saveState();
+      await this.deliverAssistantReply({
+        text: "Aborted current operation.",
+        replyToMessageId: replyToMessageId || undefined,
+        incomingMessageId,
+        sessionFile: data?.sessionFile,
+        clearProcessing: false,
+      });
+      return {
+        handled: true,
+        text: "Aborted current operation.",
+        sessionId: data?.sessionId,
+        sessionFile: this.currentSessionFile() || data?.sessionFile,
+      };
+    }
     if (commandName === "status") {
       return await this.runLocalStatusCommand(
         replyToMessageId,

@@ -82,17 +82,43 @@ async function waitUntil(predicate: () => boolean, message: string) {
   assert.fail(message);
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+) {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 test("chat controller suppresses aborted turn errors and queues later text as a fresh prompt", async () => {
   const controller = await createController();
   const deliveries: string[] = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    const text = this.stagedDelivery?.text || "";
+    if (text === "Aborted current operation.") {
+      assert.equal(this.currentTurn?.incomingMessageId, "m1");
+    }
+    deliveries.push(text);
     this.stagedDelivery = null;
   };
 
   const promptCalls: Array<{ text: string; streamingBehavior: string }> = [];
   let firstRequestTag = "";
   let secondRequestTag = "";
+  let tuiInterruptCalled = false;
+  let sessionAbortCalled = false;
+  let ensureSessionReadyCalls = 0;
+  let blockSessionReadiness = false;
   controller.session = {
     isStreaming: false,
     sessionManager: {
@@ -100,10 +126,25 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
       getSessionId: () => "session-1",
       getSessionName: () => controller.chatKey,
     },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/fresh-chat.jsonl",
-      sessionId: "session-1",
-    }),
+    ensureSessionReady: async () => {
+      ensureSessionReadyCalls += 1;
+      if (blockSessionReadiness) {
+        await new Promise(() => {});
+      }
+      return {
+        sessionFile: "/tmp/fresh-chat.jsonl",
+        sessionId: "session-1",
+      };
+    },
+    agent: {
+      abort: () => {
+        tuiInterruptCalled = true;
+      },
+    },
+    abort: async () => {
+      sessionAbortCalled = true;
+      await new Promise(() => {});
+    },
     prompt: async (
       text: string,
       options: { requestTag?: string; streamingBehavior?: string } = {},
@@ -123,10 +164,9 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
       }
       secondRequestTag = options.requestTag || "";
     },
-    runCommand: async () => ({
-      handled: true,
-      text: "Aborted current operation.",
-    }),
+    runCommand: async () => {
+      throw new Error("active chat abort should not run as a session command");
+    },
   };
 
   const firstTurn = controller.runTurn({
@@ -138,7 +178,16 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
   await waitUntil(() => Boolean(firstRequestTag), "first turn did not start");
   assert.equal(controller.canSteerActiveTurn(), true);
 
-  await controller.runCommand("/abort", "m-abort", "m-abort");
+  blockSessionReadiness = true;
+  await withTimeout(
+    controller.runCommand("/abort", "m-abort", "m-abort"),
+    100,
+    "active chat abort was delayed by session readiness or backend abort",
+  );
+  blockSessionReadiness = false;
+  assert.equal(tuiInterruptCalled, true);
+  assert.equal(sessionAbortCalled, false);
+  assert.equal(ensureSessionReadyCalls, 1);
   assert.equal(controller.canSteerActiveTurn(), false);
   assert.deepEqual(await firstTurn, {
     aborted: true,
