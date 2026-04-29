@@ -4,7 +4,7 @@ import {
   SessionManager,
   SessionSelectorComponent,
 } from "@mariozechner/pi-coding-agent";
-import { ProcessTerminal, truncateToWidth } from "@mariozechner/pi-tui";
+import { Loader, ProcessTerminal, truncateToWidth } from "@mariozechner/pi-tui";
 
 import { extractMessageText } from "../message-content.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
@@ -23,6 +23,12 @@ const RPC_TRANSPORT_REAPPLY_EVENTS = new Set([
   "auto_retry_end",
 ]);
 const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
+const RPC_TRANSPORT_STATUS_LOADER_KEY = "__rinRpcTransportStatusLoader";
+const RPC_TRANSPORT_LOADER_PHASES = new Set([
+  "starting",
+  "connecting",
+  "sending",
+]);
 
 function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
@@ -38,11 +44,60 @@ function isRpcTransportControlled(instance: any) {
   return typeof instance?.session?.getFrontendStatusEvent === "function";
 }
 
+function statusContainerHasChild(instance: any, child: any) {
+  if (!child) return false;
+  const container = instance?.statusContainer;
+  if (Array.isArray(container?.children))
+    return container.children.includes(child);
+  return container?.child === child;
+}
+
+function stopRpcTransportStatusLoader(instance: any) {
+  const loader = instance?.[RPC_TRANSPORT_STATUS_LOADER_KEY];
+  if (!loader) return;
+  loader.stop?.();
+  if (statusContainerHasChild(instance, loader)) {
+    instance.statusContainer.clear();
+  }
+  instance[RPC_TRANSPORT_STATUS_LOADER_KEY] = undefined;
+}
+
+function createRpcTransportStatusLoader(instance: any, label: string) {
+  return new Loader(
+    instance.ui,
+    (spinner) => spinner,
+    (text) => text,
+    label,
+  );
+}
+
+function showRpcTransportStatus(instance: any, event: any) {
+  const phase = String(event?.phase || "");
+  if (!RPC_TRANSPORT_LOADER_PHASES.has(phase)) {
+    stopRpcTransportStatusLoader(instance);
+    if (phase === "idle") instance?.ui?.requestRender?.();
+    return;
+  }
+
+  const label = String(event?.label || phase || "Starting");
+  let loader = instance?.[RPC_TRANSPORT_STATUS_LOADER_KEY];
+  if (!loader) {
+    loader = createRpcTransportStatusLoader(instance, label);
+    instance[RPC_TRANSPORT_STATUS_LOADER_KEY] = loader;
+  } else {
+    loader.setMessage(label);
+  }
+  instance.statusContainer.clear();
+  instance.statusContainer.addChild(loader);
+  instance.ui.requestRender();
+}
+
 function reattachExistingPiLoader(instance: any) {
-  // RPC transport status is not allowed to create its own animated loader.
-  // Pi's canonical agent/compaction/retry events own loader lifetimes; this
-  // only restores an existing Pi-owned loader after another Pi event cleared
-  // the shared status container.
+  // RPC transport status is not allowed to create its own working animation.
+  // Pi's canonical agent/compaction/retry events own those loader lifetimes;
+  // this only restores an existing Pi-owned loader after another Pi event
+  // cleared the shared status container.
+  stopRpcTransportStatusLoader(instance);
   if (!instance?.loadingAnimation) return;
   instance.statusContainer.clear();
   instance.statusContainer.addChild(instance.loadingAnimation);
@@ -289,6 +344,8 @@ export async function applyRinTuiOverrides() {
       if (event?.type === "rpc_frontend_status") {
         if (event.phase === "working") {
           reattachExistingPiLoader(this);
+        } else {
+          showRpcTransportStatus(this, event);
         }
         return;
       }
@@ -329,6 +386,7 @@ export async function applyRinTuiOverrides() {
         event,
       );
 
+      stopRpcTransportStatusLoader(this);
       await originalHandleEvent.call(this, event);
 
       if (shouldReapplyRpcPiLoader) {

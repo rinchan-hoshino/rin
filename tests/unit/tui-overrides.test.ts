@@ -109,7 +109,7 @@ test("loader stop clears render interval", () => {
   assert.ok(renders >= 1);
 });
 
-test("rpc frontend statuses do not create transport-owned animations", async () => {
+test("rpc frontend startup statuses render until Pi-owned working starts", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -157,23 +157,35 @@ test("rpc frontend statuses do not create transport-owned animations", async () 
     },
   };
 
-  for (const phase of ["starting", "connecting", "sending", "working"]) {
-    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
-      instance,
-      {
-        type: "rpc_frontend_status",
-        phase,
-        label: phase,
-        connected: true,
-      },
-    );
-  }
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_frontend_status",
+    phase: "starting",
+    label: "Starting",
+    connected: true,
+  });
 
+  const startupLoader = instance.statusContainer.child;
+  assert.ok(startupLoader);
+  assert.equal(instance.loadingAnimation, undefined);
+  assert.equal(additions, 1);
+  assert.ok(renders >= 1);
+
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_frontend_status",
+    phase: "connecting",
+    label: "Connecting",
+    connected: true,
+  });
+  assert.equal(instance.statusContainer.child, startupLoader);
+
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_frontend_status",
+    phase: "working",
+    label: "Working",
+    connected: true,
+  });
   assert.equal(instance.loadingAnimation, undefined);
   assert.equal(instance.statusContainer.child, undefined);
-  assert.equal(clears, 0);
-  assert.equal(additions, 0);
-  assert.equal(renders, 0);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "agent_start",
@@ -182,9 +194,10 @@ test("rpc frontend statuses do not create transport-owned animations", async () 
   try {
     assert.ok(instance.loadingAnimation);
     assert.equal(instance.statusContainer.child, instance.loadingAnimation);
-    assert.ok(renders >= 1);
+    assert.ok(clears >= 1);
   } finally {
     instance.loadingAnimation?.stop();
+    startupLoader?.stop?.();
   }
 });
 

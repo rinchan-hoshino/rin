@@ -209,17 +209,17 @@ async function startRpcTui(
   try {
     await rpcSession.prepareForInteractiveStartup();
     await waitForRpcStartupStep(rpcSession.connect(), "rpc_connect");
-    await waitForRpcStartupStep(
-      rpcSession.ensureSessionReady(),
-      "rpc_session_ready",
-    );
     runtimeHost = createRpcRuntimeHost(rpcSession);
-    profile.mark("rpc-session-created");
     interactiveMode = new InteractiveMode(
       runtimeHost as any,
       interactiveOptions,
     );
     await (interactiveMode as any).init();
+    await waitForRpcStartupStep(
+      rpcSession.ensureSessionReady(),
+      "rpc_session_ready",
+    );
+    profile.mark("rpc-session-created");
     await (interactiveMode as any).rebindCurrentSession?.();
     (interactiveMode as any).renderCurrentSessionState?.();
     (interactiveMode as any).ui?.requestRender?.();
