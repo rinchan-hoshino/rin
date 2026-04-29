@@ -150,6 +150,7 @@ export async function latestRinVersionForChannel(
 export async function checkForNewRinVersion(
   options: RinUpdateCheckOptions = {},
 ) {
+  if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
   if (process.env.PI_OFFLINE || process.env.RIN_OFFLINE) return undefined;
   const currentVersion = trim(options.currentVersion || getCurrentRinVersion());
   if (!parsePackageVersion(currentVersion)) return undefined;
