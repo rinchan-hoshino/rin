@@ -508,10 +508,16 @@ export class RpcInteractiveSession {
     void this.client.abort().catch(() => {});
   }
 
-  async newSession(_options?: { parentSession?: string }) {
+  async newSession(options?: {
+    parentSession?: string;
+    managedSessionLeaf?: string;
+  }) {
     this.setSessionOperationPending(true);
     try {
-      const data = await this.call("new_session");
+      const data = await this.call("new_session", {
+        parentSession: options?.parentSession,
+        managedSessionLeaf: options?.managedSessionLeaf,
+      });
       await this.refreshState(REFRESH_ALL);
       return !Boolean(data?.cancelled);
     } finally {

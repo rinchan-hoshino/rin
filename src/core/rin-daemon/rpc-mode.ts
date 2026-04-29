@@ -3,12 +3,14 @@ import { parseJsonl } from "../rin-lib/common.js";
 import { createInterruptedToolResultMessage } from "../rin-lib/interruption.js";
 import { fail, ok } from "../rin-lib/rpc.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
+import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
 import {
   appendSessionTurnState,
   type TerminalSessionTurnStateStatus,
 } from "../session/turn-state.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
+import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
 import { safeString } from "../text-utils.js";
 import {
   getOAuthState,
@@ -69,6 +71,10 @@ function canReuseCurrentSessionForNewSessionCommand(
 ) {
   if (!session || session.isStreaming || session.isCompacting) return false;
   if (String(command?.parentSession || "").trim()) return false;
+  if (String(command?.managedSessionLeaf || "").trim()) return false;
+  if (String(command?.sessionFile || command?.sessionPath || "").trim()) {
+    return false;
+  }
   const entryCount = Array.isArray(session.sessionManager?.getEntries?.())
     ? session.sessionManager.getEntries().length
     : undefined;
@@ -77,6 +83,64 @@ function canReuseCurrentSessionForNewSessionCommand(
     ? session.messages.length
     : undefined;
   return typeof messageCount === "number" ? messageCount === 0 : false;
+}
+
+async function createManagedNewSession(
+  runtime: any,
+  SessionManager: any,
+  options: { managedSessionLeaf: string; parentSession?: unknown },
+) {
+  const managedSessionLeaf = safeString(options.managedSessionLeaf).trim();
+  if (!managedSessionLeaf) {
+    return await runtime.newSession(
+      options.parentSession
+        ? { parentSession: options.parentSession }
+        : undefined,
+    );
+  }
+
+  if (
+    typeof runtime.emitBeforeSwitch !== "function" ||
+    typeof runtime.teardownCurrent !== "function" ||
+    typeof runtime.apply !== "function" ||
+    typeof runtime.createRuntime !== "function"
+  ) {
+    throw new Error("managed_new_session_unsupported");
+  }
+
+  const beforeResult = await runtime.emitBeforeSwitch("new");
+  if (beforeResult?.cancelled) return beforeResult;
+
+  const currentSession = runtime.session;
+  const cwd =
+    safeString(
+      runtime.cwd || currentSession?.sessionManager?.getCwd?.(),
+    ).trim() || process.cwd();
+  const profile = resolveRuntimeProfile({
+    cwd,
+    agentDir: safeString(runtime.services?.agentDir).trim() || undefined,
+  });
+  const sessionDir = getManagedSessionDir(profile.agentDir, managedSessionLeaf);
+  const sessionManager = SessionManager.create(cwd, sessionDir);
+  if (options.parentSession) {
+    sessionManager.newSession({ parentSession: options.parentSession });
+  }
+  const previousSessionFile = currentSession?.sessionFile;
+  await runtime.teardownCurrent("new", sessionManager.getSessionFile());
+  runtime.apply(
+    await runtime.createRuntime({
+      cwd,
+      agentDir: profile.agentDir,
+      sessionManager,
+      sessionStartEvent: {
+        type: "session_start",
+        reason: "new",
+        previousSessionFile,
+      },
+    }),
+  );
+  await runtime.finishSessionReplacement?.();
+  return { cancelled: false };
 }
 
 function getSessionMessagesForTurnCompletion(session: any) {
@@ -578,11 +642,22 @@ export async function runCustomRpcMode(
           id,
           type,
           async () => {
-            const value = await runtime.newSession(
-              command.parentSession
-                ? { parentSession: command.parentSession }
-                : undefined,
-            );
+            const managedSessionLeaf = safeString(
+              command.managedSessionLeaf || "",
+            ).trim();
+            if (safeString(command.sessionFile || command.sessionPath).trim()) {
+              throw new Error("new_session_session_file_unsupported");
+            }
+            const value = managedSessionLeaf
+              ? await createManagedNewSession(runtime, SessionManager, {
+                  managedSessionLeaf,
+                  parentSession: command.parentSession,
+                })
+              : await runtime.newSession(
+                  command.parentSession
+                    ? { parentSession: command.parentSession }
+                    : undefined,
+                );
             await bindCurrentSession();
             const rebound = getSession();
             return {

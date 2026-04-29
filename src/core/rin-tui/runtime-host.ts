@@ -26,7 +26,10 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     ) {
       rebindSession = callback;
     },
-    async newSession(options?: { parentSession?: string }) {
+    async newSession(options?: {
+      parentSession?: string;
+      managedSessionLeaf?: string;
+    }) {
       const completed = await session.newSession(options);
       return await finishReplacement(completed);
     },

@@ -36,6 +36,10 @@ function isAbortCommand(commandLine: string) {
   return safeString(commandLine).trim() === "/abort";
 }
 
+function isNewSessionCommand(commandLine: string) {
+  return safeString(commandLine).trim() === "/new";
+}
+
 export class ChatFrontendDriver {
   private readonly clientFactory: () => RpcFrontendClient;
   client: RpcFrontendClient | null = null;
@@ -318,11 +322,24 @@ export class ChatFrontendDriver {
     return await this.switchSessionIfNeeded(sessionFile);
   }
 
-  private async ensureSessionReady(restoreSessionFile = "") {
+  private async ensureSessionReady(
+    restoreSessionFile = "",
+    managedSessionLeaf = "",
+  ) {
     if (!this.session) throw new Error("chat_session_not_connected");
     const current = this.currentSessionFile();
     const wanted = safeString(restoreSessionFile || "").trim();
-    if (!current && wanted) {
+    const managedLeaf = safeString(managedSessionLeaf || "").trim();
+    if (
+      managedLeaf &&
+      !wanted &&
+      typeof this.session.newSession === "function"
+    ) {
+      const completed = await this.session.newSession({
+        managedSessionLeaf: managedLeaf,
+      });
+      if (!completed) throw new Error("rin_new_session_cancelled");
+    } else if (!current && wanted) {
       await this.switchSessionIfNeeded(wanted);
     }
     return await this.session.ensureSessionReady();
@@ -334,6 +351,7 @@ export class ChatFrontendDriver {
       skipSessionRecovery?: boolean;
       restoreSessionFile?: string;
       sessionFile?: string;
+      managedSessionLeaf?: string;
     } = {},
   ) {
     const skipSessionRecovery = options.skipSessionRecovery === true;
@@ -341,6 +359,9 @@ export class ChatFrontendDriver {
       options.restoreSessionFile || "",
     ).trim();
     const sessionFile = safeString(options.sessionFile || "").trim();
+    const managedSessionLeaf = safeString(
+      options.managedSessionLeaf || "",
+    ).trim();
     if (
       isAbortCommand(commandLine) &&
       (this.liveTurn || this.session?.isStreaming)
@@ -355,11 +376,32 @@ export class ChatFrontendDriver {
       restoreSessionFile: skipSessionRecovery ? "" : restoreSessionFile,
     });
     if (!this.session) throw new Error("chat_session_not_connected");
+    if (isNewSessionCommand(commandLine)) {
+      if (sessionFile && !managedSessionLeaf) {
+        throw new Error("new_session_session_file_unsupported");
+      }
+      if (managedSessionLeaf) {
+        const completed = await this.session.newSession({
+          managedSessionLeaf,
+        });
+        return {
+          handled: true,
+          text: completed
+            ? "Started a new session."
+            : "Session switch cancelled.",
+          sessionId: this.currentSessionId() || undefined,
+          sessionFile: this.currentSessionFile() || undefined,
+        };
+      }
+    }
     if (sessionFile) {
       await this.switchSessionIfNeeded(sessionFile);
     }
     const ready = !skipSessionRecovery
-      ? await this.ensureSessionReady(sessionFile || restoreSessionFile)
+      ? await this.ensureSessionReady(
+          sessionFile || restoreSessionFile,
+          managedSessionLeaf,
+        )
       : undefined;
     const data: any = await this.session.runCommand(commandLine);
     if (isAbortCommand(commandLine)) this.rejectLiveTurnAsAborted();
@@ -411,12 +453,16 @@ export class ChatFrontendDriver {
     images?: any[];
     sessionFile?: string;
     restoreSessionFile?: string;
+    managedSessionLeaf?: string;
     model?: string;
     thinkingLevel?: string;
   }): Promise<DriverTurnResult> {
     const sessionFile = safeString(input.sessionFile || "").trim();
     const restoreSessionFile = safeString(
       input.restoreSessionFile || "",
+    ).trim();
+    const managedSessionLeaf = safeString(
+      input.managedSessionLeaf || "",
     ).trim();
     await this.connect({ restoreSessionFile });
     if (!this.session) throw new Error("chat_session_not_connected");
@@ -425,6 +471,7 @@ export class ChatFrontendDriver {
     }
     const ready = await this.ensureSessionReady(
       sessionFile || restoreSessionFile,
+      managedSessionLeaf,
     );
     await this.applyTurnModelOptions({
       model: input.model,

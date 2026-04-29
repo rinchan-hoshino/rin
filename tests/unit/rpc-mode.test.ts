@@ -749,6 +749,168 @@ test(
 );
 
 test(
+  "rpc mode honors managed session leaf for new_session directories",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const switchCalls = [];
+    const createRuntimeCalls = [];
+    let newSessionCalls = 0;
+    let currentSession;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    const createSession = (sessionFile, sessionId) => ({
+      isStreaming: false,
+      isCompacting: false,
+      sessionFile,
+      sessionId,
+      agent: { waitForIdle: async () => {} },
+      bindExtensions: async () => {},
+      subscribe: () => () => {},
+      prompt: async () => {},
+      sendCustomMessage: async () => {},
+      steer: async () => {},
+      followUp: async () => {},
+      abort: async () => {},
+      modelRegistry: { getAvailable: async () => [] },
+      sessionManager: {
+        getEntries: () => [],
+        getTree: () => [],
+        getLeafId: () => null,
+        getCwd: () => process.cwd(),
+        getSessionDir: () => path.dirname(sessionFile),
+      },
+      messages: [],
+      getSessionStats: () => ({}),
+      getUserMessagesForForking: () => [],
+      getLastAssistantText: () => "",
+      setThinkingLevel: () => {},
+      cycleThinkingLevel: () => undefined,
+      setSteeringMode: () => {},
+      setFollowUpMode: () => {},
+      compact: async () => {},
+      setAutoCompactionEnabled: () => {},
+      setAutoRetryEnabled: () => {},
+      abortRetry: () => {},
+      executeBash: async () => {},
+      abortBash: async () => {},
+      fork: async () => ({ cancelled: false, selectedText: "" }),
+      navigateTree: async () => ({ cancelled: false }),
+      exportToHtml: async () => "",
+      exportToJsonl: () => "",
+      importFromJsonl: async () => ({ cancelled: false }),
+      setModel: async () => {},
+      reload: async () => {},
+      setSessionName: () => {},
+    });
+
+    try {
+      currentSession = createSession("/tmp/rin/sessions/root.jsonl", "root-id");
+      const runtime = {
+        get session() {
+          return currentSession;
+        },
+        services: { agentDir: "/tmp/rin" },
+        async newSession() {
+          newSessionCalls += 1;
+          throw new Error(
+            "managed new_session should not call default newSession",
+          );
+        },
+        async switchSession(sessionFile) {
+          switchCalls.push(sessionFile);
+          currentSession = createSession(sessionFile, "target-id");
+          return { cancelled: false };
+        },
+        async fork() {
+          throw new Error("unexpected");
+        },
+        async importFromJsonl() {
+          throw new Error("unexpected");
+        },
+        async emitBeforeSwitch(reason) {
+          assert.equal(reason, "new");
+          return { cancelled: false };
+        },
+        async teardownCurrent(reason, targetSessionFile) {
+          assert.equal(reason, "new");
+          assert.match(targetSessionFile, /\/sessions\/managed\/chat\//);
+        },
+        async createRuntime(args) {
+          createRuntimeCalls.push(args);
+          currentSession = createSession(
+            args.sessionManager.getSessionFile(),
+            "created-id",
+          );
+          return { session: currentSession, services: {} };
+        },
+        apply(result) {
+          currentSession = result.session;
+        },
+        async finishSessionReplacement() {},
+      };
+
+      void runCustomRpcMode(runtime, {
+        SessionManager: {
+          create: (cwd, sessionDir) => ({
+            getCwd: () => cwd,
+            getSessionDir: () => sessionDir,
+            getSessionFile: () => path.join(sessionDir, "created.jsonl"),
+            newSession() {},
+          }),
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+        reuseFreshSessionForInitialNewSession: true,
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({
+            id: "managed-new",
+            type: "new_session",
+            managedSessionLeaf: "chat",
+          })}\n`,
+        ),
+      );
+      await wait(20);
+
+      assert.deepEqual(switchCalls, []);
+      assert.equal(createRuntimeCalls.length, 1);
+      assert.match(
+        createRuntimeCalls[0].sessionManager.getSessionDir(),
+        /\/sessions\/managed\/chat$/,
+      );
+      assert.equal(newSessionCalls, 0);
+      assert.ok(lines.join("").includes('"id":"managed-new"'));
+      assert.ok(
+        lines.join("").includes('"sessionFile":"') &&
+          lines.join("").includes("/sessions/managed/chat/created.jsonl"),
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode new_session response includes the rebound session selector",
   { concurrency: false },
   async () => {

@@ -91,7 +91,7 @@ test("cron scheduler can seed and preserve dedicated session files", async () =>
   }
 });
 
-test("cron scheduler preallocates managed dedicated task session files", async () => {
+test("cron scheduler leaves unstarted dedicated task sessions unbound", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
@@ -101,16 +101,7 @@ test("cron scheduler preallocates managed dedicated task session files", async (
       session: { mode: "dedicated" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
-    assert.equal(
-      task.dedicatedSessionFile,
-      path.join(
-        agentDir,
-        "sessions",
-        "managed",
-        "task",
-        "cron_managed_dedicated.jsonl",
-      ),
-    );
+    assert.equal(task.dedicatedSessionFile, undefined);
     assert.equal(task.dedicatedSessionPersistent, true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -212,6 +203,7 @@ test("cron dedicated agent task creates and then preserves its bound session", a
         disposeAfterTurn: false,
         text: "hello",
         sessionFile: undefined,
+        managedSessionLeaf: "task",
       },
       {
         chatKey: "telegram/demo:1",
@@ -320,6 +312,7 @@ test("cron ephemeral agent task disposes and removes its transient session file"
         disposeAfterTurn: true,
         text: "hello",
         sessionFile: undefined,
+        managedSessionLeaf: "task",
         model: "openai-codex/gpt-5.5",
         thinkingLevel: "low",
       },

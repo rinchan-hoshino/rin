@@ -17,7 +17,6 @@ import {
   type ScheduledTaskTargetKind,
   type ScheduledTaskTriggerKind,
 } from "../scheduled-task-options.js";
-import { getManagedTaskSessionFile } from "../session/managed-paths.js";
 import { executeCronTask } from "./cron-execution.js";
 import {
   computeNextRunAt,
@@ -238,10 +237,7 @@ function resolveDedicatedSessionBinding(options: {
   return {
     dedicatedSessionFile: options.explicitSessionFile
       ? path.resolve(HOME_DIR, options.explicitSessionFile)
-      : options.existing?.dedicatedSessionFile ||
-        (options.target.kind === "agent_prompt"
-          ? getManagedTaskSessionFile(options.agentDir, options.taskId)
-          : undefined),
+      : options.existing?.dedicatedSessionFile,
     dedicatedSessionPersistent: true,
   };
 }
@@ -520,14 +516,8 @@ export class CronScheduler {
       row.model = normalizeModelOverride(row.model);
       if ((row.session as any)?.mode === "dedicated") {
         row.dedicatedSessionPersistent = true;
-        if (
-          row.target?.kind === "agent_prompt" &&
-          !safeString(row.dedicatedSessionFile).trim()
-        ) {
-          row.dedicatedSessionFile = getManagedTaskSessionFile(
-            this.options.agentDir,
-            row.id,
-          );
+        if (!safeString(row.dedicatedSessionFile).trim()) {
+          delete row.dedicatedSessionFile;
         }
       } else {
         delete row.dedicatedSessionFile;

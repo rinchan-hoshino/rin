@@ -7,7 +7,7 @@ import path from "node:path";
 const HOME_DIR = os.homedir();
 
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
-import { getManagedTaskSessionFile } from "../session/managed-paths.js";
+import { MANAGED_TASK_SESSION_LEAF } from "../session/managed-paths.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
 import type { CronTaskRecord } from "./cron.js";
@@ -161,8 +161,7 @@ export async function executeCronAgentTask(
   }
   const dedicatedSessionFile =
     task.session.mode === "dedicated"
-      ? String(task.dedicatedSessionFile || "").trim() ||
-        getManagedTaskSessionFile(options.agentDir, task.id)
+      ? String(task.dedicatedSessionFile || "").trim() || undefined
       : undefined;
   const controllerKey = task.id;
   const sessionFile = await resolveCronSessionFile(task);
@@ -174,6 +173,9 @@ export async function executeCronAgentTask(
     disposeAfterTurn: task.session.mode === "ephemeral",
     text: task.target.prompt,
     sessionFile,
+    ...(!sessionFile && task.session.mode !== "current"
+      ? { managedSessionLeaf: MANAGED_TASK_SESSION_LEAF }
+      : {}),
     ...(task.model ? { model: task.model } : {}),
     ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
   });
