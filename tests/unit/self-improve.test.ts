@@ -282,15 +282,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
 });
 
 test("save_prompts describes agent_profile as including standing user expectations", () => {
-  const tools = [];
-  selfImproveIndex.default({
-    registerTool(tool) {
-      tools.push(tool);
-    },
-    registerCommand() {},
-    on() {},
-  });
-  const tool = tools.find((entry) => entry.name === "save_prompts");
+  const tool = registerSavePromptsTool();
   assert.ok(tool);
   assert.match(
     String(tool.parameters.properties.slot.description || ""),
