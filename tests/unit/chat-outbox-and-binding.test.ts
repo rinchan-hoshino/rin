@@ -17,6 +17,13 @@ const outbox = await import(
 const support = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href
 );
+const transport = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "transport.js")).href
+);
+const messageStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
+    .href
+);
 
 async function withTempDir(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-outbox-test-"));
@@ -37,6 +44,33 @@ test("chat outbox enqueues payload on disk", async () => {
     });
     const stat = await fs.stat(filePath);
     assert.ok(stat.isFile());
+  });
+});
+
+test("chat assistant delivery stores session only for conversation binding", async () => {
+  await withTempDir(async (dir) => {
+    transport.recordDeliveredAssistantMessages(dir, {
+      chatKey: "telegram/777:1",
+      deliveryResult: ["m1"],
+      text: "tool send",
+      sessionFile: "/tmp/ignored.jsonl",
+    });
+    transport.recordDeliveredAssistantMessages(dir, {
+      chatKey: "telegram/777:1",
+      deliveryResult: ["m2"],
+      text: "normal reply",
+      sessionFile: "/tmp/kept.jsonl",
+      sessionBinding: "conversation",
+    });
+
+    assert.equal(
+      messageStore.getChatMessage(dir, "telegram/777:1", "m1")?.sessionFile,
+      undefined,
+    );
+    assert.equal(
+      messageStore.getChatMessage(dir, "telegram/777:1", "m2")?.sessionFile,
+      "/tmp/kept.jsonl",
+    );
   });
 });
 

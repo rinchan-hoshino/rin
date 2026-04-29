@@ -323,6 +323,7 @@ type DeliveredAssistantRecordInput = {
   rawContent?: string;
   replyToMessageId?: string;
   sessionFile?: string;
+  sessionBinding?: "conversation";
 };
 
 export function recordDeliveredAssistantMessages(
@@ -343,14 +344,17 @@ export function recordDeliveredAssistantMessages(
   const bodyText = safeString(input.text).trim();
   const rawContent =
     safeString(input.rawContent).trim() || bodyText || undefined;
-  const session = resolveSessionContext(
-    agentDir,
-    chatKey,
-    safeString(input.replyToMessageId).trim(),
-    {
-      sessionFile: input.sessionFile,
-    },
-  );
+  const session =
+    input.sessionBinding === "conversation"
+      ? resolveSessionContext(
+          agentDir,
+          chatKey,
+          safeString(input.replyToMessageId).trim(),
+          {
+            sessionFile: input.sessionFile,
+          },
+        )
+      : {};
   const now = new Date().toISOString();
 
   for (const messageId of messageIds) {
@@ -387,9 +391,12 @@ function finalizeDeliveredAssistantOutput(
   if (!chatKey) return [] as string[];
   const replyToMessageId =
     safeString(input.replyToMessageId).trim() || undefined;
-  const session = normalizeSessionRef({
-    sessionFile: input.sessionFile,
-  });
+  const session =
+    input.sessionBinding === "conversation"
+      ? normalizeSessionRef({
+          sessionFile: input.sessionFile,
+        })
+      : { sessionFile: undefined };
   const logText = safeString(input.logText).trim();
 
   if (logText) {
@@ -410,6 +417,7 @@ function finalizeDeliveredAssistantOutput(
     rawContent: input.rawContent,
     replyToMessageId,
     sessionFile: session.sessionFile,
+    sessionBinding: input.sessionBinding,
   });
 }
 
@@ -552,7 +560,10 @@ export async function sendOutboxPayload(
     const chatKey = normalizeOutboxChatKey(payload.chatKey);
     const text = normalizeOutboxText(payload.text);
     const replyToMessageId = safeString(payload.replyToMessageId).trim();
-    const session = normalizeSessionRef(payload);
+    const session =
+      payload.sessionBinding === "conversation"
+        ? normalizeSessionRef(payload)
+        : { sessionFile: undefined };
     const deliveryResult = await sendText(
       app,
       chatKey,
@@ -568,11 +579,15 @@ export async function sendOutboxPayload(
       rawContent: text,
       replyToMessageId,
       sessionFile: session.sessionFile,
+      sessionBinding: payload.sessionBinding,
     });
   }
   if (payload?.type !== "parts_delivery") return [] as string[];
   const chatKey = normalizeOutboxChatKey(payload.chatKey);
-  const session = normalizeSessionRef(payload);
+  const session =
+    payload.sessionBinding === "conversation"
+      ? normalizeSessionRef(payload)
+      : { sessionFile: undefined };
   const rawParts = Array.isArray(payload.parts)
     ? payload.parts.filter(Boolean)
     : [];
@@ -589,6 +604,7 @@ export async function sendOutboxPayload(
     chatKey,
     deliveryResult,
     sessionFile: session.sessionFile,
+    sessionBinding: payload.sessionBinding,
     ...buildPartsDeliveryRecord(rawParts),
   });
 }

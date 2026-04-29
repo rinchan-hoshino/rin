@@ -84,6 +84,10 @@ const TYPING_POLL_INTERVAL_MS = 4000;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
 const CHAT_INBOX_RETRY_MIN_MS = 2000;
 const CHAT_INBOX_RETRY_MAX_MS = 60_000;
+const DETACHED_CONTROLLER_SLEEP_IDLE_MS = Math.max(
+  1_000,
+  Number(process.env.RIN_DETACHED_CONTROLLER_SLEEP_IDLE_MS || 60_000),
+);
 
 function computeChatInboxRetryDelay(attemptCount: number) {
   const attempt = Math.max(0, Number(attemptCount || 0));
@@ -260,6 +264,7 @@ export type ChatBridgeHandle = {
   getStatus: () => ChatBridgeStatus;
   send: (payload: ChatOutboxPayload) => Promise<{ delivered: true }>;
   runTurn: (payload: ChatBridgeTurnPayload) => Promise<any>;
+  terminateTurn: (payload: { controllerKey: string }) => Promise<any>;
   evalBridge: (payload: ChatBridgeEvalPayload) => Promise<any>;
 };
 
@@ -301,7 +306,7 @@ export async function startChatBridge(
       void controller.pollTyping().catch(() => {});
     }
     for (const controller of detachedControllers.values()) {
-      void controller.pollTyping().catch(() => {});
+      void controller.housekeep().catch(() => {});
     }
   }, TYPING_POLL_INTERVAL_MS);
   const commandRows = getChatCommandRows();
@@ -346,6 +351,7 @@ export async function startChatBridge(
         affectChatBinding: detachedOptions?.affectChatBinding,
         statePath,
         frontendClientFactory,
+        sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
       });
       detachedControllers.set(controllerKey, controller);
       return controller;
@@ -735,6 +741,16 @@ export async function startChatBridge(
       }
     }
   };
+  const terminateTurn = async (payload: { controllerKey: string }) => {
+    const controllerKey = safeString(payload?.controllerKey).trim();
+    if (!controllerKey) throw new Error("chat_controller_key_required");
+    const controller = detachedControllers.get(controllerKey);
+    if (!controller) return { terminated: false };
+    await controller.terminateSession().catch(() => {});
+    controller.dispose();
+    detachedControllers.delete(controllerKey);
+    return { terminated: true };
+  };
   const evalBridge = async (payload: ChatBridgeEvalPayload) => {
     const startedAtMs = Date.now();
     const currentChatKey =
@@ -854,7 +870,16 @@ export async function startChatBridge(
     process.on("SIGTERM", () => handleSignal(0));
   }
 
-  return { app, options, stop, getStatus, send, runTurn, evalBridge };
+  return {
+    app,
+    options,
+    stop,
+    getStatus,
+    send,
+    runTurn,
+    terminateTurn,
+    evalBridge,
+  };
 }
 
 async function main() {

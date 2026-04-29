@@ -124,7 +124,7 @@ test("chat transport forwards mixed parts as a single native chat send", async (
     const stored = messageStore.getChatMessage(dir, "telegram/1:2", "m1");
     assert.equal(stored?.text, "intro");
     assert.equal(stored?.replyToMessageId, "42");
-    assert.equal(stored?.sessionFile, "chat/sess-42.jsonl");
+    assert.equal(stored?.sessionFile, undefined);
   });
 });
 
@@ -180,7 +180,7 @@ test("chat transport stores summarized content for non-text part deliveries", as
   });
 });
 
-test("chat transport stores explicit session binding for outbox text deliveries", async () => {
+test("chat transport keeps tool and task text deliveries sessionless", async () => {
   await withTempDir(async (dir) => {
     await transport.sendOutboxPayload(
       {
@@ -212,7 +212,7 @@ test("chat transport stores explicit session binding for outbox text deliveries"
     );
     const stored = messageStore.getChatMessage(dir, "telegram/1:2", "m-text");
     assert.equal(stored?.text, "scheduled hello");
-    assert.equal(stored?.sessionFile, "scheduled/task-session.jsonl");
+    assert.equal(stored?.sessionFile, undefined);
   });
 });
 

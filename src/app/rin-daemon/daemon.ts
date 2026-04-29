@@ -44,6 +44,8 @@ async function main() {
       chat: {
         send: async (payload) => await chatBridge.send(payload),
         runTurn: async (payload) => await chatBridge.runTurn(payload),
+        terminateTurn: async (payload) =>
+          await chatBridge.terminateTurn(payload),
       },
       getExtraStatus: () => ({
         chat: chatBridge.getStatus(),

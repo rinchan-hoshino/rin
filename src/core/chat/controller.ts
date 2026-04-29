@@ -55,6 +55,7 @@ type ChatTextDelivery = {
   text: string;
   replyToMessageId?: string;
   sessionFile?: string;
+  sessionBinding?: "conversation";
 };
 
 function commandNameFromCommandLine(commandLine: string) {
@@ -133,6 +134,8 @@ export class ChatController {
   stagedDelivery: ChatTextDelivery | null = null;
   awaitingTurnSettle = false;
   turnAbortRequested = false;
+  sleepAfterIdleMs = 0;
+  lastActivityAt = Date.now();
 
   constructor(
     app: any,
@@ -145,6 +148,7 @@ export class ChatController {
       affectChatBinding?: boolean;
       statePath?: string;
       frontendClientFactory?: () => RpcFrontendClient;
+      sleepAfterIdleMs?: number;
     },
   ) {
     this.app = app;
@@ -157,6 +161,7 @@ export class ChatController {
     this.state = readJsonFile<ChatState>(this.statePath, { chatKey });
     this.logger = deps.logger;
     this.h = deps.h;
+    this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
     if (!this.state.chatKey) this.state.chatKey = chatKey;
     this.driver = new ChatFrontendDriver({
       clientFactory: deps.frontendClientFactory,
@@ -200,6 +205,7 @@ export class ChatController {
   }
 
   dispose() {
+    this.lastActivityAt = Date.now();
     void this.clearWorkingReaction().catch(() => {});
     this.currentTurn = null;
     this.stagedDelivery = null;
@@ -341,7 +347,6 @@ export class ChatController {
           chatKey: this.chatKey,
           text: CHAT_WORKING_NOTICE_TEXT,
           replyToMessageId,
-          sessionFile: this.currentSessionFile(),
           createdAt: new Date().toISOString(),
         },
         this.h,
@@ -394,7 +399,7 @@ export class ChatController {
     incomingMessageId = "",
   ) {
     const text = this.buildStatusText();
-    this.markProcessedMessage(incomingMessageId);
+    this.markProcessedMessage(incomingMessageId, false);
     if (!this.deliveryEnabled) return { handled: true, text, local: true };
     await sendOutboxPayload(
       this.app,
@@ -404,7 +409,6 @@ export class ChatController {
         chatKey: this.chatKey,
         text,
         replyToMessageId: safeString(replyToMessageId).trim() || undefined,
-        sessionFile: this.currentSessionFile(),
         createdAt: new Date().toISOString(),
       },
       this.h,
@@ -515,11 +519,11 @@ export class ChatController {
     });
   }
 
-  private markProcessedMessage(messageId?: string) {
+  private markProcessedMessage(messageId?: string, bindSession = true) {
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return;
     markProcessedChatMessage(this.agentDir, this.chatKey, nextMessageId, {
-      sessionFile: this.currentSessionFile(),
+      ...(bindSession ? { sessionFile: this.currentSessionFile() } : {}),
       acceptedAt: new Date().toISOString(),
       processedAt: new Date().toISOString(),
     });
@@ -529,6 +533,7 @@ export class ChatController {
     text?: string;
     replyToMessageId?: string;
     sessionFile?: string;
+    bindSession?: boolean;
   }): ChatTextDelivery {
     const text = safeString(
       input.text ?? this.driver.latestAssistantText,
@@ -540,10 +545,15 @@ export class ChatController {
       text,
       replyToMessageId:
         safeString(input.replyToMessageId || "").trim() || undefined,
-      sessionFile: toStoredSessionFile(
-        this.agentDir,
-        input.sessionFile || this.currentSessionFile(),
-      ),
+      ...(input.bindSession === false
+        ? {}
+        : {
+            sessionFile: toStoredSessionFile(
+              this.agentDir,
+              input.sessionFile || this.currentSessionFile(),
+            ),
+            sessionBinding: "conversation" as const,
+          }),
     };
   }
 
@@ -551,6 +561,7 @@ export class ChatController {
     text?: string;
     replyToMessageId?: string;
     sessionFile?: string;
+    bindSession?: boolean;
   }) {
     const text = safeString(
       input.text ?? this.driver.latestAssistantText,
@@ -593,9 +604,11 @@ export class ChatController {
     incomingMessageId?: string;
     sessionFile?: string;
     clearProcessing?: boolean;
+    bindSession?: boolean;
   }) {
-    const text = this.stageAssistantDelivery(input);
-    this.markProcessedMessage(input.incomingMessageId);
+    const bindSession = input.bindSession !== false;
+    const text = this.stageAssistantDelivery({ ...input, bindSession });
+    this.markProcessedMessage(input.incomingMessageId, bindSession);
     await this.commitPendingDelivery(input.clearProcessing);
     return text;
   }
@@ -617,14 +630,32 @@ export class ChatController {
           text: `${INTERIM_PREFIX}${trimmed}`,
           replyToMessageId: replyToMessageId || undefined,
           sessionFile: this.currentSessionFile(),
+          sessionBinding: "conversation",
         },
         this.h,
       );
-      this.markProcessedMessage(incomingMessageId);
+      this.markProcessedMessage(incomingMessageId, false);
       return true;
     } catch {
       return false;
     }
+  }
+
+  async terminateSession() {
+    this.lastActivityAt = Date.now();
+    const wanted = this.getRecoverableSessionFile();
+    if (wanted) await this.connect({ restoreSession: true });
+    await this.session?.terminateSession?.();
+    delete this.state.sessionFile;
+    this.saveState();
+  }
+
+  async sleepIfIdle() {
+    if (!this.sleepAfterIdleMs || !this.session) return false;
+    if (this.hasActiveTurn()) return false;
+    if (Date.now() - this.lastActivityAt < this.sleepAfterIdleMs) return false;
+    this.driver.dispose();
+    return true;
   }
 
   async resumeSessionFile(sessionFile: string) {
@@ -692,6 +723,7 @@ export class ChatController {
         incomingMessageId,
         sessionFile: data?.sessionFile,
         clearProcessing: false,
+        bindSession: false,
       });
       return {
         handled: true,
@@ -717,6 +749,7 @@ export class ChatController {
         : !restoreSessionFile
           ? this.managedSessionLeafForFreshChat()
           : undefined;
+    this.lastActivityAt = Date.now();
     await this.connect({ restoreSession: !skipSessionRecovery });
     this.setCurrentTurn({
       incomingMessageId: incomingMessageId || undefined,
@@ -742,6 +775,7 @@ export class ChatController {
         incomingMessageId,
         sessionFile: data?.sessionFile,
         clearProcessing: true,
+        bindSession: false,
       });
       return data;
     } catch (error: any) {
@@ -753,6 +787,7 @@ export class ChatController {
           replyToMessageId: replyToMessageId || undefined,
           incomingMessageId,
           clearProcessing: true,
+          bindSession: false,
         });
       }
       throw error;
@@ -779,6 +814,7 @@ export class ChatController {
     },
     mode: "prompt" | "steer" = "prompt",
   ) {
+    this.lastActivityAt = Date.now();
     if (mode === "steer" && this.canSteerActiveTurn()) {
       const { sessionFile: wantedSessionFile } = normalizeSessionRef(input);
       const restoreSessionFile =
@@ -929,6 +965,7 @@ export class ChatController {
 
   async housekeep() {
     await this.pollTyping().catch(() => {});
+    await this.sleepIfIdle().catch(() => false);
   }
 
   async recoverIfNeeded() {

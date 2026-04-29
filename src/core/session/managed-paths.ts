@@ -42,6 +42,14 @@ export function getManagedTaskSessionDir(agentDir: string) {
   return getManagedSessionDir(agentDir, MANAGED_TASK_SESSION_LEAF);
 }
 
+export function getManagedTaskSessionFile(agentDir: string, taskId: unknown) {
+  const basename = sanitizeManagedSessionBasename(taskId, "task").replace(
+    /:/g,
+    "_",
+  );
+  return path.join(getManagedTaskSessionDir(agentDir), `${basename}.jsonl`);
+}
+
 export function getManagedChatSessionDir(agentDir: string) {
   return getManagedSessionDir(agentDir, MANAGED_CHAT_SESSION_LEAF);
 }

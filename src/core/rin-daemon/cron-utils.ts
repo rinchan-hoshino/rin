@@ -54,7 +54,7 @@ function shouldStopTask(task: CronTaskRecord, referenceTs: number) {
 }
 
 function computeOnceNextRunAt(
-  trigger: Extract<CronTaskTrigger, { kind: "once" }>,
+  trigger: CronTaskTrigger,
   runCount: number,
   referenceTs: number,
 ) {
@@ -66,7 +66,7 @@ function computeOnceNextRunAt(
 }
 
 function computeIntervalNextRunAt(
-  trigger: Extract<CronTaskTrigger, { kind: "interval" }>,
+  trigger: CronTaskTrigger,
   lastStartedAt: string | undefined,
   referenceTs: number,
 ) {
@@ -160,17 +160,17 @@ export function nextCronAt(expression: string, afterTs: number) {
 export function computeNextRunAt(task: CronTaskRecord, referenceTs: number) {
   if (shouldStopTask(task, referenceTs)) return undefined;
 
-  if (task.trigger.kind === "once") {
-    return computeOnceNextRunAt(task.trigger, task.runCount, referenceTs);
-  }
-
-  if (task.trigger.kind === "cron") {
+  if (task.trigger.expression) {
     return nextCronAt(task.trigger.expression, referenceTs);
   }
 
-  return computeIntervalNextRunAt(
-    task.trigger,
-    task.lastStartedAt,
-    referenceTs,
-  );
+  if (task.trigger.intervalMs) {
+    return computeIntervalNextRunAt(
+      task.trigger,
+      task.lastStartedAt,
+      referenceTs,
+    );
+  }
+
+  return computeOnceNextRunAt(task.trigger, task.runCount, referenceTs);
 }
