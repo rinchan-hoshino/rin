@@ -24,6 +24,13 @@ export type RinUpdateCheckOptions = {
   sourceRoot?: string;
 };
 
+const RIN_RELEASE_CHANNELS: readonly ReleaseChannel[] = [
+  "stable",
+  "beta",
+  "nightly",
+  "git",
+];
+
 function safeString(value: unknown) {
   if (value == null) return "";
   return String(value);
@@ -111,16 +118,15 @@ export function getCurrentRinVersion(sourceRoot?: string) {
   return readRinPackageVersion(sourceRoot);
 }
 
+function isReleaseChannel(value: string): value is ReleaseChannel {
+  return (RIN_RELEASE_CHANNELS as readonly string[]).includes(value);
+}
+
 export function inferRinReleaseChannel(
   version = getCurrentRinVersion(),
 ): ReleaseChannel {
   const envChannel = trim(process.env.RIN_RELEASE_CHANNEL).toLowerCase();
-  if (
-    envChannel === "stable" ||
-    envChannel === "beta" ||
-    envChannel === "nightly" ||
-    envChannel === "git"
-  ) {
+  if (isReleaseChannel(envChannel)) {
     return envChannel;
   }
   const normalizedVersion = trim(version).toLowerCase();
