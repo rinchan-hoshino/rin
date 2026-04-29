@@ -32,11 +32,7 @@ function formatAttempts(response: any, options: { maxError?: number } = {}) {
       /\s+/g,
       " ",
     );
-    const visibleError =
-      error.length > maxError
-        ? `${error.slice(0, maxError - 1).trimEnd()}…`
-        : error;
-    return `- ${engine}: ${visibleError}`;
+    return `- ${engine}: ${trimSnippet(error, maxError)}`;
   });
   return ["attempts:", ...lines].join("\n");
 }
