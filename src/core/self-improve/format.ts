@@ -37,13 +37,29 @@ function getPromptDocPath(doc: any) {
   return trimText(doc?.path);
 }
 
-function buildPromptBlock(result: any): string {
+function buildPromptBlock(
+  result: any,
+  options: { includeSystemPrefaces?: boolean } = {},
+): string {
   const lines: string[] = [];
   for (const doc of collectPromptDocs(result)) {
     const body = getPromptDocBody(doc);
     const label = getPromptDocLabel(doc);
     if (!body || !label) continue;
     lines.push(`${label}:`);
+    if (options.includeSystemPrefaces) {
+      const slot = trimText(doc?.self_improve_prompt_slot);
+      if (slot === "agent_profile") {
+        lines.push(
+          "Always use this agent profile as the standing role and speaking guide.",
+        );
+      }
+      if (slot === "core_doctrine") {
+        lines.push(
+          "Always follow this core doctrine as the standing methodology.",
+        );
+      }
+    }
     lines.push(body);
     lines.push("");
   }
@@ -140,7 +156,7 @@ export function buildCompiledSelfImprovePrompt(result: any): string {
 }
 
 export function buildSystemPromptSelfImprove(result: any): string {
-  return buildPromptBlock(result);
+  return buildPromptBlock(result, { includeSystemPrefaces: true });
 }
 
 function formatCompileAgentDocPaths(response: any): string[] {
@@ -155,17 +171,9 @@ function formatCompileAgentDocPaths(response: any): string[] {
 }
 
 function formatSavedPromptResult(doc: any, compact: boolean): string {
-  const docPath = getPromptDocPath(doc);
   return compact
-    ? [
-        "self_improve save_self_improve_prompt",
-        docPath ? `path=${docPath}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n")
-    : [`Saved self-improve prompt: ${getItemName(doc)}`, docPath]
-        .filter(Boolean)
-        .join("\n");
+    ? "self_improve save_self_improve_prompt"
+    : `Saved self-improve prompt: ${getItemName(doc)}`;
 }
 
 function formatSelfImproveActionResult(

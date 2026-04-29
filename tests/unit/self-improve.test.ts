@@ -298,6 +298,68 @@ test("save_prompts describes agent_profile as including standing user expectatio
   );
 });
 
+function registerSavePromptsTool() {
+  const tools = [];
+  selfImproveIndex.default({
+    registerTool(tool) {
+      tools.push(tool);
+    },
+    registerCommand() {},
+    on() {},
+  });
+  return tools.find((entry) => entry.name === "save_prompts");
+}
+
+test("save_prompts output and details do not expose prompt slot file paths", async () => {
+  await withTempRoot(async (root) => {
+    const previousRinDir = process.env.RIN_DIR;
+    const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+    try {
+      process.env.RIN_DIR = root;
+      delete process.env.PI_CODING_AGENT_DIR;
+      await store.saveSelfImprovePromptDoc(
+        {
+          name: "agent profile",
+          content: "Speak concise Chinese by default.",
+          selfImprovePromptSlot: "agent_profile",
+          scope: "global",
+        },
+        root,
+      );
+
+      const tool = registerSavePromptsTool();
+      assert.ok(tool);
+      const loaded = await tool.execute("tool-call", { slot: "agent_profile" });
+      assert.equal(
+        JSON.stringify(loaded).includes(
+          "self_improve/prompts/agent_profile.md",
+        ),
+        false,
+      );
+      assert.equal(JSON.stringify(loaded.details).includes("path"), false);
+
+      const updated = await tool.execute("tool-call", {
+        slot: "agent_profile",
+        baseContent: "- Speak concise Chinese by default.",
+        content: "Speak concise Chinese by default. Keep replies natural.",
+      });
+      assert.equal(
+        JSON.stringify(updated).includes(
+          "self_improve/prompts/agent_profile.md",
+        ),
+        false,
+      );
+      assert.equal(JSON.stringify(updated.details).includes("path"), false);
+    } finally {
+      if (previousRinDir === undefined) delete process.env.RIN_DIR;
+      else process.env.RIN_DIR = previousRinDir;
+      if (previousPiAgentDir === undefined)
+        delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
+    }
+  });
+});
+
 test("store executeSelfImproveAction compiles saved self-improve prompts", async () => {
   await withTempRoot(async (root) => {
     await store.saveSelfImprovePromptDoc(
