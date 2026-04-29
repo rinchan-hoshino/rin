@@ -289,6 +289,31 @@ test("plan-release script computes beta nightly and stable promotion versions", 
   }
 });
 
+test("hotfix workflow resolves fetched refs before publishing", () => {
+  const content = fs.readFileSync(
+    path.join(rootDir, ".github", "workflows", "publish-hotfix.yml"),
+    "utf8",
+  );
+  assert.match(content, /git fetch origin '\$\{\{ inputs\.ref \}\}'/);
+  assert.match(
+    content,
+    /echo "HOTFIX_REF_SHA=\$\(git rev-parse FETCH_HEAD\)" >> "\$GITHUB_ENV"/,
+  );
+  assert.match(
+    content,
+    /git worktree add --detach "\$candidate_dir" "\$HOTFIX_REF_SHA"/,
+  );
+  assert.match(content, /--ref "\$HOTFIX_REF_SHA"/);
+  assert.match(
+    content,
+    /git tag 'v\$\{\{ inputs\.version \}\}' "\$HOTFIX_REF_SHA"/,
+  );
+  assert.doesNotMatch(
+    content,
+    /git worktree add --detach "\$candidate_dir" '\$\{\{ inputs\.ref \}\}'/,
+  );
+});
+
 test("release workflows retry main branch metadata pushes", () => {
   for (const [workflow, followTags] of [
     ["publish-nightly.yml", false],

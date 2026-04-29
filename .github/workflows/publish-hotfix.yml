@@ -32,12 +32,15 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
       - name: Fetch hotfix ref
-        run: git fetch origin '${{ inputs.ref }}'
+        run: |
+          set -eu
+          git fetch origin '${{ inputs.ref }}'
+          echo "HOTFIX_REF_SHA=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_ENV"
       - name: Prepare candidate worktree
         run: |
           set -eu
           candidate_dir="$RUNNER_TEMP/hotfix-candidate"
-          git worktree add --detach "$candidate_dir" '${{ inputs.ref }}'
+          git worktree add --detach "$candidate_dir" "$HOTFIX_REF_SHA"
       - name: Install candidate dependencies
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm ci --no-fund --no-audit
@@ -60,14 +63,14 @@ jobs:
           npm run release:manifest --
           --channel stable
           --version '${{ inputs.version }}'
-          --ref '${{ inputs.ref }}'
+          --ref "$HOTFIX_REF_SHA"
       - name: Commit hotfix metadata and tag
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add release-manifest.json
           git commit -m 'chore(release): publish hotfix ${{ inputs.version }}' || true
-          git tag 'v${{ inputs.version }}' '${{ inputs.ref }}' || true
+          git tag 'v${{ inputs.version }}' "$HOTFIX_REF_SHA" || true
           if ! git push origin HEAD:main --follow-tags; then
             git fetch origin main
             git rebase origin/main
