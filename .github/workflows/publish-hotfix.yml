@@ -68,7 +68,11 @@ jobs:
           git add release-manifest.json
           git commit -m 'chore(release): publish hotfix ${{ inputs.version }}' || true
           git tag 'v${{ inputs.version }}' '${{ inputs.ref }}' || true
-          git push origin HEAD:main --follow-tags
+          if ! git push origin HEAD:main --follow-tags; then
+            git fetch origin main
+            git rebase origin/main
+            git push origin HEAD:main --follow-tags
+          fi
       - name: Prepare bootstrap branch checkout
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,7 +96,11 @@ jobs:
             echo 'No bootstrap changes to commit.'
           else
             git -C "$bootstrap_dir" commit -m 'chore(release): publish hotfix ${{ inputs.version }}'
-            git -C "$bootstrap_dir" push origin "HEAD:$bootstrap_branch"
+            if ! git -C "$bootstrap_dir" push origin "HEAD:$bootstrap_branch"; then
+              git -C "$bootstrap_dir" fetch origin "$bootstrap_branch"
+              git -C "$bootstrap_dir" rebase "origin/$bootstrap_branch"
+              git -C "$bootstrap_dir" push origin "HEAD:$bootstrap_branch"
+            fi
           fi
       - name: Remove candidate worktree
         if: always()
