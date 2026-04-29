@@ -64,7 +64,11 @@ function commandNameFromCommandLine(commandLine: string) {
   return safeString(commandPart.split(/\s+/, 1)[0]).trim();
 }
 
-function hasWorkingTypingCapability(bot: any) {
+function hasWorkingTypingCapability(
+  bot: any,
+  parsed: { platform: string; chatId: string },
+) {
+  if (parsed.platform === "onebot") return false;
   return Boolean(
     typeof bot?.internal?.sendChatAction === "function" ||
     typeof bot?.internal?.sendTyping === "function",
@@ -252,7 +256,7 @@ export class ChatController {
 
   canSteerActiveTurn() {
     if (this.turnAbortRequested) return false;
-    return Boolean(this.driver.liveTurn || this.session?.isStreaming);
+    return this.driver.canSteerActiveTurn();
   }
 
   private setCurrentTurn(input: {
@@ -304,7 +308,7 @@ export class ChatController {
       return { typing: false, reaction: false, notice: false };
     }
     const bot = findBot(this.app, parsed.platform, parsed.botId);
-    const typing = hasWorkingTypingCapability(bot);
+    const typing = hasWorkingTypingCapability(bot, parsed);
     const reaction = hasWorkingReactionCapability(bot, parsed);
     return {
       typing,

@@ -861,6 +861,54 @@ test("chat controller sends only one onebot Working notice when polls overlap", 
   assert.equal(controller.currentTurn.workingNoticeSent, true);
 });
 
+test("chat controller uses a Working notice for onebot private chats despite dynamic internal actions", async () => {
+  const controller = await createController("onebot/1:private:2");
+  const deliveries = [];
+  const internalActions = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "onebot",
+        selfId: "1",
+        async sendMessage(chatId, content) {
+          deliveries.push({ chatId, content });
+          return [`out-${deliveries.length}`];
+        },
+        internal: new Proxy(
+          {},
+          {
+            get(_target, property) {
+              if (typeof property !== "string") return undefined;
+              return async (...args) => {
+                internalActions.push([property, ...args]);
+              };
+            },
+          },
+        ),
+      },
+    ],
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-private",
+    workingNoticeSent: false,
+  };
+  const liveTurn = controller.startLiveTurn();
+  liveTurn.promise.catch(() => {});
+
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(internalActions, []);
+  assert.deepEqual(deliveries, [
+    {
+      chatId: "private:2",
+      content: [
+        { type: "quote", attrs: { id: "m-private" } },
+        { type: "text", attrs: { content: "Working..." } },
+      ],
+    },
+  ]);
+});
+
 test("chat controller does not keep typing from stale currentTurn metadata alone", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
@@ -1288,25 +1336,28 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   assert.deepEqual(deliveries, ["done"]);
 });
 
-test("chat controller drops superseded pending assistant text before steer", async () => {
-  const controller = await createController("telegram/1:2");
+test("chat controller queues follow-up after an assistant reply is committed", async () => {
+  const controller = await createController("onebot/1:private:2");
+  const promptCalls = [];
   const deliveries = [];
   let firstPromptOptions;
+  let releaseFirstPrompt = () => {};
+  let resolveFirstReplyCommitted = () => {};
+  const firstReplyCommitted = new Promise((resolve) => {
+    resolveFirstReplyCommitted = resolve;
+  });
 
-  controller.deliverAssistantInterim = async function (text) {
-    deliveries.push({
-      text: `··· ${text}`,
-      replyToMessageId: this.currentReplyToMessageId(),
-    });
-    return true;
-  };
-  controller.commitPendingDelivery = async function (clearProcessing = false) {
-    deliveries.push({
-      text: this.stagedDelivery?.text || "",
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
-    });
-    this.stagedDelivery = null;
-    if (clearProcessing) this.currentTurn = null;
+  controller.app = {
+    bots: [
+      {
+        platform: "onebot",
+        selfId: "1",
+        async sendMessage(chatId, content) {
+          deliveries.push({ chatId, content });
+          return [`out-${deliveries.length}`];
+        },
+      },
+    ],
   };
 
   controller.session = {
@@ -1321,51 +1372,73 @@ test("chat controller drops superseded pending assistant text before steer", asy
       sessionFile: "/tmp/steer-final-chat.jsonl",
       sessionId: "session-steer-final",
     }),
-    prompt: async (_text, options = {}) => {
-      if (options.streamingBehavior === "steer") {
+    prompt: async (text, options = {}) => {
+      promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
+      if (promptCalls.length === 1) {
+        firstPromptOptions = options;
+        controller.session.isStreaming = true;
+        await controller.handleSessionEvent({ type: "agent_start" });
+        await controller.handleSessionEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "first answer" }],
+          },
+        });
+        resolveFirstReplyCommitted();
+        await new Promise((resolve) => {
+          releaseFirstPrompt = resolve;
+        });
         controller.session.isStreaming = false;
-        emitRpcTurnComplete(
-          controller,
-          firstPromptOptions,
-          "final answer after steer",
-        );
+        emitRpcTurnComplete(controller, firstPromptOptions, "first answer");
         return;
       }
 
-      firstPromptOptions = options;
-      controller.session.isStreaming = true;
-      await controller.handleSessionEvent({ type: "agent_start" });
-      await controller.handleSessionEvent({
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "old answer replaced by steer" }],
-        },
-      });
-      await controller.runTurn(
-        {
-          text: "interrupt",
-          attachments: [],
-          incomingMessageId: "m-steer-new",
-          replyToMessageId: "m-steer-old",
-        },
-        "steer",
-      );
+      assert.equal(options.streamingBehavior, undefined);
+      emitRpcTurnComplete(controller, options, "second answer");
     },
     switchSession: async () => {},
   };
 
-  const result = await controller.runTurn({
+  const firstTurn = controller.runTurn({
     text: "hello",
     attachments: [],
-    incomingMessageId: "m-steer-old",
-    replyToMessageId: "m-steer-old",
+    incomingMessageId: "m-first",
+    replyToMessageId: "m-first",
   });
+  await firstReplyCommitted;
 
-  assert.equal(result.finalText, "final answer after steer");
-  assert.deepEqual(deliveries, [
-    { text: "final answer after steer", replyToMessageId: "m-steer-old" },
+  assert.equal(controller.canSteerActiveTurn(), false);
+  const secondTurn = controller.runTurn(
+    {
+      text: "follow up",
+      attachments: [],
+      incomingMessageId: "m-second",
+      replyToMessageId: "m-second",
+    },
+    "steer",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(promptCalls, [
+    { text: "hello", streamingBehavior: undefined },
   ]);
+
+  releaseFirstPrompt();
+  const [firstResult, secondResult] = await Promise.all([
+    firstTurn,
+    secondTurn,
+  ]);
+
+  assert.equal(firstResult.finalText, "first answer");
+  assert.equal(secondResult.finalText, "second answer");
+  assert.deepEqual(promptCalls, [
+    { text: "hello", streamingBehavior: undefined },
+    { text: "follow up", streamingBehavior: undefined },
+  ]);
+  assert.deepEqual(
+    deliveries.map((delivery) => delivery.content?.[1]?.attrs?.content),
+    ["Working...", "first answer", "Working...", "second answer"],
+  );
 });
 
 test("chat controller fails fast when prompt submission is queued offline instead of hanging forever", async () => {

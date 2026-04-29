@@ -51,6 +51,7 @@ export class ChatFrontendDriver {
   assistantPreviewText = "";
   deliveredAssistantInterimTexts = new Set<string>();
   interimDeliveryQueue: Promise<void> = Promise.resolve();
+  assistantReplyCommitted = false;
   frontendPhase: FrontendPhase = "idle";
   listeners = new Set<(event: ChatFrontendDriverEvent) => void>();
 
@@ -183,6 +184,12 @@ export class ChatFrontendDriver {
     this.assistantPreviewText = "";
     this.deliveredAssistantInterimTexts.clear();
     this.interimDeliveryQueue = Promise.resolve();
+    this.assistantReplyCommitted = false;
+  }
+
+  canSteerActiveTurn() {
+    if (!this.liveTurn && !this.session?.isStreaming) return false;
+    return !this.assistantReplyCommitted;
   }
 
   private queueInterimDelivery(run: () => Promise<void>) {
@@ -258,6 +265,7 @@ export class ChatFrontendDriver {
       }),
     ).trim();
     if (!text) return;
+    this.assistantReplyCommitted = true;
     if (safeString(this.pendingCommittedAssistantSegmentText).trim()) {
       await this.queueInterimDelivery(async () => {
         await this.emitPendingCommittedAssistantInterim();
@@ -446,6 +454,7 @@ export class ChatFrontendDriver {
       };
     }
 
+    this.resetAssistantSegmentTracking();
     this.latestAssistantText = "";
     const requestTag = this.createTurnRequestTag();
     const liveTurn = this.startLiveTurn(requestTag);
