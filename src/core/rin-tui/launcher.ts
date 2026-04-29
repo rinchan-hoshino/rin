@@ -162,6 +162,17 @@ export function resolveTuiInteractiveOptions(
   };
 }
 
+export function applyQuietStartupVersionCheckEnv(
+  settingsManager: { getQuietStartup?: () => boolean } | undefined,
+  interactiveOptions: TuiInteractiveOptions,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  if (interactiveOptions.verbose) return;
+  if (settingsManager?.getQuietStartup?.() === true) {
+    env.PI_SKIP_VERSION_CHECK ||= "1";
+  }
+}
+
 function applyTuiRuntimeRole(maintenanceMode: boolean) {
   process.env[RIN_TUI_RUNTIME_ROLE_ENV] = maintenanceMode
     ? RIN_TUI_MAINTENANCE_ROLE
@@ -190,6 +201,10 @@ async function startStdTui(
     additionalExtensionPaths: options.additionalExtensionPaths,
   });
   profile.mark("maintenance-session-created");
+  applyQuietStartupVersionCheckEnv(
+    (sessionRuntime as any)?.session?.settingsManager,
+    interactiveOptions,
+  );
   console.log();
   await runInteractiveMode(sessionRuntime, interactiveOptions);
 }
@@ -215,6 +230,10 @@ async function startRpcTui(
       interactiveOptions,
     );
     await (interactiveMode as any).init();
+    applyQuietStartupVersionCheckEnv(
+      rpcSession.settingsManager,
+      interactiveOptions,
+    );
     await waitForRpcStartupStep(
       rpcSession.ensureSessionReady(),
       "rpc_session_ready",

@@ -41,6 +41,32 @@ test("tui launcher resolves interactive startup options", () => {
   );
 });
 
+test("tui launcher maps quiet startup to Pi version-check skip env", () => {
+  const env = {};
+  launcher.applyQuietStartupVersionCheckEnv(
+    { getQuietStartup: () => true },
+    {},
+    env,
+  );
+  assert.equal(env.PI_SKIP_VERSION_CHECK, "1");
+
+  const verboseEnv = {};
+  launcher.applyQuietStartupVersionCheckEnv(
+    { getQuietStartup: () => true },
+    { verbose: true },
+    verboseEnv,
+  );
+  assert.equal(verboseEnv.PI_SKIP_VERSION_CHECK, undefined);
+
+  const existingEnv = { PI_SKIP_VERSION_CHECK: "custom" };
+  launcher.applyQuietStartupVersionCheckEnv(
+    { getQuietStartup: () => true },
+    {},
+    existingEnv,
+  );
+  assert.equal(existingEnv.PI_SKIP_VERSION_CHECK, "custom");
+});
+
 test("tui launcher formats daemon startup socket failures with doctor/reopen guidance", () => {
   const message = launcher.formatTuiStartupError(
     new Error("connect ECONNREFUSED /run/user/1001/rin-daemon/daemon.sock"),

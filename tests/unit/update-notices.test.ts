@@ -49,6 +49,24 @@ test("Rin update check uses Rin release manifest instead of Pi latest-version", 
   );
 });
 
+test("Rin update check preserves Pi version-check skip env", async () => {
+  const previous = process.env.PI_SKIP_VERSION_CHECK;
+  try {
+    process.env.PI_SKIP_VERSION_CHECK = "1";
+    assert.equal(
+      await notices.checkForNewRinVersion({
+        currentVersion: "1.2.3",
+        channel: "stable",
+        manifest: { stable: { version: "1.2.4" } },
+      }),
+      undefined,
+    );
+  } finally {
+    if (previous === undefined) delete process.env.PI_SKIP_VERSION_CHECK;
+    else process.env.PI_SKIP_VERSION_CHECK = previous;
+  }
+});
+
 test("Rin changelog entries read docs/rin without settings state", async () => {
   await withTempDir(async (dir) => {
     const previousRinDir = process.env.RIN_DIR;
