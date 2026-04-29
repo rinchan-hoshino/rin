@@ -69,6 +69,29 @@ test("terminal title override shows only session name", async () => {
   assert.equal(title, "π - demo");
 });
 
+test("update overrides replace startup update path and skip settings changelog state", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  let wroteSetting = false;
+  assert.equal(
+    codingAgentModule.InteractiveMode.prototype.getChangelogForDisplay.call({
+      settingsManager: {
+        getLastChangelogVersion: () => "0.70.6",
+        setLastChangelogVersion: () => {
+          wroteSetting = true;
+        },
+      },
+      session: { state: { messages: [] } },
+    }),
+    undefined,
+  );
+  assert.equal(wroteSetting, false);
+  assert.match(
+    String(codingAgentModule.InteractiveMode.prototype.run),
+    /showRinUpdateNotificationWhenReady/,
+  );
+});
+
 test("full redraw override preserves terminal scrollback", async () => {
   await overrides.applyRinTuiOverrides();
 

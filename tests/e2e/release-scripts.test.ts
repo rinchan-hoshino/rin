@@ -296,6 +296,44 @@ test("plan-release script computes beta nightly and stable promotion versions", 
   }
 });
 
+test("verify-changelog script requires a target Rin changelog heading", () => {
+  const tempDir = makeTempDir(".tmp-release-changelog-");
+  try {
+    const changelogPath = path.join(tempDir, "CHANGELOG.md");
+    fs.writeFileSync(
+      changelogPath,
+      ["# Rin Changelog", "", "## 1.2.3", "", "- Ready", ""].join("\n"),
+      "utf8",
+    );
+    execFileSync(
+      process.execPath,
+      [
+        path.join(rootDir, "scripts", "release", "verify-changelog.mjs"),
+        "--changelog",
+        changelogPath,
+        "--version",
+        "1.2.3",
+      ],
+      { cwd: rootDir, stdio: "pipe" },
+    );
+    assert.throws(() =>
+      execFileSync(
+        process.execPath,
+        [
+          path.join(rootDir, "scripts", "release", "verify-changelog.mjs"),
+          "--changelog",
+          changelogPath,
+          "--version",
+          "1.2.4",
+        ],
+        { cwd: rootDir, stdio: "pipe" },
+      ),
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("release workflows retry main branch metadata pushes", () => {
   for (const [workflow, followTags] of [
     ["publish-nightly.yml", false],
@@ -315,6 +353,25 @@ test("release workflows retry main branch metadata pushes", () => {
       ),
     );
   }
+});
+
+test("release workflows require changelog entries for user-facing releases", () => {
+  const beta = readWorkflow("publish-beta.yml");
+  assert.match(
+    beta,
+    /npm run release:changelog -- --version '\$\{\{ steps\.plan\.outputs\.promotion_version \}\}'/,
+  );
+  const stable = readWorkflow("publish-stable.yml");
+  assert.match(
+    stable,
+    /npm run release:changelog -- --version '\$\{\{ steps\.plan\.outputs\.version \}\}'/,
+  );
+  const hotfix = readWorkflow("publish-hotfix.yml");
+  assert.match(
+    hotfix,
+    /npm run release:changelog -- --version '\$\{\{ inputs\.version \}\}'/,
+  );
+  assert.doesNotMatch(readWorkflow("publish-nightly.yml"), /release:changelog/);
 });
 
 test("release workflows publish the public bootstrap branch", () => {

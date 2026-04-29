@@ -1,11 +1,24 @@
 import {
+  DynamicBorder,
   FooterComponent,
   InteractiveMode,
   SessionManager,
   SessionSelectorComponent,
 } from "@mariozechner/pi-coding-agent";
-import { Loader, ProcessTerminal, truncateToWidth } from "@mariozechner/pi-tui";
+import {
+  Loader,
+  Markdown,
+  ProcessTerminal,
+  Spacer,
+  Text,
+  truncateToWidth,
+} from "@mariozechner/pi-tui";
 
+import {
+  checkForNewRinVersion,
+  getRinChangelogUrl,
+  readRinChangelogEntries,
+} from "../rin-lib/update-notices.js";
 import { extractMessageText } from "../message-content.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 
@@ -163,6 +176,62 @@ function stripClearScrollback(data: string) {
     : data;
 }
 
+function showRinUpdateNotification(instance: any, newVersion: string) {
+  const text = [
+    `Rin update available: ${newVersion}`,
+    "Run: rin update",
+    `Changelog: ${getRinChangelogUrl()}`,
+  ].join("\n");
+  if (typeof instance?.showWarning === "function") {
+    instance.showWarning(text);
+    return;
+  }
+  instance?.chatContainer?.addChild?.(new Spacer(1));
+  instance?.chatContainer?.addChild?.(new Text(`Warning: ${text}`, 1, 0));
+  instance?.ui?.requestRender?.();
+}
+
+async function showRinUpdateNotificationWhenReady(instance: any) {
+  try {
+    const newVersion = await checkForNewRinVersion();
+    if (!newVersion) return;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (instance?.isInitialized) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    showRinUpdateNotification(instance, newVersion);
+  } catch {
+    // Update checks must never block the TUI.
+  }
+}
+
+function renderRinChangelog(instance: any) {
+  const entries = readRinChangelogEntries();
+  const changelogMarkdown =
+    entries.length > 0
+      ? entries
+          .slice()
+          .reverse()
+          .map((entry) => entry.content)
+          .join("\n\n")
+      : "No changelog entries found.";
+
+  instance.chatContainer.addChild(new Spacer(1));
+  instance.chatContainer.addChild(new DynamicBorder());
+  instance.chatContainer.addChild(new Text("What's New", 1, 0));
+  instance.chatContainer.addChild(new Spacer(1));
+  instance.chatContainer.addChild(
+    new Markdown(
+      changelogMarkdown,
+      1,
+      1,
+      instance.getMarkdownThemeWithSettings?.(),
+    ),
+  );
+  instance.chatContainer.addChild(new DynamicBorder());
+  instance.ui.requestRender();
+}
+
 async function renameSessionIfNamed(
   rename: (sessionFilePath: string, nextName: string) => Promise<void> | void,
   sessionFilePath: string,
@@ -279,6 +348,85 @@ export async function applyRinTuiOverrides() {
         this?.ui?.terminal?.setTitle?.(
           sessionName ? `π - ${sessionName}` : "π",
         );
+      };
+  }
+
+  const originalRun = interactiveModeProto?.run;
+  if (typeof originalRun === "function") {
+    interactiveModeProto.run = async function runWithRinUpdateNotices() {
+      await this.init();
+      void showRinUpdateNotificationWhenReady(this);
+      this.checkTmuxKeyboardSetup?.().then((warning: string | undefined) => {
+        if (warning) this.showWarning(warning);
+      });
+
+      const {
+        migratedProviders,
+        modelFallbackMessage,
+        initialMessage,
+        initialImages,
+        initialMessages,
+      } = this.options;
+      if (migratedProviders && migratedProviders.length > 0) {
+        this.showWarning(
+          `Migrated credentials to auth.json: ${migratedProviders.join(", ")}`,
+        );
+      }
+      const modelsJsonError = this.session.modelRegistry.getError();
+      if (modelsJsonError)
+        this.showError(`models.json error: ${modelsJsonError}`);
+      if (modelFallbackMessage) this.showWarning(modelFallbackMessage);
+      void this.maybeWarnAboutAnthropicSubscriptionAuth?.();
+
+      if (initialMessage) {
+        try {
+          await this.session.prompt(initialMessage, { images: initialImages });
+        } catch (error) {
+          this.showError(
+            error instanceof Error ? error.message : "Unknown error occurred",
+          );
+        }
+      }
+      if (initialMessages) {
+        for (const message of initialMessages) {
+          try {
+            await this.session.prompt(message);
+          } catch (error) {
+            this.showError(
+              error instanceof Error ? error.message : "Unknown error occurred",
+            );
+          }
+        }
+      }
+
+      while (true) {
+        const userInput = await this.getUserInput();
+        try {
+          await this.session.prompt(userInput);
+        } catch (error) {
+          this.showError(
+            error instanceof Error ? error.message : "Unknown error occurred",
+          );
+        }
+      }
+    };
+  }
+
+  const originalGetChangelogForDisplay =
+    interactiveModeProto?.getChangelogForDisplay;
+  if (typeof originalGetChangelogForDisplay === "function") {
+    interactiveModeProto.getChangelogForDisplay =
+      function skipAutomaticChangelogDisplay() {
+        return undefined;
+      };
+  }
+
+  const originalHandleChangelogCommand =
+    interactiveModeProto?.handleChangelogCommand;
+  if (typeof originalHandleChangelogCommand === "function") {
+    interactiveModeProto.handleChangelogCommand =
+      function handleRinChangelogCommand() {
+        renderRinChangelog(this);
       };
   }
 

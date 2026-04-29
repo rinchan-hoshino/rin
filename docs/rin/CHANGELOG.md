@@ -1,5 +1,11 @@
 # Rin Changelog
 
+## 0.1.0
+
+- Rin TUI update notices now use Rin release metadata and link to Rin release notes instead of Pi update feeds.
+- `/changelog` now displays Rin-native release notes from `docs/rin/CHANGELOG.md`.
+- Beta, stable, and hotfix release workflows now verify that Rin changelog notes exist for the user-facing release version before publishing metadata.
+
 ## 0.0.0
 
 - Start tracking Rin-native release notes under `docs/rin/CHANGELOG.md`.

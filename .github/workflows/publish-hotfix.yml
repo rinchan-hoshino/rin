@@ -44,6 +44,9 @@ jobs:
       - name: Build candidate
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm run build
+      - name: Verify Rin changelog entry
+        working-directory: ${{ runner.temp }}/hotfix-candidate
+        run: npm run release:changelog -- --version '${{ inputs.version }}'
       - name: Validate candidate
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm run test:release
