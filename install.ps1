@@ -1,4 +1,14 @@
 $ErrorActionPreference = "Stop"
+
+function Assert-WindowsPowerShellHost {
+  $isWindowsVariable = Get-Variable -Name IsWindows -ErrorAction SilentlyContinue
+  if ($null -ne $isWindowsVariable -and -not [bool]$isWindowsVariable.Value) {
+    throw "rin_powershell_installer_windows_only: use install.sh or rin update on non-Windows systems"
+  }
+}
+
+Assert-WindowsPowerShellHost
+
 $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { "" }
 $mode = if ($env:RIN_BOOTSTRAP_WRAPPER_MODE) { $env:RIN_BOOTSTRAP_WRAPPER_MODE } else { "install" }
 $localBootstrapScript = if ($scriptDir) { Join-Path $scriptDir "scripts/bootstrap-entrypoint.ps1" } else { "" }

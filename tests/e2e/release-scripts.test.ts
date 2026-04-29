@@ -398,12 +398,25 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       installPowerShellWrapper,
       /\[CmdletBinding\(PositionalBinding = \$false\)\]/,
     );
+    assert.match(
+      installPowerShellWrapper,
+      /function Assert-WindowsPowerShellHost/,
+    );
+    assert.ok(
+      installPowerShellWrapper.indexOf("Assert-WindowsPowerShellHost") <
+        installPowerShellWrapper.indexOf("$repoUrl ="),
+    );
     assert.match(installPowerShellWrapper, /return ,\$result/);
     assert.match(
       installPowerShellWrapper,
       /\$bootstrapArgs = @\(Build-BootstrapArgs \$args\)/,
     );
     assert.doesNotMatch(bootstrapPowerShell, /\[switch\]\$Git/);
+    assert.match(bootstrapPowerShell, /function Assert-WindowsPowerShellHost/);
+    assert.ok(
+      bootstrapPowerShell.indexOf("Assert-WindowsPowerShellHost") <
+        bootstrapPowerShell.indexOf("function Parse-Args"),
+    );
     assert.match(bootstrapPowerShell, /function Is-Flag/);
     assert.match(bootstrapPowerShell, /Is-Flag \$arg "git"/);
     assert.match(bootstrapPowerShell, /Is-Flag \$arg "mode"/);
