@@ -24,6 +24,15 @@ async function withTempDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
+test("Rin update notices compare package versions with prerelease precedence", () => {
+  assert.ok(notices.comparePackageVersions("1.2.4", "1.2.3") > 0);
+  assert.ok(notices.comparePackageVersions("1.2.4", "1.2.4-beta.1") > 0);
+  assert.ok(
+    notices.comparePackageVersions("1.2.4-beta.10", "1.2.4-beta.2") > 0,
+  );
+  assert.equal(notices.comparePackageVersions("invalid", "1.2.3"), 0);
+});
+
 test("Rin update check uses Rin release manifest instead of Pi latest-version", async () => {
   const manifest = {
     stable: { version: "1.2.4" },
