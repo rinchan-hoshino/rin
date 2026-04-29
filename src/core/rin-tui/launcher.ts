@@ -223,7 +223,6 @@ async function startRpcTui(
   let interactiveMode: InteractiveMode | undefined;
   try {
     await rpcSession.prepareForInteractiveStartup();
-    await waitForRpcStartupStep(rpcSession.connect(), "rpc_connect");
     runtimeHost = createRpcRuntimeHost(rpcSession);
     interactiveMode = new InteractiveMode(
       runtimeHost as any,
@@ -234,6 +233,7 @@ async function startRpcTui(
       rpcSession.settingsManager,
       interactiveOptions,
     );
+    await waitForRpcStartupStep(rpcSession.connect(), "rpc_connect");
     await waitForRpcStartupStep(
       rpcSession.ensureSessionReady(),
       "rpc_session_ready",
