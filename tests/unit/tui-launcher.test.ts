@@ -41,20 +41,6 @@ test("tui launcher resolves interactive startup options", () => {
   );
 });
 
-test("tui launcher prints its startup separator independently of startup verbosity", () => {
-  const quietSession = {
-    settingsManager: {
-      getQuietStartup: () => true,
-    },
-  };
-
-  assert.equal(launcher.shouldPrintStartupSeparator(quietSession), true);
-  assert.equal(
-    launcher.shouldPrintStartupSeparator(undefined, { verbose: false }),
-    true,
-  );
-});
-
 test("tui launcher formats daemon startup socket failures with doctor/reopen guidance", () => {
   const message = launcher.formatTuiStartupError(
     new Error("connect ECONNREFUSED /run/user/1001/rin-daemon/daemon.sock"),

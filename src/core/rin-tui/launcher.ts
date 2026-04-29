@@ -162,10 +162,6 @@ export function resolveTuiInteractiveOptions(
   };
 }
 
-export function shouldPrintStartupSeparator() {
-  return true;
-}
-
 function applyTuiRuntimeRole(maintenanceMode: boolean) {
   process.env[RIN_TUI_RUNTIME_ROLE_ENV] = maintenanceMode
     ? RIN_TUI_MAINTENANCE_ROLE
@@ -194,9 +190,7 @@ async function startStdTui(
     additionalExtensionPaths: options.additionalExtensionPaths,
   });
   profile.mark("maintenance-session-created");
-  if (shouldPrintStartupSeparator()) {
-    console.log();
-  }
+  console.log();
   await runInteractiveMode(sessionRuntime, interactiveOptions);
 }
 
@@ -221,9 +215,6 @@ async function startRpcTui(
     );
     runtimeHost = createRpcRuntimeHost(rpcSession);
     profile.mark("rpc-session-created");
-    if (shouldPrintStartupSeparator()) {
-      console.log();
-    }
     interactiveMode = new InteractiveMode(
       runtimeHost as any,
       interactiveOptions,
