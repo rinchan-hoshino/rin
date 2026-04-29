@@ -13,6 +13,13 @@ function makeTempDir(prefix) {
   return fs.mkdtempSync(path.join(rootDir, prefix));
 }
 
+function readWorkflow(workflow) {
+  return fs.readFileSync(
+    path.join(rootDir, ".github", "workflows", workflow),
+    "utf8",
+  );
+}
+
 test("update-release-manifest script writes stable npm tarball metadata", () => {
   const tempDir = makeTempDir(".tmp-release-script-");
   try {
@@ -290,10 +297,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
 });
 
 test("hotfix workflow resolves fetched refs before publishing", () => {
-  const content = fs.readFileSync(
-    path.join(rootDir, ".github", "workflows", "publish-hotfix.yml"),
-    "utf8",
-  );
+  const content = readWorkflow("publish-hotfix.yml");
   assert.match(content, /git fetch origin '\$\{\{ inputs\.ref \}\}'/);
   assert.match(
     content,
@@ -328,10 +332,7 @@ test("release workflows retry main branch metadata pushes", () => {
     ["publish-beta.yml", false],
     ["publish-stable.yml", true],
   ] as const) {
-    const content = fs.readFileSync(
-      path.join(rootDir, ".github", "workflows", workflow),
-      "utf8",
-    );
+    const content = readWorkflow(workflow);
     const tagSuffix = followTags ? " --follow-tags" : "";
     assert.match(
       content,
@@ -352,10 +353,7 @@ test("release workflows publish the public bootstrap branch", () => {
     "publish-stable.yml",
     "publish-hotfix.yml",
   ]) {
-    const content = fs.readFileSync(
-      path.join(rootDir, ".github", "workflows", workflow),
-      "utf8",
-    );
+    const content = readWorkflow(workflow);
     assert.match(content, /bootstrap_branch=bootstrap/);
     assert.match(
       content,
