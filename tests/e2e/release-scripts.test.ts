@@ -308,6 +308,14 @@ test("hotfix workflow resolves fetched refs before publishing", () => {
     content,
     /git tag 'v\$\{\{ inputs\.version \}\}' "\$HOTFIX_REF_SHA"/,
   );
+  assert.match(
+    content,
+    /git push origin HEAD:main 'refs\/tags\/v\$\{\{ inputs\.version \}\}'/,
+  );
+  assert.match(
+    content,
+    /if ! git push origin HEAD:main 'refs\/tags\/v\$\{\{ inputs\.version \}\}'; then\n\s+git fetch origin main\n\s+git rebase origin\/main\n\s+git push origin HEAD:main 'refs\/tags\/v\$\{\{ inputs\.version \}\}'/,
+  );
   assert.doesNotMatch(
     content,
     /git worktree add --detach "\$candidate_dir" '\$\{\{ inputs\.ref \}\}'/,
@@ -319,7 +327,6 @@ test("release workflows retry main branch metadata pushes", () => {
     ["publish-nightly.yml", false],
     ["publish-beta.yml", false],
     ["publish-stable.yml", true],
-    ["publish-hotfix.yml", true],
   ] as const) {
     const content = fs.readFileSync(
       path.join(rootDir, ".github", "workflows", workflow),

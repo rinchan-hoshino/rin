@@ -71,10 +71,10 @@ jobs:
           git add release-manifest.json
           git commit -m 'chore(release): publish hotfix ${{ inputs.version }}' || true
           git tag 'v${{ inputs.version }}' "$HOTFIX_REF_SHA" || true
-          if ! git push origin HEAD:main --follow-tags; then
+          if ! git push origin HEAD:main 'refs/tags/v${{ inputs.version }}'; then
             git fetch origin main
             git rebase origin/main
-            git push origin HEAD:main --follow-tags
+            git push origin HEAD:main 'refs/tags/v${{ inputs.version }}'
           fi
       - name: Prepare bootstrap branch checkout
         env:
