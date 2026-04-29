@@ -7,14 +7,19 @@ import path from "node:path";
 const HOME_DIR = os.homedir();
 
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
-import { MANAGED_TASK_SESSION_LEAF } from "../session/managed-paths.js";
+import {
+  MANAGED_TASK_SESSION_LEAF,
+  getManagedTaskSessionFile,
+} from "../session/managed-paths.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
+import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
 import type { CronTaskRecord } from "./cron.js";
 
 type CronChatCapability = {
   send?: (payload: ChatOutboxPayload) => Promise<any>;
   runTurn?: (payload: any) => Promise<any>;
+  terminateTurn?: (payload: { controllerKey: string }) => Promise<any>;
 };
 
 export async function sendChatText(
@@ -24,8 +29,6 @@ export async function sendChatText(
     taskId: string;
     runId: string;
     text: string;
-    sessionId?: string;
-    sessionFile?: string;
   },
 ) {
   if (typeof options.chat?.send !== "function") {
@@ -39,9 +42,12 @@ export async function sendChatText(
 }
 
 export async function resolveCronSessionFile(task: CronTaskRecord) {
-  if (task.session.mode === "current") return task.session.sessionFile;
-  if (task.session.mode === "dedicated") return task.dedicatedSessionFile;
-  if (task.session.mode === "ephemeral") return undefined;
+  const mode = normalizeScheduledTaskSessionMode((task.session as any)?.mode);
+  if (mode === "dedicated") {
+    const sessionFile = String(task.dedicatedSessionFile || "").trim();
+    return sessionFile && existsSync(sessionFile) ? sessionFile : undefined;
+  }
+  if (mode === "none") return undefined;
   throw new Error(
     `cron_invalid_session_mode:${String((task.session as any)?.mode || "unknown")}`,
   );
@@ -126,7 +132,7 @@ export async function executeCronShellTask(
   });
 }
 
-function isSafeEphemeralSessionFile(agentDir: string, sessionFile?: string) {
+function isSafeTransientSessionFile(agentDir: string, sessionFile?: string) {
   const resolved = String(sessionFile || "").trim();
   if (!resolved) return false;
   const sessionsDir = path.resolve(agentDir, "sessions");
@@ -137,11 +143,11 @@ function isSafeEphemeralSessionFile(agentDir: string, sessionFile?: string) {
   );
 }
 
-async function removeEphemeralSessionFile(
+async function removeTransientSessionFile(
   agentDir: string,
   sessionFile?: string,
 ) {
-  if (!isSafeEphemeralSessionFile(agentDir, sessionFile)) return;
+  if (!isSafeTransientSessionFile(agentDir, sessionFile)) return;
   await rm(path.resolve(String(sessionFile)), { force: true }).catch(() => {});
 }
 
@@ -159,21 +165,31 @@ export async function executeCronAgentTask(
   if (typeof options.chat?.runTurn !== "function") {
     throw new Error("cron_chat_unavailable");
   }
+  const sessionMode =
+    normalizeScheduledTaskSessionMode((task.session as any)?.mode) || "none";
   const dedicatedSessionFile =
-    task.session.mode === "dedicated"
-      ? String(task.dedicatedSessionFile || "").trim() || undefined
+    sessionMode === "dedicated"
+      ? String(task.dedicatedSessionFile || "").trim() ||
+        getManagedTaskSessionFile(options.agentDir, task.id)
       : undefined;
   const controllerKey = task.id;
   const sessionFile = await resolveCronSessionFile(task);
+  const continuing = Boolean(
+    sessionMode === "dedicated" && (sessionFile || task.runCount > 1),
+  );
+  const prompt = continuing
+    ? String(task.target.continuationPrompt || "").trim()
+    : String(task.target.prompt || "").trim();
+  if (!prompt) throw new Error("cron_prompt_required");
   const result = await options.chat.runTurn({
     chatKey: task.chatKey,
     controllerKey,
     deliveryEnabled: false,
     affectChatBinding: false,
-    disposeAfterTurn: task.session.mode === "ephemeral",
-    text: task.target.prompt,
-    sessionFile,
-    ...(!sessionFile && task.session.mode !== "current"
+    disposeAfterTurn: sessionMode === "none",
+    text: prompt,
+    sessionFile: sessionFile || dedicatedSessionFile,
+    ...(sessionMode === "none"
       ? { managedSessionLeaf: MANAGED_TASK_SESSION_LEAF }
       : {}),
     ...(task.model ? { model: task.model } : {}),
@@ -183,15 +199,11 @@ export async function executeCronAgentTask(
   const finalText = summarizeText(completion.finalText, 4000);
   if (!finalText) throw new Error("cron_final_assistant_text_missing");
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
-  if (task.session.mode === "ephemeral") {
-    await removeEphemeralSessionFile(options.agentDir, nextSessionFile);
+  if (sessionMode === "none") {
+    await removeTransientSessionFile(options.agentDir, nextSessionFile);
   }
-  if (task.session.mode === "dedicated") {
-    task.dedicatedSessionFile = dedicatedSessionFile;
-    if (nextSessionFile) {
-      task.dedicatedSessionFile = nextSessionFile;
-      task.dedicatedSessionPersistent = true;
-    } else if (dedicatedSessionFile) {
+  if (sessionMode === "dedicated") {
+    if (dedicatedSessionFile) {
       task.dedicatedSessionFile = dedicatedSessionFile;
       task.dedicatedSessionPersistent = true;
     } else {
@@ -202,8 +214,7 @@ export async function executeCronAgentTask(
   return {
     text: finalText,
     sessionId: String(result?.sessionId || "").trim() || undefined,
-    sessionFile:
-      task.session.mode === "ephemeral" ? undefined : nextSessionFile,
+    sessionFile: sessionMode === "none" ? undefined : dedicatedSessionFile,
   };
 }
 
@@ -239,8 +250,6 @@ export async function executeCronTask(
           taskId: task.id,
           runId,
           text: result.text,
-          sessionId: result.sessionId,
-          sessionFile: result.sessionFile,
         }).catch(() => {});
       }
     }
@@ -251,6 +260,17 @@ export async function executeCronTask(
   } finally {
     task.lastFinishedAt = nowIso();
     task.updatedAt = nowIso();
+    if (
+      !task.completedAt &&
+      !task.trigger.expression &&
+      !task.trigger.intervalMs &&
+      task.runCount >= 1
+    ) {
+      task.completedAt = nowIso();
+      task.completionReason = "once_completed";
+      task.enabled = false;
+      task.nextRunAt = undefined;
+    }
     if (
       !task.completedAt &&
       task.termination?.maxRuns &&

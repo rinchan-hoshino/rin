@@ -19,7 +19,6 @@ import {
   SCHEDULED_TASK_MANAGE_ACTIONS,
   SCHEDULED_TASK_SESSION_MODES,
   SCHEDULED_TASK_TARGET_KINDS,
-  SCHEDULED_TASK_TRIGGER_KINDS,
   type ScheduledTaskManageAction,
 } from "../scheduled-task-options.js";
 import { readSessionMetadata } from "../session/metadata.js";
@@ -59,7 +58,7 @@ type TaskManageParams = {
 };
 type TaskSaveCallArgs = {
   name?: unknown;
-  trigger?: { kind?: unknown } | null;
+  trigger?: Record<string, unknown> | null;
   target?: { kind?: unknown } | null;
 };
 
@@ -109,7 +108,10 @@ function buildTaskTarget(target: CronTaskInput["target"]) {
   if (target?.kind === "agent_prompt") {
     return {
       kind: "agent_prompt" as const,
-      prompt: wrapAgentPrompt(String(target.prompt || "")),
+      prompt: wrapAgentPrompt(String(target.prompt || "")) || undefined,
+      continuationPrompt:
+        wrapAgentPrompt(String((target as any).continuationPrompt || "")) ||
+        undefined,
     };
   }
   if (target) {
@@ -144,10 +146,10 @@ function renderTaskLabel(task: TaskRecordLike) {
 }
 
 function renderTaskTrigger(trigger: TaskRecordLike["trigger"]) {
-  if (trigger?.kind === "interval") {
+  if (trigger?.intervalMs) {
     return `every ${String(trigger.intervalMs || 0)}ms`;
   }
-  if (trigger?.kind === "cron") {
+  if (trigger?.expression) {
     return `cron ${String(trigger.expression || "")}`;
   }
   return `once ${String(trigger?.runAt || "")}`;
@@ -161,11 +163,9 @@ function renderTaskTarget(target: TaskRecordLike["target"]) {
 }
 
 function renderTaskSession(task: TaskRecordLike) {
-  const sessionFile = task.session?.sessionFile
-    ? String(task.session.sessionFile)
-    : task.dedicatedSessionFile
-      ? String(task.dedicatedSessionFile)
-      : "";
+  const sessionFile = task.dedicatedSessionFile
+    ? String(task.dedicatedSessionFile)
+    : "";
   const options = [
     task.model ? `model=${String(task.model)}` : "",
     task.thinkingLevel ? `thinking=${String(task.thinkingLevel)}` : "",
@@ -296,12 +296,6 @@ const taskSchema = Type.Object({
     }),
   ),
   trigger: Type.Object({
-    kind: createLooseEnumSchema(SCHEDULED_TASK_TRIGGER_KINDS, {
-      description: allowedValuesDescription(
-        "Trigger kind.",
-        SCHEDULED_TASK_TRIGGER_KINDS,
-      ),
-    }),
     intervalMs: Type.Optional(
       Type.Number({
         description:
@@ -320,7 +314,8 @@ const taskSchema = Type.Object({
     ),
     runAt: Type.Optional(
       Type.String({
-        description: "ISO timestamp for a one-time scheduled run.",
+        description:
+          "ISO timestamp for a one-time scheduled run. Used when intervalMs and expression are omitted.",
       }),
     ),
   }),
@@ -343,14 +338,8 @@ const taskSchema = Type.Object({
     Type.Object({
       mode: createLooseEnumSchema(SCHEDULED_TASK_SESSION_MODES, {
         description:
-          "Session binding mode. Use `ephemeral` for stateless tasks that should not keep a session file; use `dedicated` when future runs should reuse context.",
+          "Session mode. Use `none` for the default no-session task; use `dedicated` to create and reuse the task-id-named session across runs.",
       }),
-      sessionFile: Type.Optional(
-        Type.String({
-          description:
-            "Optional session path override. When mode=current, bind to that current session. When mode=dedicated, the first run creates a dedicated session automatically and later runs reuse it; provide this to seed or override that persistent dedicated session explicitly. Ignored for mode=ephemeral.",
-        }),
-      ),
     }),
   ),
   target: Type.Object({
@@ -362,7 +351,14 @@ const taskSchema = Type.Object({
     }),
     prompt: Type.Optional(
       Type.String({
-        description: "Instruction for scheduled agent execution.",
+        description:
+          "Instruction for scheduled agent execution. For dedicated-session tasks, this is the first-turn instruction.",
+      }),
+    ),
+    continuationPrompt: Type.Optional(
+      Type.String({
+        description:
+          "Instruction used when a dedicated task session continues after the first turn.",
       }),
     ),
     command: Type.Optional(

@@ -20,26 +20,52 @@ const cronMod = await import(
     .href
 );
 
-test("cron execution resolves session file preference", async () => {
-  assert.equal(
-    await execMod.resolveCronSessionFile({
-      session: { mode: "current", sessionFile: "/tmp/a" },
-    }),
-    "/tmp/a",
+test("cron execution resolves only existing dedicated session files", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const dedicatedSessionFile = path.join(
+    agentDir,
+    "sessions",
+    "managed",
+    "task",
+    "cron_a.jsonl",
   );
-  assert.equal(
-    await execMod.resolveCronSessionFile({
-      session: { mode: "dedicated" },
-      dedicatedSessionFile: "/tmp/b",
-    }),
-    "/tmp/b",
-  );
-  assert.equal(
-    await execMod.resolveCronSessionFile({
-      session: { mode: "ephemeral" },
-    }),
-    undefined,
-  );
+  try {
+    assert.equal(
+      await execMod.resolveCronSessionFile({
+        session: { mode: "dedicated" },
+        dedicatedSessionFile,
+      }),
+      undefined,
+    );
+    await fs.mkdir(path.dirname(dedicatedSessionFile), { recursive: true });
+    await fs.writeFile(dedicatedSessionFile, "session", "utf8");
+    assert.equal(
+      await execMod.resolveCronSessionFile({
+        session: { mode: "dedicated" },
+        dedicatedSessionFile,
+      }),
+      dedicatedSessionFile,
+    );
+    assert.equal(
+      await execMod.resolveCronSessionFile({ session: { mode: "none" } }),
+      undefined,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler derives one-time triggers when no interval is set", () => {
+  const scheduler = new cronMod.CronScheduler({
+    agentDir: "/tmp/rin-agent",
+    cwd: process.cwd(),
+  });
+  const task = scheduler.upsertTask({
+    trigger: { runAt: "2026-04-10T00:00:00.000Z" },
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt: "hello" },
+  });
+  assert.equal(task.trigger.runAt, "2026-04-10T00:00:00.000Z");
 });
 
 test("cron scheduler rejects removed specific session mode", () => {
@@ -50,65 +76,67 @@ test("cron scheduler rejects removed specific session mode", () => {
   assert.throws(
     () =>
       scheduler.upsertTask({
-        trigger: { kind: "once", runAt: "2026-04-10T00:00:00.000Z" },
-        session: { mode: "specific", sessionFile: "/tmp/a" },
+        trigger: { runAt: "2026-04-10T00:00:00.000Z" },
+        session: { mode: "specific" },
         target: { kind: "agent_prompt", prompt: "hello" },
       }),
     /cron_invalid_session_mode:specific/,
   );
 });
 
-test("cron scheduler can seed and preserve dedicated session files", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const scheduler = new cronMod.CronScheduler({ agentDir });
-  try {
-    const seeded = scheduler.upsertTask({
-      id: "cron_seeded_dedicated",
-      trigger: { kind: "interval", intervalMs: 60_000 },
-      session: { mode: "dedicated", sessionFile: "/tmp/seeded-session.jsonl" },
-      target: { kind: "agent_prompt", prompt: "hello" },
-    });
-    assert.equal(
-      seeded.dedicatedSessionFile,
-      path.resolve("/tmp/seeded-session.jsonl"),
-    );
-    assert.equal(seeded.dedicatedSessionPersistent, true);
-    assert.equal(seeded.session.sessionFile, undefined);
-
-    const updated = scheduler.upsertTask({
-      id: "cron_seeded_dedicated",
-      trigger: { kind: "interval", intervalMs: 60_000 },
-      session: { mode: "dedicated" },
-      target: { kind: "agent_prompt", prompt: "hello again" },
-    });
-    assert.equal(
-      updated.dedicatedSessionFile,
-      path.resolve("/tmp/seeded-session.jsonl"),
-    );
-    assert.equal(updated.dedicatedSessionPersistent, true);
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("cron scheduler leaves unstarted dedicated task sessions unbound", async () => {
+test("cron scheduler always derives dedicated session files from task ids", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
     const task = scheduler.upsertTask({
-      id: "cron_managed_dedicated",
-      trigger: { kind: "interval", intervalMs: 60_000 },
+      id: "cron_seeded_dedicated",
+      trigger: { intervalMs: 60_000 },
       session: { mode: "dedicated" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
-    assert.equal(task.dedicatedSessionFile, undefined);
+    assert.equal(
+      task.dedicatedSessionFile,
+      path.join(
+        agentDir,
+        "sessions",
+        "managed",
+        "task",
+        "cron_seeded_dedicated.jsonl",
+      ),
+    );
     assert.equal(task.dedicatedSessionPersistent, true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("cron scheduler preserves dedicated session files on load", async () => {
+test("cron scheduler assigns task-id-named dedicated session files before first run", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    const task = scheduler.upsertTask({
+      id: "cron_managed_dedicated",
+      trigger: { intervalMs: 60_000 },
+      session: { mode: "dedicated" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+    assert.equal(
+      task.dedicatedSessionFile,
+      path.join(
+        agentDir,
+        "sessions",
+        "managed",
+        "task",
+        "cron_managed_dedicated.jsonl",
+      ),
+    );
+    assert.equal(task.dedicatedSessionPersistent, true);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler canonicalizes dedicated session files on load", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "cron", "tasks.json");
   await fs.mkdir(path.dirname(tasksFile), { recursive: true });
@@ -117,14 +145,14 @@ test("cron scheduler preserves dedicated session files on load", async () => {
     JSON.stringify(
       [
         {
-          id: "cron_legacy_dedicated",
+          id: "cron_stale_dedicated",
           createdAt: "2026-04-17T00:00:00.000Z",
           updatedAt: "2026-04-17T00:00:00.000Z",
           enabled: true,
-          trigger: { kind: "interval", intervalMs: 60_000 },
+          trigger: { intervalMs: 60_000 },
           session: { mode: "dedicated" },
           target: { kind: "agent_prompt", prompt: "hello" },
-          dedicatedSessionFile: "/tmp/legacy-dedicated.jsonl",
+          dedicatedSessionFile: "/tmp/stale-dedicated.jsonl",
           runCount: 0,
           running: false,
         },
@@ -136,10 +164,19 @@ test("cron scheduler preserves dedicated session files on load", async () => {
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
     scheduler.start();
-    const task = scheduler.getTask("cron_legacy_dedicated");
+    const task = scheduler.getTask("cron_stale_dedicated");
     assert.ok(task);
     assert.equal(task.dedicatedSessionPersistent, true);
-    assert.equal(task.dedicatedSessionFile, "/tmp/legacy-dedicated.jsonl");
+    assert.equal(
+      task.dedicatedSessionFile,
+      path.join(
+        agentDir,
+        "sessions",
+        "managed",
+        "task",
+        "cron_stale_dedicated.jsonl",
+      ),
+    );
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -148,13 +185,24 @@ test("cron scheduler preserves dedicated session files on load", async () => {
 
 test("cron dedicated agent task creates and then preserves its bound session", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const dedicatedSessionFile = path.join(
+    agentDir,
+    "sessions",
+    "managed",
+    "task",
+    "cron_dedicated.jsonl",
+  );
   const firstSessionFile = path.join(agentDir, "dedicated-session.jsonl");
   const secondSessionFile = path.join(agentDir, "dedicated-session-next.jsonl");
   const task = {
     id: "cron_dedicated",
     chatKey: "telegram/demo:1",
     session: { mode: "dedicated" },
-    target: { kind: "agent_prompt", prompt: "hello" },
+    target: {
+      kind: "agent_prompt",
+      prompt: "hello",
+      continuationPrompt: "hello again",
+    },
   };
   const calls = [];
   try {
@@ -173,8 +221,10 @@ test("cron dedicated agent task creates and then preserves its bound session", a
       },
     });
     assert.equal(first.text, "done");
-    assert.equal(first.sessionFile, firstSessionFile);
-    assert.equal(task.dedicatedSessionFile, firstSessionFile);
+    assert.equal(first.sessionFile, dedicatedSessionFile);
+    assert.equal(task.dedicatedSessionFile, dedicatedSessionFile);
+    await fs.mkdir(path.dirname(dedicatedSessionFile), { recursive: true });
+    await fs.writeFile(dedicatedSessionFile, "session", "utf8");
     assert.equal(task.dedicatedSessionPersistent, true);
 
     const second = await execMod.executeCronAgentTask(task, {
@@ -192,8 +242,8 @@ test("cron dedicated agent task creates and then preserves its bound session", a
       },
     });
     assert.equal(second.text, "done again");
-    assert.equal(second.sessionFile, secondSessionFile);
-    assert.equal(task.dedicatedSessionFile, secondSessionFile);
+    assert.equal(second.sessionFile, dedicatedSessionFile);
+    assert.equal(task.dedicatedSessionFile, dedicatedSessionFile);
     assert.deepEqual(calls, [
       {
         chatKey: "telegram/demo:1",
@@ -202,8 +252,7 @@ test("cron dedicated agent task creates and then preserves its bound session", a
         affectChatBinding: false,
         disposeAfterTurn: false,
         text: "hello",
-        sessionFile: undefined,
-        managedSessionLeaf: "task",
+        sessionFile: dedicatedSessionFile,
       },
       {
         chatKey: "telegram/demo:1",
@@ -211,8 +260,8 @@ test("cron dedicated agent task creates and then preserves its bound session", a
         deliveryEnabled: false,
         affectChatBinding: false,
         disposeAfterTurn: false,
-        text: "hello",
-        sessionFile: firstSessionFile,
+        text: "hello again",
+        sessionFile: dedicatedSessionFile,
       },
     ]);
   } finally {
@@ -220,18 +269,32 @@ test("cron dedicated agent task creates and then preserves its bound session", a
   }
 });
 
-test("cron seeded dedicated agent task preserves its bound session", async () => {
+test("cron dedicated agent task resumes an existing canonical session", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const task = {
     id: "cron_seeded",
     chatKey: "telegram/demo:1",
     session: { mode: "dedicated" },
-    dedicatedSessionFile: "/tmp/seeded-session.jsonl",
+    dedicatedSessionFile: path.join(
+      agentDir,
+      "sessions",
+      "managed",
+      "task",
+      "cron_seeded.jsonl",
+    ),
     dedicatedSessionPersistent: true,
-    target: { kind: "agent_prompt", prompt: "hello" },
+    target: {
+      kind: "agent_prompt",
+      prompt: "hello",
+      continuationPrompt: "hello again",
+    },
   };
   const calls = [];
   try {
+    await fs.mkdir(path.dirname(task.dedicatedSessionFile), {
+      recursive: true,
+    });
+    await fs.writeFile(task.dedicatedSessionFile, "session", "utf8");
     const result = await execMod.executeCronAgentTask(task, {
       agentDir,
       runId: "run-1",
@@ -246,8 +309,8 @@ test("cron seeded dedicated agent task preserves its bound session", async () =>
         },
       },
     });
-    assert.equal(result.sessionFile, "/tmp/seeded-session-next.jsonl");
-    assert.equal(task.dedicatedSessionFile, "/tmp/seeded-session-next.jsonl");
+    assert.equal(result.sessionFile, task.dedicatedSessionFile);
+    assert.ok(task.dedicatedSessionFile.endsWith("cron_seeded.jsonl"));
     assert.deepEqual(calls, [
       {
         chatKey: "telegram/demo:1",
@@ -255,8 +318,14 @@ test("cron seeded dedicated agent task preserves its bound session", async () =>
         deliveryEnabled: false,
         affectChatBinding: false,
         disposeAfterTurn: false,
-        text: "hello",
-        sessionFile: "/tmp/seeded-session.jsonl",
+        text: "hello again",
+        sessionFile: path.join(
+          agentDir,
+          "sessions",
+          "managed",
+          "task",
+          "cron_seeded.jsonl",
+        ),
       },
     ]);
   } finally {
@@ -264,19 +333,19 @@ test("cron seeded dedicated agent task preserves its bound session", async () =>
   }
 });
 
-test("cron ephemeral agent task disposes and removes its transient session file", async () => {
+test("cron no-session agent task disposes and removes its transient session file", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const transientSessionFile = path.join(
     agentDir,
     "sessions",
     "managed",
     "task",
-    "cron_ephemeral.jsonl",
+    "cron_none.jsonl",
   );
   const task = {
-    id: "cron_ephemeral",
+    id: "cron_none",
     chatKey: "telegram/demo:1",
-    session: { mode: "ephemeral" },
+    session: { mode: "none" },
     model: "openai-codex/gpt-5.5",
     thinkingLevel: "low",
     target: { kind: "agent_prompt", prompt: "hello" },
@@ -306,7 +375,7 @@ test("cron ephemeral agent task disposes and removes its transient session file"
     assert.deepEqual(calls, [
       {
         chatKey: "telegram/demo:1",
-        controllerKey: "cron_ephemeral",
+        controllerKey: "cron_none",
         deliveryEnabled: false,
         affectChatBinding: false,
         disposeAfterTurn: true,
@@ -344,9 +413,94 @@ test("cron agent task falls back to canonical turn result text", async () => {
         }),
       },
     });
+    const expectedSessionFile = path.join(
+      agentDir,
+      "sessions",
+      "managed",
+      "task",
+      "cron_result_fallback.jsonl",
+    );
     assert.equal(result.text, "done from result");
-    assert.equal(result.sessionFile, "/tmp/cron-result-fallback.jsonl");
-    assert.equal(task.dedicatedSessionFile, "/tmp/cron-result-fallback.jsonl");
+    assert.equal(result.sessionFile, expectedSessionFile);
+    assert.equal(task.dedicatedSessionFile, expectedSessionFile);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron dedicated agent task uses separate initial and continuation prompts", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const dedicatedSessionFile = path.join(
+    agentDir,
+    "sessions",
+    "managed",
+    "task",
+    "cron_prompt_modes.jsonl",
+  );
+  const task = {
+    id: "cron_prompt_modes",
+    chatKey: "telegram/demo:1",
+    session: { mode: "dedicated" },
+    runCount: 1,
+    target: {
+      kind: "agent_prompt",
+      prompt: "first turn",
+      continuationPrompt: "next turn",
+    },
+  };
+  const calls = [];
+  try {
+    await execMod.executeCronAgentTask(task, {
+      agentDir,
+      chat: {
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return { finalText: "done", sessionFile: dedicatedSessionFile };
+        },
+      },
+    });
+    await fs.mkdir(path.dirname(dedicatedSessionFile), { recursive: true });
+    await fs.writeFile(dedicatedSessionFile, "session", "utf8");
+    task.runCount = 2;
+    await execMod.executeCronAgentTask(task, {
+      agentDir,
+      chat: {
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return { finalText: "done", sessionFile: dedicatedSessionFile };
+        },
+      },
+    });
+    assert.deepEqual(
+      calls.map((item) => item.text),
+      ["first turn", "next turn"],
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler terminates dedicated sessions when tasks stop", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const terminations = [];
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      terminateTurn: async (payload) => {
+        terminations.push(payload.controllerKey);
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: "cron_stop_me",
+      trigger: { intervalMs: 60_000 },
+      session: { mode: "dedicated" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+    scheduler.pauseTask("cron_stop_me");
+    scheduler.deleteTask("cron_stop_me");
+    assert.deepEqual(terminations, ["cron_stop_me", "cron_stop_me"]);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -380,7 +534,6 @@ test("cron scheduler installs the built-in daily memory index repair task", asyn
     });
     assert.ok(builtIn);
     assert.equal(builtIn.builtIn, true);
-    assert.equal(builtIn.trigger.kind, "cron");
     assert.equal(builtIn.trigger.expression, "17 4 * * *");
     assert.equal(builtIn.target.kind, "shell_command");
     assert.match(builtIn.target.command, /memory-index repair/);
@@ -436,7 +589,7 @@ test("cron scheduler protects built-in tasks from public mutation", async () => 
       () =>
         scheduler.upsertTask({
           id: "builtin_memory_index_repair_daily",
-          trigger: { kind: "cron", expression: "0 0 * * *" },
+          trigger: { expression: "0 0 * * *" },
           session: { mode: "dedicated" },
           target: { kind: "shell_command", command: "echo nope" },
         }),
@@ -456,7 +609,7 @@ test("cron scheduler derives running from live execution without persisting it",
     scheduler.start();
     scheduler.upsertTask({
       id: "cron_running_state",
-      trigger: { kind: "interval", intervalMs: 60_000 },
+      trigger: { intervalMs: 60_000 },
       session: { mode: "dedicated" },
       target: { kind: "shell_command", command: "echo ready" },
     });

@@ -122,34 +122,29 @@ async function withTaskDaemon(dataForPayload, run, options = {}) {
   }
 }
 
-test("save_task exposes session reuse, ephemeral, model and thinking options", () => {
+test("save_task exposes none/dedicated session modes, model and prompt options", () => {
   const saveTool = getTaskTool("save_task");
   assert.equal(saveTool.parameters.properties.id.type, "string");
   assert.equal(saveTool.parameters.properties.model.type, "string");
   assert.ok(saveTool.parameters.properties.thinkingLevel);
   assert.equal(
-    saveTool.parameters.properties.session.properties.sessionFile.type,
-    "string",
-  );
-  assert.match(
-    String(
-      saveTool.parameters.properties.session.properties.sessionFile
-        .description || "",
-    ),
-    /first run creates a dedicated session automatically/,
-  );
-  assert.match(
-    String(
-      saveTool.parameters.properties.session.properties.sessionFile
-        .description || "",
-    ),
-    /later runs reuse it/,
+    saveTool.parameters.properties.session.properties.sessionFile,
+    undefined,
   );
   assert.match(
     String(
       saveTool.parameters.properties.session.properties.mode.description || "",
     ),
-    /ephemeral/,
+    /none/,
+  );
+  assert.match(
+    String(
+      saveTool.parameters.properties.session.properties.mode.description || "",
+    ),
+    /dedicated/,
+  );
+  assert.ok(
+    saveTool.parameters.properties.target.properties.continuationPrompt,
   );
 });
 
@@ -160,7 +155,7 @@ test("get_task returns a requested task instead of falling back to 'No scheduled
         id: "cron_demo",
         name: "Demo Task",
         enabled: true,
-        trigger: { kind: "interval", intervalMs: 60_000 },
+        trigger: { intervalMs: 60_000 },
         session: { mode: "dedicated" },
         target: { kind: "agent_prompt", prompt: "hello" },
         nextRunAt: "2026-04-18T00:00:00.000Z",
@@ -188,7 +183,7 @@ test("get_task respects RIN_DAEMON_SOCKET_PATH over legacy runtime dir lookup", 
       task: {
         id: "cron_env_socket",
         enabled: true,
-        trigger: { kind: "once", runAt: "2026-04-18T00:00:00.000Z" },
+        trigger: { runAt: "2026-04-18T00:00:00.000Z" },
         session: { mode: "dedicated" },
         target: { kind: "agent_prompt", prompt: "hello" },
         nextRunAt: "2026-04-18T00:00:00.000Z",
@@ -217,7 +212,7 @@ test("get_task without taskId lists scheduled tasks via cron_list_tasks", async 
         {
           id: "cron_alpha",
           enabled: true,
-          trigger: { kind: "once", runAt: "2026-04-18T00:00:00.000Z" },
+          trigger: { runAt: "2026-04-18T00:00:00.000Z" },
           session: { mode: "dedicated" },
           target: { kind: "agent_prompt", prompt: "alpha" },
           nextRunAt: "2026-04-18T00:00:00.000Z",
@@ -226,8 +221,8 @@ test("get_task without taskId lists scheduled tasks via cron_list_tasks", async 
           id: "cron_beta",
           name: "Beta Task",
           enabled: false,
-          trigger: { kind: "cron", expression: "0 * * * *" },
-          session: { mode: "current", sessionFile: "/tmp/demo.jsonl" },
+          trigger: { expression: "0 * * * *" },
+          session: { mode: "none" },
           target: { kind: "shell_command", command: "echo beta" },
         },
       ],
@@ -260,7 +255,7 @@ test("save_task only auto-binds valid current chat session names", async () => {
       await saveTool.execute(
         "tool-invalid",
         {
-          trigger: { kind: "once", runAt: "2026-04-18T00:00:00.000Z" },
+          trigger: { runAt: "2026-04-18T00:00:00.000Z" },
           target: { kind: "agent_prompt", prompt: "hello" },
         },
         undefined,
@@ -276,7 +271,7 @@ test("save_task only auto-binds valid current chat session names", async () => {
       await saveTool.execute(
         "tool-valid",
         {
-          trigger: { kind: "once", runAt: "2026-04-18T00:00:00.000Z" },
+          trigger: { runAt: "2026-04-18T00:00:00.000Z" },
           target: { kind: "agent_prompt", prompt: "hello" },
         },
         undefined,
@@ -308,7 +303,7 @@ test("save_task normalizes prompt and shell targets before sending them to the d
       await saveTool.execute(
         "tool-agent",
         {
-          trigger: { kind: "once", runAt: "2026-04-18T00:00:00.000Z" },
+          trigger: { runAt: "2026-04-18T00:00:00.000Z" },
           target: { kind: "agent_prompt", prompt: "  hello world  " },
         },
         undefined,
@@ -319,8 +314,8 @@ test("save_task normalizes prompt and shell targets before sending them to the d
         "tool-shell",
         {
           chatKey: null,
-          trigger: { kind: "once", runAt: "2026-04-18T00:00:00.000Z" },
-          session: { mode: "current", sessionFile: "/tmp/demo.jsonl" },
+          trigger: { runAt: "2026-04-18T00:00:00.000Z" },
+          session: { mode: "none" },
           target: { kind: "shell_command", command: "echo hello" },
         },
         undefined,
@@ -329,12 +324,12 @@ test("save_task normalizes prompt and shell targets before sending them to the d
       );
 
       assert.equal(requests.length, 2);
-      assert.equal(requests[0].task?.session?.mode, "ephemeral");
+      assert.equal(requests[0].task?.session?.mode, "none");
       assert.equal(requests[0].task?.target?.kind, "agent_prompt");
       assert.equal(requests[0].task?.target?.prompt, "hello world");
       assert.equal(requests[1].task?.chatKey, null);
-      assert.equal(requests[1].task?.session?.mode, "current");
-      assert.equal(requests[1].task?.session?.sessionFile, "/tmp/demo.jsonl");
+      assert.equal(requests[1].task?.session?.mode, "none");
+      assert.equal(requests[1].task?.session?.sessionFile, undefined);
       assert.equal(requests[1].task?.target?.kind, "shell_command");
       assert.equal(requests[1].task?.target?.command, "echo hello");
     },
@@ -350,7 +345,7 @@ test("manage_task maps public actions to daemon task commands", async () => {
             task: {
               id: payload.taskId,
               enabled: payload.type === "cron_resume_task",
-              trigger: { kind: "once", runAt: "2026-04-18T00:00:00.000Z" },
+              trigger: { runAt: "2026-04-18T00:00:00.000Z" },
               session: { mode: "dedicated" },
               target: { kind: "agent_prompt", prompt: "hello" },
               nextRunAt: "2026-04-18T00:00:00.000Z",

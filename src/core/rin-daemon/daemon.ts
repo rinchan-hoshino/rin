@@ -72,6 +72,7 @@ export async function startDaemon(
     chat?: {
       send?: (payload: any) => Promise<any>;
       runTurn?: (payload: any) => Promise<any>;
+      terminateTurn?: (payload: { controllerKey: string }) => Promise<any>;
     };
     getExtraStatus?:
       | (() => Promise<Record<string, unknown> | undefined>)
