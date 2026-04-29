@@ -289,6 +289,8 @@ test("rpc working status only reattaches an existing Pi-owned loader", async () 
 test("local session selector reuses bound session helpers for canonicalized list and rename", async () => {
   await overrides.applyRinTuiOverrides();
 
+  const originalRinDir = process.env.RIN_DIR;
+  process.env.RIN_DIR = "/tmp/.rin";
   const listed = [];
   const renamed = [];
   let selector;
@@ -316,7 +318,7 @@ test("local session selector reuses bound session helpers for canonicalized list
       sessionManager: {
         getSessionFile: () => "/tmp/demo.jsonl",
         getCwd: () => "/tmp/project",
-        getSessionDir: () => "/tmp/.sessions",
+        getSessionDir: () => "/tmp/.rin/sessions/--home-rin--",
       },
       keybindings: {},
       ui: { requestRender() {} },
@@ -332,10 +334,18 @@ test("local session selector reuses bound session helpers for canonicalized list
       instance,
     );
 
+    const headerText = selector.header.render(100).join("\n");
+    assert.doesNotMatch(headerText, /Current|Folder|Directory/);
+    selector.sessionList.setSessions([], false);
+    assert.doesNotMatch(
+      selector.sessionList.render(100).join("\n"),
+      /current folder/i,
+    );
+
     const sessions = await selector.currentSessionsLoader();
     await selector.renameSession("/tmp/demo.jsonl", "renamed");
 
-    assert.deepEqual(listed, ["/tmp/.sessions", "/tmp/.sessions"]);
+    assert.deepEqual(listed, ["/tmp/.rin/sessions", "/tmp/.rin/sessions"]);
     assert.deepEqual(
       {
         id: sessions[0]?.id,
@@ -360,6 +370,11 @@ test("local session selector reuses bound session helpers for canonicalized list
     );
     assert.deepEqual(renamed, [["/tmp/demo.jsonl", "renamed"]]);
   } finally {
+    if (originalRinDir === undefined) {
+      delete process.env.RIN_DIR;
+    } else {
+      process.env.RIN_DIR = originalRinDir;
+    }
     codingAgentModule.SessionManager.list = originalList;
     codingAgentModule.SessionManager.open = originalOpen;
   }
