@@ -4,7 +4,7 @@ import {
   SessionManager,
   SessionSelectorComponent,
 } from "@mariozechner/pi-coding-agent";
-import { Loader, ProcessTerminal, truncateToWidth } from "@mariozechner/pi-tui";
+import { ProcessTerminal, truncateToWidth } from "@mariozechner/pi-tui";
 
 import { extractMessageText } from "../message-content.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
@@ -34,92 +34,43 @@ function extractUserTextFromEvent(event: any) {
   return extractMessageText(message.content, { trim: true });
 }
 
-function ensureTransportLoader(instance: any, label?: string) {
-  if (!label) {
-    if (instance.loadingAnimation) {
-      instance.loadingAnimation.stop();
-      instance.loadingAnimation = undefined;
-      instance.statusContainer.clear();
-      instance.ui.requestRender();
-    }
-    return;
-  }
-  if (!instance.loadingAnimation) {
-    instance.loadingAnimation = new Loader(
-      instance.ui,
-      (spinner) => spinner,
-      (text) => dim(text),
-      label,
-    );
-  } else {
-    instance.loadingAnimation.setMessage(label);
-  }
-  instance.statusContainer.clear();
-  instance.statusContainer.addChild(instance.loadingAnimation);
-  instance.ui.requestRender();
-}
-
 function isRpcTransportControlled(instance: any) {
   return typeof instance?.session?.getFrontendStatusEvent === "function";
 }
 
-function isRpcCompactionStatus(instance: any, status: any) {
-  return (
-    status?.phase === "compacting" ||
-    (status?.phase === "working" && instance?.session?.isCompacting)
-  );
-}
-
-function getRpcTransportLabel(status: any) {
-  if (!status || status.phase === "idle") return undefined;
-  return `${String(status.label || "Working")}...`;
-}
-
-function reattachExistingTransportLoader(instance: any) {
+function reattachExistingPiLoader(instance: any) {
+  // RPC transport status is not allowed to create its own animated loader.
+  // Pi's canonical agent/compaction/retry events own loader lifetimes; this
+  // only restores an existing Pi-owned loader after another Pi event cleared
+  // the shared status container.
   if (!instance?.loadingAnimation) return;
   instance.statusContainer.clear();
   instance.statusContainer.addChild(instance.loadingAnimation);
   instance.ui.requestRender();
 }
 
-function syncRpcTransportLoader(instance: any) {
+function syncRpcPiLoader(instance: any) {
   if (!isRpcTransportControlled(instance)) return;
   const status = instance.session.getFrontendStatusEvent?.();
   if (status?.phase === "working") {
-    reattachExistingTransportLoader(instance);
-    return;
+    reattachExistingPiLoader(instance);
   }
-  if (isRpcCompactionStatus(instance, status)) return;
-  ensureTransportLoader(instance, getRpcTransportLabel(status));
 }
 
-function syncLocalTransportLoader(instance: any) {
+function syncLocalPiLoader(instance: any) {
   if (isRpcTransportControlled(instance)) return;
   if (!instance?.session?.isStreaming) return;
-  const currentLabel =
-    typeof instance?.loadingAnimation?.message === "string"
-      ? instance.loadingAnimation.message.trim()
-      : "";
-  const queuedLabel =
-    typeof instance?.pendingWorkingMessage === "string"
-      ? instance.pendingWorkingMessage.trim()
-      : "";
-  ensureTransportLoader(
-    instance,
-    currentLabel ||
-      queuedLabel ||
-      String(instance?.defaultWorkingMessage || "Working..."),
-  );
+  reattachExistingPiLoader(instance);
 }
 
-function shouldReapplyRpcTransportAfterEvent(instance: any, event: any) {
+function shouldReapplyRpcPiLoaderAfterEvent(instance: any, event: any) {
   return (
     isRpcTransportControlled(instance) &&
     RPC_TRANSPORT_REAPPLY_EVENTS.has(String(event?.type || ""))
   );
 }
 
-function shouldReapplyLocalTransportAfterEvent(instance: any, event: any) {
+function shouldReapplyLocalPiLoaderAfterEvent(instance: any, event: any) {
   return (
     !isRpcTransportControlled(instance) && event?.type === "compaction_end"
   );
@@ -337,11 +288,8 @@ export async function applyRinTuiOverrides() {
 
       if (event?.type === "rpc_frontend_status") {
         if (event.phase === "working") {
-          reattachExistingTransportLoader(this);
-          return;
+          reattachExistingPiLoader(this);
         }
-        if (isRpcCompactionStatus(this, event)) return;
-        ensureTransportLoader(this, getRpcTransportLabel(event));
         return;
       }
 
@@ -365,29 +313,29 @@ export async function applyRinTuiOverrides() {
           await this.handleRuntimeSessionChange();
         }
         this.renderCurrentSessionState();
-        syncRpcTransportLoader(this);
+        syncRpcPiLoader(this);
         this.ui.requestRender();
         return;
       }
 
       if (shouldSuppressLocalUserEcho(this, event)) return;
 
-      const shouldReapplyRpcTransport = shouldReapplyRpcTransportAfterEvent(
+      const shouldReapplyRpcPiLoader = shouldReapplyRpcPiLoaderAfterEvent(
         this,
         event,
       );
-      const shouldReapplyLocalTransport = shouldReapplyLocalTransportAfterEvent(
+      const shouldReapplyLocalPiLoader = shouldReapplyLocalPiLoaderAfterEvent(
         this,
         event,
       );
 
       await originalHandleEvent.call(this, event);
 
-      if (shouldReapplyRpcTransport) {
-        syncRpcTransportLoader(this);
+      if (shouldReapplyRpcPiLoader) {
+        syncRpcPiLoader(this);
       }
-      if (shouldReapplyLocalTransport) {
-        syncLocalTransportLoader(this);
+      if (shouldReapplyLocalPiLoader) {
+        syncLocalPiLoader(this);
       }
     };
   }

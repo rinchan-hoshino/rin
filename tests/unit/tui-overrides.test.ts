@@ -109,11 +109,13 @@ test("loader stop clears render interval", () => {
   assert.ok(renders >= 1);
 });
 
-test("rpc working status does not create a parallel status animation", async () => {
+test("rpc frontend statuses do not create transport-owned animations", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
   let renders = 0;
+  let clears = 0;
+  let additions = 0;
   const instance = {
     isInitialized: true,
     settingsManager: settingsManagerWithoutTerminalProgress,
@@ -130,9 +132,11 @@ test("rpc working status does not create a parallel status animation", async () 
     statusContainer: {
       child: undefined,
       clear() {
+        clears += 1;
         this.child = undefined;
       },
       addChild(child) {
+        additions += 1;
         this.child = child;
       },
     },
@@ -153,15 +157,22 @@ test("rpc working status does not create a parallel status animation", async () 
     },
   };
 
-  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
-    type: "rpc_frontend_status",
-    phase: "working",
-    label: "Working",
-    connected: true,
-  });
+  for (const phase of ["starting", "connecting", "sending", "working"]) {
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "rpc_frontend_status",
+        phase,
+        label: phase,
+        connected: true,
+      },
+    );
+  }
 
   assert.equal(instance.loadingAnimation, undefined);
   assert.equal(instance.statusContainer.child, undefined);
+  assert.equal(clears, 0);
+  assert.equal(additions, 0);
   assert.equal(renders, 0);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
@@ -174,6 +185,68 @@ test("rpc working status does not create a parallel status animation", async () 
     assert.ok(renders >= 1);
   } finally {
     instance.loadingAnimation?.stop();
+  }
+});
+
+test("rpc working status only reattaches an existing Pi-owned loader", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  let renders = 0;
+  const ui = {
+    requestRender() {
+      renders += 1;
+    },
+    terminal: { setProgress() {} },
+  };
+  const existingLoader = new loaderModule.Loader(
+    ui,
+    (x) => x,
+    (x) => x,
+    "Working...",
+  );
+  const instance = {
+    isInitialized: true,
+    ui,
+    session: {
+      getFrontendStatusEvent() {
+        return {
+          type: "rpc_frontend_status",
+          phase: "working",
+          label: "Working",
+          connected: true,
+        };
+      },
+    },
+    statusContainer: {
+      child: undefined,
+      clear() {
+        this.child = undefined;
+      },
+      addChild(child) {
+        this.child = child;
+      },
+    },
+    footer: { invalidate() {} },
+    loadingAnimation: existingLoader,
+  };
+
+  try {
+    renders = 0;
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "rpc_frontend_status",
+        phase: "working",
+        label: "Working",
+        connected: true,
+      },
+    );
+
+    assert.equal(instance.loadingAnimation, existingLoader);
+    assert.equal(instance.statusContainer.child, existingLoader);
+    assert.ok(renders >= 1);
+  } finally {
+    existingLoader.stop();
   }
 });
 
@@ -602,7 +675,7 @@ test("rpc compaction start keeps the dedicated compaction loader", async () => {
   }
 });
 
-test("rpc compaction end reattaches the existing transport loader", async () => {
+test("rpc compaction end reattaches the existing Pi-owned loader", async () => {
   await overrides.applyRinTuiOverrides();
 
   let renders = 0;
