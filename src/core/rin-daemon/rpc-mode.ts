@@ -5,10 +5,6 @@ import { fail, ok } from "../rin-lib/rpc.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
-import {
-  appendSessionTurnState,
-  type TerminalSessionTurnStateStatus,
-} from "../session/turn-state.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
 import { safeString } from "../text-utils.js";
@@ -445,19 +441,12 @@ export async function runCustomRpcMode(
     if (!requestTag) return;
     output({ type: "rpc_turn_event", event, requestTag, ...payload });
   };
-  const markTurnState = (
-    session: any,
-    status: TerminalSessionTurnStateStatus,
-  ) => {
-    appendSessionTurnState(session, status);
-  };
   const abortCurrentSessionForReplacement = async () => {
     const current = getSession();
     if (!current) return;
     if (!current.isStreaming && !current.isCompacting && !isTurnActive()) {
       return;
     }
-    markTurnState(current, "aborted");
     await current.abort();
   };
   const startTurnTask = (requestTag: string, task: () => Promise<void>) => {
@@ -521,7 +510,6 @@ export async function runCustomRpcMode(
           );
           throw new Error(failureMessage || "rpc_turn_final_output_missing");
         }
-        markTurnState(turnSession, "completed");
         emitTurnEvent("complete", requestTag, {
           sessionFile: turnSession.sessionFile,
           sessionId: turnSession.sessionId,
@@ -708,9 +696,6 @@ export async function runCustomRpcMode(
         return done(id, type, session.clearQueue());
       case "abort":
         return run(id, type, async () => {
-          if (session.isStreaming || session.isCompacting || isTurnActive()) {
-            markTurnState(session, "aborted");
-          }
           await session.abort();
         });
       case "shutdown_session":

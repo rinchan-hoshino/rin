@@ -559,7 +559,7 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-test("daemon auto-resumes active session logs on startup without frontend help", async () => {
+test("daemon auto-resumes interrupted session logs on startup without frontend help", async () => {
   const agentDir = await makeTempDir("rin-daemon-resume-");
   const socketPath = path.join(agentDir, "daemon.sock");
   const workerPath = path.join(agentDir, "fake-worker.js");
@@ -571,11 +571,6 @@ test("daemon auto-resumes active session logs on startup without frontend help",
       JSON.stringify({
         type: "message",
         message: { role: "user", content: "continue this turn" },
-      }),
-      JSON.stringify({
-        type: "custom",
-        customType: "rin-turn-state",
-        data: { status: "active", timestamp: "2026-04-24T00:00:00.000Z" },
       }),
       "",
     ].join("\n"),
