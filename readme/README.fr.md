@@ -56,6 +56,21 @@ rin doctor
 
 L’installateur vous avertira des limites de sécurité et de la possibilité d’une consommation supplémentaire de jetons. Ce coût supplémentaire peut venir de l’initialisation, du traitement de la mémoire, des résumés, des exécutions non interactives `rin -p` / `rin --mode json`, des tâches planifiées et de la recherche web.
 
+### Scénarios de déploiement
+
+L’installateur reste un installateur local, mais ces formes de déploiement sont déjà praticables comme enveloppes autour des mêmes points d’entrée Linux/macOS/Windows. L’environnement cible doit toujours fournir les prérequis normaux de Rin, dont Node.js et npm :
+
+| Scénario                                         | Faisabilité                                                | Notes                                                                                                                                                                                                                                         |
+| ------------------------------------------------ | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Installation locale ou pour un autre utilisateur | Déjà prise en charge                                       | L’installateur interactif peut cibler le compte actuel ou un autre utilisateur local, puis écrire les lanceurs et le service daemon de cet utilisateur.                                                                                       |
+| Installation par SSH                             | Déjà faisable                                              | Exécutez la commande bootstrap par SSH sur l’hôte distant. Un wrapper dédié `rin install --ssh` pourrait améliorer plus tard la détection et les messages d’erreur.                                                                           |
+| Installation conteneurisée                       | Faisable avec une image Linux sans interface graphique     | Utilisez un volume persistant pour le home/répertoire d’installation de Rin et lancez le daemon ou la CLI dans le conteneur. Les lanceurs GUI et les services utilisateur de l’hôte ne s’appliquent pas dans le conteneur.                    |
+| Installation en machine virtuelle                | Prise en charge via l’installateur normal de l’OS          | Installez Rin dans l’OS invité comme sur une machine physique. Les instantanés de VM facilitent le retour arrière, mais Rin ne gère que l’environnement invité.                                                                               |
+| Installation sur NAS                             | Faisable si le NAS peut exécuter Node.js ou des conteneurs | Sur un NAS ouvert, privilégiez le chemin Linux normal ; sur un NAS de type appliance, privilégiez le modèle conteneur. Les gestionnaires de paquets du fournisseur et les shells restreints peuvent nécessiter des notes propres au matériel. |
+| Installation dans le cloud                       | Prise en charge via SSH ou un bootstrap de type cloud-init | Traitez la VM cloud comme un hôte Linux distant. Conservez les données `.rin` sur un disque durable et configurez le démarrage du daemon selon l’OS hôte.                                                                                     |
+
+Ce sont des scénarios de déploiement, pas des canaux de publication séparés. Stable, beta, nightly et git continuent d’utiliser le même contrat d’installation/mise à jour ci-dessus.
+
 ## Ce que vous pouvez demander à Rin
 
 Une fois Rin ouvert, parlez-lui simplement.
@@ -75,6 +90,8 @@ Exemples :
 ```bash
 rin            # ouvrir Rin
 rin doctor     # vérifier l’état et la configuration
+rin target     # lister et choisir des cibles de déploiement
+rin --target x # exécuter Rin sur une cible configurée
 rin start      # démarrer le daemon
 rin stop       # arrêter le daemon
 rin restart    # redémarrer le daemon

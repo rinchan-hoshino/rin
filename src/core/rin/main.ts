@@ -18,6 +18,8 @@ import {
 } from "./shared.js";
 import { runUsage, runUsageInternal } from "./usage.js";
 import { runRollback, runVersions } from "./versions.js";
+import { runTargetCommand } from "./targets.js";
+import { resolveTargetForName, runRinOnTarget } from "../rin-targets/runner.js";
 
 const RIN_COMMANDS = [
   [
@@ -34,6 +36,7 @@ const RIN_COMMANDS = [
   ["versions", "List installed Rin runtime versions"],
   ["rollback", "Rollback the installed Rin runtime to the previous version"],
   ["memory-index", "Repair the memory search index from archived transcripts"],
+  ["target", "List, select, and inspect configured Rin deployment targets"],
   ["version", "Show Rin version"],
 ] as const satisfies ReadonlyArray<readonly [ParsedArgs["command"], string]>;
 
@@ -62,6 +65,7 @@ function createCli() {
       "[command] [--beta|--nightly|--git [branch-or-ref]] [options] [-- passthrough]",
     )
     .option("-u, --user <name>", "Run against a specific daemon user")
+    .option("--target <name>", "Run against a configured Rin deployment target")
     .option("--stable", "Use the stable release channel (default)")
     .option("--beta", "Use the beta release channel")
     .option("--nightly", "Use the nightly release channel")
@@ -137,6 +141,15 @@ export async function startRinCli() {
 
   if (!command && shouldRunNonInteractive(rawArgv)) {
     return await runNonInteractive(parsed, rawArgv);
+  }
+
+  if (parsed.command === "target") return await runTargetCommand(rawArgv);
+  if (parsed.explicitTarget) {
+    const target = resolveTargetForName(parsed.targetName);
+    if (!target) throw new Error(`rin_target_not_found:${parsed.targetName}`);
+    const status = runRinOnTarget(target, rawArgv);
+    process.exitCode = status;
+    return;
   }
 
   if (parsed.command === "update") return await runUpdate(parsed);

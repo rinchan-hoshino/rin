@@ -28,7 +28,7 @@ import {
   promptChatSetup,
   promptDefaultTargetUser,
   promptProviderSetup,
-  promptTargetInstall,
+  promptInstallTarget,
 } from "./interactive.js";
 import { createInstallerI18n, promptInstallerLanguage } from "./i18n.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
@@ -41,6 +41,14 @@ import {
   targetHomeForUser,
 } from "./users.js";
 import { startUpdater } from "./updater.js";
+import {
+  installCloudTarget,
+  installContainerTarget,
+  installExistingSshTarget,
+  installNasTarget,
+  installVmTarget,
+  registerLocalUserTarget,
+} from "./deployment-targets.js";
 
 function ensureNotCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
@@ -153,7 +161,7 @@ export async function startInstaller() {
     text,
     confirm: localizedConfirm,
   };
-  const target = await promptTargetInstall(
+  const target = await promptInstallTarget(
     promptApi,
     currentUser,
     allUsers,
@@ -169,6 +177,42 @@ export async function startInstaller() {
       i18n.targetUserTitle,
     );
     outro(i18n.nothingInstalled);
+    return;
+  }
+
+  if (target.kind === "ssh") {
+    const registered = installExistingSshTarget(target);
+    outro(
+      `Installed and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
+    );
+    return;
+  }
+  if (target.kind === "container") {
+    const registered = installContainerTarget(target);
+    outro(
+      `Installed and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
+    );
+    return;
+  }
+  if (target.kind === "cloud") {
+    const registered = installCloudTarget(target);
+    outro(
+      `Provisioned, installed, and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
+    );
+    return;
+  }
+  if (target.kind === "nas") {
+    const registered = installNasTarget(target);
+    outro(
+      `Installed and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
+    );
+    return;
+  }
+  if (target.kind === "vm") {
+    const registered = installVmTarget(target);
+    outro(
+      `Provisioned, installed, and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
+    );
     return;
   }
 
@@ -331,6 +375,7 @@ export async function startInstaller() {
     );
   }
 
+  registerLocalUserTarget(targetUser);
   outro(i18n.outroInstalled(targetUser, installedService?.kind));
 }
 

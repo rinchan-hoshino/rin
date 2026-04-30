@@ -14,6 +14,12 @@ import {
   loadModelChoices,
 } from "./provider-auth.js";
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
+import {
+  findDeploymentProviders,
+  normalizeTargetName,
+  type DeploymentProviderKind,
+} from "../rin-targets/registry.js";
+import type { InstallTargetSelection } from "./deployment-targets.js";
 
 export type PromptApi = {
   ensureNotCancelled: <T>(value: T | symbol | undefined | null) => T;
@@ -30,43 +36,298 @@ export type SystemUser = {
   shell: string;
 };
 
+export async function promptInstallTarget(
+  prompt: PromptApi,
+  currentUser: string,
+  allUsers: SystemUser[],
+  targetHomeForUser: (user: string) => string,
+  i18n: InstallerI18n = createInstallerI18n(),
+): Promise<InstallTargetSelection & { cancelled?: boolean }> {
+  const targetMode = prompt.ensureNotCancelled(
+    await prompt.select({
+      message: i18n.chooseInstallTargetMessage,
+      options: [
+        {
+          value: "current",
+          label: i18n.currentInstallTargetLabel,
+          hint: currentUser,
+        },
+        {
+          value: "local-user",
+          label: i18n.localUserInstallTargetLabel,
+          hint: i18n.sameMachineHint,
+        },
+        {
+          value: "ssh",
+          label: i18n.sshInstallTargetLabel,
+          hint: i18n.reuseSshAuthHint,
+        },
+        {
+          value: "container",
+          label: i18n.containerInstallTargetLabel,
+          hint: i18n.containerIsolationHint,
+        },
+        {
+          value: "cloud",
+          label: i18n.cloudInstallTargetLabel,
+          hint: i18n.providerApiProvisionerHint,
+        },
+        {
+          value: "vm",
+          label: i18n.vmInstallTargetLabel,
+          hint: i18n.hypervisorProvisionerHint,
+        },
+        {
+          value: "nas",
+          label: i18n.nasInstallTargetLabel,
+          hint: i18n.nasIsolationHint,
+        },
+      ],
+    }),
+  );
+
+  if (targetMode === "current" || targetMode === "local-user") {
+    return await promptTargetInstall(
+      prompt,
+      currentUser,
+      targetMode === "current"
+        ? allUsers.filter((entry) => entry.name === currentUser)
+        : allUsers.filter((entry) => entry.name !== currentUser),
+      targetHomeForUser,
+      i18n,
+      targetMode === "current" ? "current" : "existing",
+    );
+  }
+
+  if (targetMode === "ssh") {
+    const host = String(
+      prompt.ensureNotCancelled(
+        await prompt.text({
+          message: i18n.sshTargetMessage,
+          placeholder: "rin-box",
+          validate(value: string) {
+            if (!String(value || "").trim()) return i18n.sshTargetRequired;
+          },
+        }),
+      ),
+    ).trim();
+    const name = await promptTargetName(prompt, host, i18n);
+    return { kind: "ssh", name, host };
+  }
+
+  if (targetMode === "container") {
+    const engine = String(
+      prompt.ensureNotCancelled(
+        await prompt.select({
+          message: i18n.containerEngineMessage,
+          options: [
+            { value: "docker", label: "Docker" },
+            { value: "podman", label: "Podman" },
+          ],
+        }),
+      ),
+    ) as "docker" | "podman";
+    const name = await promptTargetName(prompt, "rin-container", i18n);
+    const image = String(
+      prompt.ensureNotCancelled(
+        await prompt.text({
+          message: i18n.containerImageMessage,
+          placeholder: "node:22-bookworm",
+          defaultValue: "node:22-bookworm",
+        }),
+      ),
+    ).trim();
+    return { kind: "container", name, engine, image };
+  }
+
+  const providerKind = targetMode as DeploymentProviderKind;
+  const providers = findDeploymentProviders(providerKind);
+  const provider = String(
+    prompt.ensureNotCancelled(
+      await prompt.select({
+        message: i18n.chooseDeploymentProviderMessage(providerKind),
+        options: providers.map((entry) => ({
+          value: entry.id,
+          label: entry.label,
+          hint: entry.recommendedIsolation,
+        })),
+      }),
+    ),
+  );
+  const name = await promptTargetName(
+    prompt,
+    `${providerKind}-${provider}`,
+    i18n,
+  );
+
+  if (providerKind === "cloud") {
+    const defaults = cloudProviderDefaults(provider);
+    const token = await promptRequiredText(
+      prompt,
+      `API token for ${provider}`,
+      "",
+    );
+    const region = await promptTextWithDefault(
+      prompt,
+      "Region/location",
+      defaults.region,
+    );
+    const size = await promptTextWithDefault(
+      prompt,
+      "Instance size",
+      defaults.size,
+    );
+    const image = await promptTextWithDefault(prompt, "Image", defaults.image);
+    return {
+      kind: "cloud",
+      name,
+      provider,
+      token,
+      region,
+      size,
+      image,
+    } as InstallTargetSelection;
+  }
+
+  if (providerKind === "nas") {
+    const host = await promptRequiredText(
+      prompt,
+      "NAS SSH target (Host alias or user@host)",
+      "nas",
+    );
+    const engine = String(
+      prompt.ensureNotCancelled(
+        await prompt.select({
+          message: i18n.containerEngineMessage,
+          options: [
+            { value: "docker", label: "Docker" },
+            { value: "podman", label: "Podman" },
+          ],
+        }),
+      ),
+    ) as "docker" | "podman";
+    const image = await promptTextWithDefault(
+      prompt,
+      i18n.containerImageMessage,
+      "node:22-bookworm",
+    );
+    return {
+      kind: "nas",
+      name,
+      provider,
+      host,
+      engine,
+      image,
+    } as InstallTargetSelection;
+  }
+
+  const image = await promptTextWithDefault(prompt, "VM image", "24.04");
+  return { kind: "vm", name, provider, image } as InstallTargetSelection;
+}
+
+function cloudProviderDefaults(provider: string) {
+  if (provider === "hetzner") {
+    return { region: "fsn1", size: "cpx11", image: "ubuntu-24.04" };
+  }
+  return { region: "sfo3", size: "s-1vcpu-1gb", image: "ubuntu-24-04-x64" };
+}
+
+async function promptRequiredText(
+  prompt: PromptApi,
+  message: string,
+  placeholder: string,
+) {
+  return String(
+    prompt.ensureNotCancelled(
+      await prompt.text({
+        message,
+        placeholder,
+        validate(value: string) {
+          if (!String(value || "").trim()) return "This value is required";
+        },
+      }),
+    ),
+  ).trim();
+}
+
+async function promptTextWithDefault(
+  prompt: PromptApi,
+  message: string,
+  defaultValue: string,
+) {
+  return String(
+    prompt.ensureNotCancelled(
+      await prompt.text({
+        message,
+        placeholder: defaultValue,
+        defaultValue,
+      }),
+    ),
+  ).trim();
+}
+
+async function promptTargetName(
+  prompt: PromptApi,
+  fallback: string,
+  i18n: InstallerI18n,
+) {
+  const defaultName = normalizeTargetName(fallback) || "rin-target";
+  return String(
+    prompt.ensureNotCancelled(
+      await prompt.text({
+        message: i18n.targetNameMessage,
+        placeholder: defaultName,
+        defaultValue: defaultName,
+        validate(value: string) {
+          if (!normalizeTargetName(value)) return i18n.targetNameRequired;
+        },
+      }),
+    ),
+  ).trim();
+}
+
 export async function promptTargetInstall(
   prompt: PromptApi,
   currentUser: string,
   allUsers: SystemUser[],
   targetHomeForUser: (user: string) => string,
   i18n: InstallerI18n = createInstallerI18n(),
+  forcedMode?: "current" | "existing" | "new",
 ) {
   const otherUsers = allUsers.filter((entry) => entry.name !== currentUser);
   const existingCandidates = otherUsers.length ? otherUsers : allUsers;
 
-  const targetMode = prompt.ensureNotCancelled(
-    await prompt.select({
-      message: i18n.chooseTargetUserMessage,
-      options: [
-        {
-          value: "current",
-          label: i18n.currentUserLabel,
-          hint: currentUser,
-        },
-        {
-          value: "existing",
-          label: i18n.existingOtherUserLabel,
-          hint: existingCandidates.length
-            ? i18n.usersHint(existingCandidates.length)
-            : i18n.noneFoundHint,
-        },
-        { value: "new", label: i18n.newUserLabel, hint: i18n.newUserHint },
-      ],
-    }),
-  );
+  const targetMode =
+    forcedMode ||
+    prompt.ensureNotCancelled(
+      await prompt.select({
+        message: i18n.chooseTargetUserMessage,
+        options: [
+          {
+            value: "current",
+            label: i18n.currentUserLabel,
+            hint: currentUser,
+          },
+          {
+            value: "existing",
+            label: i18n.existingOtherUserLabel,
+            hint: existingCandidates.length
+              ? i18n.usersHint(existingCandidates.length)
+              : i18n.noneFoundHint,
+          },
+          { value: "new", label: i18n.newUserLabel, hint: i18n.newUserHint },
+        ],
+      }),
+    );
 
   let targetUser = currentUser;
   if (targetMode === "existing") {
     if (!existingCandidates.length) {
       return {
+        kind: "local" as const,
         cancelled: true as const,
         targetUser,
+        installDir: "",
         existingCandidates,
         allUsers,
       };
@@ -113,6 +374,7 @@ export async function promptTargetInstall(
   ).trim();
 
   return {
+    kind: "local" as const,
     cancelled: false as const,
     targetUser,
     installDir,

@@ -56,11 +56,14 @@ export type ParsedArgs = {
     | "versions"
     | "rollback"
     | "memory-index"
+    | "target"
     | "version";
   targetUser: string;
+  targetName: string;
   installDir: string;
   passthrough: string[];
   explicitUser: boolean;
+  explicitTarget: boolean;
   hasSavedInstall: boolean;
   releaseChannel: ReleaseChannel;
   releaseBranch: string;
@@ -74,11 +77,11 @@ type InstallConfig = {
 
 export { repoRootFromHere, runCommand, safeString };
 
-const RIN_WRAPPER_FLAGS_WITH_VALUE = new Set(["-u", "--user"]);
+const RIN_WRAPPER_FLAGS_WITH_VALUE = new Set(["-u", "--user", "--target"]);
 const RIN_WRAPPER_FLAGS = new Set<string>();
 
 function hasInlineWrapperValue(arg: string) {
-  return arg.startsWith("--user=");
+  return arg.startsWith("--user=") || arg.startsWith("--target=");
 }
 
 export function stripRinWrapperArgs(rawArgv: string[]) {
@@ -527,15 +530,18 @@ export function resolveParsedArgs(
 ): ParsedArgs {
   const installConfig = loadInstallConfig();
   const targetUser = safeString(options.user).trim();
+  const targetName = safeString(options.target).trim();
   return {
     command,
     targetUser:
       targetUser ||
       safeString(installConfig.defaultTargetUser).trim() ||
       os.userInfo().username,
+    targetName,
     installDir: safeString(installConfig.defaultInstallDir).trim(),
     passthrough: command ? [] : collectTuiPassthroughArgs(rawArgv),
     explicitUser: Boolean(targetUser),
+    explicitTarget: Boolean(targetName),
     hasSavedInstall: Boolean(
       safeString(installConfig.defaultTargetUser).trim() ||
       safeString(installConfig.defaultInstallDir).trim(),
