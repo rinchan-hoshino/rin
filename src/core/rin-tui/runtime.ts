@@ -890,8 +890,23 @@ export class RpcInteractiveSession {
     await this.refreshResourceDiagnostics().catch(() => {});
     await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
     if (this.extensionRunner) {
+      await this.shutdownLocalExtensions({ reason: "reload" });
       await this.loadLocalExtensions(true);
     }
+  }
+
+  async shutdownLocalExtensions(event: Record<string, unknown>) {
+    const runner = this.extensionRunner;
+    if (!runner) return false;
+    try {
+      if (runner.hasHandlers?.("session_shutdown")) {
+        await runner.emit({ ...event, type: "session_shutdown" });
+      }
+    } finally {
+      runner.invalidate?.();
+      if (this.extensionRunner === runner) this.extensionRunner = undefined;
+    }
+    return true;
   }
 
   async bindExtensions(bindings: RpcExtensionBindings = {}) {
@@ -996,13 +1011,38 @@ export class RpcInteractiveSession {
       case "setStatus":
         ui?.setStatus?.(String(payload.statusKey || ""), payload.statusText);
         return;
+      case "setWorkingMessage":
+        ui?.setWorkingMessage?.(
+          payload.message === undefined ? undefined : String(payload.message),
+        );
+        return;
+      case "setWorkingVisible":
+        ui?.setWorkingVisible?.(Boolean(payload.visible));
+        return;
+      case "setWorkingIndicator":
+        ui?.setWorkingIndicator?.(payload.options);
+        return;
+      case "setHiddenThinkingLabel":
+        ui?.setHiddenThinkingLabel?.(
+          payload.label === undefined ? undefined : String(payload.label),
+        );
+        return;
       case "setWidget":
         ui?.setWidget?.(String(payload.widgetKey || ""), payload.widgetLines, {
           placement: payload.widgetPlacement,
         });
         return;
+      case "setFooter":
+        ui?.setFooter?.(undefined);
+        return;
+      case "setHeader":
+        ui?.setHeader?.(undefined);
+        return;
       case "setTitle":
         ui?.setTitle?.(String(payload.title || ""));
+        return;
+      case "setToolsExpanded":
+        ui?.setToolsExpanded?.(Boolean(payload.expanded));
         return;
       case "set_editor_text":
         ui?.setEditorText?.(String(payload.text || ""));

@@ -6,8 +6,14 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     | ((session: RpcInteractiveSession) => Promise<void>)
     | undefined;
 
-  async function finishReplacement(completed: boolean) {
+  async function finishReplacement(
+    completed: boolean,
+    event?: Record<string, unknown>,
+  ) {
     if (completed) {
+      await (session as any).shutdownLocalExtensions?.(
+        event || { reason: "resume" },
+      );
       beforeSessionInvalidate?.();
       await rebindSession?.(session);
     }
@@ -31,7 +37,7 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
       managedSessionLeaf?: string;
     }) {
       const completed = await session.newSession(options);
-      return await finishReplacement(completed);
+      return await finishReplacement(completed, { reason: "new" });
     },
     async switchSession(
       sessionPath: string,
@@ -44,7 +50,10 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
         sessionPath,
         options,
       );
-      return await finishReplacement(completed);
+      return await finishReplacement(completed, {
+        reason: "resume",
+        targetSessionFile: sessionPath,
+      });
     },
     async fork(
       entryId: string,
@@ -55,6 +64,7 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     ) {
       const result = await (session as any).fork(entryId, options);
       if (!result?.cancelled) {
+        await (session as any).shutdownLocalExtensions?.({ reason: "fork" });
         beforeSessionInvalidate?.();
         await rebindSession?.(session);
       }
@@ -65,9 +75,10 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
         inputPath,
         cwdOverride,
       );
-      return await finishReplacement(completed);
+      return await finishReplacement(completed, { reason: "resume" });
     },
     async dispose() {
+      await (session as any).shutdownLocalExtensions?.({ reason: "quit" });
       beforeSessionInvalidate?.();
       await session.terminateSession().catch(() => {});
       await session.disconnect();

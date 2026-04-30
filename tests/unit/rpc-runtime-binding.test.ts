@@ -177,6 +177,81 @@ test("rpc local extensions use daemon-backed tools and message core actions", as
   );
 });
 
+test("rpc local extensions emit shutdown before reload", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-shutdown-"));
+  const agentDir = path.join(dir, "agent");
+  const extensionPath = path.join(dir, "shutdown-extension.ts");
+  await fs.mkdir(agentDir, { recursive: true });
+  await fs.writeFile(
+    extensionPath,
+    `export default function(pi: any) {
+      pi.on("session_start", async (event: any) => pi.appendEntry("lifecycle", { type: "start", reason: event.reason }));
+      pi.on("session_shutdown", async (event: any) => pi.appendEntry("lifecycle", { type: "shutdown", reason: event.reason }));
+    }\n`,
+  );
+  await fs.writeFile(
+    path.join(agentDir, "settings.json"),
+    JSON.stringify({ extensions: [extensionPath] }),
+  );
+
+  const sent = [];
+  const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      switch (payload.type) {
+        case "append_custom_entry":
+        case "get_active_tools":
+        case "get_all_tools":
+          return Promise.resolve({ success: true, data: { tools: [] } });
+        case "get_resource_diagnostics":
+          return Promise.resolve({ success: true, data: {} });
+        case "get_state":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl" },
+          });
+        case "get_session_snapshot":
+          return Promise.resolve({ success: true, data: { entries: [] } });
+        default:
+          return Promise.resolve({ success: true, data: {} });
+      }
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return true;
+    },
+    connect() {
+      return Promise.resolve();
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+  session.settingsManager = SettingsManager.create(dir, agentDir);
+
+  await loadRpcLocalExtensions(session, false, { cwd: dir, agentDir });
+  await wait(20);
+  await session.reload();
+  await wait(20);
+
+  assert.deepEqual(
+    sent
+      .filter((payload) => payload.type === "append_custom_entry")
+      .map((payload) => payload.data),
+    [
+      { type: "start", reason: "startup" },
+      { type: "shutdown", reason: "reload" },
+      { type: "start", reason: "reload" },
+    ],
+  );
+});
+
 test("rpc model registry exposes all models for login provider selection", async () => {
   const sent = [];
   const allModels = [
@@ -238,6 +313,21 @@ test("rpc runtime answers daemon extension UI requests through the bound UI cont
       notify(message, level) {
         sent.push({ local: "notify", message, level });
       },
+      setWorkingMessage(message) {
+        sent.push({ local: "setWorkingMessage", message });
+      },
+      setWorkingVisible(visible) {
+        sent.push({ local: "setWorkingVisible", visible });
+      },
+      setWorkingIndicator(options) {
+        sent.push({ local: "setWorkingIndicator", options });
+      },
+      setHiddenThinkingLabel(label) {
+        sent.push({ local: "setHiddenThinkingLabel", label });
+      },
+      setToolsExpanded(expanded) {
+        sent.push({ local: "setToolsExpanded", expanded });
+      },
     },
   };
 
@@ -274,6 +364,36 @@ test("rpc runtime answers daemon extension UI requests through the bound UI cont
     message: "hello",
     notifyType: "warning",
   });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "working-message-1",
+    method: "setWorkingMessage",
+    message: "Thinking",
+  });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "working-visible-1",
+    method: "setWorkingVisible",
+    visible: false,
+  });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "working-indicator-1",
+    method: "setWorkingIndicator",
+    options: { frames: ["*"], intervalMs: 100 },
+  });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "thinking-label-1",
+    method: "setHiddenThinkingLabel",
+    label: "Planning",
+  });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "tools-expanded-1",
+    method: "setToolsExpanded",
+    expanded: true,
+  });
 
   assert.deepEqual(sent, [
     { type: "extension_ui_response", id: "select-1", value: "Allow" },
@@ -281,6 +401,14 @@ test("rpc runtime answers daemon extension UI requests through the bound UI cont
     { type: "extension_ui_response", id: "input-1", value: "typed value" },
     { type: "extension_ui_response", id: "editor-1", value: "edited value" },
     { local: "notify", message: "hello", level: "warning" },
+    { local: "setWorkingMessage", message: "Thinking" },
+    { local: "setWorkingVisible", visible: false },
+    {
+      local: "setWorkingIndicator",
+      options: { frames: ["*"], intervalMs: 100 },
+    },
+    { local: "setHiddenThinkingLabel", label: "Planning" },
+    { local: "setToolsExpanded", expanded: true },
   ]);
 });
 

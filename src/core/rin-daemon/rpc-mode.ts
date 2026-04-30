@@ -326,10 +326,34 @@ export async function runCustomRpcMode(
         statusKey,
         statusText,
       }),
-    setWorkingMessage: () => {},
-    setWorkingVisible: () => {},
-    setWorkingIndicator: () => {},
-    setHiddenThinkingLabel: () => {},
+    setWorkingMessage: (message?: string) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setWorkingMessage",
+        message,
+      }),
+    setWorkingVisible: (visible: boolean) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setWorkingVisible",
+        visible,
+      }),
+    setWorkingIndicator: (options?: any) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setWorkingIndicator",
+        options,
+      }),
+    setHiddenThinkingLabel: (label?: string) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setHiddenThinkingLabel",
+        label,
+      }),
     setWidget: (widgetKey: string, content: unknown, options?: any) => {
       if (content !== undefined && !Array.isArray(content)) return;
       output({
@@ -341,8 +365,22 @@ export async function runCustomRpcMode(
         widgetPlacement: options?.placement,
       });
     },
-    setFooter: () => {},
-    setHeader: () => {},
+    setFooter: (factory?: unknown) => {
+      if (factory !== undefined) return;
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setFooter",
+      });
+    },
+    setHeader: (factory?: unknown) => {
+      if (factory !== undefined) return;
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setHeader",
+      });
+    },
     setTitle: (title: string) =>
       output({
         type: "extension_ui_request",
@@ -376,7 +414,13 @@ export async function runCustomRpcMode(
         "Theme switching is not available through the daemon frontend bridge",
     }),
     getToolsExpanded: () => false,
-    setToolsExpanded: () => {},
+    setToolsExpanded: (expanded: boolean) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setToolsExpanded",
+        expanded,
+      }),
   });
   const run = async (
     id: string | undefined,

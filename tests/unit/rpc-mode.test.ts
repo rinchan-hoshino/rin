@@ -123,8 +123,13 @@ test(
       );
 
       assert.equal(await confirmation, true);
+      boundUiContext.setWorkingMessage("Thinking");
+      boundUiContext.setWorkingVisible(false);
+      boundUiContext.setWorkingIndicator({ frames: ["*"], intervalMs: 100 });
+      boundUiContext.setHiddenThinkingLabel("Planning");
+      boundUiContext.setToolsExpanded(true);
       await wait(0);
-      const response = lines
+      const parsedLines = lines
         .map((line) => {
           try {
             return JSON.parse(line);
@@ -132,13 +137,67 @@ test(
             return null;
           }
         })
-        .filter(Boolean)
-        .find(
-          (line) =>
-            line.type === "response" &&
-            line.command === "extension_ui_response",
-        );
+        .filter(Boolean);
+      const response = parsedLines.find(
+        (line) =>
+          line.type === "response" && line.command === "extension_ui_response",
+      );
       assert.equal(response.success, true);
+      const requests = parsedLines.filter(
+        (line) => line.type === "extension_ui_request",
+      );
+      assert.deepEqual(
+        requests.slice(1).map((line) => ({
+          method: line.method,
+          message: line.message,
+          visible: line.visible,
+          options: line.options,
+          label: line.label,
+          expanded: line.expanded,
+        })),
+        [
+          {
+            method: "setWorkingMessage",
+            message: "Thinking",
+            visible: undefined,
+            options: undefined,
+            label: undefined,
+            expanded: undefined,
+          },
+          {
+            method: "setWorkingVisible",
+            message: undefined,
+            visible: false,
+            options: undefined,
+            label: undefined,
+            expanded: undefined,
+          },
+          {
+            method: "setWorkingIndicator",
+            message: undefined,
+            visible: undefined,
+            options: { frames: ["*"], intervalMs: 100 },
+            label: undefined,
+            expanded: undefined,
+          },
+          {
+            method: "setHiddenThinkingLabel",
+            message: undefined,
+            visible: undefined,
+            options: undefined,
+            label: "Planning",
+            expanded: undefined,
+          },
+          {
+            method: "setToolsExpanded",
+            message: undefined,
+            visible: undefined,
+            options: undefined,
+            label: undefined,
+            expanded: true,
+          },
+        ],
+      );
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

@@ -34,6 +34,9 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
       calls.push(["importFromJsonl", inputPath, cwdOverride]);
       return true;
     },
+    async shutdownLocalExtensions(event) {
+      calls.push(["shutdownLocalExtensions", event]);
+    },
     async terminateSession() {
       calls.push(["terminateSession"]);
     },
@@ -78,15 +81,19 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
 
   assert.deepEqual(calls, [
     ["newSession", { parentSession: "p" }],
+    ["shutdownLocalExtensions", { reason: "new" }],
     ["beforeInvalidate"],
     ["rebind", "session-like"],
     ["switchSession", "/tmp/demo.jsonl", switchOptions],
     ["fork", "entry-1", forkOptions],
+    ["shutdownLocalExtensions", { reason: "fork" }],
     ["beforeInvalidate"],
     ["rebind", "session-like"],
     ["importFromJsonl", "/tmp/in.jsonl", "/tmp/cwd"],
+    ["shutdownLocalExtensions", { reason: "resume" }],
     ["beforeInvalidate"],
     ["rebind", "session-like"],
+    ["shutdownLocalExtensions", { reason: "quit" }],
     ["beforeInvalidate"],
     ["terminateSession"],
     ["disconnect"],
