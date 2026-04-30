@@ -18,6 +18,38 @@ const listing = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "session", "listing.js"))
     .href
 );
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("listBoundSessions does not create cwd-encoded empty session dirs", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-agent-"));
+  const cwd = path.join(os.tmpdir(), "rin-project-cwd");
+  const previousRinDir = process.env.RIN_DIR;
+  process.env.RIN_DIR = agentDir;
+
+  try {
+    await factory.listBoundSessions({ cwd });
+    assert.equal(
+      await pathExists(
+        path.join(agentDir, "sessions", "--tmp-rin-project-cwd--"),
+      ),
+      false,
+    );
+  } finally {
+    if (previousRinDir === undefined) {
+      delete process.env.RIN_DIR;
+    } else {
+      process.env.RIN_DIR = previousRinDir;
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
 
 test("listBoundSessions reads only canonical root sessions", async () => {
   const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-sessions-"));
