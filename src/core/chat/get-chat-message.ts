@@ -9,6 +9,7 @@ import { Type } from "typebox";
 
 import {
   buildUserFacingTextResult,
+  formatToolCallLine,
   getToolResultUserText,
   prepareTruncatedAgentUserText,
   renderTextToolResult,
@@ -30,11 +31,9 @@ type GetChatMessageDetails = {
 function formatGetChatMessageCall(args: any, theme: any) {
   const messageId = safeString(args?.messageId).trim();
   const chatKey = safeString(args?.chatKey).trim();
-  return [
-    theme.fg("toolTitle", theme.bold("get_chat_msg")),
-    messageId ? ` ${theme.fg("accent", messageId)}` : "",
-    chatKey ? ` ${theme.fg("muted", chatKey)}` : "",
-  ].join("");
+  return formatToolCallLine("get_chat_msg", messageId || "message", theme, {
+    suffix: chatKey ? theme.fg("muted", ` ${chatKey}`) : "",
+  });
 }
 
 function formatGetChatMessageResult(

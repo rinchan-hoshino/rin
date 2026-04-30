@@ -4,6 +4,7 @@ import type {
 } from "../rin-lib/capability-types.js";
 import { existsSync } from "fs";
 import { Text } from "@mariozechner/pi-tui";
+import { formatToolCallLine } from "../pi/render-utils.js";
 import { Type } from "typebox";
 
 import {
@@ -336,6 +337,16 @@ export default function selfImproveModule(
         parameters: saveSelfImprovePromptParams,
         execute: async (_toolCallId, params) =>
           await executeSaveSelfImprovePromptAction(params),
+        renderCall: (args, theme) =>
+          new Text(
+            formatToolCallLine(
+              "save_prompts",
+              (args as any)?.slot || "slot",
+              theme,
+            ),
+            0,
+            0,
+          ),
         renderResult: renderSelfImproveResult,
       },
     ],

@@ -7,6 +7,7 @@ import { Text } from "@mariozechner/pi-tui";
 import {
   buildUserFacingTextResult,
   formatHiddenResultsNotice,
+  formatToolCallLine,
   prepareTruncatedText,
   renderTextToolResult,
 } from "../pi/render-utils.js";
@@ -122,7 +123,7 @@ async function loadSearchWeb() {
 }
 
 function formatWebSearchCall(args: any, theme: any) {
-  return `${theme.fg("toolTitle", theme.bold("web_search"))} ${theme.fg("accent", String(args?.q || "").trim())}`;
+  return formatToolCallLine("web_search", String(args?.q || "").trim(), theme);
 }
 
 export default function webSearchModule(): RinCapabilityDefinition {

@@ -9,6 +9,7 @@ import { Type } from "typebox";
 
 import {
   buildUserFacingTextResult,
+  formatToolCallLine,
   prepareTruncatedAgentUserText,
   renderTextToolResult,
 } from "../pi/render-utils.js";
@@ -32,11 +33,10 @@ type ListChatLogDetails = {
 function formatListChatLogCall(args: any, theme: any) {
   const chatKey = safeString(args?.chatKey).trim();
   const date = safeString(args?.date).trim();
-  return [
-    theme.fg("toolTitle", theme.bold("list_chat_log")),
-    chatKey ? ` ${theme.fg("accent", chatKey)}` : "",
-    theme.fg("muted", ` ${date || formatLocalDateOnly()}`),
-  ].join("");
+  return formatToolCallLine("list_chat_log", chatKey || "current chat", theme, {
+    detailStyle: chatKey ? "accent" : "muted",
+    suffix: theme.fg("muted", ` ${date || formatLocalDateOnly()}`),
+  });
 }
 
 function formatListChatLogResult(

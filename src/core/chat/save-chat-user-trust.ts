@@ -4,7 +4,9 @@ import type {
 } from "../rin-lib/capability-types.js";
 import path from "node:path";
 
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
+import { formatToolCallLine } from "../pi/render-utils.js";
 import { safeString } from "../text-utils.js";
 
 async function loadSupportModule() {
@@ -67,6 +69,19 @@ export default function saveChatUserTrustModule(
         promptSnippet: "Save identity info for a chat user.",
         promptGuidelines: [],
         parameters: paramsSchema,
+        renderCall: (args, theme) => {
+          const messageId = safeString((args as any)?.messageId).trim();
+          const userId = safeString((args as any)?.userId).trim();
+          const trust = safeString((args as any)?.trust).trim();
+          const target = [messageId || userId || "user", trust]
+            .filter(Boolean)
+            .join(" ");
+          return new Text(
+            formatToolCallLine("save_chat_user_identity", target, theme),
+            0,
+            0,
+          );
+        },
         execute: (async (_toolCallId, params) => {
           const trust = safeString((params as any)?.trust).trim();
           const messageId = safeString((params as any)?.messageId).trim();

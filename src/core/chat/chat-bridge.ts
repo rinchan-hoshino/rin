@@ -13,6 +13,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import {
   ExpandableTextResultComponent,
+  formatToolCallLine,
   getTextOutput,
   NO_OUTPUT_TEXT,
   rebuildExpandableTextResultComponent,
@@ -51,7 +52,7 @@ function previewCode(value: unknown) {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  const preview = lines[0] || "chat_bridge";
+  const preview = lines[0] || "bridge code";
   return preview.length > 100 ? `${preview.slice(0, 97)}...` : preview;
 }
 
@@ -64,7 +65,9 @@ function formatChatBridgeCall(
   const timeoutSuffix = timeout
     ? theme.fg("muted", ` (timeout ${timeout}s)`)
     : "";
-  return theme.fg("toolTitle", theme.bold(`$ ${preview}`)) + timeoutSuffix;
+  return formatToolCallLine("chat_bridge", preview, theme, {
+    suffix: timeoutSuffix,
+  });
 }
 
 const paramsSchema = createObjectSchema({
