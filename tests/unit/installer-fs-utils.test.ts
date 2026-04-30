@@ -236,12 +236,8 @@ test("syncInstalledDocs copies upstream mirrors into installed doc locations", a
   );
 });
 
-test("publishInstalledRuntime no longer requires vendored pi-coding-agent sources", async () => {
+async function makeRuntimeSource(version = "0.0.0") {
   const tempRoot = await fs.mkdtemp(path.join(tempBaseDir, "rin-install-src-"));
-  const installDir = await fs.mkdtemp(
-    path.join(tempBaseDir, "rin-install-dst-"),
-  );
-
   await fs.mkdir(path.join(tempRoot, "dist", "app", "rin"), {
     recursive: true,
   });
@@ -250,11 +246,72 @@ test("publishInstalledRuntime no longer requires vendored pi-coding-agent source
     "export {};",
     "utf8",
   );
-  await fs.writeFile(path.join(tempRoot, "package.json"), "{\n}\n", "utf8");
+  await fs.writeFile(
+    path.join(tempRoot, "package.json"),
+    `${JSON.stringify({ version }, null, 2)}\n`,
+    "utf8",
+  );
   await fs.symlink(
     path.join(rootDir, "node_modules"),
     path.join(tempRoot, "node_modules"),
   );
+  return tempRoot;
+}
+
+test("installedRuntimeReleaseId names git releases from a short commit hash", async () => {
+  const tempRoot = await makeRuntimeSource();
+
+  assert.equal(
+    fsUtils.installedRuntimeReleaseId(tempRoot, {
+      channel: "git",
+      version: "main",
+      branch: "main",
+      ref: "0123456789abcdef0123456789abcdef01234567",
+      sourceLabel: "git branch main @ 0123456789ab",
+      archiveUrl: "https://example.invalid/main.tar.gz",
+    }),
+    "0123456789ab",
+  );
+
+  await fs.rm(tempRoot, { recursive: true, force: true });
+});
+
+test("publishInstalledRuntime names releases from release version metadata", async () => {
+  const tempRoot = await makeRuntimeSource();
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-dst-"),
+  );
+
+  const published = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    {
+      findSystemUser: () => null,
+      release: {
+        channel: "stable",
+        version: "1.2.3",
+        branch: "stable",
+        ref: "v1.2.3",
+        sourceLabel: "stable 1.2.3",
+        archiveUrl: "https://example.invalid/rin-1.2.3.tgz",
+      },
+    },
+  );
+
+  assert.equal(path.basename(published.releaseRoot), "1.2.3");
+  await fs.access(
+    path.join(published.releaseRoot, "dist", "app", "rin", "main.js"),
+  );
+});
+
+test("publishInstalledRuntime no longer requires vendored pi-coding-agent sources", async () => {
+  const tempRoot = await makeRuntimeSource();
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-dst-"),
+  );
+
   const published = fsUtils.publishInstalledRuntime(
     tempRoot,
     installDir,
@@ -269,5 +326,76 @@ test("publishInstalledRuntime no longer requires vendored pi-coding-agent source
   await fs.access(path.join(published.releaseRoot, "package.json"));
   await assert.rejects(
     fs.access(path.join(published.releaseRoot, "third_party")),
+  );
+});
+
+async function seedRuntimeReleases(
+  installDir: string,
+  releaseNames: string[],
+  currentName: string,
+) {
+  const releasesRoot = path.join(installDir, "app", "releases");
+  for (const [index, name] of releaseNames.entries()) {
+    const releaseRoot = path.join(releasesRoot, name);
+    await fs.mkdir(releaseRoot, { recursive: true });
+    await fs.writeFile(path.join(releaseRoot, "package.json"), "{}\n", "utf8");
+    const time = new Date(1_700_000_000_000 + index * 1_000);
+    await fs.utimes(releaseRoot, time, time);
+  }
+  await fs.symlink(
+    path.join(releasesRoot, currentName),
+    path.join(installDir, "app", "current"),
+  );
+  return releasesRoot;
+}
+
+test("rollbackInstalledRuntime switches current to the newest previous release", async () => {
+  const tempRoot = await makeRuntimeSource();
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-dst-"),
+  );
+  const releasesRoot = await seedRuntimeReleases(
+    installDir,
+    ["1.0.0", "1.1.0", "1.2.0", "1.3.0"],
+    "1.3.0",
+  );
+
+  const result = fsUtils.rollbackInstalledRuntime(installDir, "rin", false, {
+    findSystemUser: () => null,
+  });
+
+  assert.equal(result.previousReleaseName, "1.3.0");
+  assert.equal(result.releaseName, "1.2.0");
+  assert.equal(
+    await fs.realpath(path.join(installDir, "app", "current")),
+    path.join(releasesRoot, "1.2.0"),
+  );
+  assert.deepEqual(
+    fsUtils.listInstalledReleaseNames(installDir, false).sort(),
+    ["1.1.0", "1.2.0", "1.3.0"],
+  );
+  await fs.rm(tempRoot, { recursive: true, force: true });
+});
+
+test("pruneInstalledReleases keeps current plus newest releases within the limit", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-dst-"),
+  );
+  const releasesRoot = await seedRuntimeReleases(
+    installDir,
+    ["1.0.0", "1.1.0", "1.2.0", "1.3.0"],
+    "1.0.0",
+  );
+
+  fsUtils.pruneInstalledReleases(
+    installDir,
+    3,
+    path.join(releasesRoot, "1.0.0"),
+    false,
+  );
+
+  assert.deepEqual(
+    fsUtils.listInstalledReleaseNames(installDir, false).sort(),
+    ["1.0.0", "1.2.0", "1.3.0"],
   );
 });
