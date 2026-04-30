@@ -27,7 +27,6 @@ import fetchModule from "../fetch/index.js";
 import memoryModule from "../memory/index.js";
 import messageHeaderModule from "../chat-bridge/message-header.js";
 import selfImproveModule from "../self-improve/index.js";
-import subagentModule from "../subagent/index.js";
 import taskModule from "../task/index.js";
 import tokenUsageModule from "../token-usage/index.js";
 import tuiInputCompatModule from "../rin-tui/input-compat.js";
@@ -73,7 +72,6 @@ export function createRinCapabilityDefinitions(
     messageHeaderModule(),
     autoCompactContinueModule(),
     tuiInputCompatModule(),
-    subagentModule(options),
     taskModule(),
     chatModule(options),
     tokenUsageModule(options),
@@ -124,7 +122,7 @@ function buildRinDocsBlock(agentDir: string) {
     `- Additional Pi docs: ${path.join(piRoot, "docs")}`,
     "- Read documentation whenever the task needs details about the runtime this agent is currently running in, including operations, configuration, behavior, capabilities, layout, or other agent-operated details.",
     "- Rin is built on top of Pi. Use Pi docs as the base reference, then apply Rin docs as overrides or additions where Rin differs.",
-    `- Topic map: execution environment (docs/execution-environment.md), Rin overrides (docs/pi-overrides.md), runtime layout (docs/runtime-layout.md), builtin capabilities (docs/builtin-extensions.md), capabilities (docs/capabilities.md); Pi examples (${path.join(piRoot, "examples")}: extensions, custom tools, SDK), extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md)`,
+    `- Topic map: execution environment (docs/execution-environment.md), Rin overrides (docs/pi-overrides.md), runtime layout (docs/runtime-layout.md), builtin capabilities (docs/builtin-extensions.md), capabilities (docs/capabilities.md), non-interactive CLI (docs/non-interactive-cli.md); Pi examples (${path.join(piRoot, "examples")}: extensions, custom tools, SDK), extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md)`,
   ].join("\n");
 }
 

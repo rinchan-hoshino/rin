@@ -19,8 +19,6 @@ These capabilities are now registered directly by Rin core rather than being for
   - keeps the effective system prompt stable within a session
 - `tui-input-compat`
   - smooths over some TUI input compatibility issues
-- `subagent`
-  - provides `run_subagent` and `list_models`
 - `task`
   - provides task management tools such as `list_tasks`, `save_task`, and `pause_task`
 - `chat`
@@ -34,4 +32,4 @@ These capabilities are now registered directly by Rin core rather than being for
 ## Usage note
 
 These capabilities are part of normal Rin behavior.
-`src/core/builtins/` now holds only the builtin registry and wiring layer. Concrete code lives directly in its owning domains such as `src/core/chat/`, `src/core/subagent/`, `src/core/memory/`, `src/core/self-improve/`, `src/core/rin-lib/`, `src/core/chat-bridge/`, and `src/core/rin-tui/`.
+`src/core/builtins/` now holds only the builtin registry and wiring layer. Concrete code lives directly in its owning domains such as `src/core/chat/`, `src/core/memory/`, `src/core/self-improve/`, `src/core/rin-lib/`, `src/core/chat-bridge/`, and `src/core/rin-tui/`.

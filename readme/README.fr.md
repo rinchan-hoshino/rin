@@ -54,7 +54,7 @@ Vérifiez l’état si nécessaire :
 rin doctor
 ```
 
-L’installateur vous avertira des limites de sécurité et de la possibilité d’une consommation supplémentaire de jetons. Ce coût supplémentaire peut venir de l’initialisation, du traitement de la mémoire, des résumés, des subagents, des tâches planifiées et de la recherche web.
+L’installateur vous avertira des limites de sécurité et de la possibilité d’une consommation supplémentaire de jetons. Ce coût supplémentaire peut venir de l’initialisation, du traitement de la mémoire, des résumés, des exécutions non interactives `rin -p` / `rin --mode json`, des tâches planifiées et de la recherche web.
 
 ## Ce que vous pouvez demander à Rin
 
@@ -89,7 +89,7 @@ Rin inclut déjà plusieurs briques importantes :
 - tâches planifiées et rappels
 - recherche web en direct
 - couverture de pont de chat pour Telegram, OneBot, Discord, Kook, QQ, Lark, Mail, WeChat Official, WeCom, DingTalk, Matrix, WhatsApp, LINE, Slack et Zulip
-- subagents pour déléguer du travail
+- `rin -p` / `rin --mode json` non interactif pour déléguer du travail et lancer des tours agent scriptables
 
 ## Quand utiliser `rin --std`
 

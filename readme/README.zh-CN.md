@@ -64,7 +64,7 @@ rin doctor
 rin status --watch  # 实时查看 worker 和定时任务活动
 ```
 
-安装器会提醒你安全边界，以及可能出现的额外 token 开销。这些开销可能来自初始化、记忆处理、总结压缩、subagent、定时任务和 Web 搜索等流程。
+安装器会提醒你安全边界，以及可能出现的额外 token 开销。这些开销可能来自初始化、记忆处理、总结压缩、非交互 `rin -p` / `rin --mode json`、定时任务和 Web 搜索等流程。
 
 ## 你可以直接这样让 Rin 做事
 
@@ -100,7 +100,7 @@ Rin 默认就接好了这些能力：
 - 定时任务和提醒
 - 实时 Web 搜索
 - 覆盖 Telegram、OneBot、Discord、Kook、QQ、Lark、Mail、WeChat Official、WeCom、DingTalk、Matrix、WhatsApp、LINE、Slack、Zulip 等聊天桥适配器
-- 用于委托工作的 subagent
+- 用于委托和脚本化 agent 回合的非交互 `rin -p` / `rin --mode json`
 
 ## 什么时候用 `rin --std`
 

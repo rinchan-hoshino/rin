@@ -52,11 +52,19 @@ async function main() {
       }),
       handleLocalCommand: async (command) => {
         const type = String(command?.type || "").trim();
-        if (type !== "chat_bridge_eval") return undefined;
-        return {
-          success: true,
-          data: await chatBridge.evalBridge(command?.payload || {}),
-        };
+        if (type === "chat_bridge_eval") {
+          return {
+            success: true,
+            data: await chatBridge.evalBridge(command?.payload || {}),
+          };
+        }
+        if (type === "chat_run_turn") {
+          return {
+            success: true,
+            data: await chatBridge.runTurn(command?.payload || {}),
+          };
+        }
+        return undefined;
       },
       registerLocalFrontendConnector: (connector) => {
         localFrontendConnectorResolver?.(connector);

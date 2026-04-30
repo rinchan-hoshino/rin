@@ -22,6 +22,9 @@ const memoryIndex = await import(
 const status = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "status.js")).href
 );
+const run = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "run.js")).href
+);
 const main = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "main.js")).href
 );
@@ -45,16 +48,78 @@ test("version subcommand prints package version without launching Rin", () => {
   assert.equal(parsed.releaseVersion, "1.2.3");
 });
 
-test("cli help omits removed hidden-session flags", () => {
+test("cli help omits removed run command and exposes Pi-style non-interactive flags", () => {
   const output = execFileSync(
     process.execPath,
     [path.join(rootDir, "dist", "app", "rin", "main.js"), "--help"],
     { cwd: rootDir, encoding: "utf8" },
   );
 
-  assert.doesNotMatch(output, /--session\b/);
+  assert.match(output, /--print/);
+  assert.match(output, /--mode <mode>/);
+  assert.match(output, /--chat-key <chatKey>/);
+  assert.doesNotMatch(output, /--bind-chat-session/);
+  assert.doesNotMatch(output, /\n\s+run\s+Run one non-interactive Rin turn/);
   assert.doesNotMatch(output, /--sessions\b/);
   assert.doesNotMatch(output, /--(?:std|rpc)\b/);
+});
+
+test("print help shows the Pi-style non-interactive CLI contract", () => {
+  const output = execFileSync(
+    process.execPath,
+    [path.join(rootDir, "dist", "app", "rin", "main.js"), "-p", "--help"],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+
+  assert.match(
+    output,
+    /Usage:\n\s+rin \[options\] \[@files\.\.\.\] \[messages\.\.\.\]/,
+  );
+  assert.match(output, /--print, -p/);
+  assert.match(output, /--chat-key <chatKey>/);
+  assert.doesNotMatch(output, /--bind-chat-session/);
+});
+
+test("run parser supports Pi-style print, model, chatKey, json, and timeout options", async () => {
+  const parsed = await run.parseRunArgs(
+    [
+      "-p",
+      "hello",
+      "--model",
+      "@openai/gpt-5.5",
+      "--thinking=low",
+      "--chat-key",
+      "telegram/1:2",
+      "--mode",
+      "json",
+      "--timeout",
+      "12.5",
+    ],
+    "",
+  );
+
+  assert.deepEqual(parsed, {
+    messages: [],
+    prompt: "hello",
+    sessionFile: undefined,
+    sessionName: undefined,
+    provider: undefined,
+    model: "openai/gpt-5.5",
+    thinkingLevel: "low",
+    chatKey: "telegram/1:2",
+    outputMode: "json",
+    timeoutMs: 12500,
+    help: false,
+  });
+
+  await assert.rejects(
+    () => run.parseRunArgs(["-p", "hello", "--bind-chat-session"], ""),
+    /unknown_run_option:--bind-chat-session/,
+  );
+
+  assert.equal(run.shouldRunNonInteractive(["-p"], true), true);
+  assert.equal(run.shouldRunNonInteractive(["--mode", "json"], true), true);
+  assert.equal(run.shouldRunNonInteractive([], false), true);
 });
 
 test("usage, status, and memory-index parsers ignore wrapper args around the subcommand", () => {

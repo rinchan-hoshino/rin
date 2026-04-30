@@ -107,7 +107,7 @@ Rin includes a focused default stack:
 - scheduled tasks and reminders
 - live web search
 - chat bridge support
-- subagents for delegated work
+- Pi-style non-interactive `rin -p` / `rin --mode json` for delegated, scriptable agent turns
 
 ## Updating Rin
 
