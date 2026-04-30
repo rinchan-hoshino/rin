@@ -19,10 +19,12 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 
 ## Start here
 
+- `docs/execution-environment.md`: agent identity, agent loop, environment inspection, self-improvement memory, and user-environment boundaries.
 - `docs/pi-overrides.md`: how to interpret upstream Pi docs inside Rin, including where Rin changes the meaning.
 
 ## Topic entrypoints
 
+- `docs/execution-environment.md`: how to understand the current agent runtime and what to verify before acting.
 - `docs/runtime-layout.md`: runtime layout, stable paths, launcher ownership, and paths safe for agents to reference.
 - `docs/builtin-extensions.md`: builtin capabilities and default extra capabilities provided by Rin core.
 - `docs/capabilities.md`: compact agent-facing behavior and conventions for Rin features.
@@ -31,9 +33,10 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 ## Reading order
 
 1. Start with `README.md`.
-2. Read `docs/pi-overrides.md` before relying on upstream Pi docs.
-3. Read the relevant topic entrypoint in `docs/`.
-4. Consult upstream Pi docs only as needed.
+2. Read `docs/execution-environment.md` to understand the current agent runtime and loop.
+3. Read `docs/pi-overrides.md` before relying on upstream Pi docs.
+4. Read the relevant topic entrypoint in `docs/`.
+5. Consult upstream Pi docs only as needed.
 
 ## Notes
 
