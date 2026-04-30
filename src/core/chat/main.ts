@@ -64,7 +64,7 @@ import {
   createChatKeyWorkerPool,
   waitUntil,
 } from "./chat-key-worker.js";
-import { shouldProcessText } from "./decision.js";
+import { isOwnerPresentForGroup, shouldProcessText } from "./decision.js";
 import {
   createChatRuntimeApp,
   createChatRuntimeH,
@@ -394,6 +394,13 @@ export async function startChatBridge(
       chatKey,
       replyToMessageId,
     );
+
+    if (
+      getChatType(session) === "group" &&
+      !(await isOwnerPresentForGroup(session, identity))
+    ) {
+      return { retry: false };
+    }
 
     if (command.name !== "help" && !canRunCommand(trust, command.name)) {
       return { retry: false };

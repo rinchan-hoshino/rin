@@ -161,6 +161,110 @@ test("chat decision allows owner group messages that explicitly at the bot even 
   assert.equal(result.text, "ping");
 });
 
+test("chat decision requires owner presence before trusted group mentions can trigger", async () => {
+  const queried: Array<{ chatId: string; userId: string }> = [];
+  const result = await decision.shouldProcessText(
+    {
+      platform: "telegram",
+      guildId: "group-1",
+      channelId: "-1001447529496",
+      selfId: "8623230033",
+      userId: "trusted-1",
+      bot: {
+        selfId: "8623230033",
+        username: "THE_cattail_rin_chan_bot",
+        internal: {
+          async getChatMember({ chat_id, user_id }) {
+            queried.push({ chatId: chat_id, userId: user_id });
+            return { status: "left" };
+          },
+        },
+      },
+      stripped: { content: "ping" },
+      elements: [
+        { type: "at", attrs: { name: "THE_cattail_rin_chan_bot" } },
+        { type: "text", attrs: { content: " ping" } },
+      ],
+    },
+    [
+      { type: "at", attrs: { name: "THE_cattail_rin_chan_bot" } },
+      { type: "text", attrs: { content: " ping" } },
+    ],
+    identity,
+  );
+
+  assert.equal(result.allow, false);
+  assert.deepEqual(queried, [{ chatId: "-1001447529496", userId: "owner-1" }]);
+});
+
+test("chat decision rejects trusted group mentions when owner membership is unverifiable", async () => {
+  const result = await decision.shouldProcessText(
+    {
+      platform: "telegram",
+      guildId: "group-1",
+      channelId: "-1001447529496",
+      selfId: "8623230033",
+      userId: "trusted-1",
+      bot: {
+        selfId: "8623230033",
+        username: "THE_cattail_rin_chan_bot",
+        internal: {
+          async getChatMember() {
+            return {};
+          },
+        },
+      },
+      stripped: { content: "ping" },
+      elements: [
+        { type: "at", attrs: { name: "THE_cattail_rin_chan_bot" } },
+        { type: "text", attrs: { content: " ping" } },
+      ],
+    },
+    [
+      { type: "at", attrs: { name: "THE_cattail_rin_chan_bot" } },
+      { type: "text", attrs: { content: " ping" } },
+    ],
+    identity,
+  );
+
+  assert.equal(result.allow, false);
+});
+
+test("chat decision allows trusted group mentions when an owner is present", async () => {
+  const result = await decision.shouldProcessText(
+    {
+      platform: "telegram",
+      guildId: "group-1",
+      channelId: "-1001447529496",
+      selfId: "8623230033",
+      userId: "trusted-1",
+      bot: {
+        selfId: "8623230033",
+        username: "THE_cattail_rin_chan_bot",
+        internal: {
+          async getChatMember({ chat_id, user_id }) {
+            assert.equal(chat_id, "-1001447529496");
+            assert.equal(user_id, "owner-1");
+            return { status: "administrator" };
+          },
+        },
+      },
+      stripped: { content: "ping" },
+      elements: [
+        { type: "at", attrs: { name: "THE_cattail_rin_chan_bot" } },
+        { type: "text", attrs: { content: " ping" } },
+      ],
+    },
+    [
+      { type: "at", attrs: { name: "THE_cattail_rin_chan_bot" } },
+      { type: "text", attrs: { content: " ping" } },
+    ],
+    identity,
+  );
+
+  assert.equal(result.allow, true);
+});
+
 test("chat decision ignores owner group messages that only at other users", async () => {
   const result = await decision.shouldProcessText(
     {

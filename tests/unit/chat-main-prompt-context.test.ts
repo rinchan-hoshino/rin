@@ -49,6 +49,11 @@ test("chat main carries sender metadata to the controller with the prompt body",
       app.bots.push({
         platform: "telegram",
         selfId: "1",
+        internal: {
+          async getChatMember({ user_id }) {
+            return user_id === "owner-1" ? { status: "member" } : { status: "left" };
+          },
+        },
         async sendMessage() {
           return ["assistant-1"];
         },
@@ -59,7 +64,15 @@ test("chat main carries sender metadata to the controller with the prompt body",
         selfId: "1",
         channelId: "2",
         guildId: "group-1",
-        bot: { selfId: "1", username: "RinBot" },
+        bot: {
+          selfId: "1",
+          username: "RinBot",
+          internal: {
+            async getChatMember({ user_id }) {
+              return user_id === "owner-1" ? { status: "member" } : { status: "left" };
+            },
+          },
+        },
         userId: "guest-1",
         author: {
           name: "GroupCard",

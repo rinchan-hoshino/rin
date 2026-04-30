@@ -47,6 +47,116 @@ async function getPrivateLikeGroupMemberCount(
   return 0;
 }
 
+function normalizeTrustForDecision(value: any) {
+  const trust = safeString(value).trim().toUpperCase();
+  return trust === "OWNER" || trust === "TRUSTED" ? trust : "OTHER";
+}
+
+function ownerAliasesForPlatform(identity: any, platform: string) {
+  const aliases = Array.isArray(identity?.aliases) ? identity.aliases : [];
+  return aliases.filter((entry: any) => {
+    const personId = safeString(entry?.personId).trim();
+    return (
+      safeString(entry?.platform).trim() === platform &&
+      safeString(entry?.userId).trim() &&
+      normalizeTrustForDecision(identity?.persons?.[personId]?.trust) ===
+        "OWNER"
+    );
+  });
+}
+
+function isPresentMemberRecord(member: any) {
+  if (!member || typeof member !== "object") return false;
+  const status = safeString(
+    member.status || member.role || member.memberStatus || "",
+  )
+    .trim()
+    .toLowerCase();
+  if (["left", "kicked", "banned"].includes(status)) return false;
+  if (status === "restricted" && "is_member" in member) {
+    return Boolean(member.is_member);
+  }
+  if (status) {
+    return [
+      "creator",
+      "administrator",
+      "member",
+      "restricted",
+      "owner",
+    ].includes(status);
+  }
+  return Boolean(
+    member.user ||
+    member.user_id ||
+    member.userId ||
+    member.memberId ||
+    member.id ||
+    member.card ||
+    member.nickname,
+  );
+}
+
+async function isGroupMember(
+  session: any,
+  platform: string,
+  chatId: string,
+  userId: string,
+) {
+  const internal = session?.bot?.internal;
+  try {
+    if (
+      platform === "telegram" &&
+      typeof internal?.getChatMember === "function"
+    ) {
+      return isPresentMemberRecord(
+        await internal.getChatMember({ chat_id: chatId, user_id: userId }),
+      );
+    }
+    if (
+      platform === "onebot" &&
+      typeof internal?.getGroupMemberInfo === "function"
+    ) {
+      return isPresentMemberRecord(
+        await internal.getGroupMemberInfo(chatId, userId, true),
+      );
+    }
+    if (typeof session?.bot?.getGuildMember === "function") {
+      return isPresentMemberRecord(
+        await session.bot.getGuildMember(chatId, userId),
+      );
+    }
+  } catch {}
+  return false;
+}
+
+async function isOwnerPresentInGroupSession(
+  session: any,
+  identity: any,
+  context: ReturnType<typeof normalizeDecisionSessionContext>,
+) {
+  if (context.trust === "OWNER") return true;
+  if (!context.platform || !context.chatId) return false;
+  const aliases = ownerAliasesForPlatform(identity, context.platform);
+  for (const alias of aliases) {
+    const userId = safeString(alias?.userId).trim();
+    if (!userId) continue;
+    if (
+      await isGroupMember(session, context.platform, context.chatId, userId)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function isOwnerPresentForGroup(session: any, identity: any) {
+  return await isOwnerPresentInGroupSession(
+    session,
+    identity,
+    normalizeDecisionSessionContext(session, identity),
+  );
+}
+
 export async function isPrivateLikeGroupSession(session: any, trust: string) {
   if (!session?.guildId || trust !== "OWNER") return false;
   const platform = safeString(session?.platform || "").trim();
@@ -77,12 +187,18 @@ export async function shouldProcessText(
   const privateLike =
     directLike(session) ||
     (await isPrivateLikeGroupSession(session, context.trust));
-  const allow = canAccessAgentInput({
-    chatType: privateLike ? "private" : "group",
-    trust: context.trust,
-    mentionLike: mentionLike(session),
-    commandLike: false,
-  });
+  const chatType = privateLike ? "private" : "group";
+  const ownerPresent =
+    chatType === "private" ||
+    (await isOwnerPresentInGroupSession(session, identity, context));
+  const allow =
+    ownerPresent &&
+    canAccessAgentInput({
+      chatType,
+      trust: context.trust,
+      mentionLike: mentionLike(session),
+      commandLike: false,
+    });
 
   return { allow, text, chatKey: context.chatKey, trust: context.trust };
 }
