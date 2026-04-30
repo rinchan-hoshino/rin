@@ -606,6 +606,96 @@ test("rpc session resync rebinds runtime state and rerenders history", async () 
   assert.ok(renders >= 1);
 });
 
+test("rpc startup submissions are buffered until the input loop starts", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const history = [];
+  const instance = {
+    session: {
+      isStreaming: false,
+      isCompacting: false,
+      getFrontendStatusEvent() {
+        return {
+          type: "rpc_frontend_status",
+          phase: "starting",
+          label: "Starting",
+          connected: true,
+        };
+      },
+    },
+    defaultEditor: {},
+    editor: {
+      addToHistory(text) {
+        history.push(text);
+      },
+    },
+    isBashMode: false,
+    isExtensionCommand: () => false,
+    flushPendingBashComponents() {},
+  };
+
+  codingAgentModule.InteractiveMode.prototype.setupEditorSubmitHandler.call(
+    instance,
+  );
+
+  await instance.defaultEditor.onSubmit(" first ");
+  await instance.defaultEditor.onSubmit("second");
+
+  assert.deepEqual(history, ["first", "second"]);
+  assert.equal(
+    await codingAgentModule.InteractiveMode.prototype.getUserInput.call(
+      instance,
+    ),
+    "first",
+  );
+  assert.equal(
+    await codingAgentModule.InteractiveMode.prototype.getUserInput.call(
+      instance,
+    ),
+    "second",
+  );
+});
+
+test("rpc startup submission uses an already waiting input callback", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const history = [];
+  const instance = {
+    session: {
+      isStreaming: false,
+      isCompacting: false,
+      getFrontendStatusEvent() {
+        return {
+          type: "rpc_frontend_status",
+          phase: "starting",
+          label: "Starting",
+          connected: true,
+        };
+      },
+    },
+    defaultEditor: {},
+    editor: {
+      addToHistory(text) {
+        history.push(text);
+      },
+    },
+    isBashMode: false,
+    isExtensionCommand: () => false,
+    flushPendingBashComponents() {},
+  };
+
+  codingAgentModule.InteractiveMode.prototype.setupEditorSubmitHandler.call(
+    instance,
+  );
+
+  const pending =
+    codingAgentModule.InteractiveMode.prototype.getUserInput.call(instance);
+  await instance.defaultEditor.onSubmit("ready");
+
+  assert.equal(await pending, "ready");
+  assert.deepEqual(history, ["ready"]);
+});
+
 test("rpc local user echo suppresses the matching daemon echo", async () => {
   await overrides.applyRinTuiOverrides();
 
