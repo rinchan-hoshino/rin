@@ -43,7 +43,7 @@ test("session turn state uses the latest durable marker", async () => {
   }
 });
 
-test("session turn state treats missing, active, or post-terminal user tails as interrupted turns", async () => {
+test("session turn state treats active markers and last user messages as interrupted turns", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-turn-state-"));
   try {
     const unmarked = path.join(dir, "unmarked.jsonl");
@@ -118,7 +118,7 @@ test("session turn state treats missing, active, or post-terminal user tails as 
   }
 });
 
-test("terminal turn state baseline leaves legacy sessions recoverable without mutating logs", async () => {
+test("terminal turn state baseline leaves completed legacy sessions closed without mutating logs", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-turn-state-"));
   try {
     const baselineFile = path.join(dir, "data", "baseline.json");
@@ -143,7 +143,7 @@ test("terminal turn state baseline leaves legacy sessions recoverable without mu
     assert.equal(readSessionTurnState(active)?.status, "active");
     assert.deepEqual(
       listContinuableInterruptedTurnSessionFiles(path.dirname(legacy)),
-      [active, legacy],
+      [active],
     );
     assert.deepEqual(
       listContinuableInterruptedTurnSessionFiles(path.dirname(legacy), {
@@ -327,6 +327,183 @@ test("terminal baseline markers classify by the previous session tail", async ()
           },
         }),
         JSON.stringify(baselineEntry),
+        "",
+      ].join("\n"),
+    );
+
+    assert.equal(shouldContinueInterruptedTurn(completed), false);
+    assert.equal(shouldContinueInterruptedTurn(interrupted), true);
+    assert.deepEqual(listContinuableInterruptedTurnSessionFiles(dir), [
+      interrupted,
+    ]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("terminal baseline ignores non-message tails after completed assistant replies", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-turn-state-"));
+  try {
+    const baselineEntry = {
+      type: "custom",
+      customType: "rin-turn-state",
+      data: {
+        status: "completed",
+        timestamp: "2026-04-24T00:00:00.000Z",
+        reason: "terminal-state-baseline",
+      },
+    };
+    const completedAssistant = {
+      type: "message",
+      message: { role: "assistant", content: "done" },
+    };
+    const tails = [
+      { type: "session_info" },
+      { type: "model_change" },
+      { type: "thinking_level_change" },
+      { type: "custom", customType: "other" },
+      { type: "custom_message", customType: "message-header-context" },
+      { type: "branch_summary" },
+    ];
+    for (const [index, tail] of tails.entries()) {
+      const sessionFile = path.join(dir, `completed-${index}.jsonl`);
+      await fs.writeFile(
+        sessionFile,
+        [
+          JSON.stringify(completedAssistant),
+          JSON.stringify(tail),
+          JSON.stringify(baselineEntry),
+          "",
+        ].join("\n"),
+      );
+      assert.equal(shouldContinueInterruptedTurn(sessionFile), false);
+    }
+
+    assert.deepEqual(listContinuableInterruptedTurnSessionFiles(dir), []);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("completed state with a later completed legacy turn does not resume", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-turn-state-"));
+  try {
+    const sessionFile = path.join(dir, "later-completed-turn.jsonl");
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: "custom",
+          customType: "rin-turn-state",
+          data: { status: "completed", timestamp: "1" },
+        }),
+        JSON.stringify({
+          type: "message",
+          message: { role: "user", content: "again" },
+        }),
+        JSON.stringify({
+          type: "custom_message",
+          customType: "message-header-context",
+        }),
+        JSON.stringify({
+          type: "message",
+          message: { role: "assistant", content: "done again" },
+        }),
+        "",
+      ].join("\n"),
+    );
+
+    assert.equal(shouldContinueInterruptedTurn(sessionFile), false);
+    assert.deepEqual(listContinuableInterruptedTurnSessionFiles(dir), []);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("terminal turn state after a message prevents restart recovery", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-turn-state-"));
+  try {
+    const completed = path.join(dir, "completed-after-tool-call.jsonl");
+    const aborted = path.join(dir, "aborted-after-user.jsonl");
+    await fs.writeFile(
+      completed,
+      [
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "tool-1", name: "bash" }],
+          },
+        }),
+        JSON.stringify({
+          type: "custom",
+          customType: "rin-turn-state",
+          data: { status: "completed", timestamp: "2" },
+        }),
+        "",
+      ].join("\n"),
+    );
+    await fs.writeFile(
+      aborted,
+      [
+        JSON.stringify({
+          type: "message",
+          message: { role: "user", content: "stop" },
+        }),
+        JSON.stringify({
+          type: "custom",
+          customType: "rin-turn-state",
+          data: { status: "aborted", timestamp: "3" },
+        }),
+        "",
+      ].join("\n"),
+    );
+
+    assert.equal(shouldContinueInterruptedTurn(completed), false);
+    assert.equal(shouldContinueInterruptedTurn(aborted), false);
+    assert.deepEqual(listContinuableInterruptedTurnSessionFiles(dir), []);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("passive metadata after turn state does not reopen completed turns", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-turn-state-"));
+  try {
+    const completed = path.join(dir, "completed-with-metadata.jsonl");
+    const interrupted = path.join(dir, "interrupted-with-metadata.jsonl");
+    await fs.writeFile(
+      completed,
+      [
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "tool-1", name: "bash" }],
+          },
+        }),
+        JSON.stringify({
+          type: "custom",
+          customType: "rin-turn-state",
+          data: { status: "completed", timestamp: "2" },
+        }),
+        JSON.stringify({ type: "session_info" }),
+        JSON.stringify({ type: "thinking_level_change" }),
+        "",
+      ].join("\n"),
+    );
+    await fs.writeFile(
+      interrupted,
+      [
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "tool-2", name: "read" }],
+          },
+        }),
+        JSON.stringify({ type: "session_info" }),
+        JSON.stringify({ type: "thinking_level_change" }),
         "",
       ].join("\n"),
     );

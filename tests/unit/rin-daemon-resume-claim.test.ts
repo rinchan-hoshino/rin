@@ -567,11 +567,18 @@ test("daemon auto-resumes active session logs on startup without frontend help",
   await fs.mkdir(path.dirname(sessionFile), { recursive: true });
   await fs.writeFile(
     sessionFile,
-    `${JSON.stringify({
-      type: "custom",
-      customType: "rin-turn-state",
-      data: { status: "active", timestamp: "2026-04-24T00:00:00.000Z" },
-    })}\n`,
+    [
+      JSON.stringify({
+        type: "message",
+        message: { role: "user", content: "continue this turn" },
+      }),
+      JSON.stringify({
+        type: "custom",
+        customType: "rin-turn-state",
+        data: { status: "active", timestamp: "2026-04-24T00:00:00.000Z" },
+      }),
+      "",
+    ].join("\n"),
   );
   await fs.writeFile(
     workerPath,

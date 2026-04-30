@@ -49,12 +49,8 @@ function normalizeTurnState(value: unknown): SessionTurnState | undefined {
   };
 }
 
-function isTurnStartEntry(entry: any) {
-  if (entry?.type === "custom_message") return true;
-  if (entry?.type === "branch_summary") return true;
-  if (entry?.type !== "message") return false;
-  const role = entry?.message?.role;
-  return role === "user" || role === "bashExecution";
+function isMessageEntry(entry: any) {
+  return entry?.type === "message";
 }
 
 function forEachSessionFileEntry(
@@ -80,11 +76,11 @@ function forEachSessionFileEntry(
 function readSessionTurnStateDetails(sessionFile: string):
   | {
       latest?: SessionTurnState;
-      hasTurnStartAfterLatestState: boolean;
+      hasMessageAfterLatestState: boolean;
     }
   | undefined {
   let latest: SessionTurnState | undefined;
-  let hasTurnStartAfterLatestState = false;
+  let hasMessageAfterLatestState = false;
   if (
     !forEachSessionFileEntry(sessionFile, (entry) => {
       if (
@@ -92,15 +88,15 @@ function readSessionTurnStateDetails(sessionFile: string):
         entry?.customType === SESSION_TURN_STATE_ENTRY_TYPE
       ) {
         latest = normalizeTurnState(entry) ?? latest;
-        hasTurnStartAfterLatestState = false;
+        hasMessageAfterLatestState = false;
         return;
       }
-      if (isTurnStartEntry(entry)) hasTurnStartAfterLatestState = true;
+      if (isMessageEntry(entry)) hasMessageAfterLatestState = true;
     })
   ) {
     return undefined;
   }
-  return { latest, hasTurnStartAfterLatestState };
+  return { latest, hasMessageAfterLatestState };
 }
 
 export function readSessionTurnState(
@@ -111,24 +107,14 @@ export function readSessionTurnState(
 
 export function shouldContinueInterruptedTurn(
   sessionFile: string,
-  options?: { terminalBaselineTimestamp?: string },
+  _options?: { terminalBaselineTimestamp?: string },
 ) {
-  const details = readSessionTurnStateDetails(sessionFile);
-  const latest = details?.latest;
-  if (!latest || isTerminalBaselineState(latest)) {
-    if (latest && !details.hasTurnStartAfterLatestState) {
-      return !isTerminalLegacyTailSessionFile(sessionFile, {
-        ignoreTerminalBaseline: true,
-      });
-    }
-    const baselineTimestamp = safeString(
-      options?.terminalBaselineTimestamp,
-    ).trim();
-    if (!baselineTimestamp) return true;
-    return !isTerminalLegacyTailSessionFile(sessionFile);
+  const tail = readLastTurnDecisionEntry(sessionFile);
+  if (!tail) return false;
+  if (tail.kind === "state") {
+    return !TERMINAL_TURN_STATES.has(tail.state.status);
   }
-  if (details.hasTurnStartAfterLatestState) return true;
-  return !TERMINAL_TURN_STATES.has(latest.status);
+  return !isTerminalLegacyTailEntry(tail.entry);
 }
 
 export function listSessionFiles(sessionDir: string): string[] {
@@ -188,39 +174,35 @@ function isTerminalBaselineState(state: SessionTurnState | undefined) {
   return state?.reason === "terminal-state-baseline";
 }
 
-function isTerminalBaselineEntry(entry: any) {
-  return (
-    entry?.type === "custom" &&
-    entry?.customType === SESSION_TURN_STATE_ENTRY_TYPE &&
-    safeString(entry?.data?.reason).trim() === "terminal-state-baseline"
-  );
-}
-
-function readLastSessionFileEntry(
+function readLastTurnDecisionEntry(
   sessionFile: string,
-  options?: { ignoreTerminalBaseline?: boolean },
-) {
-  let lastEntry: any;
+):
+  | { kind: "message"; entry: any }
+  | { kind: "state"; state: SessionTurnState }
+  | undefined {
+  let lastEntry:
+    | { kind: "message"; entry: any }
+    | { kind: "state"; state: SessionTurnState }
+    | undefined;
   if (
     !forEachSessionFileEntry(sessionFile, (entry) => {
-      if (options?.ignoreTerminalBaseline && isTerminalBaselineEntry(entry)) {
+      if (isMessageEntry(entry)) {
+        lastEntry = { kind: "message", entry };
         return;
       }
-      lastEntry = entry;
+      if (
+        entry?.type === "custom" &&
+        entry?.customType === SESSION_TURN_STATE_ENTRY_TYPE
+      ) {
+        const state = normalizeTurnState(entry);
+        if (!state || isTerminalBaselineState(state)) return;
+        lastEntry = { kind: "state", state };
+      }
     })
   ) {
     return undefined;
   }
   return lastEntry;
-}
-
-function isTerminalLegacyTailSessionFile(
-  sessionFile: string,
-  options?: { ignoreTerminalBaseline?: boolean },
-) {
-  return isTerminalLegacyTailEntry(
-    readLastSessionFileEntry(sessionFile, options),
-  );
 }
 
 function readTerminalBaselineTimestamp(baselineFile: string) {
