@@ -76,12 +76,12 @@ test("Rin update check preserves Pi version-check skip env", async () => {
   }
 });
 
-test("Rin changelog entries read docs/rin without settings state", async () => {
+test("Rin changelog entries read docs/release without settings state", async () => {
   await withTempDir(async (dir) => {
     const previousRinDir = process.env.RIN_DIR;
     try {
       process.env.RIN_DIR = dir;
-      const changelogPath = path.join(dir, "docs", "rin", "CHANGELOG.md");
+      const changelogPath = path.join(dir, "docs", "release", "CHANGELOG.md");
       await fs.mkdir(path.dirname(changelogPath), { recursive: true });
       await fs.writeFile(
         changelogPath,

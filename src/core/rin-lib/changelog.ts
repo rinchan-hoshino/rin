@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { resolveRuntimeProfile } from "./runtime.js";
 
-const CHANGELOG_RELATIVE_PATH = ["docs", "rin", "CHANGELOG.md"] as const;
+const CHANGELOG_RELATIVE_PATH = ["docs", "release", "CHANGELOG.md"] as const;
 
 export function getChangelogPath() {
   const { agentDir } = resolveRuntimeProfile();

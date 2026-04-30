@@ -123,7 +123,7 @@ rin update --git deadbeef
 ```
 
 If `rin` is confirmed missing on the current account, treat that as “this is not the launcher-owning user”.
-In that case, recover the real target install through the installed metadata described in `docs/rin/docs/runtime-layout.md`:
+In that case, recover the real target install through the installed metadata:
 
 - `<targetHome>/.rin/installer.json`
 - Linux: `~/.config/systemd/user/rin-daemon*.service`
@@ -160,42 +160,17 @@ rin restart    # restart the daemon
 rin update     # update the installed Rin core runtime
 ```
 
-## Testing
+## Documentation
 
-Rin keeps repository tests in three buckets:
+This README is the user documentation. Translations live in `readme/README.*.md` and must stay aligned with this English version; update them in the same change when user-facing README content changes.
 
-- `tests/unit`: fast isolated checks for one module or behavior
-- `tests/e2e`: cross-process flows that still run in a disposable environment
-- `tests/interactive`: opt-in smoke coverage for terminal interaction paths
+Internal documentation is intentionally separated:
 
-The placement and design rules for new tests live in [`tests/README.md`](tests/README.md).
+- Agent-facing runtime guidance lives in `docs/agent/` and is installed to `agentDir/docs/rin/`.
+- Developer technical documentation lives in `docs/developer/`.
+- Release-note metadata lives in `docs/release/CHANGELOG.md` for `/changelog` and release workflows.
 
-## Docs
-
-Start here:
-
-- [`docs/rin/README.md`](docs/rin/README.md)
-- [`docs/rin/docs/capabilities.md`](docs/rin/docs/capabilities.md)
-- [`docs/rin/docs/runtime-layout.md`](docs/rin/docs/runtime-layout.md)
-- [`docs/rin/docs/builtin-extensions.md`](docs/rin/docs/builtin-extensions.md)
-- [`docs/rin/docs/release-trains.md`](docs/rin/docs/release-trains.md)
-- [`docs/rin/docs/releasing.md`](docs/rin/docs/releasing.md)
-- [`docs/rin/docs/first-stable-release-checklist.md`](docs/rin/docs/first-stable-release-checklist.md)
-- [`upstream/pi/README.md`](upstream/pi/README.md) for the tracked upstream Pi mirror used by Rin
-- [`upstream/skill-creator/SKILL.md`](upstream/skill-creator/SKILL.md) for the tracked upstream builtin skill mirror used by Rin
-
-Refresh the mirrored upstream assets when needed:
-
-```bash
-npm run sync:upstreams
-```
-
-You can also refresh one mirror at a time:
-
-```bash
-npm run sync:pi-docs
-npm run sync:skill-creator
-```
+If you are changing Rin itself, start with [`docs/developer/README.md`](docs/developer/README.md).
 
 ## Project status
 

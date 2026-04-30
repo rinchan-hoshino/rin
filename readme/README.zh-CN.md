@@ -110,12 +110,13 @@ Rin 默认就接好了这些能力：
 
 ## 文档
 
-想继续了解，可以从这里开始：
+这份 README 是用户文档。翻译版位于 `readme/README.*.md`，必须始终跟随英文版；用户可见内容变化时，翻译也要在同一次变更中更新。
 
-- [`docs/rin/README.md`](../docs/rin/README.md)
-- [`docs/rin/docs/capabilities.md`](../docs/rin/docs/capabilities.md)
-- [`docs/rin/docs/runtime-layout.md`](../docs/rin/docs/runtime-layout.md)
-- [`docs/rin/docs/builtin-extensions.md`](../docs/rin/docs/builtin-extensions.md)
+内部文档已分开存放：
+
+- 给 agent 的运行时指导在 `docs/agent/`，安装后位于 `agentDir/docs/rin/`。
+- 给开发人员的技术文档在 `docs/developer/`。
+- 供 `/changelog` 和发布流程使用的发布说明元数据在 `docs/release/CHANGELOG.md`。
 
 ## 一句话总结
 

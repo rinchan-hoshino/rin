@@ -11,7 +11,7 @@ const BOOTSTRAP_PAYLOAD_FILES = Object.freeze([
   "scripts/bootstrap-entrypoint.sh",
   "scripts/bootstrap-entrypoint.ps1",
   "release-manifest.json",
-  "docs/rin/CHANGELOG.md",
+  "docs/release/CHANGELOG.md",
 ]);
 
 function parseArgs(argv) {

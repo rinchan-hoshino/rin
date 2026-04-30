@@ -8,7 +8,7 @@ function trim(value) {
 
 function parseArgs(argv) {
   const args = {
-    changelog: "docs/rin/CHANGELOG.md",
+    changelog: "docs/release/CHANGELOG.md",
     version: "",
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -19,7 +19,7 @@ function parseArgs(argv) {
       args.version = trim(argv[++index]);
     } else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: node scripts/release/verify-changelog.mjs --version <x.y.z> [--changelog docs/rin/CHANGELOG.md]",
+        "Usage: node scripts/release/verify-changelog.mjs --version <x.y.z> [--changelog docs/release/CHANGELOG.md]",
       );
       process.exit(0);
     } else {

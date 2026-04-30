@@ -99,12 +99,13 @@ Rin には次の機能が最初から入っています。
 
 ## ドキュメント
 
-詳しく知りたい場合は、まずこちらを参照してください。
+この README がユーザー向けドキュメントです。翻訳は `readme/README.*.md` にあり、英語版と常にそろえて更新する必要があります。ユーザーに見える内容を変更するときは、同じ変更で翻訳も更新してください。
 
-- [`docs/rin/README.md`](../docs/rin/README.md)
-- [`docs/rin/docs/capabilities.md`](../docs/rin/docs/capabilities.md)
-- [`docs/rin/docs/runtime-layout.md`](../docs/rin/docs/runtime-layout.md)
-- [`docs/rin/docs/builtin-extensions.md`](../docs/rin/docs/builtin-extensions.md)
+内部ドキュメントは分離されています。
+
+- エージェント向けランタイムガイドは `docs/agent/` にあり、インストール時に `agentDir/docs/rin/` へ配置されます。
+- 開発者向け技術ドキュメントは `docs/developer/` にあります。
+- `/changelog` とリリースワークフローが使うリリースノートメタデータは `docs/release/CHANGELOG.md` にあります。
 
 ## ひとことで言うと
 

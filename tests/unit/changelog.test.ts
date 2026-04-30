@@ -77,12 +77,12 @@ test("changelog parser returns empty entries for missing paths", async () => {
   });
 });
 
-test("changelog path prefers runtime Rin docs when that file exists", async () => {
+test("changelog path prefers runtime release docs when that file exists", async () => {
   await withTempDir(async (dir) => {
     const previousRinDir = process.env.RIN_DIR;
     try {
       process.env.RIN_DIR = dir;
-      const expectedPath = path.join(dir, "docs", "rin", "CHANGELOG.md");
+      const expectedPath = path.join(dir, "docs", "release", "CHANGELOG.md");
       await fs.mkdir(path.dirname(expectedPath), { recursive: true });
       await fs.writeFile(expectedPath, "## 1.0.0\n- Ready\n", "utf8");
       assert.equal(changelog.getChangelogPath(), expectedPath);
@@ -93,7 +93,7 @@ test("changelog path prefers runtime Rin docs when that file exists", async () =
   });
 });
 
-test("changelog path falls back to home Rin docs when runtime file is missing", async () => {
+test("changelog path falls back to home release docs when runtime file is missing", async () => {
   await withTempDir(async (dir) => {
     const previousHome = process.env.HOME;
     const previousRinDir = process.env.RIN_DIR;
@@ -104,7 +104,7 @@ test("changelog path falls back to home Rin docs when runtime file is missing", 
         dir,
         ".rin",
         "docs",
-        "rin",
+        "release",
         "CHANGELOG.md",
       );
       await fs.mkdir(path.dirname(expectedPath), { recursive: true });

@@ -1,7 +1,7 @@
 # README languages
 
 The English README at [`../README.md`](../README.md) is the canonical version.
-Translations in this directory are convenience copies and may lag behind the English version.
+Translations in this directory are user-facing copies and must stay aligned with the English version.
 
 ## Available
 
@@ -23,6 +23,6 @@ These are not translated yet, but they are explicitly welcome:
 
 ## Translation notes
 
-- Keep the same section order as the English README where practical.
-- Keep the WIP, token cost, and instability warnings aligned across languages.
-- When a translation is incomplete, prefer linking back to the English README instead of inventing missing content.
+- Keep the same section order and user-facing meaning as the English README.
+- Keep the WIP, token cost, install, update, and documentation-boundary warnings aligned across languages.
+- Update translations in the same change that changes the English README.

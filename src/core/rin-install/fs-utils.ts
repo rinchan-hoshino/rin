@@ -15,6 +15,7 @@ import {
   currentRuntimeRoot,
   installedAppEntryCandidates,
   installedBuiltinSkillRoot,
+  installedDocsRoot,
   installedPiDocsRoot,
   installedReleaseRoot,
   installedReleasesRoot,
@@ -438,8 +439,15 @@ export function syncInstalledDocs(
   deps: { findSystemUser: (user: string) => any },
 ) {
   const installedRinDocsDir = syncInstalledDocTree(
-    path.join(sourceRoot, "docs", "rin"),
+    path.join(sourceRoot, "docs", "agent"),
     installedRinDocsRoot(installDir),
+    targetUser,
+    elevated,
+    deps,
+  );
+  const installedReleaseDocsDir = syncInstalledDocTree(
+    path.join(sourceRoot, "docs", "release"),
+    path.join(installedDocsRoot(installDir), "release"),
     targetUser,
     elevated,
     deps,
@@ -464,7 +472,11 @@ export function syncInstalledDocs(
     );
     if (synced) installedPiDocs.push(synced);
   }
-  return { rin: installedRinDocsDir, pi: installedPiDocs };
+  return {
+    rin: installedRinDocsDir,
+    release: installedReleaseDocsDir,
+    pi: installedPiDocs,
+  };
 }
 
 export function releaseIdNow() {

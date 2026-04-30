@@ -7,7 +7,7 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 - keep `main` as the development source of truth
 - configure the repository secret `NPM_TOKEN` so `publish-stable.yml` and `publish-hotfix.yml` can publish `@rinchanai20260422/rin`
 - confirm the focused release validation set passes on `main`
-- update `docs/rin/CHANGELOG.md` before beta, stable, or hotfix publishing; release workflows require a `## <stable-version>` heading for the target user-facing version
+- update `docs/release/CHANGELOG.md` before beta, stable, or hotfix publishing; release workflows require a `## <stable-version>` heading for the target user-facing version
 - keep stable/hotfix versioning aligned with the current policy: each regular stable release advances `minor + 1` and resets `patch` to `0`, while each hotfix advances the current stable line by `patch + 1`
 
 ## Channel contract
@@ -51,7 +51,7 @@ It:
 1. resolves the beta source ref, defaulting to `main` HEAD
 2. computes the next regular stable target from the current stable version by advancing `minor + 1` and resetting `patch` to `0`
 3. creates the weekly beta version for that promotion target
-4. verifies `docs/rin/CHANGELOG.md` contains the target promotion heading
+4. verifies `docs/release/CHANGELOG.md` contains the target promotion heading
 5. validates the focused release test set
 6. updates `release-manifest.json -> beta`
 7. commits the manifest update back to `main`
@@ -66,7 +66,7 @@ It:
 2. computes the stable promotion version by stripping the beta suffix
 3. if a rerun or earlier release already used that version, bumps to the next available patch version on that stable line
 4. checks out the beta candidate ref in a detached worktree
-5. verifies the candidate `docs/rin/CHANGELOG.md` contains the stable version heading
+5. verifies the candidate `docs/release/CHANGELOG.md` contains the stable version heading
 6. validates that candidate with the focused release test set
 7. sets the package version only inside the candidate worktree
 8. publishes `@rinchanai20260422/rin` to npm using dist-tag `latest`
@@ -83,7 +83,7 @@ Use it for urgent stable fixes outside the weekly train; the patch version shoul
 It:
 
 1. checks out the requested ref in a detached worktree
-2. verifies the candidate `docs/rin/CHANGELOG.md` contains the hotfix version heading
+2. verifies the candidate `docs/release/CHANGELOG.md` contains the hotfix version heading
 3. validates the candidate with the focused release test set
 4. sets the requested patch version in the candidate worktree
 5. publishes that patch to npm as `latest`
@@ -103,7 +103,7 @@ It should contain only:
 - `update.sh`
 - `scripts/bootstrap-entrypoint.sh`
 - `release-manifest.json`
-- `docs/rin/CHANGELOG.md`
+- `docs/release/CHANGELOG.md`
 - generated bootstrap `README.md`
 
 To regenerate locally:
@@ -114,7 +114,7 @@ npm run release:bootstrap -- --output /path/to/bootstrap-worktree
 
 ## Local manifest maintenance
 
-Before publishing a beta, stable, or hotfix build, add the user-facing notes under `docs/rin/CHANGELOG.md` and verify the target stable version:
+Before publishing a beta, stable, or hotfix build, add the user-facing notes under `docs/release/CHANGELOG.md` and verify the target stable version:
 
 ```bash
 node scripts/release/verify-changelog.mjs --version <x.y.z>

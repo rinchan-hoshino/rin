@@ -32,4 +32,4 @@ The installer window is a step-by-step wizard for language/target user/install d
 
 The installer writes direct `rin-gui` launchers and, on finalized Windows installs, a user-scoped Start Menu/Desktop `Rin GUI.cmd` launcher plus a Startup launcher for the daemon. That gives Windows a GUI-first installed entry, daemon autostart, and terminal handoff without requiring a machine-wide service install.
 
-Preview artifacts for issue review should be posted in the GitHub issue or PR discussion instead of being committed under `docs/rin`.
+Preview artifacts for issue review should be posted in the GitHub issue or PR discussion instead of being committed under `docs/developer/` or `docs/agent/`.
