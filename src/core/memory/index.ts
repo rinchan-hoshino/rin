@@ -1,4 +1,7 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityOptions,
+} from "../rin-lib/capability-types.js";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
@@ -271,6 +274,7 @@ export async function executeSearchMemory(
       details.truncation = truncated.truncation;
     }
     return {
+      name: "memory",
       content: [{ type: "text" as const, text: truncated.outputText }],
       details,
     };
@@ -357,41 +361,50 @@ export function formatSearchMemoryCall(args: any, theme: any) {
   return `${theme.fg("toolTitle", theme.bold("search_memory"))} ${theme.fg("accent", query)}`;
 }
 
-export default function memoryModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "search_memory",
-    label: "Search Memory",
-    description:
-      "Search past sessions for long-term recall, or browse recent sessions directly when no query is provided.",
-    promptSnippet: "Search archived session history.",
-    promptGuidelines: [
-      "Use search_memory proactively for past-conversation recall when the user references earlier work or relevant cross-session context may matter; better to search and confirm than to guess or ask them to repeat themselves.",
-      "If you do not have a good search phrase yet, call search_memory without a query to browse recent sessions first.",
+export default function memoryModule(
+  options: RinCapabilityOptions,
+): RinCapabilityDefinition {
+  return {
+    tools: [
+      {
+        name: "search_memory",
+        label: "Search Memory",
+        description:
+          "Search past sessions for long-term recall, or browse recent sessions directly when no query is provided.",
+        promptSnippet: "Search archived session history.",
+        promptGuidelines: [
+          "Use search_memory proactively for past-conversation recall when the user references earlier work or relevant cross-session context may matter; better to search and confirm than to guess or ask them to repeat themselves.",
+          "If you do not have a good search phrase yet, call search_memory without a query to browse recent sessions first.",
+        ],
+        parameters: searchMemoryParams,
+        execute: async (_toolCallId, params, signal, onUpdate, ctx) =>
+          (await executeSearchMemory(
+            params,
+            ctx,
+            options.getThinkingLevel() as ThinkingLevel,
+            signal,
+            onUpdate as any,
+          )) as any,
+        renderCall: (args, theme, context) => {
+          const state = context.state as MemoryRenderState;
+          if (context.executionStarted && state.startedAt === undefined) {
+            state.startedAt = Date.now();
+            state.endedAt = undefined;
+          }
+          const text =
+            (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+          text.setText(formatSearchMemoryCall(args, theme));
+          return text;
+        },
+        renderResult: renderMemoryResult,
+      },
     ],
-    parameters: searchMemoryParams,
-    execute: async (_toolCallId, params, signal, onUpdate, ctx) =>
-      (await executeSearchMemory(
-        params,
-        ctx,
-        pi.getThinkingLevel() as ThinkingLevel,
-        signal,
-        onUpdate as any,
-      )) as any,
-    renderCall: (args, theme, context) => {
-      const state = context.state as MemoryRenderState;
-      if (context.executionStarted && state.startedAt === undefined) {
-        state.startedAt = Date.now();
-        state.endedAt = undefined;
-      }
-      const text =
-        (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      text.setText(formatSearchMemoryCall(args, theme));
-      return text;
+    hooks: {
+      message_end: [
+        async (event, ctx) => {
+          await archiveMessageTranscript(event?.message, ctx);
+        },
+      ],
     },
-    renderResult: renderMemoryResult,
-  });
-
-  pi.on("message_end", async (event, ctx) => {
-    await archiveMessageTranscript(event?.message, ctx);
-  });
+  };
 }

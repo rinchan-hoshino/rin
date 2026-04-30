@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
-import { BuiltinModuleHost, CompositeBuiltinRunner } from "../builtins/host.js";
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
+import type { TuiResourceOptions } from "./cli-options.js";
 import { extractText } from "./session-helpers.js";
 
 function sendRpcExtensionMessage(
@@ -77,22 +77,68 @@ function createRpcContextActions(target: any) {
   };
 }
 
+function applyExtensionFlagValues(
+  result: any,
+  values?: Map<string, boolean | string>,
+) {
+  if (!values || values.size <= 0) return;
+  const registeredFlags = new Map<string, { type?: string }>();
+  for (const extension of result?.extensions || []) {
+    for (const [name, flag] of extension?.flags || []) {
+      if (!registeredFlags.has(String(name)))
+        registeredFlags.set(String(name), flag as any);
+    }
+  }
+  for (const [name, value] of values) {
+    const flag = registeredFlags.get(name);
+    if (!flag) continue;
+    if (flag.type === "boolean") {
+      result.runtime.flagValues.set(name, true);
+      continue;
+    }
+    if (typeof value === "string") result.runtime.flagValues.set(name, value);
+  }
+}
+
+function getExtensionOptions(target: any): TuiResourceOptions {
+  return {
+    additionalExtensionPaths: Array.isArray(
+      target.extensionOptions?.additionalExtensionPaths,
+    )
+      ? target.extensionOptions.additionalExtensionPaths
+      : Array.isArray(target.additionalExtensionPaths)
+        ? target.additionalExtensionPaths
+        : [],
+    noExtensions: Boolean(target.extensionOptions?.noExtensions),
+    extensionFlagValues: target.extensionOptions?.extensionFlagValues,
+    additionalSkillPaths: [],
+    additionalPromptTemplatePaths: [],
+    additionalThemePaths: [],
+  };
+}
+
 export async function loadRpcLocalExtensions(
   target: any,
   forceReload: boolean,
   runtimeProfile: { cwd: string; agentDir: string },
 ) {
   const codingAgentModule: any = await loadRinCodingAgent();
-  const { createEventBus, discoverAndLoadExtensions, ExtensionRunner } =
+  const { createEventBus, DefaultResourceLoader, ExtensionRunner } =
     codingAgentModule;
 
   const eventBus = createEventBus();
-  const result = await discoverAndLoadExtensions(
-    target.additionalExtensionPaths,
-    runtimeProfile.cwd,
-    runtimeProfile.agentDir,
+  const extensionOptions = getExtensionOptions(target);
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: runtimeProfile.cwd,
+    agentDir: runtimeProfile.agentDir,
+    settingsManager: target.settingsManager,
     eventBus,
-  );
+    additionalExtensionPaths: extensionOptions.additionalExtensionPaths,
+    noExtensions: extensionOptions.noExtensions,
+  });
+  await resourceLoader.reload();
+  const result = resourceLoader.getExtensions();
+  applyExtensionFlagValues(result, extensionOptions.extensionFlagValues);
 
   const runner = new ExtensionRunner(
     result.extensions,
@@ -114,38 +160,14 @@ export async function loadRpcLocalExtensions(
     contextActions,
   );
 
-  const builtinHost = await BuiltinModuleHost.create({
-    cwd: runtimeProfile.cwd,
-    agentDir: runtimeProfile.agentDir,
-    sessionManager: target.sessionManager,
-    modelRegistry: target.modelRegistry,
-  });
-  builtinHost.bindCore(
-    createRpcCoreActions(target, {
-      getCommands: () => [],
-      setModel: async (model: any) => {
-        await target.setModel(model);
-        return true;
-      },
-    }),
-    contextActions,
-  );
-
-  const compositeRunner = new CompositeBuiltinRunner(runner, builtinHost);
-  compositeRunner.setUIContext(target.extensionBindings.uiContext);
-  compositeRunner.bindCommandContext(
-    target.extensionBindings.commandContextActions,
-  );
+  runner.setUIContext(target.extensionBindings.uiContext);
+  runner.bindCommandContext(target.extensionBindings.commandContextActions);
   if (target.extensionBindings.onError)
-    compositeRunner.onError(target.extensionBindings.onError);
+    runner.onError(target.extensionBindings.onError);
 
-  target.extensionRunner = compositeRunner;
-  if (
-    forceReload ||
-    result.extensions.length > 0 ||
-    builtinHost.getRegisteredCommands().length > 0
-  ) {
-    await compositeRunner.emit({
+  target.extensionRunner = runner;
+  if (forceReload || result.extensions.length > 0) {
+    await runner.emit({
       type: "session_start",
       reason: forceReload ? "reload" : "startup",
     });

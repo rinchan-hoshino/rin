@@ -290,8 +290,8 @@ test("subagent defaults do not override resume or fork session model settings", 
   );
 });
 
-test("subagent service can hide builtin modules from worker runtime", () => {
-  const disabled = subagentService.resolveSubagentDisabledBuiltinModules([
+test("subagent service can hide Rin capabilities from worker runtime", () => {
+  const disabled = subagentService.resolveSubagentDisabledRinCapabilities([
     " memory ",
     "MEMORY",
     "",
@@ -423,15 +423,12 @@ test("subagent sessions default to managed namespace dir", () => {
 });
 
 test("run_subagent exposes single-session schema and consistent sessionFile discovery hints", () => {
-  const tools = [];
-  subagentIndex.default({
-    registerTool(tool) {
-      tools.push(tool);
-    },
-    getThinkingLevel() {
-      return "medium";
-    },
-  });
+  const tools =
+    subagentIndex.default({
+      getThinkingLevel() {
+        return "medium";
+      },
+    }).tools || [];
   const runTool = tools.find((tool) => tool.name === "run_subagent");
   assert.ok(runTool);
   assert.equal(runTool.parameters.properties.disabledExtensions.type, "array");
@@ -522,15 +519,12 @@ test("run_subagent rejects legacy parallel task payloads", async () => {
 });
 
 test("run_subagent surfaces legacy task rejection without extra hints", async () => {
-  const tools = [];
-  subagentIndex.default({
-    registerTool(tool) {
-      tools.push(tool);
-    },
-    getThinkingLevel() {
-      return "medium";
-    },
-  });
+  const tools =
+    subagentIndex.default({
+      getThinkingLevel() {
+        return "medium";
+      },
+    }).tools || [];
   const runTool = tools.find((tool) => tool.name === "run_subagent");
   assert.ok(runTool);
 

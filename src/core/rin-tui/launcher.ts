@@ -15,6 +15,7 @@ import {
 } from "../tui-runtime-env.js";
 import { requestDaemonCommand } from "../rin-daemon/client.js";
 
+import { parseTuiCliOptions, type TuiResourceOptions } from "./cli-options.js";
 import { RinDaemonFrontendClient } from "./rpc-client.js";
 import { RpcInteractiveSession } from "./runtime.js";
 import { createRpcRuntimeHost } from "./runtime-host.js";
@@ -24,6 +25,12 @@ type TuiInteractiveOptions = Pick<
   InteractiveModeOptions,
   "initialMessage" | "initialMessages" | "verbose"
 >;
+
+type StartTuiOptions = {
+  additionalExtensionPaths?: string[];
+  resourceOptions?: Partial<TuiResourceOptions>;
+  argv?: string[];
+};
 const RPC_TUI_STARTUP_CONNECT_ERROR_RE =
   /\bconnect (?:ENOENT|ECONNREFUSED|ECONNRESET|EPIPE)\b/;
 const RPC_TUI_STARTUP_TRANSIENT_ERROR_RE =
@@ -135,30 +142,11 @@ function startupProfiler() {
 export function resolveTuiInteractiveOptions(
   argv: string[],
 ): TuiInteractiveOptions {
-  const messages: string[] = [];
-  let passThroughMessages = false;
-  for (const rawArg of argv) {
-    const arg = String(rawArg || "").trim();
-    if (!arg) continue;
-    if (passThroughMessages) {
-      messages.push(arg);
-      continue;
-    }
-    if (arg === "--") {
-      passThroughMessages = true;
-      continue;
-    }
-    if (arg === "--verbose") {
-      continue;
-    }
-    if (arg.startsWith("-")) continue;
-    messages.push(arg);
-  }
-
+  const parsed = parseTuiCliOptions(argv);
   return {
-    initialMessage: messages[0],
-    initialMessages: messages.length > 1 ? messages.slice(1) : undefined,
-    verbose: argv.includes("--verbose") || undefined,
+    initialMessage: parsed.initialMessage,
+    initialMessages: parsed.initialMessages,
+    verbose: parsed.verbose,
   };
 }
 
@@ -193,12 +181,24 @@ async function runInteractiveMode(
 }
 
 async function startStdTui(
-  options: { additionalExtensionPaths?: string[] },
+  resourceOptions: Partial<TuiResourceOptions>,
   profile: ReturnType<typeof startupProfiler>,
   interactiveOptions: TuiInteractiveOptions,
 ) {
   const { runtime: sessionRuntime } = await createConfiguredAgentSession({
-    additionalExtensionPaths: options.additionalExtensionPaths,
+    additionalExtensionPaths: resourceOptions.additionalExtensionPaths,
+    noExtensions: resourceOptions.noExtensions,
+    extensionFlagValues: resourceOptions.extensionFlagValues,
+    additionalSkillPaths: resourceOptions.additionalSkillPaths,
+    noSkills: resourceOptions.noSkills,
+    additionalPromptTemplatePaths:
+      resourceOptions.additionalPromptTemplatePaths,
+    noPromptTemplates: resourceOptions.noPromptTemplates,
+    additionalThemePaths: resourceOptions.additionalThemePaths,
+    noThemes: resourceOptions.noThemes,
+    noContextFiles: resourceOptions.noContextFiles,
+    systemPrompt: resourceOptions.systemPrompt,
+    appendSystemPrompt: resourceOptions.appendSystemPrompt,
   });
   profile.mark("maintenance-session-created");
   applyQuietStartupVersionCheckEnv(
@@ -210,15 +210,12 @@ async function startStdTui(
 }
 
 async function startRpcTui(
-  options: { additionalExtensionPaths?: string[] },
+  resourceOptions: Partial<TuiResourceOptions>,
   profile: ReturnType<typeof startupProfiler>,
   interactiveOptions: TuiInteractiveOptions,
 ) {
   const client = new RinDaemonFrontendClient();
-  const rpcSession = new RpcInteractiveSession(
-    client,
-    options.additionalExtensionPaths,
-  );
+  const rpcSession = new RpcInteractiveSession(client, resourceOptions);
   let runtimeHost: { dispose(): Promise<void> } | undefined;
   let interactiveMode: InteractiveMode | undefined;
   try {
@@ -263,9 +260,7 @@ async function startRpcTui(
   }
 }
 
-export async function startTui(
-  options: { additionalExtensionPaths?: string[]; argv?: string[] } = {},
-) {
+export async function startTui(options: StartTuiOptions = {}) {
   const profile = startupProfiler();
   const runtime = resolveRuntimeProfile();
   profile.mark("runtime-resolved");
@@ -275,25 +270,38 @@ export async function startTui(
   }
 
   const argv = options.argv ?? process.argv.slice(2);
+  const parsedTuiOptions = parseTuiCliOptions(argv, runtime.cwd);
+  const resourceOptions: Partial<TuiResourceOptions> = {
+    ...parsedTuiOptions.resources,
+    ...options.resourceOptions,
+    additionalExtensionPaths:
+      options.resourceOptions?.additionalExtensionPaths ??
+      options.additionalExtensionPaths ??
+      parsedTuiOptions.resources.additionalExtensionPaths,
+  };
   const maintenanceMode = await shouldStartMaintenanceMode();
   applyTuiRuntimeRole(maintenanceMode);
-  const interactiveOptions = resolveTuiInteractiveOptions(argv);
+  const interactiveOptions: TuiInteractiveOptions = {
+    initialMessage: parsedTuiOptions.initialMessage,
+    initialMessages: parsedTuiOptions.initialMessages,
+    verbose: parsedTuiOptions.verbose,
+  };
   profile.mark(maintenanceMode ? "mode=maintenance" : "mode=rpc");
 
   await applyRinTuiOverrides();
 
   if (maintenanceMode) {
-    await startStdTui(options, profile, interactiveOptions);
+    await startStdTui(resourceOptions, profile, interactiveOptions);
     return;
   }
 
   try {
-    await startRpcTui(options, profile, interactiveOptions);
+    await startRpcTui(resourceOptions, profile, interactiveOptions);
   } catch (error) {
     if (!isRecoverableRpcStartupError(error)) throw error;
     console.error(formatTuiMaintenanceFallbackNotice(error));
     applyTuiRuntimeRole(true);
     profile.mark("mode=maintenance-after-rpc-startup-failure");
-    await startStdTui(options, profile, interactiveOptions);
+    await startStdTui(resourceOptions, profile, interactiveOptions);
   }
 }

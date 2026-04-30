@@ -1,4 +1,4 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type { RinCapabilityDefinition } from "../rin-lib/capability-types.js";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { tmpdir } from "node:os";
@@ -79,122 +79,133 @@ const paramsSchema = createObjectSchema({
   ),
 });
 
-export default function chatBridgeModule(pi: BuiltinModuleApi) {
-  const registerTool: any = pi.registerTool.bind(pi);
-  registerTool({
-    name: "chat_bridge",
-    label: "chat_bridge",
-    description: "Run constrained bridge code against a specific live chat.",
-    promptSnippet: "Run constrained bridge code against a specific live chat.",
-    promptGuidelines: [
-      "Use chat_bridge for tasks such as querying chat or user information, sending messages to a specified chat, sending multimedia content, using platform features for chat management, or building complex interactive chat flows.",
-    ],
-    parameters: paramsSchema as any,
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const code = safeString((params as any)?.code);
-      const timeoutSeconds = Number((params as any)?.timeout);
-      if (!code.trim()) throw new Error("chat_bridge_code_required");
+export default function chatBridgeModule(): RinCapabilityDefinition {
+  return {
+    name: "chat-bridge",
+    tools: [
+      {
+        name: "chat_bridge",
+        label: "chat_bridge",
+        description:
+          "Run constrained bridge code against a specific live chat.",
+        promptSnippet:
+          "Run constrained bridge code against a specific live chat.",
+        promptGuidelines: [
+          "Use chat_bridge for tasks such as querying chat or user information, sending messages to a specified chat, sending multimedia content, using platform features for chat management, or building complex interactive chat flows.",
+        ],
+        parameters: paramsSchema as any,
+        async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+          const code = safeString((params as any)?.code);
+          const timeoutSeconds = Number((params as any)?.timeout);
+          if (!code.trim()) throw new Error("chat_bridge_code_required");
 
-      const requestId =
-        safeString(toolCallId).trim() ||
-        `chat_bridge_${Date.now().toString(36)}`;
-      const currentChatKey = normalizeChatKey(
-        ctx.sessionManager?.getSessionName?.() || "",
-      );
-      const session = readSessionMetadata(ctx);
-      const result = await requestDaemonCommand(
-        {
-          type: "chat_bridge_eval",
-          payload: {
-            createdAt: new Date().toISOString(),
-            requestId,
-            currentChatKey,
-            code,
-            timeoutMs:
-              Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
-                ? Math.round(timeoutSeconds * 1000)
+          const requestId =
+            safeString(toolCallId).trim() ||
+            `chat_bridge_${Date.now().toString(36)}`;
+          const currentChatKey = normalizeChatKey(
+            ctx.sessionManager?.getSessionName?.() || "",
+          );
+          const session = readSessionMetadata(ctx);
+          const result = await requestDaemonCommand(
+            {
+              type: "chat_bridge_eval",
+              payload: {
+                createdAt: new Date().toISOString(),
+                requestId,
+                currentChatKey,
+                code,
+                timeoutMs:
+                  Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+                    ? Math.round(timeoutSeconds * 1000)
+                    : undefined,
+                sessionId: session.sessionId || undefined,
+                sessionFile: session.sessionFile || undefined,
+              },
+            },
+            {
+              timeoutMs:
+                Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+                  ? Math.max(30_000, Math.round(timeoutSeconds * 1000) + 5_000)
+                  : 30_000,
+            },
+          );
+
+          const rawOutput = safeString(result?.text).trim() || "undefined";
+          const truncation = truncateTail(rawOutput);
+          let fullOutputPath: string | undefined;
+          if (truncation.truncated) {
+            fullOutputPath = getTempFilePath();
+            fs.writeFileSync(fullOutputPath, `${rawOutput}\n`, "utf8");
+          }
+
+          return {
+            content: [
+              { type: "text", text: truncation.content || NO_OUTPUT_TEXT },
+            ],
+            details: {
+              truncation: truncation.truncated ? truncation : undefined,
+              fullOutputPath,
+              currentChatKey,
+              requestId,
+              auditPath: safeString(result?.auditPath).trim() || undefined,
+              durationMs: Number.isFinite(Number(result?.durationMs))
+                ? Math.round(Number(result.durationMs))
                 : undefined,
-            sessionId: session.sessionId || undefined,
-            sessionFile: session.sessionFile || undefined,
-          },
+            } satisfies ChatBridgeDetails,
+          };
         },
-        {
-          timeoutMs:
-            Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
-              ? Math.max(30_000, Math.round(timeoutSeconds * 1000) + 5_000)
-              : 30_000,
+        renderCall(args, theme, context) {
+          const state = context.state as ChatBridgeRenderState;
+          if (context.executionStarted && state.startedAt === undefined) {
+            state.startedAt = Date.now();
+            state.endedAt = undefined;
+          }
+          const text =
+            (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+          text.setText(formatChatBridgeCall(args as any, theme));
+          return text;
         },
-      );
-
-      const rawOutput = safeString(result?.text).trim() || "undefined";
-      const truncation = truncateTail(rawOutput);
-      let fullOutputPath: string | undefined;
-      if (truncation.truncated) {
-        fullOutputPath = getTempFilePath();
-        fs.writeFileSync(fullOutputPath, `${rawOutput}\n`, "utf8");
-      }
-
-      return {
-        content: [{ type: "text", text: truncation.content || NO_OUTPUT_TEXT }],
-        details: {
-          truncation: truncation.truncated ? truncation : undefined,
-          fullOutputPath,
-          currentChatKey,
-          requestId,
-          auditPath: safeString(result?.auditPath).trim() || undefined,
-          durationMs: Number.isFinite(Number(result?.durationMs))
-            ? Math.round(Number(result.durationMs))
-            : undefined,
-        } satisfies ChatBridgeDetails,
-      };
-    },
-    renderCall(args, theme, context) {
-      const state = context.state as ChatBridgeRenderState;
-      if (context.executionStarted && state.startedAt === undefined) {
-        state.startedAt = Date.now();
-        state.endedAt = undefined;
-      }
-      const text =
-        (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      text.setText(formatChatBridgeCall(args as any, theme));
-      return text;
-    },
-    renderResult(result, options, theme, context) {
-      const state = context.state as ChatBridgeRenderState;
-      if (
-        state.startedAt !== undefined &&
-        options.isPartial &&
-        !state.interval
-      ) {
-        state.interval = setInterval(() => context.invalidate(), 1000);
-      }
-      if (!options.isPartial || context.isError) {
-        state.endedAt ??= Date.now();
-        if (state.interval) {
-          clearInterval(state.interval);
-          state.interval = undefined;
-        }
-      }
-      const details = (result as any)?.details as ChatBridgeDetails | undefined;
-      const outputText = getTextOutput(result as any, context.showImages);
-      const component =
-        (context.lastComponent as ExpandableTextResultComponent | undefined) ??
-        new ExpandableTextResultComponent();
-      rebuildExpandableTextResultComponent(
-        component,
-        {
-          outputText,
-          expanded: options.expanded,
-          previewLines: CHAT_BRIDGE_PREVIEW_LINES,
-          fullOutputPath: details?.fullOutputPath,
-          truncation: details?.truncation,
-          startedAt: state.startedAt,
-          endedAt: state.endedAt,
+        renderResult(result, options, theme, context) {
+          const state = context.state as ChatBridgeRenderState;
+          if (
+            state.startedAt !== undefined &&
+            options.isPartial &&
+            !state.interval
+          ) {
+            state.interval = setInterval(() => context.invalidate(), 1000);
+          }
+          if (!options.isPartial || context.isError) {
+            state.endedAt ??= Date.now();
+            if (state.interval) {
+              clearInterval(state.interval);
+              state.interval = undefined;
+            }
+          }
+          const details = (result as any)?.details as
+            | ChatBridgeDetails
+            | undefined;
+          const outputText = getTextOutput(result as any, context.showImages);
+          const component =
+            (context.lastComponent as
+              | ExpandableTextResultComponent
+              | undefined) ?? new ExpandableTextResultComponent();
+          rebuildExpandableTextResultComponent(
+            component,
+            {
+              outputText,
+              expanded: options.expanded,
+              previewLines: CHAT_BRIDGE_PREVIEW_LINES,
+              fullOutputPath: details?.fullOutputPath,
+              truncation: details?.truncation,
+              startedAt: state.startedAt,
+              endedAt: state.endedAt,
+            },
+            theme,
+          );
+          component.invalidate();
+          return component;
         },
-        theme,
-      );
-      component.invalidate();
-      return component;
-    },
-  });
+      },
+    ],
+  };
 }

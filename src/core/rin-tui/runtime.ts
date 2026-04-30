@@ -12,6 +12,7 @@ import {
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RpcFrontendClient } from "./frontend-surface.js";
 import { handleRpcSessionEvent } from "./events.js";
+import type { TuiResourceOptions } from "./cli-options.js";
 import { loadRpcLocalExtensions } from "./extensions.js";
 import {
   setRpcAutoCompaction,
@@ -256,6 +257,7 @@ export class RpcInteractiveSession {
   private listeners = new Set<(event: AgentEvent) => void>();
   private unsubscribeClient?: () => void;
   private extensionBindings: RpcExtensionBindings = {};
+  public extensionOptions: TuiResourceOptions;
   private additionalExtensionPaths: string[];
   private reconnecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -281,9 +283,36 @@ export class RpcInteractiveSession {
 
   constructor(
     public client: RpcFrontendClient,
-    additionalExtensionPaths: string[] = [],
+    extensionOptions: string[] | Partial<TuiResourceOptions> = [],
   ) {
-    this.additionalExtensionPaths = [...additionalExtensionPaths];
+    const normalizedExtensionOptions = Array.isArray(extensionOptions)
+      ? { additionalExtensionPaths: extensionOptions }
+      : extensionOptions;
+    this.extensionOptions = {
+      additionalExtensionPaths: [
+        ...(normalizedExtensionOptions.additionalExtensionPaths ?? []),
+      ],
+      additionalSkillPaths: [
+        ...(normalizedExtensionOptions.additionalSkillPaths ?? []),
+      ],
+      additionalPromptTemplatePaths: [
+        ...(normalizedExtensionOptions.additionalPromptTemplatePaths ?? []),
+      ],
+      additionalThemePaths: [
+        ...(normalizedExtensionOptions.additionalThemePaths ?? []),
+      ],
+      noExtensions: normalizedExtensionOptions.noExtensions,
+      extensionFlagValues: normalizedExtensionOptions.extensionFlagValues,
+      noSkills: normalizedExtensionOptions.noSkills,
+      noPromptTemplates: normalizedExtensionOptions.noPromptTemplates,
+      noThemes: normalizedExtensionOptions.noThemes,
+      noContextFiles: normalizedExtensionOptions.noContextFiles,
+      systemPrompt: normalizedExtensionOptions.systemPrompt,
+      appendSystemPrompt: normalizedExtensionOptions.appendSystemPrompt,
+    };
+    this.additionalExtensionPaths = [
+      ...this.extensionOptions.additionalExtensionPaths,
+    ];
     const proto = Object.getPrototypeOf(this);
     for (const name of Object.getOwnPropertyNames(proto)) {
       if (name === "constructor") continue;

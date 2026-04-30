@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -17,6 +19,45 @@ const { createModelRegistry } = await import(
     path.join(rootDir, "dist", "core", "rin-tui", "rpc-model-registry.js"),
   ).href
 );
+const { loadRpcLocalExtensions } = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "extensions.js"))
+    .href
+);
+
+test("rpc local extensions load settings-configured pi extensions", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-"));
+  const agentDir = path.join(dir, "agent");
+  const extensionPath = path.join(dir, "hello-extension.ts");
+  await fs.mkdir(agentDir, { recursive: true });
+  await fs.writeFile(
+    extensionPath,
+    "export default function(pi: any) { pi.registerCommand('hello', { description: 'hello command', handler: async () => {} }); }\n",
+  );
+  await fs.writeFile(
+    path.join(agentDir, "settings.json"),
+    JSON.stringify({ extensions: [extensionPath] }),
+  );
+
+  const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
+  const target = {
+    settingsManager: SettingsManager.create(dir, agentDir),
+    sessionManager: {
+      getCwd: () => dir,
+      getSessionDir: () => path.join(agentDir, "sessions"),
+    },
+    modelRegistry: {},
+    extensionBindings: {},
+    getFrontendStatusEvent: () => ({ phase: "idle" }),
+    getContextUsage: () => null,
+  };
+
+  await loadRpcLocalExtensions(target, false, { cwd: dir, agentDir });
+
+  assert.equal(
+    target.extensionRunner.getCommand("hello")?.description,
+    "hello command",
+  );
+});
 
 test("rpc model registry exposes all models for login provider selection", async () => {
   const sent = [];

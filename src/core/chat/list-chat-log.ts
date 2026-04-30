@@ -1,4 +1,7 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityOptions,
+} from "../rin-lib/capability-types.js";
 
 import { type TruncationResult } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
@@ -58,75 +61,91 @@ function formatUserListChatLogText(
   return [`path=${filePath}`, `count=${entries.length}`, "", body].join("\n");
 }
 
-export default function chatListChatLogModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "list_chat_log",
-    label: "List Chat Log",
-    description: "List chat records for a specific chat.",
-    promptSnippet: "List chat records for a specific chat.",
-    promptGuidelines: [],
-    parameters: Type.Object({
-      chatKey: Type.String({
-        description:
-          "Target chat like telegram/123456:987654321 or onebot/123456:private:12345.",
-      }),
-      date: Type.Optional(
-        Type.String({
-          description:
-            "Optional date to inspect in YYYY-MM-DD format. Defaults to today.",
+export default function chatListChatLogModule(
+  options: RinCapabilityOptions,
+): RinCapabilityDefinition {
+  return {
+    name: "chat-list-log",
+    tools: [
+      {
+        name: "list_chat_log",
+        label: "List Chat Log",
+        description: "List chat records for a specific chat.",
+        promptSnippet: "List chat records for a specific chat.",
+        promptGuidelines: [],
+        parameters: Type.Object({
+          chatKey: Type.String({
+            description:
+              "Target chat like telegram/123456:987654321 or onebot/123456:private:12345.",
+          }),
+          date: Type.Optional(
+            Type.String({
+              description:
+                "Optional date to inspect in YYYY-MM-DD format. Defaults to today.",
+            }),
+          ),
         }),
-      ),
-    }),
-    execute: async (_toolCallId, params) => {
-      const chatKey = safeString((params as any)?.chatKey).trim();
-      const date =
-        safeString((params as any)?.date).trim() || formatLocalDateOnly();
-      if (!chatKey) throw new Error("chat_list_log_chatKey_required");
+        execute: async (_toolCallId, params) => {
+          const chatKey = safeString((params as any)?.chatKey).trim();
+          const date =
+            safeString((params as any)?.date).trim() || formatLocalDateOnly();
+          if (!chatKey) throw new Error("chat_list_log_chatKey_required");
 
-      const agentDir = pi.agentDir;
-      const { readChatLog, formatChatLog } = await loadChatLogModule();
-      const { filePath, entries } = readChatLog(agentDir, chatKey, date);
-      const body = entries.length ? formatChatLog(entries) : "";
-      const agentText = entries.length
-        ? [
-            `chatKey=${chatKey}`,
-            `date=${date}`,
-            `path=${filePath}`,
-            `count=${entries.length}`,
-            "",
-            body,
-          ].join("\n")
-        : `No chat log found\nchatKey=${chatKey}\ndate=${date}\npath=${filePath}`;
-      const userText = formatUserListChatLogText(filePath, entries, body);
-      const truncated = prepareTruncatedAgentUserText(agentText, userText);
-      return {
-        content: [{ type: "text", text: truncated.outputText }],
-        details: {
-          chatKey,
-          date,
-          filePath,
-          count: entries.length,
-          entries,
-          userText: truncated.userPreviewText,
-          truncation: truncated.userTruncation,
-        } satisfies ListChatLogDetails,
-        isError: false,
-      };
-    },
-    renderCall(args, theme) {
-      return new Text(formatListChatLogCall(args, theme), 0, 0);
-    },
-    renderResult(result, options, theme, context) {
-      const details = result.details as ListChatLogDetails | undefined;
-      const userResult = buildUserFacingTextResult(result, context.showImages, {
-        userText: details?.userText,
-        details: { truncation: details?.truncation },
-      });
-      return new Text(
-        formatListChatLogResult(userResult, options, theme, context.showImages),
-        0,
-        0,
-      );
-    },
-  });
+          const agentDir = options.agentDir;
+          const { readChatLog, formatChatLog } = await loadChatLogModule();
+          const { filePath, entries } = readChatLog(agentDir, chatKey, date);
+          const body = entries.length ? formatChatLog(entries) : "";
+          const agentText = entries.length
+            ? [
+                `chatKey=${chatKey}`,
+                `date=${date}`,
+                `path=${filePath}`,
+                `count=${entries.length}`,
+                "",
+                body,
+              ].join("\n")
+            : `No chat log found\nchatKey=${chatKey}\ndate=${date}\npath=${filePath}`;
+          const userText = formatUserListChatLogText(filePath, entries, body);
+          const truncated = prepareTruncatedAgentUserText(agentText, userText);
+          return {
+            content: [{ type: "text", text: truncated.outputText }],
+            details: {
+              chatKey,
+              date,
+              filePath,
+              count: entries.length,
+              entries,
+              userText: truncated.userPreviewText,
+              truncation: truncated.userTruncation,
+            } satisfies ListChatLogDetails,
+            isError: false,
+          };
+        },
+        renderCall(args, theme) {
+          return new Text(formatListChatLogCall(args, theme), 0, 0);
+        },
+        renderResult(result, options, theme, context) {
+          const details = result.details as ListChatLogDetails | undefined;
+          const userResult = buildUserFacingTextResult(
+            result,
+            context.showImages,
+            {
+              userText: details?.userText,
+              details: { truncation: details?.truncation },
+            },
+          );
+          return new Text(
+            formatListChatLogResult(
+              userResult,
+              options,
+              theme,
+              context.showImages,
+            ),
+            0,
+            0,
+          );
+        },
+      },
+    ],
+  };
 }

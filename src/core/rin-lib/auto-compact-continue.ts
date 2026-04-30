@@ -1,4 +1,4 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type { RinCapabilityDefinition } from "./capability-types.js";
 
 import {
   consumeCompactionContinuationMarker,
@@ -10,19 +10,27 @@ const CONTINUATION_BLOCK = [
   "Resume the current task immediately from its current state. Execute the next concrete step directly without narration, and keep going if work remains.",
 ].join("\n");
 
-export default function autoCompactContinueModule(pi: BuiltinModuleApi) {
-  pi.on("session_start", async (_event, ctx) => {
-    clearCompactionContinuationMarker(ctx);
-  });
-
-  pi.on("before_agent_start", async (event, ctx) => {
-    const marker = consumeCompactionContinuationMarker(ctx);
-    if (!marker) return;
-    const systemPrompt = String(event?.systemPrompt || "").trim();
-    return {
-      systemPrompt: systemPrompt
-        ? `${systemPrompt}\n\n${CONTINUATION_BLOCK}`
-        : CONTINUATION_BLOCK,
-    };
-  });
+export default function autoCompactContinueModule(): RinCapabilityDefinition {
+  return {
+    name: "auto-compact-continue",
+    hooks: {
+      session_start: [
+        async (_event, ctx) => {
+          clearCompactionContinuationMarker(ctx);
+        },
+      ],
+      before_agent_start: [
+        async (event, ctx) => {
+          const marker = consumeCompactionContinuationMarker(ctx);
+          if (!marker) return;
+          const systemPrompt = String(event?.systemPrompt || "").trim();
+          return {
+            systemPrompt: systemPrompt
+              ? `${systemPrompt}\n\n${CONTINUATION_BLOCK}`
+              : CONTINUATION_BLOCK,
+          };
+        },
+      ],
+    },
+  };
 }

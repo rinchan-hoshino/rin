@@ -1,6 +1,7 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
 import { CustomEditor } from "@mariozechner/pi-coding-agent";
 import { matchesKey } from "@mariozechner/pi-tui";
+
+import type { RinCapabilityDefinition } from "../rin-lib/capability-types.js";
 
 export function isExplicitNewlineInput(data: string): boolean {
   return matchesKey(data, "ctrl+j");
@@ -19,11 +20,18 @@ class TuiInputCompatEditor extends CustomEditor {
   }
 }
 
-export default function (pi: BuiltinModuleApi) {
-  pi.on("session_start", (_event, ctx) => {
-    ctx.ui.setEditorComponent(
-      (tui, theme, keybindings) =>
-        new TuiInputCompatEditor(tui, theme, keybindings),
-    );
-  });
+export default function tuiInputCompatModule(): RinCapabilityDefinition {
+  return {
+    name: "tui-input-compat",
+    hooks: {
+      session_start: [
+        (_event, ctx) => {
+          ctx.ui.setEditorComponent(
+            (tui: any, theme: any, keybindings: any) =>
+              new TuiInputCompatEditor(tui, theme, keybindings),
+          );
+        },
+      ],
+    },
+  };
 }

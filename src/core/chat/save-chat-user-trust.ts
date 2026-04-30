@@ -1,4 +1,7 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityOptions,
+} from "../rin-lib/capability-types.js";
 import path from "node:path";
 
 import { Type } from "typebox";
@@ -51,79 +54,87 @@ const paramsSchema = Type.Object({
   ),
 });
 
-export default function saveChatUserTrustModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "save_chat_user_identity",
-    label: "Save Chat User Identity",
-    description: "Create or update saved identity info for a chat user.",
-    promptSnippet: "Save identity info for a chat user.",
-    promptGuidelines: [],
-    parameters: paramsSchema,
-    execute: (async (_toolCallId, params) => {
-      const trust = safeString((params as any)?.trust).trim();
-      const messageId = safeString((params as any)?.messageId).trim();
-      const chatKey = safeString((params as any)?.chatKey).trim();
-      const platformInput = safeString((params as any)?.platform).trim();
-      const userIdInput = safeString((params as any)?.userId).trim();
-      const nameInput = safeString((params as any)?.name).trim();
+export default function saveChatUserTrustModule(
+  options: RinCapabilityOptions,
+): RinCapabilityDefinition {
+  return {
+    name: "chat-save-user-trust",
+    tools: [
+      {
+        name: "save_chat_user_identity",
+        label: "Save Chat User Identity",
+        description: "Create or update saved identity info for a chat user.",
+        promptSnippet: "Save identity info for a chat user.",
+        promptGuidelines: [],
+        parameters: paramsSchema,
+        execute: (async (_toolCallId, params) => {
+          const trust = safeString((params as any)?.trust).trim();
+          const messageId = safeString((params as any)?.messageId).trim();
+          const chatKey = safeString((params as any)?.chatKey).trim();
+          const platformInput = safeString((params as any)?.platform).trim();
+          const userIdInput = safeString((params as any)?.userId).trim();
+          const nameInput = safeString((params as any)?.name).trim();
 
-      let platform = platformInput;
-      let userId = userIdInput;
-      let name = nameInput;
+          let platform = platformInput;
+          let userId = userIdInput;
+          let name = nameInput;
 
-      if (messageId) {
-        const { normalizeChatMessageLookup } = await loadMessageStoreModule();
-        const matches = normalizeChatMessageLookup(
-          pi.agentDir,
-          messageId,
-          chatKey || undefined,
-        );
-        if (!matches.length) {
-          throw new Error(
-            `Message not found: ${messageId}${chatKey ? ` (chatKey=${chatKey})` : ""}`,
-          );
-        }
-        const target = matches[0];
-        platform = safeString(target?.platform).trim();
-        userId = safeString(target?.userId).trim();
-        if (!name)
-          name = safeString(target?.nickname || target?.chatName).trim();
-      }
+          if (messageId) {
+            const { normalizeChatMessageLookup } =
+              await loadMessageStoreModule();
+            const matches = normalizeChatMessageLookup(
+              options.agentDir,
+              messageId,
+              chatKey || undefined,
+            );
+            if (!matches.length) {
+              throw new Error(
+                `Message not found: ${messageId}${chatKey ? ` (chatKey=${chatKey})` : ""}`,
+              );
+            }
+            const target = matches[0];
+            platform = safeString(target?.platform).trim();
+            userId = safeString(target?.userId).trim();
+            if (!name)
+              name = safeString(target?.nickname || target?.chatName).trim();
+          }
 
-      if (!platform || !userId) {
-        throw new Error(
-          "Provide either messageId (optionally with chatKey) or platform and userId.",
-        );
-      }
+          if (!platform || !userId) {
+            throw new Error(
+              "Provide either messageId (optionally with chatKey) or platform and userId.",
+            );
+          }
 
-      const { setIdentityTrust } = await loadSupportModule();
-      const result = setIdentityTrust({
-        dataDir: path.join(pi.agentDir, "data"),
-        platform,
-        userId,
-        trust: trust as "OWNER" | "TRUSTED" | "OTHER",
-        name: name || undefined,
-      });
+          const { setIdentityTrust } = await loadSupportModule();
+          const result = setIdentityTrust({
+            dataDir: path.join(options.agentDir, "data"),
+            platform,
+            userId,
+            trust: trust as "OWNER" | "TRUSTED" | "OTHER",
+            name: name || undefined,
+          });
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: [
-              `Saved chat user identity: ${result.trust}`,
-              `platform=${result.platform}`,
-              `userId=${result.userId}`,
-              result.name ? `name=${result.name}` : "",
-              `personId=${result.personId}`,
-              result.path,
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          },
-        ],
-        details: result,
-        isError: false,
-      };
-    }) as any,
-  });
+          return {
+            content: [
+              {
+                type: "text",
+                text: [
+                  `Saved chat user identity: ${result.trust}`,
+                  `platform=${result.platform}`,
+                  `userId=${result.userId}`,
+                  result.name ? `name=${result.name}` : "",
+                  `personId=${result.personId}`,
+                  result.path,
+                ]
+                  .filter(Boolean)
+                  .join("\n"),
+              },
+            ],
+            details: result,
+            isError: false,
+          };
+        }) as any,
+      },
+    ],
+  };
 }

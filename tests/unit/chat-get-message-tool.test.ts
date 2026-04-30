@@ -15,13 +15,10 @@ const getChatMessageMod = await import(
 );
 
 test("get_chat_msg contributes the chat reply lookup system guidance", () => {
-  const tools: any[] = [];
-  getChatMessageMod.default({
-    agentDir: rootDir,
-    registerTool(tool: any) {
-      tools.push(tool);
-    },
-  });
+  const tools: any[] =
+    getChatMessageMod.default({
+      agentDir: rootDir,
+    }).tools || [];
 
   const getChatMessageTool = tools.find((tool) => tool.name === "get_chat_msg");
   assert.ok(getChatMessageTool);

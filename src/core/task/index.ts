@@ -1,4 +1,4 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type { RinCapabilityDefinition } from "../rin-lib/capability-types.js";
 import { type TruncationResult } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
@@ -523,52 +523,57 @@ function renderTaskResult(
   );
 }
 
-export default function cronModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "get_task",
-    label: "Get Task",
-    description:
-      "Get a specific scheduled task, or list scheduled tasks when taskId is omitted.",
-    promptSnippet: "Get a specific scheduled task, or list scheduled tasks.",
-    promptGuidelines: [],
-    parameters: getTaskSchema,
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) =>
-      await executeTaskAction("get", params, ctx),
-    renderCall: (args, theme) => new Text(formatGetTaskCall(args, theme), 0, 0),
-    renderResult: renderTaskResult,
-  });
-
-  (pi as any).registerTool({
-    name: "save_task",
-    label: "Save Task",
-    description: "Create or update a scheduled task.",
-    promptSnippet: "Create or update a scheduled task.",
-    promptGuidelines: [
-      "When save_task sets the chatKey field, the agent's final message is sent to that chat automatically, so the scheduled prompt should focus only on generating the final output and should not repeat delivery instructions.",
+export default function cronModule(): RinCapabilityDefinition {
+  return {
+    name: "task",
+    tools: [
+      {
+        name: "get_task",
+        label: "Get Task",
+        description:
+          "Get a specific scheduled task, or list scheduled tasks when taskId is omitted.",
+        promptSnippet:
+          "Get a specific scheduled task, or list scheduled tasks.",
+        promptGuidelines: [],
+        parameters: getTaskSchema,
+        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) =>
+          await executeTaskAction("get", params, ctx),
+        renderCall: (args, theme) =>
+          new Text(formatGetTaskCall(args, theme), 0, 0),
+        renderResult: renderTaskResult,
+      },
+      {
+        name: "save_task",
+        label: "Save Task",
+        description: "Create or update a scheduled task.",
+        promptSnippet: "Create or update a scheduled task.",
+        promptGuidelines: [
+          "When save_task sets the chatKey field, the agent's final message is sent to that chat automatically, so the scheduled prompt should focus only on generating the final output and should not repeat delivery instructions.",
+        ],
+        parameters: taskSchema,
+        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) =>
+          await executeTaskAction("save", params, ctx),
+        renderCall: (args, theme) =>
+          new Text(formatSaveTaskCall(args, theme), 0, 0),
+        renderResult: renderTaskResult,
+      },
+      {
+        name: "manage_task",
+        label: "Manage Task",
+        description: "Delete, pause, or resume a scheduled task.",
+        promptSnippet: "Delete, pause, or resume a scheduled task.",
+        promptGuidelines: [],
+        parameters: manageTaskSchema,
+        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) =>
+          await executeTaskAction(
+            readManageTaskAction(params) as TaskAction,
+            params,
+            ctx,
+          ),
+        renderCall: (args, theme) =>
+          new Text(formatManageTaskCall(args, theme), 0, 0),
+        renderResult: renderTaskResult,
+      },
     ],
-    parameters: taskSchema,
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) =>
-      await executeTaskAction("save", params, ctx),
-    renderCall: (args, theme) =>
-      new Text(formatSaveTaskCall(args, theme), 0, 0),
-    renderResult: renderTaskResult,
-  });
-
-  (pi as any).registerTool({
-    name: "manage_task",
-    label: "Manage Task",
-    description: "Delete, pause, or resume a scheduled task.",
-    promptSnippet: "Delete, pause, or resume a scheduled task.",
-    promptGuidelines: [],
-    parameters: manageTaskSchema,
-    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) =>
-      await executeTaskAction(
-        readManageTaskAction(params) as TaskAction,
-        params,
-        ctx,
-      ),
-    renderCall: (args, theme) =>
-      new Text(formatManageTaskCall(args, theme), 0, 0),
-    renderResult: renderTaskResult,
-  });
+  };
 }

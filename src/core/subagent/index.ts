@@ -1,4 +1,7 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityOptions,
+} from "../rin-lib/capability-types.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -87,11 +90,11 @@ const DisabledExtensionsSchema = Type.Optional(
   Type.Array(
     Type.String({
       description:
-        "Builtin module name to hide from the worker runtime, for example `memory`.",
+        "Rin capability name to hide from the worker runtime, for example `memory`.",
     }),
     {
       description:
-        "Optional builtin module names to hide from the worker runtime.",
+        "Optional Rin capability names to hide from the worker runtime.",
     },
   ),
 );
@@ -173,6 +176,7 @@ function buildRunUpdate(
     ...results.map(summarizeTaskResult),
   ];
   return {
+    name: "subagent",
     content: [{ type: "text" as const, text: lines.join("\n") }],
     details: {
       ...detailsBase,
@@ -265,115 +269,134 @@ async function runSubagentResult(
 
 export { applySubagentTaskPreferences };
 
-export default function subagentModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "run_subagent",
-    label: "Run Subagent",
-    description:
-      "Run a worker with independent context and optional model selection.",
-    promptSnippet: "Run a worker with independent context.",
-    promptGuidelines: [
-      "Use run_subagent to run a worker with independent context and optional model selection.",
-      "Always use run_subagent for simple independent work that does not depend on the current conversation context.",
-      "Use run_subagent when the user asks for a subagent or wants a different model.",
+export default function subagentModule(
+  options: RinCapabilityOptions,
+): RinCapabilityDefinition {
+  return {
+    tools: [
+      {
+        name: "run_subagent",
+        label: "Run Subagent",
+        description:
+          "Run a worker with independent context and optional model selection.",
+        promptSnippet: "Run a worker with independent context.",
+        promptGuidelines: [
+          "Use run_subagent to run a worker with independent context and optional model selection.",
+          "Always use run_subagent for simple independent work that does not depend on the current conversation context.",
+          "Use run_subagent when the user asks for a subagent or wants a different model.",
+        ],
+        parameters: RunParamsSchema,
+        async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
+          return await runSubagentResult(
+            rawParams as RunSubagentParams,
+            signal,
+            onUpdate,
+            ctx,
+            options.getThinkingLevel(),
+          );
+        },
+        renderCall(args, theme, context) {
+          const state = context.state as SubagentRenderState;
+          if (context.executionStarted && state.startedAt === undefined) {
+            state.startedAt = Date.now();
+            state.endedAt = undefined;
+          }
+          const text =
+            (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+          const preview = String(args.prompt || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          const previewText = preview ? preview : theme.fg("toolOutput", "...");
+          text.setText(
+            theme.fg("toolTitle", theme.bold(`run_subagent ${previewText}`)),
+          );
+          return text;
+        },
+        renderResult(result, options, theme, context) {
+          const state = context.state as SubagentRenderState;
+          if (
+            state.startedAt !== undefined &&
+            options.isPartial &&
+            !state.interval
+          ) {
+            state.interval = setInterval(() => context.invalidate(), 1000);
+          }
+          if (!options.isPartial || context.isError) {
+            state.endedAt ??= Date.now();
+            if (state.interval) {
+              clearInterval(state.interval);
+              state.interval = undefined;
+            }
+          }
+
+          const details = result.details as SubagentDetails | undefined;
+          const outputText = getToolResultUserText(
+            result,
+            context.showImages,
+            details?.userText,
+          );
+          const component =
+            (context.lastComponent as
+              | ExpandableTextResultComponent
+              | undefined) ?? new ExpandableTextResultComponent();
+          rebuildExpandableTextResultComponent(
+            component,
+            {
+              outputText,
+              expanded: options.expanded,
+              previewLines: SUBAGENT_PREVIEW_LINES,
+              fullOutputPath: details?.fullOutputPath,
+              truncation: details?.truncation,
+              startedAt: state.startedAt,
+              endedAt: state.endedAt,
+            },
+            theme,
+          );
+          component.invalidate();
+          return component;
+        },
+      },
+      {
+        name: "list_models",
+        label: "List Models",
+        description: "List available models.",
+        promptSnippet: "List available models.",
+        promptGuidelines: [],
+        parameters: Type.Object({}),
+        async execute(_toolCallId, _rawParams, _signal, _onUpdate, ctx) {
+          return await listModelsResult(ctx, options.getThinkingLevel());
+        },
+        renderCall(_args, theme) {
+          return new Text(
+            theme.fg("toolTitle", theme.bold("list_models")),
+            0,
+            0,
+          );
+        },
+        renderResult(result: any, options, theme, context) {
+          const details = result.details as SubagentDetails | undefined;
+          const userResult = buildUserFacingTextResult(
+            result,
+            context.showImages,
+            {
+              userText: details?.userText,
+              details: {
+                truncation: details?.truncation,
+              },
+            },
+          );
+          return new Text(
+            renderTextToolResult(
+              userResult,
+              options,
+              theme,
+              context.showImages,
+            ),
+            0,
+            0,
+          );
+        },
+      },
     ],
-    parameters: RunParamsSchema,
-    async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
-      return await runSubagentResult(
-        rawParams as RunSubagentParams,
-        signal,
-        onUpdate,
-        ctx,
-        pi.getThinkingLevel(),
-      );
-    },
-    renderCall(args, theme, context) {
-      const state = context.state as SubagentRenderState;
-      if (context.executionStarted && state.startedAt === undefined) {
-        state.startedAt = Date.now();
-        state.endedAt = undefined;
-      }
-      const text =
-        (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      const preview = String(args.prompt || "")
-        .replace(/\s+/g, " ")
-        .trim();
-      const previewText = preview ? preview : theme.fg("toolOutput", "...");
-      text.setText(
-        theme.fg("toolTitle", theme.bold(`run_subagent ${previewText}`)),
-      );
-      return text;
-    },
-    renderResult(result, options, theme, context) {
-      const state = context.state as SubagentRenderState;
-      if (
-        state.startedAt !== undefined &&
-        options.isPartial &&
-        !state.interval
-      ) {
-        state.interval = setInterval(() => context.invalidate(), 1000);
-      }
-      if (!options.isPartial || context.isError) {
-        state.endedAt ??= Date.now();
-        if (state.interval) {
-          clearInterval(state.interval);
-          state.interval = undefined;
-        }
-      }
-
-      const details = result.details as SubagentDetails | undefined;
-      const outputText = getToolResultUserText(
-        result,
-        context.showImages,
-        details?.userText,
-      );
-      const component =
-        (context.lastComponent as ExpandableTextResultComponent | undefined) ??
-        new ExpandableTextResultComponent();
-      rebuildExpandableTextResultComponent(
-        component,
-        {
-          outputText,
-          expanded: options.expanded,
-          previewLines: SUBAGENT_PREVIEW_LINES,
-          fullOutputPath: details?.fullOutputPath,
-          truncation: details?.truncation,
-          startedAt: state.startedAt,
-          endedAt: state.endedAt,
-        },
-        theme,
-      );
-      component.invalidate();
-      return component;
-    },
-  });
-
-  (pi as any).registerTool({
-    name: "list_models",
-    label: "List Models",
-    description: "List available models.",
-    promptSnippet: "List available models.",
-    promptGuidelines: [],
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _rawParams, _signal, _onUpdate, ctx) {
-      return await listModelsResult(ctx, pi.getThinkingLevel());
-    },
-    renderCall(_args, theme) {
-      return new Text(theme.fg("toolTitle", theme.bold("list_models")), 0, 0);
-    },
-    renderResult(result: any, options, theme, context) {
-      const details = result.details as SubagentDetails | undefined;
-      const userResult = buildUserFacingTextResult(result, context.showImages, {
-        userText: details?.userText,
-        details: {
-          truncation: details?.truncation,
-        },
-      });
-      return new Text(
-        renderTextToolResult(userResult, options, theme, context.showImages),
-        0,
-        0,
-      );
-    },
-  });
+  };
 }

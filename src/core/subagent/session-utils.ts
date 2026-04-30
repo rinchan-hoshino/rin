@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
-import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
+import { resolveRuntimeProfile } from "../rin-lib/profile.js";
 import {
   getManagedSessionDir,
   MANAGED_SUBAGENT_SESSION_LEAF,

@@ -57,12 +57,7 @@ test("chat_bridge only forwards valid current chat session names", async () => {
     server.listen(socketPath, () => resolve());
   });
 
-  const tools = [];
-  chatBridgeModule.default({
-    registerTool(tool) {
-      tools.push(tool);
-    },
-  });
+  const tools = chatBridgeModule.default().tools || [];
   const chatBridgeTool = tools.find((tool) => tool.name === "chat_bridge");
   assert.ok(chatBridgeTool);
 

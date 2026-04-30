@@ -14,6 +14,10 @@ const launcher = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "launcher.js"))
     .href
 );
+const cliOptions = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "cli-options.js"))
+    .href
+);
 
 test("tui launcher resolves interactive startup options", () => {
   assert.deepEqual(launcher.resolveTuiInteractiveOptions([]), {
@@ -39,6 +43,41 @@ test("tui launcher resolves interactive startup options", () => {
       verbose: undefined,
     },
   );
+});
+
+test("tui launcher parses pi extension resource options without leaking paths into prompts", () => {
+  const parsed = cliOptions.parseTuiCliOptions(
+    [
+      "-e",
+      "./ext.ts",
+      "--no-extensions",
+      "--skill",
+      "./skill",
+      "--prompt-template=./prompt.md",
+      "--theme",
+      "theme.json",
+      "--plan",
+      "strict",
+      "hello",
+    ],
+    "/repo",
+  );
+
+  assert.equal(parsed.initialMessage, "hello");
+  assert.deepEqual(parsed.resources.additionalExtensionPaths, [
+    path.join("/repo", "ext.ts"),
+  ]);
+  assert.equal(parsed.resources.noExtensions, true);
+  assert.deepEqual(parsed.resources.additionalSkillPaths, [
+    path.join("/repo", "skill"),
+  ]);
+  assert.deepEqual(parsed.resources.additionalPromptTemplatePaths, [
+    path.join("/repo", "prompt.md"),
+  ]);
+  assert.deepEqual(parsed.resources.additionalThemePaths, [
+    path.join("/repo", "theme.json"),
+  ]);
+  assert.equal(parsed.resources.extensionFlagValues?.get("plan"), "strict");
 });
 
 test("tui launcher maps quiet startup to Pi version-check skip env", () => {

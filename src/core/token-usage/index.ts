@@ -1,4 +1,7 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityOptions,
+} from "../rin-lib/capability-types.js";
 
 import { appendTokenTelemetryEvent, resolveAgentDir } from "./store.js";
 import { extractToolCallNames } from "../message-content.js";
@@ -87,6 +90,7 @@ function inferCapability(eventType: string, message: any, toolName = "") {
     eventType === "tool_execution_end"
   ) {
     return {
+      name: "token-usage",
       capabilityKind: "tool_execution",
       capabilityKey: normalizedToolName
         ? `tool:${normalizedToolName}`
@@ -185,216 +189,247 @@ function recordEvent(ctx: any, input: Record<string, any>) {
   );
 }
 
-export default function tokenUsageModule(pi: BuiltinModuleApi) {
-  pi.on("session_start", async (event, ctx) => {
-    const state = getSessionState(ctx);
-    state.trigger = safeString(event?.reason).trim();
-    if (!state.thinkingLevel) {
-      try {
-        state.thinkingLevel = safeString(pi.getThinkingLevel()).trim();
-      } catch {}
-    }
-    recordEvent(ctx, {
-      eventType: "session_start",
-      trigger: state.trigger,
-      metadata: {
-        reason: safeString(event?.reason).trim(),
-        previousSessionFile: safeString(event?.previousSessionFile).trim(),
-      },
-    });
-  });
-
-  pi.on("input", async (event, ctx) => {
-    const state = getSessionState(ctx);
-    state.source = safeString(event?.source).trim();
-    state.lastInputPreview = previewText(event?.text);
-    recordEvent(ctx, {
-      eventType: "input",
-      source: state.source,
-      capabilityKind: "user_input",
-      capabilityKey: "user:input",
-      metadata: {
-        textPreview: state.lastInputPreview,
-        imageCount: Array.isArray(event?.images) ? event.images.length : 0,
-      },
-    });
-    return { action: "continue" as const };
-  });
-
-  pi.on("before_agent_start", async (event, ctx) => {
-    const state = getSessionState(ctx);
-    state.lastPromptPreview = previewText(event?.prompt);
-    try {
-      state.thinkingLevel =
-        safeString(pi.getThinkingLevel()).trim() || state.thinkingLevel;
-    } catch {}
-    recordEvent(ctx, {
-      eventType: "before_agent_start",
-      phase: "agent",
-      metadata: {
-        promptPreview: state.lastPromptPreview,
-        systemPromptChars: safeString(event?.systemPrompt).length,
-      },
-    });
-  });
-
-  pi.on("model_select", async (event, ctx) => {
-    const state = getSessionState(ctx);
-    state.provider = safeString(event?.model?.provider).trim();
-    state.model = safeString(event?.model?.id || event?.model?.name).trim();
-    recordEvent(ctx, {
-      eventType: "model_select",
-      provider: state.provider,
-      model: state.model,
-      metadata: {
-        source: safeString(event?.source).trim(),
-        previousProvider: safeString(event?.previousModel?.provider).trim(),
-        previousModel: safeString(
-          event?.previousModel?.id || event?.previousModel?.name,
-        ).trim(),
-      },
-    });
-  });
-
-  pi.on("turn_start", async (event, ctx) => {
-    const state = getSessionState(ctx);
-    state.turnIndex = Number(event?.turnIndex);
-    recordEvent(ctx, {
-      eventType: "turn_start",
-      turnIndex: state.turnIndex,
-      phase: "turn",
-      metadata: {
-        timestamp: Number(event?.timestamp || 0) || 0,
-      },
-    });
-  });
-
-  pi.on("tool_execution_start", async (event, ctx) => {
-    const capability = inferCapability(
-      "tool_execution_start",
-      null,
-      event?.toolName,
-    );
-    recordEvent(ctx, {
-      id: [
-        sessionKey(ctx),
-        "tool_execution_start",
-        safeString(event?.toolCallId).trim() || nextEventId("tool", ctx),
-      ].join(":"),
-      eventType: "tool_execution_start",
-      phase: "tool",
-      toolCallId: safeString(event?.toolCallId).trim(),
-      toolName: safeString(event?.toolName).trim(),
-      capabilityKind: capability.capabilityKind,
-      capabilityKey: capability.capabilityKey,
-      metadata: {
-        argsPreview: previewJson(event?.args || {}, 260),
-      },
-    });
-  });
-
-  pi.on("tool_execution_end", async (event, ctx) => {
-    const capability = inferCapability(
-      "tool_execution_end",
-      null,
-      event?.toolName,
-    );
-    recordEvent(ctx, {
-      id: [
-        sessionKey(ctx),
-        "tool_execution_end",
-        safeString(event?.toolCallId).trim() || nextEventId("tool", ctx),
-      ].join(":"),
-      eventType: "tool_execution_end",
-      phase: "tool",
-      toolCallId: safeString(event?.toolCallId).trim(),
-      toolName: safeString(event?.toolName).trim(),
-      capabilityKind: capability.capabilityKind,
-      capabilityKey: capability.capabilityKey,
-      isError: Boolean(event?.isError),
-      metadata: {
-        resultPreview: previewJson(event?.result || {}, 260),
-      },
-    });
-  });
-
-  pi.on("message_end", async (event, ctx) => {
-    const message = event?.message as any;
-    const state = getSessionState(ctx);
-    const toolNames = extractToolCallNames(message?.content);
-    const capability = inferCapability(
-      "message_end",
-      message,
-      message?.toolName,
-    );
-    const usageMetrics = readUsageMetrics(message?.usage);
-    recordEvent(ctx, {
-      id: safeString(message?.id).trim()
-        ? [sessionKey(ctx), "message_end", safeString(message?.id).trim()].join(
-            ":",
-          )
-        : nextEventId("message_end", ctx),
-      eventType: "message_end",
-      phase: "message",
-      provider: safeString(message?.provider).trim(),
-      model: safeString(message?.model).trim(),
-      messageId: safeString(message?.id).trim(),
-      messageRole: safeString(message?.role).trim(),
-      stopReason: safeString(message?.stopReason).trim(),
-      toolCallId: safeString(message?.toolCallId).trim(),
-      toolName: safeString(message?.toolName).trim(),
-      toolCallCount: toolNames.length,
-      toolNames,
-      capabilityKind: capability.capabilityKind,
-      capabilityKey: capability.capabilityKey,
-      inputTokens: usageMetrics.input,
-      outputTokens: usageMetrics.output,
-      cacheReadTokens: usageMetrics.cacheRead,
-      cacheWriteTokens: usageMetrics.cacheWrite,
-      totalTokens: usageMetrics.totalTokens,
-      costInput: usageMetrics.costInput,
-      costOutput: usageMetrics.costOutput,
-      costCacheRead: usageMetrics.costCacheRead,
-      costCacheWrite: usageMetrics.costCacheWrite,
-      costTotal: usageMetrics.costTotal,
-      contextTokens: usageMetrics.totalTokens,
-      isError:
-        safeString(message?.stopReason).trim() === "error" ||
-        safeString(message?.errorMessage).trim().length > 0,
-      metadata: {
-        inputPreview: state.lastInputPreview,
-        promptPreview: state.lastPromptPreview,
-        errorMessage: previewText(message?.errorMessage, 260),
-      },
-    });
-  });
-
-  pi.on("agent_end", async (event, ctx) => {
-    recordEvent(ctx, {
-      eventType: "agent_end",
-      phase: "agent",
-      metadata: {
-        messageCount: Array.isArray(event?.messages)
-          ? event.messages.length
-          : 0,
-      },
-    });
-  });
-
-  pi.on("session_compact", async (event, ctx) => {
-    recordEvent(ctx, {
-      eventType: "session_compact",
-      metadata: {
-        fromExtension: Boolean(event?.fromExtension),
-        compactionEntryId: safeString(event?.compactionEntry?.id).trim(),
-      },
-    });
-  });
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    recordEvent(ctx, {
-      eventType: "session_shutdown",
-    });
-    sessionStateById.delete(sessionKey(ctx));
-  });
+export default function tokenUsageModule(
+  options: RinCapabilityOptions,
+): RinCapabilityDefinition {
+  return {
+    hooks: {
+      session_start: [
+        async (event, ctx) => {
+          const state = getSessionState(ctx);
+          state.trigger = safeString(event?.reason).trim();
+          if (!state.thinkingLevel) {
+            try {
+              state.thinkingLevel = safeString(
+                options.getThinkingLevel(),
+              ).trim();
+            } catch {}
+          }
+          recordEvent(ctx, {
+            eventType: "session_start",
+            trigger: state.trigger,
+            metadata: {
+              reason: safeString(event?.reason).trim(),
+              previousSessionFile: safeString(
+                event?.previousSessionFile,
+              ).trim(),
+            },
+          });
+        },
+      ],
+      input: [
+        async (event, ctx) => {
+          const state = getSessionState(ctx);
+          state.source = safeString(event?.source).trim();
+          state.lastInputPreview = previewText(event?.text);
+          recordEvent(ctx, {
+            eventType: "input",
+            source: state.source,
+            capabilityKind: "user_input",
+            capabilityKey: "user:input",
+            metadata: {
+              textPreview: state.lastInputPreview,
+              imageCount: Array.isArray(event?.images)
+                ? event.images.length
+                : 0,
+            },
+          });
+          return { action: "continue" as const };
+        },
+      ],
+      before_agent_start: [
+        async (event, ctx) => {
+          const state = getSessionState(ctx);
+          state.lastPromptPreview = previewText(event?.prompt);
+          try {
+            state.thinkingLevel =
+              safeString(options.getThinkingLevel()).trim() ||
+              state.thinkingLevel;
+          } catch {}
+          recordEvent(ctx, {
+            eventType: "before_agent_start",
+            phase: "agent",
+            metadata: {
+              promptPreview: state.lastPromptPreview,
+              systemPromptChars: safeString(event?.systemPrompt).length,
+            },
+          });
+        },
+      ],
+      model_select: [
+        async (event, ctx) => {
+          const state = getSessionState(ctx);
+          state.provider = safeString(event?.model?.provider).trim();
+          state.model = safeString(
+            event?.model?.id || event?.model?.name,
+          ).trim();
+          recordEvent(ctx, {
+            eventType: "model_select",
+            provider: state.provider,
+            model: state.model,
+            metadata: {
+              source: safeString(event?.source).trim(),
+              previousProvider: safeString(
+                event?.previousModel?.provider,
+              ).trim(),
+              previousModel: safeString(
+                event?.previousModel?.id || event?.previousModel?.name,
+              ).trim(),
+            },
+          });
+        },
+      ],
+      turn_start: [
+        async (event, ctx) => {
+          const state = getSessionState(ctx);
+          state.turnIndex = Number(event?.turnIndex);
+          recordEvent(ctx, {
+            eventType: "turn_start",
+            turnIndex: state.turnIndex,
+            phase: "turn",
+            metadata: {
+              timestamp: Number(event?.timestamp || 0) || 0,
+            },
+          });
+        },
+      ],
+      tool_execution_start: [
+        async (event, ctx) => {
+          const capability = inferCapability(
+            "tool_execution_start",
+            null,
+            event?.toolName,
+          );
+          recordEvent(ctx, {
+            id: [
+              sessionKey(ctx),
+              "tool_execution_start",
+              safeString(event?.toolCallId).trim() || nextEventId("tool", ctx),
+            ].join(":"),
+            eventType: "tool_execution_start",
+            phase: "tool",
+            toolCallId: safeString(event?.toolCallId).trim(),
+            toolName: safeString(event?.toolName).trim(),
+            capabilityKind: capability.capabilityKind,
+            capabilityKey: capability.capabilityKey,
+            metadata: {
+              argsPreview: previewJson(event?.args || {}, 260),
+            },
+          });
+        },
+      ],
+      tool_execution_end: [
+        async (event, ctx) => {
+          const capability = inferCapability(
+            "tool_execution_end",
+            null,
+            event?.toolName,
+          );
+          recordEvent(ctx, {
+            id: [
+              sessionKey(ctx),
+              "tool_execution_end",
+              safeString(event?.toolCallId).trim() || nextEventId("tool", ctx),
+            ].join(":"),
+            eventType: "tool_execution_end",
+            phase: "tool",
+            toolCallId: safeString(event?.toolCallId).trim(),
+            toolName: safeString(event?.toolName).trim(),
+            capabilityKind: capability.capabilityKind,
+            capabilityKey: capability.capabilityKey,
+            isError: Boolean(event?.isError),
+            metadata: {
+              resultPreview: previewJson(event?.result || {}, 260),
+            },
+          });
+        },
+      ],
+      message_end: [
+        async (event, ctx) => {
+          const message = event?.message as any;
+          const state = getSessionState(ctx);
+          const toolNames = extractToolCallNames(message?.content);
+          const capability = inferCapability(
+            "message_end",
+            message,
+            message?.toolName,
+          );
+          const usageMetrics = readUsageMetrics(message?.usage);
+          recordEvent(ctx, {
+            id: safeString(message?.id).trim()
+              ? [
+                  sessionKey(ctx),
+                  "message_end",
+                  safeString(message?.id).trim(),
+                ].join(":")
+              : nextEventId("message_end", ctx),
+            eventType: "message_end",
+            phase: "message",
+            provider: safeString(message?.provider).trim(),
+            model: safeString(message?.model).trim(),
+            messageId: safeString(message?.id).trim(),
+            messageRole: safeString(message?.role).trim(),
+            stopReason: safeString(message?.stopReason).trim(),
+            toolCallId: safeString(message?.toolCallId).trim(),
+            toolName: safeString(message?.toolName).trim(),
+            toolCallCount: toolNames.length,
+            toolNames,
+            capabilityKind: capability.capabilityKind,
+            capabilityKey: capability.capabilityKey,
+            inputTokens: usageMetrics.input,
+            outputTokens: usageMetrics.output,
+            cacheReadTokens: usageMetrics.cacheRead,
+            cacheWriteTokens: usageMetrics.cacheWrite,
+            totalTokens: usageMetrics.totalTokens,
+            costInput: usageMetrics.costInput,
+            costOutput: usageMetrics.costOutput,
+            costCacheRead: usageMetrics.costCacheRead,
+            costCacheWrite: usageMetrics.costCacheWrite,
+            costTotal: usageMetrics.costTotal,
+            contextTokens: usageMetrics.totalTokens,
+            isError:
+              safeString(message?.stopReason).trim() === "error" ||
+              safeString(message?.errorMessage).trim().length > 0,
+            metadata: {
+              inputPreview: state.lastInputPreview,
+              promptPreview: state.lastPromptPreview,
+              errorMessage: previewText(message?.errorMessage, 260),
+            },
+          });
+        },
+      ],
+      agent_end: [
+        async (event, ctx) => {
+          recordEvent(ctx, {
+            eventType: "agent_end",
+            phase: "agent",
+            metadata: {
+              messageCount: Array.isArray(event?.messages)
+                ? event.messages.length
+                : 0,
+            },
+          });
+        },
+      ],
+      session_compact: [
+        async (event, ctx) => {
+          recordEvent(ctx, {
+            eventType: "session_compact",
+            metadata: {
+              fromExtension: Boolean(event?.fromExtension),
+              compactionEntryId: safeString(event?.compactionEntry?.id).trim(),
+            },
+          });
+        },
+      ],
+      session_shutdown: [
+        async (_event, ctx) => {
+          recordEvent(ctx, {
+            eventType: "session_shutdown",
+          });
+          sessionStateById.delete(sessionKey(ctx));
+        },
+      ],
+    },
+  };
 }

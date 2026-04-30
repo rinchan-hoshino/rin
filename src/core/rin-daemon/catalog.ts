@@ -2,10 +2,11 @@ import path from "node:path";
 
 import {
   applyRuntimeProfileEnvironment,
+  createRinCapabilityDefinitions,
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
-import { BuiltinModuleHost } from "../builtins/host.js";
+import { createRinCapabilitySet } from "../rin-lib/capability-session.js";
 import {
   collectRuntimeSlashCommands,
   getOAuthStateFromStorage,
@@ -25,7 +26,7 @@ type CatalogContext = {
   modelRegistry: any;
   resourceLoader: any;
   extensionRunner: any;
-  builtinHost: any;
+  rinCapabilities: any;
 };
 
 function normalizeAdditionalExtensionPaths(value: string[] | undefined) {
@@ -55,7 +56,6 @@ async function closeIfSupported(target: any) {
 async function cleanupCatalogContext(context: CatalogContext | undefined) {
   if (!context) return;
   try {
-    await closeIfSupported(context.builtinHost).catch(() => {});
     await closeIfSupported(context.extensionRunner).catch(() => {});
     await closeIfSupported(context.resourceLoader).catch(() => {});
   } finally {
@@ -120,10 +120,16 @@ async function createCatalogContext(
     null,
     modelRegistry,
   );
-  const builtinHost = await BuiltinModuleHost.create({
+  const rinCapabilities = createRinCapabilitySet({
     cwd,
     agentDir,
     modelRegistry,
+    definitions: createRinCapabilityDefinitions({
+      cwd,
+      agentDir,
+      getThinkingLevel: () => "medium",
+      sendMessage: () => {},
+    }),
   });
 
   return {
@@ -134,7 +140,7 @@ async function createCatalogContext(
     modelRegistry,
     resourceLoader,
     extensionRunner,
-    builtinHost,
+    rinCapabilities,
   };
 }
 
@@ -153,10 +159,10 @@ async function withCatalogContext<T>(
 export async function listCatalogCommands(options: CatalogOptions = {}) {
   return withCatalogContext(
     options,
-    async ({ resourceLoader, extensionRunner, builtinHost }) => {
+    async ({ resourceLoader, extensionRunner, rinCapabilities }) => {
       return collectRuntimeSlashCommands({
         extensionCommands: extensionRunner.getRegisteredCommands(),
-        builtinModuleCommands: builtinHost.getRegisteredCommands(),
+        rinCapabilityCommands: rinCapabilities.getRegisteredCommands(),
         promptTemplates: resourceLoader.getPrompts().prompts,
         skills: resourceLoader.getSkills().skills,
       });

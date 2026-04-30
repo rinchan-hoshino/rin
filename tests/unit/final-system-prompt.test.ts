@@ -101,7 +101,7 @@ test("buildFinalAppSystemPrompt injects a continuation prompt after automatic co
     assistantPreview: "Need to continue editing tests.",
   });
 
-  const beforeStart = await session._extensionRunner?.emitBeforeAgentStart(
+  const beforeStart = await session.__rinCapabilities?.emitBeforeAgentStart(
     "",
     undefined,
     baseSystemPrompt,
@@ -127,7 +127,7 @@ test("buildFinalAppSystemPrompt injects a continuation prompt after automatic co
     false,
   );
 
-  const afterConsume = await session._extensionRunner?.emitBeforeAgentStart(
+  const afterConsume = await session.__rinCapabilities?.emitBeforeAgentStart(
     "",
     undefined,
     baseSystemPrompt,

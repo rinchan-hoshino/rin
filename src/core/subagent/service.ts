@@ -9,17 +9,26 @@ import type {
   ThinkingLevel,
 } from "@mariozechner/pi-agent-core";
 
-import { BUILTIN_MODULE_ORDER } from "../builtins/registry.js";
+const HIDEABLE_RIN_CAPABILITIES = [
+  "web-search",
+  "fetch",
+  "memory",
+  "self-improve",
+  "message-header",
+  "auto-compact-continue",
+  "tui-input-compat",
+  "subagent",
+  "task",
+  "chat",
+  "token-usage",
+] as const;
 import { forkSessionManagerCompat } from "../session/fork.js";
 import {
   getManagedSessionDir,
   MANAGED_SUBAGENT_SESSION_LEAF,
 } from "../session/managed-paths.js";
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
-import {
-  createConfiguredAgentSession,
-  resolveRuntimeProfile,
-} from "../rin-lib/runtime.js";
+import { resolveRuntimeProfile } from "../rin-lib/profile.js";
 import { readUsageMetrics } from "../usage-metrics.js";
 import {
   formatSubagentSessionModeInvalidError,
@@ -61,12 +70,12 @@ function normalizeDisabledExtensions(values: unknown): string[] {
     : [];
 }
 
-export function resolveSubagentDisabledBuiltinModules(
+export function resolveSubagentDisabledRinCapabilities(
   disabledExtensions: string[] = [],
 ): string[] {
   const blocked = new Set(normalizeDisabledExtensions(disabledExtensions));
   blocked.add("subagent");
-  return BUILTIN_MODULE_ORDER.filter((name) => blocked.has(name));
+  return HIDEABLE_RIN_CAPABILITIES.filter((name) => blocked.has(name));
 }
 
 type NormalizedSubagentTask = Omit<
@@ -157,10 +166,12 @@ async function createManagedSession(task: NormalizedSubagentTask) {
   }
 
   const created = await withSessionCreationLock(async () => {
+    const { createConfiguredAgentSession } =
+      await import("../rin-lib/runtime.js");
     return await createConfiguredAgentSession({
       cwd: sessionManager.getCwd?.() || cwd,
       agentDir: profile.agentDir,
-      disabledBuiltinModules: resolveSubagentDisabledBuiltinModules(
+      disabledRinCapabilities: resolveSubagentDisabledRinCapabilities(
         task.disabledExtensions,
       ),
       sessionManager,

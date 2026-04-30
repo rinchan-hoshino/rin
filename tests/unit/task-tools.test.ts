@@ -16,12 +16,7 @@ const taskIndex = await import(
 );
 
 function getTaskTool(name) {
-  const tools = [];
-  taskIndex.default({
-    registerTool(tool) {
-      tools.push(tool);
-    },
-  });
+  const tools = taskIndex.default().tools || [];
   const tool = tools.find((entry) => entry.name === name);
   assert.ok(tool);
   return tool;

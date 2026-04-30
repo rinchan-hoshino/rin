@@ -10,12 +10,37 @@ import {
 } from "../language.js";
 import { loadRinCodingAgent } from "./loader.js";
 import {
+  applyRuntimeProfileEnvironment,
+  getRuntimeSessionDir,
+  resolveRuntimeProfile,
+  PI_AGENT_DIR_ENV,
+  RIN_DIR_ENV,
+} from "./profile.js";
+import {
   clearCompactionContinuationMarker,
   consumeCompactionContinuationMarker,
   getCompactionContinuationMarkerPath,
   writeCompactionContinuationMarker,
 } from "./compaction-continuation.js";
-import { attachBuiltinModulesToSession } from "../builtins/session.js";
+import autoCompactContinueModule from "./auto-compact-continue.js";
+import fetchModule from "../fetch/index.js";
+import memoryModule from "../memory/index.js";
+import messageHeaderModule from "../chat-bridge/message-header.js";
+import selfImproveModule from "../self-improve/index.js";
+import subagentModule from "../subagent/index.js";
+import taskModule from "../task/index.js";
+import tokenUsageModule from "../token-usage/index.js";
+import tuiInputCompatModule from "../rin-tui/input-compat.js";
+import webSearchModule from "../rin-web-search/index.js";
+import chatModule from "../chat/index.js";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityOptions,
+} from "./capability-types.js";
+import {
+  attachRinCapabilitiesToSession,
+  createRinCapabilitySet,
+} from "./capability-session.js";
 import { compileSelfImproveSync } from "../self-improve/store.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 
@@ -28,6 +53,24 @@ const DEFAULT_PI_GUIDELINES = [
   "When modifying files, prefer targeted edits and preserve existing style unless asked otherwise",
   "When using bash, explain meaningful findings instead of pasting excessive raw output",
 ];
+
+export function createRinCapabilityDefinitions(
+  options: RinCapabilityOptions,
+): RinCapabilityDefinition[] {
+  return [
+    webSearchModule(),
+    fetchModule(),
+    memoryModule(options),
+    selfImproveModule(options),
+    messageHeaderModule(),
+    autoCompactContinueModule(),
+    tuiInputCompatModule(),
+    subagentModule(options),
+    taskModule(),
+    chatModule(options),
+    tokenUsageModule(options),
+  ];
+}
 
 function escapeXml(text: string) {
   return text
@@ -631,30 +674,13 @@ export {
   writeCompactionContinuationMarker,
 };
 
-export const RIN_DIR_ENV = "RIN_DIR";
-export const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
-
-export function resolveRuntimeProfile(
-  options: { cwd?: string; agentDir?: string } = {},
-) {
-  const cwd = options.cwd || os.homedir();
-  const agentDir =
-    options.agentDir ||
-    process.env[RIN_DIR_ENV]?.trim() ||
-    process.env[PI_AGENT_DIR_ENV]?.trim() ||
-    path.join(os.homedir(), ".rin");
-  return { cwd, agentDir };
-}
-
-export function applyRuntimeProfileEnvironment(profile: { agentDir: string }) {
-  if (profile.agentDir) {
-    process.env[PI_AGENT_DIR_ENV] = profile.agentDir;
-  }
-}
-
-export function getRuntimeSessionDir(_cwd: string, agentDir: string) {
-  return path.join(agentDir, "sessions");
-}
+export {
+  applyRuntimeProfileEnvironment,
+  getRuntimeSessionDir,
+  resolveRuntimeProfile,
+  PI_AGENT_DIR_ENV,
+  RIN_DIR_ENV,
+};
 
 function normalizeQueueMode(value: unknown, fallback: "all" | "one-at-a-time") {
   return value === "all" || value === "one-at-a-time" ? value : fallback;
@@ -675,8 +701,18 @@ export async function createConfiguredAgentSession(
     cwd?: string;
     agentDir?: string;
     additionalExtensionPaths?: string[];
+    noExtensions?: boolean;
+    extensionFlagValues?: Map<string, boolean | string>;
     additionalSkillPaths?: string[];
-    disabledBuiltinModules?: string[];
+    noSkills?: boolean;
+    additionalPromptTemplatePaths?: string[];
+    noPromptTemplates?: boolean;
+    additionalThemePaths?: string[];
+    noThemes?: boolean;
+    noContextFiles?: boolean;
+    systemPrompt?: string;
+    appendSystemPrompt?: string[];
+    disabledRinCapabilities?: string[];
     sessionManager?: any;
     modelRef?: string;
     thinkingLevel?: any;
@@ -726,8 +762,19 @@ export async function createConfiguredAgentSession(
       agentDir: runtimeAgentDir,
       resourceLoaderOptions: {
         additionalExtensionPaths: options.additionalExtensionPaths ?? [],
+        noExtensions: options.noExtensions,
         additionalSkillPaths,
+        noSkills: options.noSkills,
+        additionalPromptTemplatePaths:
+          options.additionalPromptTemplatePaths ?? [],
+        noPromptTemplates: options.noPromptTemplates,
+        additionalThemePaths: options.additionalThemePaths ?? [],
+        noThemes: options.noThemes,
+        noContextFiles: options.noContextFiles,
+        systemPrompt: options.systemPrompt,
+        appendSystemPrompt: options.appendSystemPrompt,
       },
+      extensionFlagValues: options.extensionFlagValues,
     });
     applyRinSettingsDefaults(services.settingsManager);
 
@@ -747,19 +794,40 @@ export async function createConfiguredAgentSession(
       }
     }
 
+    const sessionRef: { current?: any } = {};
+    const rinCapabilities = createRinCapabilitySet({
+      cwd: runtimeCwd,
+      agentDir: runtimeAgentDir,
+      sessionManager,
+      modelRegistry: services.modelRegistry,
+      disabledNames: options.disabledRinCapabilities ?? [],
+      definitions: createRinCapabilityDefinitions({
+        cwd: runtimeCwd,
+        agentDir: runtimeAgentDir,
+        getThinkingLevel: () =>
+          sessionRef.current?.thinkingLevel ||
+          options.thinkingLevel ||
+          "medium",
+        sendMessage: (message, messageOptions) => {
+          sessionRef.current
+            ?.sendCustomMessage?.(message, messageOptions)
+            .catch?.(() => {});
+        },
+      }),
+    });
+
     const result = await createAgentSessionFromServices({
       services,
       sessionManager,
       sessionStartEvent,
       model: resolvedModel,
       thinkingLevel: options.thinkingLevel,
-      customTools: [],
+      customTools: rinCapabilities.getToolDefinitions(),
     });
+    sessionRef.current = result.session;
 
-    await attachBuiltinModulesToSession(result.session, {
-      cwd: runtimeCwd,
-      agentDir: runtimeAgentDir,
-      disabledNames: options.disabledBuiltinModules ?? [],
+    await attachRinCapabilitiesToSession(result.session, {
+      capabilitySet: rinCapabilities,
       reason: String(sessionStartEvent?.reason || "startup") as
         | "startup"
         | "reload"
@@ -769,26 +837,6 @@ export async function createConfiguredAgentSession(
       previousSessionFile:
         String(sessionStartEvent?.previousSessionFile || "") || undefined,
     });
-
-    const builtinHost = result.session?._extensionRunner?.builtinHost;
-    const builtinTools = builtinHost?.getAllToolDefinitions?.() || [];
-    if (builtinTools.length > 0) {
-      const existingTools = Array.isArray(result.session._customTools)
-        ? result.session._customTools
-        : [];
-      const nextTools = [
-        ...builtinTools,
-        ...existingTools.filter(
-          (tool: any) =>
-            !builtinTools.some(
-              (builtinTool: any) =>
-                String(builtinTool?.name || "") === String(tool?.name || ""),
-            ),
-        ),
-      ];
-      result.session._customTools = nextTools;
-      result.session._refreshToolRegistry?.();
-    }
 
     applyRinPromptBuilder(result.session);
     applyDisableEndTurnThresholdCompaction(result.session);

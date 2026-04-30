@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
-import { getRuntimeSessionDir } from "../rin-lib/runtime.js";
+import { getRuntimeSessionDir } from "../rin-lib/profile.js";
 import { safeString } from "../text-utils.js";
 
 const HOME_DIR = os.homedir();

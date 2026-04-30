@@ -176,7 +176,7 @@ test("catalog helpers normalize and dedupe slash commands", () => {
 
 test("catalog helpers collect runtime slash commands in source order", () => {
   const commands = collectRuntimeSlashCommands({
-    builtinModuleCommands: [
+    rinCapabilityCommands: [
       {
         invocationName: "  inspect  ",
         description: "  Inspect chat state.  ",
@@ -188,7 +188,7 @@ test("catalog helpers collect runtime slash commands in source order", () => {
   assert.deepEqual(inspectCommand, {
     name: "inspect",
     description: "Inspect chat state.",
-    source: "builtin_module",
+    source: "rin_capability",
   });
   assert.equal(
     commands.some((command) => command.name === "model"),

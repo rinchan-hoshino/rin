@@ -1,4 +1,7 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityOptions,
+} from "../rin-lib/capability-types.js";
 
 import { type TruncationResult } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
@@ -57,112 +60,129 @@ function stripRequestedMessageFields(
   return filtered.length ? filtered.join("\n") : text;
 }
 
-export default function chatGetMessageModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "get_chat_msg",
-    label: "Get Chat Message",
-    description: "Get a specific chat message.",
-    promptSnippet: "Get a specific chat message.",
-    promptGuidelines: [
-      "If the current chat message metadata contains `reply to message id: <id>`, always call get_chat_msg with that exact message id before answering.",
-    ],
-    parameters: Type.Object({
-      messageId: Type.String({
-        description: "Platform message ID to look up.",
-      }),
-      chatKey: Type.Optional(
-        Type.String({
-          description:
-            "Optional chat to disambiguate duplicated platform message IDs.",
+export default function chatGetMessageModule(
+  options: RinCapabilityOptions,
+): RinCapabilityDefinition {
+  return {
+    name: "chat-get-message",
+    tools: [
+      {
+        name: "get_chat_msg",
+        label: "Get Chat Message",
+        description: "Get a specific chat message.",
+        promptSnippet: "Get a specific chat message.",
+        promptGuidelines: [
+          "If the current chat message metadata contains `reply to message id: <id>`, always call get_chat_msg with that exact message id before answering.",
+        ],
+        parameters: Type.Object({
+          messageId: Type.String({
+            description: "Platform message ID to look up.",
+          }),
+          chatKey: Type.Optional(
+            Type.String({
+              description:
+                "Optional chat to disambiguate duplicated platform message IDs.",
+            }),
+          ),
         }),
-      ),
-    }),
-    renderCall(args, theme) {
-      return new Text(formatGetChatMessageCall(args, theme), 0, 0);
-    },
-    execute: (async (_toolCallId, params) => {
-      const messageId = safeString((params as any)?.messageId).trim();
-      const chatKey = safeString((params as any)?.chatKey).trim() || undefined;
-      if (!messageId) throw new Error("chat_get_message_messageId_required");
+        renderCall(args, theme) {
+          return new Text(formatGetChatMessageCall(args, theme), 0, 0);
+        },
+        execute: (async (_toolCallId, params) => {
+          const messageId = safeString((params as any)?.messageId).trim();
+          const chatKey =
+            safeString((params as any)?.chatKey).trim() || undefined;
+          if (!messageId)
+            throw new Error("chat_get_message_messageId_required");
 
-      const agentDir = pi.agentDir;
-      const { normalizeChatMessageLookup, describeChatMessageRecord } =
-        await loadMessageStoreModule();
-      const matches = normalizeChatMessageLookup(agentDir, messageId, chatKey);
-      if (!matches.length) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Message not found: ${messageId}${chatKey ? ` (chatKey=${chatKey})` : ""}`,
-            },
-          ],
-          details: {
-            messageId,
-            chatKey,
-            matches,
-          } satisfies GetChatMessageDetails,
-          isError: true,
-        };
-      }
-
-      const text = matches
-        .map((item: any, index: number) => {
-          const body = describeChatMessageRecord(item);
-          return matches.length > 1 ? `match ${index + 1}\n${body}` : body;
-        })
-        .join("\n\n");
-      const userText = matches
-        .map((item: any, index: number) => {
-          const body = stripRequestedMessageFields(
-            describeChatMessageRecord(item),
+          const agentDir = options.agentDir;
+          const { normalizeChatMessageLookup, describeChatMessageRecord } =
+            await loadMessageStoreModule();
+          const matches = normalizeChatMessageLookup(
+            agentDir,
             messageId,
             chatKey,
           );
-          return matches.length > 1 ? `match ${index + 1}\n${body}` : body;
-        })
-        .join("\n\n");
-      const truncated = prepareTruncatedAgentUserText(text, userText);
+          if (!matches.length) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Message not found: ${messageId}${chatKey ? ` (chatKey=${chatKey})` : ""}`,
+                },
+              ],
+              details: {
+                messageId,
+                chatKey,
+                matches,
+              } satisfies GetChatMessageDetails,
+              isError: true,
+            };
+          }
 
-      return {
-        content: [{ type: "text", text: truncated.outputText }],
-        details: {
-          messageId,
-          chatKey,
-          matches,
-          userText: truncated.userPreviewText,
-          truncation: truncated.userTruncation,
-        } satisfies GetChatMessageDetails,
-        isError: false,
-      };
-    }) as any,
-    renderResult(result: any, options, theme, context) {
-      const details = result.details as GetChatMessageDetails | undefined;
-      if (!result.isError) {
-        const userResult = buildUserFacingTextResult(
-          result,
-          context.showImages,
-          {
-            userText: details?.userText,
-            details: { truncation: details?.truncation },
-          },
-        );
-        return new Text(
-          formatGetChatMessageResult(
-            userResult,
-            options,
-            theme,
-            context.showImages,
-          ),
-          0,
-          0,
-        );
-      }
-      return new Text(
-        getToolResultUserText(result, context.showImages, details?.userText),
-        0,
-        0,
-      );
-    },
-  });
+          const text = matches
+            .map((item: any, index: number) => {
+              const body = describeChatMessageRecord(item);
+              return matches.length > 1 ? `match ${index + 1}\n${body}` : body;
+            })
+            .join("\n\n");
+          const userText = matches
+            .map((item: any, index: number) => {
+              const body = stripRequestedMessageFields(
+                describeChatMessageRecord(item),
+                messageId,
+                chatKey,
+              );
+              return matches.length > 1 ? `match ${index + 1}\n${body}` : body;
+            })
+            .join("\n\n");
+          const truncated = prepareTruncatedAgentUserText(text, userText);
+
+          return {
+            content: [{ type: "text", text: truncated.outputText }],
+            details: {
+              messageId,
+              chatKey,
+              matches,
+              userText: truncated.userPreviewText,
+              truncation: truncated.userTruncation,
+            } satisfies GetChatMessageDetails,
+            isError: false,
+          };
+        }) as any,
+        renderResult(result: any, options, theme, context) {
+          const details = result.details as GetChatMessageDetails | undefined;
+          if (!result.isError) {
+            const userResult = buildUserFacingTextResult(
+              result,
+              context.showImages,
+              {
+                userText: details?.userText,
+                details: { truncation: details?.truncation },
+              },
+            );
+            return new Text(
+              formatGetChatMessageResult(
+                userResult,
+                options,
+                theme,
+                context.showImages,
+              ),
+              0,
+              0,
+            );
+          }
+          return new Text(
+            getToolResultUserText(
+              result,
+              context.showImages,
+              details?.userText,
+            ),
+            0,
+            0,
+          );
+        },
+      },
+    ],
+  };
 }

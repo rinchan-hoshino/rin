@@ -1,4 +1,4 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type { RinCapabilityDefinition } from "../rin-lib/capability-types.js";
 
 import { Type } from "typebox";
 import { type TruncationResult } from "@mariozechner/pi-coding-agent";
@@ -125,113 +125,127 @@ function formatWebSearchCall(args: any, theme: any) {
   return `${theme.fg("toolTitle", theme.bold("web_search"))} ${theme.fg("accent", String(args?.q || "").trim())}`;
 }
 
-export default function webSearchModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "web_search",
-    label: "Web Search",
-    description: "Search the web.",
-    promptSnippet: "Search the web.",
-    promptGuidelines: [
-      "Use web_search proactively whenever web information may be relevant; better to search and confirm than to guess.",
-    ],
-    parameters: Type.Object({
-      q: Type.String({
-        description:
-          "Focused web search query. Prefer a few distinctive keywords instead of full sentences; use quotes for exact phrases, site:example.com for domain scoping, -term to exclude terms, and OR for alternatives. For different topics, split them into separate web_search calls instead of one overloaded query.",
-      }),
-      limit: Type.Optional(Type.Number({ minimum: 1, maximum: 8 })),
-      freshness: Type.Optional(
-        Type.Union(
-          [
-            Type.Literal("day"),
-            Type.Literal("week"),
-            Type.Literal("month"),
-            Type.Literal("year"),
-          ],
-          {
+export default function webSearchModule(): RinCapabilityDefinition {
+  return {
+    name: "web-search",
+    tools: [
+      {
+        name: "web_search",
+        label: "Web Search",
+        description: "Search the web.",
+        promptSnippet: "Search the web.",
+        promptGuidelines: [
+          "Use web_search proactively whenever web information may be relevant; better to search and confirm than to guess.",
+        ],
+        parameters: Type.Object({
+          q: Type.String({
             description:
-              "Optional recency filter. Allowed values: `day`, `week`, `month`, or `year`.",
-          },
-        ),
-      ),
-      language: Type.Optional(
-        Type.String({
-          description: "Optional language hint such as `zh-CN` or `en`.",
+              "Focused web search query. Prefer a few distinctive keywords instead of full sentences; use quotes for exact phrases, site:example.com for domain scoping, -term to exclude terms, and OR for alternatives. For different topics, split them into separate web_search calls instead of one overloaded query.",
+          }),
+          limit: Type.Optional(Type.Number({ minimum: 1, maximum: 8 })),
+          freshness: Type.Optional(
+            Type.Union(
+              [
+                Type.Literal("day"),
+                Type.Literal("week"),
+                Type.Literal("month"),
+                Type.Literal("year"),
+              ],
+              {
+                description:
+                  "Optional recency filter. Allowed values: `day`, `week`, `month`, or `year`.",
+              },
+            ),
+          ),
+          language: Type.Optional(
+            Type.String({
+              description: "Optional language hint such as `zh-CN` or `en`.",
+            }),
+          ),
         }),
-      ),
-    }),
-    execute: async (_toolCallId, params) => {
-      const searchWeb = await loadSearchWeb();
-      const normalizedParams = {
-        ...(params as any),
-        limit: Number.isFinite(Number((params as any)?.limit))
-          ? Number((params as any).limit)
-          : 8,
-      };
-      const response = await searchWeb(normalizedParams).catch(
-        (error: any) => ({
-          ok: false,
-          results: [],
-          error: String(error?.message || error || "web_search_failed"),
-        }),
-      );
+        execute: async (_toolCallId, params) => {
+          const searchWeb = await loadSearchWeb();
+          const normalizedParams = {
+            ...(params as any),
+            limit: Number.isFinite(Number((params as any)?.limit))
+              ? Number((params as any).limit)
+              : 8,
+          };
+          const response = await searchWeb(normalizedParams).catch(
+            (error: any) => ({
+              ok: false,
+              results: [],
+              error: String(error?.message || error || "web_search_failed"),
+            }),
+          );
 
-      const agentText = formatAgentResults(response);
-      const userText = formatResults(response);
-      const truncated = prepareTruncatedText(agentText);
-      const rows = Array.isArray(response?.results) ? response.results : [];
-      const hiddenCount = rows.length > 3 ? rows.length - 3 : 0;
-      const details: {
-        truncation?: TruncationResult;
-        emptyMessage?: string;
-        hiddenCount?: number;
-        totalResults?: number;
-        userText?: string;
-        attempts?: unknown[];
-      } = {
-        hiddenCount,
-        totalResults: rows.length,
-        userText,
-      };
+          const agentText = formatAgentResults(response);
+          const userText = formatResults(response);
+          const truncated = prepareTruncatedText(agentText);
+          const rows = Array.isArray(response?.results) ? response.results : [];
+          const hiddenCount = rows.length > 3 ? rows.length - 3 : 0;
+          const details: {
+            truncation?: TruncationResult;
+            emptyMessage?: string;
+            hiddenCount?: number;
+            totalResults?: number;
+            userText?: string;
+            attempts?: unknown[];
+          } = {
+            hiddenCount,
+            totalResults: rows.length,
+            userText,
+          };
 
-      if (Array.isArray(response?.attempts)) {
-        details.attempts = response.attempts;
-      }
+          if (Array.isArray(response?.attempts)) {
+            details.attempts = response.attempts;
+          }
 
-      if (!rows.length && response?.ok) {
-        details.emptyMessage = "No web results found.";
-      }
+          if (!rows.length && response?.ok) {
+            details.emptyMessage = "No web results found.";
+          }
 
-      if (truncated.truncation) {
-        details.truncation = truncated.truncation;
-      }
+          if (truncated.truncation) {
+            details.truncation = truncated.truncation;
+          }
 
-      return {
-        content: [{ type: "text", text: truncated.outputText }],
-        details,
-        isError: response?.ok !== true,
-      };
-    },
-    renderCall(args, theme) {
-      return new Text(formatWebSearchCall(args, theme), 0, 0);
-    },
-    renderResult(result, options, theme, context) {
-      const text =
-        (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      const details = (result.details as any) || {};
-      const userResult = buildUserFacingTextResult(result, context.showImages, {
-        userText: details.userText,
-        details: {
-          truncation: details.truncation,
-          emptyMessage: details.emptyMessage,
-          hiddenCount: details.hiddenCount,
-          totalResults: details.totalResults,
+          return {
+            content: [{ type: "text", text: truncated.outputText }],
+            details,
+            isError: response?.ok !== true,
+          };
         },
-      });
-      text.setText(
-        formatWebSearchResult(userResult, options, theme, context.showImages),
-      );
-      return text;
-    },
-  });
+        renderCall(args, theme) {
+          return new Text(formatWebSearchCall(args, theme), 0, 0);
+        },
+        renderResult(result, options, theme, context) {
+          const text =
+            (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+          const details = (result.details as any) || {};
+          const userResult = buildUserFacingTextResult(
+            result,
+            context.showImages,
+            {
+              userText: details.userText,
+              details: {
+                truncation: details.truncation,
+                emptyMessage: details.emptyMessage,
+                hiddenCount: details.hiddenCount,
+                totalResults: details.totalResults,
+              },
+            },
+          );
+          text.setText(
+            formatWebSearchResult(
+              userResult,
+              options,
+              theme,
+              context.showImages,
+            ),
+          );
+          return text;
+        },
+      },
+    ],
+  };
 }

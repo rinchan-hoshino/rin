@@ -20,17 +20,8 @@ test("tui input compat identifies the explicit newline shortcut", () => {
 });
 
 test("tui input compat registers the editor replacement on session start", () => {
-  let eventName = "";
-  let handler;
-  const pi = {
-    on(name, callback) {
-      eventName = name;
-      handler = callback;
-    },
-  };
-
-  inputCompat.default(pi);
-  assert.equal(eventName, "session_start");
+  const definition = inputCompat.default();
+  const handler = definition.hooks.session_start[0];
   assert.equal(typeof handler, "function");
 
   let componentFactory;

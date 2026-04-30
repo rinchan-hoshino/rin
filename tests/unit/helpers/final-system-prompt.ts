@@ -45,7 +45,7 @@ export async function buildFinalAppSystemPrompt(options = {}) {
     const baseSystemPrompt = String(
       runtimeMod.ensureSessionBaseSystemPrompt(session),
     );
-    const beforeStart = await session._extensionRunner?.emitBeforeAgentStart(
+    const beforeStart = await session.__rinCapabilities?.emitBeforeAgentStart(
       prompt,
       images,
       baseSystemPrompt,

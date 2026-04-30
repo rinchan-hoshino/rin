@@ -202,17 +202,13 @@ test("processing normalizes revised full-slot content and enforces limits", asyn
 
 test("automatic self-improve handlers queue managed task sessions", async () => {
   await withTempRoot(async (root) => {
-    const handlers = new Map();
-    selfImproveIndex.default({
-      registerTool() {},
-      registerCommand() {},
-      on(event, handler) {
-        const list = handlers.get(event) || [];
-        list.push(handler);
-        handlers.set(event, list);
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
       },
     });
-    const messageEnd = handlers.get("message_end")[0];
+    const messageEnd = definition.hooks.message_end[0];
     const managedSessionFile = path.join(
       root,
       "sessions",
@@ -246,18 +242,14 @@ test("automatic self-improve handlers queue managed task sessions", async () => 
 
 test("automatic self-improve handlers require persisted sessions", async () => {
   await withTempRoot(async (root) => {
-    const handlers = new Map();
-    selfImproveIndex.default({
-      registerTool() {},
-      registerCommand() {},
-      on(event, handler) {
-        const list = handlers.get(event) || [];
-        list.push(handler);
-        handlers.set(event, list);
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
       },
     });
-    const messageEnd = handlers.get("message_end")[0];
-    const shutdown = handlers.get("session_shutdown")[0];
+    const messageEnd = definition.hooks.message_end[0];
+    const shutdown = definition.hooks.session_shutdown[0];
     const sessionFile = path.join(root, "sessions", "short-lived.jsonl");
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
     await fs.writeFile(sessionFile, "", "utf8");
@@ -291,14 +283,13 @@ test("save_prompts describes agent_profile as including standing user expectatio
 });
 
 function registerSavePromptsTool() {
-  const tools = [];
-  selfImproveIndex.default({
-    registerTool(tool) {
-      tools.push(tool);
-    },
-    registerCommand() {},
-    on() {},
-  });
+  const tools =
+    selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    }).tools || [];
   return tools.find((entry) => entry.name === "save_prompts");
 }
 

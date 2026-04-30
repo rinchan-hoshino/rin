@@ -14,12 +14,7 @@ const fetchIndex = await import(
 );
 
 function getFetchTool() {
-  const tools = [];
-  fetchIndex.default({
-    registerTool(tool) {
-      tools.push(tool);
-    },
-  });
+  const tools = fetchIndex.default().tools || [];
   const tool = tools.find((entry) => entry.name === "fetch");
   assert.ok(tool);
   return tool;

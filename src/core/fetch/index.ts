@@ -1,4 +1,4 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type { RinCapabilityDefinition } from "../rin-lib/capability-types.js";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
@@ -216,70 +216,80 @@ async function buildFetchOutputText(details: FetchDetails, bodyText: string) {
   return truncated.outputText;
 }
 
-export default function fetchModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "fetch",
-    label: "Fetch URL",
-    description: "Fetch text content from a specific URL.",
-    promptSnippet: "Fetch text content from a specific URL.",
-    promptGuidelines: ["Use fetch to get the plain-text version of a page."],
-    parameters: FetchParamsSchema,
-    async execute(_toolCallId, params, signal, onUpdate) {
-      const mode: FetchMode = "text";
-      const url = normalizeUrl(params.url);
-
-      onUpdate?.({
-        content: [{ type: "text", text: `Fetching ${url}...` }],
-        details: { phase: "request", url, mode },
-      });
-
-      const { response, buffer } = await fetchResponseBuffer(url, signal);
-      const details = createFetchDetails(url, mode, response, buffer);
-
-      if (!response.ok) {
-        throw new Error(formatFailedFetch(details, buffer));
-      }
-
-      const bodyText = resolveResponseBody(details, buffer);
-
-      return {
-        content: [
-          { type: "text", text: await buildFetchOutputText(details, bodyText) },
+export default function fetchModule(): RinCapabilityDefinition {
+  return {
+    tools: [
+      {
+        name: "fetch",
+        label: "Fetch URL",
+        description: "Fetch text content from a specific URL.",
+        promptSnippet: "Fetch text content from a specific URL.",
+        promptGuidelines: [
+          "Use fetch to get the plain-text version of a page.",
         ],
-        details,
-      };
-    },
-    renderCall(args, theme) {
-      return new Text(
-        `${theme.fg("toolTitle", theme.bold("fetch"))} ${theme.fg("accent", String(args.url || ""))}`,
-        0,
-        0,
-      );
-    },
-    renderResult(result, options, theme, context) {
-      const text =
-        (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      const details = (result.details as FetchDetails | undefined) || undefined;
-      const userResult = buildUserFacingTextResult(
-        result as any,
-        context.showImages,
-        {
-          userText: details?.userText,
-          details: {
-            truncation: details?.truncation,
-            fullOutputPath: details?.fullOutputPath,
-          },
+        parameters: FetchParamsSchema,
+        async execute(_toolCallId, params, signal, onUpdate) {
+          const mode: FetchMode = "text";
+          const url = normalizeUrl(params.url);
+
+          onUpdate?.({
+            content: [{ type: "text", text: `Fetching ${url}...` }],
+            details: { phase: "request", url, mode },
+          });
+
+          const { response, buffer } = await fetchResponseBuffer(url, signal);
+          const details = createFetchDetails(url, mode, response, buffer);
+
+          if (!response.ok) {
+            throw new Error(formatFailedFetch(details, buffer));
+          }
+
+          const bodyText = resolveResponseBody(details, buffer);
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: await buildFetchOutputText(details, bodyText),
+              },
+            ],
+            details,
+          };
         },
-      );
-      text.setText(
-        formatFetchResult(
-          userResult as any,
-          options as any,
-          theme,
-          context.showImages,
-        ),
-      );
-      return text;
-    },
-  });
+        renderCall(args, theme) {
+          return new Text(
+            `${theme.fg("toolTitle", theme.bold("fetch"))} ${theme.fg("accent", String(args.url || ""))}`,
+            0,
+            0,
+          );
+        },
+        renderResult(result, options, theme, context) {
+          const text =
+            (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+          const details =
+            (result.details as FetchDetails | undefined) || undefined;
+          const userResult = buildUserFacingTextResult(
+            result as any,
+            context.showImages,
+            {
+              userText: details?.userText,
+              details: {
+                truncation: details?.truncation,
+                fullOutputPath: details?.fullOutputPath,
+              },
+            },
+          );
+          text.setText(
+            formatFetchResult(
+              userResult as any,
+              options as any,
+              theme,
+              context.showImages,
+            ),
+          );
+          return text;
+        },
+      },
+    ],
+  };
 }

@@ -1,4 +1,7 @@
-import type { BuiltinModuleApi } from "../builtins/host.js";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityOptions,
+} from "../rin-lib/capability-types.js";
 import { existsSync } from "fs";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
@@ -45,11 +48,11 @@ function getSessionReviewState(sessionId: string) {
 }
 
 function triggerInitConversation(
-  pi: BuiltinModuleApi,
+  options: Pick<RinCapabilityOptions, "sendMessage">,
   _mode: "auto" | "manual",
   busy: boolean,
 ) {
-  pi.sendMessage(
+  options.sendMessage(
     {
       customType: "self-improve-init-trigger",
       content: "The user is requesting initialization.",
@@ -119,6 +122,7 @@ function stripSavePromptPaths(response: any) {
   if (!response || typeof response !== "object") return response;
   const { path: _path, doc, ...rest } = response;
   return {
+    name: "self-improve",
     ...rest,
     ...(doc ? { doc: stripPathFromDoc(doc) } : {}),
   };
@@ -315,89 +319,103 @@ function renderSelfImproveResult(
   return text;
 }
 
-export default function selfImproveModule(pi: BuiltinModuleApi) {
-  (pi as any).registerTool({
-    name: "save_prompts",
-    label: "Save Prompts",
-    description:
-      "Save durable prompt baselines that persist across sessions and stay available every turn. Keep them compact and focused on what will still matter later.",
-    promptSnippet: "Save durable prompt baselines.",
-    promptGuidelines: [
-      "Use save_prompts when a durable baseline about the assistant, the user, durable methods and values, or durable facts and operating conventions should remain available by default in future turns rather than only for session-local progress or one-off task state.",
+export default function selfImproveModule(
+  options: RinCapabilityOptions,
+): RinCapabilityDefinition {
+  return {
+    tools: [
+      {
+        name: "save_prompts",
+        label: "Save Prompts",
+        description:
+          "Save durable prompt baselines that persist across sessions and stay available every turn. Keep them compact and focused on what will still matter later.",
+        promptSnippet: "Save durable prompt baselines.",
+        promptGuidelines: [
+          "Use save_prompts when a durable baseline about the assistant, the user, durable methods and values, or durable facts and operating conventions should remain available by default in future turns rather than only for session-local progress or one-off task state.",
+        ],
+        parameters: saveSelfImprovePromptParams,
+        execute: async (_toolCallId, params) =>
+          await executeSaveSelfImprovePromptAction(params),
+        renderResult: renderSelfImproveResult,
+      },
     ],
-    parameters: saveSelfImprovePromptParams,
-    execute: async (_toolCallId, params) =>
-      await executeSaveSelfImprovePromptAction(params),
-    renderResult: renderSelfImproveResult,
-  });
+    hooks: {
+      message_end: [
+        async (event, ctx) => {
+          const role = String(event?.message?.role || "").trim();
+          const meta = sessionMeta(ctx);
+          const state = getSessionReviewState(meta.sessionId);
+          if (!state || !meta.sessionFile || !meta.sessionPersisted) return;
 
-  pi.on("message_end", async (event, ctx) => {
-    const role = String(event?.message?.role || "").trim();
-    const meta = sessionMeta(ctx);
-    const state = getSessionReviewState(meta.sessionId);
-    if (!state || !meta.sessionFile || !meta.sessionPersisted) return;
+          if (role === "user") {
+            state.userTurns += 1;
+            return;
+          }
 
-    if (role === "user") {
-      state.userTurns += 1;
-      return;
-    }
-
-    if (
-      role === "assistant" &&
-      state.userTurns > 0 &&
-      state.userTurns - state.lastQueuedTurn >= SELF_IMPROVE_REVIEW_INTERVAL
-    ) {
-      await processSelfImproveReview(ctx, {
-        sessionFile: meta.sessionFile,
-        leafId: meta.leafId,
-        trigger: "self_improve:periodic_review",
-        snapshotKey: `review:${state.userTurns}`,
-      });
-      state.lastQueuedTurn = state.userTurns;
-    }
-  });
-
-  pi.on("session_before_compact", async (_event, ctx) => {
-    const meta = sessionMeta(ctx);
-    if (!meta.sessionFile || !meta.sessionPersisted) return;
-    await processSelfImproveReview(ctx, {
-      sessionFile: meta.sessionFile,
-      leafId: meta.leafId,
-      trigger: "self_improve:session_compaction_review",
-      snapshotKey: `compact:${meta.leafId || meta.sessionFile}`,
-    });
-  });
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    const meta = sessionMeta(ctx);
-    if (!meta.sessionPersisted) {
-      if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
-      return;
-    }
-    await processSelfImproveReview(ctx, {
-      sessionFile: meta.sessionFile,
-      leafId: meta.leafId,
-      trigger: "self_improve:session_shutdown_review",
-    });
-    await processSessionSummaryUpdate(ctx, {
-      sessionFile: meta.sessionFile,
-      leafId: meta.leafId,
-      trigger: "session_summary:session_shutdown",
-    });
-    if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
-  });
-
-  pi.registerCommand("init", {
-    description: "Start or restart self-improve onboarding conversation.",
-    handler: async (_args, ctx) => {
-      await markOnboardingPrompted(resolveAgentDir, "manual:/init");
-      ctx.ui.notify(
-        ctx.isIdle()
-          ? "Self-improve onboarding started."
-          : "Self-improve onboarding queued.",
-        "info",
-      );
-      triggerInitConversation(pi, "manual", !ctx.isIdle());
+          if (
+            role === "assistant" &&
+            state.userTurns > 0 &&
+            state.userTurns - state.lastQueuedTurn >=
+              SELF_IMPROVE_REVIEW_INTERVAL
+          ) {
+            await processSelfImproveReview(ctx, {
+              sessionFile: meta.sessionFile,
+              leafId: meta.leafId,
+              trigger: "self_improve:periodic_review",
+              snapshotKey: `review:${state.userTurns}`,
+            });
+            state.lastQueuedTurn = state.userTurns;
+          }
+        },
+      ],
+      session_before_compact: [
+        async (_event, ctx) => {
+          const meta = sessionMeta(ctx);
+          if (!meta.sessionFile || !meta.sessionPersisted) return;
+          await processSelfImproveReview(ctx, {
+            sessionFile: meta.sessionFile,
+            leafId: meta.leafId,
+            trigger: "self_improve:session_compaction_review",
+            snapshotKey: `compact:${meta.leafId || meta.sessionFile}`,
+          });
+        },
+      ],
+      session_shutdown: [
+        async (_event, ctx) => {
+          const meta = sessionMeta(ctx);
+          if (!meta.sessionPersisted) {
+            if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
+            return;
+          }
+          await processSelfImproveReview(ctx, {
+            sessionFile: meta.sessionFile,
+            leafId: meta.leafId,
+            trigger: "self_improve:session_shutdown_review",
+          });
+          await processSessionSummaryUpdate(ctx, {
+            sessionFile: meta.sessionFile,
+            leafId: meta.leafId,
+            trigger: "session_summary:session_shutdown",
+          });
+          if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
+        },
+      ],
     },
-  });
+    commands: [
+      {
+        name: "init",
+        description: "Start or restart self-improve onboarding conversation.",
+        handler: async (_args, ctx) => {
+          await markOnboardingPrompted(resolveAgentDir, "manual:/init");
+          ctx.ui.notify(
+            ctx.isIdle()
+              ? "Self-improve onboarding started."
+              : "Self-improve onboarding queued.",
+            "info",
+          );
+          triggerInitConversation(options, "manual", !ctx.isIdle());
+        },
+      },
+    ],
+  };
 }

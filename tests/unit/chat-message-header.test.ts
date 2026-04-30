@@ -19,16 +19,8 @@ const promptContextMod = await import(
   ).href
 );
 
-function createPi() {
-  const handlers = new Map();
-  return {
-    handlers,
-    on(event, handler) {
-      const list = handlers.get(event) || [];
-      list.push(handler);
-      handlers.set(event, list);
-    },
-  };
+function createHandlers() {
+  return messageHeaderMod.default().hooks;
 }
 
 test("chat prompt context packages sender identity guidance into the prompt text", () => {
@@ -93,8 +85,7 @@ test("prompt context header injection is reusable and idempotent", () => {
 });
 
 test("message header skips duplicate metadata for already formatted chat prompts", async () => {
-  const pi = createPi();
-  messageHeaderMod.default(pi);
+  const handlers = createHandlers();
 
   const promptText = promptContextMod.formatPromptContext(
     {
@@ -109,13 +100,13 @@ test("message header skips duplicate metadata for already formatted chat prompts
     "@RinBot my name is?",
   );
 
-  const inputResult = await pi.handlers.get("input")[0]({
+  const inputResult = await handlers.input[0]({
     source: "chat-bridge",
     text: promptText,
   });
   assert.deepEqual(inputResult, { action: "continue" });
 
-  const beforeStart = await pi.handlers.get("before_agent_start")[0]({
+  const beforeStart = await handlers.before_agent_start[0]({
     prompt: promptText,
     systemPrompt: "Base prompt",
   });
@@ -124,16 +115,15 @@ test("message header skips duplicate metadata for already formatted chat prompts
 });
 
 test("message header still injects a local hidden timestamp for non-chat prompts", async () => {
-  const pi = createPi();
-  messageHeaderMod.default(pi);
+  const handlers = createHandlers();
 
-  const inputResult = await pi.handlers.get("input")[0]({
+  const inputResult = await handlers.input[0]({
     source: "user",
     text: "hello",
   });
   assert.deepEqual(inputResult, { action: "continue" });
 
-  const beforeStart = await pi.handlers.get("before_agent_start")[0]({
+  const beforeStart = await handlers.before_agent_start[0]({
     prompt: "hello",
     systemPrompt: "Base prompt",
   });

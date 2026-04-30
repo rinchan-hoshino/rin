@@ -434,12 +434,9 @@ test("web search provider attempts expose fetch failure details", async () => {
 
 test("web search tool output includes provider attempts on failure", async () => {
   const originalFetch = globalThis.fetch;
-  let registeredTool: any;
-  webSearchIndex.default({
-    registerTool(tool: any) {
-      registeredTool = tool;
-    },
-  });
+  const registeredTool = webSearchIndex
+    .default()
+    .tools.find((tool: any) => tool.name === "web_search");
 
   globalThis.fetch = (async () => {
     throw new TypeError("fetch failed");
