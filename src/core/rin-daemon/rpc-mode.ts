@@ -445,15 +445,22 @@ export async function runCustomRpcMode(
     const usingInitialFreshSession = initialFreshSessionReusable;
     initialFreshSessionReusable = false;
     switch (type) {
-      case "prompt":
+      case "prompt": {
+        const streamingBehavior = command.streamingBehavior;
+        const promptOptions = {
+          images: command.images,
+          streamingBehavior,
+          source: "rpc" as any,
+        };
+        if (streamingBehavior) {
+          await session.prompt(command.message, promptOptions);
+          return done(id, "prompt");
+        }
         startTurnTask(String(command.requestTag || ""), async () => {
-          await session.prompt(command.message, {
-            images: command.images,
-            streamingBehavior: command.streamingBehavior,
-            source: "rpc" as any,
-          });
+          await session.prompt(command.message, promptOptions);
         });
         return done(id, "prompt");
+      }
       case "resume_interrupted_turn":
         startInterruptTurnTask(String(command.requestTag || ""), async () => {
           await resumeInterruptedTurn(session);

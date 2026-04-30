@@ -9,19 +9,6 @@ function normalizeList<T>(value: T[] | undefined | null) {
   return Array.isArray(value) ? value : [];
 }
 
-function normalizeNonNegativeInteger(value: unknown) {
-  const count = Number(value);
-  if (!Number.isFinite(count)) return 0;
-  return Math.max(0, Math.trunc(count));
-}
-
-function trimQueuedMessages(queue: string[], removeCount: number) {
-  if (removeCount <= 0 || queue.length === 0) return 0;
-  const nextRemoveCount = Math.min(queue.length, removeCount);
-  queue.splice(0, nextRemoveCount);
-  return nextRemoveCount;
-}
-
 export function getContextUsage(model: any, messages: any[], branch: any[]) {
   const contextWindow = Number(model?.contextWindow || 0);
   if (contextWindow <= 0) return undefined;
@@ -105,18 +92,4 @@ export function computeSessionStats(
     cost,
     contextUsage,
   };
-}
-
-export function reconcilePendingQueues(
-  steeringMessages: string[],
-  followUpMessages: string[],
-  targetCount: number,
-) {
-  const nextTargetCount = normalizeNonNegativeInteger(targetCount);
-  let overflow =
-    normalizeList(steeringMessages).length +
-    normalizeList(followUpMessages).length -
-    nextTargetCount;
-  overflow -= trimQueuedMessages(steeringMessages, overflow);
-  trimQueuedMessages(followUpMessages, overflow);
 }
