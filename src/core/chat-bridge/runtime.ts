@@ -38,10 +38,15 @@ function normalizeSinglePart(input: any): ChatMessagePart | null {
   if (type === "text") {
     return { type: "text", text: safeString(input?.text) };
   }
+  if (type === "markdown") {
+    return { type, text: safeString(input?.text ?? input?.content) };
+  }
   if (type === "at") {
+    const id = safeString(input?.id).trim();
+    if (!id) throw new Error("chat_bridge_at_id_required");
     return {
       type: "at",
-      id: safeString(input?.id).trim(),
+      id,
       name: safeString(input?.name).trim() || undefined,
     };
   }
@@ -59,6 +64,15 @@ function normalizeSinglePart(input: any): ChatMessagePart | null {
   if (type === "file") {
     return {
       type: "file",
+      path: safeString(input?.path).trim() || undefined,
+      url: safeString(input?.url).trim() || undefined,
+      name: safeString(input?.name).trim() || undefined,
+      mimeType: safeString(input?.mimeType).trim() || undefined,
+    };
+  }
+  if (type === "video" || type === "audio" || type === "sticker") {
+    return {
+      type,
       path: safeString(input?.path).trim() || undefined,
       url: safeString(input?.url).trim() || undefined,
       name: safeString(input?.name).trim() || undefined,

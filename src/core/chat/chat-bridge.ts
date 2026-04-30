@@ -70,7 +70,7 @@ function formatChatBridgeCall(
 const paramsSchema = createObjectSchema({
   code: Type.String({
     description:
-      'TypeScript/JavaScript async function body for the live chat bridge runtime. Available globals: `chat`, `bot`, `internal`, `h`, `store`, `identity`, `helpers`. `chat`, `bot`, `internal`, `store`, and `identity` are bound to the current chat when the current session already belongs to a chat; otherwise use `helpers.useChat("platform/bot:chat")` to get a bound scope for a specific chat. `bot` is intentionally thin; prefer `internal` for most platform operations. Template: `const scope = chat ?? helpers.useChat("telegram/8623230033:-1001234567890"); return await scope.internal.getChat({ chat_id: scope.chat.chatId });` Example send: `const room = helpers.useChat("onebot/2301401877:1067390680"); await room.helpers.send([{ type: "text", text: "hello" }, { type: "image", url: "https://example.com/demo.png" }]); return "sent";` Example platform-specific call: `const scope = helpers.useChat("telegram/8623230033:-1001234567890"); return await scope.internal.getChatMember({ chat_id: scope.chat.chatId, user_id: 123456789 });` Read `${CHAT_BRIDGE_DOC_PATH}` for the runtime reference and more examples.',
+      'TypeScript/JavaScript async function body for the live chat bridge runtime. Available globals: `chat`, `bot`, `internal`, `h`, `store`, `identity`, `helpers`. `chat`, `bot`, `internal`, `store`, and `identity` are bound to the current chat when the current session already belongs to a chat; otherwise use `helpers.useChat("platform/bot:chat")` to get a bound scope for a specific chat. The bridge can send rich chat content. `bot` is intentionally thin; prefer `internal` for most platform operations. Read `${CHAT_BRIDGE_DOC_PATH}` for runtime objects and examples.',
   }),
   timeout: Type.Optional(
     Type.Number({
@@ -91,7 +91,7 @@ export default function chatBridgeModule(): RinCapabilityDefinition {
         promptSnippet:
           "Run constrained bridge code against a specific live chat.",
         promptGuidelines: [
-          "Use chat_bridge for tasks such as querying chat or user information, sending messages to a specified chat, sending multimedia content, using platform features for chat management, or building complex interactive chat flows.",
+          "Use chat_bridge for querying chat or user information, sending rich chat content, using platform features for chat management, or building complex interactive chat flows.",
         ],
         parameters: paramsSchema as any,
         async execute(toolCallId, params, _signal, _onUpdate, ctx) {

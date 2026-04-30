@@ -23,6 +23,7 @@ import {
   prepareOutboundNodes,
   readBinaryFromNode,
   renderPlainTextFromNodes,
+  renderTelegramHtmlFromNodes,
   safeString,
   sleep,
   splitPlainText,
@@ -42,10 +43,25 @@ function toSnakeCase(value: string) {
     .toLowerCase();
 }
 
+function isTelegramMediaNodeType(type: string) {
+  return ["image", "file", "video", "audio", "sticker"].includes(type);
+}
+
+function telegramMediaMethod(type: string) {
+  if (type === "image") return { method: "sendPhoto", field: "photo" };
+  if (type === "video") return { method: "sendVideo", field: "video" };
+  if (type === "audio") return { method: "sendAudio", field: "audio" };
+  if (type === "sticker") return { method: "sendSticker", field: "sticker" };
+  return { method: "sendDocument", field: "document" };
+}
+
 function isTextLikeNode(node: any) {
   const type = safeString(node?.type).toLowerCase();
   return (
     type === "text" ||
+    type === "markdown" ||
+    type === "md" ||
+    type === "html" ||
     type === "at" ||
     type === "br" ||
     type === "p" ||
@@ -100,6 +116,10 @@ function createNodeBuilder() {
       compactObject({ ...(attrs || {}), id: safeString(id) }),
     );
   h.image = (src: unknown) => normalizeNode("image", { src: safeString(src) });
+  h.markdown = (content: unknown) =>
+    normalizeNode("markdown", { content: safeString(content) });
+  h.html = (content: unknown) =>
+    normalizeNode("html", { content: safeString(content) });
   h.file = (value: unknown, mimeType?: string, attrs?: Record<string, any>) => {
     const base = compactObject({
       ...(attrs || {}),
@@ -496,26 +516,45 @@ class TelegramAdapter {
         );
       }
     }
-    const document = message?.document;
-    if (document && typeof document === "object") {
+    const mediaCandidates = [
+      { source: message?.sticker, type: "sticker", fallbackMime: "image/webp" },
+      { source: message?.video, type: "video", fallbackMime: "video/mp4" },
+      { source: message?.animation, type: "video", fallbackMime: "video/mp4" },
+      { source: message?.audio, type: "audio", fallbackMime: "audio/mpeg" },
+      { source: message?.voice, type: "audio", fallbackMime: "audio/ogg" },
+      {
+        source: message?.document,
+        type: "file",
+        fallbackMime: "application/octet-stream",
+      },
+    ];
+    for (const candidate of mediaCandidates) {
+      const media = candidate.source;
+      if (!media || typeof media !== "object") continue;
       const mimeType =
-        safeString(document?.mime_type).trim() || "application/octet-stream";
+        safeString(media?.mime_type).trim() || candidate.fallbackMime;
       const cached = await this.cacheFile({
-        fileId: safeString(document?.file_id).trim(),
-        uniqueId: safeString(document?.file_unique_id).trim(),
+        fileId: safeString(media?.file_id).trim(),
+        uniqueId: safeString(media?.file_unique_id).trim(),
         mimeType,
-        name: safeString(document?.file_name).trim() || undefined,
+        name:
+          safeString(media?.file_name).trim() ||
+          safeString(media?.emoji).trim() ||
+          undefined,
       });
-      if (cached) {
-        elements.push(
-          normalizeNode(mimeType.startsWith("image/") ? "image" : "file", {
-            src: fileUrl(cached.path),
-            mime: cached.mimeType,
-            mimeType: cached.mimeType,
-            name: cached.name,
-          }),
-        );
-      }
+      if (!cached) continue;
+      const nodeType =
+        candidate.type === "file" && mimeType.startsWith("image/")
+          ? "image"
+          : candidate.type;
+      elements.push(
+        normalizeNode(nodeType, {
+          src: fileUrl(cached.path),
+          mime: cached.mimeType,
+          mimeType: cached.mimeType,
+          name: cached.name,
+        }),
+      );
     }
     return elements;
   }
@@ -597,25 +636,46 @@ class TelegramAdapter {
     chatId: string,
     text: string,
     replyToMessageId?: string,
+    parseMode?: string,
   ) {
-    const result = await this.callApi(
-      "sendMessage",
-      compactObject({
-        chat_id: chatId,
-        text,
-        reply_to_message_id: replyToMessageId,
-      }),
-    );
-    return safeString(result?.message_id).trim();
+    const payload = compactObject({
+      chat_id: chatId,
+      text,
+      parse_mode: safeString(parseMode).trim() || undefined,
+      reply_to_message_id: replyToMessageId,
+    });
+    try {
+      const result = await this.callApi("sendMessage", payload);
+      return safeString(result?.message_id).trim();
+    } catch (error) {
+      if (!payload.parse_mode) throw error;
+      const result = await this.callApi(
+        "sendMessage",
+        compactObject({
+          chat_id: chatId,
+          text: renderPlainTextFromNodes([
+            { type: "html", attrs: { content: text } },
+          ]),
+          reply_to_message_id: replyToMessageId,
+        }),
+      );
+      return safeString(result?.message_id).trim();
+    }
   }
 
   private async sendBinaryMessage(
-    method: "sendPhoto" | "sendDocument",
-    field: "photo" | "document",
+    method:
+      | "sendPhoto"
+      | "sendDocument"
+      | "sendVideo"
+      | "sendAudio"
+      | "sendSticker",
+    field: "photo" | "document" | "video" | "audio" | "sticker",
     chatId: string,
     node: any,
     caption: string,
     replyToMessageId?: string,
+    parseMode?: string,
   ) {
     const payload = await readBinaryFromNode(node);
     if (!payload) {
@@ -628,6 +688,7 @@ class TelegramAdapter {
           chat_id: chatId,
           [field]: payload.url,
           caption: caption || undefined,
+          parse_mode: safeString(parseMode).trim() || undefined,
           reply_to_message_id: replyToMessageId,
         }),
       );
@@ -636,6 +697,7 @@ class TelegramAdapter {
     const result = await this.callMultipart(method, (form) => {
       form.append("chat_id", safeString(chatId));
       if (caption) form.append("caption", caption);
+      if (parseMode) form.append("parse_mode", safeString(parseMode));
       if (replyToMessageId)
         form.append("reply_to_message_id", safeString(replyToMessageId));
       form.append(
@@ -657,33 +719,39 @@ class TelegramAdapter {
     while (cursor < work.length) {
       const node = work[cursor];
       const type = safeString(node?.type).toLowerCase();
-      if (type === "image" || type === "file") {
+      if (isTelegramMediaNodeType(type)) {
         const captionNodes: any[] = [];
         let nextCursor = cursor + 1;
         while (nextCursor < work.length && isTextLikeNode(work[nextCursor])) {
           captionNodes.push(work[nextCursor]);
           nextCursor += 1;
         }
-        const caption = renderPlainTextFromNodes(captionNodes);
+        const renderedCaption = renderTelegramHtmlFromNodes(captionNodes);
         const captionChunks = splitPlainText(
-          caption,
+          renderedCaption,
           TELEGRAM_MAX_CAPTION_LENGTH,
         );
+        const media = telegramMediaMethod(type);
+        const caption = type === "sticker" ? "" : captionChunks[0] || "";
         const messageId = await this.sendBinaryMessage(
-          type === "image" ? "sendPhoto" : "sendDocument",
-          type === "image" ? "photo" : "document",
+          media.method as any,
+          media.field as any,
           chatId,
           node,
-          captionChunks[0] || "",
+          caption,
           firstReply,
+          caption ? "HTML" : undefined,
         );
         if (messageId) delivered.push(messageId);
         firstReply = undefined;
-        for (const extraCaptionChunk of captionChunks.slice(1)) {
+        const spillCaptionChunks =
+          type === "sticker" ? captionChunks : captionChunks.slice(1);
+        for (const extraCaptionChunk of spillCaptionChunks) {
           const extraMessageId = await this.sendText(
             chatId,
             extraCaptionChunk,
             firstReply,
+            "HTML",
           );
           if (extraMessageId) delivered.push(extraMessageId);
         }
@@ -695,13 +763,18 @@ class TelegramAdapter {
       while (nextCursor < work.length) {
         const candidate = work[nextCursor];
         const candidateType = safeString(candidate?.type).toLowerCase();
-        if (candidateType === "image" || candidateType === "file") break;
+        if (isTelegramMediaNodeType(candidateType)) break;
         textNodes.push(candidate);
         nextCursor += 1;
       }
-      const text = renderPlainTextFromNodes(textNodes);
+      const text = renderTelegramHtmlFromNodes(textNodes);
       for (const textChunk of splitPlainText(text, TELEGRAM_MAX_TEXT_LENGTH)) {
-        const messageId = await this.sendText(chatId, textChunk, firstReply);
+        const messageId = await this.sendText(
+          chatId,
+          textChunk,
+          firstReply,
+          "HTML",
+        );
         if (messageId) delivered.push(messageId);
         firstReply = undefined;
       }
@@ -1158,6 +1231,10 @@ class OneBotAdapter {
         parts.push(escapeOneBotText(safeString(attrs.content)));
         continue;
       }
+      if (type === "markdown" || type === "md" || type === "html") {
+        parts.push(escapeOneBotText(renderPlainTextFromNodes([node])));
+        continue;
+      }
       if (type === "at") {
         const id = safeString(attrs.id).trim();
         if (id) parts.push(`[CQ:at,qq=${escapeOneBotText(id)}]`);
@@ -1172,7 +1249,17 @@ class OneBotAdapter {
         if (media) parts.push(`[CQ:image,file=${escapeOneBotText(media)}]`);
         continue;
       }
-      if (type === "file") {
+      if (type === "audio" || type === "voice" || type === "record") {
+        const media = await this.normalizeOutboundMedia(node, "file");
+        if (media) parts.push(`[CQ:record,file=${escapeOneBotText(media)}]`);
+        continue;
+      }
+      if (type === "video") {
+        const media = await this.normalizeOutboundMedia(node, "file");
+        if (media) parts.push(`[CQ:video,file=${escapeOneBotText(media)}]`);
+        continue;
+      }
+      if (type === "file" || type === "sticker") {
         const media = await this.normalizeOutboundMedia(node, "file");
         if (media) parts.push(`[CQ:file,file=${escapeOneBotText(media)}]`);
         continue;
@@ -1289,19 +1376,37 @@ class OneBotAdapter {
         }
         continue;
       }
-      if (type === "file") {
+      if (
+        [
+          "file",
+          "video",
+          "record",
+          "audio",
+          "voice",
+          "sticker",
+          "face",
+          "mface",
+        ].includes(type)
+      ) {
+        const nodeType =
+          type === "record" || type === "voice"
+            ? "audio"
+            : type === "face" || type === "mface"
+              ? "sticker"
+              : type;
         const src = safeString(data?.url || data?.file || "").trim();
-        if (src) {
-          elements.push(
-            normalizeNode(
-              "file",
-              compactObject({
-                src,
-                name: safeString(data?.name || data?.file).trim() || undefined,
-              }),
-            ),
-          );
-        }
+        elements.push(
+          normalizeNode(
+            nodeType,
+            compactObject({
+              src: src || undefined,
+              id: safeString(data?.id || data?.qq).trim() || undefined,
+              name:
+                safeString(data?.name || data?.file || data?.text).trim() ||
+                undefined,
+            }),
+          ),
+        );
         continue;
       }
       if (type === "reply") {

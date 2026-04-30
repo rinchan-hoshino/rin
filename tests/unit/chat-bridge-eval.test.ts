@@ -64,7 +64,7 @@ test("chat bridge eval runs constrained code with bot, internal, helpers, store,
             status: 1,
             async sendMessage(chatId, content) {
               sends.push({ chatId, content });
-              return ["m1"];
+              return [`m${sends.length}`];
             },
             async getGuild(chatId) {
               return { id: chatId, name: "Demo Chat" };
@@ -98,6 +98,11 @@ test("chat bridge eval runs constrained code with bot, internal, helpers, store,
 const room = helpers.useChat("telegram/1:2");
 const label: string = "hello 7";
 const sent = await room.helpers.send(label);
+const richSent = await room.helpers.send([
+  { type: "at", id: "7", name: "Alice" },
+  { type: "markdown", text: "**hello**" },
+  { type: "video", url: "https://example.com/demo.mp4", name: "demo.mp4" },
+]);
 const chatInfo = await room.internal.getChat({ chat_id: room.chat.chatId });
 const member = await room.internal.getChatMember({ chat_id: room.chat.chatId, user_id: 7 });
 const saved = room.identity.setTrust({ userId: "7", trust: "TRUSTED", name: "Alice" });
@@ -105,6 +110,7 @@ const stored = room.store.getMessage(sent[0])[0];
 return {
   currentChatKey: helpers.currentChatKey,
   sent,
+  richSent,
   chatInfo,
   member,
   saved,
@@ -123,6 +129,7 @@ return {
     assert.equal(result.value.botStatus, 1);
     assert.equal(result.value.currentChatKey, "telegram/1:2");
     assert.deepEqual(result.value.sent, ["m1"]);
+    assert.deepEqual(result.value.richSent, ["m2"]);
     assert.equal(result.value.chatInfo.chat.title, "Demo Chat");
     assert.equal(result.value.member.payload.user_id, 7);
     assert.equal(result.value.saved.trust, "TRUSTED");
@@ -130,13 +137,52 @@ return {
     assert.equal(result.value.botGetGuildType, "undefined");
     assert.equal(result.value.botSendMessageType, "function");
     assert.equal(result.value.internalClientKind, "demo-client");
-    assert.equal(sends.length, 1);
+    assert.equal(sends.length, 2);
     assert.equal(sends[0].chatId, "2");
+    assert.deepEqual(
+      sends[1].content.map((node) => node.type),
+      ["at", "markdown", "video"],
+    );
 
     const stored = messageStore.getChatMessage(agentDir, "telegram/1:2", "m1");
     assert.equal(stored?.text, "hello 7");
     assert.equal(stored?.sessionId, undefined);
     assert.equal(stored?.sessionFile, undefined);
+  });
+});
+
+test("chat bridge send requires structured at parts to include ids", async () => {
+  await withTempDir(async (agentDir) => {
+    const runtime = runtimeModule.createChatBridgeRuntime({
+      app: {
+        bots: [
+          {
+            platform: "telegram",
+            selfId: "1",
+            status: 1,
+            async sendMessage() {
+              throw new Error("unexpected_send");
+            },
+            internal: {},
+          },
+        ],
+      },
+      agentDir,
+      dataDir: path.join(agentDir, "data"),
+      currentChatKey: "telegram/1:2",
+      h: createH(),
+    });
+
+    await assert.rejects(
+      () =>
+        evalModule.executeChatBridgeCode({
+          code: `return await helpers.send([{ type: "at", name: "Alice" }]);`,
+          context: runtime,
+          timeoutMs: 5_000,
+          filename: "chat-bridge-at-required.test.ts",
+        }),
+      /chat_bridge_at_id_required/,
+    );
   });
 });
 

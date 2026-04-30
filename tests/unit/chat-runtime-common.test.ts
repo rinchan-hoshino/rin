@@ -29,7 +29,7 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
 
   assert.equal(
     chatRuntimeCommon.renderPlainTextFromNodes(nodes),
-    "Hello@Rinworld",
+    "Hello@Rin world",
   );
   assert.equal(
     chatRuntimeCommon.renderPlainTextFromNodes([
@@ -41,8 +41,54 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
     chatRuntimeCommon.renderPlainTextFromNodes(nodes, {
       renderAt: (attrs) => `<@${attrs.id}>`,
     }),
-    "Hello<@42>world",
+    "Hello<@42> world",
   );
+  assert.equal(
+    chatRuntimeCommon.renderPlainTextFromNodes([
+      chatRuntimeCommon.normalizeNode("markdown", {
+        content: "**bold** [link](https://example.com)",
+      }),
+      chatRuntimeCommon.normalizeNode("image", {
+        src: "https://example.com/cat.png",
+        name: "cat.png",
+      }),
+    ]),
+    "bold link\nimage: cat.png",
+  );
+  assert.equal(
+    chatRuntimeCommon.renderPlainTextFromNodes(
+      [
+        chatRuntimeCommon.normalizeNode("markdown", {
+          content: "**bold**",
+        }),
+      ],
+      { markdown: "preserve" },
+    ),
+    "**bold**",
+  );
+  assert.match(
+    chatRuntimeCommon.renderTelegramHtmlFromNodes([
+      chatRuntimeCommon.normalizeNode("markdown", {
+        content: "**bold** [link](https://example.com)",
+      }),
+    ]),
+    /<b>bold<\/b> <a href="https:\/\/example\.com">link<\/a>/,
+  );
+  assert.equal(
+    chatRuntimeCommon.renderPlainTextFromNodes(
+      [
+        chatRuntimeCommon.normalizeNode("at", { id: "42", name: "Rin" }),
+        chatRuntimeCommon.normalizeNode("quote", { id: "m1" }),
+        chatRuntimeCommon.normalizeNode("file", {
+          src: "https://example.com/spec.pdf",
+          name: "spec.pdf",
+        }),
+      ],
+      { markdown: "preserve" },
+    ),
+    "[@Rin](at:42)[quote:m1]\n[file: spec.pdf](https://example.com/spec.pdf)",
+  );
+
   assert.equal(
     chatRuntimeCommon.extractQuoteMessageId([
       chatRuntimeCommon.normalizeNode("quote", { id: "abc123" }),
@@ -64,6 +110,23 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
     ["text", "at"],
   );
   assert.equal(prepared.replyToMessageId, "abc123");
+});
+
+test("chat runtime common helpers expand markdown rich object syntax", () => {
+  const markdown = chatRuntimeCommon.prepareOutboundNodes([
+    chatRuntimeCommon.normalizeNode("markdown", {
+      content:
+        "Hello [@Rin](at:42) [quote:m1] [image: cat](https://example.com/cat.png) [file: spec.pdf](https://example.com/spec.pdf) [video: demo](https://example.com/demo.mp4) [audio: voice](https://example.com/voice.mp3) [sticker: yay](https://example.com/yay.webp)",
+    }),
+  ]);
+  assert.deepEqual(
+    markdown.nodes.map((node) => node.type),
+    ["markdown", "at", "quote", "image", "file", "video", "audio", "sticker"],
+  );
+  assert.equal(markdown.replyToMessageId, "m1");
+  assert.equal(markdown.nodes[1].attrs.id, "42");
+  assert.equal(markdown.nodes[3].attrs.src, "https://example.com/cat.png");
+  assert.equal(markdown.nodes[4].attrs.name, "spec.pdf");
 });
 
 test("chat runtime common helpers preserve binary payload naming for buffers and file urls", async () => {

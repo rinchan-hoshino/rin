@@ -8,7 +8,12 @@ import {
   isImageMimeType,
   isImageName,
 } from "../chat/file-utils.js";
-import { normalizeMessageText, renderMessageText } from "../message-content.js";
+import {
+  renderChatNodesPlain,
+  expandRichTextSyntaxNodes,
+  renderChatNodesTelegramHtml,
+  type RenderChatNodesOptions,
+} from "../chat/rich-text.js";
 import { ensureDir } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 
@@ -153,14 +158,29 @@ export function flattenNodes(value: any): any[] {
   return value.flatMap((item) => flattenNodes(item)).filter(Boolean);
 }
 
+function assertOutboundStructuredMentions(nodes: any[]) {
+  for (const node of flattenNodes(nodes)) {
+    const type = safeString(node?.type).trim().toLowerCase();
+    if (type === "at" && !safeString(node?.attrs?.id).trim()) {
+      throw new Error("chat_send_at_id_required");
+    }
+    if (Array.isArray(node?.children)) {
+      assertOutboundStructuredMentions(node.children);
+    }
+  }
+}
+
 export function prepareOutboundNodes(content: any) {
-  const nodes = flattenNodes(content)
-    .map((node) =>
-      typeof node === "string"
-        ? normalizeNode("text", { content: node })
-        : node,
-    )
-    .filter(Boolean);
+  const nodes = expandRichTextSyntaxNodes(
+    flattenNodes(content)
+      .map((node) =>
+        typeof node === "string"
+          ? normalizeNode("text", { content: node })
+          : node,
+      )
+      .filter(Boolean),
+  );
+  assertOutboundStructuredMentions(nodes);
   return {
     nodes,
     work: nodes.filter(
@@ -170,29 +190,20 @@ export function prepareOutboundNodes(content: any) {
   };
 }
 
-export type RenderPlainTextOptions = {
-  renderAt?: (attrs: Record<string, any>) => string;
-};
+export type RenderPlainTextOptions = RenderChatNodesOptions;
 
 export function renderPlainTextFromNodes(
   nodes: any[],
   options: RenderPlainTextOptions = {},
 ) {
-  return normalizeMessageText(
-    renderMessageText(nodes, {
-      normalizeChildren: normalizeMessageText,
-      renderAt: (attrs) => {
-        if (typeof options.renderAt === "function") {
-          return safeString(options.renderAt(attrs));
-        }
-        const name = safeString(attrs.name).trim();
-        const id = safeString(attrs.id).trim();
-        if (name) return `@${name}`;
-        if (id) return `@${id}`;
-        return "";
-      },
-    }),
-  );
+  return renderChatNodesPlain(nodes, options);
+}
+
+export function renderTelegramHtmlFromNodes(
+  nodes: any[],
+  options: RenderPlainTextOptions = {},
+) {
+  return renderChatNodesTelegramHtml(nodes, options);
 }
 
 export function fileUrl(filePath: string) {

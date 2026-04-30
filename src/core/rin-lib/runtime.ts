@@ -54,6 +54,14 @@ const DEFAULT_PI_GUIDELINES = [
   "When using bash, explain meaningful findings instead of pasting excessive raw output",
 ];
 
+const RICH_CHAT_CONTENT_SYNTAX = [
+  "Chat rich content Markdown syntax:",
+  "- Native at: [@name](at:<platform-user-id>). Raw @name text is plain text only.",
+  "- Quote reply: [quote:<message-id>] drives the platform reply/quote target.",
+  "- Image/file/video/audio/sticker: [image: name](url), [file: name](url), [video: name](url), [audio: name](url), [sticker: name](url).",
+  "- Unsupported rich objects degrade to readable plain text; supported rich objects are sent natively when possible.",
+].join("\n");
+
 export function createRinCapabilityDefinitions(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition[] {
@@ -237,13 +245,20 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
       "Guidelines:",
       guidelines,
       "",
+      RICH_CHAT_CONTENT_SYNTAX,
+      "",
       skillGuidanceBlock,
       "",
       docsBlock,
       configuredLanguageBlock ? `\n${configuredLanguageBlock}` : "",
     ].join("\n");
   } else {
-    prompt = [prompt, docsBlock, configuredLanguageBlock]
+    prompt = [
+      prompt,
+      RICH_CHAT_CONTENT_SYNTAX,
+      docsBlock,
+      configuredLanguageBlock,
+    ]
       .filter(Boolean)
       .join("\n\n");
   }

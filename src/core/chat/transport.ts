@@ -259,6 +259,19 @@ function withReplyQuote(h: any, replyToMessageId: string, nodes: any[]) {
     : nodes;
 }
 
+function markdownNode(h: any, text: string) {
+  if (typeof h?.markdown === "function") return h.markdown(text);
+  return typeof h === "function"
+    ? h("markdown", { content: text })
+    : { type: "markdown", attrs: { content: text } };
+}
+
+function looksLikeMarkdown(text: string) {
+  return /(^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s)|```|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|!?\[[^\]]+\]\([^)]+\)|\[(?:quote:\s*[^\]]+|(?:image|file|video|audio|sticker):\s*[^\]]*)\]/i.test(
+    safeString(text),
+  );
+}
+
 async function sendChatNodes(app: any, chatKey: string, nodes: any[]) {
   const { parsed, bot } = requireChatTarget(app, chatKey);
   return await sendBotMessage(bot, parsed.chatId, nodes);
@@ -428,14 +441,15 @@ function localAssetUrl(filePath: string) {
 function summarizeOutgoingParts(parts: ChatMessagePart[]) {
   return parts
     .map((part) => {
-      if (part.type === "text") return safeString(part.text).trim();
+      if (part.type === "text" || part.type === "markdown")
+        return safeString(part.text).trim();
       if (part.type === "at")
         return `[@] ${safeString(part.name).trim() || safeString(part.id).trim()}`;
       if (part.type === "quote")
         return `[#quote] ${safeString(part.id).trim()}`;
       if (part.type === "image")
         return `[#image] ${safeString(part.path).trim() || safeString(part.url).trim()}`;
-      return `[#file] ${safeString(part.name).trim() || safeString(part.path).trim() || safeString(part.url).trim()}`;
+      return `[#${part.type}] ${safeString((part as any).name).trim() || safeString((part as any).path).trim() || safeString((part as any).url).trim()}`;
     })
     .filter(Boolean)
     .join("\n\n")
@@ -452,7 +466,11 @@ export async function sendText(
   return await sendChatNodes(
     app,
     chatKey,
-    withReplyQuote(h, replyToMessageId, [h.text(safeString(text))]),
+    withReplyQuote(h, replyToMessageId, [
+      looksLikeMarkdown(text)
+        ? markdownNode(h, safeString(text))
+        : h.text(safeString(text)),
+    ]),
   );
 }
 
@@ -497,35 +515,44 @@ export async function sendGenericFile(
 }
 
 export async function messagePartToNode(part: ChatMessagePart, h: any) {
-  if (part.type === "text") return h.text(part.text);
-  if (part.type === "at")
-    return h.at(part.id, part.name ? { name: part.name } : undefined);
-  if (part.type === "quote") return h.quote(part.id);
-  if (part.type === "image") {
-    const localPath = safeString(part.path).trim();
-    const remoteUrl = safeString(part.url).trim();
-    if (!localPath && !remoteUrl) {
-      throw new Error("chat_outbox_invalid_part:image");
-    }
-    if (localPath) {
-      return h("image", {
-        src: localAssetUrl(localPath),
-        mimeType: safeString(part.mimeType).trim() || "image/png",
-      });
-    }
-    return h.image(remoteUrl);
+  if (part.type === "text") {
+    const text = safeString(part.text);
+    return looksLikeMarkdown(text) ? markdownNode(h, text) : h.text(text);
   }
-  const localPath = safeString(part.path).trim();
-  const remoteUrl = safeString(part.url).trim();
+  if (part.type === "markdown") return markdownNode(h, part.text);
+  if (part.type === "at") {
+    const id = safeString(part.id).trim();
+    if (!id) throw new Error("chat_outbox_invalid_part:at");
+    return h.at(id, part.name ? { name: part.name } : undefined);
+  }
+  if (part.type === "quote") return h.quote(part.id);
+  if (["image", "video", "audio", "sticker"].includes(part.type)) {
+    const localPath = safeString((part as any).path).trim();
+    const remoteUrl = safeString((part as any).url).trim();
+    if (!localPath && !remoteUrl) {
+      throw new Error(`chat_outbox_invalid_part:${part.type}`);
+    }
+    const attrs = {
+      src: localPath ? localAssetUrl(localPath) : remoteUrl,
+      mimeType:
+        safeString((part as any).mimeType).trim() ||
+        (part.type === "image" ? "image/png" : undefined),
+      name: safeString((part as any).name).trim() || undefined,
+    };
+    return h(part.type, attrs);
+  }
+  const filePart = part as Extract<ChatMessagePart, { type: "file" }>;
+  const localPath = safeString(filePart.path).trim();
+  const remoteUrl = safeString(filePart.url).trim();
   const name =
-    safeString(part.name).trim() ||
+    safeString(filePart.name).trim() ||
     (localPath ? path.basename(localPath) : undefined);
   if (!localPath && !remoteUrl) {
     throw new Error("chat_outbox_invalid_part:file");
   }
   return h.file(
     localPath ? localAssetUrl(localPath) : remoteUrl,
-    safeString(part.mimeType).trim() || undefined,
+    safeString(filePart.mimeType).trim() || undefined,
     name ? { name } : undefined,
   );
 }
@@ -536,7 +563,7 @@ function buildPartsDeliveryRecord(rawParts: ChatMessagePart[]) {
     | undefined;
   const replyToMessageId = safeString(quotePart?.id).trim() || undefined;
   const logText = rawParts
-    .filter((part) => part.type === "text")
+    .filter((part) => part.type === "text" || part.type === "markdown")
     .map((part) => safeString((part as any).text).trim())
     .filter(Boolean)
     .join("\n\n")

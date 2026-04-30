@@ -4,10 +4,8 @@ import {
   type StoredChatMessage,
 } from "./message-store.js";
 import { composeChatKey } from "./support.js";
-import {
-  extractMessageText,
-  normalizeMessageText,
-} from "../message-content.js";
+import { normalizeMessageText } from "../message-content.js";
+import { renderChatNodesMarkdown } from "./rich-text.js";
 import { cloneJsonIfObject } from "../json-utils.js";
 import { safeString } from "../text-utils.js";
 
@@ -54,15 +52,8 @@ export function ensureSessionElements(session: any) {
   return [] as any[];
 }
 
-export function mentionLike(session: any) {
-  if (Boolean(session?.stripped?.appel)) return true;
-  const elements = ensureSessionElements(session);
-  const atElements = elements.filter(
-    (element) => safeString(element?.type).toLowerCase() === "at",
-  );
-  if (!atElements.length) return false;
-
-  const selfTokens = new Set(
+function collectSelfMentionTokens(session: any) {
+  return new Set(
     [
       session?.selfId,
       session?.bot?.selfId,
@@ -78,21 +69,74 @@ export function mentionLike(session: any) {
       .map(normalizeMentionToken)
       .filter(Boolean),
   );
+}
+
+function isSelfMention(attrs: Record<string, any>, selfTokens: Set<string>) {
+  const id = normalizeMentionToken(attrs.id);
+  const name = normalizeMentionToken(attrs.name);
+  return Boolean((id && selfTokens.has(id)) || (name && selfTokens.has(name)));
+}
+
+export function mentionLike(session: any) {
+  if (Boolean(session?.stripped?.appel)) return true;
+  const elements = ensureSessionElements(session);
+  const atElements = elements.filter(
+    (element) => safeString(element?.type).toLowerCase() === "at",
+  );
+  if (!atElements.length) return false;
+
+  const selfTokens = collectSelfMentionTokens(session);
 
   for (const element of atElements) {
-    const attrs = element?.attrs || {};
-    const id = normalizeMentionToken(attrs.id);
-    const name = normalizeMentionToken(attrs.name);
-    if ((id && selfTokens.has(id)) || (name && selfTokens.has(name))) {
-      return true;
-    }
+    if (isSelfMention(element?.attrs || {}, selfTokens)) return true;
   }
 
   return false;
 }
 
 export function elementsToText(elements: any) {
-  return normalizeMessageText(extractMessageText(elements));
+  return normalizeMessageText(renderChatNodesMarkdown(elements));
+}
+
+function isRichAttachmentElement(element: any) {
+  return [
+    "img",
+    "image",
+    "file",
+    "video",
+    "audio",
+    "voice",
+    "sticker",
+    "record",
+    "face",
+    "mface",
+  ].includes(safeString(element?.type).trim().toLowerCase());
+}
+
+function sessionElementsToText(session: any, elements: any[]) {
+  const normalizedElements = Array.isArray(elements) ? elements : [];
+  const richAttachments = normalizedElements.filter(isRichAttachmentElement);
+  const textElements = normalizedElements.filter(
+    (element) => !isRichAttachmentElement(element),
+  );
+  const selfTokens = collectSelfMentionTokens(session);
+  const baseText = normalizeMessageText(
+    renderChatNodesMarkdown(textElements, {
+      renderAt(attrs) {
+        if (isSelfMention(attrs, selfTokens)) return "";
+        const id = safeString(attrs.id).trim();
+        const name = safeString(attrs.name).trim() || id;
+        return id ? `[@${name}](at:${id})` : name ? `@${name}` : "";
+      },
+    }),
+  );
+  const fallbackText = normalizeMessageText(session?.stripped?.content || "");
+  const richText = richAttachments.length
+    ? elementsToText(richAttachments)
+    : "";
+  return normalizeMessageText(
+    [baseText || fallbackText, richText].filter(Boolean).join("\n"),
+  );
 }
 
 export function pickSenderNickname(session: any) {
@@ -206,7 +250,7 @@ export function buildChatInboxRouting(
     chatType: getChatType(session),
     isDirect: directLike(session),
     mentionLike: mentionLike(session),
-    text: elementsToText(elements) || undefined,
+    text: sessionElementsToText(session, elements) || undefined,
     userId: pickUserId(session) || undefined,
     nickname: pickSenderNickname(session) || undefined,
     chatName: pickChatName(session) || undefined,
@@ -246,7 +290,7 @@ export function buildInboundStoredChatMessageInput(
     nickname: pickSenderNickname(session) || undefined,
     chatName: pickChatName(session) || undefined,
     trust,
-    text: elementsToText(elements) || undefined,
+    text: sessionElementsToText(session, elements) || undefined,
     rawContent: safeString(session?.content || "").trim() || undefined,
     strippedContent:
       safeString(session?.stripped?.content || "").trim() || undefined,
