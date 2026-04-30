@@ -920,17 +920,11 @@ export class RpcInteractiveSession {
     }
   }
 
-  async shutdownLocalExtensions(event: Record<string, unknown>) {
+  async shutdownLocalExtensions(_event: Record<string, unknown>) {
     const runner = this.extensionRunner;
     if (!runner) return false;
-    try {
-      if (runner.hasHandlers?.("session_shutdown")) {
-        await runner.emit({ ...event, type: "session_shutdown" });
-      }
-    } finally {
-      runner.invalidate?.();
-      if (this.extensionRunner === runner) this.extensionRunner = undefined;
-    }
+    runner.invalidate?.();
+    if (this.extensionRunner === runner) this.extensionRunner = undefined;
     return true;
   }
 

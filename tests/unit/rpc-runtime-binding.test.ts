@@ -127,7 +127,7 @@ test("rpc local extension commands do not execute in the frontend", async () => 
   );
 });
 
-test("rpc local extensions use daemon-backed tools and message core actions", async () => {
+test("rpc local extensions do not emit worker-owned session lifecycle events", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-actions-"));
   const agentDir = path.join(dir, "agent");
   const extensionPath = path.join(dir, "actions-extension.ts");
@@ -135,15 +135,7 @@ test("rpc local extensions use daemon-backed tools and message core actions", as
   await fs.writeFile(
     extensionPath,
     `export default function(pi: any) {
-      pi.on("session_start", async () => {
-        pi.appendEntry("tools-seen", {
-          active: pi.getActiveTools(),
-          all: pi.getAllTools().map((tool: any) => tool.name),
-        });
-        pi.setActiveTools(["read"]);
-        pi.sendMessage({ customType: "notice", content: "hello" }, { triggerTurn: false });
-        pi.sendUserMessage([{ type: "text", text: "hi" }], { deliverAs: "followUp" });
-      });
+      pi.on("session_start", async () => pi.appendEntry("lifecycle", { type: "start" }));
     }\n`,
   );
   await fs.writeFile(
@@ -158,31 +150,8 @@ test("rpc local extensions use daemon-backed tools and message core actions", as
       sent.push(payload);
       switch (payload.type) {
         case "get_active_tools":
-          return Promise.resolve({ success: true, data: { tools: ["bash"] } });
         case "get_all_tools":
-        case "refresh_tools":
-          return Promise.resolve({
-            success: true,
-            data: {
-              tools: [{ name: "read", description: "Read", parameters: {} }],
-            },
-          });
-        case "set_active_tools":
-          return Promise.resolve({
-            success: true,
-            data: { tools: payload.toolNames },
-          });
-        case "append_custom_entry":
-        case "send_custom_message":
-        case "send_user_message":
-          return Promise.resolve({ success: true, data: {} });
-        case "get_state":
-          return Promise.resolve({
-            success: true,
-            data: { sessionFile: "/tmp/s.jsonl" },
-          });
-        case "get_session_snapshot":
-          return Promise.resolve({ success: true, data: { entries: [] } });
+          return Promise.resolve({ success: true, data: { tools: [] } });
         default:
           return Promise.resolve({ success: true, data: {} });
       }
@@ -190,54 +159,18 @@ test("rpc local extensions use daemon-backed tools and message core actions", as
     subscribe() {
       return () => {};
     },
-    abort() {
-      return Promise.resolve();
-    },
     isConnected() {
       return true;
-    },
-    connect() {
-      return Promise.resolve();
-    },
-    disconnect() {
-      return Promise.resolve();
     },
   });
   session.settingsManager = SettingsManager.create(dir, agentDir);
 
   await loadRpcLocalExtensions(session, false, { cwd: dir, agentDir });
-  await session.refreshTools();
   await wait(20);
 
-  assert.deepEqual(
-    sent.filter((payload) => payload.type === "append_custom_entry").at(-1),
-    {
-      type: "append_custom_entry",
-      customType: "tools-seen",
-      data: { active: ["bash"], all: ["read"] },
-    },
-  );
-  assert.deepEqual(
-    sent.find((payload) => payload.type === "set_active_tools"),
-    { type: "set_active_tools", toolNames: ["read"] },
-  );
-  assert.deepEqual(
-    sent.find((payload) => payload.type === "send_custom_message"),
-    {
-      type: "send_custom_message",
-      message: { customType: "notice", content: "hello" },
-      options: { triggerTurn: false },
-    },
-  );
-  assert.deepEqual(
-    sent.find((payload) => payload.type === "send_user_message"),
-    {
-      type: "send_user_message",
-      content: [{ type: "text", text: "hi" }],
-      options: { deliverAs: "followUp" },
-      requestTag: sent.find((payload) => payload.type === "send_user_message")
-        ?.requestTag,
-    },
+  assert.equal(
+    sent.some((payload) => payload.type === "append_custom_entry"),
+    false,
   );
 });
 
@@ -265,7 +198,7 @@ test("rpc local extensions preserve all CLI resource path options", () => {
   );
 });
 
-test("rpc local extensions emit shutdown before reload", async () => {
+test("rpc local extensions invalidate on reload without emitting lifecycle events", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-shutdown-"));
   const agentDir = path.join(dir, "agent");
   const extensionPath = path.join(dir, "shutdown-extension.ts");
@@ -288,7 +221,6 @@ test("rpc local extensions emit shutdown before reload", async () => {
     send(payload) {
       sent.push(payload);
       switch (payload.type) {
-        case "append_custom_entry":
         case "get_active_tools":
         case "get_all_tools":
           return Promise.resolve({ success: true, data: { tools: [] } });
@@ -325,18 +257,14 @@ test("rpc local extensions emit shutdown before reload", async () => {
 
   await loadRpcLocalExtensions(session, false, { cwd: dir, agentDir });
   await wait(20);
+  const runner = session.extensionRunner;
   await session.reload();
   await wait(20);
 
-  assert.deepEqual(
-    sent
-      .filter((payload) => payload.type === "append_custom_entry")
-      .map((payload) => payload.data),
-    [
-      { type: "start", reason: "startup" },
-      { type: "shutdown", reason: "reload" },
-      { type: "start", reason: "reload" },
-    ],
+  assert.notEqual(session.extensionRunner, runner);
+  assert.equal(
+    sent.some((payload) => payload.type === "append_custom_entry"),
+    false,
   );
 });
 

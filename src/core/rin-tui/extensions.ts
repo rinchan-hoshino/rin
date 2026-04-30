@@ -128,7 +128,7 @@ export function getRpcLocalExtensionOptions(target: any): TuiResourceOptions {
 
 export async function loadRpcLocalExtensions(
   target: any,
-  forceReload: boolean,
+  _forceReload: boolean,
   runtimeProfile: { cwd: string; agentDir: string },
 ) {
   const codingAgentModule: any = await loadRinCodingAgent();
@@ -187,10 +187,4 @@ export async function loadRpcLocalExtensions(
     runner.onError(target.extensionBindings.onError);
 
   target.extensionRunner = runner;
-  if (forceReload || result.extensions.length > 0) {
-    await runner.emit({
-      type: "session_start",
-      reason: forceReload ? "reload" : "startup",
-    });
-  }
 }
