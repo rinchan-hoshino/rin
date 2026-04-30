@@ -187,7 +187,7 @@ test("telegram adapter sends sticker media without dropping following text", asy
   });
 });
 
-test("onebot adapter strips markdown formatting instead of exposing raw markdown", async () => {
+test("onebot adapter degrades markdown formatting instead of exposing raw markdown", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
@@ -203,12 +203,17 @@ test("onebot adapter strips markdown formatting instead of exposing raw markdown
     };
 
     const result = await app.bots[0].sendMessage("private:2", [
-      h.markdown("**bold** [docs](https://example.com)"),
+      h.markdown(
+        "**bold** [docs](https://example.com)\n- one\n1. first\n> quoted",
+      ),
     ]);
 
     assert.deepEqual(result, ["m1"]);
     assert.equal(calls[0].action, "send_private_msg");
-    assert.equal(calls[0].params.message, "bold docs");
+    assert.equal(
+      calls[0].params.message,
+      "bold docs\n- one\n1. first\n> quoted",
+    );
   });
 });
 

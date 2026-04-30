@@ -82,9 +82,9 @@ export function stripMarkdownFormatting(text: string) {
   });
   next = next.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
   next = next.replace(/^\s{0,3}#{1,6}\s+/gm, "");
-  next = next.replace(/^\s{0,3}>\s?/gm, "");
+  next = next.replace(/^\s{0,3}>\s?/gm, "> ");
   next = next.replace(/^\s*[-*+]\s+/gm, "- ");
-  next = next.replace(/^\s*\d+[.)]\s+/gm, "");
+  next = next.replace(/^\s*(\d+)[.)]\s+/gm, "$1. ");
   next = next.replace(/\*\*([^*\n]+)\*\*/g, "$1");
   next = next.replace(/(?<!\w)__([^_\n]+)__(?!\w)/g, "$1");
   next = next.replace(/\*([^*\n]+)\*/g, "$1");

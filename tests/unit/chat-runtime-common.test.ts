@@ -56,6 +56,14 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
     "bold link\nimage: cat.png",
   );
   assert.equal(
+    chatRuntimeCommon.renderPlainTextFromNodes([
+      chatRuntimeCommon.normalizeNode("markdown", {
+        content: "- one\n* two\n+ three\n1. first\n2) second\n> quoted",
+      }),
+    ]),
+    "- one\n- two\n- three\n1. first\n2. second\n> quoted",
+  );
+  assert.equal(
     chatRuntimeCommon.renderPlainTextFromNodes(
       [
         chatRuntimeCommon.normalizeNode("markdown", {
