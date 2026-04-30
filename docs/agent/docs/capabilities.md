@@ -50,6 +50,10 @@ Rin separates session history memory from self-improvement state. As an agent, y
 - before saving a new self-improve prompt, search first and avoid creating duplicates when possible
 - reusable procedures, checklists, and operating playbooks belong in skills rather than prompts
 
+## Non-interactive CLI
+
+Use Pi-style `rin -p` or `rin --mode json` for isolated, scriptable one-shot agent turns from `bash`, including optional model/thinking selection and `--chat-key` delivery. Read `~/.rin/docs/rin/docs/non-interactive-cli.md` before building automation around it.
+
 ## Scheduled tasks
 
 Rin provides scheduled task support. As an agent, you should know that:

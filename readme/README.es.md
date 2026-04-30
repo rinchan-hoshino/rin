@@ -54,7 +54,7 @@ Comprueba el estado si hace falta:
 rin doctor
 ```
 
-El instalador te advertirá sobre los límites de seguridad y el posible uso adicional de tokens. Ese coste extra puede venir de la inicialización, el procesamiento de memoria, los resúmenes, los subagentes, las tareas programadas y la búsqueda web.
+El instalador te advertirá sobre los límites de seguridad y el posible uso adicional de tokens. Ese coste extra puede venir de la inicialización, el procesamiento de memoria, los resúmenes, las ejecuciones no interactivas de `rin -p` / `rin --mode json`, las tareas programadas y la búsqueda web.
 
 ## Qué puedes pedirle a Rin
 
@@ -89,7 +89,7 @@ Rin ya trae conectadas varias funciones importantes:
 - tareas programadas y recordatorios
 - búsqueda web en vivo
 - cobertura de puente de chat para Telegram, OneBot, Discord, Kook, QQ, Lark, Mail, WeChat Official, WeCom, DingTalk, Matrix, WhatsApp, LINE, Slack y Zulip
-- subagentes para delegar trabajo
+- `rin -p` / `rin --mode json` no interactivo para delegar trabajo y ejecutar turnos de agente programables
 
 ## Cuándo usar `rin --std`
 

@@ -6,6 +6,7 @@ import { runDoctor } from "./doctor.js";
 import { launchDefaultRin } from "./launch.js";
 import { runGui } from "../rin-gui/main.js";
 import { runMemoryIndex, runMemoryIndexInternal } from "./memory-index.js";
+import { runNonInteractive, shouldRunNonInteractive } from "./run.js";
 import { runStatus, runStatusInternal } from "./status.js";
 import {
   hasSubcommandHelpFlag,
@@ -67,6 +68,16 @@ function createCli() {
     .option("--git", "Use the git release channel")
     .option("--branch <name>", "Explicit git branch selector")
     .option("--version <value>", "Explicit stable version or git ref selector")
+    .option("-p, --print", "Non-interactive mode: process prompt and exit")
+    .option("--mode <mode>", "Output mode: text (default) or json")
+    .option("--provider <name>", "Provider name for non-interactive mode")
+    .option("--model <provider/model>", "Model for non-interactive mode")
+    .option("--thinking <level>", "Thinking level for non-interactive mode")
+    .option(
+      "--chat-key <chatKey>",
+      "Deliver non-interactive final answer to a chat",
+    )
+    .option("--bind-chat-session", "Use the chat's normal conversation session")
     .help();
 
   for (const [name, description] of RIN_COMMANDS) {
@@ -108,15 +119,26 @@ export async function startRinCli() {
     return;
   }
 
+  if (
+    rawArgv.some((arg) => arg === "--help" || arg === "-h") &&
+    shouldRunNonInteractive(rawArgv, true)
+  ) {
+    await runNonInteractive(resolveParsedArgs("", {}, rawArgv), rawArgv);
+    return;
+  }
+
   const cli = createCli();
   const parsedArgv = cli.parse(process.argv, { run: false });
+  const command = parseCommandName(safeString(cli.matchedCommandName).trim());
+  const parsed = resolveParsedArgs(command, parsedArgv.options, rawArgv);
   if (parsedArgv.options.help) {
     cli.outputHelp();
     return;
   }
 
-  const command = parseCommandName(safeString(cli.matchedCommandName).trim());
-  const parsed = resolveParsedArgs(command, parsedArgv.options, rawArgv);
+  if (!command && shouldRunNonInteractive(rawArgv)) {
+    return await runNonInteractive(parsed, rawArgv);
+  }
 
   if (parsed.command === "update") return await runUpdate(parsed);
   if (parsed.command === "start") return await runStart(parsed);

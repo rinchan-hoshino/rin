@@ -54,7 +54,7 @@ rin
 rin doctor
 ```
 
-インストーラーはセキュリティ境界と追加トークン消費の可能性を警告します。初期設定、メモリ処理、要約、subagent、定期タスク、Web 検索などで追加コストが発生することがあります。
+インストーラーはセキュリティ境界と追加トークン消費の可能性を警告します。初期設定、メモリ処理、要約、非対話 `rin -p` / `rin --mode json`、定期タスク、Web 検索などで追加コストが発生することがあります。
 
 ## Rin に頼めること
 
@@ -89,7 +89,7 @@ Rin には次の機能が最初から入っています。
 - 定期タスクとリマインダー
 - ライブ Web 検索
 - Telegram、OneBot、Discord、Kook、QQ、Lark、Mail、WeChat Official、WeCom、DingTalk、Matrix、WhatsApp、LINE、Slack、Zulip 向けチャットブリッジ対応
-- 作業を委譲する subagent
+- 作業委譲とスクリプト化された agent ターン向けの非対話 `rin -p` / `rin --mode json`
 
 ## `rin --std` を使う場面
 

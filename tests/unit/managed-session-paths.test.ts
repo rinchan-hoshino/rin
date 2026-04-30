@@ -34,8 +34,11 @@ test("managed session paths normalize leaves into dedicated directories", () => 
     path.join(agentDir, "sessions", "managed", "task"),
   );
   assert.equal(
-    managedPaths.getManagedSubagentSessionDir(agentDir),
-    path.join(agentDir, "sessions", "managed", "subagent"),
+    managedPaths.getManagedSessionDir(
+      agentDir,
+      managedPaths.MANAGED_CLI_SESSION_LEAF,
+    ),
+    path.join(agentDir, "sessions", "managed", "cli"),
   );
 });
 

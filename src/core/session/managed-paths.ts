@@ -9,7 +9,7 @@ const HOME_DIR = os.homedir();
 
 export const MANAGED_CHAT_SESSION_LEAF = "chat";
 export const MANAGED_TASK_SESSION_LEAF = "task";
-export const MANAGED_SUBAGENT_SESSION_LEAF = "subagent";
+export const MANAGED_CLI_SESSION_LEAF = "cli";
 
 function sanitizeManagedSessionBasename(value: unknown, fallback: string) {
   const normalized = safeString(value)
@@ -34,10 +34,6 @@ export function getManagedSessionDir(agentDir: string, leaf: unknown) {
   );
 }
 
-export function getManagedSubagentSessionDir(agentDir: string) {
-  return getManagedSessionDir(agentDir, MANAGED_SUBAGENT_SESSION_LEAF);
-}
-
 export function getManagedTaskSessionDir(agentDir: string) {
   return getManagedSessionDir(agentDir, MANAGED_TASK_SESSION_LEAF);
 }
@@ -58,8 +54,8 @@ export function getManagedSessionSearchDirs(agentDir: string) {
   return [
     getRuntimeSessionDir(HOME_DIR, agentDir),
     getManagedChatSessionDir(agentDir),
-    getManagedSubagentSessionDir(agentDir),
     getManagedTaskSessionDir(agentDir),
+    getManagedSessionDir(agentDir, MANAGED_CLI_SESSION_LEAF),
   ];
 }
 

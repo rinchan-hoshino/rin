@@ -6,7 +6,7 @@ Rin's agent working directory is usually `~/.rin/`.
 
 - `auth.json`: model authentication data
 - `settings.json`: Rin / pi settings
-- `sessions/`: user-facing session data; direct TUI sessions live at this root, while Rin-managed chat, task, and subagent sessions live under `sessions/managed/<kind>/`
+- `sessions/`: user-facing session data; direct TUI sessions live at this root, while Rin-managed chat, task, and CLI sessions live under `sessions/managed/<kind>/`
 - `memory/`: markdown-backed memory data
 - `routines/`: routine prompts and task files
 - `data/`: daemon, index, chat bridge, web-search, and other runtime state
