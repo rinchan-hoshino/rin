@@ -124,10 +124,16 @@ test("syncInstalledDocs copies upstream mirrors into installed doc locations", a
     path.join(tempBaseDir, "rin-install-dst-"),
   );
 
-  await fs.mkdir(path.join(tempRoot, "docs", "rin"), { recursive: true });
+  await fs.mkdir(path.join(tempRoot, "docs", "agent"), { recursive: true });
   await fs.writeFile(
-    path.join(tempRoot, "docs", "rin", "README.md"),
-    "# Rin docs\n",
+    path.join(tempRoot, "docs", "agent", "README.md"),
+    "# Rin agent docs\n",
+    "utf8",
+  );
+  await fs.mkdir(path.join(tempRoot, "docs", "release"), { recursive: true });
+  await fs.writeFile(
+    path.join(tempRoot, "docs", "release", "CHANGELOG.md"),
+    "# Rin changelog\n",
     "utf8",
   );
   await fs.mkdir(path.join(tempRoot, "upstream", "pi", "docs"), {
@@ -196,6 +202,8 @@ test("syncInstalledDocs copies upstream mirrors into installed doc locations", a
   );
 
   assert.equal(installedDocs.pi.length, 5);
+  await fs.access(path.join(installDir, "docs", "rin", "README.md"));
+  await fs.access(path.join(installDir, "docs", "release", "CHANGELOG.md"));
   await fs.access(path.join(installDir, "docs", "pi", "README.md"));
   await fs.access(path.join(installDir, "docs", "pi", "CHANGELOG.md"));
   await fs.access(path.join(installDir, "docs", "pi", "docs", "models.md"));

@@ -11,8 +11,9 @@ Rin's agent working directory is usually `~/.rin/`.
 - `routines/`: routine prompts and task files
 - `data/`: daemon, index, chat bridge, web-search, and other runtime state
   - custom chat bridge / Chat adapter packages, when used, are installed here via the generated runtime `package.json`
-- `docs/rin/`: Rin-specific user docs for the agent
-- `docs/pi/`: installed copies of upstream pi docs
+- `docs/rin/`: Rin-specific agent docs
+- `docs/pi/`: installed copies of upstream Pi docs
+- `docs/release/`: release-note metadata used by `/changelog`
 - `app/current/`: the currently active runtime
 - `app/releases/<timestamp>/`: runtime release directories
 
@@ -98,5 +99,7 @@ Avoid baking a specific `app/releases/<timestamp>/...` path into long-lived conf
 
 ## Documentation install policy
 
-Rin-specific docs are installed into the stable `docs/rin/` path rather than a release-specific directory.
+Rin-specific agent docs are installed into the stable `docs/rin/` path rather than a release-specific directory.
 This lets the system prompt point to stable documentation paths across updates.
+
+Release-note metadata is installed separately under `docs/release/` so agent guidance does not mix with changelog content.

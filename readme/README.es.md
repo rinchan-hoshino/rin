@@ -99,12 +99,13 @@ Lo normal es usar `rin`.
 
 ## Documentación
 
-Si quieres más detalles, empieza aquí:
+Este README es la documentación para usuarios. Las traducciones viven en `readme/README.*.md` y deben mantenerse alineadas con la versión inglesa; actualízalas en el mismo cambio cuando cambie contenido visible para usuarios.
 
-- [`docs/rin/README.md`](../docs/rin/README.md)
-- [`docs/rin/docs/capabilities.md`](../docs/rin/docs/capabilities.md)
-- [`docs/rin/docs/runtime-layout.md`](../docs/rin/docs/runtime-layout.md)
-- [`docs/rin/docs/builtin-extensions.md`](../docs/rin/docs/builtin-extensions.md)
+La documentación interna está separada:
+
+- La guía de runtime para agentes vive en `docs/agent/` y se instala en `agentDir/docs/rin/`.
+- La documentación técnica para desarrolladores vive en `docs/developer/`.
+- Los metadatos de notas de versión usados por `/changelog` y los flujos de publicación viven en `docs/release/CHANGELOG.md`.
 
 ## Versión corta
 

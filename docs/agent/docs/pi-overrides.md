@@ -4,11 +4,11 @@ This document explains how to interpret upstream pi documentation when operating
 
 ## Rule of precedence
 
-When Rin docs and upstream pi docs overlap:
+When Rin docs and upstream Pi docs overlap on Rin-specific behavior:
 
 - prefer Rin docs first
-- use upstream pi docs as the base reference only when Rin docs do not override the topic
-- if there is any conflict, Rin docs take precedence
+- use upstream Pi docs as the base reference only when Rin docs do not override the topic
+- if there is any conflict about Rin behavior, Rin docs take precedence
 
 ## What changes in Rin
 

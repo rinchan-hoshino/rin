@@ -49,9 +49,9 @@ Expected status:
 
 ## Changelog and docs readiness
 
-- confirm `docs/rin/CHANGELOG.md` contains the release notes you want shipped in bootstrap docs
-- confirm `docs/rin/docs/release-trains.md` still matches the actual channel contract and cadence
-- confirm `docs/rin/docs/releasing.md` still matches the actual workflow behavior
+- confirm `docs/release/CHANGELOG.md` contains the release notes you want shipped in bootstrap docs
+- confirm `docs/developer/release-trains.md` still matches the actual channel contract and cadence
+- confirm `docs/developer/releasing.md` still matches the actual workflow behavior
 - confirm root `README.md` examples for install and update flags remain accurate
 
 ## First stable publish run

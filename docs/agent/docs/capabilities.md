@@ -145,7 +145,8 @@ As an agent, you should know that:
 
 Rin installs docs into stable locations:
 
-- `~/.rin/docs/rin/`: Rin-specific user docs
-- `~/.rin/docs/pi/`: installed copies of upstream pi docs
+- `~/.rin/docs/rin/`: Rin-specific agent docs
+- `~/.rin/docs/pi/`: installed copies of upstream Pi docs
+- `~/.rin/docs/release/`: release-note metadata used by `/changelog`
 
 Prefer these stable paths over specific `app/releases/<timestamp>/...` paths.

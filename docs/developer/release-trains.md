@@ -21,7 +21,7 @@ Rin uses a four-channel release model.
   - `scripts/bootstrap-entrypoint.sh`
   - `scripts/bootstrap-entrypoint.ps1`
   - `release-manifest.json`
-  - `docs/rin/CHANGELOG.md`
+  - `docs/release/CHANGELOG.md`
 
 ## User-facing rules
 
@@ -32,7 +32,7 @@ Rin uses a four-channel release model.
 - `--git` with no suffix means `main`
 - `--git <name>` means that branch or ref directly
 - `--branch` / `--version` remain supported as explicit selectors for direct stable/git resolution when needed
-- `/changelog` and bootstrap changelog docs read Rin-native notes from `docs/rin/CHANGELOG.md`; startup update checks use `release-manifest.json` and do not persist a separate last-seen version in settings
+- `/changelog` and bootstrap changelog docs read Rin-native notes from `docs/release/CHANGELOG.md`; startup update checks use `release-manifest.json` and do not persist a separate last-seen version in settings
 
 ## Cadence
 
@@ -69,6 +69,6 @@ That means the stable workflow publishes the beta candidate's exact pinned ref, 
 - `publish-beta.yml`: scheduled weekly beta cut from `main`
 - `publish-stable.yml`: scheduled weekly promotion of the current beta candidate to stable npm
 - `publish-hotfix.yml`: manual patch release from an explicit ref
-- `npm run release:changelog -- --version <x.y.z>`: verify `docs/rin/CHANGELOG.md` contains the target user-facing release heading; beta, stable, and hotfix workflows run this before publishing or updating release metadata
+- `npm run release:changelog -- --version <x.y.z>`: verify `docs/release/CHANGELOG.md` contains the target user-facing release heading; beta, stable, and hotfix workflows run this before publishing or updating release metadata
 - `npm run release:manifest -- --channel stable|beta|nightly ...`: local manifest maintenance helper
 - `npm run release:bootstrap -- --output <dir>`: export the `bootstrap` payload

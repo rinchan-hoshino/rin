@@ -424,7 +424,7 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       path.join("scripts", "bootstrap-entrypoint.sh"),
       path.join("scripts", "bootstrap-entrypoint.ps1"),
       "release-manifest.json",
-      path.join("docs", "rin", "CHANGELOG.md"),
+      path.join("docs", "release", "CHANGELOG.md"),
       "README.md",
     ]) {
       assert.equal(
