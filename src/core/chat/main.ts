@@ -71,6 +71,7 @@ import { listChatRuntimeAdapterEntries } from "./runtime-config.js";
 import { composeChatKey, loadIdentity, trustOf } from "./support.js";
 import { sendOutboxPayload } from "./transport.js";
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
+import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
 import { isTransientChatRuntimeError } from "./runtime-errors.js";
 
@@ -306,7 +307,9 @@ export async function startChatBridge(
       void controller.housekeep().catch(() => {});
     }
   }, TYPING_POLL_INTERVAL_MS);
-  const commandRows = getChatCommandRows();
+  const commandRows = getChatCommandRows(
+    readConfiguredLanguageFromSettings(runtime.agentDir),
+  );
   const frontendClientFactory = options.frontendClientFactory;
   const getIdentity = () => loadIdentity(dataDir);
   const getController = (chatKey: string) => {

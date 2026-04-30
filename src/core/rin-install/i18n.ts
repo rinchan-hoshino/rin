@@ -38,8 +38,21 @@ type InstallerLanguagePromptCopy = {
   invalidLanguageTag: string;
 };
 
+type ChatCommandDescriptions = Record<
+  | "help"
+  | "abort"
+  | "new"
+  | "compact"
+  | "reload"
+  | "status"
+  | "session"
+  | "model",
+  string
+>;
+
 type InstallerDisplayCopy = {
   languagePrompt: InstallerLanguagePromptCopy;
+  chatCommandDescriptions: ChatCommandDescriptions;
   installerCancelled: string;
   introTitle: string;
   safetyBoundaryTitle: string;
@@ -226,6 +239,16 @@ const INSTALLER_DISPLAY_COPY = {
       customHint: "Enter any BCP 47 language tag",
       textMessage: "Enter language tag (BCP 47)",
       invalidLanguageTag: "Use a valid BCP 47 language tag",
+    },
+    chatCommandDescriptions: {
+      help: "Show available commands",
+      abort: "Abort current operation",
+      new: "Start a new session",
+      compact: "Compact the current session",
+      reload: "Reload extensions, prompts, skills, and themes",
+      status: "Show current chat processing status",
+      session: "Show current session status",
+      model: "Show or change the current model",
     },
     installerCancelled: "Installer cancelled.",
     introTitle: "Rin Installer",
@@ -528,6 +551,16 @@ const INSTALLER_DISPLAY_COPY = {
       customHint: "输入任意 BCP 47 语言标签",
       textMessage: "输入语言标签（BCP 47）",
       invalidLanguageTag: "请输入有效的 BCP 47 语言标签",
+    },
+    chatCommandDescriptions: {
+      help: "显示可用命令",
+      abort: "中止当前操作",
+      new: "开始新会话",
+      compact: "压缩当前会话",
+      reload: "重新加载扩展、提示词、技能和主题",
+      status: "显示当前聊天处理状态",
+      session: "显示当前会话状态",
+      model: "显示或切换当前模型",
     },
     installerCancelled: "安装器已取消。",
     introTitle: "Rin 安装器",
@@ -849,7 +882,7 @@ export async function promptInstallerLanguage(
   );
 }
 
-export function createInstallerI18n(languageTag = "en") {
+export function createRinI18n(languageTag = "en") {
   const language = normalizeLanguageTag(languageTag, "en");
   const displayLanguage = resolveInstallerDisplayLanguage(language);
   const copy = INSTALLER_DISPLAY_COPY[displayLanguage];
@@ -860,4 +893,8 @@ export function createInstallerI18n(languageTag = "en") {
     isChinese: displayLanguage === "zh-CN",
     ...copy,
   };
+}
+
+export function createInstallerI18n(languageTag = "en") {
+  return createRinI18n(languageTag);
 }

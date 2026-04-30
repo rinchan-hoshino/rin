@@ -8,6 +8,7 @@ import {
   moveFileToDir,
   removeFileIfExists,
 } from "../platform/fs.js";
+import { createRinI18n } from "../i18n.js";
 import { safeString } from "./chat-helpers.js";
 import { sendOutboxPayload } from "./transport.js";
 
@@ -16,22 +17,23 @@ export type ChatCommandRow = {
   description?: string;
 };
 
-const KOISHI_CHAT_COMMAND_ROWS: readonly ChatCommandRow[] = [
-  { name: "help", description: "Show available commands" },
-  { name: "abort", description: "Abort current operation" },
-  { name: "new", description: "Start a new session" },
-  { name: "compact", description: "Compact the current session" },
-  {
-    name: "reload",
-    description: "Reload extensions, prompts, skills, and themes",
-  },
-  { name: "status", description: "Show current chat processing status" },
-  { name: "session", description: "Show current session status" },
-  { name: "model", description: "Show or change the current model" },
-];
+const CHAT_COMMAND_NAMES = [
+  "help",
+  "abort",
+  "new",
+  "compact",
+  "reload",
+  "status",
+  "session",
+  "model",
+] as const;
 
-export function getChatCommandRows(): ChatCommandRow[] {
-  return KOISHI_CHAT_COMMAND_ROWS.map((item) => ({ ...item }));
+export function getChatCommandRows(languageTag = "en"): ChatCommandRow[] {
+  const descriptions = createRinI18n(languageTag).chatCommandDescriptions;
+  return CHAT_COMMAND_NAMES.map((name) => ({
+    name,
+    description: descriptions[name],
+  }));
 }
 
 function normalizeTelegramCommandName(value: unknown) {

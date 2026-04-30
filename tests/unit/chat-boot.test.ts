@@ -33,6 +33,47 @@ async function withTempDir(fn) {
   }
 }
 
+test("chat boot localizes command descriptions for Chinese runtimes", () => {
+  const rows = boot.getChatCommandRows("zh-CN");
+  assert.deepEqual(
+    rows.map((row) => row.description),
+    [
+      "\u663e\u793a\u53ef\u7528\u547d\u4ee4",
+      "\u4e2d\u6b62\u5f53\u524d\u64cd\u4f5c",
+      "\u5f00\u59cb\u65b0\u4f1a\u8bdd",
+      "\u538b\u7f29\u5f53\u524d\u4f1a\u8bdd",
+      "\u91cd\u65b0\u52a0\u8f7d\u6269\u5c55\u3001\u63d0\u793a\u8bcd\u3001\u6280\u80fd\u548c\u4e3b\u9898",
+      "\u663e\u793a\u5f53\u524d\u804a\u5929\u5904\u7406\u72b6\u6001",
+      "\u663e\u793a\u5f53\u524d\u4f1a\u8bdd\u72b6\u6001",
+      "\u663e\u793a\u6216\u5207\u6362\u5f53\u524d\u6a21\u578b",
+    ],
+  );
+  assert.deepEqual(boot.buildTelegramCommandPayload(rows), [
+    { command: "help", description: "\u663e\u793a\u53ef\u7528\u547d\u4ee4" },
+    { command: "abort", description: "\u4e2d\u6b62\u5f53\u524d\u64cd\u4f5c" },
+    { command: "new", description: "\u5f00\u59cb\u65b0\u4f1a\u8bdd" },
+    { command: "compact", description: "\u538b\u7f29\u5f53\u524d\u4f1a\u8bdd" },
+    {
+      command: "reload",
+      description:
+        "\u91cd\u65b0\u52a0\u8f7d\u6269\u5c55\u3001\u63d0\u793a\u8bcd\u3001\u6280\u80fd\u548c\u4e3b\u9898",
+    },
+    {
+      command: "status",
+      description:
+        "\u663e\u793a\u5f53\u524d\u804a\u5929\u5904\u7406\u72b6\u6001",
+    },
+    {
+      command: "session",
+      description: "\u663e\u793a\u5f53\u524d\u4f1a\u8bdd\u72b6\u6001",
+    },
+    {
+      command: "model",
+      description: "\u663e\u793a\u6216\u5207\u6362\u5f53\u524d\u6a21\u578b",
+    },
+  ]);
+});
+
 test("chat boot clears common telegram scopes before syncing default commands", async () => {
   const deletes = [];
   const sets = [];
