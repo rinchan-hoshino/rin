@@ -30,10 +30,12 @@
     "release:bootstrap": "node scripts/release/export-bootstrap-branch.mjs",
     "prepare": "node scripts/install-git-hooks.mjs",
     "test": "npm run test:unit && npm run test:e2e",
-    "test:release": "node --import tsx --test tests/unit/installer-modules.test.ts tests/unit/rin-cli.test.ts tests/unit/rpc-and-shared.test.ts tests/e2e/bootstrap-entrypoint.test.ts tests/unit/release.test.ts tests/e2e/release-scripts.test.ts",
+    "test:release": "node --import tsx --test tests/unit/installer-modules.test.ts tests/unit/rin-cli.test.ts tests/unit/rpc-and-shared.test.ts tests/e2e/bootstrap-entrypoint.test.ts tests/e2e/install-to-tui-user-flow.test.ts tests/unit/release.test.ts tests/e2e/release-scripts.test.ts",
     "test:unit": "npm run build && node --import tsx --test $(find tests/unit -name '*.test.ts' -print | sort)",
     "test:e2e": "npm run build && node --import tsx --test $(find tests/e2e -name '*.test.ts' -print | sort)",
     "test:interactive": "npm run build && node --import tsx --test $(find tests/interactive -name '*.test.ts' -print | sort)",
+    "test:manual:install-tui": "npm run build && node --import tsx tests/interactive/install-to-tui-manual.ts",
+    "test:manual:install-tui:scripted": "npm run build && node --import tsx tests/interactive/install-to-tui-manual.ts --scripted",
     "lint": "eslint . --ext .ts --max-warnings 0",
     "lint:fix": "eslint . --ext .ts --fix"
   },
