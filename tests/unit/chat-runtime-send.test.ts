@@ -237,6 +237,48 @@ test("onebot adapter renders structured at as native CQ mention", async () => {
   });
 });
 
+test("onebot adapter recreates the outbound media cache directory before sending local images", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { selfId: "1", url: "ws://127.0.0.1:9" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const imagePath = path.join(agentDir, "avatar.png");
+    const cacheDir = path.join(
+      agentDir,
+      "data",
+      "chat-runtime-cache",
+      "onebot",
+    );
+    const calls: Array<{ action: string; params: any }> = [];
+    await fs.writeFile(imagePath, Buffer.from("png"));
+    await fs.rm(cacheDir, { recursive: true, force: true });
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      return { message_id: "m1" };
+    };
+
+    const result = await app.bots[0].sendMessage("private:2", [
+      h.image(imagePath),
+    ]);
+
+    assert.deepEqual(result, ["m1"]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].action, "send_private_msg");
+    assert.match(
+      calls[0].params.message,
+      /^\[CQ:image,file=file:\/\/.*chat-runtime-cache\/onebot\/.*avatar\.png\]$/,
+    );
+    const cachedPath = calls[0].params.message
+      .replace(/^\[CQ:image,file=file:\/\//, "")
+      .replace(/\]$/, "");
+    await assert.doesNotReject(fs.stat(decodeURIComponent(cachedPath)));
+  });
+});
+
 test("discord adapter splits oversized text sends and keeps attachments on the first chunk", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
