@@ -95,20 +95,34 @@ function applyExtensionFlagValues(
   }
 }
 
-function getExtensionOptions(target: any): TuiResourceOptions {
+function getResourceOptionArray(target: any, key: string, legacyKey?: string) {
+  const optionValue = target.extensionOptions?.[key];
+  if (Array.isArray(optionValue)) return optionValue;
+  if (legacyKey && Array.isArray(target[legacyKey])) return target[legacyKey];
+  return [];
+}
+
+export function getRpcLocalExtensionOptions(target: any): TuiResourceOptions {
   return {
-    additionalExtensionPaths: Array.isArray(
-      target.extensionOptions?.additionalExtensionPaths,
-    )
-      ? target.extensionOptions.additionalExtensionPaths
-      : Array.isArray(target.additionalExtensionPaths)
-        ? target.additionalExtensionPaths
-        : [],
+    additionalExtensionPaths: getResourceOptionArray(
+      target,
+      "additionalExtensionPaths",
+      "additionalExtensionPaths",
+    ),
     noExtensions: Boolean(target.extensionOptions?.noExtensions),
     extensionFlagValues: target.extensionOptions?.extensionFlagValues,
-    additionalSkillPaths: [],
-    additionalPromptTemplatePaths: [],
-    additionalThemePaths: [],
+    additionalSkillPaths: getResourceOptionArray(
+      target,
+      "additionalSkillPaths",
+    ),
+    additionalPromptTemplatePaths: getResourceOptionArray(
+      target,
+      "additionalPromptTemplatePaths",
+    ),
+    additionalThemePaths: getResourceOptionArray(
+      target,
+      "additionalThemePaths",
+    ),
   };
 }
 
@@ -122,13 +136,17 @@ export async function loadRpcLocalExtensions(
     codingAgentModule;
 
   const eventBus = createEventBus();
-  const extensionOptions = getExtensionOptions(target);
+  const extensionOptions = getRpcLocalExtensionOptions(target);
   const resourceLoader = new DefaultResourceLoader({
     cwd: runtimeProfile.cwd,
     agentDir: runtimeProfile.agentDir,
     settingsManager: target.settingsManager,
     eventBus,
     additionalExtensionPaths: extensionOptions.additionalExtensionPaths,
+    additionalSkillPaths: extensionOptions.additionalSkillPaths,
+    additionalPromptTemplatePaths:
+      extensionOptions.additionalPromptTemplatePaths,
+    additionalThemePaths: extensionOptions.additionalThemePaths,
     noExtensions: extensionOptions.noExtensions,
   });
   await resourceLoader.reload();

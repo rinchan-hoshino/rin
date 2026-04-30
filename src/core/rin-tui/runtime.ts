@@ -750,8 +750,14 @@ export class RpcInteractiveSession {
         };
       }
     }
+    const frontendCommand = this.getFrontendExtensionCommand(commandLine);
     await this.ensureRemoteSession();
     const data = await this.call("run_command", { commandLine });
+    if (data?.handled === false && frontendCommand) {
+      await this.executeFrontendExtensionCommand(commandLine, frontendCommand);
+      await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
+      return { handled: true };
+    }
     await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
     return data;
   }
@@ -1367,6 +1373,27 @@ export class RpcInteractiveSession {
 
   private isFrontendExtensionCommand(text: string) {
     return Boolean(this.getFrontendExtensionCommand(text));
+  }
+
+  private async executeFrontendExtensionCommand(text: string, command: any) {
+    const extensionRunner = this.extensionRunner;
+    if (!extensionRunner?.createCommandContext) return false;
+    const spaceIndex = text.indexOf(" ");
+    const commandName =
+      spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+    const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
+    const ctx = extensionRunner.createCommandContext();
+    try {
+      await command.handler(args, ctx);
+    } catch (error) {
+      extensionRunner.emitError?.({
+        extensionPath: `command:${commandName}`,
+        event: "command",
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    }
+    return true;
   }
 
   private async ensureRemoteSession() {

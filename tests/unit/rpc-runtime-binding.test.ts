@@ -19,7 +19,7 @@ const { createModelRegistry } = await import(
     path.join(rootDir, "dist", "core", "rin-tui", "rpc-model-registry.js"),
   ).href
 );
-const { loadRpcLocalExtensions } = await import(
+const { getRpcLocalExtensionOptions, loadRpcLocalExtensions } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "extensions.js"))
     .href
 );
@@ -60,6 +60,74 @@ test("rpc local extensions load settings-configured pi extensions", async () => 
   assert.equal(
     target.extensionRunner.getCommand("hello")?.description,
     "hello command",
+  );
+});
+
+test("rpc local extension commands fall back locally when daemon lacks them", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-command-"));
+  const agentDir = path.join(dir, "agent");
+  const extensionPath = path.join(dir, "command-extension.ts");
+  await fs.mkdir(agentDir, { recursive: true });
+  await fs.writeFile(
+    extensionPath,
+    `export default function(pi: any) {
+      pi.registerCommand("local", {
+        description: "local command",
+        handler: async (args: string) => pi.appendEntry("local-command", { args }),
+      });
+    }\n`,
+  );
+  await fs.writeFile(
+    path.join(agentDir, "settings.json"),
+    JSON.stringify({ extensions: [extensionPath] }),
+  );
+
+  const sent = [];
+  const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      switch (payload.type) {
+        case "run_command":
+          return Promise.resolve({ success: true, data: { handled: false } });
+        case "append_custom_entry":
+        case "get_active_tools":
+        case "get_all_tools":
+          return Promise.resolve({ success: true, data: { tools: [] } });
+        case "get_state":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl" },
+          });
+        case "get_session_snapshot":
+          return Promise.resolve({ success: true, data: { entries: [] } });
+        default:
+          return Promise.resolve({ success: true, data: {} });
+      }
+    },
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+  });
+  session.settingsManager = SettingsManager.create(dir, agentDir);
+
+  await loadRpcLocalExtensions(session, false, { cwd: dir, agentDir });
+  await session.prompt("/local hello world");
+
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "run_command"),
+    { type: "run_command", commandLine: "/local hello world" },
+  );
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "append_custom_entry"),
+    {
+      type: "append_custom_entry",
+      customType: "local-command",
+      data: { args: "hello world" },
+    },
   );
 });
 
@@ -173,6 +241,30 @@ test("rpc local extensions use daemon-backed tools and message core actions", as
       options: { deliverAs: "followUp" },
       requestTag: sent.find((payload) => payload.type === "send_user_message")
         ?.requestTag,
+    },
+  );
+});
+
+test("rpc local extensions preserve all CLI resource path options", () => {
+  const extensionFlagValues = new Map([["flag", "value"]]);
+  assert.deepEqual(
+    getRpcLocalExtensionOptions({
+      extensionOptions: {
+        additionalExtensionPaths: ["/ext"],
+        additionalSkillPaths: ["/skill"],
+        additionalPromptTemplatePaths: ["/prompt"],
+        additionalThemePaths: ["/theme"],
+        noExtensions: true,
+        extensionFlagValues,
+      },
+    }),
+    {
+      additionalExtensionPaths: ["/ext"],
+      additionalSkillPaths: ["/skill"],
+      additionalPromptTemplatePaths: ["/prompt"],
+      additionalThemePaths: ["/theme"],
+      noExtensions: true,
+      extensionFlagValues,
     },
   );
 });
