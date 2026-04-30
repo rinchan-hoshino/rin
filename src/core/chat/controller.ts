@@ -131,6 +131,7 @@ export class ChatController {
   workingReactionTick = 0;
   lastWorkingReactionAt = 0;
   currentTurn: ChatTurnMeta | null = null;
+  backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatTextDelivery | null = null;
   awaitingTurnSettle = false;
   turnAbortRequested = false;
@@ -208,6 +209,7 @@ export class ChatController {
     this.lastActivityAt = Date.now();
     void this.clearWorkingReaction().catch(() => {});
     this.currentTurn = null;
+    this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
     this.turnAbortRequested = false;
@@ -231,6 +233,7 @@ export class ChatController {
     this.stagedDelivery = null;
     await this.clearWorkingReaction().catch(() => {});
     this.currentTurn = null;
+    this.backendAcceptedIncomingMessageId = "";
     this.saveState();
   }
 
@@ -250,6 +253,12 @@ export class ChatController {
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return false;
     return this.currentIncomingMessageId() === nextMessageId;
+  }
+
+  hasBackendAcceptedInboundMessage(messageId?: string) {
+    const nextMessageId = safeString(messageId || "").trim();
+    if (!nextMessageId) return false;
+    return this.backendAcceptedIncomingMessageId === nextMessageId;
   }
 
   hasActiveTurn() {
@@ -288,10 +297,12 @@ export class ChatController {
       replyToMessageId: nextReplyToMessageId,
       workingNoticeSent: false,
     };
+    this.backendAcceptedIncomingMessageId = "";
   }
 
   private clearCurrentTurn() {
     this.currentTurn = null;
+    this.backendAcceptedIncomingMessageId = "";
   }
 
   async clearWorkingReaction() {
@@ -931,15 +942,18 @@ export class ChatController {
           (error as any)?.message || error,
         ).trim();
         if (errorMessage === "chat_turn_aborted") {
-          this.markProcessedMessage(input.incomingMessageId);
+          const abortedSession = normalizeSessionRef(error);
+          this.markProcessedMessage(input.incomingMessageId, false);
           await this.clearWorkingReaction().catch(() => {});
           this.clearCurrentTurn();
           this.stagedDelivery = null;
           this.saveState();
           return {
             aborted: true,
-            sessionId: this.currentSessionId() || undefined,
-            sessionFile: this.currentSessionFile(),
+            sessionId:
+              abortedSession.sessionId || this.currentSessionId() || undefined,
+            sessionFile:
+              abortedSession.sessionFile || this.currentSessionFile(),
           };
         }
         if (
@@ -997,7 +1011,8 @@ export class ChatController {
         }
         return;
       case "turn_accepted":
-        this.markAcceptedMessage(this.currentIncomingMessageId());
+        this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
+        this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
         return;
       case "assistant_interim":
         await this.deliverAssistantInterim(event.text);

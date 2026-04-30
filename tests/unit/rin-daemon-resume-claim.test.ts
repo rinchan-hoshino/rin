@@ -382,6 +382,113 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
+test("daemon aborts the previous selected session when starting a new session before state sync", async () => {
+  const agentDir = await makeTempDir("rin-daemon-new-abort-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.js");
+  const logPath = path.join(agentDir, "commands.log");
+  await fs.writeFile(
+    workerPath,
+    `
+const fs = require("node:fs");
+const process = require("node:process");
+const logPath = ${JSON.stringify(logPath)};
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+function log(type) { fs.appendFileSync(logPath, process.pid + ":" + type + "\\n"); }
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    log(command.type);
+    if (command.type === "new_session") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false, sessionFile: "/tmp/session-" + process.pid + ".jsonl", sessionId: "session-" + process.pid } });
+      continue;
+    }
+    if (command.type === "prompt") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+      continue;
+    }
+    if (command.type === "abort") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+      continue;
+    }
+    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+  }
+});
+`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  try {
+    await waitForSocket(socketPath);
+    await withRpcConnection(socketPath, async (client) => {
+      const first = await client.request({ id: "1", type: "new_session" });
+      const prompt = await client.request({
+        id: "2",
+        type: "prompt",
+        message: "old turn",
+      });
+      const second = await client.request({ id: "3", type: "new_session" });
+
+      assert.equal(first.success, true);
+      assert.equal(prompt.success, true);
+      assert.equal(second.success, true);
+      assert.notEqual(second.data?.sessionFile, first.data?.sessionFile);
+
+      let lines = [];
+      for (let i = 0; i < 20; i += 1) {
+        lines = (await fs.readFile(logPath, "utf8"))
+          .trim()
+          .split("\n")
+          .filter(Boolean);
+        if (lines.some((line) => line.endsWith(":abort"))) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      const byPid = new Map();
+      for (const line of lines) {
+        const [pid, type] = line.split(":");
+        const list = byPid.get(pid) || [];
+        list.push(type);
+        byPid.set(pid, list);
+      }
+      const commandGroups = Array.from(byPid.values());
+      assert.equal(commandGroups.length, 2);
+      assert.equal(
+        commandGroups.some((commands) =>
+          ["new_session", "prompt", "abort"].every((type) =>
+            commands.includes(type),
+          ),
+        ),
+        true,
+      );
+      assert.equal(
+        commandGroups.some(
+          (commands) =>
+            commands.includes("new_session") &&
+            !commands.includes("prompt") &&
+            !commands.includes("abort"),
+        ),
+        true,
+      );
+    });
+  } finally {
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("daemon attaches a selected session without a frontend switch_session round-trip", async () => {
   const agentDir = await makeTempDir("rin-daemon-select-");
   const socketPath = path.join(agentDir, "daemon.sock");

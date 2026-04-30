@@ -268,6 +268,7 @@ test("runBuiltinCommand uses runtime for session replacement commands", async ()
   const calls = [];
   const runtime = {
     session: {
+      isStreaming: true,
       abort: async () => {
         calls.push(["abort"]);
       },
@@ -353,6 +354,7 @@ test("runBuiltinCommand uses runtime for session replacement commands", async ()
   assert.match(String(resultMissingModel.text || ""), /Usage: \/model/);
 
   assert.deepEqual(calls, [
+    ["abort"],
     ["abort"],
     ["newSession"],
     ["switchSession", "/tmp/sessions/abc.jsonl"],

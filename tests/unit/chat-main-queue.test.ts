@@ -395,6 +395,292 @@ test("chat main does not retry a queued prompt while the controller is already h
   }
 });
 
+test("chat main routes active-turn /new through the chatKey worker immediately", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      const promptTags = [];
+      const newSessionCalls = [];
+      let releasePromptStart;
+      const promptStartGate = new Promise((resolve) => {
+        releasePromptStart = resolve;
+      });
+      controllerMod.ChatController.prototype.connect = async function () {
+        if (this.session && this.client) return;
+        const controller = this;
+        this.client = { subscribe() {} };
+        this.session = {
+          isStreaming: false,
+          messages: [],
+          sessionManager: {
+            getSessionFile: () => "/tmp/active-new-chat.jsonl",
+            getSessionId: () => "active-new-session",
+            getSessionName: () => controller.chatKey,
+          },
+          ensureSessionReady: async () => ({
+            sessionFile: "/tmp/active-new-chat.jsonl",
+            sessionId: "active-new-session",
+          }),
+          prompt: async (_message, options = {}) => {
+            promptTags.push(options.requestTag || "");
+            controller.session.isStreaming = true;
+            await promptStartGate;
+            await controller.handleClientEvent({
+              type: "ui",
+              payload: {
+                type: "rpc_turn_event",
+                event: "start",
+                requestTag: options.requestTag,
+              },
+            });
+          },
+          newSession: async (options = {}) => {
+            newSessionCalls.push({
+              chatKey: controller.chatKey,
+              managedSessionLeaf: options.managedSessionLeaf || "",
+            });
+            controller.session.isStreaming = false;
+            await controller.handleClientEvent({
+              type: "ui",
+              payload: {
+                type: "rpc_turn_event",
+                event: "error",
+                requestTag: promptTags[0],
+                error: "chat_turn_aborted",
+                sessionId: "active-new-session",
+                sessionFile: "/tmp/active-new-chat.jsonl",
+              },
+            });
+            return true;
+          },
+          switchSession: async () => {},
+        };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-1"];
+        },
+        internal: {
+          async sendChatAction() {},
+        },
+      });
+
+      const makeMessage = (messageId, content) => ({
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId,
+        isDirect: true,
+        content,
+        stripped: { content },
+        elements: [h.createChatRuntimeH().text(content)],
+      });
+
+      app.emit("message", makeMessage("m-active", "start long turn"));
+      const promptDeadline = Date.now() + 5000;
+      while (Date.now() < promptDeadline && promptTags.length < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const baselineNewSessionCalls = newSessionCalls.length;
+      app.emit("message", makeMessage("m-new", "/new"));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (newSessionCalls.length !== baselineNewSessionCalls) {
+        throw new Error(JSON.stringify({ stage: "new-before-accepted", newSessionCalls }));
+      }
+      releasePromptStart();
+
+      const deadline = Date.now() + 5000;
+      let rows = [];
+      while (Date.now() < deadline) {
+        rows = storeMod
+          .listChatMessages(agentDir)
+          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        if (
+          newSessionCalls.length > baselineNewSessionCalls &&
+          rows.some((item) => item.text === "Started a new session.")
+        ) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (
+        promptTags.length !== 1 ||
+        newSessionCalls.length <= baselineNewSessionCalls ||
+        newSessionCalls.at(-1)?.chatKey !== "telegram/1:2" ||
+        newSessionCalls.at(-1)?.managedSessionLeaf !== "chat" ||
+        !rows.some((item) => item.text === "Started a new session.")
+      ) {
+        throw new Error(JSON.stringify({ promptTags, newSessionCalls, rows }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat main lets same-chat follow-up enter the chatKey worker as steer", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      const promptModes = [];
+      controllerMod.ChatController.prototype.connect = async function () {
+        if (this.session && this.client) return;
+        const controller = this;
+        this.client = { subscribe() {} };
+        this.session = {
+          isStreaming: false,
+          messages: [],
+          sessionManager: {
+            getSessionFile: () => "/tmp/steer-chat.jsonl",
+            getSessionId: () => "steer-session",
+            getSessionName: () => controller.chatKey,
+          },
+          ensureSessionReady: async () => ({
+            sessionFile: "/tmp/steer-chat.jsonl",
+            sessionId: "steer-session",
+          }),
+          prompt: async (_message, options = {}) => {
+            promptModes.push(options.streamingBehavior || "prompt");
+            if (options.streamingBehavior === "steer") return;
+            controller.session.isStreaming = true;
+            await controller.handleClientEvent({
+              type: "ui",
+              payload: {
+                type: "rpc_turn_event",
+                event: "start",
+                requestTag: options.requestTag,
+              },
+            });
+          },
+          switchSession: async () => {},
+        };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-1"];
+        },
+        internal: {
+          async sendChatAction() {},
+        },
+      });
+
+      const makeMessage = (messageId, content) => ({
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId,
+        isDirect: true,
+        content,
+        stripped: { content },
+        elements: [h.createChatRuntimeH().text(content)],
+      });
+
+      app.emit("message", makeMessage("m-one", "first"));
+      const firstDeadline = Date.now() + 5000;
+      while (Date.now() < firstDeadline && promptModes.length < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      app.emit("message", makeMessage("m-two", "second"));
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && promptModes.length < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "steer") {
+        throw new Error(JSON.stringify({ promptModes }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main retries a transient daemon startup failure without leaking the socket error into chat", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

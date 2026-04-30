@@ -1044,6 +1044,7 @@ test(
     const handlers = new Map();
     const lines = [];
     let currentSession;
+    let abortCalls = 0;
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -1057,7 +1058,7 @@ test(
     try {
       const createSession = (name) => ({
         name,
-        isStreaming: false,
+        isStreaming: name === "first",
         isCompacting: false,
         sessionFile: `/tmp/${name}.jsonl`,
         sessionId: `${name}-id`,
@@ -1068,7 +1069,9 @@ test(
         sendCustomMessage: async () => {},
         steer: async () => {},
         followUp: async () => {},
-        abort: async () => {},
+        abort: async () => {
+          abortCalls += 1;
+        },
         modelRegistry: { getAvailable: async () => [] },
         sessionManager: {
           getEntries: () => [{ id: `${name}-header` }],
@@ -1147,6 +1150,7 @@ test(
       assert.equal(payload.data.cancelled, false);
       assert.equal(payload.data.sessionFile, "/tmp/second.jsonl");
       assert.equal(payload.data.sessionId, "second-id");
+      assert.equal(abortCalls, 1);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

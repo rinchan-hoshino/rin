@@ -380,19 +380,17 @@ export class ChatFrontendDriver {
       if (sessionFile && !managedSessionLeaf) {
         throw new Error("new_session_session_file_unsupported");
       }
-      if (managedSessionLeaf) {
-        const completed = await this.session.newSession({
-          managedSessionLeaf,
-        });
-        return {
-          handled: true,
-          text: completed
-            ? "Started a new session."
-            : "Session switch cancelled.",
-          sessionId: this.currentSessionId() || undefined,
-          sessionFile: this.currentSessionFile() || undefined,
-        };
-      }
+      const completed = await this.session.newSession(
+        managedSessionLeaf ? { managedSessionLeaf } : undefined,
+      );
+      return {
+        handled: true,
+        text: completed
+          ? "Started a new session."
+          : "Session switch cancelled.",
+        sessionId: this.currentSessionId() || undefined,
+        sessionFile: this.currentSessionFile() || undefined,
+      };
     }
     if (sessionFile) {
       await this.switchSessionIfNeeded(sessionFile);
@@ -608,7 +606,16 @@ export class ChatFrontendDriver {
       }
       if (event.event === "error") {
         this.setFrontendPhase("idle");
-        this.failLiveTurn(new Error(String(event.error || "rpc_turn_failed")));
+        const session = normalizeSessionRef(event);
+        const error = new Error(
+          String(event.error || "rpc_turn_failed"),
+        ) as Error & {
+          sessionId?: string;
+          sessionFile?: string;
+        };
+        error.sessionId = session.sessionId;
+        error.sessionFile = session.sessionFile;
+        this.failLiveTurn(error);
         return;
       }
     }

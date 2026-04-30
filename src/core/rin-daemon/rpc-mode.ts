@@ -235,6 +235,15 @@ export async function runCustomRpcMode(
   ) => {
     appendSessionTurnState(session, status);
   };
+  const abortCurrentSessionForReplacement = async () => {
+    const current = getSession();
+    if (!current) return;
+    if (!current.isStreaming && !current.isCompacting && !isTurnActive()) {
+      return;
+    }
+    markTurnState(current, "aborted");
+    await current.abort();
+  };
   const startTurnTask = (requestTag: string, task: () => Promise<void>) => {
     const turnSession = getSession();
     const beforeSnapshot = snapshotSessionTurnCompletion(turnSession);
@@ -392,6 +401,7 @@ export async function runCustomRpcMode(
       commandContextActions: {
         waitForIdle: () => getSession().agent.waitForIdle(),
         newSession: async (options) => {
+          await abortCurrentSessionForReplacement();
           const result = await runtime.newSession(options);
           await bindCurrentSession();
           return result;
@@ -478,7 +488,9 @@ export async function runCustomRpcMode(
         return done(id, type, session.clearQueue());
       case "abort":
         return run(id, type, async () => {
-          markTurnState(session, "aborted");
+          if (session.isStreaming || session.isCompacting || isTurnActive()) {
+            markTurnState(session, "aborted");
+          }
           await session.abort();
         });
       case "shutdown_session":
@@ -649,6 +661,7 @@ export async function runCustomRpcMode(
           id,
           type,
           async () => {
+            await abortCurrentSessionForReplacement();
             const managedSessionLeaf = safeString(
               command.managedSessionLeaf || "",
             ).trim();

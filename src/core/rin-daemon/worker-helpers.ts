@@ -274,6 +274,7 @@ export async function runBuiltinCommand(
       await session.abort();
       return handledText("Aborted current operation.");
     case "new":
+      await session.abort();
       await runtime.newSession();
       return handledText("Started a new session.");
     case "compact":

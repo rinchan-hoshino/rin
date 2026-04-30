@@ -289,6 +289,13 @@ export async function startDaemon(
       return true;
     }
     if (type === "new_session") {
+      const previousWorker = workerPool.resolveCurrentWorkerForCommand(
+        connection,
+        command,
+      );
+      if (previousWorker) {
+        await workerPool.abortWorker(previousWorker);
+      }
       const worker = workerPool.resolveWorkerForCommand(connection, command);
       if (!worker) {
         writeLine(

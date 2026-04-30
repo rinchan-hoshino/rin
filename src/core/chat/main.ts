@@ -45,15 +45,22 @@ import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { appendChatLog } from "./chat-log.js";
 import {
-  claimChatInboxFile,
-  completeChatInboxFile,
-  listPendingChatInboxFiles,
-  readChatInboxItem,
-  requeueChatInboxFile,
-  restoreChatInboxFile,
+  type ChatInboxItem,
   restoreChatInboxSession,
   restoreProcessingChatInboxFiles,
 } from "./inbox.js";
+import {
+  type ClaimedChatInboxJob,
+  type ChatInboxJobResult,
+  createChatInboxDrain,
+  finalizeClaimedChatInboxJob,
+  requeueClaimedChatInboxJob,
+} from "./inbox-drain.js";
+import {
+  type PreparedChatKeyWorkerJob,
+  createChatKeyWorkerPool,
+  waitUntil,
+} from "./chat-key-worker.js";
 import { shouldProcessText } from "./decision.js";
 import {
   createChatRuntimeApp,
@@ -82,20 +89,10 @@ const RIN_CHAT_SETTINGS_PATH_ENV = "RIN_CHAT_SETTINGS_PATH";
 const LEGACY_RIN_KOISHI_SETTINGS_PATH_ENV = "RIN_KOISHI_SETTINGS_PATH";
 const TYPING_POLL_INTERVAL_MS = 4000;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
-const CHAT_INBOX_RETRY_MIN_MS = 2000;
-const CHAT_INBOX_RETRY_MAX_MS = 60_000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = Math.max(
   1_000,
   Number(process.env.RIN_DETACHED_CONTROLLER_SLEEP_IDLE_MS || 60_000),
 );
-
-function computeChatInboxRetryDelay(attemptCount: number) {
-  const attempt = Math.max(0, Number(attemptCount || 0));
-  return Math.min(
-    CHAT_INBOX_RETRY_MAX_MS,
-    CHAT_INBOX_RETRY_MIN_MS * 2 ** attempt,
-  );
-}
 
 async function buildTelegramInboundMediaDebug(session: any) {
   const update = session?.telegram;
@@ -439,13 +436,12 @@ export async function startChatBridge(
     }
   };
 
-  const handleChatTurnSession = async (
+  const handleAllowedChatTurnSession = async (
     session: any,
     elements: any[],
     identity: any,
+    decision: Awaited<ReturnType<typeof shouldProcessText>>,
   ) => {
-    const decision = await shouldProcessText(session, elements, identity);
-    if (!decision.allow) return { retry: false };
     const messageId = pickMessageId(session);
     const replyToMessageId = pickReplyToMessageId(session);
     const controller = getController(decision.chatKey);
@@ -546,95 +542,135 @@ export async function startChatBridge(
     }
   };
 
-  const activeInboxRuns = new Map<string, Promise<void>>();
-  const dispatchClaimedInboxItem = (claimedPath: string, envelope: any) => {
-    if (!claimedPath || activeInboxRuns.has(claimedPath)) return;
-    const run = (async () => {
-      try {
-        const queuedSession = restoreChatInboxSession(
-          envelope,
-          findRuntimeBot(
-            safeString(envelope?.session?.platform || "").trim(),
-            safeString(envelope?.session?.selfId || "").trim(),
-          ),
-        );
-        const queuedElements = Array.isArray(envelope.elements)
-          ? envelope.elements
-          : [];
-        const identity = getIdentity();
-        const command = parseInboundCommand(
-          queuedSession,
-          elementsToText(queuedElements),
-          commandRows,
-        );
-        const result = command
-          ? await handleCommandSession(queuedSession, command, identity)
-          : await handleChatTurnSession(
-              queuedSession,
-              queuedElements,
-              identity,
-            );
-        if (result?.retry) {
-          requeueChatInboxFile(runtime.agentDir, claimedPath, envelope, {
-            delayMs: computeChatInboxRetryDelay(envelope.attemptCount + 1),
-            error: safeString(
-              (result as any)?.errorMessage || "chat_inbound_retry_needed",
-            ),
-          });
-          return;
-        }
-        completeChatInboxFile(claimedPath);
-      } catch (error) {
-        logger.warn(
-          `chat inbox drain failed file=${claimedPath} err=${safeString((error as any)?.message || error)}`,
-        );
-        requeueChatInboxFile(runtime.agentDir, claimedPath, envelope, {
-          delayMs: computeChatInboxRetryDelay(envelope.attemptCount + 1),
-          error: safeString((error as any)?.message || error),
-        });
-      } finally {
-        activeInboxRuns.delete(claimedPath);
-      }
-    })();
-    activeInboxRuns.set(claimedPath, run);
-    void run;
+  const handleChatTurnSession = async (
+    session: any,
+    elements: any[],
+    identity: any,
+  ) => {
+    const decision = await shouldProcessText(session, elements, identity);
+    if (!decision.allow) return { retry: false };
+    return await handleAllowedChatTurnSession(
+      session,
+      elements,
+      identity,
+      decision,
+    );
   };
 
-  const drainChatInbox = async () => {
-    for (const filePath of listPendingChatInboxFiles(runtime.agentDir)) {
-      let claimedPath = "";
-      try {
-        claimedPath = claimChatInboxFile(runtime.agentDir, filePath);
-      } catch {
-        continue;
-      }
-      if (!claimedPath) continue;
-      const envelope = readChatInboxItem(claimedPath);
-      if (!envelope) {
-        completeChatInboxFile(claimedPath);
-        continue;
-      }
-      const nextAttemptAt = Date.parse(
-        safeString(envelope.nextAttemptAt || "").trim(),
+  const runClaimedInboxJob = async (
+    job: ClaimedChatInboxJob,
+    run: () => Promise<ChatInboxJobResult | undefined>,
+  ) => {
+    try {
+      const result = await run();
+      finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
+    } catch (error) {
+      logger.warn(
+        `chat inbox worker failed chatKey=${job.envelope.chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,
       );
-      if (Number.isFinite(nextAttemptAt) && nextAttemptAt > Date.now()) {
-        restoreChatInboxFile(runtime.agentDir, claimedPath, envelope);
-        continue;
-      }
-      const controller = envelope.chatKey
-        ? getController(envelope.chatKey)
-        : null;
-      if (controller?.claimsInboundMessage(envelope.messageId)) {
-        completeChatInboxFile(claimedPath);
-        continue;
-      }
-      if (isInboundMessageProcessed(envelope.chatKey, envelope.messageId)) {
-        completeChatInboxFile(claimedPath);
-        continue;
-      }
-      dispatchClaimedInboxItem(claimedPath, envelope);
+      requeueClaimedChatInboxJob(
+        runtime.agentDir,
+        job,
+        (error as any)?.message || error,
+      );
     }
   };
+
+  const waitForTurnAdmission = (
+    controller: ChatController,
+    messageId: string,
+    task: Promise<unknown>,
+  ) =>
+    waitUntil(
+      () => controller.hasBackendAcceptedInboundMessage(messageId),
+      task,
+    );
+
+  const prepareClaimedInboxJob = async (
+    job: ClaimedChatInboxJob,
+  ): Promise<PreparedChatKeyWorkerJob> => {
+    const { envelope } = job;
+    const queuedSession = restoreChatInboxSession(
+      envelope,
+      findRuntimeBot(
+        safeString(envelope?.session?.platform || "").trim(),
+        safeString(envelope?.session?.selfId || "").trim(),
+      ),
+    );
+    const queuedElements = Array.isArray(envelope.elements)
+      ? envelope.elements
+      : [];
+    const identity = getIdentity();
+    const command = parseInboundCommand(
+      queuedSession,
+      elementsToText(queuedElements),
+      commandRows,
+    );
+    if (command) {
+      return {
+        run: () =>
+          runClaimedInboxJob(job, () =>
+            handleCommandSession(queuedSession, command, identity),
+          ),
+      };
+    }
+
+    const decision = await shouldProcessText(
+      queuedSession,
+      queuedElements,
+      identity,
+    );
+    if (!decision.allow) {
+      return {
+        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
+      };
+    }
+
+    const controller = getController(decision.chatKey);
+    let task: Promise<void> | null = null;
+    return {
+      run: () => {
+        task = runClaimedInboxJob(job, () =>
+          handleAllowedChatTurnSession(
+            queuedSession,
+            queuedElements,
+            identity,
+            decision,
+          ),
+        );
+        return task;
+      },
+      waitForAdmission: async () => {
+        if (task) {
+          await waitForTurnAdmission(controller, envelope.messageId, task);
+        }
+      },
+    };
+  };
+
+  const chatKeyWorkers = createChatKeyWorkerPool<ClaimedChatInboxJob>({
+    prepare: (job) => prepareClaimedInboxJob(job),
+    onPrepareError: (job, chatKey, error) => {
+      logger.warn(
+        `chat inbox prepare failed chatKey=${chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,
+      );
+      requeueClaimedChatInboxJob(
+        runtime.agentDir,
+        job,
+        (error as any)?.message || error,
+      );
+    },
+    logger,
+  });
+
+  const { requestDrainChatInbox } = createChatInboxDrain({
+    agentDir: runtime.agentDir,
+    getController,
+    isInboundMessageProcessed,
+    enqueueClaimedInboxItem: (job) =>
+      chatKeyWorkers.enqueue(job.envelope.chatKey, job),
+    logger,
+  });
 
   app.on("message", (session: any) => {
     void (async () => {
@@ -660,7 +696,7 @@ export async function startChatBridge(
         );
       }
 
-      await drainChatInbox();
+      requestDrainChatInbox();
     })().catch((error: any) => {
       logger.warn(
         `chat inbound handling failed err=${safeString(error?.message || error)}`,
@@ -669,11 +705,7 @@ export async function startChatBridge(
   });
 
   inboxPollTimer = setInterval(() => {
-    void drainChatInbox().catch((error: any) => {
-      logger.warn(
-        `chat inbox polling failed err=${safeString(error?.message || error)}`,
-      );
-    });
+    requestDrainChatInbox();
   }, CHAT_INBOX_POLL_INTERVAL_MS);
 
   app.on("bot-status-updated", (bot: any) => {
@@ -829,11 +861,7 @@ export async function startChatBridge(
     );
   }
 
-  void drainChatInbox().catch((error: any) => {
-    logger.warn(
-      `chat inbox startup drain failed err=${safeString(error?.message || error)}`,
-    );
-  });
+  requestDrainChatInbox();
 
   let stoppingPromise: Promise<void> | null = null;
   const stop = async () => {

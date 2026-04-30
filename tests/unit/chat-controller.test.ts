@@ -245,6 +245,161 @@ test("chat controller skips recovery bootstrap for /new", async () => {
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller starts /new immediately through the TUI new-session path", async () => {
+  const controller = await createController();
+  const calls = [];
+  const deliveries = [];
+  let backendAbortCalled = false;
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  let sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "old-chat.jsonl",
+  );
+  let sessionId = "session-old";
+  let firstRequestTag = "";
+  const session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => sessionId,
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({ sessionFile, sessionId }),
+    agent: {
+      abort: () => {
+        backendAbortCalled = true;
+      },
+    },
+    prompt: async (_text, options = {}) => {
+      firstRequestTag = options.requestTag || "";
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: { type: "rpc_frontend_status", phase: "working" },
+      });
+    },
+    newSession: async (options = {}) => {
+      calls.push(`newSession:${options.managedSessionLeaf}`);
+      await controller.handleClientEvent({
+        type: "rpc_turn_event",
+        event: "error",
+        requestTag: firstRequestTag,
+        error: "chat_turn_aborted",
+        sessionFile,
+        sessionId,
+      });
+      sessionFile = path.join(
+        controller.agentDir,
+        "sessions",
+        "new-chat.jsonl",
+      );
+      sessionId = "session-new";
+      return true;
+    },
+  };
+  controller.session = session;
+  controller.connect = async () => {
+    if (!controller.session) controller.session = session;
+  };
+
+  const firstTurn = controller.runTurn({
+    text: "first",
+    attachments: [],
+    replyToMessageId: "m1",
+    incomingMessageId: "m1",
+  });
+  while (!firstRequestTag) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  const newCommand = await Promise.race([
+    controller.runCommand("/new", "m-new", "m-new"),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("new command queued")), 50),
+    ),
+  ]);
+  assert.equal(newCommand.text, "Started a new session.");
+  assert.equal(backendAbortCalled, false);
+  assert.deepEqual(await firstTurn, {
+    aborted: true,
+    sessionId: "session-old",
+    sessionFile: path.join(controller.agentDir, "sessions", "old-chat.jsonl"),
+  });
+
+  await emitRpcTurnComplete(
+    controller,
+    { requestTag: firstRequestTag },
+    "first done",
+  );
+
+  assert.deepEqual(calls, ["newSession:chat"]);
+  assert.deepEqual(deliveries, ["Started a new session."]);
+  assert.equal(controller.state.sessionFile, "new-chat.jsonl");
+});
+
+test("chat controller keeps /status immediate during an active chat turn", async () => {
+  const controller = await createController();
+  controller.deliveryEnabled = false;
+  const calls = [];
+  let firstRequestTag = "";
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => "/tmp/old-chat.jsonl",
+      getSessionId: () => "session-old",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/old-chat.jsonl",
+      sessionId: "session-old",
+    }),
+    prompt: async (_text, options = {}) => {
+      firstRequestTag = options.requestTag || "";
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: { type: "rpc_frontend_status", phase: "working" },
+      });
+    },
+    runCommand: async (commandLine) => {
+      calls.push(`runCommand:${commandLine}`);
+      return { handled: true, text: "unreachable" };
+    },
+  };
+
+  const firstTurn = controller.runTurn({
+    text: "first",
+    attachments: [],
+    replyToMessageId: "m1",
+    incomingMessageId: "m1",
+  });
+  while (!firstRequestTag) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  const status = await Promise.race([
+    controller.runCommand("/status", "m-status", "m-status"),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("status command queued")), 50),
+    ),
+  ]);
+
+  assert.equal(status.local, true);
+  assert.match(status.text, /Status: working/);
+  assert.deepEqual(calls, []);
+  assert.equal(controller.currentIncomingMessageId(), "m1");
+
+  await emitRpcTurnComplete(
+    controller,
+    { requestTag: firstRequestTag },
+    "first done",
+  );
+  assert.equal((await firstTurn).finalText, "first done");
+});
+
 test("chat controller delivers visible non-transient command errors", async () => {
   const controller = await createController();
   const deliveries = [];

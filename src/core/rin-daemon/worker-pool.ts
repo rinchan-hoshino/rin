@@ -296,14 +296,8 @@ export class WorkerPool {
     }
   }
 
-  resolveWorkerForCommand(connection: ConnectionState, command: any) {
-    const type = String(command?.type || "unknown");
+  resolveCurrentWorkerForCommand(connection: ConnectionState, command: any) {
     const selector = this.resolveSelector(connection, command);
-
-    if (type === "new_session") {
-      return this.createWorker(connection);
-    }
-
     const selectedWorker = this.findWorkerBySelector(selector);
     if (selectedWorker) return selectedWorker;
     if (
@@ -314,8 +308,28 @@ export class WorkerPool {
     ) {
       return connection.attachedWorker;
     }
+    return undefined;
+  }
+
+  resolveWorkerForCommand(connection: ConnectionState, command: any) {
+    const type = String(command?.type || "unknown");
+
+    if (type === "new_session") {
+      return this.createWorker(connection);
+    }
+
+    const currentWorker = this.resolveCurrentWorkerForCommand(
+      connection,
+      command,
+    );
+    if (currentWorker) return currentWorker;
     if (isSessionScopedCommand(type)) return undefined;
     return undefined;
+  }
+
+  async abortWorker(worker: WorkerHandle) {
+    if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
+    await this.sendInternalCommand(worker, { type: "abort" });
   }
 
   getStatusSnapshot() {
