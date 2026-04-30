@@ -439,10 +439,8 @@ export class RpcInteractiveSession {
     },
   ) {
     const expandPromptTemplates = options?.expandPromptTemplates ?? true;
-    if (
-      expandPromptTemplates &&
-      (await this.tryExecuteLocalExtensionCommand(message))
-    ) {
+    if (expandPromptTemplates && this.isFrontendExtensionCommand(message)) {
+      await this.runCommand(message);
       return;
     }
     await this.sendOrQueue({
@@ -1270,7 +1268,7 @@ export class RpcInteractiveSession {
     } as any);
   }
 
-  private getLocalExtensionCommand(text: string) {
+  private getFrontendExtensionCommand(text: string) {
     if (!text.startsWith("/")) return undefined;
     const extensionRunner = this.extensionRunner;
     if (!extensionRunner?.getCommand) return undefined;
@@ -1280,31 +1278,8 @@ export class RpcInteractiveSession {
     return extensionRunner.getCommand(commandName);
   }
 
-  private isLocalExtensionCommand(text: string) {
-    return Boolean(this.getLocalExtensionCommand(text));
-  }
-
-  private async tryExecuteLocalExtensionCommand(text: string) {
-    const command = this.getLocalExtensionCommand(text);
-    if (!command) return false;
-
-    const spaceIndex = text.indexOf(" ");
-    const commandName =
-      spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
-    const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
-    const ctx = this.extensionRunner?.createCommandContext?.();
-    if (!ctx) return false;
-
-    try {
-      await command.handler(args, ctx);
-    } catch (err) {
-      this.extensionRunner?.emitError?.({
-        extensionPath: `command:${commandName}`,
-        event: "command",
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-    return true;
+  private isFrontendExtensionCommand(text: string) {
+    return Boolean(this.getFrontendExtensionCommand(text));
   }
 
   private async ensureRemoteSession() {

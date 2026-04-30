@@ -360,10 +360,25 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
   assert.equal(sentTypes.at(-1), "get_resource_diagnostics");
 });
 
-test("rpc runtime executes local extension commands immediately through prompt", async () => {
+test("rpc runtime routes extension slash commands from prompt to daemon", async () => {
+  const sent = [];
+  const localCalls = [];
   const session = new RpcInteractiveSession({
-    send() {
-      throw new Error("should_not_send_remote_prompt");
+    send(payload) {
+      sent.push(payload);
+      if (payload.type === "run_command") {
+        return Promise.resolve({ success: true, data: { handled: true } });
+      }
+      if (payload.type === "get_state") {
+        return Promise.resolve({
+          success: true,
+          data: { sessionFile: "/tmp/rpc-session.jsonl" },
+        });
+      }
+      if (payload.type === "get_session_snapshot") {
+        return Promise.resolve({ success: true, data: { entries: [] } });
+      }
+      return Promise.resolve({ success: true, data: {} });
     },
     subscribe() {
       return () => {};
@@ -381,30 +396,32 @@ test("rpc runtime executes local extension commands immediately through prompt",
       return Promise.resolve();
     },
   });
+  session.sessionFile = "/tmp/rpc-session.jsonl";
 
-  const calls = [];
   session.extensionRunner = {
     getCommand(name) {
       return name === "chat"
         ? {
             invocationName: "chat",
-            handler: async (args, ctx) => {
-              calls.push(["handler", args, Boolean(ctx)]);
+            handler: async (args) => {
+              localCalls.push(["handler", args]);
             },
           }
         : undefined;
-    },
-    createCommandContext() {
-      return { ui: {}, waitForIdle: async () => {} };
-    },
-    emitError(error) {
-      calls.push(["error", error.error]);
     },
   };
 
   await session.prompt("/chat telegram", { streamingBehavior: "steer" });
 
-  assert.deepEqual(calls, [["handler", "telegram", true]]);
+  assert.deepEqual(localCalls, []);
+  assert.equal(
+    sent.some((payload) => payload.type === "prompt"),
+    false,
+  );
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "run_command"),
+    { type: "run_command", commandLine: "/chat telegram" },
+  );
   assert.deepEqual(session.getSteeringMessages(), []);
   assert.equal(session.pendingMessageCount, 0);
 });
