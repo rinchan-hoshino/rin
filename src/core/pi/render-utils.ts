@@ -118,9 +118,9 @@ const TOOL_CALL_PREFIXES: Record<string, string> = {
   write: "write",
   edit: "edit",
   fetch: "GET",
-  web_search: "?",
-  search_memory: "recall",
-  save_prompts: "pin",
+  web_search: "🌐",
+  search_memory: "🧠",
+  save_prompts: "📌",
   run_subagent: "agent",
   list_models: "models",
   generate_codex_image: "image",
@@ -155,7 +155,7 @@ export function formatToolCallLine(
   const prefix = getToolCallDisplayPrefix(toolName);
   const detailText = String(detail || "").trim();
   const detailStyle = config.detailStyle || "accent";
-  const parts = [theme.fg("toolTitle", prefix)];
+  const parts = [theme.fg("toolTitle", theme.bold(prefix))];
   if (detailText) parts.push(` ${theme.fg(detailStyle, detailText)}`);
   if (config.suffix) parts.push(config.suffix);
   return parts.join("");
@@ -302,8 +302,8 @@ export function styleToolOutputLine(line: string, theme: any) {
   if (indexedHeader && !/^https?:\/\//i.test(trimmed)) {
     const [, prefix, title, suffix = ""] = indexedHeader;
     return [
-      theme.fg("toolTitle", prefix),
-      theme.fg("toolOutput", title),
+      theme.fg("muted", prefix),
+      theme.fg("toolTitle", theme.bold(title)),
       suffix ? theme.fg("muted", suffix) : "",
     ].join("");
   }
@@ -312,14 +312,14 @@ export function styleToolOutputLine(line: string, theme: any) {
   if (commandSummary) {
     const [, label, spacing, count] = commandSummary;
     return [
-      theme.fg("toolTitle", label),
+      theme.fg("toolTitle", theme.bold(label)),
       spacing,
       theme.fg("success", count),
     ].join("");
   }
 
   if (/^match\s+\d+$/i.test(trimmed)) {
-    return theme.fg("toolTitle", line);
+    return theme.fg("toolTitle", theme.bold(line));
   }
 
   const keyValue = line.match(/^([A-Za-z][A-Za-z0-9_-]*)(=)(.*)$/);
@@ -336,7 +336,7 @@ export function styleToolOutputLine(line: string, theme: any) {
   if (labelValue) {
     const [, label, spacing, value] = labelValue;
     return [
-      theme.fg("toolTitle", label),
+      theme.fg("toolTitle", theme.bold(label)),
       spacing,
       styleValue(value, theme),
     ].join("");

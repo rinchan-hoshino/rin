@@ -931,7 +931,7 @@ test("search_memory call formatting keeps query in the TUI tool title", () => {
     { query: "search_memory hang" },
     theme,
   );
-  assert.equal(rendered, "recall search_memory hang");
+  assert.equal(rendered, "🧠 search_memory hang");
 });
 
 test("search_memory rendered result appends timing info", () => {

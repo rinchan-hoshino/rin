@@ -93,17 +93,18 @@ test("render utils style structured tool output lines", () => {
   );
   assert.equal(
     renderUtils.styleToolOutputLine("1. Example Result | 2026-04-17", theme),
-    "<toolTitle>1. </toolTitle><toolOutput>Example Result</toolOutput><muted> | 2026-04-17</muted>",
+    "<muted>1. </muted><toolTitle>**Example Result**</toolTitle><muted> | 2026-04-17</muted>",
   );
   assert.equal(
     renderUtils.styleToolOutputLine("Saved task: nightly cleanup", theme),
-    "<toolTitle>Saved task:</toolTitle> <toolOutput>nightly cleanup</toolOutput>",
+    "<toolTitle>**Saved task:**</toolTitle> <toolOutput>nightly cleanup</toolOutput>",
   );
 });
 
 test("render utils format compact tool call headers", () => {
   const theme = {
     fg: (kind, text) => `<${kind}>${text}</${kind}>`,
+    bold: (text) => `**${text}**`,
   };
 
   assert.equal(
@@ -112,13 +113,13 @@ test("render utils format compact tool call headers", () => {
       "site:example.com docs",
       theme,
     ),
-    "<toolTitle>?</toolTitle> <accent>site:example.com docs</accent>",
+    "<toolTitle>**🌐**</toolTitle> <accent>site:example.com docs</accent>",
   );
   assert.equal(
     renderUtils.formatToolCallLine("search_memory", "recent", theme, {
       detailStyle: "muted",
     }),
-    "<toolTitle>recall</toolTitle> <muted>recent</muted>",
+    "<toolTitle>**🧠**</toolTitle> <muted>recent</muted>",
   );
 });
 
@@ -217,7 +218,7 @@ test("render utils render expanded tool warnings", () => {
 
   assert.match(
     rendered,
-    /<toolTitle>web_search<\/toolTitle> <success>2<\/success>/,
+    /<toolTitle>\*\*web_search\*\*<\/toolTitle> <success>2<\/success>/,
   );
   assert.match(
     rendered,
