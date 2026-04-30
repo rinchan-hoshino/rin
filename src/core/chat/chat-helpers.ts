@@ -60,6 +60,7 @@ export type ChatBridgePromptMeta = {
   chatType?: "private" | "group";
   userId?: string;
   nickname?: string;
+  groupNickname?: string;
   identity?: string;
   replyToMessageId?: string;
   attachedFiles?: Array<{ name?: string; path?: string }>;
@@ -76,6 +77,7 @@ export {
   pickChatName,
   pickMessageId,
   pickReplyToMessageId,
+  pickSenderGroupNickname,
   pickSenderNickname,
   pickUserId,
   summarizeQuote,

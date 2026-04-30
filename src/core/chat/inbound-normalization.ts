@@ -139,23 +139,35 @@ function sessionElementsToText(session: any, elements: any[]) {
   );
 }
 
-export function pickSenderNickname(session: any) {
-  const values = [
-    session?.author?.nick,
-    session?.author?.name,
-    session?.author?.nickname,
-    session?.author?.username,
-    session?.username,
-    session?.user?.nick,
-    session?.user?.name,
-    session?.user?.nickname,
-    session?.user?.username,
-  ];
+function pickFirstTrimmed(values: unknown[]) {
   for (const value of values) {
     const text = safeString(value).trim();
     if (text) return text;
   }
   return "";
+}
+
+export function pickSenderGroupNickname(session: any) {
+  return pickFirstTrimmed([
+    session?.author?.groupNickname,
+    session?.author?.card,
+    session?.user?.groupNickname,
+    session?.user?.card,
+  ]);
+}
+
+export function pickSenderNickname(session: any) {
+  return pickFirstTrimmed([
+    session?.author?.nickname,
+    session?.author?.username,
+    session?.username,
+    session?.user?.nickname,
+    session?.user?.username,
+    session?.author?.nick,
+    session?.author?.name,
+    session?.user?.nick,
+    session?.user?.name,
+  ]);
 }
 
 export function pickChatName(session: any) {

@@ -1421,11 +1421,14 @@ class OneBotAdapter {
       payload?.sender && typeof payload.sender === "object"
         ? payload.sender
         : {};
+    const groupNickname = !isDirect
+      ? safeString(sender?.card).trim() || undefined
+      : undefined;
     const nickname =
-      safeString(sender?.card).trim() ||
       safeString(sender?.nickname).trim() ||
       safeString(sender?.nick).trim() ||
       undefined;
+    const displayName = groupNickname || nickname;
     return {
       platform: "onebot",
       selfId: selfId || undefined,
@@ -1437,14 +1440,20 @@ class OneBotAdapter {
       userId,
       author: {
         userId,
-        name: nickname,
-        nick: nickname,
+        name: displayName,
+        nick: displayName,
+        nickname,
+        groupNickname,
+        card: groupNickname,
       },
       user: {
         userId,
         id: userId,
-        name: nickname,
-        nick: nickname,
+        name: displayName,
+        nick: displayName,
+        nickname,
+        groupNickname,
+        card: groupNickname,
       },
       channelId,
       channelName: !isDirect
