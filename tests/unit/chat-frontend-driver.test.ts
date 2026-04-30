@@ -115,6 +115,42 @@ test("chat frontend driver does not treat a preview as interim when a tool bound
   assert.deepEqual(interimTexts, []);
 });
 
+test("chat frontend driver emits leading tool-call text as the only interim source", async () => {
+  const driver = createDriver();
+  const interimTexts: string[] = [];
+  driver.subscribe((event: any) => {
+    if (event.type === "assistant_interim") interimTexts.push(event.text);
+  });
+
+  driver.session.prompt = async (_text: string, options: any = {}) => {
+    await emitDriverEvent(driver, { type: "agent_start" });
+    await emitDriverEvent(driver, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "I will check this" },
+          { type: "toolCall", name: "read", id: "call-1" },
+          { type: "text", text: "not part of the interim" },
+        ],
+      },
+    });
+    assert.deepEqual(interimTexts, ["I will check this"]);
+    await emitDriverEvent(driver, {
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "read",
+    });
+    assert.deepEqual(interimTexts, ["I will check this"]);
+    await emitRpcTurnComplete(driver, options.requestTag, "Final answer");
+  };
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "Final answer");
+  assert.deepEqual(interimTexts, ["I will check this"]);
+});
+
 test("chat frontend driver starts managed leaf sessions even after connect reports a default session", async () => {
   const driver = createDriver();
   const calls: string[] = [];
@@ -147,7 +183,7 @@ test("chat frontend driver starts managed leaf sessions even after connect repor
   );
 });
 
-test("chat frontend driver emits a completed assistant segment as interim before a later distinct final", async () => {
+test("chat frontend driver does not emit text-only assistant messages as interim", async () => {
   const driver = createDriver();
   const interimTexts: string[] = [];
   driver.subscribe((event: any) => {
@@ -169,5 +205,5 @@ test("chat frontend driver emits a completed assistant segment as interim before
   const result = await driver.runTurn({ text: "hello" });
 
   assert.equal(result.finalText, "Final answer");
-  assert.deepEqual(interimTexts, ["I will check this"]);
+  assert.deepEqual(interimTexts, []);
 });

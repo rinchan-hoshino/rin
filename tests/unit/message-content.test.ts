@@ -85,6 +85,41 @@ test("message content helpers extract text with optional thinking and trimming",
   );
 });
 
+test("message content helpers extract only text before the first tool call", () => {
+  assert.equal(
+    messageContent.extractTextBeforeFirstToolCall(
+      [
+        { type: "text", text: "I will check this" },
+        { type: "toolCall", name: "read" },
+        { type: "text", text: "ignored result-bound text" },
+      ],
+      { trim: true },
+    ),
+    "I will check this",
+  );
+  assert.equal(
+    messageContent.extractTextBeforeFirstToolCall(
+      [
+        { type: "thinking", thinking: "hidden plan" },
+        { type: "text", text: " visible " },
+        { type: "TOOLCALL", name: "bash" },
+      ],
+      { includeThinking: false, trim: true },
+    ),
+    "visible",
+  );
+  assert.equal(
+    messageContent.extractTextBeforeFirstToolCall(
+      [
+        { type: "toolCall", name: "bash" },
+        { type: "text", text: "late" },
+      ],
+      { trim: true },
+    ),
+    "",
+  );
+});
+
 test("message content helpers keep render dispatch and child normalization rules stable", () => {
   assert.equal(messageContent.renderMessageText(null), "");
   assert.equal(messageContent.renderMessageText(undefined), "");

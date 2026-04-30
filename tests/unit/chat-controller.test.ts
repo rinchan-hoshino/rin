@@ -650,7 +650,7 @@ test("chat controller uses discord typing and reaction capabilities together", a
   assert.deepEqual(reactions, [["create", "channel-1", "m-discord", "🤔"]]);
 });
 
-test("chat controller flushes a completed interim assistant message before a later distinct final reply", async () => {
+test("chat controller does not deliver text-only assistant messages as interim", async () => {
   const controller = await createController("telegram/1:2");
   const chatKey = "telegram/1:2";
   const deliveries = [];
@@ -722,8 +722,96 @@ test("chat controller flushes a completed interim assistant message before a lat
 
   assert.equal(result.finalText, "Final answer");
   assert.deepEqual(deliveries, [
-    { text: "··· I will check this", replyToMessageId: "m-interim" },
     { text: "Final answer", replyToMessageId: "m-interim" },
+  ]);
+});
+
+test("chat controller delivers leading tool-call text as the only interim source", async () => {
+  const controller = await createController("telegram/1:2");
+  const chatKey = "telegram/1:2";
+  const deliveries = [];
+  controller.deliverAssistantInterim = async function (text) {
+    deliveries.push({
+      text: `··· ${text}`,
+      replyToMessageId: this.currentReplyToMessageId(),
+    });
+    return true;
+  };
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    deliveries.push({
+      text: this.stagedDelivery?.text || "",
+      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+    });
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+  };
+
+  saveChatMessage(controller.agentDir, {
+    chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    chatType: "private",
+    messageId: "m-tool-interim",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "hello",
+  });
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "tool-interim-chat.jsonl",
+  );
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-tool-interim",
+      getSessionName: () => chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-tool-interim",
+    }),
+    prompt: async (_text, options = {}) => {
+      await controller.handleSessionEvent({ type: "agent_start" });
+      await controller.handleSessionEvent({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "I will check this" },
+            { type: "toolCall", name: "read", id: "call-1" },
+            { type: "text", text: "not interim" },
+          ],
+        },
+      });
+      assert.deepEqual(deliveries, [
+        { text: "··· I will check this", replyToMessageId: "m-tool-interim" },
+      ]);
+      await controller.handleSessionEvent({
+        type: "tool_execution_start",
+        toolCallId: "call-1",
+        toolName: "read",
+      });
+      emitRpcTurnComplete(controller, options, "Final answer");
+    },
+    switchSession: async () => {},
+  };
+
+  const result = await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-tool-interim",
+    replyToMessageId: "m-tool-interim",
+  });
+
+  assert.equal(result.finalText, "Final answer");
+  assert.deepEqual(deliveries, [
+    { text: "··· I will check this", replyToMessageId: "m-tool-interim" },
+    { text: "Final answer", replyToMessageId: "m-tool-interim" },
   ]);
 });
 
@@ -786,10 +874,17 @@ test("chat controller treats delivered interim assistant text as an inbound repl
         type: "message_end",
         message: {
           role: "assistant",
-          content: [{ type: "text", text: "I will check this" }],
+          content: [
+            { type: "text", text: "I will check this" },
+            { type: "toolCall", name: "read", id: "call-1" },
+          ],
         },
       });
-      await controller.handleSessionEvent({ type: "tool_execution_start" });
+      await controller.handleSessionEvent({
+        type: "tool_execution_start",
+        toolCallId: "call-1",
+        toolName: "read",
+      });
       throw new Error("chat_controller_disposed");
     },
     switchSession: async () => {},
