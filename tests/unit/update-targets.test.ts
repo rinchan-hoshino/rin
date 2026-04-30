@@ -94,7 +94,13 @@ test("discoverInstalledTargets scans manifest, launcher, systemd, and launchd ho
       recursive: true,
     });
     await fs.writeFile(
-      path.join(danaHome, ".config", "systemd", "user", "rin-daemon.service"),
+      path.join(
+        danaHome,
+        ".config",
+        "systemd",
+        "user",
+        "rin-daemon-dana.service",
+      ),
       `Environment=RIN_DIR=${path.join(danaHome, ".rin")}\nExecStart=node daemon.js\n`,
       "utf8",
     );
@@ -364,7 +370,10 @@ test("discoverInstalledTargets ignores invalid managed entries and non-file look
       JSON.stringify({ targetUser: "", installDir: "" }),
       "utf8",
     );
-    await fs.mkdir(
+    await fs.mkdir(path.join(oscarHome, ".config", "systemd", "user"), {
+      recursive: true,
+    });
+    await fs.writeFile(
       path.join(
         oscarHome,
         ".config",
@@ -372,12 +381,6 @@ test("discoverInstalledTargets ignores invalid managed entries and non-file look
         "user",
         "rin-daemon-oscar.service",
       ),
-      {
-        recursive: true,
-      },
-    );
-    await fs.writeFile(
-      path.join(oscarHome, ".config", "systemd", "user", "rin-daemon.service"),
       "Environment=RIN_DIR=\n",
       "utf8",
     );
