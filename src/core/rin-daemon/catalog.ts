@@ -16,6 +16,17 @@ type CatalogOptions = {
   cwd?: string;
   agentDir?: string;
   additionalExtensionPaths?: string[];
+  noExtensions?: boolean;
+  extensionFlagValues?: Array<[string, boolean | string]>;
+  additionalSkillPaths?: string[];
+  noSkills?: boolean;
+  additionalPromptTemplatePaths?: string[];
+  noPromptTemplates?: boolean;
+  additionalThemePaths?: string[];
+  noThemes?: boolean;
+  noContextFiles?: boolean;
+  systemPrompt?: string;
+  appendSystemPrompt?: string[];
 };
 
 type CatalogContext = {
@@ -75,8 +86,6 @@ async function createCatalogContext(
     ModelRegistry,
     SettingsManager,
     ExtensionRunner,
-    createEventBus,
-    discoverAndLoadExtensions,
   } = codingAgentModule as any;
 
   const { cwd, agentDir } = resolveRuntimeProfile({
@@ -97,6 +106,16 @@ async function createCatalogContext(
     agentDir,
     settingsManager,
     additionalExtensionPaths,
+    additionalSkillPaths: options.additionalSkillPaths,
+    additionalPromptTemplatePaths: options.additionalPromptTemplatePaths,
+    additionalThemePaths: options.additionalThemePaths,
+    noExtensions: options.noExtensions,
+    noSkills: options.noSkills,
+    noPromptTemplates: options.noPromptTemplates,
+    noThemes: options.noThemes,
+    noContextFiles: options.noContextFiles,
+    systemPrompt: options.systemPrompt,
+    appendSystemPrompt: options.appendSystemPrompt,
   });
   await resourceLoader.reload();
 
@@ -106,13 +125,12 @@ async function createCatalogContext(
     path.join(agentDir, "models.json"),
   );
 
-  const eventBus = createEventBus();
-  const loadedExtensions = await discoverAndLoadExtensions(
-    additionalExtensionPaths,
-    cwd,
-    agentDir,
-    eventBus,
-  );
+  const loadedExtensions = resourceLoader.getExtensions();
+  if (Array.isArray(options.extensionFlagValues)) {
+    for (const [name, value] of options.extensionFlagValues) {
+      loadedExtensions.runtime.flagValues.set(String(name), value);
+    }
+  }
   const extensionRunner = new ExtensionRunner(
     loadedExtensions.extensions,
     loadedExtensions.runtime,

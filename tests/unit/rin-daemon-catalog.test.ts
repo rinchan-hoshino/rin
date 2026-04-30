@@ -53,6 +53,31 @@ test("daemon catalog lists builtin and extension commands without session worker
   });
 });
 
+test("daemon catalog honors command-level extension resource options", async () => {
+  await withTestAgentDir(async (agentDir) => {
+    const extensionPath = path.join(agentDir, "catalog-extension.ts");
+    await fs.writeFile(
+      extensionPath,
+      `export default function(pi: any) {
+        pi.registerCommand("catalog-ext", {
+          description: "catalog extension command",
+          handler: async () => {},
+        });
+      }\n`,
+    );
+
+    const commands = await listCatalogCommands({
+      cwd: rootDir,
+      agentDir,
+      additionalExtensionPaths: [extensionPath],
+    });
+    assert.equal(
+      commands.find((item) => item.name === "catalog-ext")?.description,
+      "catalog extension command",
+    );
+  });
+});
+
 test("daemon catalog lists available models directly", async () => {
   await withTestAgentDir(async (agentDir) => {
     const models = await listCatalogModels({

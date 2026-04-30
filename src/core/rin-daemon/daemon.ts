@@ -183,9 +183,12 @@ export async function startDaemon(
     get_session_snapshot: () => ({
       data: { entries: [], tree: [], leafId: null },
     }),
-    get_commands: async () => ({
+    get_commands: async (command) => ({
       data: {
-        commands: await listCatalogCommands(catalogOptions),
+        commands: await listCatalogCommands({
+          ...catalogOptions,
+          ...(command.resourceOptions || {}),
+        }),
       },
     }),
     get_all_models: async () => ({
@@ -257,9 +260,18 @@ export async function startDaemon(
       | "unknown";
     const selectorPresent = commandHasSessionSelector(command);
     const selectedSessionPresent = hasSelectedSession(connection);
+    if (
+      command?.resourceOptions &&
+      typeof command.resourceOptions === "object"
+    ) {
+      connection.resourceOptions = command.resourceOptions;
+    }
 
     if (type === "get_state" && !selectorPresent && !selectedSessionPresent) {
-      const worker = workerPool.ensureAttachedWorker(connection);
+      const worker = workerPool.ensureAttachedWorker(
+        connection,
+        command.resourceOptions,
+      );
       workerPool.forwardToWorker(connection, worker, command);
       workerPool.evictDetachedWorkers();
       return true;

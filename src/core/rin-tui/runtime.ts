@@ -1404,9 +1404,27 @@ export class RpcInteractiveSession {
   }
 
   private buildSessionCommandPayload(
-    _type: string,
+    type: string,
     payload: Record<string, unknown>,
   ) {
+    if (
+      [
+        "get_state",
+        "new_session",
+        "select_session",
+        "attach_session",
+        "switch_session",
+        "get_commands",
+        "get_resource_diagnostics",
+      ].includes(type)
+    ) {
+      return {
+        ...payload,
+        resourceOptions:
+          payload.resourceOptions ||
+          serializeRpcResourceOptions(this.extensionOptions),
+      };
+    }
     return payload;
   }
 

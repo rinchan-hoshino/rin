@@ -20,6 +20,7 @@ export type ConnectionState = {
   attachedWorker?: WorkerHandle;
   sessionFile?: string;
   sessionId?: string;
+  resourceOptions?: Record<string, unknown>;
 };
 
 type PendingResponse = {
@@ -236,8 +237,12 @@ export class WorkerPool {
     connection: ConnectionState,
     resourceOptions?: Record<string, unknown>,
   ) {
+    if (resourceOptions) connection.resourceOptions = resourceOptions;
     if (connection.attachedWorker) return connection.attachedWorker;
-    const worker = this.createWorker(connection, resourceOptions);
+    const worker = this.createWorker(
+      connection,
+      resourceOptions || connection.resourceOptions,
+    );
     this.attachWorker(connection, worker);
     return worker;
   }
@@ -285,7 +290,7 @@ export class WorkerPool {
     }
     if (!wanted.sessionFile) return undefined;
 
-    const worker = this.createWorker(connection);
+    const worker = this.createWorker(connection, connection.resourceOptions);
     this.setWorkerSessionRefs(worker, wanted);
     this.attachWorker(connection, worker);
     try {
@@ -319,7 +324,9 @@ export class WorkerPool {
     const type = String(command?.type || "unknown");
 
     if (type === "new_session") {
-      return this.createWorker(connection, command.resourceOptions);
+      if (command.resourceOptions)
+        connection.resourceOptions = command.resourceOptions;
+      return this.createWorker(connection, connection.resourceOptions);
     }
 
     const currentWorker = this.resolveCurrentWorkerForCommand(
