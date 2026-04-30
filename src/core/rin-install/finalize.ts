@@ -72,7 +72,7 @@ async function applyInstalledRuntime(
     installDir,
     targetUser,
     useElevatedWrite,
-    { findSystemUser },
+    { findSystemUser, release },
   );
   const installedDocs = syncInstalledDocs(
     sourceRoot,

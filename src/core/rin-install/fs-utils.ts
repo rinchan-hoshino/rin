@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
+import { type InstalledReleaseInfo } from "../rin-lib/release.js";
 import {
   ensureDir,
   preferredTempRootCandidates,
@@ -479,6 +480,71 @@ export function syncInstalledDocs(
   };
 }
 
+function sanitizeInstalledReleaseId(value: string) {
+  return String(value || "")
+    .trim()
+    .replace(/[^A-Za-z0-9._+-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+}
+
+function isPlaceholderPackageVersion(value: string) {
+  return !value || value === "0.0.0";
+}
+
+function readSourcePackageVersion(sourceRoot: string) {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(sourceRoot, "package.json"), "utf8"),
+    );
+    return sanitizeInstalledReleaseId(String(parsed?.version || ""));
+  } catch {
+    return "";
+  }
+}
+
+function readSourceGitCommit(sourceRoot: string) {
+  try {
+    return sanitizeInstalledReleaseId(
+      execFileSync(
+        "git",
+        ["-C", sourceRoot, "rev-parse", "--short=12", "HEAD"],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        },
+      ),
+    );
+  } catch {
+    return "";
+  }
+}
+
+export function installedRuntimeReleaseId(
+  sourceRoot: string,
+  release?: InstalledReleaseInfo,
+) {
+  const releaseVersion = sanitizeInstalledReleaseId(
+    String(release?.version || ""),
+  );
+  const releaseRef = sanitizeInstalledReleaseId(String(release?.ref || ""));
+  const packageVersion = readSourcePackageVersion(sourceRoot);
+  const gitCommit = readSourceGitCommit(sourceRoot);
+
+  if (release?.channel === "git") {
+    if (/^[0-9a-f]{7,40}$/i.test(releaseVersion))
+      return releaseVersion.slice(0, 12);
+    if (/^[0-9a-f]{7,40}$/i.test(releaseRef)) return releaseRef.slice(0, 12);
+    return gitCommit || releaseRef || releaseVersion || "unknown";
+  }
+
+  if (!isPlaceholderPackageVersion(releaseVersion)) return releaseVersion;
+  if (!isPlaceholderPackageVersion(packageVersion)) return packageVersion;
+  return (
+    gitCommit || releaseRef || releaseVersion || packageVersion || "unknown"
+  );
+}
+
 export function releaseIdNow() {
   return new Date().toISOString().replace(/[:.]/g, "-").replace(/Z$/, "Z");
 }
@@ -488,9 +554,15 @@ export function publishInstalledRuntime(
   installDir: string,
   targetUser: string,
   elevated = false,
-  deps: { findSystemUser: (user: string) => any },
+  deps: {
+    findSystemUser: (user: string) => any;
+    release?: InstalledReleaseInfo;
+  },
 ) {
-  const releaseRoot = installedReleaseRoot(installDir, releaseIdNow());
+  const releaseRoot = installedReleaseRoot(
+    installDir,
+    installedRuntimeReleaseId(sourceRoot, deps.release),
+  );
   const currentLink = currentRuntimeRoot(installDir);
   const currentTmpLink = `${currentLink}.tmp`;
   if (elevated) {
@@ -505,6 +577,7 @@ export function publishInstalledRuntime(
         path.join(releaseRoot, name),
       ]);
     }
+    runPrivileged("touch", [releaseRoot]);
     try {
       runPrivileged("rm", ["-rf", currentTmpLink]);
     } catch {}
@@ -533,6 +606,9 @@ export function publishInstalledRuntime(
   for (const name of RUNTIME_COPY_ENTRY_NAMES)
     syncTree(path.join(sourceRoot, name), path.join(releaseRoot, name));
   try {
+    fs.utimesSync(releaseRoot, new Date(), new Date());
+  } catch {}
+  try {
     fs.rmSync(currentTmpLink, { recursive: true, force: true });
   } catch {}
   fs.symlinkSync(releaseRoot, currentTmpLink);
@@ -543,19 +619,32 @@ export function publishInstalledRuntime(
   return { releaseRoot, currentLink };
 }
 
-export function listInstalledReleaseNames(
+export type InstalledReleaseEntry = {
+  name: string;
+  path: string;
+  mtimeMs: number;
+};
+
+export function listInstalledReleaseEntries(
   installDir: string,
   elevated = false,
-) {
+): InstalledReleaseEntry[] {
   const releasesDir = installedReleasesRoot(installDir);
   if (!elevated) {
     try {
       return fs
         .readdirSync(releasesDir, { withFileTypes: true })
         .filter((entry) => entry.isDirectory())
-        .map((entry) => entry.name);
+        .map((entry) => {
+          const releasePath = path.join(releasesDir, entry.name);
+          let mtimeMs = 0;
+          try {
+            mtimeMs = fs.statSync(releasePath).mtimeMs;
+          } catch {}
+          return { name: entry.name, path: releasePath, mtimeMs };
+        });
     } catch {
-      return [] as string[];
+      return [];
     }
   }
   const privilegeCommand = pickPrivilegeCommand();
@@ -565,16 +654,148 @@ export function listInstalledReleaseNames(
       [
         process.execPath,
         "-e",
-        `const fs=require('node:fs');const dir=process.argv[1];try{const names=fs.readdirSync(dir,{withFileTypes:true}).filter((entry)=>entry.isDirectory()).map((entry)=>entry.name);process.stdout.write(JSON.stringify(names));}catch{process.stdout.write('[]')}`,
+        `const fs=require('node:fs');const path=require('node:path');const dir=process.argv[1];try{const entries=fs.readdirSync(dir,{withFileTypes:true}).filter((entry)=>entry.isDirectory()).map((entry)=>{const releasePath=path.join(dir,entry.name);let mtimeMs=0;try{mtimeMs=fs.statSync(releasePath).mtimeMs}catch{}return {name:entry.name,path:releasePath,mtimeMs};});process.stdout.write(JSON.stringify(entries));}catch{process.stdout.write('[]')}`,
         releasesDir,
       ],
       { encoding: "utf8" },
     );
     const parsed = JSON.parse(String(raw || "[]"));
-    return Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
+    return Array.isArray(parsed)
+      ? parsed.map((value: any) => ({
+          name: String(value?.name || ""),
+          path: String(value?.path || ""),
+          mtimeMs: Number(value?.mtimeMs || 0),
+        }))
+      : [];
   } catch {
-    return [] as string[];
+    return [];
   }
+}
+
+function releaseEntrySortNewestFirst(
+  a: InstalledReleaseEntry,
+  b: InstalledReleaseEntry,
+) {
+  const byTime = b.mtimeMs - a.mtimeMs;
+  if (byTime) return byTime;
+  return b.name.localeCompare(a.name);
+}
+
+export function listInstalledReleaseNames(
+  installDir: string,
+  elevated = false,
+) {
+  return listInstalledReleaseEntries(installDir, elevated).map(
+    (entry) => entry.name,
+  );
+}
+
+export function currentInstalledReleaseName(
+  installDir: string,
+  elevated = false,
+) {
+  const currentLink = currentRuntimeRoot(installDir);
+  try {
+    const target = elevated
+      ? execFileSync(
+          pickPrivilegeCommand(),
+          [
+            process.execPath,
+            "-e",
+            `const fs=require('node:fs');try{process.stdout.write(fs.realpathSync(process.argv[1]))}catch{}`,
+            currentLink,
+          ],
+          { encoding: "utf8" },
+        )
+      : fs.realpathSync(currentLink);
+    const releasesDir = path.resolve(installedReleasesRoot(installDir));
+    const normalizedTarget = path.resolve(String(target || ""));
+    if (!normalizedTarget.startsWith(`${releasesDir}${path.sep}`)) return "";
+    return path.basename(normalizedTarget);
+  } catch {
+    return "";
+  }
+}
+
+export function switchInstalledCurrentRelease(
+  installDir: string,
+  releaseName: string,
+  targetUser: string,
+  elevated = false,
+  deps: { findSystemUser: (user: string) => any },
+) {
+  const releasesDir = installedReleasesRoot(installDir);
+  const targetRoot = path.join(releasesDir, releaseName);
+  const currentLink = currentRuntimeRoot(installDir);
+  const currentTmpLink = `${currentLink}.tmp`;
+  if (!listInstalledReleaseNames(installDir, elevated).includes(releaseName)) {
+    throw new Error(`rin_release_not_found:${releaseName}`);
+  }
+  if (elevated) {
+    const target = deps.findSystemUser(targetUser) as any;
+    const targetGroup = target?.name ? String(target?.gid ?? "") : "";
+    try {
+      runPrivileged("rm", ["-rf", currentTmpLink]);
+    } catch {}
+    runPrivileged("ln", ["-s", targetRoot, currentTmpLink]);
+    try {
+      runPrivileged("rm", ["-rf", currentLink]);
+    } catch {}
+    runPrivileged("mv", [currentTmpLink, currentLink]);
+    if (target?.name) {
+      try {
+        runPrivileged("chown", [
+          "-h",
+          `${target.name}${targetGroup ? `:${targetGroup}` : ""}`,
+          currentLink,
+        ]);
+      } catch {}
+    }
+    return { releaseRoot: targetRoot, currentLink };
+  }
+  try {
+    fs.rmSync(currentTmpLink, { recursive: true, force: true });
+  } catch {}
+  fs.symlinkSync(targetRoot, currentTmpLink);
+  try {
+    fs.rmSync(currentLink, { recursive: true, force: true });
+  } catch {}
+  fs.renameSync(currentTmpLink, currentLink);
+  return { releaseRoot: targetRoot, currentLink };
+}
+
+export function rollbackInstalledRuntime(
+  installDir: string,
+  targetUser: string,
+  elevated = false,
+  deps: { findSystemUser: (user: string) => any },
+) {
+  const currentName = currentInstalledReleaseName(installDir, elevated);
+  const entries = listInstalledReleaseEntries(installDir, elevated)
+    .filter((entry) => entry.name && entry.name !== currentName)
+    .sort(releaseEntrySortNewestFirst);
+  const target = entries[0];
+  if (!target) throw new Error("rin_rollback_no_previous_release");
+  const switched = switchInstalledCurrentRelease(
+    installDir,
+    target.name,
+    targetUser,
+    elevated,
+    deps,
+  );
+  const prunedReleases = pruneInstalledReleases(
+    installDir,
+    3,
+    switched.releaseRoot,
+    elevated,
+  );
+  return {
+    previousReleaseName: currentName,
+    releaseName: target.name,
+    releaseRoot: switched.releaseRoot,
+    currentLink: switched.currentLink,
+    prunedReleases,
+  };
 }
 
 export function pruneInstalledReleases(
@@ -583,24 +804,29 @@ export function pruneInstalledReleases(
   currentReleaseRoot: string,
   elevated = false,
 ) {
-  const releasesDir = installedReleasesRoot(installDir);
   const currentReleaseName = path.basename(currentReleaseRoot);
-  const names = listInstalledReleaseNames(installDir, elevated).sort((a, b) =>
-    b.localeCompare(a),
+  const normalizedKeepCount = Math.max(keepCount, 1);
+  const entries = listInstalledReleaseEntries(installDir, elevated).sort(
+    releaseEntrySortNewestFirst,
   );
-  const keep = new Set(names.slice(0, Math.max(keepCount, 1)));
-  keep.add(currentReleaseName);
+  const keep = new Set<string>();
+  if (currentReleaseName) keep.add(currentReleaseName);
+  for (const entry of entries) {
+    if (keep.size >= normalizedKeepCount) break;
+    keep.add(entry.name);
+  }
   const removed: string[] = [];
-  for (const name of names) {
-    if (keep.has(name)) continue;
-    const releasePath = path.join(releasesDir, name);
-    if (elevated) runPrivileged("rm", ["-rf", releasePath]);
-    else fs.rmSync(releasePath, { recursive: true, force: true });
-    removed.push(releasePath);
+  for (const entry of entries) {
+    if (keep.has(entry.name)) continue;
+    if (elevated) runPrivileged("rm", ["-rf", entry.path]);
+    else fs.rmSync(entry.path, { recursive: true, force: true });
+    removed.push(entry.path);
   }
   return {
-    keepCount: Math.max(keepCount, 1),
-    kept: [...keep].sort((a, b) => b.localeCompare(a)),
+    keepCount: normalizedKeepCount,
+    kept: entries
+      .filter((entry) => keep.has(entry.name))
+      .map((entry) => entry.name),
     removed,
   };
 }

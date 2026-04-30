@@ -36,6 +36,8 @@ import {
 import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import {
   type ReleaseChannel,
+  type ResolvedRelease,
+  getReleaseRepoUrl,
   loadReleaseManifestForNetwork,
   resolveReleaseRequest,
 } from "../rin-lib/release.js";
@@ -51,6 +53,8 @@ export type ParsedArgs = {
     | "status"
     | "gui"
     | "usage"
+    | "versions"
+    | "rollback"
     | "memory-index"
     | "version";
   targetUser: string;
@@ -294,6 +298,33 @@ export function requireTool(name: string, paths: string[] = []) {
 
 function runCommandSync(command: string, args: string[], options: any = {}) {
   execFileSync(command, args, { stdio: "inherit", ...options });
+}
+
+function resolveGitCommitForRelease(
+  repoUrl: string,
+  release: ResolvedRelease,
+): ResolvedRelease {
+  if (release.channel !== "git") return release;
+  const selector = release.ref || release.version || release.branch || "HEAD";
+  if (/^[0-9a-f]{7,40}$/i.test(selector)) return release;
+  try {
+    const git = requireTool("git", ["/usr/bin/git", "/bin/git"]);
+    const raw = execFileSync(git, ["ls-remote", repoUrl, selector], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const hash = raw.split(/\s+/)[0] || "";
+    if (/^[0-9a-f]{40}$/i.test(hash)) {
+      const shortHash = hash.slice(0, 12);
+      return {
+        ...release,
+        version: shortHash,
+        ref: hash,
+        sourceLabel: `${release.sourceLabel} @ ${shortHash}`,
+      };
+    }
+  } catch {}
+  return release;
 }
 
 export function updateWorkRoot() {
@@ -541,11 +572,15 @@ export function resolveParsedArgs(
 export async function runUpdate(parsed: ParsedArgs) {
   const installDir = resolveInstallDirForTarget(parsed);
   const manifest = await loadReleaseManifestForNetwork();
-  const resolvedRelease = resolveReleaseRequest(manifest, {
+  const requestedRelease = resolveReleaseRequest(manifest, {
     channel: parsed.releaseChannel,
     branch: parsed.releaseBranch,
     version: parsed.releaseVersion,
   });
+  const resolvedRelease = resolveGitCommitForRelease(
+    manifest.git?.repoUrl || getReleaseRepoUrl(manifest),
+    requestedRelease,
+  );
 
   const curl =
     process.platform === "win32"

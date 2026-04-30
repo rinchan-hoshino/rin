@@ -16,6 +16,7 @@ import {
   safeString,
 } from "./shared.js";
 import { runUsage, runUsageInternal } from "./usage.js";
+import { runRollback, runVersions } from "./versions.js";
 
 const RIN_COMMANDS = [
   [
@@ -29,6 +30,8 @@ const RIN_COMMANDS = [
   ["status", "Show live worker and scheduled task activity"],
   ["gui", "Start the cross-platform Rin GUI shell"],
   ["usage", "Show token telemetry dashboard and grouped usage stats"],
+  ["versions", "List installed Rin runtime versions"],
+  ["rollback", "Rollback the installed Rin runtime to the previous version"],
   ["memory-index", "Repair the memory search index from archived transcripts"],
   ["version", "Show Rin version"],
 ] as const satisfies ReadonlyArray<readonly [ParsedArgs["command"], string]>;
@@ -126,6 +129,8 @@ export async function startRinCli() {
     return await runGui(parsed, process.argv.slice(2));
   if (parsed.command === "usage")
     return await runUsage(parsed, process.argv.slice(2));
+  if (parsed.command === "versions") return runVersions(parsed);
+  if (parsed.command === "rollback") return await runRollback(parsed);
   if (parsed.command === "memory-index")
     return await runMemoryIndex(parsed, process.argv.slice(2));
   if (parsed.command === "version") {
