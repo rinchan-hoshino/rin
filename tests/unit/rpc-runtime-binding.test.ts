@@ -24,6 +24,10 @@ const { loadRpcLocalExtensions } = await import(
     .href
 );
 
+function wait(ms = 0) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 test("rpc local extensions load settings-configured pi extensions", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-"));
   const agentDir = path.join(dir, "agent");
@@ -56,6 +60,120 @@ test("rpc local extensions load settings-configured pi extensions", async () => 
   assert.equal(
     target.extensionRunner.getCommand("hello")?.description,
     "hello command",
+  );
+});
+
+test("rpc local extensions use daemon-backed tools and message core actions", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-actions-"));
+  const agentDir = path.join(dir, "agent");
+  const extensionPath = path.join(dir, "actions-extension.ts");
+  await fs.mkdir(agentDir, { recursive: true });
+  await fs.writeFile(
+    extensionPath,
+    `export default function(pi: any) {
+      pi.on("session_start", async () => {
+        pi.appendEntry("tools-seen", {
+          active: pi.getActiveTools(),
+          all: pi.getAllTools().map((tool: any) => tool.name),
+        });
+        pi.setActiveTools(["read"]);
+        pi.sendMessage({ customType: "notice", content: "hello" }, { triggerTurn: false });
+        pi.sendUserMessage([{ type: "text", text: "hi" }], { deliverAs: "followUp" });
+      });
+    }\n`,
+  );
+  await fs.writeFile(
+    path.join(agentDir, "settings.json"),
+    JSON.stringify({ extensions: [extensionPath] }),
+  );
+
+  const sent = [];
+  const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      switch (payload.type) {
+        case "get_active_tools":
+          return Promise.resolve({ success: true, data: { tools: ["bash"] } });
+        case "get_all_tools":
+        case "refresh_tools":
+          return Promise.resolve({
+            success: true,
+            data: {
+              tools: [{ name: "read", description: "Read", parameters: {} }],
+            },
+          });
+        case "set_active_tools":
+          return Promise.resolve({
+            success: true,
+            data: { tools: payload.toolNames },
+          });
+        case "append_custom_entry":
+        case "send_custom_message":
+        case "send_user_message":
+          return Promise.resolve({ success: true, data: {} });
+        case "get_state":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl" },
+          });
+        case "get_session_snapshot":
+          return Promise.resolve({ success: true, data: { entries: [] } });
+        default:
+          return Promise.resolve({ success: true, data: {} });
+      }
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return true;
+    },
+    connect() {
+      return Promise.resolve();
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+  session.settingsManager = SettingsManager.create(dir, agentDir);
+
+  await loadRpcLocalExtensions(session, false, { cwd: dir, agentDir });
+  await session.refreshTools();
+  await wait(20);
+
+  assert.deepEqual(
+    sent.filter((payload) => payload.type === "append_custom_entry").at(-1),
+    {
+      type: "append_custom_entry",
+      customType: "tools-seen",
+      data: { active: ["bash"], all: ["read"] },
+    },
+  );
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "set_active_tools"),
+    { type: "set_active_tools", toolNames: ["read"] },
+  );
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "send_custom_message"),
+    {
+      type: "send_custom_message",
+      message: { customType: "notice", content: "hello" },
+      options: { triggerTurn: false },
+    },
+  );
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "send_user_message"),
+    {
+      type: "send_user_message",
+      content: [{ type: "text", text: "hi" }],
+      options: { deliverAs: "followUp" },
+      requestTag: sent.find((payload) => payload.type === "send_user_message")
+        ?.requestTag,
+    },
   );
 });
 

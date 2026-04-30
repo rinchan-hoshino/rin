@@ -243,6 +243,8 @@ export class RpcInteractiveSession {
   public scopedModels: any[] = [];
   public promptTemplates: any[] = [];
   public extensionRunner: any = undefined;
+  public activeToolsCache: string[] = [];
+  public allToolsCache: any[] = [];
   public model: any = null;
   public thinkingLevel: ThinkingLevel = "medium";
   public steeringMode: "all" | "one-at-a-time" = "all";
@@ -668,6 +670,51 @@ export class RpcInteractiveSession {
       this.startupPending = false;
       this.emitFrontendStatus(true);
     }
+  }
+
+  async getActiveTools() {
+    const data = await this.call("get_active_tools");
+    this.activeToolsCache = Array.isArray(data?.tools) ? data.tools : [];
+    return this.activeToolsCache;
+  }
+
+  async getAllTools() {
+    const data = await this.call("get_all_tools");
+    this.allToolsCache = Array.isArray(data?.tools) ? data.tools : [];
+    return this.allToolsCache;
+  }
+
+  async setActiveToolsByName(toolNames: string[]) {
+    const data = await this.call("set_active_tools", { toolNames });
+    this.activeToolsCache = Array.isArray(data?.tools)
+      ? data.tools
+      : [...toolNames];
+    await this.refreshState(REFRESH_SESSION).catch(() => {});
+  }
+
+  async refreshTools() {
+    const data = await this.call("refresh_tools");
+    this.allToolsCache = Array.isArray(data?.tools) ? data.tools : [];
+    return this.allToolsCache;
+  }
+
+  async appendEntry(customType: string, data?: unknown) {
+    await this.call("append_custom_entry", { customType, data });
+    await this.refreshState(REFRESH_SESSION).catch(() => {});
+  }
+
+  async sendCustomMessage(message: any, options?: any) {
+    await this.call("send_custom_message", { message, options });
+    await this.refreshState(REFRESH_MESSAGES_AND_SESSION).catch(() => {});
+  }
+
+  async sendUserMessage(content: any, options?: any) {
+    await this.call("send_user_message", {
+      content,
+      options,
+      requestTag: this.ensureRequestTag(options?.requestTag),
+    });
+    await this.refreshState(REFRESH_MESSAGES_AND_SESSION).catch(() => {});
   }
 
   async runCommand(commandLine: string) {

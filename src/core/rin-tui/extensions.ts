@@ -2,25 +2,13 @@ import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
 import type { TuiResourceOptions } from "./cli-options.js";
-import { extractText } from "./session-helpers.js";
 
-function sendRpcExtensionMessage(
-  target: any,
-  message: string,
-  options?: { images?: any[] },
-) {
-  void target
-    .prompt(message, {
-      images: options?.images,
-      source: "extension" as any,
-    })
-    .catch(() => {});
+function sendRpcExtensionMessage(target: any, message: any, options?: any) {
+  void target.sendCustomMessage(message, options).catch(() => {});
 }
 
-function sendRpcExtensionUserMessage(target: any, content: any) {
-  const text = extractText(content);
-  if (!text) return;
-  void target.prompt(text, { source: "extension" as any }).catch(() => {});
+function sendRpcExtensionUserMessage(target: any, content: any, options?: any) {
+  void target.sendUserMessage(content, options).catch(() => {});
 }
 
 function createRpcCoreActions(
@@ -34,10 +22,12 @@ function createRpcCoreActions(
     sendMessage: (message: string, messageOptions?: { images?: any[] }) => {
       sendRpcExtensionMessage(target, message, messageOptions);
     },
-    sendUserMessage: (content: any) => {
-      sendRpcExtensionUserMessage(target, content);
+    sendUserMessage: (content: any, messageOptions?: any) => {
+      sendRpcExtensionUserMessage(target, content, messageOptions);
     },
-    appendEntry: () => {},
+    appendEntry: (customType: string, data?: unknown) => {
+      void target.appendEntry(customType, data).catch(() => {});
+    },
     setSessionName: (name: string) => {
       void target.setSessionName(name).catch(() => {});
     },
@@ -45,10 +35,15 @@ function createRpcCoreActions(
     setLabel: (entryId: string, label: string | undefined) => {
       void target.setEntryLabel(entryId, label).catch(() => {});
     },
-    getActiveTools: () => [],
-    getAllTools: () => [],
-    setActiveTools: () => {},
-    refreshTools: () => {},
+    getActiveTools: () => target.activeToolsCache || [],
+    getAllTools: () => target.allToolsCache || [],
+    setActiveTools: (toolNames: string[]) => {
+      target.activeToolsCache = [...toolNames];
+      void target.setActiveToolsByName(toolNames).catch(() => {});
+    },
+    refreshTools: () => {
+      void target.refreshTools().catch(() => {});
+    },
     getCommands: () => options.getCommands(),
     setModel: (model: any) => options.setModel(model),
     getThinkingLevel: () => target.thinkingLevel,
@@ -147,6 +142,14 @@ export async function loadRpcLocalExtensions(
     target.sessionManager,
     target.modelRegistry,
   );
+  await Promise.all([
+    target.getActiveTools
+      ? target.getActiveTools().catch(() => [])
+      : Promise.resolve([]),
+    target.getAllTools
+      ? target.getAllTools().catch(() => [])
+      : Promise.resolve([]),
+  ]);
   const contextActions = createRpcContextActions(target);
 
   runner.bindCore(

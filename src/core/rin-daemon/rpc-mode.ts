@@ -788,6 +788,46 @@ export async function runCustomRpcMode(
         return done(id, type, { text: session.getLastAssistantText() });
       case "get_messages":
         return done(id, type, { messages: session.messages });
+      case "get_active_tools":
+        return done(id, type, {
+          tools: session.getActiveToolNames?.() || [],
+        });
+      case "get_all_tools":
+        return done(id, type, {
+          tools: session.getAllTools?.() || [],
+        });
+      case "set_active_tools": {
+        const toolNames = Array.isArray(command.toolNames)
+          ? command.toolNames
+              .map((name: unknown) => safeString(name).trim())
+              .filter(Boolean)
+          : [];
+        session.setActiveToolsByName?.(toolNames);
+        return done(id, type, {
+          tools: session.getActiveToolNames?.() || toolNames,
+        });
+      }
+      case "refresh_tools":
+        session._refreshToolRegistry?.();
+        return done(id, type, {
+          tools: session.getAllTools?.() || [],
+        });
+      case "append_custom_entry": {
+        const customType = safeString(command.customType).trim();
+        if (!customType) throw new Error("customType is required");
+        session.sessionManager?.appendCustomEntry?.(customType, command.data);
+        return done(id, type);
+      }
+      case "send_custom_message":
+        return run(id, type, async () => {
+          await session.sendCustomMessage(command.message, command.options);
+          return { sent: true };
+        });
+      case "send_user_message":
+        startTurnTask(String(command.requestTag || ""), async () => {
+          await session.sendUserMessage(command.content, command.options);
+        });
+        return done(id, type, { sent: true });
       case "get_commands":
         return done(id, type, {
           commands: getSlashCommands(session),

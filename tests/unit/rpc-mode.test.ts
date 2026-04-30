@@ -273,6 +273,173 @@ test(
 );
 
 test(
+  "rpc mode exposes daemon session tools and extension message actions",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const calls = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        getActiveToolNames: () => ["bash"],
+        getAllTools: () => [
+          { name: "bash", description: "Run shell", parameters: {} },
+          { name: "read", description: "Read file", parameters: {} },
+        ],
+        setActiveToolsByName: (toolNames) => {
+          calls.push(["setActiveToolsByName", toolNames]);
+        },
+        _refreshToolRegistry: () => {
+          calls.push(["refreshTools"]);
+        },
+        sessionManager: {
+          appendCustomEntry: (customType, data) => {
+            calls.push(["appendCustomEntry", customType, data]);
+          },
+          getEntries: () => [],
+          getTree: () => [],
+          getLeafId: () => null,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
+        sendCustomMessage: async (message, options) => {
+          calls.push(["sendCustomMessage", message, options]);
+        },
+        sendUserMessage: async (content, options) => {
+          calls.push(["sendUserMessage", content, options]);
+        },
+        prompt: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      const commands = [
+        { id: "1", type: "get_active_tools" },
+        { id: "2", type: "get_all_tools" },
+        { id: "3", type: "set_active_tools", toolNames: ["read"] },
+        { id: "4", type: "refresh_tools" },
+        {
+          id: "5",
+          type: "append_custom_entry",
+          customType: "demo",
+          data: { ok: true },
+        },
+        {
+          id: "6",
+          type: "send_custom_message",
+          message: { customType: "notice", content: "hello" },
+          options: { triggerTurn: false },
+        },
+        {
+          id: "7",
+          type: "send_user_message",
+          content: [{ type: "text", text: "hi" }],
+          options: { deliverAs: "followUp" },
+        },
+      ];
+      onData(
+        Buffer.from(
+          commands.map((command) => JSON.stringify(command)).join("\n") + "\n",
+        ),
+      );
+      await wait(40);
+
+      const responses = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter((line) => line?.type === "response");
+      const byId = new Map(responses.map((line) => [line.id, line]));
+      assert.deepEqual(byId.get("1")?.data, { tools: ["bash"] });
+      assert.equal(byId.get("2")?.data.tools.length, 2);
+      assert.deepEqual(byId.get("3")?.data, { tools: ["bash"] });
+      assert.equal(byId.get("4")?.data.tools.length, 2);
+      assert.deepEqual(byId.get("5")?.success, true);
+      assert.deepEqual(byId.get("6")?.data, { sent: true });
+      assert.deepEqual(byId.get("7")?.data, { sent: true });
+      assert.deepEqual(calls, [
+        ["setActiveToolsByName", ["read"]],
+        ["refreshTools"],
+        ["appendCustomEntry", "demo", { ok: true }],
+        [
+          "sendCustomMessage",
+          { customType: "notice", content: "hello" },
+          { triggerTurn: false },
+        ],
+        [
+          "sendUserMessage",
+          [{ type: "text", text: "hi" }],
+          { deliverAs: "followUp" },
+        ],
+      ]);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode executes extension slash commands on the daemon session",
   { concurrency: false },
   async () => {
