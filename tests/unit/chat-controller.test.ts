@@ -187,9 +187,10 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
-test("chat controller skips recovery bootstrap for /new", async () => {
+test("chat controller skips recovery bootstrap and asks the active voice to acknowledge /new", async () => {
   const controller = await createController();
   const calls = [];
+  const prompts = [];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
     deliveries.push(this.stagedDelivery?.text || "");
@@ -200,6 +201,7 @@ test("chat controller skips recovery bootstrap for /new", async () => {
   controller.connect = async function (options = {}) {
     calls.push(`connect:${String(options.restoreSession)}`);
     this.session = {
+      isStreaming: false,
       sessionManager: {
         getSessionFile: () => currentSessionFile,
         getSessionId: () => "session-2",
@@ -229,19 +231,31 @@ test("chat controller skips recovery bootstrap for /new", async () => {
           sessionId: "session-2",
         };
       },
-      runCommand: async (commandLine) => {
-        calls.push(`runCommand:${commandLine}`);
-        return { handled: true, text: "Started a new session." };
+      prompt: async (text, options = {}) => {
+        prompts.push(text);
+        emitRpcTurnComplete(
+          controller,
+          options,
+          "Active voice new-session reply.",
+        );
       },
     };
   };
 
   await controller.runCommand("/new");
 
-  assert.equal(calls[0], "connect:false");
-  assert.equal(calls[1], "newSession:chat");
-  assert.deepEqual(calls.slice(2), []);
-  assert.deepEqual(deliveries, ["Started a new session."]);
+  assert.deepEqual(calls, [
+    "connect:false",
+    "newSession:chat",
+    "ensureSessionReady",
+  ]);
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0], "Briefly greet me.");
+  assert.doesNotMatch(
+    prompts[0],
+    /agent|persona|send|chat|message|command|implementation|system/i,
+  );
+  assert.deepEqual(deliveries, ["Active voice new-session reply."]);
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
@@ -398,6 +412,77 @@ test("chat controller keeps /status immediate during an active chat turn", async
     "first done",
   );
   assert.equal((await firstTurn).finalText, "first done");
+});
+
+test("chat controller asks the active voice to acknowledge /compact and /reload", async () => {
+  for (const [command, resultText, activeVoiceText, promptPattern] of [
+    [
+      "/compact",
+      "Compacted session.",
+      "Active voice compact reply.",
+      /^Briefly tell me everything is settled\.$/,
+    ],
+    [
+      "/reload",
+      "Reloaded extensions, prompts, skills, and themes.",
+      "Active voice reload reply.",
+      /^Briefly tell me you are ready\.$/,
+    ],
+  ]) {
+    const controller = await createController();
+    const calls = [];
+    const prompts = [];
+    const deliveries = [];
+    controller.commitPendingDelivery = async function () {
+      deliveries.push(this.stagedDelivery?.text || "");
+      this.stagedDelivery = null;
+    };
+
+    const sessionFile = path.join(
+      controller.agentDir,
+      "sessions",
+      `${command.slice(1)}-chat.jsonl`,
+    );
+    controller.session = {
+      isStreaming: false,
+      sessionManager: {
+        getSessionFile: () => sessionFile,
+        getSessionId: () => `session-${command.slice(1)}`,
+        getSessionName: () => controller.chatKey,
+      },
+      ensureSessionReady: async () => {
+        calls.push("ensureSessionReady");
+        return {
+          sessionFile,
+          sessionId: `session-${command.slice(1)}`,
+        };
+      },
+      runCommand: async (commandLine) => {
+        calls.push(`runCommand:${commandLine}`);
+        return { handled: true, text: resultText, sessionFile };
+      },
+      prompt: async (text, options = {}) => {
+        prompts.push(text);
+        emitRpcTurnComplete(controller, options, activeVoiceText);
+      },
+      switchSession: async () => {},
+    };
+
+    await controller.runCommand(command);
+
+    assert.deepEqual(calls, [
+      "ensureSessionReady",
+      `runCommand:${command}`,
+      "ensureSessionReady",
+    ]);
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], promptPattern);
+    assert.doesNotMatch(
+      prompts[0],
+      /agent|persona|send|chat|message|command|implementation|system/i,
+    );
+    assert.deepEqual(deliveries, [activeVoiceText]);
+  }
 });
 
 test("chat controller delivers visible non-transient command errors", async () => {

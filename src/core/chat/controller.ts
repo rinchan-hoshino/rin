@@ -66,6 +66,15 @@ function commandNameFromCommandLine(commandLine: string) {
   return safeString(commandPart.split(/\s+/, 1)[0]).trim();
 }
 
+function buildActiveVoiceAcknowledgementPrompt(commandName: string) {
+  const promptByCommand: Record<string, string> = {
+    new: "Briefly greet me.",
+    compact: "Briefly tell me everything is settled.",
+    reload: "Briefly tell me you are ready.",
+  };
+  return promptByCommand[commandName] || "";
+}
+
 function hasWorkingTypingCapability(
   bot: any,
   parsed: { platform: string; chatId: string },
@@ -719,7 +728,8 @@ export class ChatController {
     sessionFile = "",
   ) {
     const commandName = commandNameFromCommandLine(commandLine);
-    const abortingActiveTurn = commandName === "abort" && this.hasActiveTurn();
+    const hadActiveTurn = this.hasActiveTurn();
+    const abortingActiveTurn = commandName === "abort" && hadActiveTurn;
     if (abortingActiveTurn) {
       this.turnAbortRequested = true;
       const data = this.driver.interruptActiveTurnLikeTui();
@@ -767,7 +777,7 @@ export class ChatController {
       replyToMessageId: replyToMessageId || undefined,
     });
     try {
-      const data: any = await this.driver.runCommand(commandLine, {
+      let data: any = await this.driver.runCommand(commandLine, {
         skipSessionRecovery,
         restoreSessionFile,
         sessionFile,
@@ -778,6 +788,30 @@ export class ChatController {
         this.driver.currentSessionFile(),
       );
       this.saveState();
+
+      const activeVoicePrompt = hadActiveTurn
+        ? ""
+        : buildActiveVoiceAcknowledgementPrompt(commandName);
+      if (activeVoicePrompt) {
+        const activeVoiceReply = await this.driver.runTurn({
+          text: activeVoicePrompt,
+          sessionFile: safeString(
+            data?.sessionFile || this.driver.currentSessionFile(),
+          ).trim(),
+        });
+        data = {
+          ...data,
+          text: activeVoiceReply.finalText,
+          sessionId: activeVoiceReply.sessionId || data?.sessionId,
+          sessionFile: activeVoiceReply.sessionFile || data?.sessionFile,
+        };
+        this.updateStoredSessionFile(
+          data?.sessionFile,
+          this.driver.currentSessionFile(),
+        );
+        this.saveState();
+      }
+
       const text = safeString(data?.text || "").trim();
       if (!text) throw new Error("chat_command_text_missing");
       await this.deliverAssistantReply({
