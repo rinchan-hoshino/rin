@@ -855,7 +855,7 @@ test("executeSearchMemory emits an initial status update before finishing", asyn
   });
 });
 
-test("search_memory formatting shows query, archive path, and raw messages with line numbers", () => {
+test("search_memory user formatting omits duplicate header and shows raw messages", () => {
   const rendered = memoryExtensionModule.formatSearchResult({
     query: "minecraft server",
     results: [
@@ -877,7 +877,7 @@ test("search_memory formatting shows query, archive path, and raw messages with 
     ],
   });
 
-  assert.match(rendered, /^search_memory minecraft server/m);
+  assert.doesNotMatch(rendered, /^search_memory minecraft server/m);
   assert.match(
     rendered,
     /\/home\/rin\/\.rin\/memory\/transcripts\/2026\/04\/demo\.jsonl/,
@@ -931,7 +931,7 @@ test("search_memory call formatting keeps query in the TUI tool title", () => {
     { query: "search_memory hang" },
     theme,
   );
-  assert.equal(rendered, "search_memory search_memory hang");
+  assert.equal(rendered, "recall search_memory hang");
 });
 
 test("search_memory rendered result appends timing info", () => {

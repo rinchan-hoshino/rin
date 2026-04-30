@@ -8,6 +8,7 @@ import { normalizeChatKey } from "../chat/support.js";
 import { ALL_THINKING_LEVELS } from "../model-thinking-levels.js";
 import {
   buildUserFacingTextResult,
+  formatToolCallLine,
   prepareTruncatedAgentUserText,
   renderTextToolResult,
 } from "../pi/render-utils.js";
@@ -57,6 +58,7 @@ type TaskManageParams = {
   taskId?: unknown;
 };
 type TaskSaveCallArgs = {
+  id?: unknown;
   name?: unknown;
   trigger?: Record<string, unknown> | null;
   target?: { kind?: unknown } | null;
@@ -470,33 +472,34 @@ async function executeTaskAction(
 
 function formatGetTaskCall(args: TaskGetParams, theme: TaskTheme) {
   const taskId = readTaskId(args);
-  return [
-    theme.fg("toolTitle", theme.bold("get_task")),
-    taskId ? ` ${theme.fg("accent", taskId)}` : "",
-  ].join("");
+  return formatToolCallLine("get_task", taskId || "list", theme, {
+    detailStyle: taskId ? "accent" : "muted",
+  });
 }
 
 function formatSaveTaskCall(args: TaskSaveCallArgs, theme: TaskTheme) {
   const name = String(args.name || "").trim();
-  const trigger = String(args.trigger?.kind || "").trim();
+  const taskId = String(args.id || "").trim();
   const target = String(args.target?.kind || "").trim();
-  const parts = [
-    theme.fg("toolTitle", theme.bold("save_task")),
-    name ? ` ${theme.fg("accent", name)}` : "",
-    trigger ? theme.fg("muted", ` ${trigger}`) : "",
-    target ? theme.fg("muted", ` ${target}`) : "",
-  ];
-  return parts.join("");
+  return formatToolCallLine(
+    "save_task",
+    name || taskId || target || "task",
+    theme,
+    {
+      suffix: target && (name || taskId) ? theme.fg("muted", ` ${target}`) : "",
+    },
+  );
 }
 
 function formatManageTaskCall(args: TaskManageParams, theme: TaskTheme) {
   const action = readManageTaskAction(args);
   const taskId = readTaskId(args);
-  return [
-    theme.fg("toolTitle", theme.bold("manage_task")),
-    action ? ` ${theme.fg("muted", action)}` : "",
-    taskId ? ` ${theme.fg("accent", taskId)}` : "",
-  ].join("");
+  return formatToolCallLine(
+    "manage_task",
+    [action, taskId].filter(Boolean).join(" ") || "task",
+    theme,
+    { detailStyle: action ? "accent" : "muted" },
+  );
 }
 
 function renderTaskResult(

@@ -112,6 +112,55 @@ type TextToolResult = TextToolContent & {
 
 export const NO_OUTPUT_TEXT = "(no output)";
 
+const TOOL_CALL_PREFIXES: Record<string, string> = {
+  bash: "$",
+  read: "read",
+  write: "write",
+  edit: "edit",
+  fetch: "GET",
+  web_search: "?",
+  search_memory: "recall",
+  save_prompts: "pin",
+  run_subagent: "agent",
+  list_models: "models",
+  generate_codex_image: "image",
+  get_task: "tasks",
+  save_task: "schedule",
+  manage_task: "task",
+  chat_bridge: "chat",
+  get_chat_msg: "msg",
+  list_chat_log: "log",
+  save_chat_user_identity: "trust",
+};
+
+export function getToolCallDisplayPrefix(toolName: unknown) {
+  const normalized = String(toolName || "").trim();
+  if (!normalized) return "tool";
+  const known = TOOL_CALL_PREFIXES[normalized];
+  if (known) return known;
+  const initials = normalized
+    .split(/[_\s-]+/)
+    .map((part) => part.trim()[0])
+    .filter(Boolean)
+    .join("");
+  return initials || normalized;
+}
+
+export function formatToolCallLine(
+  toolName: unknown,
+  detail: unknown,
+  theme: any,
+  config: { detailStyle?: string; suffix?: string } = {},
+) {
+  const prefix = getToolCallDisplayPrefix(toolName);
+  const detailText = String(detail || "").trim();
+  const detailStyle = config.detailStyle || "accent";
+  const parts = [theme.fg("toolTitle", prefix)];
+  if (detailText) parts.push(` ${theme.fg(detailStyle, detailText)}`);
+  if (config.suffix) parts.push(config.suffix);
+  return parts.join("");
+}
+
 function collectTextOutput(result: TextToolContent | null | undefined): {
   outputText: string;
   imageBlocks: ToolContentEntry[];
@@ -254,7 +303,7 @@ export function styleToolOutputLine(line: string, theme: any) {
     const [, prefix, title, suffix = ""] = indexedHeader;
     return [
       theme.fg("toolTitle", prefix),
-      theme.fg("toolOutput", theme.bold(title)),
+      theme.fg("toolOutput", title),
       suffix ? theme.fg("muted", suffix) : "",
     ].join("");
   }
@@ -263,14 +312,14 @@ export function styleToolOutputLine(line: string, theme: any) {
   if (commandSummary) {
     const [, label, spacing, count] = commandSummary;
     return [
-      theme.fg("toolTitle", theme.bold(label)),
+      theme.fg("toolTitle", label),
       spacing,
       theme.fg("success", count),
     ].join("");
   }
 
   if (/^match\s+\d+$/i.test(trimmed)) {
-    return theme.fg("toolTitle", theme.bold(line));
+    return theme.fg("toolTitle", line);
   }
 
   const keyValue = line.match(/^([A-Za-z][A-Za-z0-9_-]*)(=)(.*)$/);
@@ -287,7 +336,7 @@ export function styleToolOutputLine(line: string, theme: any) {
   if (labelValue) {
     const [, label, spacing, value] = labelValue;
     return [
-      theme.fg("toolTitle", theme.bold(label)),
+      theme.fg("toolTitle", label),
       spacing,
       styleValue(value, theme),
     ].join("");

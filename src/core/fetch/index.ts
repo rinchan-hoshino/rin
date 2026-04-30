@@ -27,6 +27,7 @@ import {
 } from "./text-utils.js";
 import {
   buildUserFacingTextResult,
+  formatToolCallLine,
   prepareTruncatedAgentUserText,
   renderTextToolResult,
 } from "../pi/render-utils.js";
@@ -258,7 +259,7 @@ export default function fetchModule(): RinCapabilityDefinition {
         },
         renderCall(args, theme) {
           return new Text(
-            `${theme.fg("toolTitle", theme.bold("fetch"))} ${theme.fg("accent", String(args.url || ""))}`,
+            formatToolCallLine("fetch", String(args.url || ""), theme),
             0,
             0,
           );

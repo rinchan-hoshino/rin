@@ -38,6 +38,7 @@ import {
   appendTruncationNotice,
   buildUserFacingTextResult,
   ExpandableTextResultComponent,
+  formatToolCallLine,
   getToolResultUserText,
   prepareTruncatedText,
   rebuildExpandableTextResultComponent,
@@ -306,9 +307,8 @@ export default function subagentModule(
           const preview = String(args.prompt || "")
             .replace(/\s+/g, " ")
             .trim();
-          const previewText = preview ? preview : theme.fg("toolOutput", "...");
           text.setText(
-            theme.fg("toolTitle", theme.bold(`run_subagent ${previewText}`)),
+            formatToolCallLine("run_subagent", preview || "...", theme),
           );
           return text;
         },
@@ -367,11 +367,7 @@ export default function subagentModule(
           return await listModelsResult(ctx, options.getThinkingLevel());
         },
         renderCall(_args, theme) {
-          return new Text(
-            theme.fg("toolTitle", theme.bold("list_models")),
-            0,
-            0,
-          );
+          return new Text(formatToolCallLine("list_models", "", theme), 0, 0);
         },
         renderResult(result: any, options, theme, context) {
           const details = result.details as SubagentDetails | undefined;

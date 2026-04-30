@@ -10,6 +10,7 @@ import { type TruncationResult } from "@mariozechner/pi-coding-agent";
 import {
   buildUserFacingTextResult,
   formatHiddenResultsNotice,
+  formatToolCallLine,
   formatToolDuration,
   prepareTruncatedText,
   renderTextToolResult,
@@ -123,11 +124,9 @@ function searchResultHeader(response: any): string {
 
 export function formatSearchResult(response: any): string {
   const rows = Array.isArray(response?.results) ? response.results : [];
-  if (!rows.length)
-    return `${searchResultHeader(response)}\n\nNo memory results found.`;
-  return [
-    searchResultHeader(response),
-    ...rows.map((item: any) => {
+  if (!rows.length) return "No memory results found.";
+  return rows
+    .map((item: any) => {
       return [
         resultLocation(item),
         resultSnippet(item),
@@ -137,8 +136,8 @@ export function formatSearchResult(response: any): string {
       ]
         .filter(Boolean)
         .join("\n");
-    }),
-  ].join("\n\n");
+    })
+    .join("\n\n");
 }
 
 export function formatAgentSearchResult(response: any): string {
@@ -355,10 +354,9 @@ function renderMemoryResult(
 
 export function formatSearchMemoryCall(args: any, theme: any) {
   const query = String(args?.query || "").trim();
-  if (!query) {
-    return `${theme.fg("toolTitle", theme.bold("search_memory"))} ${theme.fg("muted", "recent")}`;
-  }
-  return `${theme.fg("toolTitle", theme.bold("search_memory"))} ${theme.fg("accent", query)}`;
+  return formatToolCallLine("search_memory", query || "recent", theme, {
+    detailStyle: query ? "accent" : "muted",
+  });
 }
 
 export default function memoryModule(
