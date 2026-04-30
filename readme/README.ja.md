@@ -90,6 +90,8 @@ Rin を開いたら、そのまま話しかければ大丈夫です。
 ```bash
 rin            # Rin を開く
 rin doctor     # 状態と設定を確認
+rin target     # デプロイ先ターゲットを表示・選択
+rin --target x # 設定済みターゲット環境で Rin を実行
 rin start      # デーモンを起動
 rin stop       # デーモンを停止
 rin restart    # デーモンを再起動

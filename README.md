@@ -169,6 +169,8 @@ Avoid treating repo-local workflows like `git pull`, ad-hoc rebuilds, or rerunni
 rin            # open Rin
 rin doctor     # inspect health and configuration
 rin status     # show live worker and scheduled-task activity
+rin target     # list and select deployment targets
+rin --target x # run Rin against a configured target environment
 rin start      # start the daemon
 rin stop       # stop the daemon
 rin restart    # restart the daemon

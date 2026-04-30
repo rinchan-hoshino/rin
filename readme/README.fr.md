@@ -90,6 +90,8 @@ Exemples :
 ```bash
 rin            # ouvrir Rin
 rin doctor     # vérifier l’état et la configuration
+rin target     # lister et choisir des cibles de déploiement
+rin --target x # exécuter Rin sur une cible configurée
 rin start      # démarrer le daemon
 rin stop       # arrêter le daemon
 rin restart    # redémarrer le daemon

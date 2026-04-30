@@ -101,6 +101,8 @@ rin status --watch  # 实时查看 worker 和定时任务活动
 rin            # 打开 Rin
 rin doctor     # 检查状态和配置
 rin status     # 查看 worker 和定时任务活动
+rin target     # 查看和选择部署目标
+rin --target x # 在已配置的目标环境中运行 Rin
 rin start      # 启动 daemon
 rin stop       # 停止 daemon
 rin restart    # 重启 daemon

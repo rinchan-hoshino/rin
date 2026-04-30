@@ -72,6 +72,27 @@ type InstallerDisplayCopy = {
   currentUserLabel: string;
   existingOtherUserLabel: string;
   newUserLabel: string;
+  chooseInstallTargetMessage: string;
+  currentInstallTargetLabel: string;
+  localUserInstallTargetLabel: string;
+  sshInstallTargetLabel: string;
+  containerInstallTargetLabel: string;
+  cloudInstallTargetLabel: string;
+  vmInstallTargetLabel: string;
+  nasInstallTargetLabel: string;
+  sameMachineHint: string;
+  reuseSshAuthHint: string;
+  containerIsolationHint: string;
+  providerApiProvisionerHint: string;
+  hypervisorProvisionerHint: string;
+  nasIsolationHint: string;
+  sshTargetMessage: string;
+  sshTargetRequired: string;
+  targetNameMessage: string;
+  targetNameRequired: string;
+  containerEngineMessage: string;
+  containerImageMessage: string;
+  chooseDeploymentProviderMessage: (kind: string) => string;
   noneFoundHint: string;
   usersHint: (count: number) => string;
   newUserHint: string;
@@ -269,6 +290,28 @@ const INSTALLER_DISPLAY_COPY = {
     currentUserLabel: "Current user",
     existingOtherUserLabel: "Existing other user",
     newUserLabel: "New user",
+    chooseInstallTargetMessage: "Where should Rin be installed?",
+    currentInstallTargetLabel: "This user",
+    localUserInstallTargetLabel: "Another local user",
+    sshInstallTargetLabel: "Existing SSH host",
+    containerInstallTargetLabel: "Local container",
+    cloudInstallTargetLabel: "New cloud instance",
+    vmInstallTargetLabel: "New virtual machine",
+    nasInstallTargetLabel: "NAS isolated runtime",
+    sameMachineHint: "same machine",
+    reuseSshAuthHint: "reuse your ssh config/auth",
+    containerIsolationHint: "Docker or Podman isolation",
+    providerApiProvisionerHint: "provider API provisioner",
+    hypervisorProvisionerHint: "hypervisor provisioner",
+    nasIsolationHint: "vendor app/container runtime",
+    sshTargetMessage: "SSH target (Host alias or user@host)",
+    sshTargetRequired: "SSH target is required",
+    targetNameMessage: "Target name for future rin --target use",
+    targetNameRequired: "Target name is required",
+    containerEngineMessage: "Container engine",
+    containerImageMessage: "Base image",
+    chooseDeploymentProviderMessage: (kind: string) =>
+      `Choose ${kind} provider`,
     noneFoundHint: "none found",
     usersHint: (count: number) => `${count} user(s)`,
     newUserHint: "enter a username",
@@ -581,6 +624,27 @@ const INSTALLER_DISPLAY_COPY = {
     currentUserLabel: "当前用户",
     existingOtherUserLabel: "现有其他用户",
     newUserLabel: "新用户",
+    chooseInstallTargetMessage: "Rin 要安装到哪里？",
+    currentInstallTargetLabel: "当前用户",
+    localUserInstallTargetLabel: "本机其他用户",
+    sshInstallTargetLabel: "已有 SSH 主机",
+    containerInstallTargetLabel: "本机容器隔离环境",
+    cloudInstallTargetLabel: "新云主机",
+    vmInstallTargetLabel: "新虚拟机",
+    nasInstallTargetLabel: "NAS 隔离环境",
+    sameMachineHint: "同一台机器",
+    reuseSshAuthHint: "复用现有 ssh 配置和认证",
+    containerIsolationHint: "Docker 或 Podman 隔离",
+    providerApiProvisionerHint: "通过 provider API 创建环境",
+    hypervisorProvisionerHint: "通过虚拟化后端创建环境",
+    nasIsolationHint: "厂商应用/容器隔离环境",
+    sshTargetMessage: "SSH 目标（Host 别名或 user@host）",
+    sshTargetRequired: "必须填写 SSH 目标",
+    targetNameMessage: "未来 rin --target 使用的目标名称",
+    targetNameRequired: "必须填写目标名称",
+    containerEngineMessage: "容器引擎",
+    containerImageMessage: "基础镜像",
+    chooseDeploymentProviderMessage: (kind: string) => `选择 ${kind} provider`,
     noneFoundHint: "未找到",
     usersHint: (count: number) => `共 ${count} 个用户`,
     newUserHint: "输入用户名",
