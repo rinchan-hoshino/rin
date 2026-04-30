@@ -132,7 +132,7 @@ test("loader stop clears render interval", () => {
   assert.ok(renders >= 1);
 });
 
-test("rpc frontend startup statuses render until Pi-owned working starts", async () => {
+test("rpc frontend startup statuses render as static text until Pi-owned working starts", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -187,9 +187,10 @@ test("rpc frontend startup statuses render until Pi-owned working starts", async
     connected: true,
   });
 
-  const startupLoader = instance.statusContainer.child;
-  assert.ok(startupLoader);
+  const startupStatus = instance.statusContainer.child;
+  assert.ok(startupStatus);
   assert.equal(instance.loadingAnimation, undefined);
+  assert.equal(startupStatus.intervalId, undefined);
   assert.equal(additions, 1);
   assert.ok(renders >= 1);
 
@@ -199,7 +200,9 @@ test("rpc frontend startup statuses render until Pi-owned working starts", async
     label: "Connecting",
     connected: true,
   });
-  assert.equal(instance.statusContainer.child, startupLoader);
+  assert.equal(instance.statusContainer.child, startupStatus);
+  assert.equal(startupStatus.intervalId, undefined);
+  assert.equal(additions, 1);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_frontend_status",
@@ -220,7 +223,6 @@ test("rpc frontend startup statuses render until Pi-owned working starts", async
     assert.ok(clears >= 1);
   } finally {
     instance.loadingAnimation?.stop();
-    startupLoader?.stop?.();
   }
 });
 
