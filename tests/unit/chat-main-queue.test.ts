@@ -12,14 +12,18 @@ const rootDir = path.resolve(
   "..",
 );
 
-test("chat main consumes inbound help messages through the inbox path only once", async () => {
+test("chat main consumes inbound localized help messages through the inbox path only once", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
     path.join(tempRoot, "rin-chat-main-queue-"),
   );
   try {
-    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+    await fs.writeFile(
+      path.join(agentDir, "settings.json"),
+      JSON.stringify({ language: "zh-CN" }) + "\n",
+      "utf8",
+    );
 
     const script = `
       import path from "node:path";
@@ -67,7 +71,12 @@ test("chat main consumes inbound help messages through the inbox path only once"
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      if (rows.length !== 1) {
+      const text = rows[0]?.text || "";
+      if (
+        rows.length !== 1 ||
+        !text.includes("/help — \u663e\u793a\u53ef\u7528\u547d\u4ee4") ||
+        !text.includes("/model — \u663e\u793a\u6216\u5207\u6362\u5f53\u524d\u6a21\u578b")
+      ) {
         throw new Error(JSON.stringify({
           sentCount,
           assistantCount: rows.length,
