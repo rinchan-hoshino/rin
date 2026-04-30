@@ -548,3 +548,128 @@ test("usage report keeps provider_model labels consistent in raw event tables", 
     assert.match(report, /\(none\)/);
   });
 });
+
+test("usage dashboard renders Codex subscription quota and token charts", async () => {
+  await withTempRoot(async (root) => {
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-dashboard-chart",
+        timestamp: "2026-04-10T08:00:00.000Z",
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        provider: "openai-codex",
+        model: "gpt-5.5",
+        inputTokens: 80,
+        outputTokens: 20,
+        totalTokens: 100,
+        costTotal: 0.25,
+      },
+      root,
+    );
+
+    const report = usageCli.renderUsageReport(
+      root,
+      {
+        groupBy: [],
+        filters: [],
+        limit: 20,
+        orderBy: "total_tokens",
+        direction: "desc",
+        events: false,
+        includeZero: false,
+        dimensions: false,
+        help: false,
+      },
+      [
+        {
+          provider: "openai-codex",
+          label: "ChatGPT Codex",
+          configured: true,
+          accountName: "rin@example.test",
+          plan: "pro",
+          windows: [
+            {
+              name: "five_hour",
+              percentLeft: 75,
+              resetAt: "2026-04-10T13:00:00.000Z",
+            },
+            {
+              name: "weekly",
+              percentLeft: 40,
+              resetAt: "2026-04-17T08:00:00.000Z",
+            },
+          ],
+        },
+        {
+          provider: "google-gemini-cli",
+          label: "Gemini CLI",
+          configured: true,
+          accountName: "gemini@example.test",
+          windows: [],
+          error: "quota unavailable",
+        },
+      ],
+    );
+
+    assert.match(report, /accounts & quota/);
+    assert.match(report, /ChatGPT Codex\s+rin@example\.test \(pro\)/);
+    assert.match(report, /5-hour\s+█+░+ 75% left/);
+    assert.match(report, /weekly\s+█+░+ 40% left/);
+    assert.match(report, /Gemini CLI\s+gemini@example\.test/);
+    assert.match(report, /temporarily unavailable \(quota unavailable\)/);
+    assert.match(report, /overview/);
+    assert.match(report, /chart/);
+  });
+});
+
+test("Codex subscription usage parser accepts current wham usage shape", () => {
+  const parsed = usageCli.parseCodexSubscriptionUsage({
+    email: "rin@example.test",
+    plan_type: "pro",
+    rate_limit: {
+      primary_window: {
+        used_percent: 25,
+        limit_window_seconds: 18000,
+        reset_at: 1777551566,
+      },
+      secondary_window: {
+        percent_left: 40,
+        limit_window_seconds: 604800,
+        reset_at: 1777974883,
+      },
+    },
+    credits: { balance: "0" },
+  });
+
+  assert.equal(parsed.accountName, "rin@example.test");
+  assert.equal(parsed.plan, "pro");
+  assert.equal(parsed.windows[0].name, "five_hour");
+  assert.equal(parsed.windows[0].percentLeft, 75);
+  assert.equal(parsed.windows[1].name, "weekly");
+  assert.equal(parsed.windows[1].percentLeft, 40);
+  assert.equal(parsed.credits, "0");
+});
+
+test("Anthropic subscription usage parser accepts OAuth usage shape", () => {
+  const parsed = usageCli.parseAnthropicSubscriptionUsage({
+    five_hour: {
+      utilization: 25,
+      resets_at: "2026-04-10T13:00:00.000Z",
+    },
+    seven_day: {
+      utilization: 60,
+      resets_at: "2026-04-17T08:00:00.000Z",
+    },
+    extra_usage: {
+      used_credits: 125,
+      monthly_limit: 2000,
+    },
+  });
+
+  assert.equal(parsed.windows[0].name, "five_hour");
+  assert.equal(parsed.windows[0].percentLeft, 75);
+  assert.equal(parsed.windows[1].name, "seven_day");
+  assert.equal(parsed.windows[1].percentLeft, 40);
+  assert.equal(parsed.credits, "1.25/20.00");
+});

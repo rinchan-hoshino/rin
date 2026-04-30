@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import {
   captureInternalRinCommand,
   createTargetExecutionContext,
@@ -5,6 +8,7 @@ import {
   ParsedArgs,
   safeString,
 } from "./shared.js";
+import { loadRinCodingAgent } from "../rin-lib/loader.js";
 import type { TokenUsageQueryOptions } from "../token-usage/store.js";
 import {
   formatProviderModelLabel,
@@ -45,6 +49,63 @@ const DASHBOARD_AGGREGATE_SECTIONS: UsageAggregateSection[] = [
   { title: "top sessions", groupBy: ["session_name", "session_id"], limit: 8 },
   { title: "top capabilities", groupBy: ["capability"], limit: 10 },
 ];
+
+const OPENAI_CODEX_PROVIDER = "openai-codex";
+const ANTHROPIC_PROVIDER = "anthropic";
+const GITHUB_COPILOT_PROVIDER = "github-copilot";
+const OPENAI_CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const GITHUB_USER_URL = "https://api.github.com/user";
+const GOOGLE_USERINFO_URL =
+  "https://www.googleapis.com/oauth2/v1/userinfo?alt=json";
+const GOOGLE_OAUTH_PROVIDERS = new Set([
+  "google-gemini-cli",
+  "google-antigravity",
+]);
+
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  [OPENAI_CODEX_PROVIDER]: "ChatGPT Codex",
+  [ANTHROPIC_PROVIDER]: "Claude subscription",
+  [GITHUB_COPILOT_PROVIDER]: "GitHub Copilot",
+  "google-gemini-cli": "Gemini CLI",
+  "google-antigravity": "Google Antigravity",
+};
+
+type SubscriptionWindow = {
+  name: string;
+  percentLeft?: number;
+  resetAt?: string;
+  windowSeconds?: number;
+};
+
+export type ProviderQuotaStatus = {
+  provider: string;
+  label: string;
+  configured: boolean;
+  authType?: string;
+  accountName?: string;
+  accountId?: string;
+  plan?: string;
+  windows: SubscriptionWindow[];
+  credits?: string;
+  error?: string;
+};
+
+export type CodexSubscriptionStatus = Omit<
+  ProviderQuotaStatus,
+  "provider" | "label"
+>;
+
+type ProviderCredential = {
+  type?: string;
+  access?: string;
+  refresh?: string;
+  expires?: number;
+  accountId?: string;
+  projectId?: string;
+  email?: string;
+  enterpriseUrl?: string;
+};
 
 function printUsageHelp() {
   console.log(
@@ -219,6 +280,34 @@ function truncate(value: string, width: number) {
   return `${value.slice(0, width - 1)}…`;
 }
 
+function formatPercent(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "-";
+  const rounded = Math.round(numeric * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
+}
+
+function clampPercent(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return undefined;
+  return Math.min(100, Math.max(0, numeric));
+}
+
+function renderBar(value: unknown, width = 18) {
+  const percent = clampPercent(value);
+  if (percent === undefined) return `${"░".repeat(width)} -`;
+  const filled = Math.round((percent / 100) * width);
+  return `${"█".repeat(filled)}${"░".repeat(width - filled)} ${formatPercent(percent)}`;
+}
+
+function formatTime(value: unknown) {
+  const text = safeString(value).trim();
+  if (!text) return "-";
+  const timestamp = Date.parse(text);
+  if (Number.isNaN(timestamp)) return text;
+  return new Date(timestamp).toLocaleString();
+}
+
 function renderTable(rows: Array<Record<string, unknown>>, columns: string[]) {
   if (!rows.length) return "(no rows)";
   const widths = new Map<string, number>();
@@ -253,21 +342,482 @@ function renderTable(rows: Array<Record<string, unknown>>, columns: string[]) {
   return [header, divider, ...body].join("\n");
 }
 
+function decodeJwtPayload(token: string): Record<string, any> | undefined {
+  const parts = token.split(".");
+  if (parts.length !== 3) return undefined;
+  try {
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function getAuthPath(agentDir: string) {
+  return path.join(agentDir || "", "auth.json");
+}
+
+function readStoredCredentials(agentDir: string) {
+  const authPath = getAuthPath(agentDir);
+  if (!authPath || !fs.existsSync(authPath)) return {};
+  try {
+    const auth = JSON.parse(fs.readFileSync(authPath, "utf8"));
+    if (!auth || typeof auth !== "object") return {};
+    const credentials: Record<string, ProviderCredential> = {};
+    for (const [provider, credential] of Object.entries(auth)) {
+      if (!provider || !credential || typeof credential !== "object") continue;
+      credentials[provider] = credential as ProviderCredential;
+    }
+    return credentials;
+  } catch {
+    return {};
+  }
+}
+
+function providerLabel(provider: string) {
+  return PROVIDER_DISPLAY_NAMES[provider] || provider;
+}
+
+function baseProviderStatus(
+  provider: string,
+  credential: ProviderCredential | undefined,
+): ProviderQuotaStatus {
+  return {
+    provider,
+    label: providerLabel(provider),
+    configured: true,
+    authType: safeString(credential?.type).trim() || undefined,
+    windows: [],
+  };
+}
+
+function profileFromCredential(
+  provider: string,
+  credential: ProviderCredential | undefined,
+): Pick<ProviderQuotaStatus, "accountName" | "accountId" | "plan"> {
+  if (provider === OPENAI_CODEX_PROVIDER) {
+    const payload = credential?.access
+      ? decodeJwtPayload(credential.access)
+      : undefined;
+    const auth = payload?.["https://api.openai.com/auth"];
+    const profile = payload?.["https://api.openai.com/profile"];
+    return {
+      accountName:
+        safeString(profile?.email || profile?.name).trim() || undefined,
+      accountId:
+        safeString(credential?.accountId || auth?.chatgpt_account_id).trim() ||
+        undefined,
+      plan: safeString(auth?.chatgpt_plan_type).trim() || undefined,
+    };
+  }
+  if (GOOGLE_OAUTH_PROVIDERS.has(provider)) {
+    return {
+      accountName: safeString(credential?.email).trim() || undefined,
+      accountId: safeString(credential?.projectId).trim() || undefined,
+    };
+  }
+  return {};
+}
+
+function normalizeWindowName(name: string, windowSeconds: unknown) {
+  const seconds = Number(windowSeconds || 0);
+  if (seconds > 0 && seconds <= 6 * 3600) return "five_hour";
+  if (seconds >= 6 * 24 * 3600) return "weekly";
+  return name;
+}
+
+function epochToIso(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  const ms = numeric > 10 ** 11 ? numeric : numeric * 1000;
+  return new Date(ms).toISOString();
+}
+
+function parseIsoTime(value: unknown) {
+  const text = safeString(value).trim();
+  if (!text) return undefined;
+  const timestamp = Date.parse(text);
+  if (Number.isNaN(timestamp)) return undefined;
+  return new Date(timestamp).toISOString();
+}
+
+function parseLimitWindow(
+  name: string,
+  value: any,
+): SubscriptionWindow | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const window =
+    !value.reset_at && !value.reset_time_ms && value.primary_window
+      ? value.primary_window
+      : value;
+  if (!window || typeof window !== "object") return undefined;
+  const percentLeft =
+    clampPercent(window.percent_left ?? window.remaining_percent) ??
+    clampPercent(
+      window.used_percent === undefined
+        ? undefined
+        : 100 - Number(window.used_percent),
+    );
+  const resetAt = epochToIso(window.reset_at ?? window.reset_time_ms);
+  const windowSeconds = Number(window.limit_window_seconds || 0) || undefined;
+  return {
+    name: normalizeWindowName(name, windowSeconds),
+    percentLeft,
+    resetAt,
+    windowSeconds,
+  };
+}
+
+function parseRateLimitWindows(rateLimit: any): SubscriptionWindow[] {
+  const windows: SubscriptionWindow[] = [];
+  const primary =
+    parseLimitWindow("five_hour", rateLimit?.five_hour) ||
+    parseLimitWindow("five_hour", rateLimit?.five_hour_limit) ||
+    parseLimitWindow("five_hour", rateLimit?.primary_window) ||
+    parseLimitWindow("five_hour", rateLimit?.primary);
+  const secondary =
+    parseLimitWindow("weekly", rateLimit?.weekly) ||
+    parseLimitWindow("weekly", rateLimit?.weekly_limit) ||
+    parseLimitWindow("weekly", rateLimit?.secondary_window) ||
+    parseLimitWindow("weekly", rateLimit?.secondary);
+  if (primary) windows.push(primary);
+  if (secondary) windows.push(secondary);
+  return windows;
+}
+
+function parseAnthropicWindow(
+  name: string,
+  value: any,
+): SubscriptionWindow | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const utilization = Number(value.utilization);
+  const percentLeft = Number.isFinite(utilization)
+    ? clampPercent(100 - utilization)
+    : clampPercent(value.percent_left ?? value.remaining_percent);
+  return {
+    name,
+    percentLeft,
+    resetAt: parseIsoTime(value.resets_at || value.reset_at),
+  };
+}
+
+export function parseCodexSubscriptionUsage(
+  data: any,
+  credential?: ProviderCredential,
+): CodexSubscriptionStatus {
+  const fallback = profileFromCredential(OPENAI_CODEX_PROVIDER, credential);
+  return {
+    configured: true,
+    accountName: safeString(data?.email).trim() || fallback.accountName,
+    accountId:
+      safeString(data?.account_id || data?.accountId).trim() ||
+      fallback.accountId,
+    plan: safeString(data?.plan_type || data?.planType).trim() || fallback.plan,
+    windows: parseRateLimitWindows(data?.rate_limit || data?.rate_limits),
+    credits: data?.credits
+      ? safeString(data.credits.balance).trim()
+      : undefined,
+  };
+}
+
+export function parseAnthropicSubscriptionUsage(
+  data: any,
+): Pick<ProviderQuotaStatus, "windows" | "credits"> {
+  const windows = [
+    parseAnthropicWindow("five_hour", data?.five_hour),
+    parseAnthropicWindow("seven_day", data?.seven_day),
+  ].filter((window): window is SubscriptionWindow => Boolean(window));
+  const usedCredits = data?.extra_usage?.used_credits;
+  const monthlyLimit = data?.extra_usage?.monthly_limit;
+  const credits =
+    usedCredits !== undefined && monthlyLimit !== undefined
+      ? `${(Number(usedCredits) / 100).toFixed(2)}/${(Number(monthlyLimit) / 100).toFixed(2)}`
+      : undefined;
+  return { windows, credits };
+}
+
+async function refreshProviderCredential(
+  agentDir: string,
+  provider: string,
+  credential: ProviderCredential,
+): Promise<ProviderCredential> {
+  const authPath = getAuthPath(agentDir);
+  if (!authPath || !fs.existsSync(authPath)) return credential;
+  try {
+    const codingAgentModule = await loadRinCodingAgent();
+    const { AuthStorage } = codingAgentModule as any;
+    const authStorage = AuthStorage.create(authPath);
+    const apiKey = await authStorage.getApiKey?.(provider, {
+      includeFallback: false,
+    });
+    const refreshed = { ...credential, ...(authStorage.get?.(provider) || {}) };
+    if (GOOGLE_OAUTH_PROVIDERS.has(provider) && typeof apiKey === "string") {
+      try {
+        const parsed = JSON.parse(apiKey);
+        return {
+          ...refreshed,
+          access: parsed.token || refreshed.access,
+          projectId: parsed.projectId || refreshed.projectId,
+        };
+      } catch {
+        return refreshed;
+      }
+    }
+    return { ...refreshed, access: apiKey || refreshed.access };
+  } catch {
+    return credential;
+  }
+}
+
+async function readJsonResponse(url: string, init: RequestInit) {
+  const response = await fetch(url, {
+    ...init,
+    signal: init.signal || AbortSignal.timeout(4000),
+  });
+  const text = await response.text();
+  let data: any = undefined;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    data = undefined;
+  }
+  return { response, data };
+}
+
+async function loadCodexProviderStatus(
+  credential: ProviderCredential,
+): Promise<ProviderQuotaStatus> {
+  const profile = profileFromCredential(OPENAI_CODEX_PROVIDER, credential);
+  const base = {
+    ...baseProviderStatus(OPENAI_CODEX_PROVIDER, credential),
+    ...profile,
+  };
+  if (!credential.access || !profile.accountId) {
+    return { ...base, error: "missing token" };
+  }
+  try {
+    const { response, data } = await readJsonResponse(OPENAI_CODEX_USAGE_URL, {
+      headers: {
+        Authorization: `Bearer ${credential.access}`,
+        Accept: "application/json",
+        "ChatGPT-Account-Id": profile.accountId,
+        Origin: "https://chatgpt.com",
+        Referer: "https://chatgpt.com/",
+        "User-Agent": "Rin usage",
+      },
+    });
+    if (!response.ok)
+      return { ...base, error: `quota HTTP ${response.status}` };
+    return {
+      ...base,
+      ...parseCodexSubscriptionUsage(data, credential),
+    };
+  } catch (error: any) {
+    return {
+      ...base,
+      error: safeString(error?.message || error).trim() || "quota unavailable",
+    };
+  }
+}
+
+async function loadAnthropicProviderStatus(
+  credential: ProviderCredential,
+): Promise<ProviderQuotaStatus> {
+  const base = baseProviderStatus(ANTHROPIC_PROVIDER, credential);
+  if (!credential.access) return { ...base, error: "missing token" };
+  try {
+    const { response, data } = await readJsonResponse(ANTHROPIC_USAGE_URL, {
+      headers: {
+        Authorization: `Bearer ${credential.access}`,
+        Accept: "application/json",
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": "Rin usage",
+      },
+    });
+    if (!response.ok)
+      return { ...base, error: `quota HTTP ${response.status}` };
+    return { ...base, ...parseAnthropicSubscriptionUsage(data) };
+  } catch (error: any) {
+    return {
+      ...base,
+      error: safeString(error?.message || error).trim() || "quota unavailable",
+    };
+  }
+}
+
+async function loadGoogleProviderStatus(
+  provider: string,
+  credential: ProviderCredential,
+): Promise<ProviderQuotaStatus> {
+  const base = loadUnavailableProviderStatus(provider, credential);
+  if (!credential.access || base.accountName) return base;
+  try {
+    const { response, data } = await readJsonResponse(GOOGLE_USERINFO_URL, {
+      headers: {
+        Authorization: `Bearer ${credential.access}`,
+        Accept: "application/json",
+        "User-Agent": "Rin usage",
+      },
+    });
+    if (!response.ok) return base;
+    return {
+      ...base,
+      accountName: safeString(data?.email || data?.name).trim() || undefined,
+      accountId: base.accountId,
+    };
+  } catch {
+    return base;
+  }
+}
+
+async function loadGithubCopilotProviderStatus(
+  credential: ProviderCredential,
+): Promise<ProviderQuotaStatus> {
+  const base = baseProviderStatus(GITHUB_COPILOT_PROVIDER, credential);
+  const token = credential.refresh;
+  if (!token) return { ...base, error: "quota unavailable" };
+  try {
+    const { response, data } = await readJsonResponse(GITHUB_USER_URL, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Rin usage",
+      },
+    });
+    if (!response.ok) return { ...base, error: "quota unavailable" };
+    return {
+      ...base,
+      accountName: safeString(data?.login || data?.email).trim() || undefined,
+      accountId: safeString(data?.id).trim() || undefined,
+      error: "quota unavailable",
+    };
+  } catch {
+    return { ...base, error: "quota unavailable" };
+  }
+}
+
+function loadUnavailableProviderStatus(
+  provider: string,
+  credential: ProviderCredential,
+): ProviderQuotaStatus {
+  return {
+    ...baseProviderStatus(provider, credential),
+    ...profileFromCredential(provider, credential),
+    error: "quota unavailable",
+  };
+}
+
+async function loadProviderQuotaStatus(
+  agentDir: string,
+  provider: string,
+  credential: ProviderCredential,
+): Promise<ProviderQuotaStatus> {
+  const refreshed =
+    credential.type === "oauth"
+      ? await refreshProviderCredential(agentDir, provider, credential)
+      : credential;
+  if (refreshed.type !== "oauth") {
+    return loadUnavailableProviderStatus(provider, refreshed);
+  }
+  if (provider === OPENAI_CODEX_PROVIDER) {
+    return loadCodexProviderStatus(refreshed);
+  }
+  if (provider === ANTHROPIC_PROVIDER) {
+    return loadAnthropicProviderStatus(refreshed);
+  }
+  if (GOOGLE_OAUTH_PROVIDERS.has(provider)) {
+    return loadGoogleProviderStatus(provider, refreshed);
+  }
+  if (provider === GITHUB_COPILOT_PROVIDER) {
+    return loadGithubCopilotProviderStatus(refreshed);
+  }
+  return loadUnavailableProviderStatus(provider, refreshed);
+}
+
+export async function loadProviderQuotaStatuses(
+  agentDir: string,
+): Promise<ProviderQuotaStatus[]> {
+  const credentials = readStoredCredentials(agentDir);
+  const entries = Object.entries(credentials).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  return await Promise.all(
+    entries.map(([provider, credential]) =>
+      loadProviderQuotaStatus(agentDir, provider, credential),
+    ),
+  );
+}
+
+export async function loadCodexSubscriptionStatus(
+  agentDir: string,
+): Promise<CodexSubscriptionStatus> {
+  const credential = readStoredCredentials(agentDir)[OPENAI_CODEX_PROVIDER];
+  if (credential?.type !== "oauth") return { configured: false, windows: [] };
+  const refreshed = await refreshProviderCredential(
+    agentDir,
+    OPENAI_CODEX_PROVIDER,
+    credential,
+  );
+  const status = await loadCodexProviderStatus(refreshed);
+  const { configured, accountName, accountId, plan, windows, credits, error } =
+    status;
+  return { configured, accountName, accountId, plan, windows, credits, error };
+}
+
+function renderProviderQuotas(statuses?: ProviderQuotaStatus[]) {
+  if (!statuses) return "accounts & quota\n  not checked";
+  if (!statuses.length) return "accounts & quota\n  no configured providers";
+  const lines = [`accounts & quota`];
+  for (const status of statuses) {
+    const account = status.accountName || status.accountId || "-";
+    const plan = status.plan ? ` (${status.plan})` : "";
+    lines.push(`  ${status.label}  ${account}${plan}`);
+    if (status.windows.length) {
+      for (const window of status.windows) {
+        const label =
+          window.name === "five_hour"
+            ? "5-hour"
+            : window.name === "seven_day"
+              ? "7-day"
+              : window.name;
+        lines.push(
+          `    ${pad(label, 8)} ${renderBar(window.percentLeft)} left · reset ${formatTime(window.resetAt)}`,
+        );
+      }
+    } else {
+      lines.push(
+        `    quota    temporarily unavailable${status.error ? ` (${status.error})` : ""}`,
+      );
+    }
+    if (status.credits) lines.push(`    credits  ${status.credits}`);
+  }
+  return lines.join("\n");
+}
+
 function summarizeOverview(overview: any) {
+  const totalTokens = Number(overview?.total_tokens || 0);
+  const tokenRows = [
+    { label: "input", value: Number(overview?.input_tokens || 0) },
+    { label: "output", value: Number(overview?.output_tokens || 0) },
+    { label: "cache read", value: Number(overview?.cache_read_tokens || 0) },
+    { label: "cache write", value: Number(overview?.cache_write_tokens || 0) },
+  ].filter((row) => row.value > 0 || totalTokens === 0);
   const lines = [
-    `events=${formatInt(overview?.total_events)}`,
-    `tokenEvents=${formatInt(overview?.token_events)}`,
-    `sessions=${formatInt(overview?.session_count)}`,
-    `models=${formatInt(overview?.model_count)}`,
-    `tokens=${formatInt(overview?.total_tokens)} (in=${formatInt(overview?.input_tokens)}, out=${formatInt(overview?.output_tokens)}, cacheRead=${formatInt(overview?.cache_read_tokens)}, cacheWrite=${formatInt(overview?.cache_write_tokens)})`,
-    `cost=$${formatCost(overview?.cost_total)}`,
+    `overview`,
+    `  events   ${formatInt(overview?.total_events)} total · ${formatInt(overview?.token_events)} token events`,
+    `  scope    ${formatInt(overview?.session_count)} sessions · ${formatInt(overview?.model_count)} models`,
+    `  tokens   ${formatInt(totalTokens)}`,
+    ...tokenRows.map((row) => {
+      const share = totalTokens > 0 ? (row.value / totalTokens) * 100 : 0;
+      return `  ${pad(row.label, 11)} ${renderBar(share, 14)} · ${formatInt(row.value)}`;
+    }),
+    `  cost     $${formatCost(overview?.cost_total)}`,
   ];
   if (
     safeString(overview?.first_timestamp).trim() ||
     safeString(overview?.last_timestamp).trim()
   ) {
     lines.push(
-      `range=${safeString(overview?.first_timestamp).trim() || "-"} .. ${safeString(overview?.last_timestamp).trim() || "-"}`,
+      `  range    ${safeString(overview?.first_timestamp).trim() || "-"} .. ${safeString(overview?.last_timestamp).trim() || "-"}`,
     );
   }
   return lines.join("\n");
@@ -288,9 +838,18 @@ function renderAggregateTable(
     "total_tokens",
     "cost_total",
   ];
+  const maxTokens = Math.max(
+    0,
+    ...rows.map((row) => Number(row.total_tokens || 0)),
+  );
   const formatted = rows.map((row) => {
     const next: Record<string, unknown> = {};
     for (const key of groupBy) next[key] = row[key];
+    const totalTokens = Number(row.total_tokens || 0);
+    next.chart = renderBar(
+      maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0,
+      10,
+    );
     next.rows = formatInt(row.rows);
     next.token_events = formatInt(row.token_events);
     next.input_tokens = formatInt(row.input_tokens);
@@ -301,7 +860,7 @@ function renderAggregateTable(
     next.cost_total = `$${formatCost(row.cost_total)}`;
     return next;
   });
-  return `${title}\n${renderTable(formatted, [...groupBy, ...metrics])}`;
+  return `${title}\n${renderTable(formatted, [...groupBy, "chart", ...metrics])}`;
 }
 
 function renderEventTable(rows: Array<Record<string, unknown>>) {
@@ -372,6 +931,7 @@ function queryRecentMessageEvents(
 export function renderUsageReport(
   agentDir: string,
   options: UsageCliOptions,
+  providerQuotas?: ProviderQuotaStatus[],
 ): string {
   if (options.help) {
     printUsageHelp();
@@ -412,13 +972,26 @@ export function renderUsageReport(
   const recent = queryRecentMessageEvents(scope, 10);
 
   return [
-    "token usage dashboard",
+    `Rin usage @ ${formatTime(new Date().toISOString())}`,
+    renderProviderQuotas(providerQuotas),
+    "",
     summarizeOverview(overview),
     "",
     ...aggregateSections.flatMap((section) => [section, ""]),
     "recent token events",
     renderEventTable(recent),
   ].join("\n");
+}
+
+async function renderUsageReportForCli(
+  agentDir: string,
+  options: UsageCliOptions,
+) {
+  if (options.events || options.groupBy.length > 0 || options.dimensions) {
+    return renderUsageReport(agentDir, options);
+  }
+  const providerQuotas = await loadProviderQuotaStatuses(agentDir);
+  return renderUsageReport(agentDir, options, providerQuotas);
 }
 
 export async function runUsageInternal(rawArgv: string[]) {
@@ -428,7 +1001,7 @@ export async function runUsageInternal(rawArgv: string[]) {
     return;
   }
   console.log(
-    renderUsageReport(
+    await renderUsageReportForCli(
       process.env.RIN_DIR || process.env.PI_CODING_AGENT_DIR || "",
       options,
     ),
@@ -452,5 +1025,5 @@ export async function runUsage(parsed: ParsedArgs, rawArgv: string[]) {
     process.stdout.write(forwarded);
     return;
   }
-  console.log(renderUsageReport(context.installDir, options));
+  console.log(await renderUsageReportForCli(context.installDir, options));
 }

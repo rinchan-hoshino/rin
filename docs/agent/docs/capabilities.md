@@ -139,7 +139,7 @@ As an agent, you should know that:
 
 - telemetry is stored under `~/.rin/data/token-usage/usage.db`
 - it tracks session, event, model, source, tool, and capability metadata alongside token counts
-- `rin usage` shows a simple text dashboard and supports grouped queries over the recorded dimensions
+- `rin usage` shows a charted text dashboard, current configured provider accounts/quotas when available, and grouped queries over the recorded dimensions
 
 ## Stable documentation paths
 

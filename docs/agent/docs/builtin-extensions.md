@@ -29,7 +29,7 @@ These capabilities are now registered directly by Rin core rather than being for
   - `/chat` enters platform selection directly, keeps installer-only opt-in confirmation, prefers the minimum runnable fields, defaults to polling / socket modes when supported, and includes direct official links for required values
 - `token-usage`
   - records detailed token telemetry under `~/.rin/data/token-usage/usage.db`
-  - powers the `rin usage` text dashboard and grouped usage queries
+  - powers the charted `rin usage` text dashboard, grouped usage queries, and best-effort configured provider account/quota display
 
 ## Usage note
 
