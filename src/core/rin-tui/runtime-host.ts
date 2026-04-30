@@ -11,10 +11,10 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     event?: Record<string, unknown>,
   ) {
     if (completed) {
+      beforeSessionInvalidate?.();
       await (session as any).shutdownLocalExtensions?.(
         event || { reason: "resume" },
       );
-      beforeSessionInvalidate?.();
       await rebindSession?.(session);
     }
     return { cancelled: !completed };
@@ -64,8 +64,8 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     ) {
       const result = await (session as any).fork(entryId, options);
       if (!result?.cancelled) {
-        await (session as any).shutdownLocalExtensions?.({ reason: "fork" });
         beforeSessionInvalidate?.();
+        await (session as any).shutdownLocalExtensions?.({ reason: "fork" });
         await rebindSession?.(session);
       }
       return result;
@@ -78,8 +78,8 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
       return await finishReplacement(completed, { reason: "resume" });
     },
     async dispose() {
-      await (session as any).shutdownLocalExtensions?.({ reason: "quit" });
       beforeSessionInvalidate?.();
+      await (session as any).shutdownLocalExtensions?.({ reason: "quit" });
       await session.terminateSession().catch(() => {});
       await session.disconnect();
     },
