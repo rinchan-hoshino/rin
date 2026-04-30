@@ -1,8 +1,14 @@
+import fs from "node:fs";
 import {
   findManagedSystemdJournalSnapshot,
   findManagedSystemdStatusSnapshot,
 } from "../rin-install/managed-service.js";
-import { createTargetExecutionContext, ParsedArgs } from "./shared.js";
+import { systemdUserUnitPathForHome } from "../rin-install/paths.js";
+import {
+  createTargetExecutionContext,
+  type ParsedArgs,
+  type TargetExecutionContext,
+} from "./shared.js";
 
 function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
@@ -56,6 +62,67 @@ export function renderDaemonWorkerDoctorLines(daemonStatus: unknown) {
   ];
 }
 
+export function existingManagedSystemdUnitsForDoctor(
+  units: string[],
+  targetHome: string,
+  unitExists: (filePath: string) => boolean = fs.existsSync,
+) {
+  return units.filter((unit) =>
+    unitExists(systemdUserUnitPathForHome(targetHome, unit)),
+  );
+}
+
+type DoctorSystemdContext = Pick<
+  TargetExecutionContext,
+  "capture" | "managedServiceUnits" | "systemctl" | "targetHome"
+>;
+
+export function collectSystemdDoctorLines(
+  context: DoctorSystemdContext,
+  unitExists: (filePath: string) => boolean = fs.existsSync,
+) {
+  const lines: string[] = [];
+  if (!context.systemctl) return lines;
+
+  const existingUnits = existingManagedSystemdUnitsForDoctor(
+    context.managedServiceUnits,
+    context.targetHome,
+    unitExists,
+  );
+  if (!existingUnits.length) return lines;
+
+  const status = findManagedSystemdStatusSnapshot(existingUnits, (unit) =>
+    context.capture([
+      context.systemctl,
+      "--user",
+      "status",
+      unit,
+      "--no-pager",
+      "-l",
+    ]),
+  );
+  if (status) {
+    lines.push(`serviceUnit=${status.unit}`, "serviceStatus:", ...status.lines);
+  }
+
+  const journal = findManagedSystemdJournalSnapshot(existingUnits, (unit) =>
+    context.capture([
+      "journalctl",
+      "--user",
+      "-u",
+      unit,
+      "-n",
+      "20",
+      "--no-pager",
+    ]),
+  );
+  if (journal) {
+    lines.push(`serviceJournal=${journal.unit}`, ...journal.lines);
+  }
+
+  return lines;
+}
+
 export async function runDoctor(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
   const socketReady = await context.canConnectSocket();
@@ -76,46 +143,8 @@ export async function runDoctor(parsed: ParsedArgs) {
     ...renderWebSearchDoctorLines(webSearchStatus),
     ...renderChatBridgeDoctorLines(chatStatus),
     ...renderDaemonWorkerDoctorLines(daemonStatus),
+    ...collectSystemdDoctorLines(context),
   );
-
-  if (context.systemctl) {
-    const status = findManagedSystemdStatusSnapshot(
-      context.managedServiceUnits,
-      (unit) =>
-        context.capture([
-          context.systemctl,
-          "--user",
-          "status",
-          unit,
-          "--no-pager",
-          "-l",
-        ]),
-    );
-    if (status) {
-      lines.push(
-        `serviceUnit=${status.unit}`,
-        "serviceStatus:",
-        ...status.lines,
-      );
-    }
-
-    const journal = findManagedSystemdJournalSnapshot(
-      context.managedServiceUnits,
-      (unit) =>
-        context.capture([
-          "journalctl",
-          "--user",
-          "-u",
-          unit,
-          "-n",
-          "20",
-          "--no-pager",
-        ]),
-    );
-    if (journal) {
-      lines.push(`serviceJournal=${journal.unit}`, ...journal.lines);
-    }
-  }
 
   console.log(lines.join("\n"));
 }

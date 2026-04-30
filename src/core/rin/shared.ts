@@ -357,8 +357,9 @@ export function resolveInstallDirForTarget(parsed: ParsedArgs) {
 
 function daemonControlContext(parsed: ParsedArgs) {
   const repoRoot = repoRootFromHere();
-  const installDir = resolveInstallDirForTarget(parsed);
   const targetUser = parsed.targetUser;
+  const targetHome = readPasswdUser(targetUser)?.home || os.homedir();
+  const installDir = parsed.installDir || defaultInstallDirForHome(targetHome);
   const runtimeAgentDir =
     safeString(process.env[RIN_DIR_ENV]).trim() ||
     safeString(process.env[PI_AGENT_DIR_ENV]).trim() ||
@@ -383,6 +384,7 @@ function daemonControlContext(parsed: ParsedArgs) {
     repoRoot,
     installDir,
     targetUser,
+    targetHome,
     runtimeEnv,
     systemctl,
     socketPath,

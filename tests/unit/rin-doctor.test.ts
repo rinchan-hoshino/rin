@@ -1,11 +1,86 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 import {
+  collectSystemdDoctorLines,
+  existingManagedSystemdUnitsForDoctor,
   renderChatBridgeDoctorLines,
   renderDaemonWorkerDoctorLines,
   renderWebSearchDoctorLines,
 } from "../../src/core/rin/doctor.js";
+
+test("rin doctor skips missing managed systemd unit candidates", () => {
+  const units = ["rin-daemon-demo.service"];
+  const checkedPaths: string[] = [];
+  const existingUnits = existingManagedSystemdUnitsForDoctor(
+    units,
+    "/home/demo",
+    (filePath) => {
+      checkedPaths.push(filePath);
+      return true;
+    },
+  );
+
+  assert.deepEqual(existingUnits, ["rin-daemon-demo.service"]);
+  assert.deepEqual(checkedPaths, [
+    path.join(
+      "/home/demo",
+      ".config",
+      "systemd",
+      "user",
+      "rin-daemon-demo.service",
+    ),
+  ]);
+
+  const captured: string[][] = [];
+  const lines = collectSystemdDoctorLines(
+    {
+      systemctl: "/usr/bin/systemctl",
+      targetHome: "/home/demo",
+      managedServiceUnits: units,
+      capture(argv) {
+        captured.push(argv);
+        return argv.includes("status")
+          ? "● rin-daemon-demo.service - Demo\n   Active: active (running)"
+          : "recent one\nrecent two";
+      },
+    },
+    (filePath) => filePath.endsWith("rin-daemon-demo.service"),
+  );
+
+  assert.deepEqual(
+    captured.map((argv) => argv.join(" ")),
+    [
+      "/usr/bin/systemctl --user status rin-daemon-demo.service --no-pager -l",
+      "journalctl --user -u rin-daemon-demo.service -n 20 --no-pager",
+    ],
+  );
+  assert.deepEqual(lines, [
+    "serviceUnit=rin-daemon-demo.service",
+    "serviceStatus:",
+    "● rin-daemon-demo.service - Demo",
+    "   Active: active (running)",
+    "serviceJournal=rin-daemon-demo.service",
+    "recent one",
+    "recent two",
+  ]);
+
+  assert.deepEqual(
+    collectSystemdDoctorLines(
+      {
+        systemctl: "/usr/bin/systemctl",
+        targetHome: "/home/demo",
+        managedServiceUnits: units,
+        capture() {
+          throw new Error("should not touch missing unit candidates");
+        },
+      },
+      () => false,
+    ),
+    [],
+  );
+});
 
 test("rin doctor renderers report default daemon capability status", () => {
   assert.deepEqual(renderWebSearchDoctorLines(undefined), [
