@@ -1,8 +1,5 @@
 import fs from "node:fs/promises";
-import net from "node:net";
 import path from "node:path";
-
-import { parseJsonl } from "../rin-lib/common.js";
 import { requestDaemonCommand } from "../rin-daemon/client.js";
 import { MANAGED_CLI_SESSION_LEAF } from "../session/managed-paths.js";
 import {
@@ -28,11 +25,6 @@ export type RunCliOptions = {
   outputMode: "text" | "json";
   timeoutMs: number;
   help?: boolean;
-};
-
-type PendingRequest = {
-  resolve: (value: any) => void;
-  reject: (error: Error) => void;
 };
 
 function printRunHelp() {
@@ -345,129 +337,6 @@ export async function parseRunArgs(
   };
 }
 
-class DaemonRunClient {
-  private socket = new net.Socket();
-  private state = { buffer: "" };
-  private seq = 0;
-  private pending = new Map<string, PendingRequest>();
-  private turnWaiters = new Map<
-    string,
-    { resolve: (value: any) => void; reject: (error: Error) => void }
-  >();
-
-  constructor(
-    private readonly socketPath: string,
-    private readonly outputMode: "text" | "json",
-  ) {}
-
-  async connect(timeoutMs: number) {
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const timer = setTimeout(
-        () => finish(new Error("daemon_connect_timeout")),
-        timeoutMs,
-      );
-      const finish = (error?: Error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (error) reject(error);
-        else resolve();
-      };
-      this.socket.setEncoding("utf8");
-      this.socket.once("error", finish);
-      this.socket.once("connect", () => finish());
-      this.socket.on("data", (chunk) => this.handleData(String(chunk)));
-      this.socket.connect({ path: this.socketPath });
-    });
-  }
-
-  close() {
-    try {
-      this.socket.destroy();
-    } catch {}
-  }
-
-  request(type: string, payload: Record<string, unknown> = {}) {
-    const id = `run_${Date.now().toString(36)}_${++this.seq}`;
-    return new Promise<any>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.write(`${JSON.stringify({ ...payload, id, type })}\n`);
-    });
-  }
-
-  waitForTurn(requestTag: string) {
-    return new Promise<any>((resolve, reject) => {
-      this.turnWaiters.set(requestTag, { resolve, reject });
-    });
-  }
-
-  private handleData(chunk: string) {
-    parseJsonl(chunk, this.state, (line) => {
-      let payload: any;
-      try {
-        payload = JSON.parse(line);
-      } catch {
-        return;
-      }
-      if (payload?.type === "response" && payload.id) {
-        const pending = this.pending.get(String(payload.id));
-        if (pending) {
-          this.pending.delete(String(payload.id));
-          if (payload.success === false) {
-            pending.reject(new Error(String(payload.error || "run_failed")));
-          } else {
-            pending.resolve(payload.data ?? payload);
-          }
-        }
-        return;
-      }
-      if (this.outputMode === "json") console.log(JSON.stringify(payload));
-      if (payload?.type === "rpc_turn_event" && payload.requestTag) {
-        const waiter = this.turnWaiters.get(String(payload.requestTag));
-        if (!waiter) return;
-        if (payload.event === "complete") {
-          this.turnWaiters.delete(String(payload.requestTag));
-          waiter.resolve(payload);
-        } else if (payload.event === "error") {
-          this.turnWaiters.delete(String(payload.requestTag));
-          waiter.reject(new Error(String(payload.error || "run_failed")));
-        }
-      }
-    });
-  }
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("run_timeout")),
-          Math.max(1, timeoutMs),
-        );
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-async function runPromptTurn(
-  client: DaemonRunClient,
-  prompt: string,
-  timeoutMs: number,
-) {
-  const request = (type: string, payload: Record<string, unknown> = {}) =>
-    withTimeout(client.request(type, payload), timeoutMs);
-  const requestTag = `cli_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const turn = client.waitForTurn(requestTag);
-  await request("prompt", { message: prompt, requestTag });
-  return await withTimeout(turn, timeoutMs);
-}
-
 function isSafeTransientSessionFile(agentDir: string, sessionFile?: string) {
   const resolved = safeString(sessionFile).trim();
   if (!resolved) return false;
@@ -499,58 +368,14 @@ function formatRunResult(result: any, keepSession: boolean) {
   };
 }
 
-async function runDaemonTurn(
-  agentDir: string,
-  socketPath: string,
-  options: RunCliOptions,
-): Promise<Record<string, unknown>> {
-  const client = new DaemonRunClient(socketPath, options.outputMode);
-  const request = (type: string, payload: Record<string, unknown> = {}) =>
-    withTimeout(client.request(type, payload), options.timeoutMs);
-  const keepSession = Boolean(options.sessionFile);
-  try {
-    await client.connect(Math.min(options.timeoutMs, 10_000));
-    if (options.sessionFile) {
-      await request("switch_session", { sessionFile: options.sessionFile });
-    } else {
-      await request("get_state");
-    }
-    if (options.sessionName) {
-      if (!options.sessionFile) throw new Error("run_name_requires_session");
-      await request("set_session_name", { name: options.sessionName });
-    }
-    if (options.model) {
-      const model = splitModelRef(options.model);
-      if (!model) throw new Error(`invalid_model:${options.model}`);
-      await request("set_model", {
-        provider: model.provider,
-        modelId: model.modelId,
-      });
-    }
-    if (options.thinkingLevel) {
-      await request("set_thinking_level", { level: options.thinkingLevel });
-    }
-
-    let result = await runPromptTurn(client, options.prompt, options.timeoutMs);
-    for (const message of options.messages) {
-      result = await runPromptTurn(client, message, options.timeoutMs);
-    }
-    if (!keepSession) {
-      await removeTransientSessionFile(agentDir, result?.sessionFile);
-    }
-    return formatRunResult(result, keepSession);
-  } finally {
-    client.close();
-  }
-}
-
-async function runChatTurn(
+async function runDetachedTurn(
   agentDir: string,
   socketPath: string,
   options: RunCliOptions,
 ): Promise<Record<string, unknown>> {
   const text = [options.prompt, ...options.messages].filter(Boolean).join("\n");
   const keepSession = Boolean(options.sessionFile);
+  if (options.sessionName) throw new Error("run_name_unsupported");
   const result = await requestDaemonCommand(
     {
       type: "chat_run_turn",
@@ -564,6 +389,7 @@ async function runChatTurn(
         model: options.model,
         thinkingLevel: options.thinkingLevel,
         controllerKey: `cli-${Date.now()}`,
+        deliveryEnabled: Boolean(options.chatKey),
         affectChatBinding: false,
         disposeAfterTurn: true,
       },
@@ -580,7 +406,10 @@ function printResult(
   result: Record<string, unknown>,
   outputMode: "text" | "json",
 ) {
-  if (outputMode === "json") return;
+  if (outputMode === "json") {
+    console.log(JSON.stringify(result));
+    return;
+  }
   const text = safeString(result.finalText).trim();
   if (text) console.log(text);
 }
@@ -596,8 +425,10 @@ export async function runNonInteractive(parsed: ParsedArgs, rawArgv: string[]) {
 
   const context = createTargetExecutionContext(parsed);
   await ensureDaemonAvailable(context);
-  const result = options.chatKey
-    ? await runChatTurn(context.agentDir, context.socketPath, options)
-    : await runDaemonTurn(context.agentDir, context.socketPath, options);
+  const result = await runDetachedTurn(
+    context.agentDir,
+    context.socketPath,
+    options,
+  );
   printResult(result, options.outputMode);
 }

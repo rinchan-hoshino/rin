@@ -14,7 +14,7 @@ That means you are expected to do useful work during a turn when the user asks f
 - search the web or fetch a URL
 - recall archived session history
 - manage self-improvement prompts and skills
-- delegate isolated work to a subagent
+- run isolated work through the non-interactive CLI
 - create or inspect scheduled tasks
 - interact with configured chat bridges
 
@@ -35,7 +35,7 @@ Implications:
 
 ## Inspecting the current environment
 
-The current environment is the environment where this agent process and its tools run. It may be a daemon worker, a subagent, a container, a VM, or a remote machine.
+The current environment is the environment where this agent process and its tools run. It may be a daemon worker, a non-interactive CLI run, a container, a VM, or a remote machine.
 
 Useful starting checks:
 
@@ -105,7 +105,7 @@ Examples:
 
 - in chat bridge turns, the sender is a chat-platform user, not necessarily the local shell user
 - a daemon worker may run under a dedicated service account
-- a subagent may run with a different working directory or reduced context
+- a non-interactive CLI run may use a different working directory, model, or context
 - browser, GUI, phone, or remote-server state may live on another host
 - a project checkout may be a temporary clone rather than the user's canonical workspace
 

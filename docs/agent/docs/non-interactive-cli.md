@@ -1,6 +1,6 @@
 # Non-interactive CLI
 
-Use Pi-style non-interactive CLI when you need an isolated, scriptable agent turn outside the current conversation. Invoke `rin -p` for final-text output or `rin --mode json` for JSON-line event output, pass a focused self-contained prompt, and integrate the returned result into the current turn.
+Use Pi-style non-interactive CLI when you need an isolated, scriptable agent turn outside the current conversation. Invoke `rin -p` for final-text output or `rin --mode json` for JSON output, pass a focused self-contained prompt, and integrate the returned result into the current turn.
 
 ## Basic usage
 
@@ -24,14 +24,14 @@ rin -p @prompt.md "Apply these instructions to the current repository"
 Useful options:
 
 - `-p`, `--print`: run one non-interactive turn and print the final answer.
-- `--mode json`: print JSON-line events instead of only final text.
+- `--mode json`: print a JSON result object instead of only final text.
 - `--provider <name>` and `--model <provider/model>`: select a model for this run.
 - `--thinking <off|minimal|low|medium|high|xhigh>`: set thinking level.
 - `--session <file>`: continue an existing dedicated session file.
 - `--chat-key <chatKey>`: also deliver the final answer to a chat.
 - `--timeout <seconds>`: override the default 30 minute wait.
 
-Runs without `--session` do not keep a session. When delegated work needs durable context across runs, create or use a dedicated session under `sessions/managed/<kind>/` and pass it with `--session`.
+Runs without `--session` do not keep a session. When delegated work needs durable context across runs, agents should create or reuse a dedicated session under `sessions/managed/<kind>/` and pass it with `--session`.
 
 ## Chat delivery
 

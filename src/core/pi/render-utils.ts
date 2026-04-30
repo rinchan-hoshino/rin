@@ -121,8 +121,6 @@ const TOOL_CALL_PREFIXES: Record<string, string> = {
   web_search: "🌐",
   search_memory: "🧠",
   save_prompts: "📌",
-  run_subagent: "agent",
-  list_models: "models",
   generate_codex_image: "image",
   get_task: "tasks",
   save_task: "schedule",
