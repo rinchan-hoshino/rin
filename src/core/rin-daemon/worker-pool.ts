@@ -94,6 +94,7 @@ export class WorkerPool {
       sweepIntervalMs?: number;
       internalCommandTimeoutMs?: number;
       switchSessionCommandTimeoutMs?: number;
+      resourceOptions?: Record<string, unknown>;
     },
   ) {
     this.gcIdleMs = Math.max(0, Number(options.gcIdleMs ?? 30_000));
@@ -231,9 +232,12 @@ export class WorkerPool {
     this.requestWorker(worker, connection, command, true);
   }
 
-  ensureAttachedWorker(connection: ConnectionState) {
+  ensureAttachedWorker(
+    connection: ConnectionState,
+    resourceOptions?: Record<string, unknown>,
+  ) {
     if (connection.attachedWorker) return connection.attachedWorker;
-    const worker = this.createWorker(connection);
+    const worker = this.createWorker(connection, resourceOptions);
     this.attachWorker(connection, worker);
     return worker;
   }
@@ -315,7 +319,7 @@ export class WorkerPool {
     const type = String(command?.type || "unknown");
 
     if (type === "new_session") {
-      return this.createWorker(connection);
+      return this.createWorker(connection, command.resourceOptions);
     }
 
     const currentWorker = this.resolveCurrentWorkerForCommand(
@@ -524,15 +528,29 @@ export class WorkerPool {
     }
   }
 
-  private createWorker(requester?: ConnectionState) {
+  private createWorker(
+    requester?: ConnectionState,
+    resourceOptions?: Record<string, unknown>,
+  ) {
     if (this.shuttingDown) {
       throw new Error("rin_daemon_shutting_down");
     }
 
+    const workerResourceOptions =
+      resourceOptions || this.options.resourceOptions;
     const child = spawn(process.execPath, [this.options.workerPath], {
       cwd: this.options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        ...(workerResourceOptions
+          ? {
+              RIN_WORKER_RESOURCE_OPTIONS: JSON.stringify(
+                workerResourceOptions,
+              ),
+            }
+          : {}),
+      },
     });
 
     const worker: WorkerHandle = {

@@ -5,12 +5,48 @@ import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import { createConfiguredAgentSession } from "../rin-lib/runtime.js";
 import { runCustomRpcMode } from "./rpc-mode.js";
 
-export async function startWorker(
-  options: { additionalExtensionPaths?: string[] } = {},
-) {
+type WorkerResourceOptions = {
+  additionalExtensionPaths?: string[];
+  noExtensions?: boolean;
+  extensionFlagValues?: Array<[string, boolean | string]>;
+  additionalSkillPaths?: string[];
+  noSkills?: boolean;
+  additionalPromptTemplatePaths?: string[];
+  noPromptTemplates?: boolean;
+  additionalThemePaths?: string[];
+  noThemes?: boolean;
+  noContextFiles?: boolean;
+  systemPrompt?: string;
+  appendSystemPrompt?: string[];
+};
+
+function readWorkerResourceOptions(): WorkerResourceOptions {
+  const raw = process.env.RIN_WORKER_RESOURCE_OPTIONS;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function startWorker(options: WorkerResourceOptions = {}) {
   const sessionManagerModule = await loadRinSessionManagerModule();
+  const mergedOptions = { ...readWorkerResourceOptions(), ...options };
   const { runtime } = await createConfiguredAgentSession({
-    additionalExtensionPaths: options.additionalExtensionPaths,
+    additionalExtensionPaths: mergedOptions.additionalExtensionPaths,
+    noExtensions: mergedOptions.noExtensions,
+    extensionFlagValues: new Map(mergedOptions.extensionFlagValues || []),
+    additionalSkillPaths: mergedOptions.additionalSkillPaths,
+    noSkills: mergedOptions.noSkills,
+    additionalPromptTemplatePaths: mergedOptions.additionalPromptTemplatePaths,
+    noPromptTemplates: mergedOptions.noPromptTemplates,
+    additionalThemePaths: mergedOptions.additionalThemePaths,
+    noThemes: mergedOptions.noThemes,
+    noContextFiles: mergedOptions.noContextFiles,
+    systemPrompt: mergedOptions.systemPrompt,
+    appendSystemPrompt: mergedOptions.appendSystemPrompt,
   });
   await runCustomRpcMode(runtime, {
     SessionManager: sessionManagerModule.SessionManager,

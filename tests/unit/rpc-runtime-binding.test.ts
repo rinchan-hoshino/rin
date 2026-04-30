@@ -63,7 +63,7 @@ test("rpc local extensions load settings-configured pi extensions", async () => 
   );
 });
 
-test("rpc local extension commands fall back locally when daemon lacks them", async () => {
+test("rpc local extension commands do not execute in the frontend", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-command-"));
   const agentDir = path.join(dir, "agent");
   const extensionPath = path.join(dir, "command-extension.ts");
@@ -121,13 +121,9 @@ test("rpc local extension commands fall back locally when daemon lacks them", as
     sent.find((payload) => payload.type === "run_command"),
     { type: "run_command", commandLine: "/local hello world" },
   );
-  assert.deepEqual(
+  assert.equal(
     sent.find((payload) => payload.type === "append_custom_entry"),
-    {
-      type: "append_custom_entry",
-      customType: "local-command",
-      data: { args: "hello world" },
-    },
+    undefined,
   );
 });
 
@@ -610,78 +606,94 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
   const sent = [];
   let remoteCreated = false;
   const skillPath = "/tmp/rin-test/self_improve/skills/broken/SKILL.md";
-  const session = new RpcInteractiveSession({
-    send(payload) {
-      sent.push(payload);
-      switch (payload.type) {
-        case "new_session":
-          remoteCreated = true;
-          return Promise.resolve({
-            success: true,
-            data: { sessionId: "s1", sessionFile: "/tmp/s1.jsonl" },
-          });
-        case "get_resource_diagnostics":
-          return Promise.resolve({
-            success: true,
-            data: {
-              skills: {
-                skills: [],
-                diagnostics: [
-                  {
-                    type: "warning",
-                    message: "Nested mappings are not allowed",
-                    path: skillPath,
-                  },
-                ],
+  const session = new RpcInteractiveSession(
+    {
+      send(payload) {
+        sent.push(payload);
+        switch (payload.type) {
+          case "new_session":
+            remoteCreated = true;
+            return Promise.resolve({
+              success: true,
+              data: { sessionId: "s1", sessionFile: "/tmp/s1.jsonl" },
+            });
+          case "get_resource_diagnostics":
+            return Promise.resolve({
+              success: true,
+              data: {
+                skills: {
+                  skills: [],
+                  diagnostics: [
+                    {
+                      type: "warning",
+                      message: "Nested mappings are not allowed",
+                      path: skillPath,
+                    },
+                  ],
+                },
+                prompts: { prompts: [], diagnostics: [] },
+                themes: { themes: [], diagnostics: [] },
+                extensions: { extensions: [], errors: [] },
               },
-              prompts: { prompts: [], diagnostics: [] },
-              themes: { themes: [], diagnostics: [] },
-              extensions: { extensions: [], errors: [] },
-            },
-          });
-        case "get_state":
-          return Promise.resolve({
-            success: true,
-            data: {
-              sessionId: remoteCreated ? "s1" : "",
-              sessionFile: remoteCreated ? "/tmp/s1.jsonl" : undefined,
-              thinkingLevel: "medium",
-              steeringMode: "all",
-              followUpMode: "one-at-a-time",
-              autoCompactionEnabled: false,
-            },
-          });
-        case "get_session_snapshot":
-          return Promise.resolve({
-            success: true,
-            data: { entries: [], tree: [], leafId: null },
-          });
-        case "get_all_models":
-          return Promise.resolve({ success: true, data: { models: [] } });
-        case "get_available_models":
-          return Promise.resolve({ success: true, data: { models: [] } });
-        case "get_oauth_state":
-          return Promise.resolve({ success: true, data: {} });
-        default:
-          return Promise.resolve({ success: true, data: {} });
-      }
+            });
+          case "get_state":
+            return Promise.resolve({
+              success: true,
+              data: {
+                sessionId: remoteCreated ? "s1" : "",
+                sessionFile: remoteCreated ? "/tmp/s1.jsonl" : undefined,
+                thinkingLevel: "medium",
+                steeringMode: "all",
+                followUpMode: "one-at-a-time",
+                autoCompactionEnabled: false,
+              },
+            });
+          case "get_session_snapshot":
+            return Promise.resolve({
+              success: true,
+              data: { entries: [], tree: [], leafId: null },
+            });
+          case "get_all_models":
+            return Promise.resolve({ success: true, data: { models: [] } });
+          case "get_available_models":
+            return Promise.resolve({ success: true, data: { models: [] } });
+          case "get_oauth_state":
+            return Promise.resolve({ success: true, data: {} });
+          default:
+            return Promise.resolve({ success: true, data: {} });
+        }
+      },
+      subscribe() {
+        return () => {};
+      },
+      abort() {
+        return Promise.resolve();
+      },
+      isConnected() {
+        return true;
+      },
+      connect() {
+        return Promise.resolve();
+      },
+      disconnect() {
+        return Promise.resolve();
+      },
     },
-    subscribe() {
-      return () => {};
+    {
+      additionalSkillPaths: ["/tmp/extra-skill"],
+      noSkills: true,
+      additionalPromptTemplatePaths: ["/tmp/extra-prompt"],
+      noPromptTemplates: true,
+      additionalThemePaths: ["/tmp/extra-theme"],
+      noThemes: true,
+      additionalExtensionPaths: ["/tmp/extra-extension"],
+      noExtensions: true,
+      noContextFiles: true,
+      systemPrompt: "system prompt",
+      appendSystemPrompt: ["append prompt"],
+      extensionFlagValues: new Map([["flag", true]]),
     },
-    abort() {
-      return Promise.resolve();
-    },
-    isConnected() {
-      return true;
-    },
-    connect() {
-      return Promise.resolve();
-    },
-    disconnect() {
-      return Promise.resolve();
-    },
-  });
+  );
 
   await session.connect();
   await session.ensureSessionReady();
@@ -695,6 +707,23 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
   ]);
   const sentTypes = sent.map((entry) => entry.type);
   assert.ok(sentTypes.includes("new_session"));
+  assert.deepEqual(
+    sent.find((entry) => entry.type === "new_session")?.resourceOptions,
+    {
+      additionalExtensionPaths: ["/tmp/extra-extension"],
+      noExtensions: true,
+      extensionFlagValues: [["flag", true]],
+      additionalSkillPaths: ["/tmp/extra-skill"],
+      noSkills: true,
+      additionalPromptTemplatePaths: ["/tmp/extra-prompt"],
+      noPromptTemplates: true,
+      additionalThemePaths: ["/tmp/extra-theme"],
+      noThemes: true,
+      noContextFiles: true,
+      systemPrompt: "system prompt",
+      appendSystemPrompt: ["append prompt"],
+    },
+  );
   assert.equal(sentTypes.at(-1), "get_resource_diagnostics");
 });
 
@@ -815,7 +844,7 @@ test("rpc runtime forwards prompt streamingBehavior through prompt mode", async 
   assert.equal(session.pendingMessageCount, 0);
 });
 
-test("rpc runtime resumes a session through select_session", async () => {
+test("rpc runtime switches sessions through the daemon worker", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -870,8 +899,9 @@ test("rpc runtime resumes a session through select_session", async () => {
   const completed = await session.switchSession("/tmp/s2.jsonl");
 
   assert.equal(completed, true);
-  assert.equal(sent[0]?.type, "select_session");
+  assert.equal(sent[0]?.type, "switch_session");
   assert.equal(sent[0]?.sessionPath, "/tmp/s2.jsonl");
+  assert.ok(sent[0]?.resourceOptions);
 });
 
 test("rpc runtime restores active session history from one daemon snapshot", async () => {

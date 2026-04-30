@@ -128,6 +128,27 @@ function normalizeQueuedMessages(value: any) {
   });
 }
 
+function serializeRpcResourceOptions(options: TuiResourceOptions) {
+  return {
+    additionalExtensionPaths: [...(options.additionalExtensionPaths || [])],
+    noExtensions: options.noExtensions,
+    extensionFlagValues: Array.from(
+      options.extensionFlagValues?.entries?.() || [],
+    ),
+    additionalSkillPaths: [...(options.additionalSkillPaths || [])],
+    noSkills: options.noSkills,
+    additionalPromptTemplatePaths: [
+      ...(options.additionalPromptTemplatePaths || []),
+    ],
+    noPromptTemplates: options.noPromptTemplates,
+    additionalThemePaths: [...(options.additionalThemePaths || [])],
+    noThemes: options.noThemes,
+    noContextFiles: options.noContextFiles,
+    systemPrompt: options.systemPrompt,
+    appendSystemPrompt: [...(options.appendSystemPrompt || [])],
+  };
+}
+
 function createRpcResourceLoader(getSnapshot: () => RpcResourceSnapshot) {
   return {
     getThemes: () => getSnapshot().themes,
@@ -546,6 +567,7 @@ export class RpcInteractiveSession {
       const data = await this.call("new_session", {
         parentSession: options?.parentSession,
         managedSessionLeaf: options?.managedSessionLeaf,
+        resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
       });
       await this.refreshState(REFRESH_ALL);
       return !Boolean(data?.cancelled);
@@ -557,7 +579,10 @@ export class RpcInteractiveSession {
   async switchSession(sessionPath: string, _cwdOverride?: string) {
     this.setSessionOperationPending(true);
     try {
-      const data = await this.call("select_session", { sessionPath });
+      const data = await this.call("switch_session", {
+        sessionPath,
+        resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
+      });
       await this.refreshState(REFRESH_ALL);
       return !Boolean(data?.cancelled);
     } finally {
@@ -750,14 +775,8 @@ export class RpcInteractiveSession {
         };
       }
     }
-    const frontendCommand = this.getFrontendExtensionCommand(commandLine);
     await this.ensureRemoteSession();
     const data = await this.call("run_command", { commandLine });
-    if (data?.handled === false && frontendCommand) {
-      await this.executeFrontendExtensionCommand(commandLine, frontendCommand);
-      await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
-      return { handled: true };
-    }
     await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
     return data;
   }
@@ -1375,30 +1394,11 @@ export class RpcInteractiveSession {
     return Boolean(this.getFrontendExtensionCommand(text));
   }
 
-  private async executeFrontendExtensionCommand(text: string, command: any) {
-    const extensionRunner = this.extensionRunner;
-    if (!extensionRunner?.createCommandContext) return false;
-    const spaceIndex = text.indexOf(" ");
-    const commandName =
-      spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
-    const args = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
-    const ctx = extensionRunner.createCommandContext();
-    try {
-      await command.handler(args, ctx);
-    } catch (error) {
-      extensionRunner.emitError?.({
-        extensionPath: `command:${commandName}`,
-        event: "command",
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-    }
-    return true;
-  }
-
   private async ensureRemoteSession() {
     if (this.sessionFile || this.sessionId) return;
-    const data = await this.call("new_session");
+    const data = await this.call("new_session", {
+      resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
+    });
     if (data && data.cancelled) throw new Error("rin_new_session_cancelled");
     await this.refreshState(REFRESH_ALL);
   }

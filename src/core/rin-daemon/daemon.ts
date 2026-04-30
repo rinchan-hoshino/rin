@@ -301,11 +301,24 @@ export async function startDaemon(
       workerPool.evictDetachedWorkers();
       return true;
     }
-    if (
-      type === "select_session" ||
-      type === "switch_session" ||
-      type === "attach_session"
-    ) {
+    if (type === "switch_session") {
+      const selector = getSessionSelector(command);
+      if (!selector.sessionFile && !selector.sessionId) {
+        writeLine(
+          connection.socket,
+          response(id, type, false, "rin_no_attached_session"),
+        );
+        return true;
+      }
+      const worker = workerPool.ensureAttachedWorker(
+        connection,
+        command.resourceOptions,
+      );
+      workerPool.forwardToWorker(connection, worker, command);
+      workerPool.evictDetachedWorkers();
+      return true;
+    }
+    if (type === "select_session" || type === "attach_session") {
       const selector = getSessionSelector(command);
       if (!selector.sessionFile && !selector.sessionId) {
         writeLine(

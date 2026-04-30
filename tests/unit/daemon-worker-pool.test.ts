@@ -79,6 +79,62 @@ async function makeTempDir(prefix) {
   return dir;
 }
 
+test("new session workers receive rpc resource options through the environment", async () => {
+  const dir = await makeTempDir("rin-worker-pool-resources-");
+  const envPath = path.join(dir, "resource-options.json");
+  const workerPath = path.join(dir, "worker.mjs");
+  await fs.writeFile(
+    workerPath,
+    `import fs from "node:fs";\nfs.writeFileSync(${JSON.stringify(envPath)}, process.env.RIN_WORKER_RESOURCE_OPTIONS || "");\nprocess.stdin.resume();\nsetInterval(() => {}, 1000);\n`,
+  );
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    {
+      type: "new_session",
+      resourceOptions: {
+        additionalExtensionPaths: ["/ext"],
+        noExtensions: true,
+        extensionFlagValues: [["flag", true]],
+        additionalSkillPaths: ["/skill"],
+        noSkills: true,
+        additionalPromptTemplatePaths: ["/prompt"],
+        noPromptTemplates: true,
+        additionalThemePaths: ["/theme"],
+        noThemes: true,
+        noContextFiles: true,
+        systemPrompt: "system",
+        appendSystemPrompt: ["append"],
+      },
+    },
+  );
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const raw = await fs.readFile(envPath, "utf8");
+      assert.deepEqual(JSON.parse(raw), {
+        additionalExtensionPaths: ["/ext"],
+        noExtensions: true,
+        extensionFlagValues: [["flag", true]],
+        additionalSkillPaths: ["/skill"],
+        noSkills: true,
+        additionalPromptTemplatePaths: ["/prompt"],
+        noPromptTemplates: true,
+        additionalThemePaths: ["/theme"],
+        noThemes: true,
+        noContextFiles: true,
+        systemPrompt: "system",
+        appendSystemPrompt: ["append"],
+      });
+      return;
+    } catch (error) {
+      if (attempt === 19) throw error;
+      await sleep(25);
+    }
+  }
+});
+
 test("getRestorableSessionSelectors keeps live session workers and remembers turn state", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");
