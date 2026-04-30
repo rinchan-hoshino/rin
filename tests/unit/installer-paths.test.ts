@@ -340,6 +340,7 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
   );
   assert.deepEqual(pathsMod.managedSystemdUnitCandidates("demo"), [
     "rin-daemon-demo.service",
+    "rin-daemon.service",
   ]);
   assert.equal(
     pathsMod.isManagedSystemdUnitName("rin-daemon-demo.service"),
@@ -347,7 +348,7 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
   );
   assert.equal(
     pathsMod.isManagedSystemdUnitName("  rin-daemon.service  "),
-    false,
+    true,
   );
   assert.equal(pathsMod.isManagedSystemdUnitName("other.service"), false);
   assert.equal(
@@ -383,6 +384,7 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
       "user",
       "rin-daemon-demo.service",
     ),
+    path.join(linuxHome, ".config", "systemd", "user", "rin-daemon.service"),
   ]);
   assert.equal(
     pathsMod.daemonSocketPathForHome(macHome, { platform: "darwin" }),

@@ -11,7 +11,7 @@ import {
 } from "../../src/core/rin/doctor.js";
 
 test("rin doctor skips missing managed systemd unit candidates", () => {
-  const units = ["rin-daemon-demo.service"];
+  const units = ["rin-daemon-demo.service", "rin-daemon.service"];
   const checkedPaths: string[] = [];
   const existingUnits = existingManagedSystemdUnitsForDoctor(
     units,
@@ -19,12 +19,12 @@ test("rin doctor skips missing managed systemd unit candidates", () => {
     (filePath) => {
       checkedPaths.push(filePath);
       return filePath.endsWith(
-        path.join(".config", "systemd", "user", "rin-daemon-demo.service"),
+        path.join(".config", "systemd", "user", "rin-daemon.service"),
       );
     },
   );
 
-  assert.deepEqual(existingUnits, ["rin-daemon-demo.service"]);
+  assert.deepEqual(existingUnits, ["rin-daemon.service"]);
   assert.deepEqual(checkedPaths, [
     path.join(
       "/home/demo",
@@ -33,6 +33,7 @@ test("rin doctor skips missing managed systemd unit candidates", () => {
       "user",
       "rin-daemon-demo.service",
     ),
+    path.join("/home/demo", ".config", "systemd", "user", "rin-daemon.service"),
   ]);
 
   const captured: string[][] = [];
@@ -44,26 +45,26 @@ test("rin doctor skips missing managed systemd unit candidates", () => {
       capture(argv) {
         captured.push(argv);
         return argv.includes("status")
-          ? "● rin-daemon-demo.service - Demo\n   Active: active (running)"
+          ? "● rin-daemon.service - Demo\n   Active: active (running)"
           : "recent one\nrecent two";
       },
     },
-    (filePath) => filePath.endsWith("rin-daemon-demo.service"),
+    (filePath) => filePath.endsWith("rin-daemon.service"),
   );
 
   assert.deepEqual(
     captured.map((argv) => argv.join(" ")),
     [
-      "/usr/bin/systemctl --user status rin-daemon-demo.service --no-pager -l",
-      "journalctl --user -u rin-daemon-demo.service -n 20 --no-pager",
+      "/usr/bin/systemctl --user status rin-daemon.service --no-pager -l",
+      "journalctl --user -u rin-daemon.service -n 20 --no-pager",
     ],
   );
   assert.deepEqual(lines, [
-    "serviceUnit=rin-daemon-demo.service",
+    "serviceUnit=rin-daemon.service",
     "serviceStatus:",
-    "● rin-daemon-demo.service - Demo",
+    "● rin-daemon.service - Demo",
     "   Active: active (running)",
-    "serviceJournal=rin-daemon-demo.service",
+    "serviceJournal=rin-daemon.service",
     "recent one",
     "recent two",
   ]);

@@ -370,6 +370,8 @@ export function installRecordCandidatesForHome(home: string) {
   ]);
 }
 
+const LEGACY_MANAGED_SYSTEMD_UNIT_NAME = "rin-daemon.service";
+
 function normalizeManagedUserFragment(targetUser: string, pattern: RegExp) {
   return String(targetUser).trim().replace(pattern, "-");
 }
@@ -387,12 +389,18 @@ export function managedSystemdUnitName(targetUser: string) {
 }
 
 export function managedSystemdUnitCandidates(targetUser: string) {
-  return uniqueNonEmptyStrings([managedSystemdUnitName(targetUser)]);
+  return uniqueNonEmptyStrings([
+    managedSystemdUnitName(targetUser),
+    LEGACY_MANAGED_SYSTEMD_UNIT_NAME,
+  ]);
 }
 
 export function isManagedSystemdUnitName(unitName: string) {
   const normalizedUnitName = String(unitName || "").trim();
-  return /^rin-daemon-.+\.service$/.test(normalizedUnitName);
+  return (
+    normalizedUnitName === LEGACY_MANAGED_SYSTEMD_UNIT_NAME ||
+    /^rin-daemon(?:-.+)?\.service$/.test(normalizedUnitName)
+  );
 }
 
 export function installDirFromManagedSystemdUnit(text: string) {
