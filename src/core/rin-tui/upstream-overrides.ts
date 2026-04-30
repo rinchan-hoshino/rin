@@ -54,8 +54,8 @@ function dim(text: string) {
 
 function currentRuntimeModeLabel() {
   const role = String(process.env[RIN_TUI_RUNTIME_ROLE_ENV] || "").trim();
-  if (role === RIN_TUI_RPC_FRONTEND_ROLE) return "mode: rpc";
-  if (role === RIN_TUI_MAINTENANCE_ROLE) return "mode: std";
+  if (role === RIN_TUI_RPC_FRONTEND_ROLE) return "daemon";
+  if (role === RIN_TUI_MAINTENANCE_ROLE) return "maint";
   return undefined;
 }
 

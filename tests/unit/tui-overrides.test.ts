@@ -126,12 +126,14 @@ test("footer shows runtime mode at the bottom right", async () => {
     process.env.RIN_TUI_RUNTIME_ROLE = "rpc-frontend";
     let lines = footer.render(60);
     assert.match(lines.at(-1), /syncing/);
-    assert.match(lines.at(-1), /mode: rpc/);
+    assert.match(lines.at(-1), /daemon/);
+    assert.doesNotMatch(lines.at(-1), /mode:|rpc|std/);
     assert.equal(piTuiModule.visibleWidth(lines.at(-1)), 60);
 
     process.env.RIN_TUI_RUNTIME_ROLE = "maintenance-tui";
     lines = footer.render(60);
-    assert.match(lines.at(-1), /mode: std/);
+    assert.match(lines.at(-1), /maint/);
+    assert.doesNotMatch(lines.at(-1), /mode:|rpc|std/);
     assert.equal(piTuiModule.visibleWidth(lines.at(-1)), 60);
   } finally {
     if (originalRole === undefined) {
