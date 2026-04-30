@@ -579,8 +579,8 @@ export async function runCustomRpcMode(
           await bindCurrentSession();
           return result;
         },
-        fork: async (entryId) => {
-          const result = await runtime.fork(entryId);
+        fork: async (entryId, options) => {
+          const result = await runtime.fork(entryId, options);
           await bindCurrentSession();
           return { cancelled: result.cancelled };
         },
@@ -594,8 +594,8 @@ export async function runCustomRpcMode(
             })
           ).cancelled,
         }),
-        switchSession: async (sessionPath) => {
-          const result = await runtime.switchSession(sessionPath);
+        switchSession: async (sessionPath, options) => {
+          const result = await runtime.switchSession(sessionPath, options);
           await bindCurrentSession();
           return result;
         },

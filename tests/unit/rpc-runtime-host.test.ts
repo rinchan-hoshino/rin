@@ -22,12 +22,12 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
       calls.push(["newSession", options]);
       return true;
     },
-    async switchSession(sessionPath, cwdOverride) {
-      calls.push(["switchSession", sessionPath, cwdOverride]);
+    async switchSession(sessionPath, options) {
+      calls.push(["switchSession", sessionPath, options]);
       return false;
     },
-    async fork(entryId) {
-      calls.push(["fork", entryId]);
+    async fork(entryId, options) {
+      calls.push(["fork", entryId, options]);
       return { cancelled: false, selectedText: "hi" };
     },
     async importFromJsonl(inputPath, cwdOverride) {
@@ -55,11 +55,18 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
   assert.deepEqual(await runtimeHost.newSession({ parentSession: "p" }), {
     cancelled: false,
   });
+  const switchOptions = {
+    cwdOverride: "/tmp/cwd",
+    withSession: async () => {},
+  };
+  const forkOptions = { position: "at", withSession: async () => {} };
   assert.deepEqual(
-    await runtimeHost.switchSession("/tmp/demo.jsonl", "/tmp/cwd"),
-    { cancelled: true },
+    await runtimeHost.switchSession("/tmp/demo.jsonl", switchOptions),
+    {
+      cancelled: true,
+    },
   );
-  assert.deepEqual(await runtimeHost.fork("entry-1"), {
+  assert.deepEqual(await runtimeHost.fork("entry-1", forkOptions), {
     cancelled: false,
     selectedText: "hi",
   });
@@ -73,8 +80,8 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
     ["newSession", { parentSession: "p" }],
     ["beforeInvalidate"],
     ["rebind", "session-like"],
-    ["switchSession", "/tmp/demo.jsonl", "/tmp/cwd"],
-    ["fork", "entry-1"],
+    ["switchSession", "/tmp/demo.jsonl", switchOptions],
+    ["fork", "entry-1", forkOptions],
     ["beforeInvalidate"],
     ["rebind", "session-like"],
     ["importFromJsonl", "/tmp/in.jsonl", "/tmp/cwd"],

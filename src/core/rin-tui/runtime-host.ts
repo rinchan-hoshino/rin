@@ -33,15 +33,27 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
       const completed = await session.newSession(options);
       return await finishReplacement(completed);
     },
-    async switchSession(sessionPath: string, cwdOverride?: string) {
+    async switchSession(
+      sessionPath: string,
+      options?: {
+        cwdOverride?: string;
+        withSession?: (ctx: any) => Promise<void>;
+      },
+    ) {
       const completed = await (session as any).switchSession(
         sessionPath,
-        cwdOverride,
+        options,
       );
       return await finishReplacement(completed);
     },
-    async fork(entryId: string) {
-      const result = await session.fork(entryId);
+    async fork(
+      entryId: string,
+      options?: {
+        position?: "before" | "at";
+        withSession?: (ctx: any) => Promise<void>;
+      },
+    ) {
+      const result = await (session as any).fork(entryId, options);
       if (!result?.cancelled) {
         beforeSessionInvalidate?.();
         await rebindSession?.(session);

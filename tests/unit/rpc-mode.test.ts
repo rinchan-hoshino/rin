@@ -147,6 +147,132 @@ test(
 );
 
 test(
+  "rpc mode command context passes session replacement options through",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const calls = [];
+    let bindCount = 0;
+    let actions;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function () {
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async (bindings) => {
+          bindCount += 1;
+          actions = bindings.commandContextActions;
+        },
+        subscribe: () => () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: {
+          getEntries: () => [],
+          getTree: () => [],
+          getLeafId: () => null,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
+        messages: [],
+        prompt: async () => {},
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+      const runtime = {
+        session,
+        newSession: async (options) => {
+          calls.push(["newSession", options]);
+          return { cancelled: false };
+        },
+        fork: async (entryId, options) => {
+          calls.push(["fork", entryId, options]);
+          return { cancelled: false };
+        },
+        switchSession: async (sessionPath, options) => {
+          calls.push(["switchSession", sessionPath, options]);
+          return { cancelled: false };
+        },
+        importFromJsonl: async () => ({ cancelled: false }),
+      };
+
+      void runCustomRpcMode(runtime, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+      });
+      await wait(0);
+      assert.equal(typeof actions?.newSession, "function");
+
+      const setup = async () => {};
+      const withSession = async () => {};
+      const newSessionOptions = { setup, withSession };
+      const forkOptions = { position: "at", withSession };
+      const switchOptions = { withSession };
+
+      assert.deepEqual(await actions.newSession(newSessionOptions), {
+        cancelled: false,
+      });
+      assert.deepEqual(await actions.fork("entry-1", forkOptions), {
+        cancelled: false,
+      });
+      assert.deepEqual(
+        await actions.switchSession("/tmp/next.jsonl", switchOptions),
+        { cancelled: false },
+      );
+
+      assert.deepEqual(calls, [
+        ["newSession", newSessionOptions],
+        ["fork", "entry-1", forkOptions],
+        ["switchSession", "/tmp/next.jsonl", switchOptions],
+      ]);
+      assert.equal(bindCount, 4);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode executes extension slash commands on the daemon session",
   { concurrency: false },
   async () => {
