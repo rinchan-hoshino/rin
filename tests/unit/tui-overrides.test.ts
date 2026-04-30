@@ -92,6 +92,56 @@ test("update overrides replace startup update path and skip settings changelog s
   );
 });
 
+test("footer shows runtime mode at the bottom right", async () => {
+  await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
+
+  const originalRole = process.env.RIN_TUI_RUNTIME_ROLE;
+  const session = {
+    state: {
+      model: {
+        id: "gpt-demo",
+        provider: "openai",
+        contextWindow: 200000,
+        reasoning: true,
+      },
+      thinkingLevel: "medium",
+    },
+    sessionManager: {
+      getEntries: () => [],
+      getCwd: () => "/tmp/project",
+      getSessionName: () => undefined,
+    },
+    getContextUsage: () => ({ contextWindow: 200000, percent: 12.3 }),
+    modelRegistry: { isUsingOAuth: () => false },
+  };
+  const footerData = {
+    getGitBranch: () => "main",
+    getAvailableProviderCount: () => 1,
+    getExtensionStatuses: () => new Map([["demo", "syncing"]]),
+  };
+  const footer = new codingAgentModule.FooterComponent(session, footerData);
+
+  try {
+    process.env.RIN_TUI_RUNTIME_ROLE = "rpc-frontend";
+    let lines = footer.render(60);
+    assert.match(lines.at(-1), /syncing/);
+    assert.match(lines.at(-1), /mode: rpc/);
+    assert.equal(piTuiModule.visibleWidth(lines.at(-1)), 60);
+
+    process.env.RIN_TUI_RUNTIME_ROLE = "maintenance-tui";
+    lines = footer.render(60);
+    assert.match(lines.at(-1), /mode: std/);
+    assert.equal(piTuiModule.visibleWidth(lines.at(-1)), 60);
+  } finally {
+    if (originalRole === undefined) {
+      delete process.env.RIN_TUI_RUNTIME_ROLE;
+    } else {
+      process.env.RIN_TUI_RUNTIME_ROLE = originalRole;
+    }
+  }
+});
+
 test("full redraw override preserves terminal scrollback", async () => {
   await overrides.applyRinTuiOverrides();
 

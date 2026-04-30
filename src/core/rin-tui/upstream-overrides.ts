@@ -11,6 +11,7 @@ import {
   Spacer,
   Text,
   truncateToWidth,
+  visibleWidth,
 } from "@mariozechner/pi-tui";
 
 import {
@@ -20,6 +21,11 @@ import {
 } from "../rin-lib/update-notices.js";
 import { extractMessageText } from "../message-content.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
+import {
+  RIN_TUI_MAINTENANCE_ROLE,
+  RIN_TUI_RPC_FRONTEND_ROLE,
+  RIN_TUI_RUNTIME_ROLE_ENV,
+} from "../tui-runtime-env.js";
 
 let applied = false;
 const ANSI_DIM = "\u001b[2m";
@@ -44,6 +50,32 @@ const RPC_TRANSPORT_STATUS_PHASES = new Set([
 
 function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
+}
+
+function currentRuntimeModeLabel() {
+  const role = String(process.env[RIN_TUI_RUNTIME_ROLE_ENV] || "").trim();
+  if (role === RIN_TUI_RPC_FRONTEND_ROLE) return "mode: rpc";
+  if (role === RIN_TUI_MAINTENANCE_ROLE) return "mode: std";
+  return undefined;
+}
+
+function renderLineWithRuntimeMode(line: string, width: number) {
+  const label = currentRuntimeModeLabel();
+  if (!label || width <= 0) return line;
+
+  const indicator = dim(label);
+  const indicatorWidth = visibleWidth(indicator);
+  if (indicatorWidth >= width) {
+    return truncateToWidth(indicator, width, dim("..."));
+  }
+
+  const minGap = 2;
+  const leftWidth = Math.max(0, width - indicatorWidth - minGap);
+  const left = truncateToWidth(line, leftWidth, dim("..."));
+  const gap = " ".repeat(
+    Math.max(minGap, width - visibleWidth(left) - indicatorWidth),
+  );
+  return `${left}${gap}${indicator}`;
 }
 
 function extractUserTextFromEvent(event: any) {
@@ -390,6 +422,13 @@ export async function applyRinTuiOverrides() {
       if (statsLine) nextLines.push(statsLine);
       for (const line of lines.slice(2)) {
         if (line) nextLines.push(line);
+      }
+      if (nextLines.length > 0) {
+        const lastIndex = nextLines.length - 1;
+        nextLines[lastIndex] = renderLineWithRuntimeMode(
+          nextLines[lastIndex],
+          width,
+        );
       }
       return nextLines;
     };
