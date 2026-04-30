@@ -16,12 +16,18 @@ export type RinRuntimeTransport =
       user?: string;
       port?: number;
       controlPath?: string;
+      identityFile?: string;
     }
   | {
       kind: "container";
       engine: "docker" | "podman";
       container: string;
       user?: string;
+    }
+  | {
+      kind: "command";
+      command: string;
+      argsBeforeRin: string[];
     };
 
 export type RinTargetRecord = {
@@ -82,27 +88,18 @@ export const DEPLOYMENT_PROVIDERS: DeploymentProviderDescriptor[] = [
     ],
   },
   ...[
-    ["aws", "AWS EC2"],
-    ["azure", "Azure Virtual Machines"],
-    ["gcp", "Google Compute Engine"],
-    ["digitalocean", "DigitalOcean Droplets"],
-    ["linode", "Akamai/Linode Compute"],
-    ["vultr", "Vultr Cloud Compute"],
     ["hetzner", "Hetzner Cloud"],
-    ["oracle", "Oracle Cloud Infrastructure"],
-    ["alibaba", "Alibaba Cloud ECS"],
-    ["tencent", "Tencent Cloud CVM"],
-    ["huawei", "Huawei Cloud ECS"],
+    ["digitalocean", "DigitalOcean Droplets"],
   ].map(([id, label]) => ({
     kind: "cloud" as const,
     id,
     label,
     recommendedIsolation: "dedicated Linux VM created through the provider API",
-    requiredInputs: ["API token or provider CLI credentials", "region"],
+    requiredInputs: ["API token", "region"],
     defaultRuntime: "ssh" as const,
     notes: [
-      "Provision with cloud-init, then run the normal Rin installer inside the instance.",
-      "Register the resulting instance as a Rin target for later rin --target execution.",
+      "Provision with the provider CLI and cloud-init, then run the normal Rin installer inside the instance.",
+      "Only providers with an implemented create/install/register loop are listed here.",
     ],
   })),
   ...[
@@ -122,14 +119,7 @@ export const DEPLOYMENT_PROVIDERS: DeploymentProviderDescriptor[] = [
       "Fall back to SSH only when the NAS explicitly supports a normal Linux shell with Node.js/npm.",
     ],
   })),
-  ...[
-    ["hyperv", "Hyper-V"],
-    ["proxmox", "Proxmox VE"],
-    ["virtualbox", "VirtualBox"],
-    ["vmware", "VMware"],
-    ["multipass", "Multipass"],
-    ["lima", "Lima"],
-  ].map(([id, label]) => ({
+  ...[["multipass", "Multipass"]].map(([id, label]) => ({
     kind: "vm" as const,
     id,
     label,
@@ -138,7 +128,7 @@ export const DEPLOYMENT_PROVIDERS: DeploymentProviderDescriptor[] = [
     defaultRuntime: "ssh" as const,
     notes: [
       "Create the VM from scratch, install prerequisites through cloud-init, then run the Rin installer.",
-      "Register SSH access to the guest as the target runtime.",
+      "Register Multipass exec as the target runtime.",
     ],
   })),
 ];

@@ -56,11 +56,13 @@ test("rin target store upserts, defaults, and removes targets", async () => {
   assert.equal(store.getDefaultTarget(filePath), undefined);
 });
 
-test("rin target registry lists mainstream deployment providers", () => {
-  assert.ok(registry.findDeploymentProvider("cloud", "aws"));
-  assert.ok(registry.findDeploymentProvider("cloud", "tencent"));
+test("rin target registry lists only closed-loop deployment providers", () => {
+  assert.ok(registry.findDeploymentProvider("cloud", "hetzner"));
+  assert.ok(registry.findDeploymentProvider("cloud", "digitalocean"));
+  assert.equal(registry.findDeploymentProvider("cloud", "aws"), undefined);
   assert.ok(registry.findDeploymentProvider("nas", "synology"));
-  assert.ok(registry.findDeploymentProvider("vm", "hyperv"));
+  assert.ok(registry.findDeploymentProvider("vm", "multipass"));
+  assert.equal(registry.findDeploymentProvider("vm", "hyperv"), undefined);
   assert.ok(registry.findDeploymentProvider("container", "docker"));
 });
 

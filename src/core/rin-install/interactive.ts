@@ -159,7 +159,111 @@ export async function promptInstallTarget(
     `${providerKind}-${provider}`,
     i18n,
   );
-  return { kind: providerKind, name, provider } as InstallTargetSelection;
+
+  if (providerKind === "cloud") {
+    const defaults = cloudProviderDefaults(provider);
+    const token = await promptRequiredText(
+      prompt,
+      `API token for ${provider}`,
+      "",
+    );
+    const region = await promptTextWithDefault(
+      prompt,
+      "Region/location",
+      defaults.region,
+    );
+    const size = await promptTextWithDefault(
+      prompt,
+      "Instance size",
+      defaults.size,
+    );
+    const image = await promptTextWithDefault(prompt, "Image", defaults.image);
+    return {
+      kind: "cloud",
+      name,
+      provider,
+      token,
+      region,
+      size,
+      image,
+    } as InstallTargetSelection;
+  }
+
+  if (providerKind === "nas") {
+    const host = await promptRequiredText(
+      prompt,
+      "NAS SSH target (Host alias or user@host)",
+      "nas",
+    );
+    const engine = String(
+      prompt.ensureNotCancelled(
+        await prompt.select({
+          message: i18n.containerEngineMessage,
+          options: [
+            { value: "docker", label: "Docker" },
+            { value: "podman", label: "Podman" },
+          ],
+        }),
+      ),
+    ) as "docker" | "podman";
+    const image = await promptTextWithDefault(
+      prompt,
+      i18n.containerImageMessage,
+      "node:22-bookworm",
+    );
+    return {
+      kind: "nas",
+      name,
+      provider,
+      host,
+      engine,
+      image,
+    } as InstallTargetSelection;
+  }
+
+  const image = await promptTextWithDefault(prompt, "VM image", "24.04");
+  return { kind: "vm", name, provider, image } as InstallTargetSelection;
+}
+
+function cloudProviderDefaults(provider: string) {
+  if (provider === "hetzner") {
+    return { region: "fsn1", size: "cpx11", image: "ubuntu-24.04" };
+  }
+  return { region: "sfo3", size: "s-1vcpu-1gb", image: "ubuntu-24-04-x64" };
+}
+
+async function promptRequiredText(
+  prompt: PromptApi,
+  message: string,
+  placeholder: string,
+) {
+  return String(
+    prompt.ensureNotCancelled(
+      await prompt.text({
+        message,
+        placeholder,
+        validate(value: string) {
+          if (!String(value || "").trim()) return "This value is required";
+        },
+      }),
+    ),
+  ).trim();
+}
+
+async function promptTextWithDefault(
+  prompt: PromptApi,
+  message: string,
+  defaultValue: string,
+) {
+  return String(
+    prompt.ensureNotCancelled(
+      await prompt.text({
+        message,
+        placeholder: defaultValue,
+        defaultValue,
+      }),
+    ),
+  ).trim();
 }
 
 async function promptTargetName(

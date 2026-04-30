@@ -41,10 +41,17 @@ function commandForTransport(
       : transport.host;
     const args = [] as string[];
     if (transport.port) args.push("-p", String(transport.port));
+    if (transport.identityFile) args.push("-i", transport.identityFile);
     if (transport.controlPath)
       args.push("-o", `ControlPath=${transport.controlPath}`);
     args.push(target, "rin", ...rinArgs);
     return { command: "ssh", args };
+  }
+  if (transport.kind === "command") {
+    return {
+      command: transport.command,
+      args: [...transport.argsBeforeRin, "rin", ...rinArgs],
+    };
   }
   const args = ["exec"];
   if (transport.user) args.push("-u", transport.user);

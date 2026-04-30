@@ -42,11 +42,12 @@ import {
 } from "./users.js";
 import { startUpdater } from "./updater.js";
 import {
+  installCloudTarget,
   installContainerTarget,
   installExistingSshTarget,
-  provisionedTargetPendingMessage,
+  installNasTarget,
+  installVmTarget,
   registerLocalUserTarget,
-  registerProvisionedTargetPlaceholder,
 } from "./deployment-targets.js";
 
 function ensureNotCancelled<T>(value: T | symbol): T {
@@ -193,10 +194,25 @@ export async function startInstaller() {
     );
     return;
   }
-  if (target.kind !== "local") {
-    const registered = registerProvisionedTargetPlaceholder(target);
-    note(provisionedTargetPendingMessage(target), i18n.installChoicesTitle);
-    outro(`Registered pending Rin target ${registered.name}.`);
+  if (target.kind === "cloud") {
+    const registered = installCloudTarget(target);
+    outro(
+      `Provisioned, installed, and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
+    );
+    return;
+  }
+  if (target.kind === "nas") {
+    const registered = installNasTarget(target);
+    outro(
+      `Installed and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
+    );
+    return;
+  }
+  if (target.kind === "vm") {
+    const registered = installVmTarget(target);
+    outro(
+      `Provisioned, installed, and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
+    );
     return;
   }
 
