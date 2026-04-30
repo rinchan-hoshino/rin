@@ -34,12 +34,17 @@ test("chat chat helpers extract chat metadata", () => {
     guildId: "g1",
     userId: "u1",
     channelId: "c1",
-    author: { name: "Alice" },
+    author: {
+      name: "AliceCard",
+      groupNickname: "AliceCard",
+      nickname: "AliceAccount",
+    },
     stripped: { content: "/new hello", appel: true },
     content: "/new hello",
   };
   assert.equal(helpers.pickUserId(session), "u1");
-  assert.equal(helpers.pickSenderNickname(session), "Alice");
+  assert.equal(helpers.pickSenderNickname(session), "AliceAccount");
+  assert.equal(helpers.pickSenderGroupNickname(session), "AliceCard");
   assert.equal(helpers.getChatId(session), "c1");
   assert.equal(helpers.getChatType(session), "group");
 });

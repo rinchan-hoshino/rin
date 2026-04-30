@@ -38,6 +38,7 @@ import {
   pickChatName,
   pickMessageId,
   pickReplyToMessageId,
+  pickSenderGroupNickname,
   pickSenderNickname,
   pickUserId,
   safeString,
@@ -531,6 +532,7 @@ export async function startChatBridge(
       chatType: getChatType(session),
       userId: pickUserId(session),
       nickname: pickSenderNickname(session),
+      groupNickname: pickSenderGroupNickname(session) || undefined,
       identity: trustOf(
         identity,
         safeString(session?.platform || "").trim(),

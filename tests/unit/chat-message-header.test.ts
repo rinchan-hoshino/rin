@@ -31,7 +31,8 @@ test("chat prompt context packages sender identity guidance into the prompt text
       chatKey: "telegram/1:2",
       chatType: "group",
       userId: "guest-1",
-      nickname: "Alice",
+      nickname: "AliceAccount",
+      groupNickname: "AliceCard",
       identity: "OTHER",
     },
     "hello",
@@ -44,7 +45,9 @@ test("chat prompt context packages sender identity guidance into the prompt text
       "runtime note: header lines above `---` are runtime metadata for this message, not user-authored text.",
     ),
   );
-  assert.ok(promptText.includes("sender nickname: Alice"));
+  assert.ok(promptText.includes("sender nickname: AliceAccount"));
+  assert.ok(promptText.includes("sender group nickname: AliceCard"));
+  assert.equal(promptText.includes("sender account nickname:"), false);
   assert.ok(promptText.includes("sender trust: other chat user"));
   assert.ok(
     promptText.includes(

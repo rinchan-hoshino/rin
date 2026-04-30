@@ -1008,10 +1008,13 @@ export class QQAdapter {
           `<@${safeString(this.bot?.selfId).trim()}>`,
         ])
       : rawText;
+    const groupNickname = !isDirect
+      ? safeString(msg?.member?.nick || "").trim() || undefined
+      : undefined;
     const nickname =
-      safeString(
-        msg?.member?.nick || msg?.author?.username || msg?.author?.nick || "",
-      ).trim() || undefined;
+      safeString(msg?.author?.username || msg?.author?.nick || "").trim() ||
+      undefined;
+    const displayName = groupNickname || nickname;
     const elements: any[] = [];
     if (strippedContent) {
       elements.push(normalizeNode("text", { content: strippedContent }));
@@ -1031,16 +1034,20 @@ export class QQAdapter {
       userId,
       author: {
         userId,
-        name: nickname,
-        nick: nickname,
-        username: safeString(msg?.author?.username || "").trim() || undefined,
+        name: displayName,
+        nick: displayName,
+        nickname,
+        groupNickname,
+        username: nickname,
       },
       user: {
         id: userId,
         userId,
-        name: nickname,
-        nick: nickname,
-        username: safeString(msg?.author?.username || "").trim() || undefined,
+        name: displayName,
+        nick: displayName,
+        nickname,
+        groupNickname,
+        username: nickname,
       },
       channelId,
       guildId: guildId || undefined,

@@ -80,6 +80,98 @@ test("chat runtime derives the durable chat key from normalized chat identity", 
   assert.equal(stored.routing?.userId, "42");
 });
 
+test("onebot group sessions preserve both group card and account nickname", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const app = runtime.createChatRuntimeApp(agentDir);
+  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+    dataDir: path.join(agentDir, "data"),
+    settings: {},
+    adapterEntries: [
+      {
+        key: "onebot",
+        name: "OneBot",
+        config: { endpoint: "ws://127.0.0.1:1", selfId: "1" },
+      },
+    ],
+  });
+  const adapter = [...app.adapters][0];
+  const seen = [];
+  app.on("message", (session) => seen.push(session));
+
+  await adapter.handleSocketMessage(
+    JSON.stringify({
+      post_type: "message",
+      message_type: "group",
+      self_id: 1,
+      user_id: 42,
+      group_id: 100,
+      message_id: 200,
+      raw_message: "hello",
+      sender: { card: "GroupCard", nickname: "AccountNick" },
+    }),
+  );
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].author.name, "GroupCard");
+  assert.equal(seen[0].author.nickname, "AccountNick");
+  assert.equal(seen[0].author.groupNickname, "GroupCard");
+  assert.equal(seen[0].author.accountNickname, undefined);
+  const files = inbox.listPendingChatInboxFiles(agentDir);
+  const stored = inbox.readChatInboxItem(files[0]);
+  assert.equal(stored.routing?.nickname, "AccountNick");
+  assert.equal(stored.session?.author?.nickname, "AccountNick");
+  assert.equal(stored.session?.author?.groupNickname, "GroupCard");
+  assert.equal(stored.session?.author?.accountNickname, undefined);
+});
+
+test("qq group sessions preserve both group nickname and account nickname", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const app = runtime.createChatRuntimeApp(agentDir);
+  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+    dataDir: path.join(agentDir, "data"),
+    settings: {},
+    adapterEntries: [
+      {
+        key: "qq",
+        name: "QQ",
+        config: {},
+      },
+    ],
+  });
+  const adapter = [...app.adapters][0];
+  adapter.bot.selfId = "bot-1";
+  const seen = [];
+  app.on("message", (session) => seen.push(session));
+
+  await adapter.handleIncomingEvent({
+    eventType: "GROUP_AT_MESSAGE_CREATE",
+    msg: {
+      id: "qq-msg-1",
+      group_openid: "group-1",
+      group_name: "Demo QQ Group",
+      content: "<@!bot-1> hello",
+      author: { member_openid: "user-1", username: "AccountNick" },
+      member: { nick: "GroupNick" },
+    },
+  });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].author.name, "GroupNick");
+  assert.equal(seen[0].author.nickname, "AccountNick");
+  assert.equal(seen[0].author.groupNickname, "GroupNick");
+  assert.equal(seen[0].author.accountNickname, undefined);
+  const files = inbox.listPendingChatInboxFiles(agentDir);
+  const stored = inbox.readChatInboxItem(files[0]);
+  assert.equal(stored.routing?.nickname, "AccountNick");
+  assert.equal(stored.session?.author?.nickname, "AccountNick");
+  assert.equal(stored.session?.author?.groupNickname, "GroupNick");
+  assert.equal(stored.session?.author?.accountNickname, undefined);
+});
+
 test("telegram runtime advances the poll cursor only after the update is handled", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
