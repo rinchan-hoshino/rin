@@ -115,6 +115,27 @@ export function extractMessageText(
   return trim ? text.trim() : text;
 }
 
+export function extractTextBeforeFirstToolCall(
+  content: any,
+  {
+    includeThinking = false,
+    trim = false,
+  }: { includeThinking?: boolean; trim?: boolean } = {},
+) {
+  if (!Array.isArray(content)) {
+    const text = renderMessageText(content, { includeThinking });
+    return trim ? text.trim() : text;
+  }
+  const prefixParts: any[] = [];
+  for (const entry of content) {
+    const part = normalizeMessagePart(entry);
+    if (part?.type === "toolcall") break;
+    prefixParts.push(entry);
+  }
+  const text = renderMessageText(prefixParts, { includeThinking });
+  return trim ? text.trim() : text;
+}
+
 export function normalizeMessageText(text: unknown) {
   return safeString(text)
     .replace(/\r\n?/g, "\n")
