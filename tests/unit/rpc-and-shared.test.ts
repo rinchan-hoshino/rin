@@ -97,6 +97,36 @@ test("shared resolveParsedArgs keeps passthrough and install defaults coherent",
   );
 });
 
+test("ensureDaemonAvailable uses the managed service without spawning an unmanaged daemon", async () => {
+  const execCalls: string[][] = [];
+  let socketChecks = 0;
+  await shared.ensureDaemonAvailable({
+    targetUser: "demo",
+    systemctl: "/usr/bin/systemctl",
+    managedServiceUnits: ["rin-daemon-demo.service"],
+    canConnectSocket: async () => ++socketChecks > 1,
+    exec: (argv: string[]) => execCalls.push(argv),
+  } as any);
+  assert.deepEqual(execCalls, [
+    ["/usr/bin/systemctl", "--user", "start", "rin-daemon-demo.service"],
+  ]);
+});
+
+test("ensureDaemonAvailable does not spawn unmanaged daemon without a managed service", async () => {
+  const execCalls: string[][] = [];
+  await assert.rejects(
+    shared.ensureDaemonAvailable({
+      targetUser: "demo",
+      systemctl: "",
+      managedServiceUnits: [],
+      canConnectSocket: async () => false,
+      exec: (argv: string[]) => execCalls.push(argv),
+    } as any),
+    /rin_daemon_unavailable: managed daemon service did not become available for demo/,
+  );
+  assert.deepEqual(execCalls, []);
+});
+
 test("shared reuses installer common repo helpers", async () => {
   assert.equal(shared.repoRootFromHere(), installCommon.repoRootFromHere());
   assert.equal(

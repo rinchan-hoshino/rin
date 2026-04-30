@@ -1,7 +1,7 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { safeString } from "../text-utils.js";
 
 import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
@@ -250,34 +250,8 @@ export async function ensureDaemonAvailable(context: TargetExecutionContext) {
     }
   }
 
-  const daemonEntry = path.join(
-    context.repoRoot,
-    "dist",
-    "app",
-    "rin-daemon",
-    "daemon.js",
-  );
-  const launch = buildUserShell(
-    context.targetUser,
-    [process.execPath, daemonEntry],
-    context.runtimeEnv,
-  );
-  const child = spawn(launch.command, launch.args, {
-    cwd: context.repoRoot,
-    env: launch.env,
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 5000) {
-    if (await context.canConnectSocket()) return;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-
   throw new Error(
-    `rin_daemon_unavailable: failed to start daemon for ${context.targetUser}`,
+    `rin_daemon_unavailable: managed daemon service did not become available for ${context.targetUser}`,
   );
 }
 
