@@ -188,12 +188,6 @@ test("discoverInstalledTargets scans manifest, launcher, systemd, and launchd ho
         source: "launchd",
       },
       {
-        targetUser: "dana",
-        installDir: path.join(danaHome, ".rin"),
-        ownerHome: danaHome,
-        source: "systemd",
-      },
-      {
         targetUser: "eve",
         installDir: "/opt/rin-eve",
         ownerHome: eveHome,

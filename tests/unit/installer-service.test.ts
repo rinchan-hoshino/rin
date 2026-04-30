@@ -199,12 +199,12 @@ test("refreshManagedServiceFiles updates existing managed units without creating
     const targetHome = path.join(dir, "home");
     const unitDir = path.join(targetHome, ".config", "systemd", "user");
     const currentUnit = path.join(unitDir, "rin-daemon-demo.user-test.service");
-    const legacyUnit = path.join(unitDir, "rin-daemon.service");
+    const bareUnit = path.join(unitDir, "rin-daemon.service");
 
     await fs.mkdir(path.dirname(currentDaemon), { recursive: true });
     await fs.writeFile(currentDaemon, "export {};\n", "utf8");
     await fs.mkdir(unitDir, { recursive: true });
-    await fs.writeFile(legacyUnit, "stale\n", "utf8");
+    await fs.writeFile(currentUnit, "stale\n", "utf8");
 
     service.refreshManagedServiceFiles("demo.user+test", installDir, false, {
       findSystemUser: () => ({ gid: 123 }),
@@ -216,9 +216,9 @@ test("refreshManagedServiceFiles updates existing managed units without creating
       installDir,
       () => targetHome,
     );
-    assert.equal(await fs.readFile(legacyUnit, "utf8"), spec.service);
-    assert.equal((await fs.stat(legacyUnit)).mode & 0o777, 0o644);
-    await assert.rejects(fs.access(currentUnit), /ENOENT/);
+    assert.equal(await fs.readFile(currentUnit, "utf8"), spec.service);
+    assert.equal((await fs.stat(currentUnit)).mode & 0o777, 0o644);
+    await assert.rejects(fs.access(bareUnit), /ENOENT/);
   });
 });
 
@@ -226,10 +226,7 @@ test("systemdUserContext keeps managed unit candidates ordered", () => {
   const context = service.systemdUserContext("demo.user+test", {
     findSystemUser: () => ({ uid: -1 }),
   });
-  assert.deepEqual(context.units, [
-    "rin-daemon-demo.user-test.service",
-    "rin-daemon.service",
-  ]);
+  assert.deepEqual(context.units, ["rin-daemon-demo.user-test.service"]);
   assert.deepEqual(context.userEnv, {});
 });
 
@@ -268,11 +265,7 @@ test("systemd user command helpers use direct local args for self and machine-ho
 });
 
 test("managed systemd helpers prefer richer successful snapshots while keeping action probe order", () => {
-  const units = [
-    "missing.service",
-    "rin-daemon-demo.service",
-    "rin-daemon.service",
-  ];
+  const units = ["missing.service", "rin-daemon-demo.service", "other.service"];
   const calls = [];
 
   const status = managedService.findManagedSystemdStatusSnapshot(
@@ -312,7 +305,7 @@ test("managed systemd helpers prefer richer successful snapshots while keeping a
       if (unit === "missing.service") return "";
       if (unit === "rin-daemon-demo.service")
         return "older\nrecent one\nrecent two";
-      return "oldest\nlegacy one\nlegacy two";
+      return "oldest\nother one\nother two";
     },
     2,
   );
@@ -333,10 +326,10 @@ test("managed systemd helpers prefer richer successful snapshots while keeping a
   assert.deepEqual(calls, [
     "status:missing.service",
     "status:rin-daemon-demo.service",
-    "status:rin-daemon.service",
+    "status:other.service",
     "journal:missing.service",
     "journal:rin-daemon-demo.service",
-    "journal:rin-daemon.service",
+    "journal:other.service",
     "reload",
     "probe:missing.service",
     "probe:rin-daemon-demo.service",
