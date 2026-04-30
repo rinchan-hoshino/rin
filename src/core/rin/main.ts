@@ -77,7 +77,6 @@ function createCli() {
       "--chat-key <chatKey>",
       "Deliver non-interactive final answer to a chat",
     )
-    .option("--bind-chat-session", "Use the chat's normal conversation session")
     .help();
 
   for (const [name, description] of RIN_COMMANDS) {

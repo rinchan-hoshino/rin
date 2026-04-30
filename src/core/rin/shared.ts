@@ -388,6 +388,7 @@ function daemonControlContext(parsed: ParsedArgs) {
   return {
     repoRoot,
     installDir,
+    agentDir: runtimeAgentDir,
     targetUser,
     targetHome,
     runtimeEnv,

@@ -208,7 +208,7 @@ export class ChatController {
           ? ""
           : this.getRecoverableSessionFile(),
     });
-    if (this.driver.currentSessionFile()) {
+    if (this.affectChatBinding && this.driver.currentSessionFile()) {
       this.updateStoredSessionFile(this.driver.currentSessionFile());
       this.saveState();
     }
@@ -506,12 +506,14 @@ export class ChatController {
   }
 
   private updateStoredSessionFile(...candidates: unknown[]) {
+    if (!this.affectChatBinding) return undefined;
     const picked = this.pickStoredValue(...candidates, this.state.sessionFile);
     this.state.sessionFile = toStoredSessionFile(this.agentDir, picked);
     return this.state.sessionFile;
   }
 
   private getRecoverableSessionFile() {
+    if (!this.affectChatBinding) return "";
     const wanted = resolveStoredSessionFile(
       this.agentDir,
       this.state.sessionFile,
@@ -528,6 +530,7 @@ export class ChatController {
   }
 
   private markAcceptedMessage(messageId?: string) {
+    if (!this.affectChatBinding) return;
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return;
     const acceptedAt = new Date().toISOString();
@@ -626,7 +629,7 @@ export class ChatController {
     clearProcessing?: boolean;
     bindSession?: boolean;
   }) {
-    const bindSession = input.bindSession !== false;
+    const bindSession = input.bindSession !== false && this.affectChatBinding;
     const text = this.stageAssistantDelivery({ ...input, bindSession });
     this.markProcessedMessage(input.incomingMessageId, bindSession);
     await this.commitPendingDelivery(input.clearProcessing);
@@ -649,8 +652,12 @@ export class ChatController {
           chatKey: this.chatKey,
           text: `${INTERIM_PREFIX}${trimmed}`,
           replyToMessageId: replyToMessageId || undefined,
-          sessionFile: this.currentSessionFile(),
-          sessionBinding: "conversation",
+          ...(this.affectChatBinding
+            ? {
+                sessionFile: this.currentSessionFile(),
+                sessionBinding: "conversation" as const,
+              }
+            : {}),
         },
         this.h,
       );

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import net from "node:net";
+import path from "node:path";
 
 import { parseJsonl } from "../rin-lib/common.js";
 import { requestDaemonCommand } from "../rin-daemon/client.js";
@@ -24,7 +25,6 @@ export type RunCliOptions = {
   model?: string;
   thinkingLevel?: string;
   chatKey?: string;
-  bindChatSession?: boolean;
   outputMode: "text" | "json";
   timeoutMs: number;
   help?: boolean;
@@ -49,7 +49,6 @@ Options:
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --session <file>               Use a specific session file
   --chat-key <chatKey>           Deliver the final answer to this chat as well
-  --bind-chat-session            With --chat-key, use that chat's normal conversation session
   --timeout <seconds>            Maximum wait time (default: 1800)
   --help, -h                     Show this help
 
@@ -166,7 +165,6 @@ export async function parseRunArgs(
   let timeoutValue = "";
   let outputMode: "text" | "json" = "text";
   let help = false;
-  let bindChatSession = false;
   let passthroughMessages = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -186,8 +184,7 @@ export async function parseRunArgs(
     }
     if (arg === "--print" || arg === "-p") continue;
     if (arg === "--bind-chat-session") {
-      bindChatSession = true;
-      continue;
+      throw new Error("unknown_run_option:--bind-chat-session");
     }
     if (arg === "--mode") {
       const value = readValue(args, index);
@@ -342,7 +339,6 @@ export async function parseRunArgs(
       : undefined,
     thinkingLevel: safeString(thinkingLevel).trim() || undefined,
     chatKey: safeString(chatKey).trim() || undefined,
-    bindChatSession,
     outputMode,
     timeoutMs: parseTimeoutMs(timeoutValue),
     help,
@@ -472,23 +468,55 @@ async function runPromptTurn(
   return await withTimeout(turn, timeoutMs);
 }
 
+function isSafeTransientSessionFile(agentDir: string, sessionFile?: string) {
+  const resolved = safeString(sessionFile).trim();
+  if (!resolved) return false;
+  const sessionsDir = path.resolve(agentDir, "sessions");
+  const absolute = path.resolve(resolved);
+  return (
+    absolute.startsWith(`${sessionsDir}${path.sep}`) &&
+    path.basename(absolute).endsWith(".jsonl")
+  );
+}
+
+async function removeTransientSessionFile(
+  agentDir: string,
+  sessionFile?: string,
+) {
+  if (!isSafeTransientSessionFile(agentDir, sessionFile)) return;
+  await fs
+    .rm(path.resolve(String(sessionFile)), { force: true })
+    .catch(() => {});
+}
+
+function formatRunResult(result: any, keepSession: boolean) {
+  return {
+    finalText: result?.finalText,
+    result: result?.result,
+    ...(keepSession
+      ? { sessionFile: result?.sessionFile, sessionId: result?.sessionId }
+      : {}),
+  };
+}
+
 async function runDaemonTurn(
+  agentDir: string,
   socketPath: string,
   options: RunCliOptions,
 ): Promise<Record<string, unknown>> {
   const client = new DaemonRunClient(socketPath, options.outputMode);
   const request = (type: string, payload: Record<string, unknown> = {}) =>
     withTimeout(client.request(type, payload), options.timeoutMs);
+  const keepSession = Boolean(options.sessionFile);
   try {
     await client.connect(Math.min(options.timeoutMs, 10_000));
     if (options.sessionFile) {
       await request("switch_session", { sessionFile: options.sessionFile });
     } else {
-      await request("new_session", {
-        managedSessionLeaf: MANAGED_CLI_SESSION_LEAF,
-      });
+      await request("get_state");
     }
     if (options.sessionName) {
+      if (!options.sessionFile) throw new Error("run_name_requires_session");
       await request("set_session_name", { name: options.sessionName });
     }
     if (options.model) {
@@ -507,41 +535,45 @@ async function runDaemonTurn(
     for (const message of options.messages) {
       result = await runPromptTurn(client, message, options.timeoutMs);
     }
-    return {
-      finalText: result.finalText,
-      result: result.result,
-      sessionFile: result.sessionFile,
-      sessionId: result.sessionId,
-    };
+    if (!keepSession) {
+      await removeTransientSessionFile(agentDir, result?.sessionFile);
+    }
+    return formatRunResult(result, keepSession);
   } finally {
     client.close();
   }
 }
 
 async function runChatTurn(
+  agentDir: string,
   socketPath: string,
   options: RunCliOptions,
 ): Promise<Record<string, unknown>> {
   const text = [options.prompt, ...options.messages].filter(Boolean).join("\n");
-  return await requestDaemonCommand(
+  const keepSession = Boolean(options.sessionFile);
+  const result = await requestDaemonCommand(
     {
       type: "chat_run_turn",
       payload: {
         chatKey: options.chatKey,
         text,
         sessionFile: options.sessionFile,
-        managedSessionLeaf: MANAGED_CLI_SESSION_LEAF,
+        ...(!keepSession
+          ? { managedSessionLeaf: MANAGED_CLI_SESSION_LEAF }
+          : {}),
         model: options.model,
         thinkingLevel: options.thinkingLevel,
-        controllerKey: options.bindChatSession
-          ? "default"
-          : `cli-${Date.now()}`,
-        affectChatBinding: options.bindChatSession,
-        disposeAfterTurn: !options.bindChatSession,
+        controllerKey: `cli-${Date.now()}`,
+        affectChatBinding: false,
+        disposeAfterTurn: true,
       },
     },
     { socketPath, timeoutMs: options.timeoutMs },
   );
+  if (!keepSession) {
+    await removeTransientSessionFile(agentDir, result?.sessionFile);
+  }
+  return formatRunResult(result, keepSession);
 }
 
 function printResult(
@@ -565,7 +597,7 @@ export async function runNonInteractive(parsed: ParsedArgs, rawArgv: string[]) {
   const context = createTargetExecutionContext(parsed);
   await ensureDaemonAvailable(context);
   const result = options.chatKey
-    ? await runChatTurn(context.socketPath, options)
-    : await runDaemonTurn(context.socketPath, options);
+    ? await runChatTurn(context.agentDir, context.socketPath, options)
+    : await runDaemonTurn(context.agentDir, context.socketPath, options);
   printResult(result, options.outputMode);
 }

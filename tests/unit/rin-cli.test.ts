@@ -58,6 +58,7 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.match(output, /--print/);
   assert.match(output, /--mode <mode>/);
   assert.match(output, /--chat-key <chatKey>/);
+  assert.doesNotMatch(output, /--bind-chat-session/);
   assert.doesNotMatch(output, /\n\s+run\s+Run one non-interactive Rin turn/);
   assert.doesNotMatch(output, /--sessions\b/);
   assert.doesNotMatch(output, /--(?:std|rpc)\b/);
@@ -76,6 +77,7 @@ test("print help shows the Pi-style non-interactive CLI contract", () => {
   );
   assert.match(output, /--print, -p/);
   assert.match(output, /--chat-key <chatKey>/);
+  assert.doesNotMatch(output, /--bind-chat-session/);
 });
 
 test("run parser supports Pi-style print, model, chatKey, json, and timeout options", async () => {
@@ -88,7 +90,6 @@ test("run parser supports Pi-style print, model, chatKey, json, and timeout opti
       "--thinking=low",
       "--chat-key",
       "telegram/1:2",
-      "--bind-chat-session",
       "--mode",
       "json",
       "--timeout",
@@ -106,11 +107,15 @@ test("run parser supports Pi-style print, model, chatKey, json, and timeout opti
     model: "openai/gpt-5.5",
     thinkingLevel: "low",
     chatKey: "telegram/1:2",
-    bindChatSession: true,
     outputMode: "json",
     timeoutMs: 12500,
     help: false,
   });
+
+  await assert.rejects(
+    () => run.parseRunArgs(["-p", "hello", "--bind-chat-session"], ""),
+    /unknown_run_option:--bind-chat-session/,
+  );
 
   assert.equal(run.shouldRunNonInteractive(["-p"], true), true);
   assert.equal(run.shouldRunNonInteractive(["--mode", "json"], true), true);

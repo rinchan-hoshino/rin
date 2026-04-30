@@ -27,12 +27,11 @@ Useful options:
 - `--mode json`: print JSON-line events instead of only final text.
 - `--provider <name>` and `--model <provider/model>`: select a model for this run.
 - `--thinking <off|minimal|low|medium|high|xhigh>`: set thinking level.
-- `--session <file>`: continue an existing session file.
+- `--session <file>`: continue an existing dedicated session file.
 - `--chat-key <chatKey>`: also deliver the final answer to a chat.
-- `--bind-chat-session`: with `--chat-key`, use and update that chat's normal conversation session.
 - `--timeout <seconds>`: override the default 30 minute wait.
 
-New runs without `--session` create managed CLI sessions under `sessions/managed/cli/`.
+Runs without `--session` do not keep a session. When delegated work needs durable context across runs, create or use a dedicated session under `sessions/managed/<kind>/` and pass it with `--session`.
 
 ## Chat delivery
 
@@ -42,7 +41,7 @@ Use `--chat-key` to deliver the final answer to a chat while still printing it l
 rin -p --chat-key telegram/123:-100456 "Write a short status update"
 ```
 
-By default, chat delivery uses a detached one-shot chat controller so it does not replace the chat's normal conversation session. Add `--bind-chat-session` when the run should use and update that chat's normal conversation session.
+Chat delivery uses a detached one-shot chat controller. Delivered messages are not bound to a conversation session, so replies to those messages do not enter the non-interactive run's session.
 
 ## Agent guidance
 
