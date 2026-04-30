@@ -1196,8 +1196,15 @@ class OneBotAdapter {
     fallbackName: string,
   ) {
     const fileName = ensureExtension(ensureFileName(fallbackName), mimeType);
+    ensureDir(this.cacheDir);
     const fullPath = path.join(this.cacheDir, `${Date.now()}-${fileName}`);
-    await fs.promises.writeFile(fullPath, data);
+    try {
+      await fs.promises.writeFile(fullPath, data);
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+      ensureDir(this.cacheDir);
+      await fs.promises.writeFile(fullPath, data);
+    }
     return fullPath;
   }
 
