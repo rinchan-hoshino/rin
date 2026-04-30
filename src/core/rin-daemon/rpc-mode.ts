@@ -23,6 +23,21 @@ import {
 
 const TURN_HEARTBEAT_INTERVAL_MS = 2_000;
 
+type PendingExtensionUiRequest = {
+  resolve: (response: any) => void;
+  timer?: NodeJS.Timeout;
+  abort?: () => void;
+};
+
+function createExtensionUiResponseParser(defaultValue: any) {
+  return (response: any) => {
+    if (response?.cancelled) return defaultValue;
+    if ("confirmed" in (response || {})) return Boolean(response.confirmed);
+    if ("value" in (response || {})) return response.value;
+    return defaultValue;
+  };
+}
+
 function appendInterruptedToolResults(
   session: any,
   options: { persistToSession?: boolean } = {},
@@ -206,6 +221,163 @@ export async function runCustomRpcMode(
   const output = (obj: unknown) => writeJsonLine(obj);
   const done = (id: string | undefined, type: string, value?: unknown) =>
     ok(id, type, value);
+  const pendingExtensionUiRequests = new Map<
+    string,
+    PendingExtensionUiRequest
+  >();
+  let extensionUiRequestSeq = 0;
+
+  const createExtensionUiRequestId = () =>
+    `extension_ui_${Date.now().toString(36)}_${++extensionUiRequestSeq}`;
+
+  const resolvePendingExtensionUiRequest = (response: any) => {
+    const requestId = safeString(response?.id).trim();
+    if (!requestId) return false;
+    const pending = pendingExtensionUiRequests.get(requestId);
+    if (!pending) return false;
+    pendingExtensionUiRequests.delete(requestId);
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.abort?.();
+    pending.resolve(response);
+    return true;
+  };
+
+  const createExtensionUiDialogPromise = (
+    options: any,
+    defaultValue: any,
+    request: Record<string, unknown>,
+    parseResponse = createExtensionUiResponseParser(defaultValue),
+  ) => {
+    if (options?.signal?.aborted) return Promise.resolve(defaultValue);
+    const requestId = createExtensionUiRequestId();
+    return new Promise<any>((resolve) => {
+      let timer: NodeJS.Timeout | undefined;
+      const abort = () => {
+        if (timer) clearTimeout(timer);
+        options?.signal?.removeEventListener?.("abort", onAbort);
+      };
+      const finish = (value: any) => {
+        abort();
+        pendingExtensionUiRequests.delete(requestId);
+        resolve(value);
+      };
+      const onAbort = () => finish(defaultValue);
+      options?.signal?.addEventListener?.("abort", onAbort, { once: true });
+      if (Number(options?.timeout) > 0) {
+        timer = setTimeout(() => finish(defaultValue), Number(options.timeout));
+      }
+      pendingExtensionUiRequests.set(requestId, {
+        resolve: (response) => finish(parseResponse(response)),
+        timer,
+        abort,
+      });
+      output({ type: "extension_ui_request", id: requestId, ...request });
+    });
+  };
+
+  const createExtensionUiContext = () => ({
+    select: (title: string, options: string[], dialogOptions?: any) =>
+      createExtensionUiDialogPromise(
+        dialogOptions,
+        undefined,
+        { method: "select", title, options, timeout: dialogOptions?.timeout },
+        createExtensionUiResponseParser(undefined),
+      ),
+    confirm: (title: string, message: string, dialogOptions?: any) =>
+      createExtensionUiDialogPromise(
+        dialogOptions,
+        false,
+        { method: "confirm", title, message, timeout: dialogOptions?.timeout },
+        createExtensionUiResponseParser(false),
+      ),
+    input: (title: string, placeholder?: string, dialogOptions?: any) =>
+      createExtensionUiDialogPromise(
+        dialogOptions,
+        undefined,
+        {
+          method: "input",
+          title,
+          placeholder,
+          timeout: dialogOptions?.timeout,
+        },
+        createExtensionUiResponseParser(undefined),
+      ),
+    editor: (title: string, prefill?: string, dialogOptions?: any) =>
+      createExtensionUiDialogPromise(
+        dialogOptions,
+        undefined,
+        { method: "editor", title, prefill, timeout: dialogOptions?.timeout },
+        createExtensionUiResponseParser(undefined),
+      ),
+    notify: (message: string, notifyType?: string) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "notify",
+        message,
+        notifyType,
+      }),
+    onTerminalInput: () => () => {},
+    setStatus: (statusKey: string, statusText?: string) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setStatus",
+        statusKey,
+        statusText,
+      }),
+    setWorkingMessage: () => {},
+    setWorkingVisible: () => {},
+    setWorkingIndicator: () => {},
+    setHiddenThinkingLabel: () => {},
+    setWidget: (widgetKey: string, content: unknown, options?: any) => {
+      if (content !== undefined && !Array.isArray(content)) return;
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setWidget",
+        widgetKey,
+        widgetLines: content,
+        widgetPlacement: options?.placement,
+      });
+    },
+    setFooter: () => {},
+    setHeader: () => {},
+    setTitle: (title: string) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setTitle",
+        title,
+      }),
+    custom: async () => undefined,
+    pasteToEditor: (text: string) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "set_editor_text",
+        text,
+      }),
+    setEditorText: (text: string) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "set_editor_text",
+        text,
+      }),
+    getEditorText: () => "",
+    addAutocompleteProvider: () => {},
+    setEditorComponent: () => {},
+    getAllThemes: () => [],
+    getTheme: () => undefined,
+    setTheme: () => ({
+      success: false,
+      error:
+        "Theme switching is not available through the daemon frontend bridge",
+    }),
+    getToolsExpanded: () => false,
+    setToolsExpanded: () => {},
+  });
   const run = async (
     id: string | undefined,
     type: string,
@@ -398,6 +570,7 @@ export async function runCustomRpcMode(
   const bindCurrentSession = async () => {
     const session = getSession();
     await session.bindExtensions({
+      uiContext: createExtensionUiContext(),
       commandContextActions: {
         waitForIdle: () => getSession().agent.waitForIdle(),
         newSession: async (options) => {
@@ -455,6 +628,9 @@ export async function runCustomRpcMode(
     const usingInitialFreshSession = initialFreshSessionReusable;
     initialFreshSessionReusable = false;
     switch (type) {
+      case "extension_ui_response":
+        resolvePendingExtensionUiRequest(command);
+        return done(id, type);
       case "prompt": {
         const streamingBehavior = command.streamingBehavior;
         const promptOptions = {

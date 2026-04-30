@@ -18,6 +18,135 @@ function wait(ms = 0) {
 }
 
 test(
+  "rpc mode bridges extension UI dialog requests and responses",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    let boundUiContext;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async (bindings) => {
+          boundUiContext = bindings.uiContext;
+        },
+        subscribe: () => () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: {
+          getEntries: () => [],
+          getTree: () => [],
+          getLeafId: () => null,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
+        messages: [],
+        prompt: async () => {},
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+      });
+      await wait(0);
+      assert.equal(typeof boundUiContext?.confirm, "function");
+
+      const confirmation = boundUiContext.confirm("Confirm", "Proceed?");
+      await wait(0);
+      const jsonLines = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const request = jsonLines.find(
+        (line) => line.type === "extension_ui_request",
+      );
+      assert.equal(request.method, "confirm");
+      assert.equal(request.title, "Confirm");
+      assert.equal(request.message, "Proceed?");
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: request.id, type: "extension_ui_response", confirmed: true })}\n`,
+        ),
+      );
+
+      assert.equal(await confirmation, true);
+      await wait(0);
+      const response = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .find(
+          (line) =>
+            line.type === "response" &&
+            line.command === "extension_ui_response",
+        );
+      assert.equal(response.success, true);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode emits canonical finalText on turn completion",
   { concurrency: false },
   async () => {

@@ -217,7 +217,10 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   async send(command: any) {
     if (!this.socket || this.socket.destroyed)
       throw new Error("rin_tui_not_connected");
-    const id = `req_${++this.requestId}`;
+    const id =
+      command?.type === "extension_ui_response" && command?.id
+        ? String(command.id)
+        : `req_${++this.requestId}`;
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);

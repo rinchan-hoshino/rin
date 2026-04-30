@@ -100,6 +100,72 @@ test("rpc model registry exposes all models for login provider selection", async
   ]);
 });
 
+test("rpc runtime answers daemon extension UI requests through the bound UI context", async () => {
+  const sent = [];
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      return Promise.resolve({ success: true });
+    },
+    subscribe() {
+      return () => {};
+    },
+  });
+  session.extensionBindings = {
+    uiContext: {
+      select: async () => "Allow",
+      confirm: async () => true,
+      input: async () => "typed value",
+      editor: async () => "edited value",
+      notify(message, level) {
+        sent.push({ local: "notify", message, level });
+      },
+    },
+  };
+
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "select-1",
+    method: "select",
+    title: "Pick",
+    options: ["Allow", "Block"],
+  });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "confirm-1",
+    method: "confirm",
+    title: "Confirm",
+    message: "Proceed?",
+  });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "input-1",
+    method: "input",
+    title: "Input",
+  });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "editor-1",
+    method: "editor",
+    title: "Edit",
+  });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "notify-1",
+    method: "notify",
+    message: "hello",
+    notifyType: "warning",
+  });
+
+  assert.deepEqual(sent, [
+    { type: "extension_ui_response", id: "select-1", value: "Allow" },
+    { type: "extension_ui_response", id: "confirm-1", confirmed: true },
+    { type: "extension_ui_response", id: "input-1", value: "typed value" },
+    { type: "extension_ui_response", id: "editor-1", value: "edited value" },
+    { local: "notify", message: "hello", level: "warning" },
+  ]);
+});
+
 test("rpc runtime keeps control methods bound to the session instance", async () => {
   const sent = [];
   const model = { provider: "test", id: "demo-model", name: "Demo Model" };

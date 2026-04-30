@@ -54,6 +54,24 @@ type RpcExtensionBindings = {
   onError?: (error: any) => void;
 };
 
+type RpcExtensionUiResponse =
+  | { type: "extension_ui_response"; id: string; value: string }
+  | { type: "extension_ui_response"; id: string; confirmed: boolean }
+  | { type: "extension_ui_response"; id: string; cancelled: true };
+
+function extensionUiRequestId(payload: any) {
+  return String(payload?.id || "").trim();
+}
+
+function cancelledExtensionUiResponse(
+  payload: any,
+): RpcExtensionUiResponse | undefined {
+  const id = extensionUiRequestId(payload);
+  return id
+    ? { type: "extension_ui_response", id, cancelled: true }
+    : undefined;
+}
+
 type RpcResourceSnapshot = {
   skills: { skills: any[]; diagnostics: any[] };
   prompts: { prompts: any[]; diagnostics: any[] };
@@ -844,13 +862,111 @@ export class RpcInteractiveSession {
   }
 
   private handleRpcEvent(payload: any) {
-    if (payload?.type === "extension_ui_request") return;
+    if (payload?.type === "extension_ui_request") {
+      void this.handleExtensionUiRequest(payload).catch((error) => {
+        this.extensionBindings.onError?.({
+          extensionPath: "rpc:extension_ui_request",
+          event: payload?.method || "extension_ui_request",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+      return;
+    }
     void handleRpcSessionEvent(
       this as any,
       payload,
       () => this.queueRefreshState(REFRESH_MESSAGES),
       () => this.queueRefreshState(REFRESH_MESSAGES_AND_SESSION),
     );
+  }
+
+  private async handleExtensionUiRequest(payload: any) {
+    const id = extensionUiRequestId(payload);
+    const method = String(payload?.method || "").trim();
+    const ui = this.extensionBindings.uiContext;
+    let response: RpcExtensionUiResponse | undefined;
+
+    switch (method) {
+      case "select": {
+        if (!id) return;
+        const value = ui?.select
+          ? await ui.select(String(payload.title || ""), payload.options || [])
+          : undefined;
+        response =
+          value === undefined || value === null
+            ? { type: "extension_ui_response", id, cancelled: true }
+            : { type: "extension_ui_response", id, value: String(value) };
+        break;
+      }
+      case "confirm": {
+        if (!id) return;
+        const confirmed = ui?.confirm
+          ? await ui.confirm(
+              String(payload.title || ""),
+              String(payload.message || ""),
+            )
+          : false;
+        response = {
+          type: "extension_ui_response",
+          id,
+          confirmed: !!confirmed,
+        };
+        break;
+      }
+      case "input": {
+        if (!id) return;
+        const value = ui?.input
+          ? await ui.input(
+              String(payload.title || ""),
+              payload.placeholder === undefined
+                ? undefined
+                : String(payload.placeholder),
+            )
+          : undefined;
+        response =
+          value === undefined || value === null
+            ? { type: "extension_ui_response", id, cancelled: true }
+            : { type: "extension_ui_response", id, value: String(value) };
+        break;
+      }
+      case "editor": {
+        if (!id) return;
+        const value = ui?.editor
+          ? await ui.editor(
+              String(payload.title || ""),
+              payload.prefill === undefined
+                ? undefined
+                : String(payload.prefill),
+            )
+          : undefined;
+        response =
+          value === undefined || value === null
+            ? { type: "extension_ui_response", id, cancelled: true }
+            : { type: "extension_ui_response", id, value: String(value) };
+        break;
+      }
+      case "notify":
+        ui?.notify?.(String(payload.message || ""), payload.notifyType);
+        return;
+      case "setStatus":
+        ui?.setStatus?.(String(payload.statusKey || ""), payload.statusText);
+        return;
+      case "setWidget":
+        ui?.setWidget?.(String(payload.widgetKey || ""), payload.widgetLines, {
+          placement: payload.widgetPlacement,
+        });
+        return;
+      case "setTitle":
+        ui?.setTitle?.(String(payload.title || ""));
+        return;
+      case "set_editor_text":
+        ui?.setEditorText?.(String(payload.text || ""));
+        return;
+      default:
+        response = cancelledExtensionUiResponse(payload);
+    }
+
+    if (response) await this.client.send(response);
   }
 
   private emitEvent(event: AgentEvent) {
