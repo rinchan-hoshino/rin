@@ -98,6 +98,21 @@ rin doctor
 rin status --watch  # live worker and scheduled-task activity
 ```
 
+### Deployment scenarios
+
+The installer is still a local installer, but several deployment shapes are already practical as wrappers around the same Linux/macOS/Windows entry points. The target environment still needs the normal Rin prerequisites, including Node.js and npm:
+
+| Scenario                    | Feasibility                                             | Notes                                                                                                                                                                                    |
+| --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local or cross-user install | Supported today                                         | The interactive installer can target the current account or another local user, then writes that user's launchers and daemon service.                                                    |
+| SSH install                 | Feasible today                                          | Run the bootstrap command over SSH on the remote host. A dedicated `rin install --ssh` wrapper could improve discovery and error reporting later.                                        |
+| Containerized install       | Feasible with a headless Linux image                    | Use a persistent volume for the Rin home/install directory and run the daemon or CLI inside the container. GUI launchers and host user services do not apply inside the container.       |
+| Virtual machine install     | Supported through the normal OS installer               | Install Rin inside the guest OS exactly like a physical machine. VM snapshots make rollback easier, but Rin still manages only the guest environment.                                    |
+| NAS install                 | Feasible when the NAS can run Node.js or containers     | Prefer the normal Linux path on open NAS systems, or the container pattern on appliance-style NAS devices. Vendor package managers and restricted shells may need device-specific notes. |
+| Cloud host install          | Supported through SSH or cloud-init style bootstrapping | Treat the cloud VM as a remote Linux host. Persist `.rin` data on durable disk and configure daemon startup according to the host OS.                                                    |
+
+These are deployment scenarios, not separate release channels. Stable, beta, nightly, and git selection keep using the same install/update contract above.
+
 ## Built in today
 
 Rin includes a focused default stack:
