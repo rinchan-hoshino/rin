@@ -192,6 +192,11 @@ test("chat controller skips recovery bootstrap and asks the active voice to ackn
   const calls = [];
   const prompts = [];
   const deliveries = [];
+  const activeVoiceCommands = [];
+  controller.runActiveVoiceAcknowledgement = async (commandName) => {
+    activeVoiceCommands.push(commandName);
+    return "Active voice new-session reply.";
+  };
   controller.commitPendingDelivery = async function () {
     deliveries.push(this.stagedDelivery?.text || "");
     this.stagedDelivery = null;
@@ -244,17 +249,9 @@ test("chat controller skips recovery bootstrap and asks the active voice to ackn
 
   await controller.runCommand("/new");
 
-  assert.deepEqual(calls, [
-    "connect:false",
-    "newSession:chat",
-    "ensureSessionReady",
-  ]);
-  assert.equal(prompts.length, 1);
-  assert.equal(prompts[0], "Briefly greet me.");
-  assert.doesNotMatch(
-    prompts[0],
-    /agent|persona|send|chat|message|command|implementation|system/i,
-  );
+  assert.deepEqual(calls, ["connect:false", "newSession:chat"]);
+  assert.deepEqual(prompts, []);
+  assert.deepEqual(activeVoiceCommands, ["new"]);
   assert.deepEqual(deliveries, ["Active voice new-session reply."]);
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
@@ -415,24 +412,23 @@ test("chat controller keeps /status immediate during an active chat turn", async
 });
 
 test("chat controller asks the active voice to acknowledge /compact and /reload", async () => {
-  for (const [command, resultText, activeVoiceText, promptPattern] of [
-    [
-      "/compact",
-      "Compacted session.",
-      "Active voice compact reply.",
-      /^Briefly tell me everything is settled\.$/,
-    ],
+  for (const [command, resultText, activeVoiceText] of [
+    ["/compact", "Compacted session.", "Active voice compact reply."],
     [
       "/reload",
       "Reloaded extensions, prompts, skills, and themes.",
       "Active voice reload reply.",
-      /^Briefly tell me you are ready\.$/,
     ],
   ]) {
     const controller = await createController();
     const calls = [];
     const prompts = [];
     const deliveries = [];
+    const activeVoiceCommands = [];
+    controller.runActiveVoiceAcknowledgement = async (commandName) => {
+      activeVoiceCommands.push(commandName);
+      return activeVoiceText;
+    };
     controller.commitPendingDelivery = async function () {
       deliveries.push(this.stagedDelivery?.text || "");
       this.stagedDelivery = null;
@@ -470,17 +466,9 @@ test("chat controller asks the active voice to acknowledge /compact and /reload"
 
     await controller.runCommand(command);
 
-    assert.deepEqual(calls, [
-      "ensureSessionReady",
-      `runCommand:${command}`,
-      "ensureSessionReady",
-    ]);
-    assert.equal(prompts.length, 1);
-    assert.match(prompts[0], promptPattern);
-    assert.doesNotMatch(
-      prompts[0],
-      /agent|persona|send|chat|message|command|implementation|system/i,
-    );
+    assert.deepEqual(calls, ["ensureSessionReady", `runCommand:${command}`]);
+    assert.deepEqual(prompts, []);
+    assert.deepEqual(activeVoiceCommands, [command.slice(1)]);
     assert.deepEqual(deliveries, [activeVoiceText]);
   }
 });

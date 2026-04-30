@@ -100,21 +100,83 @@ async function withTimeout<T>(
   }
 }
 
+test("chat controller settles an abort while prompt submission is still pending", async () => {
+  const controller = await createController();
+  const deliveries: string[] = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  let promptRequestTag = "";
+  let abortCalled = false;
+  controller.runActiveVoiceAcknowledgement = async (commandName: string) => {
+    assert.equal(commandName, "abort");
+    return "Active voice abort reply.";
+  };
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => "/tmp/pending-submit-chat.jsonl",
+      getSessionId: () => "session-pending-submit",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/pending-submit-chat.jsonl",
+      sessionId: "session-pending-submit",
+    }),
+    agent: {
+      abort: () => {
+        abortCalled = true;
+      },
+    },
+    prompt: async (_text: string, options: { requestTag?: string } = {}) => {
+      promptRequestTag = options.requestTag || "";
+      await new Promise(() => {});
+    },
+  };
+
+  const turn = controller.runTurn({
+    text: "pending prompt",
+    attachments: [],
+    replyToMessageId: "m1",
+    incomingMessageId: "m1",
+  });
+  await waitUntil(() => Boolean(promptRequestTag), "prompt did not start");
+  await withTimeout(
+    controller.runCommand("/abort", "m-abort", "m-abort"),
+    100,
+    "abort command was delayed by pending prompt submission",
+  );
+  const result = await withTimeout(
+    turn,
+    100,
+    "aborted turn did not settle while prompt submission was pending",
+  );
+  assert.equal(abortCalled, true);
+  assert.deepEqual(result, {
+    aborted: true,
+    sessionId: "session-pending-submit",
+    sessionFile: "/tmp/pending-submit-chat.jsonl",
+  });
+  assert.deepEqual(deliveries, ["Active voice abort reply."]);
+});
+
 test("chat controller suppresses aborted turn errors and queues later text as a fresh prompt", async () => {
   const controller = await createController();
   const deliveries: string[] = [];
   controller.commitPendingDelivery = async function () {
-    const text = this.stagedDelivery?.text || "";
-    if (text === "Aborted current operation.") {
-      assert.equal(this.currentTurn?.incomingMessageId, "m1");
-    }
-    deliveries.push(text);
+    deliveries.push(this.stagedDelivery?.text || "");
     this.stagedDelivery = null;
   };
 
   const promptCalls: Array<{ text: string; streamingBehavior: string }> = [];
   let firstRequestTag = "";
   let secondRequestTag = "";
+  controller.runActiveVoiceAcknowledgement = async (commandName: string) => {
+    assert.equal(commandName, "abort");
+    return "Active voice abort reply.";
+  };
   let tuiInterruptCalled = false;
   let sessionAbortCalled = false;
   let ensureSessionReadyCalls = 0;
@@ -212,5 +274,5 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
   ]);
   emitRpcTurnComplete(controller, secondRequestTag, "second done");
   assert.equal((await secondTurn).finalText, "second done");
-  assert.deepEqual(deliveries, ["Aborted current operation.", "second done"]);
+  assert.deepEqual(deliveries, ["Active voice abort reply.", "second done"]);
 });

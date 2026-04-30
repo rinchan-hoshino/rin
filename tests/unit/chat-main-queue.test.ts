@@ -570,6 +570,159 @@ test("chat main routes active-turn /new through the chatKey worker immediately",
   }
 });
 
+test("chat main lets /abort bypass a same-chat turn waiting for backend admission", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      controllerMod.ChatController.prototype.runActiveVoiceAcknowledgement = async function (commandName) {
+        if (commandName !== "abort") throw new Error(commandName);
+        return "Active voice abort reply.";
+      };
+
+      const promptTags = [];
+      let abortCalls = 0;
+      controllerMod.ChatController.prototype.connect = async function () {
+        if (this.session && this.client) return;
+        const controller = this;
+        this.client = { subscribe() {} };
+        this.session = {
+          isStreaming: false,
+          messages: [],
+          sessionManager: {
+            getSessionFile: () => "/tmp/abort-admission-chat.jsonl",
+            getSessionId: () => "abort-admission-session",
+            getSessionName: () => controller.chatKey,
+          },
+          ensureSessionReady: async () => ({
+            sessionFile: "/tmp/abort-admission-chat.jsonl",
+            sessionId: "abort-admission-session",
+          }),
+          agent: {
+            abort: () => {
+              abortCalls += 1;
+              controller.session.isStreaming = false;
+            },
+          },
+          prompt: async (message, options = {}) => {
+            promptTags.push(options.requestTag || "");
+            if (message === "Briefly tell me the current operation was aborted.") {
+              controller.session.isStreaming = false;
+              await controller.handleClientEvent({
+                type: "ui",
+                payload: {
+                  type: "rpc_turn_event",
+                  event: "complete",
+                  requestTag: options.requestTag,
+                  finalText: "Active voice abort reply.",
+                  result: { messages: [{ type: "text", text: "Active voice abort reply." }] },
+                  sessionId: "abort-admission-session",
+                  sessionFile: "/tmp/abort-admission-chat.jsonl",
+                },
+              });
+              return;
+            }
+            controller.session.isStreaming = true;
+            await new Promise(() => {});
+          },
+          switchSession: async () => {},
+        };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-1"];
+        },
+        internal: {
+          async sendChatAction() {},
+        },
+      });
+
+      const makeMessage = (messageId, content) => ({
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId,
+        isDirect: true,
+        content,
+        stripped: { content },
+        elements: [h.createChatRuntimeH().text(content)],
+      });
+
+      app.emit("message", makeMessage("m-active", "start long turn"));
+      const promptDeadline = Date.now() + 5000;
+      while (Date.now() < promptDeadline && promptTags.length < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (promptTags.length !== 1) {
+        throw new Error(JSON.stringify({ stage: "prompt-not-started", promptTags }));
+      }
+
+      app.emit("message", makeMessage("m-abort", "/abort"));
+      const deadline = Date.now() + 5000;
+      let rows = [];
+      while (Date.now() < deadline) {
+        rows = storeMod
+          .listChatMessages(agentDir)
+          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        if (abortCalls > 0 && rows.some((item) => item.text === "Active voice abort reply.")) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (
+        abortCalls !== 1 ||
+        !rows.some((item) => item.text === "Active voice abort reply.")
+      ) {
+        throw new Error(JSON.stringify({ abortCalls, promptTags, rows }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main lets same-chat follow-up enter the chatKey worker as steer", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

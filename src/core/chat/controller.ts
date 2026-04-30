@@ -71,6 +71,7 @@ function buildActiveVoiceAcknowledgementPrompt(commandName: string) {
     new: "Briefly greet me.",
     compact: "Briefly tell me everything is settled.",
     reload: "Briefly tell me you are ready.",
+    abort: "Briefly tell me the current operation was aborted.",
   };
   return promptByCommand[commandName] || "";
 }
@@ -131,6 +132,7 @@ export class ChatController {
   statePath: string;
   state: ChatState;
   driver: ChatFrontendDriver;
+  frontendClientFactory?: () => RpcFrontendClient;
   turnQueue: Promise<void> = Promise.resolve();
   logger: any;
   h: any;
@@ -172,6 +174,7 @@ export class ChatController {
     this.logger = deps.logger;
     this.h = deps.h;
     this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
+    this.frontendClientFactory = deps.frontendClientFactory;
     if (!this.state.chatKey) this.state.chatKey = chatKey;
     this.driver = new ChatFrontendDriver({
       clientFactory: deps.frontendClientFactory,
@@ -512,6 +515,45 @@ export class ChatController {
     return this.state.sessionFile;
   }
 
+  private isSafeTransientSessionFile(sessionFile?: string) {
+    const resolved = safeString(sessionFile || "").trim();
+    if (!resolved) return false;
+    const sessionsDir = path.resolve(this.agentDir, "sessions");
+    const absolute = path.resolve(resolved);
+    return (
+      absolute.startsWith(`${sessionsDir}${path.sep}`) &&
+      path.basename(absolute).endsWith(".jsonl")
+    );
+  }
+
+  private removeTransientSessionFile(sessionFile?: string) {
+    if (!this.isSafeTransientSessionFile(sessionFile)) return;
+    try {
+      fs.rmSync(path.resolve(String(sessionFile)), { force: true });
+    } catch {}
+  }
+
+  private async runActiveVoiceAcknowledgement(commandName: string) {
+    const prompt = buildActiveVoiceAcknowledgementPrompt(commandName);
+    if (!prompt) return undefined;
+    const driver = new ChatFrontendDriver({
+      clientFactory: this.frontendClientFactory,
+    });
+    let sessionFile = "";
+    try {
+      const result = await driver.runTurn({
+        text: prompt,
+        managedSessionLeaf: MANAGED_CHAT_SESSION_LEAF,
+      });
+      sessionFile = result.sessionFile || driver.currentSessionFile();
+      return result.finalText;
+    } finally {
+      sessionFile ||= driver.currentSessionFile();
+      driver.dispose();
+      this.removeTransientSessionFile(sessionFile);
+    }
+  }
+
   private getRecoverableSessionFile() {
     if (!this.affectChatBinding) return "";
     const wanted = resolveStoredSessionFile(
@@ -739,14 +781,21 @@ export class ChatController {
     const abortingActiveTurn = commandName === "abort" && hadActiveTurn;
     if (abortingActiveTurn) {
       this.turnAbortRequested = true;
-      const data = this.driver.interruptActiveTurnLikeTui();
+      let data: any = this.driver.interruptActiveTurnLikeTui();
       this.updateStoredSessionFile(
         data?.sessionFile,
         this.driver.currentSessionFile(),
       );
       this.saveState();
+      const activeVoiceReply =
+        await this.runActiveVoiceAcknowledgement(commandName);
+      if (activeVoiceReply) {
+        data = { ...data, text: activeVoiceReply };
+      }
+      const text = safeString(data?.text || "").trim();
+      if (!text) throw new Error("chat_command_text_missing");
       await this.deliverAssistantReply({
-        text: "Aborted current operation.",
+        text,
         replyToMessageId: replyToMessageId || undefined,
         incomingMessageId,
         sessionFile: data?.sessionFile,
@@ -755,7 +804,7 @@ export class ChatController {
       });
       return {
         handled: true,
-        text: "Aborted current operation.",
+        text,
         sessionId: data?.sessionId,
         sessionFile: this.currentSessionFile() || data?.sessionFile,
       };
@@ -796,31 +845,16 @@ export class ChatController {
       );
       this.saveState();
 
-      const activeVoicePrompt = hadActiveTurn
-        ? ""
-        : buildActiveVoiceAcknowledgementPrompt(commandName);
-      if (activeVoicePrompt) {
-        const activeVoiceReply = await this.driver.runTurn({
-          text: activeVoicePrompt,
-          sessionFile: safeString(
-            data?.sessionFile || this.driver.currentSessionFile(),
-          ).trim(),
-        });
-        data = {
-          ...data,
-          text: activeVoiceReply.finalText,
-          sessionId: activeVoiceReply.sessionId || data?.sessionId,
-          sessionFile: activeVoiceReply.sessionFile || data?.sessionFile,
-        };
-        this.updateStoredSessionFile(
-          data?.sessionFile,
-          this.driver.currentSessionFile(),
-        );
-        this.saveState();
+      const activeVoiceReply = hadActiveTurn
+        ? undefined
+        : await this.runActiveVoiceAcknowledgement(commandName);
+      if (activeVoiceReply) {
+        data = { ...data, text: activeVoiceReply };
       }
 
       const text = safeString(data?.text || "").trim();
       if (!text) throw new Error("chat_command_text_missing");
+      data = { ...data, text };
       await this.deliverAssistantReply({
         text,
         replyToMessageId: replyToMessageId || undefined,

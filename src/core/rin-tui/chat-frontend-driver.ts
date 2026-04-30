@@ -462,14 +462,29 @@ export class ChatFrontendDriver {
     this.latestAssistantText = "";
     const requestTag = this.createTurnRequestTag();
     const liveTurn = this.startLiveTurn(requestTag);
-    try {
+    const promptSubmission = (async () => {
       await this.session.prompt(text, {
         images,
         source: "chat-bridge",
         requestTag,
       });
       this.throwIfQueuedOffline(requestTag);
-    } catch (error: any) {
+    })();
+    promptSubmission.catch(() => {});
+
+    const firstResult = await Promise.race([
+      promptSubmission.then(
+        () => ({ type: "prompt_submitted" as const }),
+        (error: unknown) => ({ type: "prompt_error" as const, error }),
+      ),
+      liveTurn.promise.then(
+        (completion) => ({ type: "turn_complete" as const, completion }),
+        (error: unknown) => ({ type: "turn_error" as const, error }),
+      ),
+    ]);
+
+    if (firstResult.type === "prompt_error") {
+      const error = firstResult.error;
       if (isAgentAlreadyProcessingError(error)) {
         if (this.liveTurn === liveTurn) this.liveTurn = null;
         this.clearAssistantInterimState();
@@ -499,8 +514,14 @@ export class ChatFrontendDriver {
       );
       throw error;
     }
+    if (firstResult.type === "turn_error") {
+      throw firstResult.error;
+    }
 
-    const completion = await liveTurn.promise;
+    const completion =
+      firstResult.type === "turn_complete"
+        ? firstResult.completion
+        : await liveTurn.promise;
     const finalText = safeString((completion as any)?.finalText).trim();
     if (!finalText) {
       throw new Error("rpc_turn_final_output_missing");

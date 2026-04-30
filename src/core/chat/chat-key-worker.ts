@@ -18,6 +18,7 @@ type ChatKeyWorker<T> = {
   queue: T[];
   pumping: boolean;
   activeTasks: Set<Promise<void>>;
+  barrierTasks: Set<Promise<void>>;
 };
 
 export function createChatKeyWorkerPool<T>(deps: {
@@ -27,9 +28,84 @@ export function createChatKeyWorkerPool<T>(deps: {
     chatKey: string,
     error: unknown,
   ) => void | Promise<void>;
+  canBypassAdmissionWait?: (payload: T, chatKey: string) => boolean;
   logger?: { warn?: (...args: any[]) => void };
 }): ChatKeyWorkerPool<T> {
   const workers = new Map<string, ChatKeyWorker<T>>();
+
+  const startPreparedTask = (
+    worker: ChatKeyWorker<T>,
+    chatKey: string,
+    prepared: PreparedChatKeyWorkerJob,
+  ) => {
+    const task = prepared
+      .run()
+      .catch((error: any) => {
+        deps.logger?.warn?.(
+          `chat inbox worker task failed chatKey=${chatKey} err=${safeString(error?.message || error)}`,
+        );
+      })
+      .finally(() => {
+        worker.activeTasks.delete(task);
+        if (!worker.queue.length && !worker.activeTasks.size) {
+          workers.delete(chatKey);
+        }
+      });
+    worker.activeTasks.add(task);
+    return task;
+  };
+
+  const runPreparedPayload = async (
+    worker: ChatKeyWorker<T>,
+    chatKey: string,
+    prepared: PreparedChatKeyWorkerJob,
+  ) => {
+    const task = startPreparedTask(worker, chatKey, prepared);
+    if (prepared.waitForAdmission) {
+      await prepared.waitForAdmission();
+      return;
+    }
+    await task;
+  };
+
+  const runPayload = async (
+    worker: ChatKeyWorker<T>,
+    chatKey: string,
+    payload: T,
+  ) => {
+    let prepared: PreparedChatKeyWorkerJob;
+    try {
+      prepared = await deps.prepare(payload, chatKey);
+    } catch (error) {
+      await deps.onPrepareError?.(payload, chatKey, error);
+      return;
+    }
+
+    await runPreparedPayload(worker, chatKey, prepared);
+  };
+
+  const runBypassPayload = async (
+    worker: ChatKeyWorker<T>,
+    chatKey: string,
+    payload: T,
+  ) => {
+    let complete!: () => void;
+    const bypassTask = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    worker.activeTasks.add(bypassTask);
+    worker.barrierTasks.add(bypassTask);
+    try {
+      await runPayload(worker, chatKey, payload);
+    } finally {
+      worker.activeTasks.delete(bypassTask);
+      worker.barrierTasks.delete(bypassTask);
+      complete();
+      if (!worker.queue.length && !worker.activeTasks.size) {
+        workers.delete(chatKey);
+      }
+    }
+  };
 
   const pump = (chatKey: string) => {
     const worker = workers.get(chatKey);
@@ -40,34 +116,10 @@ export function createChatKeyWorkerPool<T>(deps: {
         while (worker.queue.length) {
           const payload = worker.queue.shift();
           if (!payload) continue;
-          let prepared: PreparedChatKeyWorkerJob;
-          try {
-            prepared = await deps.prepare(payload, chatKey);
-          } catch (error) {
-            await deps.onPrepareError?.(payload, chatKey, error);
-            continue;
+          await runPayload(worker, chatKey, payload);
+          while (worker.barrierTasks.size > 0) {
+            await Promise.race([...worker.barrierTasks]);
           }
-
-          const task = prepared
-            .run()
-            .catch((error: any) => {
-              deps.logger?.warn?.(
-                `chat inbox worker task failed chatKey=${chatKey} err=${safeString(error?.message || error)}`,
-              );
-            })
-            .finally(() => {
-              worker.activeTasks.delete(task);
-              if (!worker.queue.length && !worker.activeTasks.size) {
-                workers.delete(chatKey);
-              }
-            });
-          worker.activeTasks.add(task);
-
-          if (prepared.waitForAdmission) {
-            await prepared.waitForAdmission();
-            continue;
-          }
-          await task;
         }
       } finally {
         worker.pumping = false;
@@ -88,8 +140,25 @@ export function createChatKeyWorkerPool<T>(deps: {
       const key = safeString(chatKey).trim() || "unknown";
       let worker = workers.get(key);
       if (!worker) {
-        worker = { queue: [], pumping: false, activeTasks: new Set() };
+        worker = {
+          queue: [],
+          pumping: false,
+          activeTasks: new Set(),
+          barrierTasks: new Set(),
+        };
         workers.set(key, worker);
+      }
+      if (
+        worker.pumping &&
+        worker.activeTasks.size > 0 &&
+        deps.canBypassAdmissionWait?.(payload, key)
+      ) {
+        void runBypassPayload(worker, key, payload).catch((error: any) => {
+          deps.logger?.warn?.(
+            `chat inbox worker bypass failed chatKey=${key} err=${safeString(error?.message || error)}`,
+          );
+        });
+        return;
       }
       worker.queue.push(payload);
       pump(key);

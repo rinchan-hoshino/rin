@@ -654,6 +654,26 @@ export async function startChatBridge(
       task,
     );
 
+  const isAbortCommandJob = (job: ClaimedChatInboxJob) => {
+    const { envelope } = job;
+    const queuedSession = restoreChatInboxSession(
+      envelope,
+      findRuntimeBot(
+        safeString(envelope?.session?.platform || "").trim(),
+        safeString(envelope?.session?.selfId || "").trim(),
+      ),
+    );
+    const queuedElements = Array.isArray(envelope.elements)
+      ? envelope.elements
+      : [];
+    const command = parseInboundCommand(
+      queuedSession,
+      elementsToText(queuedElements),
+      commandRows,
+    );
+    return command?.name === "abort";
+  };
+
   const prepareClaimedInboxJob = async (
     job: ClaimedChatInboxJob,
   ): Promise<PreparedChatKeyWorkerJob> => {
@@ -723,6 +743,7 @@ export async function startChatBridge(
 
   const chatKeyWorkers = createChatKeyWorkerPool<ClaimedChatInboxJob>({
     prepare: (job) => prepareClaimedInboxJob(job),
+    canBypassAdmissionWait: (job) => isAbortCommandJob(job),
     onPrepareError: (job, chatKey, error) => {
       logger.warn(
         `chat inbox prepare failed chatKey=${chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,
