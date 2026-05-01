@@ -9,6 +9,7 @@ tar -xf - -C "$workdir/repo"
 cd "$workdir/repo"
 ln -s /opt/rin/node_modules node_modules
 export PATH="/opt/rin/node_modules/.bin:$PATH"
+export RIN_INSTALL_TUI_CONTAINER_INNER=1
 
 if [[ -n "${FORMAT_TARGETS:-}" ]]; then
   mapfile -t format_targets < <(printf '%s\n' "$FORMAT_TARGETS" | sed '/^$/d')
