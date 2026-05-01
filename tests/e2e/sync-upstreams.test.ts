@@ -76,19 +76,19 @@ function writeSyncWorkspace(workspace: string, packageVersion: string) {
   );
 }
 
+function initMirrorRepo(mirrorRepo: string) {
+  fs.mkdirSync(mirrorRepo, { recursive: true });
+  run("git", ["init", "-b", "main"], mirrorRepo);
+  run("git", ["config", "user.name", "Rin Tests"], mirrorRepo);
+  run("git", ["config", "user.email", "rin-tests@example.invalid"], mirrorRepo);
+}
+
 test("sync-upstreams uses the current pi package version tag instead of a stale _upstream ref", () => {
   const tempDir = makeTempDir("rin-sync-upstreams-");
   const mirrorRepo = path.join(tempDir, "mirror.git");
   const workspace = path.join(tempDir, "workspace");
   try {
-    fs.mkdirSync(mirrorRepo, { recursive: true });
-    run("git", ["init", "-b", "main"], mirrorRepo);
-    run("git", ["config", "user.name", "Rin Tests"], mirrorRepo);
-    run(
-      "git",
-      ["config", "user.email", "rin-tests@example.invalid"],
-      mirrorRepo,
-    );
+    initMirrorRepo(mirrorRepo);
 
     writeMirrorSnapshot(mirrorRepo, "0.69.0");
     commitTag(mirrorRepo, "0.69.0");
@@ -125,6 +125,59 @@ test("sync-upstreams uses the current pi package version tag instead of a stale 
       ),
     );
     assert.equal(nextMeta.ref, "v0.70.0");
+    assert.equal(nextMeta.packageVersion, "0.70.0");
+    assert.equal(
+      fs.readFileSync(
+        path.join(workspace, "upstream", "pi", "README.md"),
+        "utf8",
+      ),
+      "README 0.70.0\n",
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("sync-upstreams preserves an existing pi ref when package version is already current", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-current-");
+  const mirrorRepo = path.join(tempDir, "mirror.git");
+  const workspace = path.join(tempDir, "workspace");
+  try {
+    initMirrorRepo(mirrorRepo);
+    writeMirrorSnapshot(mirrorRepo, "0.70.0");
+    commitTag(mirrorRepo, "0.70.0");
+    run("git", ["tag", "custom-0.70.0"], mirrorRepo);
+
+    fs.mkdirSync(path.join(workspace, "upstream", "pi"), { recursive: true });
+    writeSyncWorkspace(workspace, "0.70.0");
+    fs.writeFileSync(
+      path.join(workspace, "upstream", "pi", "_upstream.json"),
+      JSON.stringify(
+        {
+          repo: pathToFileURL(mirrorRepo).href,
+          sourceSubdir: "packages/coding-agent",
+          ref: "custom-0.70.0",
+          packageVersion: "0.70.0",
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+
+    run(
+      process.execPath,
+      [path.join(workspace, "scripts", "sync-upstreams.mjs"), "pi"],
+      workspace,
+    );
+
+    const nextMeta = JSON.parse(
+      fs.readFileSync(
+        path.join(workspace, "upstream", "pi", "_upstream.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(nextMeta.ref, "custom-0.70.0");
     assert.equal(nextMeta.packageVersion, "0.70.0");
     assert.equal(
       fs.readFileSync(
