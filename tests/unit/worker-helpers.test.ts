@@ -136,6 +136,72 @@ test("worker helpers expose resource diagnostics from the active session", () =>
   });
 });
 
+test("worker helpers expose extension runner diagnostics", () => {
+  const diagnostics = workerHelpers.getResourceDiagnostics({
+    resourceLoader: {
+      getSkills: () => ({ skills: [], diagnostics: [] }),
+      getPrompts: () => ({ prompts: [], diagnostics: [] }),
+      getThemes: () => ({ themes: [], diagnostics: [] }),
+      getExtensions: () => ({ extensions: [], errors: [] }),
+    },
+    extensionRunner: {
+      getRegisteredCommands: () => [
+        {
+          name: "reload",
+          invocationName: "extension:reload",
+          sourceInfo: { path: "/tmp/ext.ts" },
+        },
+      ],
+      getCommandDiagnostics: () => [
+        { type: "warning", message: "duplicate command", path: "/tmp/ext.ts" },
+      ],
+      getShortcutDiagnostics: () => [
+        { type: "warning", message: "duplicate shortcut", path: "/tmp/ext.ts" },
+      ],
+    },
+  });
+
+  assert.deepEqual(diagnostics.extensions.commandDiagnostics, [
+    { type: "warning", message: "duplicate command", path: "/tmp/ext.ts" },
+  ]);
+  assert.deepEqual(diagnostics.extensions.shortcutDiagnostics, [
+    { type: "warning", message: "duplicate shortcut", path: "/tmp/ext.ts" },
+  ]);
+  assert.deepEqual(diagnostics.extensions.diagnostics, [
+    { type: "warning", message: "duplicate command", path: "/tmp/ext.ts" },
+    {
+      type: "warning",
+      message:
+        "Extension command '/reload' conflicts with built-in interactive command. Available as '/extension:reload'.",
+      path: "/tmp/ext.ts",
+    },
+    { type: "warning", message: "duplicate shortcut", path: "/tmp/ext.ts" },
+  ]);
+});
+
+test("worker helpers expose extension command argument completions", async () => {
+  const completions = await workerHelpers.getCommandArgumentCompletions(
+    {
+      extensionRunner: {
+        getCommand: (name) =>
+          name === "deploy"
+            ? {
+                getArgumentCompletions: async (prefix) => [
+                  { value: `${prefix}-prod`, label: "production" },
+                ],
+              }
+            : undefined,
+      },
+    },
+    "deploy",
+    "app",
+  );
+
+  assert.deepEqual(completions, {
+    items: [{ id: "app-prod", value: "app-prod", label: "production" }],
+  });
+});
+
 test("worker helpers expose normalized slash commands and oauth state", () => {
   const session = createSessionFixture();
   const commands = workerHelpers.getSlashCommands(session);

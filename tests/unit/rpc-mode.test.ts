@@ -611,6 +611,122 @@ test(
 );
 
 test(
+  "rpc mode returns extension command argument completions from daemon session",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        extensionRunner: {
+          getCommand(name) {
+            return name === "deploy"
+              ? {
+                  getArgumentCompletions: async (prefix) => [
+                    { value: `${prefix}-prod`, label: "production" },
+                  ],
+                }
+              : undefined;
+          },
+        },
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: {
+          getEntries: () => [],
+          getTree: () => [],
+          getLeafId: () => null,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
+        messages: [],
+        prompt: async () => {},
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "get_command_argument_completions", commandName: "deploy", argumentPrefix: "app" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const response = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .find((line) => line.type === "response" && line.id === "1");
+      assert.equal(response.success, true);
+      assert.deepEqual(response.data, {
+        items: [{ id: "app-prod", value: "app-prod", label: "production" }],
+      });
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode emits canonical finalText on turn completion",
   { concurrency: false },
   async () => {

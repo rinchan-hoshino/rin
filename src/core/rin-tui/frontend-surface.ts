@@ -60,6 +60,7 @@ export interface FrontendCommandItem {
   name: string;
   description?: string;
   category?: string;
+  source?: string;
 }
 
 export interface FrontendSessionItem {

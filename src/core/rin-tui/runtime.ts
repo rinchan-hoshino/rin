@@ -13,7 +13,6 @@ import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RpcFrontendClient } from "./frontend-surface.js";
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
-import { loadRpcLocalExtensions } from "./extensions.js";
 import {
   setRpcAutoCompaction,
   cycleRpcModel,
@@ -76,7 +75,13 @@ type RpcResourceSnapshot = {
   skills: { skills: any[]; diagnostics: any[] };
   prompts: { prompts: any[]; diagnostics: any[] };
   themes: { themes: any[]; diagnostics: any[] };
-  extensions: { extensions: any[]; errors: any[] };
+  extensions: {
+    extensions: any[];
+    errors: any[];
+    diagnostics: any[];
+    commandDiagnostics: any[];
+    shortcutDiagnostics: any[];
+  };
 };
 
 function emptyRpcResourceSnapshot(): RpcResourceSnapshot {
@@ -84,7 +89,13 @@ function emptyRpcResourceSnapshot(): RpcResourceSnapshot {
     skills: { skills: [], diagnostics: [] },
     prompts: { prompts: [], diagnostics: [] },
     themes: { themes: [], diagnostics: [] },
-    extensions: { extensions: [], errors: [] },
+    extensions: {
+      extensions: [],
+      errors: [],
+      diagnostics: [],
+      commandDiagnostics: [],
+      shortcutDiagnostics: [],
+    },
   };
 }
 
@@ -115,6 +126,15 @@ function normalizeRpcResourceSnapshot(value: any): RpcResourceSnapshot {
         : [],
       errors: Array.isArray(value?.extensions?.errors)
         ? value.extensions.errors
+        : [],
+      diagnostics: Array.isArray(value?.extensions?.diagnostics)
+        ? value.extensions.diagnostics
+        : [],
+      commandDiagnostics: Array.isArray(value?.extensions?.commandDiagnostics)
+        ? value.extensions.commandDiagnostics
+        : [],
+      shortcutDiagnostics: Array.isArray(value?.extensions?.shortcutDiagnostics)
+        ? value.extensions.shortcutDiagnostics
         : [],
     },
   };
@@ -263,7 +283,7 @@ export class RpcInteractiveSession {
 
   public scopedModels: any[] = [];
   public promptTemplates: any[] = [];
-  public extensionRunner: any = undefined;
+  public extensionRunner: any;
   public activeToolsCache: string[] = [];
   public allToolsCache: any[] = [];
   public model: any = null;
@@ -299,7 +319,7 @@ export class RpcInteractiveSession {
   private unsubscribeClient?: () => void;
   private extensionBindings: RpcExtensionBindings = {};
   public extensionOptions: TuiResourceOptions;
-  private additionalExtensionPaths: string[];
+  private commandCatalog: any[] = [];
   private reconnecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectPromise: Promise<void> | null = null;
@@ -351,9 +371,6 @@ export class RpcInteractiveSession {
       systemPrompt: normalizedExtensionOptions.systemPrompt,
       appendSystemPrompt: normalizedExtensionOptions.appendSystemPrompt,
     };
-    this.additionalExtensionPaths = [
-      ...this.extensionOptions.additionalExtensionPaths,
-    ];
     const proto = Object.getPrototypeOf(this);
     for (const name of Object.getOwnPropertyNames(proto)) {
       if (name === "constructor") continue;
@@ -361,6 +378,7 @@ export class RpcInteractiveSession {
       if (!descriptor || typeof descriptor.value !== "function") continue;
       (this as any)[name] = descriptor.value.bind(this);
     }
+    this.extensionRunner = this.createPassiveExtensionRunner();
     this.agent = new RemoteAgent(client);
     this.settingsManager = undefined;
     this.modelRegistry = createModelRegistry(client);
@@ -462,7 +480,10 @@ export class RpcInteractiveSession {
     },
   ) {
     const expandPromptTemplates = options?.expandPromptTemplates ?? true;
-    if (expandPromptTemplates && this.isFrontendExtensionCommand(message)) {
+    if (
+      expandPromptTemplates &&
+      (await this.isDaemonExtensionCommand(message).catch(() => false))
+    ) {
       await this.runCommand(message);
       return;
     }
@@ -906,26 +927,67 @@ export class RpcInteractiveSession {
     return getLastAssistantText(this.messages);
   }
 
-  getToolDefinition(toolName: string) {
-    return this.extensionRunner?.getToolDefinition?.(toolName);
+  getToolDefinition(_toolName: string) {
+    return undefined;
+  }
+
+  private createPassiveExtensionRunner() {
+    return {
+      getRegisteredCommands: () =>
+        this.commandCatalog
+          .filter((command) => String(command?.source || "") === "extension")
+          .map((command) => this.toPassiveExtensionCommand(command)),
+      getCommand: (name: string) => {
+        const commandName = String(name || "");
+        const command = this.commandCatalog.find(
+          (entry) =>
+            String(entry?.source || "") === "extension" &&
+            String(entry?.name || "") === commandName,
+        );
+        return command ? this.toPassiveExtensionCommand(command) : undefined;
+      },
+      getCommandDiagnostics: () =>
+        this.resourceSnapshot.extensions.commandDiagnostics,
+      getShortcutDiagnostics: () =>
+        this.resourceSnapshot.extensions.shortcutDiagnostics,
+      getShortcuts: () => new Map(),
+      getMessageRenderer: () => undefined,
+      emitUserBash: async () => null,
+      getToolDefinition: () => undefined,
+      invalidate: () => {},
+    };
+  }
+
+  private toPassiveExtensionCommand(command: any) {
+    const name = String(command?.name || "");
+    return {
+      name,
+      invocationName: name,
+      description:
+        typeof command?.description === "string"
+          ? command.description
+          : undefined,
+      sourceInfo: command?.sourceInfo,
+      getArgumentCompletions: async (argumentPrefix: string) => {
+        const data = await this.call("get_command_argument_completions", {
+          commandName: name,
+          argumentPrefix,
+        });
+        return Array.isArray(data?.items) ? data.items : null;
+      },
+    };
   }
 
   async reload() {
     await this.modelRegistry.sync();
+    await this.call("reload").catch(() => {});
+    await this.refreshDaemonCommandCatalog().catch(() => {});
     await this.refreshResourceDiagnostics().catch(() => {});
     await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
-    if (this.extensionRunner) {
-      await this.shutdownLocalExtensions({ reason: "reload" });
-      await this.loadLocalExtensions(true);
-    }
   }
 
   async shutdownLocalExtensions(_event: Record<string, unknown>) {
-    const runner = this.extensionRunner;
-    if (!runner) return false;
-    runner.invalidate?.();
-    if (this.extensionRunner === runner) this.extensionRunner = undefined;
-    return true;
+    return false;
   }
 
   async bindExtensions(bindings: RpcExtensionBindings = {}) {
@@ -933,11 +995,10 @@ export class RpcInteractiveSession {
       ...this.extensionBindings,
       ...bindings,
     };
-    await this.loadLocalExtensions(false);
-  }
-
-  private async loadLocalExtensions(forceReload: boolean) {
-    await loadRpcLocalExtensions(this as any, forceReload, getRuntimeProfile());
+    await Promise.all([
+      this.refreshDaemonCommandCatalog().catch(() => {}),
+      this.refreshResourceDiagnostics().catch(() => {}),
+    ]);
   }
 
   private handleRpcEvent(payload: any) {
@@ -1374,18 +1435,28 @@ export class RpcInteractiveSession {
     } as any);
   }
 
-  private getFrontendExtensionCommand(text: string) {
-    if (!text.startsWith("/")) return undefined;
-    const extensionRunner = this.extensionRunner;
-    if (!extensionRunner?.getCommand) return undefined;
-    const spaceIndex = text.indexOf(" ");
-    const commandName =
-      spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
-    return extensionRunner.getCommand(commandName);
+  private parseSlashCommandName(text: string) {
+    const trimmed = String(text || "").trim();
+    if (!trimmed.startsWith("/")) return "";
+    const spaceIndex = trimmed.indexOf(" ");
+    return spaceIndex === -1 ? trimmed.slice(1) : trimmed.slice(1, spaceIndex);
   }
 
-  private isFrontendExtensionCommand(text: string) {
-    return Boolean(this.getFrontendExtensionCommand(text));
+  private async refreshDaemonCommandCatalog() {
+    const data = await this.call("get_commands");
+    this.commandCatalog = Array.isArray(data?.commands) ? data.commands : [];
+    return this.commandCatalog;
+  }
+
+  private async isDaemonExtensionCommand(text: string) {
+    const commandName = this.parseSlashCommandName(text);
+    if (!commandName) return false;
+    const commands = await this.refreshDaemonCommandCatalog();
+    return commands.some(
+      (command: any) =>
+        String(command?.name || "") === commandName &&
+        String(command?.source || "") === "extension",
+    );
   }
 
   private async ensureRemoteSession() {
@@ -1410,6 +1481,7 @@ export class RpcInteractiveSession {
         "switch_session",
         "get_commands",
         "get_resource_diagnostics",
+        "get_command_argument_completions",
       ].includes(type)
     ) {
       return {

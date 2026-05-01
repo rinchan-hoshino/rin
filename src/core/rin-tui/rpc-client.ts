@@ -40,6 +40,17 @@ type FrontendClientTransportOptions = {
   connectSocket: RpcSocketConnector;
 };
 
+function parseCommandArgumentCompletionRequest(input: string) {
+  const value = String(input || "");
+  if (!value.startsWith("/")) return null;
+  const match = value.match(/^\/([^\s]+)\s+(.*)$/s);
+  if (!match) return null;
+  return {
+    commandName: match[1],
+    argumentPrefix: match[2] ?? "",
+  };
+}
+
 export class RinDaemonFrontendClient implements RpcFrontendClient {
   socketPath: string;
   socket: RpcSocketLike | null = null;
@@ -130,8 +141,16 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   }
 
   async getAutocompleteItems(
-    _input: string,
+    input: string,
   ): Promise<FrontendAutocompleteItem[]> {
+    const argumentRequest = parseCommandArgumentCompletionRequest(input);
+    if (argumentRequest && this.isConnected()) {
+      const completions = await this.getCommandArgumentCompletions(
+        argumentRequest.commandName,
+        argumentRequest.argumentPrefix,
+      ).catch(() => []);
+      if (completions.length > 0) return completions;
+    }
     const commands = await this.getCommands().catch(() => []);
     return commands.map((command) => ({
       id: command.id,
@@ -163,6 +182,30 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
           : undefined,
       category:
         typeof command.category === "string" ? command.category : undefined,
+      source: typeof command.source === "string" ? command.source : undefined,
+    }));
+  }
+
+  async getCommandArgumentCompletions(
+    commandName: string,
+    argumentPrefix: string,
+  ): Promise<FrontendAutocompleteItem[]> {
+    const data = this.getData(
+      await this.send({
+        type: "get_command_argument_completions",
+        commandName,
+        argumentPrefix,
+      }),
+    );
+    const items = Array.isArray(data?.items) ? data.items : [];
+    return items.map((item: any, index: number) => ({
+      id: String(item?.id || item?.value || item?.label || index),
+      label: String(item?.label || item?.value || item?.id || ""),
+      insertText:
+        item?.value === undefined ? undefined : String(item.value || ""),
+      detail:
+        typeof item?.description === "string" ? item.description : undefined,
+      kind: "other" as const,
     }));
   }
 

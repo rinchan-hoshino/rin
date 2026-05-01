@@ -1,4 +1,5 @@
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
+import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
 import { listBoundSessions } from "../session/factory.js";
 
 export function writeJsonLine(value: unknown) {
@@ -112,6 +113,73 @@ function sanitizeExtensionError(error: any) {
   };
 }
 
+function getBuiltInCommandConflictDiagnostics(extensionRunner: any) {
+  const builtinNames = new Set(
+    BUILTIN_SLASH_COMMANDS.map((command) => command.name),
+  );
+  const commands = extensionRunner?.getRegisteredCommands?.() || [];
+  return commands
+    .filter((command: any) => builtinNames.has(String(command?.name || "")))
+    .map((command: any) => ({
+      type: "warning",
+      message:
+        command?.invocationName === command?.name
+          ? `Extension command '/${command.name}' conflicts with built-in interactive command. Skipping in autocomplete.`
+          : `Extension command '/${command.name}' conflicts with built-in interactive command. Available as '/${command.invocationName}'.`,
+      path: command?.sourceInfo?.path,
+    }));
+}
+
+function getExtensionCommandDiagnostics(extensionRunner: any) {
+  return (extensionRunner?.getCommandDiagnostics?.() || []).map(
+    sanitizeResourceDiagnostic,
+  );
+}
+
+function getExtensionShortcutDiagnostics(extensionRunner: any) {
+  return (extensionRunner?.getShortcutDiagnostics?.() || []).map(
+    sanitizeResourceDiagnostic,
+  );
+}
+
+function getExtensionDiagnostics(extensionRunner: any) {
+  return [
+    ...getExtensionCommandDiagnostics(extensionRunner),
+    ...getBuiltInCommandConflictDiagnostics(extensionRunner).map(
+      sanitizeResourceDiagnostic,
+    ),
+    ...getExtensionShortcutDiagnostics(extensionRunner),
+  ];
+}
+
+function normalizeCompletionItem(item: any, index: number) {
+  if (typeof item === "string") {
+    return { id: item, value: item, label: item };
+  }
+  const result: any = {
+    id: String(item?.id || item?.value || item?.label || index),
+    value: String(item?.value || item?.label || item?.id || ""),
+    label: String(item?.label || item?.value || item?.id || ""),
+  };
+  if (typeof item?.description === "string") {
+    result.description = item.description;
+  }
+  return result;
+}
+
+export async function getCommandArgumentCompletions(
+  session: any,
+  commandName: string,
+  argumentPrefix: string,
+) {
+  const command = session?.extensionRunner?.getCommand?.(commandName);
+  const complete = command?.getArgumentCompletions;
+  if (typeof complete !== "function") return { items: [] };
+  const result = await complete(String(argumentPrefix || ""));
+  const items = Array.isArray(result) ? result : [];
+  return { items: items.map(normalizeCompletionItem) };
+}
+
 export function getResourceDiagnostics(session: any) {
   const resourceLoader = session?.resourceLoader;
   const skills = resourceLoader?.getSkills?.() || {};
@@ -134,6 +202,13 @@ export function getResourceDiagnostics(session: any) {
     extensions: {
       extensions: (extensions.extensions || []).map(sanitizeExtension),
       errors: (extensions.errors || []).map(sanitizeExtensionError),
+      diagnostics: getExtensionDiagnostics(session?.extensionRunner),
+      commandDiagnostics: getExtensionCommandDiagnostics(
+        session?.extensionRunner,
+      ),
+      shortcutDiagnostics: getExtensionShortcutDiagnostics(
+        session?.extensionRunner,
+      ),
     },
   };
 }

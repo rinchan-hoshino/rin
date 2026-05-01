@@ -9,6 +9,7 @@ import { resolveTurnCompletion } from "../session/turn-result.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
 import { safeString } from "../text-utils.js";
 import {
+  getCommandArgumentCompletions,
   getOAuthState,
   getResourceDiagnostics,
   getSessionState,
@@ -734,6 +735,14 @@ export async function runCustomRpcMode(
         return done(id, type, getOAuthState(session));
       case "get_resource_diagnostics":
         return done(id, type, getResourceDiagnostics(session));
+      case "get_command_argument_completions":
+        return run(id, type, () =>
+          getCommandArgumentCompletions(
+            session,
+            safeString(command.commandName).trim(),
+            safeString(command.argumentPrefix),
+          ),
+        );
       case "set_thinking_level":
         return run(id, type, () => session.setThinkingLevel(command.level));
       case "cycle_thinking_level":

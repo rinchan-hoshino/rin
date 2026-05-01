@@ -1,7 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -19,85 +17,36 @@ const { createModelRegistry } = await import(
     path.join(rootDir, "dist", "core", "rin-tui", "rpc-model-registry.js"),
   ).href
 );
-const { getRpcLocalExtensionOptions, loadRpcLocalExtensions } = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "extensions.js"))
-    .href
-);
-
-function wait(ms = 0) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-test("rpc local extensions load settings-configured pi extensions", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-"));
-  const agentDir = path.join(dir, "agent");
-  const extensionPath = path.join(dir, "hello-extension.ts");
-  await fs.mkdir(agentDir, { recursive: true });
-  await fs.writeFile(
-    extensionPath,
-    "export default function(pi: any) { pi.registerCommand('hello', { description: 'hello command', handler: async () => {} }); }\n",
-  );
-  await fs.writeFile(
-    path.join(agentDir, "settings.json"),
-    JSON.stringify({ extensions: [extensionPath] }),
-  );
-
-  const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
-  const target = {
-    settingsManager: SettingsManager.create(dir, agentDir),
-    sessionManager: {
-      getCwd: () => dir,
-      getSessionDir: () => path.join(agentDir, "sessions"),
-    },
-    modelRegistry: {},
-    extensionBindings: {},
-    getFrontendStatusEvent: () => ({ phase: "idle" }),
-    getContextUsage: () => null,
-  };
-
-  await loadRpcLocalExtensions(target, false, { cwd: dir, agentDir });
-
-  assert.equal(
-    target.extensionRunner.getCommand("hello")?.description,
-    "hello command",
-  );
-});
-
-test("rpc local extension commands do not execute in the frontend", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-command-"));
-  const agentDir = path.join(dir, "agent");
-  const extensionPath = path.join(dir, "command-extension.ts");
-  await fs.mkdir(agentDir, { recursive: true });
-  await fs.writeFile(
-    extensionPath,
-    `export default function(pi: any) {
-      pi.registerCommand("local", {
-        description: "local command",
-        handler: async (args: string) => pi.appendEntry("local-command", { args }),
-      });
-    }\n`,
-  );
-  await fs.writeFile(
-    path.join(agentDir, "settings.json"),
-    JSON.stringify({ extensions: [extensionPath] }),
-  );
-
+test("rpc prompt routes extension slash commands using daemon catalog authority", async () => {
   const sent = [];
-  const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
   const session = new RpcInteractiveSession({
     send(payload) {
       sent.push(payload);
       switch (payload.type) {
+        case "get_commands":
+          return Promise.resolve({
+            success: true,
+            data: {
+              commands: [
+                {
+                  name: "local",
+                  description: "local command",
+                  source: "extension",
+                },
+              ],
+            },
+          });
+        case "new_session":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
+          });
         case "run_command":
-          return Promise.resolve({ success: true, data: { handled: false } });
-        case "append_custom_entry":
-        case "get_active_tools":
-        case "get_all_tools":
-          return Promise.resolve({ success: true, data: { tools: [] } });
+          return Promise.resolve({ success: true, data: { handled: true } });
         case "get_state":
           return Promise.resolve({
             success: true,
-            data: { sessionFile: "/tmp/s.jsonl" },
+            data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
           });
         case "get_session_snapshot":
           return Promise.resolve({ success: true, data: { entries: [] } });
@@ -112,46 +61,51 @@ test("rpc local extension commands do not execute in the frontend", async () => 
       return true;
     },
   });
-  session.settingsManager = SettingsManager.create(dir, agentDir);
 
-  await loadRpcLocalExtensions(session, false, { cwd: dir, agentDir });
   await session.prompt("/local hello world");
 
+  assert.equal(
+    sent.some((payload) => payload.type === "prompt"),
+    false,
+  );
   assert.deepEqual(
     sent.find((payload) => payload.type === "run_command"),
-    { type: "run_command", commandLine: "/local hello world" },
-  );
-  assert.equal(
-    sent.find((payload) => payload.type === "append_custom_entry"),
-    undefined,
+    {
+      type: "run_command",
+      commandLine: "/local hello world",
+    },
   );
 });
 
-test("rpc local extensions do not emit worker-owned session lifecycle events", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-actions-"));
-  const agentDir = path.join(dir, "agent");
-  const extensionPath = path.join(dir, "actions-extension.ts");
-  await fs.mkdir(agentDir, { recursive: true });
-  await fs.writeFile(
-    extensionPath,
-    `export default function(pi: any) {
-      pi.on("session_start", async () => pi.appendEntry("lifecycle", { type: "start" }));
-    }\n`,
-  );
-  await fs.writeFile(
-    path.join(agentDir, "settings.json"),
-    JSON.stringify({ extensions: [extensionPath] }),
-  );
-
+test("rpc prompt does not treat non-extension slash catalog entries as extension commands", async () => {
   const sent = [];
-  const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
   const session = new RpcInteractiveSession({
     send(payload) {
       sent.push(payload);
       switch (payload.type) {
-        case "get_active_tools":
-        case "get_all_tools":
-          return Promise.resolve({ success: true, data: { tools: [] } });
+        case "get_commands":
+          return Promise.resolve({
+            success: true,
+            data: {
+              commands: [
+                { name: "reload", description: "reload", source: "builtin" },
+              ],
+            },
+          });
+        case "new_session":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
+          });
+        case "prompt":
+          return Promise.resolve({ success: true, data: {} });
+        case "get_state":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
+          });
+        case "get_session_snapshot":
+          return Promise.resolve({ success: true, data: { entries: [] } });
         default:
           return Promise.resolve({ success: true, data: {} });
       }
@@ -163,73 +117,113 @@ test("rpc local extensions do not emit worker-owned session lifecycle events", a
       return true;
     },
   });
-  session.settingsManager = SettingsManager.create(dir, agentDir);
 
-  await loadRpcLocalExtensions(session, false, { cwd: dir, agentDir });
-  await wait(20);
+  session.rpcConnected = true;
+
+  await session.prompt("/reload");
 
   assert.equal(
-    sent.some((payload) => payload.type === "append_custom_entry"),
+    sent.some((payload) => payload.type === "run_command"),
     false,
   );
-});
-
-test("rpc local extensions preserve all CLI resource path options", () => {
-  const extensionFlagValues = new Map([["flag", "value"]]);
-  assert.deepEqual(
-    getRpcLocalExtensionOptions({
-      extensionOptions: {
-        additionalExtensionPaths: ["/ext"],
-        additionalSkillPaths: ["/skill"],
-        additionalPromptTemplatePaths: ["/prompt"],
-        additionalThemePaths: ["/theme"],
-        noExtensions: true,
-        extensionFlagValues,
-      },
-    }),
-    {
-      additionalExtensionPaths: ["/ext"],
-      additionalSkillPaths: ["/skill"],
-      additionalPromptTemplatePaths: ["/prompt"],
-      additionalThemePaths: ["/theme"],
-      noExtensions: true,
-      extensionFlagValues,
-    },
+  assert.equal(
+    sent.some((payload) => payload.type === "prompt"),
+    true,
   );
 });
 
-test("rpc local extensions invalidate on reload without emitting lifecycle events", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-ext-shutdown-"));
-  const agentDir = path.join(dir, "agent");
-  const extensionPath = path.join(dir, "shutdown-extension.ts");
-  await fs.mkdir(agentDir, { recursive: true });
-  await fs.writeFile(
-    extensionPath,
-    `export default function(pi: any) {
-      pi.on("session_start", async (event: any) => pi.appendEntry("lifecycle", { type: "start", reason: event.reason }));
-      pi.on("session_shutdown", async (event: any) => pi.appendEntry("lifecycle", { type: "shutdown", reason: event.reason }));
-    }\n`,
-  );
-  await fs.writeFile(
-    path.join(agentDir, "settings.json"),
-    JSON.stringify({ extensions: [extensionPath] }),
-  );
-
+test("rpc extension runner is a passive daemon catalog facade", async () => {
   const sent = [];
-  const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      if (payload.type === "get_commands") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            commands: [
+              {
+                name: "deploy",
+                description: "Deploy app",
+                source: "extension",
+              },
+              { name: "reload", description: "Reload", source: "builtin" },
+            ],
+          },
+        });
+      }
+      if (payload.type === "get_resource_diagnostics") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            extensions: {
+              commandDiagnostics: [
+                { type: "warning", message: "duplicate command" },
+              ],
+              shortcutDiagnostics: [
+                { type: "warning", message: "duplicate shortcut" },
+              ],
+            },
+          },
+        });
+      }
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+  });
+
+  await session.bindExtensions({});
+
+  const commands = session.extensionRunner.getRegisteredCommands();
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].name, "deploy");
+  assert.equal(commands[0].description, "Deploy app");
+  assert.equal(typeof commands[0].getArgumentCompletions, "function");
+  assert.deepEqual(session.extensionRunner.getCommandDiagnostics(), [
+    { type: "warning", message: "duplicate command" },
+  ]);
+  assert.deepEqual(session.extensionRunner.getShortcutDiagnostics(), [
+    { type: "warning", message: "duplicate shortcut" },
+  ]);
+  assert.deepEqual(Array.from(session.extensionRunner.getShortcuts()), []);
+  assert.equal(await session.extensionRunner.emitUserBash({}), null);
+  assert.equal(session.extensionRunner.getCommand("reload"), undefined);
+  assert.equal(
+    sent.some((payload) => payload.type === "get_commands"),
+    true,
+  );
+});
+
+test("rpc reload delegates to the daemon session and refreshes catalog", async () => {
+  const sent = [];
+  let reloaded = false;
   const session = new RpcInteractiveSession({
     send(payload) {
       sent.push(payload);
       switch (payload.type) {
-        case "get_active_tools":
-        case "get_all_tools":
-          return Promise.resolve({ success: true, data: { tools: [] } });
+        case "reload":
+          reloaded = true;
+          return Promise.resolve({ success: true, data: {} });
+        case "get_commands":
+          return Promise.resolve({
+            success: true,
+            data: {
+              commands: reloaded
+                ? [{ name: "after", source: "extension" }]
+                : [{ name: "before", source: "extension" }],
+            },
+          });
         case "get_resource_diagnostics":
           return Promise.resolve({ success: true, data: {} });
         case "get_state":
           return Promise.resolve({
             success: true,
-            data: { sessionFile: "/tmp/s.jsonl" },
+            data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
           });
         case "get_session_snapshot":
           return Promise.resolve({ success: true, data: { entries: [] } });
@@ -240,31 +234,22 @@ test("rpc local extensions invalidate on reload without emitting lifecycle event
     subscribe() {
       return () => {};
     },
-    abort() {
-      return Promise.resolve();
-    },
     isConnected() {
       return true;
     },
-    connect() {
-      return Promise.resolve();
-    },
-    disconnect() {
-      return Promise.resolve();
-    },
   });
-  session.settingsManager = SettingsManager.create(dir, agentDir);
 
-  await loadRpcLocalExtensions(session, false, { cwd: dir, agentDir });
-  await wait(20);
-  const runner = session.extensionRunner;
   await session.reload();
-  await wait(20);
 
-  assert.notEqual(session.extensionRunner, runner);
   assert.equal(
-    sent.some((payload) => payload.type === "append_custom_entry"),
-    false,
+    sent.some((payload) => payload.type === "reload"),
+    true,
+  );
+  assert.deepEqual(
+    session.extensionRunner
+      .getRegisteredCommands()
+      .map((command) => command.name),
+    ["after"],
   );
 });
 
@@ -657,10 +642,15 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
 
 test("rpc runtime routes extension slash commands from prompt to daemon", async () => {
   const sent = [];
-  const localCalls = [];
   const session = new RpcInteractiveSession({
     send(payload) {
       sent.push(payload);
+      if (payload.type === "get_commands") {
+        return Promise.resolve({
+          success: true,
+          data: { commands: [{ name: "chat", source: "extension" }] },
+        });
+      }
       if (payload.type === "run_command") {
         return Promise.resolve({ success: true, data: { handled: true } });
       }
@@ -693,22 +683,8 @@ test("rpc runtime routes extension slash commands from prompt to daemon", async 
   });
   session.sessionFile = "/tmp/rpc-session.jsonl";
 
-  session.extensionRunner = {
-    getCommand(name) {
-      return name === "chat"
-        ? {
-            invocationName: "chat",
-            handler: async (args) => {
-              localCalls.push(["handler", args]);
-            },
-          }
-        : undefined;
-    },
-  };
-
   await session.prompt("/chat telegram", { streamingBehavior: "steer" });
 
-  assert.deepEqual(localCalls, []);
   assert.equal(
     sent.some((payload) => payload.type === "prompt"),
     false,
