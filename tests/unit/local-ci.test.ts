@@ -35,3 +35,24 @@ test("local CI runner enables inner install-to-TUI smoke before tests", () => {
   assert.notEqual(testIndex, -1);
   assert.ok(envIndex < testIndex);
 });
+
+test("local CI runner preserves staged format target filtering", () => {
+  const runner = readRepoFile(".ci/local-ci/run-checks.sh");
+  const targetBranchIndex = runner.indexOf('if [[ -n "${FORMAT_TARGETS:-}" ]]');
+  const targetFilterIndex = runner.indexOf(
+    "mapfile -t format_targets < <(printf '%s\\n' \"$FORMAT_TARGETS\" | sed '/^$/d')",
+  );
+  const targetedCheckIndex = runner.indexOf(
+    'npm run format:check -- "${format_targets[@]}"',
+  );
+  const lintIndex = runner.indexOf("npm run lint");
+
+  assert.notEqual(targetBranchIndex, -1);
+  assert.notEqual(targetFilterIndex, -1);
+  assert.notEqual(targetedCheckIndex, -1);
+  assert.notEqual(lintIndex, -1);
+  assert.ok(targetBranchIndex < targetFilterIndex);
+  assert.ok(targetFilterIndex < targetedCheckIndex);
+  assert.ok(targetedCheckIndex < lintIndex);
+  assert.match(runner, /No staged files need format checking\./);
+});
