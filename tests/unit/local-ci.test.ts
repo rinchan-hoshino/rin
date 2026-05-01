@@ -44,6 +44,16 @@ test("local CI container includes install-to-TUI smoke prerequisites", () => {
   );
 });
 
+test("local CI image includes prepare hook input before npm install", () => {
+  const dockerfile = readRepoFile(".ci/local-ci/Dockerfile");
+
+  assertOrdered(dockerfile, [
+    "COPY package.json package-lock.json ./",
+    "COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs",
+    "RUN npm ci",
+  ]);
+});
+
 test("local CI runner reuses image dependencies before repo checks", () => {
   const runner = readRepoFile(".ci/local-ci/run-checks.sh");
 
