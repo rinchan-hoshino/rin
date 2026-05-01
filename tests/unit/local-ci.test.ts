@@ -12,6 +12,24 @@ function readRepoFile(relativePath: string) {
   return fs.readFileSync(path.join(rootDir, relativePath), "utf8");
 }
 
+function indexOfRequired(content: string, needle: string) {
+  const index = content.indexOf(needle);
+  assert.notEqual(index, -1, `missing expected content: ${needle}`);
+  return index;
+}
+
+function assertOrdered(content: string, needles: string[]) {
+  let previous = -1;
+  for (const needle of needles) {
+    const index = indexOfRequired(content, needle);
+    assert.ok(
+      index > previous,
+      `${needle} should appear after previous marker`,
+    );
+    previous = index;
+  }
+}
+
 test("local CI container includes install-to-TUI smoke prerequisites", () => {
   const dockerfile = readRepoFile(".ci/local-ci/Dockerfile");
 
@@ -26,33 +44,36 @@ test("local CI container includes install-to-TUI smoke prerequisites", () => {
   );
 });
 
+test("local CI runner reuses image dependencies before repo checks", () => {
+  const runner = readRepoFile(".ci/local-ci/run-checks.sh");
+
+  assertOrdered(runner, [
+    'cd "$workdir/repo"',
+    "ln -s /opt/rin/node_modules node_modules",
+    'export PATH="/opt/rin/node_modules/.bin:$PATH"',
+    "npm run format:check",
+    "npm run lint",
+    "npm test",
+  ]);
+});
+
 test("local CI runner enables inner install-to-TUI smoke before tests", () => {
   const runner = readRepoFile(".ci/local-ci/run-checks.sh");
-  const envIndex = runner.indexOf("export RIN_INSTALL_TUI_CONTAINER_INNER=1");
-  const testIndex = runner.indexOf("npm test");
 
-  assert.notEqual(envIndex, -1);
-  assert.notEqual(testIndex, -1);
-  assert.ok(envIndex < testIndex);
+  assertOrdered(runner, [
+    "export RIN_INSTALL_TUI_CONTAINER_INNER=1",
+    "npm test",
+  ]);
 });
 
 test("local CI runner preserves staged format target filtering", () => {
   const runner = readRepoFile(".ci/local-ci/run-checks.sh");
-  const targetBranchIndex = runner.indexOf('if [[ -n "${FORMAT_TARGETS:-}" ]]');
-  const targetFilterIndex = runner.indexOf(
-    "mapfile -t format_targets < <(printf '%s\\n' \"$FORMAT_TARGETS\" | sed '/^$/d')",
-  );
-  const targetedCheckIndex = runner.indexOf(
-    'npm run format:check -- "${format_targets[@]}"',
-  );
-  const lintIndex = runner.indexOf("npm run lint");
 
-  assert.notEqual(targetBranchIndex, -1);
-  assert.notEqual(targetFilterIndex, -1);
-  assert.notEqual(targetedCheckIndex, -1);
-  assert.notEqual(lintIndex, -1);
-  assert.ok(targetBranchIndex < targetFilterIndex);
-  assert.ok(targetFilterIndex < targetedCheckIndex);
-  assert.ok(targetedCheckIndex < lintIndex);
+  assertOrdered(runner, [
+    'if [[ -n "${FORMAT_TARGETS:-}" ]]',
+    "mapfile -t format_targets < <(printf '%s\\n' \"$FORMAT_TARGETS\" | sed '/^$/d')",
+    'npm run format:check -- "${format_targets[@]}"',
+    "npm run lint",
+  ]);
   assert.match(runner, /No staged files need format checking\./);
 });
