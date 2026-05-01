@@ -206,6 +206,110 @@ test("chat main treats /resume as a normal prompt after the command is removed",
   }
 });
 
+test("chat main forwards command sender identity to controller prompt context", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const seen = [];
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { trusted: { trust: "TRUSTED" } },
+        aliases: [{ platform: "telegram", userId: "trusted-1", personId: "trusted" }],
+        trusted: ["trusted"],
+      });
+
+      controllerMod.ChatController.prototype.runCommand = async function (
+        commandLine,
+        replyToMessageId,
+        incomingMessageId,
+        sessionFile,
+        promptMeta,
+      ) {
+        seen.push({ commandLine, replyToMessageId, incomingMessageId, sessionFile, promptMeta });
+        return { handled: true, text: "ok" };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["sent"];
+        },
+      });
+
+      app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "trusted-1",
+        username: "TrustedNick",
+        messageId: "m-new",
+        timestamp: 1767225600000,
+        isDirect: true,
+        content: "/new",
+        stripped: { content: "/new" },
+        elements: [h.createChatRuntimeH().text("/new")],
+      });
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && seen.length < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      const call = seen[0];
+      if (
+        seen.length !== 1 ||
+        call.commandLine !== "/new" ||
+        call.replyToMessageId !== "m-new" ||
+        call.incomingMessageId !== "m-new" ||
+        call.sessionFile !== "" ||
+        call.promptMeta?.source !== "chat-bridge" ||
+        call.promptMeta?.triggerKind !== "chat-command" ||
+        call.promptMeta?.chatKey !== "telegram/1:2" ||
+        call.promptMeta?.chatType !== "private" ||
+        call.promptMeta?.userId !== "trusted-1" ||
+        call.promptMeta?.nickname !== "TrustedNick" ||
+        call.promptMeta?.identity !== "TRUSTED"
+      ) {
+        throw new Error(JSON.stringify({ seen }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main ignores removed /auth commands instead of mutating chat identity", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

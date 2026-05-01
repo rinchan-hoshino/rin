@@ -256,6 +256,73 @@ test("chat controller skips recovery bootstrap and asks the active voice to ackn
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller passes command sender context to active voice acknowledgements", async () => {
+  const controller = await createController();
+  const deliveries = [];
+  const seenContexts = [];
+  controller.runActiveVoiceAcknowledgement = async (
+    commandName,
+    promptMeta,
+  ) => {
+    seenContexts.push({ commandName, promptMeta });
+    return "Active voice contextual reply.";
+  };
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  let currentSessionFile;
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => currentSessionFile,
+      getSessionId: () => "session-new",
+      getSessionName: () => controller.chatKey,
+    },
+    newSession: async (options = {}) => {
+      currentSessionFile = path.join(
+        controller.agentDir,
+        "sessions",
+        "managed",
+        options.managedSessionLeaf,
+        "created-contextual-command.jsonl",
+      );
+      return true;
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: currentSessionFile,
+      sessionId: "session-new",
+    }),
+  };
+
+  await controller.runCommand("/new", "m-new", "m-new", "", {
+    source: "chat-bridge",
+    chatKey: "telegram/1:2",
+    chatType: "group",
+    userId: "trusted-1",
+    nickname: "AccountNick",
+    groupNickname: "GroupCard",
+    identity: "TRUSTED",
+  });
+
+  assert.deepEqual(seenContexts, [
+    {
+      commandName: "new",
+      promptMeta: {
+        source: "chat-bridge",
+        chatKey: "telegram/1:2",
+        chatType: "group",
+        userId: "trusted-1",
+        nickname: "AccountNick",
+        groupNickname: "GroupCard",
+        identity: "TRUSTED",
+      },
+    },
+  ]);
+  assert.deepEqual(deliveries, ["Active voice contextual reply."]);
+});
+
 test("chat controller starts /new immediately through the TUI new-session path", async () => {
   const controller = await createController();
   const calls = [];

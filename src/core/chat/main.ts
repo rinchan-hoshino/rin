@@ -394,6 +394,23 @@ export async function startChatBridge(
       chatKey,
       replyToMessageId,
     );
+    const promptMeta = {
+      source: "chat-bridge",
+      triggerKind: "chat-command",
+      sentAt: Number.isFinite(Number(session?.timestamp))
+        ? Number(session.timestamp)
+        : Date.now(),
+      chatKey,
+      chatName:
+        pickChatName(session) ||
+        (getChatType(session) === "private" ? pickSenderNickname(session) : ""),
+      chatType: getChatType(session),
+      userId: pickUserId(session),
+      nickname: pickSenderNickname(session),
+      groupNickname: pickSenderGroupNickname(session) || undefined,
+      identity: trust,
+      replyToMessageId: replyToMessageId || undefined,
+    };
 
     if (
       getChatType(session) === "group" &&
@@ -436,6 +453,7 @@ export async function startChatBridge(
         messageId,
         messageId,
         replySession?.sessionFile || "",
+        promptMeta,
       );
       return { retry: false };
     } catch (error) {

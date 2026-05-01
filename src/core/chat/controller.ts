@@ -533,16 +533,20 @@ export class ChatController {
     } catch {}
   }
 
-  private async runActiveVoiceAcknowledgement(commandName: string) {
+  private async runActiveVoiceAcknowledgement(
+    commandName: string,
+    promptMeta?: PromptContextMeta,
+  ) {
     const prompt = buildActiveVoiceAcknowledgementPrompt(commandName);
     if (!prompt) return undefined;
+    const promptText = injectPromptContextHeader(promptMeta, prompt);
     const driver = new ChatFrontendDriver({
       clientFactory: this.frontendClientFactory,
     });
     let sessionFile = "";
     try {
       const result = await driver.runTurn({
-        text: prompt,
+        text: promptText,
         managedSessionLeaf: MANAGED_CHAT_SESSION_LEAF,
       });
       sessionFile = result.sessionFile || driver.currentSessionFile();
@@ -775,6 +779,7 @@ export class ChatController {
     replyToMessageId = "",
     incomingMessageId = "",
     sessionFile = "",
+    promptMeta?: PromptContextMeta,
   ) {
     const commandName = commandNameFromCommandLine(commandLine);
     const hadActiveTurn = this.hasActiveTurn();
@@ -787,8 +792,10 @@ export class ChatController {
         this.driver.currentSessionFile(),
       );
       this.saveState();
-      const activeVoiceReply =
-        await this.runActiveVoiceAcknowledgement(commandName);
+      const activeVoiceReply = await this.runActiveVoiceAcknowledgement(
+        commandName,
+        promptMeta,
+      );
       if (activeVoiceReply) {
         data = { ...data, text: activeVoiceReply };
       }
@@ -847,7 +854,7 @@ export class ChatController {
 
       const activeVoiceReply = hadActiveTurn
         ? undefined
-        : await this.runActiveVoiceAcknowledgement(commandName);
+        : await this.runActiveVoiceAcknowledgement(commandName, promptMeta);
       if (activeVoiceReply) {
         data = { ...data, text: activeVoiceReply };
       }
