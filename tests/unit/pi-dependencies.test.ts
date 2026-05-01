@@ -23,15 +23,20 @@ function normalizeVersionSpec(value: unknown) {
   return String(value || "").replace(/^[~^]/, "");
 }
 
+function currentPiVersion() {
+  const packageJson = readJson("package.json");
+  const expectedVersion = normalizeVersionSpec(
+    packageJson.dependencies?.["@mariozechner/pi-coding-agent"],
+  );
+  assert.match(expectedVersion, /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?$/);
+  return expectedVersion;
+}
+
 test("Pi package dependencies stay version-aligned", () => {
   const packageJson = readJson("package.json");
   const packageLock = readJson("package-lock.json");
   const rootLockPackage = packageLock.packages?.[""];
-  const expectedVersion = normalizeVersionSpec(
-    packageJson.dependencies?.["@mariozechner/pi-coding-agent"],
-  );
-
-  assert.match(expectedVersion, /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?$/);
+  const expectedVersion = currentPiVersion();
 
   for (const name of piDependencyNames) {
     assert.equal(
@@ -47,4 +52,19 @@ test("Pi package dependencies stay version-aligned", () => {
       expectedVersion,
     );
   }
+});
+
+test("Pi upstream mirror metadata follows the package version", () => {
+  const upstreamMeta = readJson("upstream/pi/_upstream.json");
+  const expectedVersion = currentPiVersion();
+
+  assert.equal(upstreamMeta.packageName, "@mariozechner/pi-coding-agent");
+  assert.equal(upstreamMeta.packageVersion, expectedVersion);
+  assert.equal(upstreamMeta.ref, `v${expectedVersion}`);
+  assert.deepEqual(upstreamMeta.paths, [
+    "README.md",
+    "CHANGELOG.md",
+    "docs",
+    "examples",
+  ]);
 });
