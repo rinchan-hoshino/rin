@@ -109,10 +109,10 @@ function readSyncedPiReadme(workspace: string) {
   );
 }
 
-function runPiSync(workspace: string) {
+function runPiSync(workspace: string, args: string[] = []) {
   run(
     process.execPath,
-    [path.join(workspace, "scripts", "sync-upstreams.mjs"), "pi"],
+    [path.join(workspace, "scripts", "sync-upstreams.mjs"), "pi", ...args],
     workspace,
   );
 }
@@ -172,6 +172,38 @@ test("sync-upstreams preserves an existing pi ref when package version is alread
     assert.equal(nextMeta.ref, "custom-0.70.0");
     assert.equal(nextMeta.packageVersion, "0.70.0");
     assert.equal(readSyncedPiReadme(workspace), "README 0.70.0\n");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("sync-upstreams honors an explicit pi ref override", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-ref-");
+  const mirrorRepo = path.join(tempDir, "mirror.git");
+  const workspace = path.join(tempDir, "workspace");
+  try {
+    initMirrorRepo(mirrorRepo);
+    writeMirrorSnapshot(mirrorRepo, "0.70.0");
+    commitTag(mirrorRepo, "0.70.0");
+    writeMirrorSnapshot(mirrorRepo, "override");
+    run("git", ["add", "."], mirrorRepo);
+    run("git", ["commit", "-m", "snapshot override"], mirrorRepo);
+    run("git", ["tag", "custom-ref"], mirrorRepo);
+
+    writeSyncWorkspace(workspace, "0.70.0");
+    writePiUpstreamMeta(workspace, {
+      repo: pathToFileURL(mirrorRepo).href,
+      sourceSubdir: "packages/coding-agent",
+      ref: "v0.70.0",
+      packageVersion: "0.70.0",
+    });
+
+    runPiSync(workspace, ["--ref", "custom-ref"]);
+
+    const nextMeta = readPiUpstreamMeta(workspace);
+    assert.equal(nextMeta.ref, "custom-ref");
+    assert.equal(nextMeta.packageVersion, "0.70.0");
+    assert.equal(readSyncedPiReadme(workspace), "README override\n");
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
