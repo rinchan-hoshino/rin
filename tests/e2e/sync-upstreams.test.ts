@@ -83,6 +83,40 @@ function initMirrorRepo(mirrorRepo: string) {
   run("git", ["config", "user.email", "rin-tests@example.invalid"], mirrorRepo);
 }
 
+function piUpstreamMetaPath(workspace: string) {
+  return path.join(workspace, "upstream", "pi", "_upstream.json");
+}
+
+function writePiUpstreamMeta(workspace: string, meta: Record<string, string>) {
+  fs.mkdirSync(path.dirname(piUpstreamMetaPath(workspace)), {
+    recursive: true,
+  });
+  fs.writeFileSync(
+    piUpstreamMetaPath(workspace),
+    JSON.stringify(meta, null, 2) + "\n",
+    "utf8",
+  );
+}
+
+function readPiUpstreamMeta(workspace: string) {
+  return JSON.parse(fs.readFileSync(piUpstreamMetaPath(workspace), "utf8"));
+}
+
+function readSyncedPiReadme(workspace: string) {
+  return fs.readFileSync(
+    path.join(workspace, "upstream", "pi", "README.md"),
+    "utf8",
+  );
+}
+
+function runPiSync(workspace: string) {
+  run(
+    process.execPath,
+    [path.join(workspace, "scripts", "sync-upstreams.mjs"), "pi"],
+    workspace,
+  );
+}
+
 test("sync-upstreams uses the current pi package version tag instead of a stale _upstream ref", () => {
   const tempDir = makeTempDir("rin-sync-upstreams-");
   const mirrorRepo = path.join(tempDir, "mirror.git");
@@ -95,44 +129,20 @@ test("sync-upstreams uses the current pi package version tag instead of a stale 
     writeMirrorSnapshot(mirrorRepo, "0.70.0");
     commitTag(mirrorRepo, "0.70.0");
 
-    fs.mkdirSync(path.join(workspace, "upstream", "pi"), { recursive: true });
     writeSyncWorkspace(workspace, "0.70.0");
-    fs.writeFileSync(
-      path.join(workspace, "upstream", "pi", "_upstream.json"),
-      JSON.stringify(
-        {
-          repo: pathToFileURL(mirrorRepo).href,
-          sourceSubdir: "packages/coding-agent",
-          ref: "v0.69.0",
-          packageVersion: "0.69.0",
-        },
-        null,
-        2,
-      ) + "\n",
-      "utf8",
-    );
+    writePiUpstreamMeta(workspace, {
+      repo: pathToFileURL(mirrorRepo).href,
+      sourceSubdir: "packages/coding-agent",
+      ref: "v0.69.0",
+      packageVersion: "0.69.0",
+    });
 
-    run(
-      process.execPath,
-      [path.join(workspace, "scripts", "sync-upstreams.mjs"), "pi"],
-      workspace,
-    );
+    runPiSync(workspace);
 
-    const nextMeta = JSON.parse(
-      fs.readFileSync(
-        path.join(workspace, "upstream", "pi", "_upstream.json"),
-        "utf8",
-      ),
-    );
+    const nextMeta = readPiUpstreamMeta(workspace);
     assert.equal(nextMeta.ref, "v0.70.0");
     assert.equal(nextMeta.packageVersion, "0.70.0");
-    assert.equal(
-      fs.readFileSync(
-        path.join(workspace, "upstream", "pi", "README.md"),
-        "utf8",
-      ),
-      "README 0.70.0\n",
-    );
+    assert.equal(readSyncedPiReadme(workspace), "README 0.70.0\n");
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -148,44 +158,20 @@ test("sync-upstreams preserves an existing pi ref when package version is alread
     commitTag(mirrorRepo, "0.70.0");
     run("git", ["tag", "custom-0.70.0"], mirrorRepo);
 
-    fs.mkdirSync(path.join(workspace, "upstream", "pi"), { recursive: true });
     writeSyncWorkspace(workspace, "0.70.0");
-    fs.writeFileSync(
-      path.join(workspace, "upstream", "pi", "_upstream.json"),
-      JSON.stringify(
-        {
-          repo: pathToFileURL(mirrorRepo).href,
-          sourceSubdir: "packages/coding-agent",
-          ref: "custom-0.70.0",
-          packageVersion: "0.70.0",
-        },
-        null,
-        2,
-      ) + "\n",
-      "utf8",
-    );
+    writePiUpstreamMeta(workspace, {
+      repo: pathToFileURL(mirrorRepo).href,
+      sourceSubdir: "packages/coding-agent",
+      ref: "custom-0.70.0",
+      packageVersion: "0.70.0",
+    });
 
-    run(
-      process.execPath,
-      [path.join(workspace, "scripts", "sync-upstreams.mjs"), "pi"],
-      workspace,
-    );
+    runPiSync(workspace);
 
-    const nextMeta = JSON.parse(
-      fs.readFileSync(
-        path.join(workspace, "upstream", "pi", "_upstream.json"),
-        "utf8",
-      ),
-    );
+    const nextMeta = readPiUpstreamMeta(workspace);
     assert.equal(nextMeta.ref, "custom-0.70.0");
     assert.equal(nextMeta.packageVersion, "0.70.0");
-    assert.equal(
-      fs.readFileSync(
-        path.join(workspace, "upstream", "pi", "README.md"),
-        "utf8",
-      ),
-      "README 0.70.0\n",
-    );
+    assert.equal(readSyncedPiReadme(workspace), "README 0.70.0\n");
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
