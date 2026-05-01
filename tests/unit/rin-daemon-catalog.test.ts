@@ -23,7 +23,7 @@ async function createTestAgentDir() {
   await fs.writeFile(
     path.join(agentDir, "auth.json"),
     JSON.stringify({
-      "google-gemini-cli": { type: "api_key", key: "test-key" },
+      openai: { type: "api_key", key: "test-key" },
     }),
   );
   await fs.writeFile(path.join(agentDir, "models.json"), JSON.stringify({}));

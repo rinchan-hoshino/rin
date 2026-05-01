@@ -34,7 +34,6 @@ Pi loads skills from:
 - CLI: `--skill <path>` (repeatable, additive even with `--no-skills`)
 
 Discovery rules:
-
 - In `~/.pi/agent/skills/` and `.pi/skills/`, direct root `.md` files are discovered as individual skills
 - In all skill locations, directories containing `SKILL.md` are discovered recursively
 - In `~/.agents/skills/` and project `.agents/skills/`, root `.md` files are ignored
@@ -47,7 +46,10 @@ To use skills from Claude Code or OpenAI Codex, add their directories to setting
 
 ```json
 {
-  "skills": ["~/.claude/skills", "~/.codex/skills"]
+  "skills": [
+    "~/.claude/skills",
+    "~/.codex/skills"
+  ]
 }
 ```
 
@@ -115,7 +117,6 @@ description: What this skill does and when to use it. Be specific.
 ## Setup
 
 Run once before first use:
-
 ```bash
 cd /path/to/skill && npm install
 ```
@@ -137,15 +138,15 @@ See [the reference guide](references/REFERENCE.md) for details.
 
 Per the [Agent Skills specification](https://agentskills.io/specification#frontmatter-required):
 
-| Field                      | Required | Description                                                                    |
-| -------------------------- | -------- | ------------------------------------------------------------------------------ |
-| `name`                     | Yes      | Max 64 chars. Lowercase a-z, 0-9, hyphens. Must match parent directory.        |
-| `description`              | Yes      | Max 1024 chars. What the skill does and when to use it.                        |
-| `license`                  | No       | License name or reference to bundled file.                                     |
-| `compatibility`            | No       | Max 500 chars. Environment requirements.                                       |
-| `metadata`                 | No       | Arbitrary key-value mapping.                                                   |
-| `allowed-tools`            | No       | Space-delimited list of pre-approved tools (experimental).                     |
-| `disable-model-invocation` | No       | When `true`, skill is hidden from system prompt. Users must use `/skill:name`. |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Max 64 chars. Lowercase a-z, 0-9, hyphens. Must match parent directory. |
+| `description` | Yes | Max 1024 chars. What the skill does and when to use it. |
+| `license` | No | License name or reference to bundled file. |
+| `compatibility` | No | Max 500 chars. Environment requirements. |
+| `metadata` | No | Arbitrary key-value mapping. |
+| `allowed-tools` | No | Space-delimited list of pre-approved tools (experimental). |
+| `disable-model-invocation` | No | When `true`, skill is hidden from system prompt. Users must use `/skill:name`. |
 
 ### Name Rules
 
@@ -163,13 +164,11 @@ Invalid: `PDF-Processing`, `-pdf`, `pdf--processing`
 The description determines when the agent loads the skill. Be specific.
 
 Good:
-
 ```yaml
 description: Extracts text and tables from PDF files, fills PDF forms, and merges multiple PDFs. Use when working with PDF documents.
 ```
 
 Poor:
-
 ```yaml
 description: Helps with PDFs.
 ```
@@ -199,7 +198,6 @@ brave-search/
 ```
 
 **SKILL.md:**
-
 ````markdown
 ---
 name: brave-search

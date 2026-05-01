@@ -36,45 +36,38 @@ Image clipboard is not supported on Termux (the `ctrl+v` image paste feature wil
 
 Create `~/.pi/agent/AGENTS.md` to help the agent understand the Termux environment:
 
-````markdown
+```markdown
 # Agent Environment: Termux on Android
 
 ## Location
-
 - **OS**: Android (Termux terminal emulator)
 - **Home**: `/data/data/com.termux/files/home`
 - **Prefix**: `/data/data/com.termux/files/usr`
 - **Shared storage**: `/storage/emulated/0` (Downloads, Documents, etc.)
 
 ## Opening URLs
-
 ```bash
 termux-open-url "https://example.com"
 ```
-````
 
 ## Opening Files
-
 ```bash
 termux-open file.pdf          # Opens with default app
 termux-open -c image.jpg      # Choose app
 ```
 
 ## Clipboard
-
 ```bash
 termux-clipboard-set "text"   # Copy
 termux-clipboard-get          # Paste
 ```
 
 ## Notifications
-
 ```bash
 termux-notification -t "Title" -c "Content"
 ```
 
 ## Device Info
-
 ```bash
 termux-battery-status         # Battery info
 termux-wifi-connectioninfo    # WiFi info
@@ -82,13 +75,11 @@ termux-telephony-deviceinfo   # Device info
 ```
 
 ## Sharing
-
 ```bash
 termux-share -a send file.txt # Share file
 ```
 
 ## Other Useful Commands
-
 ```bash
 termux-toast "message"        # Quick toast popup
 termux-vibrate                # Vibrate device
@@ -97,12 +88,10 @@ termux-camera-photo out.jpg   # Take photo
 ```
 
 ## Notes
-
 - Termux:API app must be installed for `termux-*` commands
 - Use `pkg install termux-api` for the command-line tools
 - Storage permission needed for `/storage/emulated/0` access
-
-````
+```
 
 ## Limitations
 
@@ -121,12 +110,11 @@ Ensure both apps are installed:
 Then install the CLI tools:
 ```bash
 pkg install termux-api
-````
+```
 
 ### Permission denied for shared storage
 
 Run once to grant storage permissions:
-
 ```bash
 termux-setup-storage
 ```
@@ -134,7 +122,6 @@ termux-setup-storage
 ### Node.js installation issues
 
 If npm fails, try clearing the cache:
-
 ```bash
 npm cache clean --force
 ```

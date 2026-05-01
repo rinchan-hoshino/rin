@@ -17,15 +17,15 @@ The editor can be replaced temporarily by built-in UI such as `/settings` or by 
 
 ### Editor Features
 
-| Feature              | How                                                            |
-| -------------------- | -------------------------------------------------------------- |
-| File reference       | Type `@` to fuzzy-search project files                         |
-| Path completion      | Press Tab to complete paths                                    |
-| Multi-line input     | Shift+Enter, or Ctrl+Enter on Windows Terminal                 |
-| Images               | Paste with Ctrl+V, Alt+V on Windows, or drag into the terminal |
-| Shell command        | `!command` runs and sends output to the model                  |
-| Hidden shell command | `!!command` runs without sending output to the model           |
-| External editor      | Ctrl+G opens `$VISUAL` or `$EDITOR`                            |
+| Feature | How |
+|---------|-----|
+| File reference | Type `@` to fuzzy-search project files |
+| Path completion | Press Tab to complete paths |
+| Multi-line input | Shift+Enter, or Ctrl+Enter on Windows Terminal |
+| Images | Paste with Ctrl+V, Alt+V on Windows, or drag into the terminal |
+| Shell command | `!command` runs and sends output to the model |
+| Hidden shell command | `!!command` runs without sending output to the model |
+| External editor | Ctrl+G opens `$VISUAL` or `$EDITOR` |
 
 See [Keybindings](keybindings.md) for all shortcuts and customization.
 
@@ -33,27 +33,27 @@ See [Keybindings](keybindings.md) for all shortcuts and customization.
 
 Type `/` in the editor to open command completion. Extensions can register custom commands, skills are available as `/skill:name`, and prompt templates expand via `/templatename`.
 
-| Command             | Description                                                        |
-| ------------------- | ------------------------------------------------------------------ |
-| `/login`, `/logout` | Manage OAuth or API-key credentials                                |
-| `/model`            | Switch models                                                      |
-| `/scoped-models`    | Enable/disable models for Ctrl+P cycling                           |
-| `/settings`         | Thinking level, theme, message delivery, transport                 |
-| `/resume`           | Pick from previous sessions                                        |
-| `/new`              | Start a new session                                                |
-| `/name <name>`      | Set session display name                                           |
-| `/session`          | Show session file, ID, messages, tokens, and cost                  |
-| `/tree`             | Jump to any point in the session and continue from there           |
-| `/fork`             | Create a new session from a previous user message                  |
-| `/clone`            | Duplicate the current active branch into a new session             |
-| `/compact [prompt]` | Manually compact context, optionally with custom instructions      |
-| `/copy`             | Copy last assistant message to clipboard                           |
-| `/export [file]`    | Export session to HTML                                             |
-| `/share`            | Upload as private GitHub gist with shareable HTML link             |
-| `/reload`           | Reload keybindings, extensions, skills, prompts, and context files |
-| `/hotkeys`          | Show all keyboard shortcuts                                        |
-| `/changelog`        | Display version history                                            |
-| `/quit`             | Quit pi                                                            |
+| Command | Description |
+|---------|-------------|
+| `/login`, `/logout` | Manage OAuth or API-key credentials |
+| `/model` | Switch models |
+| `/scoped-models` | Enable/disable models for Ctrl+P cycling |
+| `/settings` | Thinking level, theme, message delivery, transport |
+| `/resume` | Pick from previous sessions |
+| `/new` | Start a new session |
+| `/name <name>` | Set session display name |
+| `/session` | Show session file, ID, messages, tokens, and cost |
+| `/tree` | Jump to any point in the session and continue from there |
+| `/fork` | Create a new session from a previous user message |
+| `/clone` | Duplicate the current active branch into a new session |
+| `/compact [prompt]` | Manually compact context, optionally with custom instructions |
+| `/copy` | Copy last assistant message to clipboard |
+| `/export [file]` | Export session to HTML |
+| `/share` | Upload as private GitHub gist with shareable HTML link |
+| `/reload` | Reload keybindings, extensions, skills, prompts, and context files |
+| `/hotkeys` | Show all keyboard shortcuts |
+| `/changelog` | Display version history |
+| `/quit` | Quit pi |
 
 ## Message Queue
 
@@ -141,13 +141,13 @@ See [Pi Packages](packages.md) for package sources and security notes.
 
 ### Modes
 
-| Flag                  | Description                                               |
-| --------------------- | --------------------------------------------------------- |
-| default               | Interactive mode                                          |
-| `-p`, `--print`       | Print response and exit                                   |
-| `--mode json`         | Output all events as JSON lines; see [JSON mode](json.md) |
-| `--mode rpc`          | RPC mode over stdin/stdout; see [RPC mode](rpc.md)        |
-| `--export <in> [out]` | Export a session to HTML                                  |
+| Flag | Description |
+|------|-------------|
+| default | Interactive mode |
+| `-p`, `--print` | Print response and exit |
+| `--mode json` | Output all events as JSON lines; see [JSON mode](json.md) |
+| `--mode rpc` | RPC mode over stdin/stdout; see [RPC mode](rpc.md) |
+| `--export <in> [out]` | Export a session to HTML |
 
 In print mode, pi also reads piped stdin and merges it into the initial prompt:
 
@@ -157,49 +157,49 @@ cat README.md | pi -p "Summarize this text"
 
 ### Model Options
 
-| Option                   | Description                                                            |
-| ------------------------ | ---------------------------------------------------------------------- |
-| `--provider <name>`      | Provider, such as `anthropic`, `openai`, or `google`                   |
-| `--model <pattern>`      | Model pattern or ID; supports `provider/id` and optional `:<thinking>` |
-| `--api-key <key>`        | API key, overriding environment variables                              |
-| `--thinking <level>`     | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`                     |
-| `--models <patterns>`    | Comma-separated patterns for Ctrl+P cycling                            |
-| `--list-models [search]` | List available models                                                  |
+| Option | Description |
+|--------|-------------|
+| `--provider <name>` | Provider, such as `anthropic`, `openai`, or `google` |
+| `--model <pattern>` | Model pattern or ID; supports `provider/id` and optional `:<thinking>` |
+| `--api-key <key>` | API key, overriding environment variables |
+| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `--models <patterns>` | Comma-separated patterns for Ctrl+P cycling |
+| `--list-models [search]` | List available models |
 
 ### Session Options
 
-| Option                 | Description                                            |
-| ---------------------- | ------------------------------------------------------ |
-| `-c`, `--continue`     | Continue the most recent session                       |
-| `-r`, `--resume`       | Browse and select a session                            |
-| `--session <path\|id>` | Use a specific session file or partial UUID            |
-| `--fork <path\|id>`    | Fork a session file or partial UUID into a new session |
-| `--session-dir <dir>`  | Custom session storage directory                       |
-| `--no-session`         | Ephemeral mode; do not save                            |
+| Option | Description |
+|--------|-------------|
+| `-c`, `--continue` | Continue the most recent session |
+| `-r`, `--resume` | Browse and select a session |
+| `--session <path\|id>` | Use a specific session file or partial UUID |
+| `--fork <path\|id>` | Fork a session file or partial UUID into a new session |
+| `--session-dir <dir>` | Custom session storage directory |
+| `--no-session` | Ephemeral mode; do not save |
 
 ### Tool Options
 
-| Option                        | Description                                                    |
-| ----------------------------- | -------------------------------------------------------------- |
-| `--tools <list>`, `-t <list>` | Allowlist specific built-in, extension, and custom tools       |
-| `--no-builtin-tools`, `-nbt`  | Disable built-in tools but keep extension/custom tools enabled |
-| `--no-tools`, `-nt`           | Disable all tools                                              |
+| Option | Description |
+|--------|-------------|
+| `--tools <list>`, `-t <list>` | Allowlist specific built-in, extension, and custom tools |
+| `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
+| `--no-tools`, `-nt` | Disable all tools |
 
 Built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`.
 
 ### Resource Options
 
-| Option                       | Description                                          |
-| ---------------------------- | ---------------------------------------------------- |
+| Option | Description |
+|--------|-------------|
 | `-e`, `--extension <source>` | Load an extension from path, npm, or git; repeatable |
-| `--no-extensions`            | Disable extension discovery                          |
-| `--skill <path>`             | Load a skill; repeatable                             |
-| `--no-skills`                | Disable skill discovery                              |
-| `--prompt-template <path>`   | Load a prompt template; repeatable                   |
-| `--no-prompt-templates`      | Disable prompt template discovery                    |
-| `--theme <path>`             | Load a theme; repeatable                             |
-| `--no-themes`                | Disable theme discovery                              |
-| `--no-context-files`, `-nc`  | Disable `AGENTS.md` and `CLAUDE.md` discovery        |
+| `--no-extensions` | Disable extension discovery |
+| `--skill <path>` | Load a skill; repeatable |
+| `--no-skills` | Disable skill discovery |
+| `--prompt-template <path>` | Load a prompt template; repeatable |
+| `--no-prompt-templates` | Disable prompt template discovery |
+| `--theme <path>` | Load a theme; repeatable |
+| `--no-themes` | Disable theme discovery |
+| `--no-context-files`, `-nc` | Disable `AGENTS.md` and `CLAUDE.md` discovery |
 
 Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings. Example:
 
@@ -209,13 +209,13 @@ pi --no-extensions -e ./my-extension.ts
 
 ### Other Options
 
-| Option                          | Description                                                         |
-| ------------------------------- | ------------------------------------------------------------------- |
-| `--system-prompt <text>`        | Replace default prompt; context files and skills are still appended |
-| `--append-system-prompt <text>` | Append to system prompt                                             |
-| `--verbose`                     | Force verbose startup                                               |
-| `-h`, `--help`                  | Show help                                                           |
-| `-v`, `--version`               | Show version                                                        |
+| Option | Description |
+|--------|-------------|
+| `--system-prompt <text>` | Replace default prompt; context files and skills are still appended |
+| `--append-system-prompt <text>` | Append to system prompt |
+| `--verbose` | Force verbose startup |
+| `-h`, `--help` | Show help |
+| `-v`, `--version` | Show version |
 
 ### File Arguments
 
@@ -257,14 +257,16 @@ pi --tools read,grep,find,ls -p "Review the code"
 
 ### Environment Variables
 
-| Variable                | Description                                                      |
-| ----------------------- | ---------------------------------------------------------------- |
-| `PI_CODING_AGENT_DIR`   | Override config directory; default is `~/.pi/agent`              |
-| `PI_PACKAGE_DIR`        | Override package directory, useful for Nix/Guix store paths      |
-| `PI_SKIP_VERSION_CHECK` | Skip version check at startup                                    |
-| `PI_TELEMETRY`          | Override install telemetry: `1`/`true`/`yes` or `0`/`false`/`no` |
-| `PI_CACHE_RETENTION`    | Set to `long` for extended prompt cache where supported          |
-| `VISUAL`, `EDITOR`      | External editor for Ctrl+G                                       |
+| Variable | Description |
+|----------|-------------|
+| `PI_CODING_AGENT_DIR` | Override config directory; default is `~/.pi/agent` |
+| `PI_CODING_AGENT_SESSION_DIR` | Override session storage directory; overridden by `--session-dir` |
+| `PI_PACKAGE_DIR` | Override package directory, useful for Nix/Guix store paths |
+| `PI_OFFLINE` | Disable startup network operations, including update checks, package update checks, and install/update telemetry |
+| `PI_SKIP_VERSION_CHECK` | Skip the Pi version update check at startup. This prevents the `pi.dev` latest-version request |
+| `PI_TELEMETRY` | Override install/update telemetry: `1`/`true`/`yes` or `0`/`false`/`no`. This does not disable update checks |
+| `PI_CACHE_RETENTION` | Set to `long` for extended prompt cache where supported |
+| `VISUAL`, `EDITOR` | External editor for Ctrl+G |
 
 ## Design Principles
 

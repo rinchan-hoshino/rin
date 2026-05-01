@@ -22,9 +22,7 @@ Disable discovery with `--no-prompt-templates`.
 ---
 description: Review staged git changes
 ---
-
 Review the staged changes (`git diff --cached`). Focus on:
-
 - Bugs and logic errors
 - Security issues
 - Error handling gaps
@@ -79,7 +77,6 @@ Example:
 ---
 description: Create a component
 ---
-
 Create a React component named $1 with features: $@
 ```
 

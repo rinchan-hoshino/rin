@@ -49,7 +49,6 @@ Never use `__dirname` directly for package assets.
 ## Debug Command
 
 `/debug` (hidden) writes to `~/.pi/agent/pi-debug.log`:
-
 - Rendered TUI lines with ANSI codes
 - Last messages sent to the LLM
 
@@ -66,7 +65,7 @@ npm test -- test/specific.test.ts # Run specific test
 ```
 packages/
   ai/           # LLM provider abstraction
-  agent/        # Agent loop and message types
+  agent/        # Agent loop and message types  
   tui/          # Terminal UI components
   coding-agent/ # CLI and interactive mode
 ```

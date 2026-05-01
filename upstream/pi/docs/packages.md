@@ -88,7 +88,6 @@ ssh://git@github.com/user/repo@v1
 - Runs `npm install` after clone or pull if `package.json` exists.
 
 **SSH examples:**
-
 ```bash
 # git@host:path shorthand (requires git: prefix)
 pi install git:git@github.com:user/repo
