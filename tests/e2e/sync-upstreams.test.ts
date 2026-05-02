@@ -53,6 +53,21 @@ function writeMirrorSnapshot(
   );
 }
 
+function writeSkillCreatorSnapshot(root: string, version: string) {
+  const sourceRoot = path.join(root, "skills", "skill-creator");
+  fs.mkdirSync(sourceRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(sourceRoot, "README.md"),
+    `skill README ${version}\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(sourceRoot, "SKILL.md"),
+    `skill body ${version}\n`,
+    "utf8",
+  );
+}
+
 function commitTag(root: string, version: string) {
   run("git", ["add", "."], root);
   run("git", ["commit", "-m", `snapshot ${version}`], root);
@@ -91,15 +106,24 @@ function piUpstreamMetaPath(workspace: string) {
   return path.join(workspace, "upstream", "pi", "_upstream.json");
 }
 
+function skillCreatorUpstreamMetaPath(workspace: string) {
+  return path.join(workspace, "upstream", "skill-creator", "_upstream.json");
+}
+
+function writeUpstreamMeta(filePath: string, meta: Record<string, string>) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(meta, null, 2) + "\n", "utf8");
+}
+
 function writePiUpstreamMeta(workspace: string, meta: Record<string, string>) {
-  fs.mkdirSync(path.dirname(piUpstreamMetaPath(workspace)), {
-    recursive: true,
-  });
-  fs.writeFileSync(
-    piUpstreamMetaPath(workspace),
-    JSON.stringify(meta, null, 2) + "\n",
-    "utf8",
-  );
+  writeUpstreamMeta(piUpstreamMetaPath(workspace), meta);
+}
+
+function writeSkillCreatorUpstreamMeta(
+  workspace: string,
+  meta: Record<string, string>,
+) {
+  writeUpstreamMeta(skillCreatorUpstreamMetaPath(workspace), meta);
 }
 
 function readPiUpstreamMeta(workspace: string) {
@@ -123,6 +147,14 @@ function runSync(workspace: string, target: string, args: string[] = []) {
 
 function runPiSync(workspace: string, args: string[] = []) {
   runSync(workspace, "pi", args);
+}
+
+function runDefaultSync(workspace: string) {
+  run(
+    process.execPath,
+    [path.join(workspace, "scripts", "sync-upstreams.mjs")],
+    workspace,
+  );
 }
 
 test("sync-upstreams uses the current pi package version tag instead of a stale _upstream ref", () => {
@@ -294,6 +326,56 @@ test("sync-upstreams mirrors the full skill-creator source root", () => {
     assert.equal(
       fs.readFileSync(path.join(destRoot, "SKILL.md"), "utf8"),
       "skill body\n",
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("sync-upstreams defaults to all configured upstream mirrors", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-all-");
+  const mirrorRepo = path.join(tempDir, "mirror.git");
+  const workspace = path.join(tempDir, "workspace");
+  try {
+    initMirrorRepo(mirrorRepo);
+    writeMirrorSnapshot(mirrorRepo, "0.70.0");
+    writeSkillCreatorSnapshot(mirrorRepo, "default");
+    commitTag(mirrorRepo, "0.70.0");
+
+    writeSyncWorkspace(workspace, "0.70.0");
+    const repo = pathToFileURL(mirrorRepo).href;
+    writePiUpstreamMeta(workspace, {
+      repo,
+      sourceSubdir: "packages/coding-agent",
+      ref: "v0.70.0",
+      packageVersion: "0.70.0",
+    });
+    writeSkillCreatorUpstreamMeta(workspace, {
+      repo,
+      sourceSubdir: "skills/skill-creator",
+      ref: "v0.70.0",
+    });
+
+    runDefaultSync(workspace);
+
+    const piMeta = readPiUpstreamMeta(workspace);
+    assert.equal(piMeta.repo, repo);
+    assert.equal(piMeta.ref, "v0.70.0");
+    assert.equal(readSyncedPiReadme(workspace), "README 0.70.0\n");
+
+    const skillRoot = path.join(workspace, "upstream", "skill-creator");
+    const skillMeta = JSON.parse(
+      fs.readFileSync(skillCreatorUpstreamMetaPath(workspace), "utf8"),
+    );
+    assert.equal(skillMeta.repo, repo);
+    assert.equal(skillMeta.ref, "v0.70.0");
+    assert.equal(
+      fs.readFileSync(path.join(skillRoot, "README.md"), "utf8"),
+      "skill README default\n",
+    );
+    assert.equal(
+      fs.readFileSync(path.join(skillRoot, "SKILL.md"), "utf8"),
+      "skill body default\n",
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
