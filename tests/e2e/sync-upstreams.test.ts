@@ -130,6 +130,12 @@ function readPiUpstreamMeta(workspace: string) {
   return JSON.parse(fs.readFileSync(piUpstreamMetaPath(workspace), "utf8"));
 }
 
+function readSkillCreatorUpstreamMeta(workspace: string) {
+  return JSON.parse(
+    fs.readFileSync(skillCreatorUpstreamMetaPath(workspace), "utf8"),
+  );
+}
+
 function readSyncedPiReadme(workspace: string) {
   return fs.readFileSync(
     path.join(workspace, "upstream", "pi", "README.md"),
@@ -332,6 +338,49 @@ test("sync-upstreams mirrors the full skill-creator source root", () => {
   }
 });
 
+test("sync-upstreams preserves an existing skill-creator ref", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-skill-current-");
+  const mirrorRepo = path.join(tempDir, "mirror.git");
+  const workspace = path.join(tempDir, "workspace");
+  try {
+    initMirrorRepo(mirrorRepo);
+    writeSkillCreatorSnapshot(mirrorRepo, "base");
+    run("git", ["add", "."], mirrorRepo);
+    run("git", ["commit", "-m", "snapshot skill base"], mirrorRepo);
+    run("git", ["tag", "base-skill"], mirrorRepo);
+    writeSkillCreatorSnapshot(mirrorRepo, "custom");
+    run("git", ["add", "."], mirrorRepo);
+    run("git", ["commit", "-m", "snapshot skill custom"], mirrorRepo);
+    run("git", ["tag", "custom-skill"], mirrorRepo);
+
+    writeSyncWorkspace(workspace, "0.70.0");
+    const repo = pathToFileURL(mirrorRepo).href;
+    writeSkillCreatorUpstreamMeta(workspace, {
+      repo,
+      sourceSubdir: "skills/skill-creator",
+      ref: "custom-skill",
+    });
+
+    runSync(workspace, "skill-creator");
+
+    const skillRoot = path.join(workspace, "upstream", "skill-creator");
+    const nextMeta = readSkillCreatorUpstreamMeta(workspace);
+    assert.equal(nextMeta.repo, repo);
+    assert.equal(nextMeta.sourceSubdir, "skills/skill-creator");
+    assert.equal(nextMeta.ref, "custom-skill");
+    assert.equal(
+      fs.readFileSync(path.join(skillRoot, "README.md"), "utf8"),
+      "skill README custom\n",
+    );
+    assert.equal(
+      fs.readFileSync(path.join(skillRoot, "SKILL.md"), "utf8"),
+      "skill body custom\n",
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("sync-upstreams defaults to all configured upstream mirrors", () => {
   const tempDir = makeTempDir("rin-sync-upstreams-all-");
   const mirrorRepo = path.join(tempDir, "mirror.git");
@@ -364,9 +413,7 @@ test("sync-upstreams defaults to all configured upstream mirrors", () => {
     assert.equal(readSyncedPiReadme(workspace), "README 0.70.0\n");
 
     const skillRoot = path.join(workspace, "upstream", "skill-creator");
-    const skillMeta = JSON.parse(
-      fs.readFileSync(skillCreatorUpstreamMetaPath(workspace), "utf8"),
-    );
+    const skillMeta = readSkillCreatorUpstreamMeta(workspace);
     assert.equal(skillMeta.repo, repo);
     assert.equal(skillMeta.ref, "v0.70.0");
     assert.equal(
