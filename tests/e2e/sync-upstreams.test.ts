@@ -53,8 +53,12 @@ function writeMirrorSnapshot(
   );
 }
 
-function writeSkillCreatorSnapshot(root: string, version: string) {
-  const sourceRoot = path.join(root, "skills", "skill-creator");
+function writeSkillCreatorSnapshot(
+  root: string,
+  version: string,
+  sourceSubdir = "skills/skill-creator",
+) {
+  const sourceRoot = path.join(root, sourceSubdir);
   fs.mkdirSync(sourceRoot, { recursive: true });
   fs.writeFileSync(
     path.join(sourceRoot, "README.md"),
@@ -332,6 +336,44 @@ test("sync-upstreams mirrors the full skill-creator source root", () => {
     assert.equal(
       fs.readFileSync(path.join(destRoot, "SKILL.md"), "utf8"),
       "skill body\n",
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("sync-upstreams honors explicit skill-creator source subdir overrides", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-skill-source-");
+  const mirrorRepo = path.join(tempDir, "mirror.git");
+  const workspace = path.join(tempDir, "workspace");
+  try {
+    initMirrorRepo(mirrorRepo);
+    writeSkillCreatorSnapshot(mirrorRepo, "alt", "alt/skill-creator");
+    commitTag(mirrorRepo, "0.70.0");
+
+    writeSyncWorkspace(workspace, "0.70.0");
+    const repo = pathToFileURL(mirrorRepo).href;
+    runSync(workspace, "skill-creator", [
+      "--repo",
+      repo,
+      "--ref",
+      "v0.70.0",
+      "--sourceSubdir",
+      "alt/skill-creator",
+    ]);
+
+    const skillRoot = path.join(workspace, "upstream", "skill-creator");
+    const nextMeta = readSkillCreatorUpstreamMeta(workspace);
+    assert.equal(nextMeta.repo, repo);
+    assert.equal(nextMeta.sourceSubdir, "alt/skill-creator");
+    assert.equal(nextMeta.ref, "v0.70.0");
+    assert.equal(
+      fs.readFileSync(path.join(skillRoot, "README.md"), "utf8"),
+      "skill README alt\n",
+    );
+    assert.equal(
+      fs.readFileSync(path.join(skillRoot, "SKILL.md"), "utf8"),
+      "skill body alt\n",
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
