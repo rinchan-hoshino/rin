@@ -305,19 +305,21 @@ test("sync-upstreams rejects value options without explicit values", () => {
   const workspace = path.join(tempDir, "workspace");
   try {
     writeSyncWorkspace(workspace, "0.70.0");
-    assert.throws(
-      () =>
-        run(
-          process.execPath,
-          [
-            path.join(workspace, "scripts", "sync-upstreams.mjs"),
-            "pi",
-            "--ref",
-          ],
-          workspace,
-        ),
-      /Missing value for --ref/,
-    );
+    for (const option of ["ref", "repo", "sourceSubdir"]) {
+      assert.throws(
+        () =>
+          run(
+            process.execPath,
+            [
+              path.join(workspace, "scripts", "sync-upstreams.mjs"),
+              "pi",
+              `--${option}`,
+            ],
+            workspace,
+          ),
+        new RegExp(`Missing value for --${option}`),
+      );
+    }
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
