@@ -80,8 +80,8 @@ test("local CI runner preserves staged format target filtering", () => {
   const runner = readRepoFile(".ci/local-ci/run-checks.sh");
 
   assertOrdered(runner, [
-    'if [[ -n "${FORMAT_TARGETS:-}" ]]',
-    "mapfile -t format_targets < <(printf '%s\\n' \"$FORMAT_TARGETS\" | sed '/^$/d')",
+    'if [[ "${FORMAT_TARGETS_SET:-}" == "1" ]]',
+    "mapfile -t format_targets < <(printf '%s\\n' \"${FORMAT_TARGETS:-}\" | sed '/^$/d')",
     'npm run format:check -- "${format_targets[@]}"',
     "npm run lint",
   ]);

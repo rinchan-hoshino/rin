@@ -21,4 +21,4 @@ format_targets="$({
 tree_id="$(git write-tree)"
 
 echo "rin local ci: running format, lint, test in container..."
-git archive --format=tar "$tree_id" | docker run --rm --network none -e FORMAT_TARGETS="$format_targets" -i "$image_tag"
+git archive --format=tar "$tree_id" | docker run --rm --network none -e FORMAT_TARGETS_SET=1 -e FORMAT_TARGETS="$format_targets" -i "$image_tag"
