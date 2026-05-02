@@ -153,11 +153,23 @@ function readSyncedPiReadme(workspace: string) {
   );
 }
 
-function runSync(workspace: string, target: string, args: string[] = []) {
+function syncTempEntries(tempRoot: string) {
+  return fs
+    .readdirSync(tempRoot)
+    .filter((entry) => entry.startsWith("rin-sync-"));
+}
+
+function runSync(
+  workspace: string,
+  target: string,
+  args: string[] = [],
+  env: Record<string, string> = {},
+) {
   run(
     process.execPath,
     [path.join(workspace, "scripts", "sync-upstreams.mjs"), target, ...args],
     workspace,
+    env,
   );
 }
 
@@ -165,11 +177,12 @@ function runPiSync(workspace: string, args: string[] = []) {
   runSync(workspace, "pi", args);
 }
 
-function runDefaultSync(workspace: string) {
+function runDefaultSync(workspace: string, env: Record<string, string> = {}) {
   run(
     process.execPath,
     [path.join(workspace, "scripts", "sync-upstreams.mjs")],
     workspace,
+    env,
   );
 }
 
@@ -477,6 +490,40 @@ test("sync-upstreams defaults to all configured upstream mirrors", () => {
   }
 });
 
+test("sync-upstreams cleans temporary clone directories after successful sync", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-success-cleanup-");
+  const mirrorRepo = path.join(tempDir, "mirror.git");
+  const workspace = path.join(tempDir, "workspace");
+  const tempRoot = path.join(tempDir, "tmp");
+  try {
+    fs.mkdirSync(tempRoot, { recursive: true });
+    initMirrorRepo(mirrorRepo);
+    writeMirrorSnapshot(mirrorRepo, "0.70.0");
+    writeSkillCreatorSnapshot(mirrorRepo, "cleanup");
+    commitTag(mirrorRepo, "0.70.0");
+
+    writeSyncWorkspace(workspace, "0.70.0");
+    const repo = pathToFileURL(mirrorRepo).href;
+    writePiUpstreamMeta(workspace, {
+      repo,
+      sourceSubdir: "packages/coding-agent",
+      ref: "v0.70.0",
+      packageVersion: "0.70.0",
+    });
+    writeSkillCreatorUpstreamMeta(workspace, {
+      repo,
+      sourceSubdir: "skills/skill-creator",
+      ref: "v0.70.0",
+    });
+
+    runDefaultSync(workspace, { RIN_TMP_DIR: tempRoot });
+
+    assert.deepEqual(syncTempEntries(tempRoot), []);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("sync-upstreams cleans temporary clone directories after clone failures", () => {
   const tempDir = makeTempDir("rin-sync-upstreams-cleanup-");
   const workspace = path.join(tempDir, "workspace");
@@ -499,12 +546,7 @@ test("sync-upstreams cleans temporary clone directories after clone failures", (
         { RIN_TMP_DIR: tempRoot },
       ),
     );
-    assert.deepEqual(
-      fs
-        .readdirSync(tempRoot)
-        .filter((entry) => entry.startsWith("rin-sync-pi-")),
-      [],
-    );
+    assert.deepEqual(syncTempEntries(tempRoot), []);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
