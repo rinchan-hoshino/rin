@@ -53,6 +53,15 @@ test("session helpers share deterministic thinking-level availability", () => {
   assert.deepEqual(sessionHelpers.computeAvailableThinkingLevels(noReasoning), [
     "off",
   ]);
+  assert.deepEqual(
+    sessionHelpers.computeAvailableThinkingLevels({
+      provider: "deepseek",
+      id: "deepseek-reasoner",
+      reasoning: true,
+      thinkingLevelMap: { off: null, xhigh: "max" },
+    }),
+    ["minimal", "low", "medium", "high", "xhigh"],
+  );
 });
 
 test("getLastAssistantText scans backward without requiring a copied array", () => {

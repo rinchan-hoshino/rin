@@ -61,6 +61,16 @@ test("provider-auth computes available thinking levels deterministically", () =>
     ["off"],
   );
 
+  assert.deepEqual(
+    provider.computeAvailableThinkingLevels({
+      provider: "deepseek",
+      id: "deepseek-reasoner",
+      reasoning: true,
+      thinkingLevelMap: { off: null, xhigh: "max" },
+    }),
+    ["minimal", "low", "medium", "high", "xhigh"],
+  );
+
   const first = provider.computeAvailableThinkingLevels({
     provider: "openai",
     id: "codex-max",
