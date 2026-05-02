@@ -15,10 +15,16 @@ function makeTempDir(prefix: string) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-function run(command: string, args: string[], cwd: string) {
+function run(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: Record<string, string> = {},
+) {
   return execFileSync(command, args, {
     cwd,
     encoding: "utf8",
+    env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 }
@@ -465,6 +471,39 @@ test("sync-upstreams defaults to all configured upstream mirrors", () => {
     assert.equal(
       fs.readFileSync(path.join(skillRoot, "SKILL.md"), "utf8"),
       "skill body default\n",
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("sync-upstreams cleans temporary clone directories after clone failures", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-cleanup-");
+  const workspace = path.join(tempDir, "workspace");
+  const tempRoot = path.join(tempDir, "tmp");
+  try {
+    fs.mkdirSync(tempRoot, { recursive: true });
+    writeSyncWorkspace(workspace, "0.70.0");
+    assert.throws(() =>
+      run(
+        process.execPath,
+        [
+          path.join(workspace, "scripts", "sync-upstreams.mjs"),
+          "pi",
+          "--repo",
+          pathToFileURL(path.join(tempDir, "missing.git")).href,
+          "--ref",
+          "v0.70.0",
+        ],
+        workspace,
+        { RIN_TMP_DIR: tempRoot },
+      ),
+    );
+    assert.deepEqual(
+      fs
+        .readdirSync(tempRoot)
+        .filter((entry) => entry.startsWith("rin-sync-pi-")),
+      [],
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
