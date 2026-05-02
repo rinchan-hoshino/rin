@@ -23,8 +23,12 @@ function run(command: string, args: string[], cwd: string) {
   }).trim();
 }
 
-function writeMirrorSnapshot(root: string, version: string) {
-  const sourceRoot = path.join(root, "packages", "coding-agent");
+function writeMirrorSnapshot(
+  root: string,
+  version: string,
+  sourceSubdir = "packages/coding-agent",
+) {
+  const sourceRoot = path.join(root, sourceSubdir);
   fs.mkdirSync(path.join(sourceRoot, "docs"), { recursive: true });
   fs.mkdirSync(path.join(sourceRoot, "examples"), { recursive: true });
   fs.writeFileSync(
@@ -204,6 +208,42 @@ test("sync-upstreams honors an explicit pi ref override", () => {
     assert.equal(nextMeta.ref, "custom-ref");
     assert.equal(nextMeta.packageVersion, "0.70.0");
     assert.equal(readSyncedPiReadme(workspace), "README override\n");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("sync-upstreams honors explicit pi repo and source subdir overrides", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-repo-");
+  const mirrorRepo = path.join(tempDir, "mirror.git");
+  const workspace = path.join(tempDir, "workspace");
+  try {
+    initMirrorRepo(mirrorRepo);
+    writeMirrorSnapshot(mirrorRepo, "0.70.0", "alt/coding-agent");
+    commitTag(mirrorRepo, "0.70.0");
+
+    writeSyncWorkspace(workspace, "0.70.0");
+    const repo = pathToFileURL(mirrorRepo).href;
+    writePiUpstreamMeta(workspace, {
+      repo: pathToFileURL(path.join(tempDir, "missing.git")).href,
+      sourceSubdir: "packages/coding-agent",
+      ref: "v0.70.0",
+      packageVersion: "0.70.0",
+    });
+
+    runPiSync(workspace, [
+      "--repo",
+      repo,
+      "--sourceSubdir",
+      "alt/coding-agent",
+    ]);
+
+    const nextMeta = readPiUpstreamMeta(workspace);
+    assert.equal(nextMeta.repo, repo);
+    assert.equal(nextMeta.sourceSubdir, "alt/coding-agent");
+    assert.equal(nextMeta.ref, "v0.70.0");
+    assert.equal(nextMeta.packageVersion, "0.70.0");
+    assert.equal(readSyncedPiReadme(workspace), "README 0.70.0\n");
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
