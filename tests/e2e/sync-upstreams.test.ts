@@ -78,10 +78,14 @@ function writeSkillCreatorSnapshot(
   );
 }
 
-function commitTag(root: string, version: string) {
+function commitSnapshot(root: string, message: string, tagName?: string) {
   run("git", ["add", "."], root);
-  run("git", ["commit", "-m", `snapshot ${version}`], root);
-  run("git", ["tag", `v${version}`], root);
+  run("git", ["commit", "-m", message], root);
+  if (tagName) run("git", ["tag", tagName], root);
+}
+
+function commitTag(root: string, version: string) {
+  commitSnapshot(root, `snapshot ${version}`, `v${version}`);
 }
 
 function writeSyncWorkspace(workspace: string, packageVersion: string) {
@@ -255,9 +259,7 @@ test("sync-upstreams honors an explicit pi ref override", () => {
     writeMirrorSnapshot(mirrorRepo, "0.70.0");
     commitTag(mirrorRepo, "0.70.0");
     writeMirrorSnapshot(mirrorRepo, "override");
-    run("git", ["add", "."], mirrorRepo);
-    run("git", ["commit", "-m", "snapshot override"], mirrorRepo);
-    run("git", ["tag", "custom-ref"], mirrorRepo);
+    commitSnapshot(mirrorRepo, "snapshot override", "custom-ref");
 
     writeSyncWorkspace(workspace, "0.70.0");
     writePiUpstreamMeta(workspace, {
@@ -328,9 +330,7 @@ test("sync-upstreams mirrors the full skill-creator source root", () => {
       "utf8",
     );
     fs.writeFileSync(path.join(sourceRoot, "SKILL.md"), "skill body\n", "utf8");
-    run("git", ["add", "."], mirrorRepo);
-    run("git", ["commit", "-m", "snapshot skill creator"], mirrorRepo);
-    run("git", ["tag", "skill-test"], mirrorRepo);
+    commitSnapshot(mirrorRepo, "snapshot skill creator", "skill-test");
 
     writeSyncWorkspace(workspace, "0.70.0");
     const repo = pathToFileURL(mirrorRepo).href;
@@ -406,13 +406,9 @@ test("sync-upstreams preserves an existing skill-creator ref", () => {
   try {
     initMirrorRepo(mirrorRepo);
     writeSkillCreatorSnapshot(mirrorRepo, "base");
-    run("git", ["add", "."], mirrorRepo);
-    run("git", ["commit", "-m", "snapshot skill base"], mirrorRepo);
-    run("git", ["tag", "base-skill"], mirrorRepo);
+    commitSnapshot(mirrorRepo, "snapshot skill base", "base-skill");
     writeSkillCreatorSnapshot(mirrorRepo, "custom");
-    run("git", ["add", "."], mirrorRepo);
-    run("git", ["commit", "-m", "snapshot skill custom"], mirrorRepo);
-    run("git", ["tag", "custom-skill"], mirrorRepo);
+    commitSnapshot(mirrorRepo, "snapshot skill custom", "custom-skill");
 
     writeSyncWorkspace(workspace, "0.70.0");
     const repo = pathToFileURL(mirrorRepo).href;
