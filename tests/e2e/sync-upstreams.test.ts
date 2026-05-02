@@ -88,6 +88,10 @@ function commitTag(root: string, version: string) {
   commitSnapshot(root, `snapshot ${version}`, `v${version}`);
 }
 
+function resolveGitRef(root: string, ref: string) {
+  return run("git", ["rev-parse", ref], root);
+}
+
 function writeSyncWorkspace(workspace: string, packageVersion: string) {
   fs.mkdirSync(path.join(workspace, "scripts"), { recursive: true });
   fs.copyFileSync(
@@ -273,6 +277,10 @@ test("sync-upstreams honors an explicit pi ref override", () => {
 
     const nextMeta = readPiUpstreamMeta(workspace);
     assert.equal(nextMeta.ref, "custom-ref");
+    assert.equal(
+      nextMeta.resolvedCommit,
+      resolveGitRef(mirrorRepo, "custom-ref"),
+    );
     assert.equal(nextMeta.packageVersion, "0.70.0");
     assert.equal(readSyncedPiReadme(workspace), "README override\n");
   } finally {
@@ -348,6 +356,10 @@ test("sync-upstreams mirrors the full skill-creator source root", () => {
     assert.equal(nextMeta.repo, repo);
     assert.equal(nextMeta.sourceSubdir, "skills/skill-creator");
     assert.equal(nextMeta.ref, "skill-test");
+    assert.equal(
+      nextMeta.resolvedCommit,
+      resolveGitRef(mirrorRepo, "skill-test"),
+    );
     assert.equal(
       fs.readFileSync(path.join(destRoot, "README.md"), "utf8"),
       "skill readme\n",
