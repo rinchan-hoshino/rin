@@ -540,6 +540,184 @@ test("chat controller asks the active voice to acknowledge /compact and /reload"
   }
 });
 
+test("chat controller starts working indicators for chat commands", async () => {
+  for (const command of ["/new", "/abort", "/compact", "/reload"]) {
+    const controller = await createController("telegram/1:2");
+    const actions = [];
+    const reactions = [];
+    const deliveries = [];
+    controller.app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "1",
+          async createReaction(chatId, messageId, emoji) {
+            reactions.push(["create", chatId, messageId, emoji]);
+          },
+          async deleteReaction(chatId, messageId, emoji, userId) {
+            reactions.push(["delete", chatId, messageId, emoji, userId]);
+          },
+          internal: {
+            async sendChatAction(payload) {
+              actions.push(payload);
+            },
+          },
+        },
+      ],
+    };
+    controller.runActiveVoiceAcknowledgement = async () =>
+      `Voice reply for ${command}`;
+    controller.commitPendingDelivery = async function (
+      clearProcessing = false,
+    ) {
+      deliveries.push(this.stagedDelivery?.text || "");
+      this.stagedDelivery = null;
+      if (clearProcessing) {
+        await this.clearWorkingReaction().catch(() => {});
+        this.currentTurn = null;
+      }
+    };
+
+    let currentSessionFile = path.join(
+      controller.agentDir,
+      "sessions",
+      `${command.slice(1)}-command.jsonl`,
+    );
+    controller.session = {
+      isStreaming: false,
+      sessionManager: {
+        getSessionFile: () => currentSessionFile,
+        getSessionId: () => `session-${command.slice(1)}`,
+        getSessionName: () => controller.chatKey,
+      },
+      newSession: async (options = {}) => {
+        currentSessionFile = path.join(
+          controller.agentDir,
+          "sessions",
+          "managed",
+          options.managedSessionLeaf,
+          "created-command-indicator.jsonl",
+        );
+        return true;
+      },
+      ensureSessionReady: async () => ({
+        sessionFile: currentSessionFile,
+        sessionId: `session-${command.slice(1)}`,
+      }),
+      runCommand: async () => ({
+        handled: true,
+        text: `Command reply for ${command}`,
+        sessionFile: currentSessionFile,
+      }),
+      switchSession: async () => {},
+    };
+
+    await controller.runCommand(
+      command,
+      `m-${command.slice(1)}`,
+      `m-${command.slice(1)}`,
+    );
+
+    assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+    assert.deepEqual(reactions, [
+      ["create", "2", `m-${command.slice(1)}`, "🤔"],
+      ["delete", "2", `m-${command.slice(1)}`, "🤔", "1"],
+    ]);
+    assert.deepEqual(deliveries, [`Voice reply for ${command}`]);
+  }
+});
+
+test("chat controller moves working indicators to the steering message", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  const reactions = [];
+  let releaseFirstPrompt = () => {};
+  let resolveFirstPromptStarted = () => {};
+  const firstPromptStarted = new Promise((resolve) => {
+    resolveFirstPromptStarted = resolve;
+  });
+
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        async createReaction(chatId, messageId, emoji) {
+          reactions.push(["create", chatId, messageId, emoji]);
+        },
+        async deleteReaction(chatId, messageId, emoji, userId) {
+          reactions.push(["delete", chatId, messageId, emoji, userId]);
+        },
+        internal: {
+          async sendChatAction(payload) {
+            actions.push(payload);
+          },
+        },
+      },
+    ],
+  };
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+  };
+
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/live-chat.jsonl",
+      getSessionId: () => "session-live",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/live-chat.jsonl",
+      sessionId: "session-live",
+    }),
+    prompt: async (_text, options = {}) => {
+      if (options.streamingBehavior === "steer") return;
+      controller.session.isStreaming = true;
+      resolveFirstPromptStarted();
+      await new Promise((resolve) => {
+        releaseFirstPrompt = resolve;
+      });
+      controller.session.isStreaming = false;
+      emitRpcTurnComplete(controller, options, "done");
+    },
+    switchSession: async () => {},
+  };
+
+  const firstTurn = controller.runTurn({
+    text: "first",
+    attachments: [],
+    incomingMessageId: "m-first",
+  });
+  await firstPromptStarted;
+
+  const steerResult = await controller.runTurn(
+    {
+      text: "steer now",
+      attachments: [],
+      incomingMessageId: "m-steer",
+    },
+    "steer",
+  );
+
+  assert.equal(steerResult.steered, true);
+  assert.deepEqual(actions, [
+    { chat_id: "2", action: "typing" },
+    { chat_id: "2", action: "typing" },
+  ]);
+  assert.deepEqual(reactions, [
+    ["create", "2", "m-first", "🤔"],
+    ["delete", "2", "m-first", "🤔", "1"],
+    ["create", "2", "m-steer", "🤔"],
+  ]);
+  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
+
+  releaseFirstPrompt();
+  assert.equal((await firstTurn).finalText, "done");
+});
+
 test("chat controller delivers visible non-transient command errors", async () => {
   const controller = await createController();
   const deliveries = [];
