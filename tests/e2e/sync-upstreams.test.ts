@@ -113,12 +113,16 @@ function readSyncedPiReadme(workspace: string) {
   );
 }
 
-function runPiSync(workspace: string, args: string[] = []) {
+function runSync(workspace: string, target: string, args: string[] = []) {
   run(
     process.execPath,
-    [path.join(workspace, "scripts", "sync-upstreams.mjs"), "pi", ...args],
+    [path.join(workspace, "scripts", "sync-upstreams.mjs"), target, ...args],
     workspace,
   );
+}
+
+function runPiSync(workspace: string, args: string[] = []) {
+  runSync(workspace, "pi", args);
 }
 
 test("sync-upstreams uses the current pi package version tag instead of a stale _upstream ref", () => {
@@ -244,6 +248,53 @@ test("sync-upstreams honors explicit pi repo and source subdir overrides", () =>
     assert.equal(nextMeta.ref, "v0.70.0");
     assert.equal(nextMeta.packageVersion, "0.70.0");
     assert.equal(readSyncedPiReadme(workspace), "README 0.70.0\n");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("sync-upstreams mirrors the full skill-creator source root", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-skill-");
+  const mirrorRepo = path.join(tempDir, "mirror.git");
+  const workspace = path.join(tempDir, "workspace");
+  try {
+    initMirrorRepo(mirrorRepo);
+    const sourceRoot = path.join(mirrorRepo, "skills", "skill-creator");
+    fs.mkdirSync(sourceRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(sourceRoot, "README.md"),
+      "skill readme\n",
+      "utf8",
+    );
+    fs.writeFileSync(path.join(sourceRoot, "SKILL.md"), "skill body\n", "utf8");
+    run("git", ["add", "."], mirrorRepo);
+    run("git", ["commit", "-m", "snapshot skill creator"], mirrorRepo);
+    run("git", ["tag", "skill-test"], mirrorRepo);
+
+    writeSyncWorkspace(workspace, "0.70.0");
+    const repo = pathToFileURL(mirrorRepo).href;
+    runSync(workspace, "skill-creator", [
+      "--repo",
+      repo,
+      "--ref",
+      "skill-test",
+    ]);
+
+    const destRoot = path.join(workspace, "upstream", "skill-creator");
+    const nextMeta = JSON.parse(
+      fs.readFileSync(path.join(destRoot, "_upstream.json"), "utf8"),
+    );
+    assert.equal(nextMeta.repo, repo);
+    assert.equal(nextMeta.sourceSubdir, "skills/skill-creator");
+    assert.equal(nextMeta.ref, "skill-test");
+    assert.equal(
+      fs.readFileSync(path.join(destRoot, "README.md"), "utf8"),
+      "skill readme\n",
+    );
+    assert.equal(
+      fs.readFileSync(path.join(destRoot, "SKILL.md"), "utf8"),
+      "skill body\n",
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
