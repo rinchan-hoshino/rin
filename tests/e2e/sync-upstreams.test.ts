@@ -300,6 +300,21 @@ test("sync-upstreams mirrors the full skill-creator source root", () => {
   }
 });
 
+test("sync-upstreams rejects unknown mirror targets", () => {
+  const tempDir = makeTempDir("rin-sync-upstreams-target-");
+  const workspace = path.join(tempDir, "workspace");
+  try {
+    writeSyncWorkspace(workspace, "0.70.0");
+    assert.throws(
+      () => runSync(workspace, "missing-upstream"),
+      /Unknown upstream mirror: missing-upstream/,
+    );
+    assert.equal(fs.existsSync(path.join(workspace, "upstream")), false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("sync-upstreams rejects value options without explicit values", () => {
   const tempDir = makeTempDir("rin-sync-upstreams-args-");
   const workspace = path.join(tempDir, "workspace");
