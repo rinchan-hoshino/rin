@@ -1,0 +1,48 @@
+name: sync-public-mirror
+
+on:
+  push:
+    branches:
+      - main
+      - bootstrap
+    tags:
+      - v*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-public-mirror
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'rinchanai/rin-internal'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure public mirror SSH key
+        env:
+          PUBLIC_MIRROR_SSH_KEY: ${{ secrets.PUBLIC_MIRROR_SSH_KEY }}
+        run: |
+          set -eu
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$PUBLIC_MIRROR_SSH_KEY" > "$HOME/.ssh/public_mirror"
+          chmod 600 "$HOME/.ssh/public_mirror"
+          ssh-keyscan github.com >> "$HOME/.ssh/known_hosts"
+          git config core.sshCommand "ssh -i $HOME/.ssh/public_mirror -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+
+      - name: Push public refs
+        run: |
+          set -eu
+          git remote add public git@github.com:rinchanai/rin.git
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
+          git push public refs/remotes/origin/main:refs/heads/main
+          if git fetch origin +refs/heads/bootstrap:refs/remotes/origin/bootstrap; then
+            git push public refs/remotes/origin/bootstrap:refs/heads/bootstrap
+          fi
+          git push public --tags

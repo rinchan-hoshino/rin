@@ -16,7 +16,7 @@ docker build -f .ci/local-ci/Dockerfile -t "$image_tag" .
 
 format_targets="$({
   git diff --cached --name-only --diff-filter=ACMR
-} | grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|js|mjs|md|json|yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.mjs)$' || true)"
+} | grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|js|mjs|md|json|yml|yaml)$|^\.github/workflows/.*\.(yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.mjs)$' || true)"
 
 tree_id="$(git write-tree)"
 
