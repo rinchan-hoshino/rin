@@ -510,6 +510,13 @@ function mutateMessageArray(target: any[], source: any[]) {
   for (const item of Array.isArray(source) ? source : []) target.push(item);
 }
 
+export function isRinContextOverflow(message: any, contextWindow?: number) {
+  if (isContextOverflow(message, contextWindow)) return true;
+  if (message?.stopReason !== "error") return false;
+  const errorMessage = String(message?.errorMessage || "");
+  return /\bWebSocket closed\s+1009\b/i.test(errorMessage);
+}
+
 function buildMidTurnLlmContext(
   session: any,
   systemPrompt: string,
@@ -561,10 +568,37 @@ export function applyDisableEndTurnThresholdCompaction(session: any) {
     skipAbortedCheck = true,
   ) {
     const contextWindow = Number(session.model?.contextWindow || 0);
+    if (!isRinContextOverflow(assistantMessage, contextWindow)) {
+      return;
+    }
+
     if (isContextOverflow(assistantMessage, contextWindow)) {
       return await original(assistantMessage, skipAbortedCheck);
     }
-    return;
+
+    if (session._overflowRecoveryAttempted) {
+      session._emit?.({
+        type: "compaction_end",
+        reason: "overflow",
+        result: undefined,
+        aborted: false,
+        willRetry: false,
+        errorMessage:
+          "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.",
+      });
+      return;
+    }
+
+    session._overflowRecoveryAttempted = true;
+    const messages = session.agent?.state?.messages;
+    if (
+      Array.isArray(messages) &&
+      messages.length > 0 &&
+      messages[messages.length - 1]?.role === "assistant"
+    ) {
+      session.agent.state.messages = messages.slice(0, -1);
+    }
+    await session._runAutoCompaction?.("overflow", true);
   };
 
   (session as any)[DISABLE_END_TURN_THRESHOLD_KEY] = { original };
