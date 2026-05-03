@@ -1801,6 +1801,70 @@ test("chat controller treats rpc completion as the canonical final reply for pro
   assert.equal(controller.state.sessionFile, "prompt-chat.jsonl");
 });
 
+test("chat controller delivers prompt turn errors through conversation binding", async () => {
+  const controller = await createController("telegram/1:2");
+  const chatKey = "telegram/1:2";
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "failed-turn-chat.jsonl",
+  );
+
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-failed-turn",
+      getSessionName: () => chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-failed-turn",
+    }),
+    prompt: async (_text, options = {}) => {
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "rpc_turn_event",
+          event: "start",
+          requestTag: options.requestTag,
+          sessionFile,
+          sessionId: "session-failed-turn",
+        },
+      });
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "rpc_turn_event",
+          event: "error",
+          requestTag: options.requestTag,
+          error: "fetch failed",
+          sessionFile,
+          sessionId: "session-failed-turn",
+        },
+      });
+    },
+    switchSession: async () => {},
+  };
+
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-failed-turn",
+      replyToMessageId: "m-failed-turn",
+    }),
+    /fetch failed/,
+  );
+
+  const assistantError = getChatMessage(controller.agentDir, chatKey, "m1");
+  assert.equal(assistantError?.text, "fetch failed");
+  assert.equal(assistantError?.replyToMessageId, "m-failed-turn");
+  assert.equal(assistantError?.sessionFile, "failed-turn-chat.jsonl");
+  assert.equal(controller.state.sessionFile, "failed-turn-chat.jsonl");
+});
+
 test("chat controller reuses an observed completed assistant message when rpc finalText is missing", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];

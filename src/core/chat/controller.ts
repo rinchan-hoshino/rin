@@ -1083,14 +1083,27 @@ export class ChatController {
               abortedSession.sessionFile || this.currentSessionFile(),
           };
         }
-        if (
+        const errorSession = normalizeSessionRef(error as any);
+        const errorSessionFile = this.updateStoredSessionFile(
+          errorSession.sessionFile,
+          this.driver.currentSessionFile(),
+        );
+        const transientSessionFailure =
           shouldReleaseStoredSessionOnTransientTurnError(error, {
             wantedSessionFile,
             restoreSessionFile,
-          })
-        ) {
+          });
+        if (transientSessionFailure) {
           delete this.state.sessionFile;
           this.driver.dispose();
+        } else if (errorSession.sessionFile) {
+          await this.deliverAssistantReply({
+            text: errorMessage || "chat_bridge_turn_failed",
+            replyToMessageId: input.replyToMessageId,
+            incomingMessageId: input.incomingMessageId,
+            sessionFile: errorSessionFile || this.currentSessionFile(),
+            clearProcessing: true,
+          });
         }
         await this.clearWorkingReactionFor(input.incomingMessageId);
         this.clearCurrentTurnFor(input.incomingMessageId);

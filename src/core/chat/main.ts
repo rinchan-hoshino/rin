@@ -554,16 +554,21 @@ export async function startChatBridge(
         .filter((item) => item?.kind === "file")
         .map((item) => ({ name: item.name, path: item.path })),
     };
-    const handleTurnFailure = async (
-      error: any,
-      sessionFile = linkedSessionFile,
-    ) => {
+    const handleTurnFailure = async (error: any) => {
       const errorMessage = safeString((error as any)?.message || error);
       const transientFailure = isTransientChatRuntimeError(errorMessage);
       logger.warn(
         `chat turn failed chatKey=${decision.chatKey} transient=${transientFailure} err=${errorMessage}`,
       );
-      if (!transientFailure) {
+      if (
+        !transientFailure &&
+        messageId &&
+        !hasInboundChatMessageReplyBoundary(
+          runtime.agentDir,
+          decision.chatKey,
+          messageId,
+        )
+      ) {
         void sendOutboxPayload(
           app,
           runtime.agentDir,
@@ -573,7 +578,7 @@ export async function startChatBridge(
             chatKey: decision.chatKey,
             text: errorMessage || "chat_bridge_turn_failed",
             replyToMessageId: messageId || undefined,
-            sessionFile: sessionFile || undefined,
+            sessionFile: linkedSessionFile || undefined,
           },
           h,
         ).catch(() => {});
@@ -595,7 +600,7 @@ export async function startChatBridge(
       );
       return { retry: false };
     } catch (error) {
-      return await handleTurnFailure(error, linkedSessionFile);
+      return await handleTurnFailure(error);
     }
   };
 
