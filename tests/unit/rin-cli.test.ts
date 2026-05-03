@@ -193,6 +193,13 @@ test("usage, status, and memory-index parsers ignore wrapper args around the sub
     },
   );
 
+  assert.deepEqual(status.parseStatusArgs(["status", "--interval=0.25"]), {
+    watch: false,
+    intervalMs: 250,
+    json: false,
+    help: false,
+  });
+
   assert.deepEqual(memoryIndex.parseMemoryIndexArgs(["memory-index"]), {
     action: "repair",
     help: false,
@@ -317,6 +324,14 @@ test("usage and status parsers reject invalid syntax", () => {
   assert.throws(
     () => status.parseStatusArgs(["status", "--bad"]),
     /unknown_status_arg:--bad/,
+  );
+  assert.throws(
+    () => status.parseStatusArgs(["status", "--interval", "--json"]),
+    /missing_status_interval/,
+  );
+  assert.throws(
+    () => status.parseStatusArgs(["status", "--interval=soon"]),
+    /invalid_status_interval:soon/,
   );
 });
 

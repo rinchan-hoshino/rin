@@ -42,9 +42,13 @@ function readStatusArg(args: string[], index: number) {
   return safeString(args[index]).trim();
 }
 
-function parseIntervalMs(value: string, fallback: number) {
-  const seconds = Number(value);
-  if (!Number.isFinite(seconds) || seconds <= 0) return fallback;
+function parseIntervalMs(value: string) {
+  const text = safeString(value).trim();
+  if (!text) throw new Error("missing_status_interval");
+  const seconds = Number(text);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error(`invalid_status_interval:${text}`);
+  }
   return Math.max(100, Math.round(seconds * 1000));
 }
 
@@ -71,10 +75,15 @@ export function parseStatusArgs(argv: string[]): StatusCliOptions {
       continue;
     }
     if (arg === "--interval") {
-      result.intervalMs = parseIntervalMs(
-        readStatusArg(args, ++i),
-        result.intervalMs,
-      );
+      const next = readStatusArg(args, i + 1);
+      if (!next || next.startsWith("--"))
+        throw new Error("missing_status_interval");
+      i += 1;
+      result.intervalMs = parseIntervalMs(next);
+      continue;
+    }
+    if (arg.startsWith("--interval=")) {
+      result.intervalMs = parseIntervalMs(arg.slice("--interval=".length));
       continue;
     }
     throw new Error(`unknown_status_arg:${arg}`);
