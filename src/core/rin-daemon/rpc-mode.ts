@@ -777,7 +777,6 @@ export async function runCustomRpcMode(
       case "get_session_snapshot":
         return done(id, type, {
           entries: session.sessionManager.getEntries(),
-          tree: session.sessionManager.getTree(),
           leafId: session.sessionManager.getLeafId(),
         });
       case "set_entry_label":

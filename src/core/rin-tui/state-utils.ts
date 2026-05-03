@@ -29,6 +29,61 @@ function normalizeRpcEntries(entries: any[]) {
   });
 }
 
+function buildRpcTreeFromEntries(
+  entries: any[],
+  labelsById: Map<string, string | undefined>,
+) {
+  const nodeById = new Map<string, any>();
+  const labelTimestampsById = new Map<string, string | undefined>();
+  const roots: any[] = [];
+
+  for (const entry of entries) {
+    nodeById.set(entry.id, { entry, children: [] });
+    if (entry.type !== "label") continue;
+    const targetId = normalizeRpcText(entry.targetId);
+    if (!targetId) continue;
+    const label = normalizeRpcText(entry.label);
+    if (label) {
+      labelsById.set(targetId, label);
+      labelTimestampsById.set(targetId, normalizeRpcText(entry.timestamp));
+    } else {
+      labelsById.delete(targetId);
+      labelTimestampsById.delete(targetId);
+    }
+  }
+
+  for (const entry of entries) {
+    const node = nodeById.get(entry.id);
+    if (!node) continue;
+    const label = labelsById.get(entry.id);
+    if (label) {
+      node.label = label;
+      node.labelTimestamp = labelTimestampsById.get(entry.id);
+    }
+    const parentId = normalizeRpcText(entry.parentId);
+    if (!parentId || parentId === entry.id) {
+      roots.push(node);
+      continue;
+    }
+    const parent = nodeById.get(parentId);
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+
+  const stack = [...roots];
+  while (stack.length) {
+    const node = stack.pop()!;
+    node.children.sort(
+      (left: any, right: any) =>
+        new Date(left.entry.timestamp).getTime() -
+        new Date(right.entry.timestamp).getTime(),
+    );
+    stack.push(...node.children);
+  }
+
+  return roots;
+}
+
 function normalizeRpcTree(
   nodes: any[],
   entryById: Map<string, any>,
@@ -144,11 +199,10 @@ export function applyRpcSessionTree(
     target.entries.map((entry: any) => [entry.id, entry]),
   );
   target.labelsById = new Map();
-  target.tree = normalizeRpcTree(
-    Array.isArray(treeData?.tree) ? treeData.tree : [],
-    target.entryById,
-    target.labelsById,
-  );
+  const snapshotTree = Array.isArray(treeData?.tree) ? treeData.tree : [];
+  target.tree = snapshotTree.length
+    ? normalizeRpcTree(snapshotTree, target.entryById, target.labelsById)
+    : buildRpcTreeFromEntries(target.entries, target.labelsById);
   const leafId = normalizeRpcText(treeData?.leafId);
   target.leafId = leafId && target.entryById.has(leafId) ? leafId : null;
 }

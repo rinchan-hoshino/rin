@@ -172,7 +172,7 @@ process.stdin.on("data", (chunk) => {
     assert.equal(messages.success, true);
     assert.deepEqual(messages.data, { messages: [] });
     assert.equal(snapshot.success, true);
-    assert.deepEqual(snapshot.data, { entries: [], tree: [], leafId: null });
+    assert.deepEqual(snapshot.data, { entries: [], leafId: null });
     assert.equal(commands.success, true);
     assert.equal(Array.isArray(commands.data?.commands), true);
     assert.equal(models.success, true);

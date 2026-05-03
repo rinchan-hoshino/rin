@@ -207,6 +207,55 @@ test("rpc state utils normalize deep linear session trees without recursion", ()
   assert.equal(target.leafId, `entry-${depth - 1}`);
 });
 
+test("rpc state utils rebuild tree from flat entries when snapshots omit tree", () => {
+  const target = {
+    entries: [],
+    tree: [],
+    leafId: null,
+    entryById: new Map(),
+    labelsById: new Map(),
+  };
+
+  stateUtils.applyRpcSessionTree(
+    target,
+    {
+      entries: [
+        { id: "1", type: "message", timestamp: "2026-01-01T00:00:00.000Z" },
+        {
+          id: "2",
+          parentId: "1",
+          type: "message",
+          timestamp: "2026-01-01T00:00:02.000Z",
+        },
+        {
+          id: "3",
+          parentId: "1",
+          type: "message",
+          timestamp: "2026-01-01T00:00:01.000Z",
+        },
+        {
+          id: "4",
+          parentId: "3",
+          type: "label",
+          targetId: "2",
+          label: "marked",
+          timestamp: "2026-01-01T00:00:03.000Z",
+        },
+      ],
+    },
+    { leafId: "2" },
+  );
+
+  assert.equal(target.tree.length, 1);
+  assert.deepEqual(
+    target.tree[0].children.map((node: any) => node.entry.id),
+    ["3", "2"],
+  );
+  assert.equal(target.tree[0].children[1].label, "marked");
+  assert.equal(target.labelsById.get("2"), "marked");
+  assert.equal(target.leafId, "2");
+});
+
 test("rpc state utils stop branch traversal on parent cycles", () => {
   const entryById = new Map([
     ["1", { id: "1", parentId: "2" }],

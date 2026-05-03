@@ -181,7 +181,7 @@ export async function startDaemon(
   > = {
     get_messages: () => ({ data: { messages: [] } }),
     get_session_snapshot: () => ({
-      data: { entries: [], tree: [], leafId: null },
+      data: { entries: [], leafId: null },
     }),
     get_commands: async (command) => ({
       data: {
