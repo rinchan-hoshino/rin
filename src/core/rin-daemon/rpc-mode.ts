@@ -195,6 +195,17 @@ async function settleTurnCompletionEvents() {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+async function waitForSessionPostAgentEvents(session: any) {
+  await session?.agent?.waitForIdle?.();
+  const eventQueue = session?._agentEventQueue;
+  if (eventQueue && typeof eventQueue.then === "function") {
+    try {
+      await eventQueue;
+    } catch {}
+  }
+  await settleTurnCompletionEvents();
+}
+
 function isRecoverableTurnErrorMessage(message: any) {
   if (safeString(message?.role).trim() !== "assistant") return false;
   if (safeString(message?.stopReason).trim() !== "error") return false;
@@ -533,16 +544,21 @@ export async function runCustomRpcMode(
           }, TURN_HEARTBEAT_INTERVAL_MS)
         : null;
       try {
-        await task();
+        let taskError: any = null;
+        try {
+          await task();
+        } catch (error) {
+          taskError = error;
+        }
         for (let recoveryChecks = 0; ; recoveryChecks += 1) {
-          await turnSession.agent.waitForIdle();
-          await settleTurnCompletionEvents();
+          await waitForSessionPostAgentEvents(turnSession);
           if (recoveryChecks >= 3) break;
           const recoveryStarted = await waitForRecoverableTurnContinuation(
             turnSession,
             lastCompletedAssistantMessage,
           );
           if (!recoveryStarted) break;
+          taskError = null;
         }
         let completion = resolveTurnCompletion({
           messages: lastCompletedAssistantMessage
@@ -569,6 +585,12 @@ export async function runCustomRpcMode(
           }
         }
         if (!completion.finalText) {
+          if (
+            taskError &&
+            !isRecoverableTurnErrorMessage(lastCompletedAssistantMessage)
+          ) {
+            throw taskError;
+          }
           const failureMessage = resolveTurnFailureMessage(
             turnSession,
             afterSnapshot?.messages ||
