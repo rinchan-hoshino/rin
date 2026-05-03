@@ -14,8 +14,10 @@ function Is-Flag([string]$Value, [string]$Name) {
 
 function Read-OptionValue([string[]]$Values, [ref]$Index, [string]$DisplayName) {
   if ($Index.Value + 1 -ge $Values.Count) { throw "missing value for $DisplayName" }
+  $Value = $Values[$Index.Value + 1]
+  if (-not $Value -or $Value.StartsWith("-")) { throw "missing value for $DisplayName" }
   $Index.Value += 1
-  return $Values[$Index.Value]
+  return $Value
 }
 
 function Looks-Like-Git-Ref([string]$Value) {

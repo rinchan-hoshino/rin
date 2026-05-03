@@ -192,6 +192,40 @@ async function runBootstrapWrapper(scriptName, args, env) {
   });
 }
 
+async function assertBootstrapFails(args, pattern) {
+  await withTempDir(async (tempDir) => {
+    await assert.rejects(
+      execFileAsync(
+        "sh",
+        [path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"), ...args],
+        {
+          cwd: rootDir,
+          env: { ...process.env, RIN_INSTALL_TMPDIR: tempDir },
+        },
+      ),
+      pattern,
+    );
+  });
+}
+
+test("bootstrap entrypoint rejects missing legacy selector values", async () => {
+  await assertBootstrapFails(["install", "--branch", "--version"], {
+    stderr: /missing value for --branch/,
+  });
+  await assertBootstrapFails(["install", "--version", "--beta"], {
+    stderr: /missing value for --version/,
+  });
+
+  const powerShell = await fs.readFile(
+    path.join(rootDir, "scripts", "bootstrap-entrypoint.ps1"),
+    "utf8",
+  );
+  assert.match(
+    powerShell,
+    /\$Value\.StartsWith\("-"\).*missing value for \$DisplayName/,
+  );
+});
+
 test("stable install and update wrappers resolve release metadata before launching npm installer and leave no temp work dirs", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);

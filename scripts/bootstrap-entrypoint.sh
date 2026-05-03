@@ -155,6 +155,16 @@ looks_like_git_ref() {
   printf '%s' "$1" | grep -Eq '^[0-9a-fA-F]{7,40}$'
 }
 
+read_option_value() {
+  option=$1
+  shift
+  if [ "$#" -lt 1 ] || [ -z "${1:-}" ] || [ "${1#-}" != "$1" ]; then
+    echo "missing value for $option" >&2
+    exit 1
+  fi
+  OPTION_VALUE=$1
+}
+
 parse_args() {
   GIT_SELECTOR=
   EXPLICIT_CHANNEL=
@@ -200,14 +210,14 @@ parse_args() {
         ;;
       --branch)
         EXPECT_GIT_SELECTOR=
-        [ "$#" -ge 2 ] || { echo "missing value for --branch" >&2; exit 1; }
-        BRANCH=$2
+        read_option_value --branch "$@"
+        BRANCH=$OPTION_VALUE
         shift
         ;;
       --version)
         EXPECT_GIT_SELECTOR=
-        [ "$#" -ge 2 ] || { echo "missing value for --version" >&2; exit 1; }
-        VERSION=$2
+        read_option_value --version "$@"
+        VERSION=$OPTION_VALUE
         shift
         ;;
       -h|--help)
