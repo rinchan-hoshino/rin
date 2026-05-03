@@ -6,6 +6,14 @@ function trim(value) {
   return String(value || "").trim();
 }
 
+function nextArgValue(argv, index, option) {
+  const value = argv[index + 1];
+  if (!value || String(value).startsWith("--")) {
+    throw new Error(`missing_value:${option}`);
+  }
+  return trim(value);
+}
+
 function parseArgs(argv) {
   const args = {
     changelog: "docs/release/CHANGELOG.md",
@@ -14,9 +22,11 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--changelog") {
-      args.changelog = trim(argv[++index]);
+      args.changelog = nextArgValue(argv, index, arg);
+      index += 1;
     } else if (arg === "--version") {
-      args.version = trim(argv[++index]);
+      args.version = nextArgValue(argv, index, arg);
+      index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(
         "Usage: node scripts/release/verify-changelog.mjs --version <x.y.z> [--changelog docs/release/CHANGELOG.md]",

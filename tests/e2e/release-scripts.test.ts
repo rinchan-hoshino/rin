@@ -296,6 +296,29 @@ test("plan-release script computes beta nightly and stable promotion versions", 
   }
 });
 
+test("release scripts reject value options without explicit values", () => {
+  const cases = [
+    ["update-release-manifest.mjs", "--manifest"],
+    ["update-release-manifest.mjs", "--version"],
+    ["plan-release.mjs", "--manifest"],
+    ["plan-release.mjs", "--channel"],
+    ["verify-changelog.mjs", "--changelog"],
+    ["verify-changelog.mjs", "--version"],
+  ];
+
+  for (const [script, option] of cases) {
+    assert.throws(
+      () =>
+        execFileSync(
+          process.execPath,
+          [path.join(rootDir, "scripts", "release", script), option],
+          { cwd: rootDir, stdio: "pipe" },
+        ),
+      new RegExp(`missing_value:${option}`),
+    );
+  }
+});
+
 test("verify-changelog script requires a target Rin changelog heading", () => {
   const tempDir = makeTempDir(".tmp-release-changelog-");
   try {

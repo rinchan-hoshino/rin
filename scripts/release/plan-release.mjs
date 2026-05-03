@@ -6,8 +6,12 @@ function trim(value) {
   return String(value || "").trim();
 }
 
-function nextArgValue(argv, index) {
-  return trim(argv[index + 1]);
+function nextArgValue(argv, index, option) {
+  const value = argv[index + 1];
+  if (!value || String(value).startsWith("--")) {
+    throw new Error(`missing_value:${option}`);
+  }
+  return trim(value);
 }
 
 function parseArgs(argv) {
@@ -21,19 +25,19 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--manifest") {
-      args.manifest = nextArgValue(argv, index);
+      args.manifest = nextArgValue(argv, index, arg);
       index += 1;
     } else if (arg === "--channel") {
-      args.channel = nextArgValue(argv, index);
+      args.channel = nextArgValue(argv, index, arg);
       index += 1;
     } else if (arg === "--beta-version") {
-      args.betaVersion = nextArgValue(argv, index);
+      args.betaVersion = nextArgValue(argv, index, arg);
       index += 1;
     } else if (arg === "--ref") {
-      args.ref = nextArgValue(argv, index);
+      args.ref = nextArgValue(argv, index, arg);
       index += 1;
     } else if (arg === "--date") {
-      args.date = nextArgValue(argv, index);
+      args.date = nextArgValue(argv, index, arg);
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(

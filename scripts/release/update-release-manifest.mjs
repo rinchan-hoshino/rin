@@ -2,6 +2,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
+function argValue(argv, index, option) {
+  const value = argv[index + 1];
+  if (!value || String(value).startsWith("--")) {
+    throw new Error(`missing_value:${option}`);
+  }
+  return String(value).trim();
+}
+
 function parseArgs(argv) {
   const args = {
     manifest: "release-manifest.json",
@@ -17,26 +25,37 @@ function parseArgs(argv) {
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--manifest")
-      args.manifest = String(argv[++index] || "").trim();
-    else if (arg === "--channel")
-      args.channel = String(argv[++index] || "").trim();
-    else if (arg === "--version")
-      args.version = String(argv[++index] || "").trim();
-    else if (arg === "--ref") args.ref = String(argv[++index] || "").trim();
-    else if (arg === "--package-name")
-      args.packageName = String(argv[++index] || "").trim();
-    else if (arg === "--repo-url")
-      args.repoUrl = String(argv[++index] || "").trim();
-    else if (arg === "--branch")
-      args.branch = String(argv[++index] || "").trim();
-    else if (arg === "--series")
-      args.series = String(argv[++index] || "").trim();
-    else if (arg === "--from-beta-version")
-      args.fromBetaVersion = String(argv[++index] || "").trim();
-    else if (arg === "--promotion-version")
-      args.promotionVersion = String(argv[++index] || "").trim();
-    else if (arg === "-h" || arg === "--help") {
+    if (arg === "--manifest") {
+      args.manifest = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--channel") {
+      args.channel = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--version") {
+      args.version = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--ref") {
+      args.ref = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--package-name") {
+      args.packageName = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--repo-url") {
+      args.repoUrl = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--branch") {
+      args.branch = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--series") {
+      args.series = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--from-beta-version") {
+      args.fromBetaVersion = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--promotion-version") {
+      args.promotionVersion = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "-h" || arg === "--help") {
       console.log(
         "Usage: node scripts/release/update-release-manifest.mjs --channel stable|beta|nightly --version <value> [--ref <sha>] [--branch <name>] [--series <major.minor>] [--from-beta-version <value>] [--promotion-version <x.y.z>] [--package-name <name>] [--repo-url <url>] [--manifest <path>]",
       );
