@@ -56,7 +56,7 @@ export class ChatFrontendDriver {
   } | null = null;
   latestAssistantText = "";
   deliveredAssistantInterimTexts = new Set<string>();
-  assistantReplyCommitted = false;
+  assistantFinalReplyCommitted = false;
   frontendPhase: FrontendPhase = "idle";
   listeners = new Set<(event: ChatFrontendDriverEvent) => void>();
 
@@ -186,12 +186,12 @@ export class ChatFrontendDriver {
 
   private resetAssistantSegmentTracking() {
     this.deliveredAssistantInterimTexts.clear();
-    this.assistantReplyCommitted = false;
+    this.assistantFinalReplyCommitted = false;
   }
 
   canSteerActiveTurn() {
     if (!this.liveTurn && !this.session?.isStreaming) return false;
-    return !this.assistantReplyCommitted;
+    return !this.assistantFinalReplyCommitted;
   }
 
   private clearAssistantInterimState() {
@@ -228,8 +228,10 @@ export class ChatFrontendDriver {
       }),
     ).trim();
     if (fullText) this.latestAssistantText = fullText;
-    this.assistantReplyCommitted = true;
-    if (!hasToolCalls) return;
+    if (!hasToolCalls) {
+      this.assistantFinalReplyCommitted = true;
+      return;
+    }
     const interimText = safeString(
       extractTextBeforeFirstToolCall(content, {
         includeThinking: false,

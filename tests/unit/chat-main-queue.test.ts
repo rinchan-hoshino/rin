@@ -882,6 +882,19 @@ test("chat main lets same-chat follow-up enter the chatKey worker as steer", asy
                 requestTag: options.requestTag,
               },
             });
+            await controller.handleClientEvent({
+              type: "ui",
+              payload: {
+                type: "message_end",
+                message: {
+                  role: "assistant",
+                  content: [
+                    { type: "text", text: "checking" },
+                    { type: "toolCall", name: "read", id: "call-1" },
+                  ],
+                },
+              },
+            });
           },
           switchSession: async () => {},
         };

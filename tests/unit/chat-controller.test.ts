@@ -718,6 +718,85 @@ test("chat controller moves working indicators to the steering message", async (
   assert.equal((await firstTurn).finalText, "done");
 });
 
+test("chat controller keeps steering open after assistant tool-call interim", async () => {
+  const controller = await createController("telegram/1:2");
+  const promptCalls = [];
+  let releaseFirstPrompt = () => {};
+  let firstRequestTag = "";
+  let resolveFirstPromptStarted = () => {};
+  const firstPromptStarted = new Promise((resolve) => {
+    resolveFirstPromptStarted = resolve;
+  });
+
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+  };
+
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/live-chat.jsonl",
+      getSessionId: () => "session-live",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/live-chat.jsonl",
+      sessionId: "session-live",
+    }),
+    prompt: async (text, options = {}) => {
+      promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
+      if (options.streamingBehavior === "steer") return;
+      firstRequestTag = String(options.requestTag || "");
+      controller.session.isStreaming = true;
+      resolveFirstPromptStarted();
+      await new Promise((resolve) => {
+        releaseFirstPrompt = resolve;
+      });
+      controller.session.isStreaming = false;
+      emitRpcTurnComplete(controller, { requestTag: firstRequestTag }, "done");
+    },
+    switchSession: async () => {},
+  };
+
+  const firstTurn = controller.runTurn({
+    text: "first",
+    attachments: [],
+    incomingMessageId: "m-first",
+  });
+  await firstPromptStarted;
+  await controller.handleSessionEvent({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "text", text: "checking" },
+        { type: "toolCall", name: "read", id: "call-1" },
+      ],
+    },
+  });
+
+  assert.equal(controller.canSteerActiveTurn(), true);
+  const steerResult = await controller.runTurn(
+    {
+      text: "steer now",
+      attachments: [],
+      incomingMessageId: "m-steer-now",
+    },
+    "steer",
+  );
+
+  assert.equal(steerResult.steered, true);
+  assert.deepEqual(promptCalls, [
+    { text: "first", streamingBehavior: undefined },
+    { text: "steer now", streamingBehavior: "steer" },
+  ]);
+
+  releaseFirstPrompt();
+  assert.equal((await firstTurn).finalText, "done");
+});
+
 test("chat controller delivers visible non-transient command errors", async () => {
   const controller = await createController();
   const deliveries = [];
