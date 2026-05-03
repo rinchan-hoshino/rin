@@ -997,6 +997,157 @@ test(
 );
 
 test(
+  "rpc mode waits for recoverable websocket error continuation before completing",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const sessionSubscribers = new Set();
+    const stateMessages = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const emit = (event) => {
+        for (const handler of sessionSubscribers) handler(event);
+      };
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: {
+          state: { messages: stateMessages, errorMessage: "" },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        prompt: async () => {
+          const errorMessage = {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            errorMessage: "WebSocket closed 1009",
+          };
+          stateMessages.push(errorMessage);
+          emit({ type: "message_end", message: errorMessage });
+          setTimeout(() => {
+            const finalMessage = {
+              role: "assistant",
+              content: [{ type: "text", text: "recovered final" }],
+              stopReason: "stop",
+              errorMessage: "",
+            };
+            stateMessages.push(finalMessage);
+            emit({ type: "compaction_end", result: { summary: "ok" } });
+            emit({ type: "message_end", message: finalMessage });
+          }, 5);
+        },
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: {
+          getEntries: () => [],
+          getTree: () => [],
+          getLeafId: () => null,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
+        messages: stateMessages,
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "recovered final",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
+        ),
+      );
+      await wait(40);
+
+      const events = lines
+        .join("")
+        .trim()
+        .split(/\n+/)
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const completion = events.find(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      assert.equal(completion?.requestTag, "tag-1");
+      assert.equal(completion?.finalText, "recovered final");
+      assert.equal(
+        events.some(
+          (event) =>
+            event.type === "rpc_turn_event" &&
+            event.event === "complete" &&
+            event.finalText === "WebSocket closed 1009",
+        ),
+        false,
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode keeps canonical finalText even when session messages lag behind",
   { concurrency: false },
   async () => {

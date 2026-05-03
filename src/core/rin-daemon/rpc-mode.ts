@@ -195,6 +195,65 @@ async function settleTurnCompletionEvents() {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+function isRecoverableTurnErrorMessage(message: any) {
+  if (safeString(message?.role).trim() !== "assistant") return false;
+  if (safeString(message?.stopReason).trim() !== "error") return false;
+  const errorMessage = safeString(message?.errorMessage).trim();
+  return /\bWebSocket closed\s+1009\b/i.test(errorMessage) ||
+    /\bWebSocket (?:error|closed)\b/i.test(errorMessage)
+    ? true
+    : false;
+}
+
+async function waitForRecoverableTurnContinuation(
+  session: any,
+  lastAssistantMessage: any,
+  timeoutMs = 1500,
+) {
+  if (!isRecoverableTurnErrorMessage(lastAssistantMessage)) return false;
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const cleanup: {
+      timeout?: NodeJS.Timeout;
+      unsubscribe?: () => void;
+    } = {};
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (cleanup.timeout) clearTimeout(cleanup.timeout);
+      cleanup.unsubscribe?.();
+      resolve(value);
+    };
+
+    const rawUnsubscribe = session.subscribe?.((event: any) => {
+      const type = safeString(event?.type).trim();
+      if (
+        type === "compaction_start" ||
+        type === "compaction_end" ||
+        type === "agent_start"
+      ) {
+        finish(true);
+        return;
+      }
+      if (
+        type === "message_end" &&
+        event?.message?.role === "assistant" &&
+        event.message !== lastAssistantMessage
+      ) {
+        finish(true);
+      }
+    });
+    cleanup.unsubscribe =
+      typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
+
+    setImmediate(() => {
+      if (session?.isStreaming || session?.isCompacting) finish(true);
+    });
+    cleanup.timeout = setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
 export async function runCustomRpcMode(
   runtimeOrSession: any,
   deps: {
@@ -475,8 +534,16 @@ export async function runCustomRpcMode(
         : null;
       try {
         await task();
-        await turnSession.agent.waitForIdle();
-        await settleTurnCompletionEvents();
+        for (let recoveryChecks = 0; ; recoveryChecks += 1) {
+          await turnSession.agent.waitForIdle();
+          await settleTurnCompletionEvents();
+          if (recoveryChecks >= 3) break;
+          const recoveryStarted = await waitForRecoverableTurnContinuation(
+            turnSession,
+            lastCompletedAssistantMessage,
+          );
+          if (!recoveryStarted) break;
+        }
         let completion = resolveTurnCompletion({
           messages: lastCompletedAssistantMessage
             ? [lastCompletedAssistantMessage]
