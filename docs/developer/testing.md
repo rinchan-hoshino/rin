@@ -21,6 +21,8 @@ Use these rules when adding or changing repository tests.
 
 ## Verification rules
 
+- Use `npm run format` to apply repository Prettier formatting; pass paths after `--` to limit the target set.
+- Use `npm run format:check` to verify formatting without rewriting files.
 - `npm run test:unit` is the default fast verification path.
 - `npm run test:e2e` covers isolated end-to-end flows.
 - `npm run test:interactive` is for explicit smoke runs only and should stay safe to skip in normal automation.

@@ -32,3 +32,30 @@ test("run-format-check preserves explicit prettier check targets", () => {
     ...targets,
   ]);
 });
+
+test("run-format-check builds prettier write arguments", () => {
+  const targets = ["src/core/rin/main.ts"];
+
+  assert.deepEqual(formatCheckScript.buildPrettierFormatWriteArgs(targets), [
+    "--write",
+    "--ignore-unknown",
+    "--ignore-path",
+    ".prettierignore",
+    ...targets,
+  ]);
+});
+
+test("run-format-check parses explicit formatter modes", () => {
+  assert.deepEqual(formatCheckScript.parseFormatArgs(["--write", "src"]), {
+    mode: "write",
+    targets: ["src"],
+  });
+  assert.deepEqual(formatCheckScript.parseFormatArgs(["--check", "tests"]), {
+    mode: "check",
+    targets: ["tests"],
+  });
+  assert.deepEqual(formatCheckScript.parseFormatArgs(["src"]), {
+    mode: "check",
+    targets: ["src"],
+  });
+});
