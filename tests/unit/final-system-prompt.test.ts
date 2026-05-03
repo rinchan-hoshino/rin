@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 
 import { pathToFileURL } from "node:url";
@@ -22,11 +22,22 @@ const sessionForkMod = await import(
 );
 const { SessionManager } = await import("@mariozechner/pi-coding-agent");
 
-test("createConfiguredAgentSession keeps system prompt empty until first turn", async () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "rin-lazy-prompt-cwd-"));
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-lazy-prompt-agent-"),
-  );
+function makeTempDir(t: TestContext, prefix: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  t.after(() => {
+    try {
+      if (process.cwd().startsWith(dir)) process.chdir(rootDir);
+    } catch {
+      process.chdir(rootDir);
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return dir;
+}
+
+test("createConfiguredAgentSession keeps system prompt empty until first turn", async (t) => {
+  const cwd = makeTempDir(t, "rin-lazy-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-lazy-prompt-agent-");
 
   const { session } = await runtimeMod.createConfiguredAgentSession({
     cwd,
@@ -81,11 +92,9 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
 });
 
-test("buildFinalAppSystemPrompt injects configured language from settings", async () => {
-  const cwd = fs.mkdtempSync(path.join(rootDir, ".tmp-rin-lang-prompt-cwd-"));
-  const agentDir = fs.mkdtempSync(
-    path.join(rootDir, ".tmp-rin-lang-prompt-agent-"),
-  );
+test("buildFinalAppSystemPrompt injects configured language from settings", async (t) => {
+  const cwd = makeTempDir(t, "rin-lang-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-lang-prompt-agent-");
   fs.writeFileSync(
     path.join(agentDir, "settings.json"),
     JSON.stringify({ language: "zh-CN" }, null, 2),
@@ -150,11 +159,9 @@ test("buildFinalAppSystemPrompt injects a continuation prompt after automatic co
   );
 });
 
-test("system prompt stays frozen until reload", async () => {
-  const cwd = fs.mkdtempSync(path.join(rootDir, ".tmp-rin-frozen-prompt-cwd-"));
-  const agentDir = fs.mkdtempSync(
-    path.join(rootDir, ".tmp-rin-frozen-prompt-agent-"),
-  );
+test("system prompt stays frozen until reload", async (t) => {
+  const cwd = makeTempDir(t, "rin-frozen-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-frozen-prompt-agent-");
   const promptDir = path.join(agentDir, "self_improve", "prompts");
   fs.mkdirSync(promptDir, { recursive: true });
   fs.writeFileSync(
@@ -190,13 +197,9 @@ test("system prompt stays frozen until reload", async () => {
   );
 });
 
-test("persisted system prompt restores across resume and refreshes on reload", async () => {
-  const cwd = fs.mkdtempSync(
-    path.join(rootDir, ".tmp-rin-persist-prompt-cwd-"),
-  );
-  const agentDir = fs.mkdtempSync(
-    path.join(rootDir, ".tmp-rin-persist-prompt-agent-"),
-  );
+test("persisted system prompt restores across resume and refreshes on reload", async (t) => {
+  const cwd = makeTempDir(t, "rin-persist-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-persist-prompt-agent-");
   const promptDir = path.join(agentDir, "self_improve", "prompts");
   fs.mkdirSync(promptDir, { recursive: true });
   fs.writeFileSync(
@@ -265,11 +268,9 @@ test("persisted system prompt restores across resume and refreshes on reload", a
   await resumedRuntime.runtime.dispose();
 });
 
-test("stored system prompt blocks participate in frozen prompts", async () => {
-  const cwd = fs.mkdtempSync(path.join(rootDir, ".tmp-rin-block-prompt-cwd-"));
-  const agentDir = fs.mkdtempSync(
-    path.join(rootDir, ".tmp-rin-block-prompt-agent-"),
-  );
+test("stored system prompt blocks participate in frozen prompts", async (t) => {
+  const cwd = makeTempDir(t, "rin-block-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-block-prompt-agent-");
   const { session, runtime } = await runtimeMod.createConfiguredAgentSession({
     cwd,
     agentDir,
@@ -289,11 +290,9 @@ test("stored system prompt blocks participate in frozen prompts", async () => {
   await runtime.dispose();
 });
 
-test("forked sessions restore the source persisted system prompt", async () => {
-  const cwd = fs.mkdtempSync(path.join(rootDir, ".tmp-rin-fork-prompt-cwd-"));
-  const agentDir = fs.mkdtempSync(
-    path.join(rootDir, ".tmp-rin-fork-prompt-agent-"),
-  );
+test("forked sessions restore the source persisted system prompt", async (t) => {
+  const cwd = makeTempDir(t, "rin-fork-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-fork-prompt-agent-");
   const promptDir = path.join(agentDir, "self_improve", "prompts");
   fs.mkdirSync(promptDir, { recursive: true });
   fs.writeFileSync(
@@ -345,11 +344,9 @@ test("forked sessions restore the source persisted system prompt", async () => {
   await forkRuntime.runtime.dispose();
 });
 
-test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async () => {
-  const cwd = fs.mkdtempSync(path.join(rootDir, ".tmp-rin-final-prompt-cwd-"));
-  const agentDir = fs.mkdtempSync(
-    path.join(rootDir, ".tmp-rin-final-prompt-agent-"),
-  );
+test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async (t) => {
+  const cwd = makeTempDir(t, "rin-final-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-final-prompt-agent-");
   fs.writeFileSync(
     path.join(cwd, "AGENTS.md"),
     "# Project Rules\n\n- Test rule\n",
