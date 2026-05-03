@@ -171,6 +171,42 @@ test("rpc state utils normalize session tree snapshots", () => {
   assert.equal(target.leafId, null);
 });
 
+test("rpc state utils normalize deep linear session trees without recursion", () => {
+  const depth = 5_000;
+  const entries = Array.from({ length: depth }, (_, index) => ({
+    id: `entry-${index}`,
+    parentId: index > 0 ? `entry-${index - 1}` : undefined,
+    type: "message",
+  }));
+  let treeNode: any = { entry: { id: `entry-${depth - 1}` }, children: [] };
+  for (let index = depth - 2; index >= 0; index -= 1) {
+    treeNode = {
+      entry: { id: `entry-${index}` },
+      children: [treeNode],
+    };
+  }
+  const target = {
+    entries: [],
+    tree: [],
+    leafId: null,
+    entryById: new Map(),
+    labelsById: new Map(),
+  };
+
+  stateUtils.applyRpcSessionTree(
+    target,
+    { entries },
+    { tree: [treeNode], leafId: `entry-${depth - 1}` },
+  );
+
+  let node = target.tree[0];
+  for (let index = 0; index < depth; index += 1) {
+    assert.equal(node.entry, target.entryById.get(`entry-${index}`));
+    node = node.children[0];
+  }
+  assert.equal(target.leafId, `entry-${depth - 1}`);
+});
+
 test("rpc state utils stop branch traversal on parent cycles", () => {
   const entryById = new Map([
     ["1", { id: "1", parentId: "2" }],

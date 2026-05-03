@@ -34,27 +34,36 @@ function normalizeRpcTree(
   entryById: Map<string, any>,
   labelsById: Map<string, string | undefined>,
 ) {
-  return nodes.flatMap((node: any) => {
+  const normalizedRoots: any[] = [];
+  const stack = [...nodes]
+    .reverse()
+    .map((node) => ({ node, output: normalizedRoots }));
+
+  while (stack.length) {
+    const { node, output } = stack.pop()!;
     const entryId = normalizeRpcText(node?.entry?.id);
-    if (!entryId) return [];
+    if (!entryId) continue;
     const entry = entryById.get(entryId);
-    if (!entry) return [];
+    if (!entry) continue;
     labelsById.set(
       entryId,
       typeof node?.label === "string" ? node.label : undefined,
     );
-    return [
-      {
-        ...node,
-        entry,
-        children: normalizeRpcTree(
-          Array.isArray(node?.children) ? node.children : [],
-          entryById,
-          labelsById,
-        ),
-      },
-    ];
-  });
+
+    const normalizedNode = {
+      ...node,
+      entry,
+      children: [] as any[],
+    };
+    output.push(normalizedNode);
+
+    const children = Array.isArray(node?.children) ? node.children : [];
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push({ node: children[index], output: normalizedNode.children });
+    }
+  }
+
+  return normalizedRoots;
 }
 
 export function applyRpcSessionState(
