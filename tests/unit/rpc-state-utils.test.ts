@@ -256,6 +256,33 @@ test("rpc state utils rebuild tree from flat entries when snapshots omit tree", 
   assert.equal(target.leafId, "2");
 });
 
+test("rpc state utils keeps cyclic flat entries reachable as roots", () => {
+  const target = {
+    entries: [],
+    tree: [],
+    leafId: null,
+    entryById: new Map(),
+    labelsById: new Map(),
+  };
+
+  stateUtils.applyRpcSessionTree(
+    target,
+    {
+      entries: [
+        { id: "1", parentId: "2", type: "message" },
+        { id: "2", parentId: "1", type: "message" },
+      ],
+    },
+    { leafId: "2" },
+  );
+
+  assert.deepEqual(
+    target.tree.map((node: any) => node.entry.id),
+    ["1", "2"],
+  );
+  assert.equal(target.leafId, "2");
+});
+
 test("rpc state utils stop branch traversal on parent cycles", () => {
   const entryById = new Map([
     ["1", { id: "1", parentId: "2" }],

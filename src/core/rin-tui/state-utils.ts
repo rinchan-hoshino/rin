@@ -29,6 +29,21 @@ function normalizeRpcEntries(entries: any[]) {
   });
 }
 
+function entryHasParentCycle(entry: any, nodeById: Map<string, any>) {
+  const originId = normalizeRpcText(entry?.id);
+  if (!originId) return false;
+  const visited = new Set<string>([originId]);
+  let parentId = normalizeRpcText(entry?.parentId);
+  while (parentId) {
+    if (visited.has(parentId)) return true;
+    visited.add(parentId);
+    const parent = nodeById.get(parentId)?.entry;
+    if (!parent) return false;
+    parentId = normalizeRpcText(parent.parentId);
+  }
+  return false;
+}
+
 function buildRpcTreeFromEntries(
   entries: any[],
   labelsById: Map<string, string | undefined>,
@@ -66,8 +81,11 @@ function buildRpcTreeFromEntries(
       continue;
     }
     const parent = nodeById.get(parentId);
-    if (parent) parent.children.push(node);
-    else roots.push(node);
+    if (parent && !entryHasParentCycle(entry, nodeById)) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
   }
 
   const stack = [...roots];
