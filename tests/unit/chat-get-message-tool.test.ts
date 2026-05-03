@@ -23,6 +23,6 @@ test("get_chat_msg contributes the chat reply lookup system guidance", () => {
   const getChatMessageTool = tools.find((tool) => tool.name === "get_chat_msg");
   assert.ok(getChatMessageTool);
   assert.deepEqual(getChatMessageTool.promptGuidelines, [
-    "If the current chat message metadata contains `reply to message id: <id>`, always call get_chat_msg with that exact message id before answering.",
+    "When chat metadata has `reply to message id: <id>`, always call get_chat_msg with that id before answering.",
   ]);
 });

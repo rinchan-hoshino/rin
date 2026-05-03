@@ -155,7 +155,7 @@ test("chat prompt context keeps reply id metadata without embedding lookup guida
   assert.ok(promptText.includes("reply to message id: quoted-42"));
   assert.equal(promptText.includes("reply message:"), false);
   assert.equal(promptText.includes("first line"), false);
-  assert.equal(promptText.includes("reply lookup:"), false);
+  assert.equal(promptText.includes("reply lookup"), false);
 });
 
 test("chat prompt context keeps owner and trusted senders distinct", () => {

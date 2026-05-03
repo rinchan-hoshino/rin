@@ -31,9 +31,7 @@ import {
   buildInboundAttachmentNotice,
   getChatId,
   getChatType,
-  lookupReplyMessage,
   lookupReplySession,
-  mentionLike,
   persistInboundMessage,
   pickChatName,
   pickMessageId,
@@ -43,6 +41,7 @@ import {
   pickUserId,
   safeString,
   hasInboundChatMessageReplyBoundary,
+  isReplyToLatestAssistantMessage,
 } from "./chat-helpers.js";
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { ChatController, loadChatSettings } from "./controller.js";
@@ -394,6 +393,13 @@ export async function startChatBridge(
       chatKey,
       replyToMessageId,
     );
+    const promptReplyToMessageId = isReplyToLatestAssistantMessage(
+      runtime.agentDir,
+      chatKey,
+      replyToMessageId,
+    )
+      ? ""
+      : replyToMessageId;
     const promptMeta = {
       source: "chat-bridge",
       triggerKind: "chat-command",
@@ -409,7 +415,7 @@ export async function startChatBridge(
       nickname: pickSenderNickname(session),
       groupNickname: pickSenderGroupNickname(session) || undefined,
       identity: trust,
-      replyToMessageId: replyToMessageId || undefined,
+      replyToMessageId: promptReplyToMessageId || undefined,
     };
 
     if (
@@ -467,45 +473,6 @@ export async function startChatBridge(
     }
   };
 
-  const resolveQuotedInputElements = (
-    session: any,
-    elements: any[],
-    chatKey: string,
-  ) => {
-    const replyToMessageId = pickReplyToMessageId(session);
-    if (getChatType(session) !== "group" || !mentionLike(session)) {
-      return elements;
-    }
-    if (!replyToMessageId || !chatKey) return elements;
-    const quoted = lookupReplyMessage(
-      runtime.agentDir,
-      chatKey,
-      replyToMessageId,
-    );
-    if (!quoted) return elements;
-    if (safeString(quoted.sessionFile || quoted.sessionId || "").trim()) {
-      return elements;
-    }
-    const currentUserId = pickUserId(session);
-    const quotedUserId = safeString(
-      quoted.userId || session?.quote?.userId || "",
-    ).trim();
-    if (!currentUserId || !quotedUserId || currentUserId !== quotedUserId) {
-      return elements;
-    }
-    if (Array.isArray(quoted.elements) && quoted.elements.length) {
-      return quoted.elements;
-    }
-    const text = safeString(
-      quoted.text ||
-        quoted.strippedContent ||
-        quoted.rawContent ||
-        quoted.quote?.content ||
-        "",
-    ).trim();
-    return text ? [{ type: "text", attrs: { content: text } }] : elements;
-  };
-
   const handleAllowedChatTurnSession = async (
     session: any,
     elements: any[],
@@ -523,6 +490,13 @@ export async function startChatBridge(
     const linkedSessionFile = safeString(
       replySession?.sessionFile || "",
     ).trim();
+    const promptReplyToMessageId = isReplyToLatestAssistantMessage(
+      runtime.agentDir,
+      decision.chatKey,
+      replyToMessageId,
+    )
+      ? ""
+      : replyToMessageId;
     const { attachments, failures } = await extractInboundAttachments(
       elements,
       chatStateDir(dataDir, decision.chatKey),
@@ -563,7 +537,7 @@ export async function startChatBridge(
         safeString(session?.platform || "").trim(),
         pickUserId(session),
       ),
-      replyToMessageId: replyToMessageId || undefined,
+      replyToMessageId: promptReplyToMessageId || undefined,
       attachedFiles: attachments
         .filter((item) => item?.kind === "file")
         .map((item) => ({ name: item.name, path: item.path })),
@@ -619,25 +593,11 @@ export async function startChatBridge(
     identity: any,
   ) => {
     const platform = safeString(session?.platform || "").trim();
-    const rawChatKey = composeChatKey(
-      platform,
-      getChatId(session),
-      safeString(session?.selfId || session?.bot?.selfId || "").trim(),
-    );
-    const effectiveElements = resolveQuotedInputElements(
-      session,
-      elements,
-      rawChatKey,
-    );
-    const decision = await shouldProcessText(
-      session,
-      effectiveElements,
-      identity,
-    );
+    const decision = await shouldProcessText(session, elements, identity);
     if (!decision.allow) return { retry: false };
     return await handleAllowedChatTurnSession(
       session,
-      effectiveElements,
+      elements,
       identity,
       decision,
     );
@@ -721,14 +681,9 @@ export async function startChatBridge(
       };
     }
 
-    const effectiveElements = resolveQuotedInputElements(
-      queuedSession,
-      queuedElements,
-      envelope.chatKey,
-    );
     const decision = await shouldProcessText(
       queuedSession,
-      effectiveElements,
+      queuedElements,
       identity,
     );
     if (!decision.allow) {
@@ -744,7 +699,7 @@ export async function startChatBridge(
         task = runClaimedInboxJob(job, () =>
           handleAllowedChatTurnSession(
             queuedSession,
-            effectiveElements,
+            queuedElements,
             identity,
             decision,
           ),

@@ -5,6 +5,7 @@ import { ensureExtension, ensureFileName, fileNameFromUrl } from "./support.js";
 import { ensureDir } from "../platform/fs.js";
 import {
   findChatMessageByChatAndId,
+  listChatMessages,
   listChatMessagesByReplyTo,
   saveChatMessage,
   updateChatMessage,
@@ -160,6 +161,46 @@ export function lookupReplySession(
     linked,
     sessionFile: resolveStoredSessionFile(agentDir, linked.sessionFile),
   };
+}
+
+function chatMessageSortTime(record: any) {
+  return Date.parse(safeString(record?.receivedAt || record?.processedAt)) || 0;
+}
+
+function compareChatMessageOrder(left: any, right: any) {
+  const leftTime = chatMessageSortTime(left);
+  const rightTime = chatMessageSortTime(right);
+  if (leftTime !== rightTime) return leftTime - rightTime;
+  return safeString(left?.recordKey).localeCompare(
+    safeString(right?.recordKey),
+  );
+}
+
+function isSubstantiveAssistantChatMessage(record: any) {
+  return (
+    record?.role === "assistant" &&
+    isSubstantiveAssistantChatText(record.text || record.rawContent)
+  );
+}
+
+export function isReplyToLatestAssistantMessage(
+  agentDir: string,
+  chatKey: string,
+  replyToMessageId: string,
+) {
+  const replied = lookupReplyMessage(agentDir, chatKey, replyToMessageId);
+  if (!replied || !isSubstantiveAssistantChatMessage(replied)) return false;
+  let latest: any = null;
+  for (const item of listChatMessages(agentDir)) {
+    if (item.chatKey !== chatKey || !isSubstantiveAssistantChatMessage(item)) {
+      continue;
+    }
+    if (!latest || compareChatMessageOrder(latest, item) < 0) latest = item;
+  }
+  return (
+    safeString(latest?.messageId).trim() ===
+    safeString(replied.messageId).trim()
+  );
 }
 
 function isSubstantiveAssistantChatText(text: unknown) {

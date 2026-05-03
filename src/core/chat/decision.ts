@@ -4,6 +4,7 @@ import {
   getChatId,
   hasMediaElements,
   mentionLike,
+  pickReplyToMessageId,
   pickUserId,
   safeString,
 } from "./chat-helpers.js";
@@ -175,7 +176,10 @@ export async function shouldProcessText(
     renderChatNodesMarkdown(elements, { renderAt: () => "" }),
   );
   const hasMedia = hasMediaElements(elements);
-  if (!text && !hasMedia)
+  const isReplyOnlyTrigger =
+    Boolean(pickReplyToMessageId(session)) &&
+    (directLike(session) || mentionLike(session));
+  if (!text && !hasMedia && !isReplyOnlyTrigger)
     return {
       allow: false,
       text: "",
