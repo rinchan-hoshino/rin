@@ -10,6 +10,7 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
+import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import type { RpcFrontendClient } from "./frontend-surface.js";
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
@@ -421,6 +422,18 @@ export class RpcInteractiveSession {
     this.unsubscribeClient = this.client.subscribe((event) => {
       if (event.type === "ui" && event.name === "connection_lost") {
         this.handleConnectionLost();
+        return;
+      }
+      if (event.type === "extension_ui_request") {
+        this.handleRpcEvent((event as any).payload);
+        return;
+      }
+      if (event.type === "extension_error") {
+        this.emitEvent({
+          type: "status",
+          level: "error",
+          text: String((event as any).payload?.error || "Extension error"),
+        } as any);
         return;
       }
       if (event.type !== "ui") return;
@@ -1500,7 +1513,10 @@ export class RpcInteractiveSession {
     );
   }
 
-  private async call(type: string, payload: Record<string, unknown> = {}) {
+  private async call(
+    type: RinRpcCommandType,
+    payload: Record<string, unknown> = {},
+  ) {
     const sessionScoped = isSessionScopedCommand(type);
     const send = async () =>
       await this.client.send({

@@ -1,0 +1,275 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+import {
+  DefaultResourceLoader,
+  SettingsManager,
+} from "@mariozechner/pi-coding-agent";
+
+const rootDir = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "..",
+  "..",
+);
+const runtime = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"))
+    .href
+);
+const capabilitySession = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-lib", "capability-session.js"),
+  ).href
+);
+const daemonExtensions = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "extensions.js"),
+  ).href
+);
+const bundledExtensions = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-bundled-extensions.js"))
+    .href
+);
+
+function createCapabilities(agentDir: string) {
+  return capabilitySession.createRinCapabilitySet({
+    cwd: agentDir,
+    agentDir,
+    definitions: runtime.createRinCapabilityDefinitions({
+      cwd: agentDir,
+      agentDir,
+      getThinkingLevel: () => "medium",
+      sendMessage: () => {},
+    }),
+  });
+}
+
+async function writeJson(filePath: string, value: unknown) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function writeProviderPackage(
+  dir: string,
+  packageName: string,
+  source: string,
+) {
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, "package.json"),
+    `${JSON.stringify(
+      { name: packageName, version: "0.0.0", type: "module", main: "index.js" },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  await fs.writeFile(path.join(dir, "index.js"), source, "utf8");
+}
+
+async function createExtensionLoader(agentDir: string) {
+  const settingsManager = SettingsManager.create(agentDir, agentDir);
+  bundledExtensions.applyBundledRinExtensionAliases(settingsManager);
+  const loader = new DefaultResourceLoader({
+    cwd: agentDir,
+    agentDir,
+    settingsManager,
+  });
+  await loader.reload();
+  return loader;
+}
+
+function extensionToolNames(loader: DefaultResourceLoader) {
+  return loader
+    .getExtensions()
+    .extensions.flatMap((extension: any) =>
+      Array.from(extension.tools.values()).map(
+        (tool: any) => tool.definition.name,
+      ),
+    );
+}
+
+function findExtensionTool(loader: DefaultResourceLoader, name: string) {
+  for (const extension of loader.getExtensions().extensions as any[]) {
+    const tool = extension.tools.get(name);
+    if (tool) return tool.definition;
+  }
+  return undefined;
+}
+
+test("stage B browser and computer use extensions stay disabled by default", async () => {
+  for (const settings of [{}, { extensions: [] }]) {
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
+    try {
+      await writeJson(path.join(agentDir, "settings.json"), settings);
+      const capabilities = createCapabilities(agentDir);
+      const toolNames = capabilities
+        .getToolDefinitions()
+        .map((tool: any) => tool.name);
+      const loader = await createExtensionLoader(agentDir);
+
+      assert.equal(toolNames.includes("browser_use"), false);
+      assert.equal(toolNames.includes("computer_use"), false);
+      assert.equal(extensionToolNames(loader).includes("browser_use"), false);
+      assert.equal(extensionToolNames(loader).includes("computer_use"), false);
+    } finally {
+      await fs.rm(agentDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("stage B browser and computer use load as external Pi extensions and honor native filters", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
+  try {
+    await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: ["rin:browser-use", "rin:computer-use", "!rin:browser-use"],
+    });
+    const loader = await createExtensionLoader(agentDir);
+    const toolNames = extensionToolNames(loader);
+
+    assert.equal(toolNames.includes("browser_use"), false);
+    assert.equal(toolNames.includes("computer_use"), true);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("stage B external browser and computer use tools execute through adapters", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
+  const browserAdapterPath = path.join(agentDir, "agent-browser-adapter.js");
+  const computerAdapterPath = path.join(agentDir, "computer-adapter.js");
+  const previousRinDir = process.env.RIN_DIR;
+  try {
+    await fs.writeFile(
+      browserAdapterPath,
+      `process.stdout.write(JSON.stringify({ agentBrowser: true, args: process.argv.slice(2) }));\n`,
+      "utf8",
+    );
+    await fs.writeFile(
+      computerAdapterPath,
+      `process.stdin.setEncoding("utf8");
+let input = "";
+process.stdin.on("data", (chunk) => input += chunk);
+process.stdin.on("end", () => {
+  const payload = JSON.parse(input || "{}");
+  process.stdout.write(JSON.stringify({ ok: true, action: payload.action }));
+});
+`,
+      "utf8",
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: ["rin:browser-use", "rin:computer-use"],
+    });
+    await writeJson(path.join(agentDir, "extensions", "rin-browser-use.json"), {
+      command: process.execPath,
+      args: [browserAdapterPath],
+    });
+    await writeJson(
+      path.join(agentDir, "extensions", "rin-computer-use.json"),
+      {
+        adapter: {
+          command: process.execPath,
+          args: [computerAdapterPath],
+        },
+      },
+    );
+    process.env.RIN_DIR = agentDir;
+    const loader = await createExtensionLoader(agentDir);
+    const browserTool = findExtensionTool(loader, "browser_use");
+    const computerTool = findExtensionTool(loader, "computer_use");
+    assert.ok(browserTool);
+    assert.ok(computerTool);
+
+    const browserResult = await browserTool.execute(
+      "tool-call-1",
+      { action: "status" },
+      undefined,
+      undefined,
+      { cwd: agentDir },
+    );
+    const computerResult = await computerTool.execute(
+      "tool-call-2",
+      { action: "key", key: "Return" },
+      undefined,
+      undefined,
+      { cwd: agentDir },
+    );
+
+    assert.match(browserResult.content[0].text, /browser_use status/);
+    assert.match(browserResult.content[0].text, /agentBrowser/);
+    assert.match(browserResult.content[0].text, /cdp-url/);
+    assert.match(computerResult.content[0].text, /computer_use key/);
+    assert.match(computerResult.content[0].text, /ok/);
+  } finally {
+    restoreEnv("RIN_DIR", previousRinDir);
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+function restoreEnv(name: string, value: string | undefined) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+test("stage B daemon extension manager starts async workers and stops them", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-worker-pkg-"),
+  );
+  const markerPath = path.join(agentDir, "worker.log");
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-daemon-worker-test",
+      `import fs from "node:fs";
+export const rinDaemonExtension = {
+  start(ctx) {
+    fs.appendFileSync(ctx.config.markerPath, "start:" + ctx.name + "\\n");
+    ctx.runAsync("tick", async () => {
+      fs.appendFileSync(ctx.config.markerPath, "async\\n");
+    });
+    return {
+      stop() {
+        fs.appendFileSync(ctx.config.markerPath, "stop\\n");
+      },
+    };
+  },
+};
+`,
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      rinExtensions: {
+        daemonWorkers: [
+          {
+            name: "worker-a",
+            packageName: "rin-daemon-worker-test",
+            version: `file:${packageDir}`,
+            config: { markerPath },
+          },
+        ],
+      },
+    });
+
+    const manager = new daemonExtensions.RinDaemonExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: () => {} },
+    });
+    const started = await manager.start();
+    await manager.stop();
+
+    assert.deepEqual(started, [
+      { name: "worker-a", packageName: "rin-daemon-worker-test" },
+    ]);
+    assert.equal(
+      await fs.readFile(markerPath, "utf8"),
+      "start:worker-a\nasync\nstop\n",
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});

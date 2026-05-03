@@ -1,3 +1,4 @@
+import type { RinRpcCommand } from "../rin-frontend-sdk/index.js";
 import type { RpcFrontendClient } from "./frontend-surface.js";
 
 type OAuthCredentialSummary = { type: string } | undefined;
@@ -42,7 +43,7 @@ function normalizeCredentialSummary(value: any): OAuthCredentialSummary {
 
 async function sendIgnoredClientCommand(
   client: RpcFrontendClient,
-  payload: Record<string, unknown>,
+  payload: RinRpcCommand,
 ) {
   await client.send(payload).catch(() => {});
 }

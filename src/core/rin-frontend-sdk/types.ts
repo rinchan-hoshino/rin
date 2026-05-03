@@ -1,0 +1,158 @@
+import type {
+  RinRpcCommandType,
+  RinRpcResponseEnvelope,
+} from "../rin-lib/rpc-types.js";
+
+export type RinRpcCommand = {
+  id?: string;
+  type: RinRpcCommandType | "extension_ui_response";
+  [key: string]: unknown;
+};
+
+export type RinRpcResponse<T = unknown> = Omit<
+  RinRpcResponseEnvelope,
+  "data"
+> & {
+  data?: T;
+};
+
+export type RinExtensionUiMethod =
+  | "select"
+  | "confirm"
+  | "input"
+  | "editor"
+  | "notify"
+  | "setStatus"
+  | "setWorkingMessage"
+  | "setWorkingVisible"
+  | "setWorkingIndicator"
+  | "setHiddenThinkingLabel"
+  | "setWidget"
+  | "setFooter"
+  | "setHeader"
+  | "setTitle"
+  | "setToolsExpanded"
+  | "set_editor_text";
+
+export type RinExtensionUiRequest = {
+  type: "extension_ui_request";
+  id?: string;
+  method: RinExtensionUiMethod | string;
+  title?: string;
+  message?: string;
+  options?: unknown[];
+  placeholder?: string;
+  prefill?: string;
+  notifyType?: string;
+  statusKey?: string;
+  statusText?: string;
+  visible?: boolean;
+  label?: string;
+  widgetKey?: string;
+  widgetLines?: unknown;
+  widgetPlacement?: string;
+  expanded?: boolean;
+  text?: string;
+  [key: string]: unknown;
+};
+
+export type RinExtensionUiResponse =
+  | { type: "extension_ui_response"; id: string; value: string }
+  | { type: "extension_ui_response"; id: string; confirmed: boolean }
+  | { type: "extension_ui_response"; id: string; cancelled: true };
+
+export type RinFrontendEvent =
+  | {
+      type: "message_delta";
+      messageId: string;
+      role: "user" | "assistant" | "system" | "tool";
+      delta: string;
+    }
+  | { type: "message_done"; messageId: string; stopReason?: string }
+  | { type: "status"; level: "info" | "warning" | "error"; text: string }
+  | {
+      type: "tool";
+      toolCallId: string;
+      phase: "start" | "update" | "done";
+      toolName: string;
+      title?: string;
+      body?: string;
+      isError?: boolean;
+    }
+  | { type: "session_changed"; sessionId: string; title?: string }
+  | { type: "extension_ui_request"; payload: RinExtensionUiRequest }
+  | { type: "extension_error"; payload: unknown }
+  | { type: "ui"; name: string; payload: unknown };
+
+export type RinFrontendAutocompleteItem = {
+  id: string;
+  label: string;
+  insertText?: string;
+  detail?: string;
+  kind?: "command" | "file" | "symbol" | "session" | "model" | "other";
+};
+
+export type RinFrontendCommandItem = {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  source?: string;
+};
+
+export type RinFrontendSessionItem = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  isActive?: boolean;
+};
+
+export type RinFrontendModelItem = {
+  id: string;
+  label: string;
+  provider?: string;
+  description?: string;
+};
+
+export type RinSessionState = {
+  model?: unknown;
+  thinkingLevel?: string;
+  turnActive?: boolean;
+  isStreaming?: boolean;
+  isCompacting?: boolean;
+  sessionFile?: string;
+  sessionId?: string;
+  sessionName?: string;
+  [key: string]: unknown;
+};
+
+export type RinPromptOptions = {
+  images?: unknown[];
+  streamingBehavior?: "steer" | "followUp";
+  source?: string;
+  requestTag?: string;
+};
+
+export interface RinFrontendClient {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  isConnected(): boolean;
+  subscribe(listener: (event: RinFrontendEvent) => void): () => void;
+  request<T = unknown>(command: RinRpcCommand): Promise<T>;
+  send(command: RinRpcCommand): Promise<RinRpcResponse>;
+  submit(text: string): Promise<void>;
+  prompt(text: string, options?: RinPromptOptions): Promise<void>;
+  abort(): Promise<void>;
+  getState(): Promise<RinSessionState>;
+  getMessages(): Promise<unknown[]>;
+  getCommands(): Promise<RinFrontendCommandItem[]>;
+  runCommand(commandLine: string): Promise<unknown>;
+  getCommandArgumentCompletions(
+    commandName: string,
+    argumentPrefix: string,
+  ): Promise<RinFrontendAutocompleteItem[]>;
+  listSessions(): Promise<RinFrontendSessionItem[]>;
+  resumeSession(sessionId: string): Promise<void>;
+  listModels(): Promise<RinFrontendModelItem[]>;
+  respondExtensionUi(response: RinExtensionUiResponse): Promise<void>;
+}

@@ -390,6 +390,7 @@ export function ensureChatRuntimeDependencies(
         cwd: rootDir,
         stdio: "pipe",
         encoding: "utf8",
+        timeout: 120000,
       },
     );
   } catch (error: any) {

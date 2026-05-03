@@ -8,6 +8,12 @@ import { defaultDaemonSocketPath, parseJsonl } from "../rin-lib/common.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
 import { describeBoundSessions } from "../session/listing.js";
 import type {
+  RinExtensionUiRequest,
+  RinExtensionUiResponse,
+  RinRpcCommand,
+  RinRpcResponse,
+} from "../rin-frontend-sdk/index.js";
+import type {
   FrontendAutocompleteItem,
   FrontendCommandItem,
   FrontendDialogSpec,
@@ -26,6 +32,17 @@ function toFrontendEvent(event: any): InteractiveFrontendEvent | null {
 
   if (event.type === "worker_exit") {
     return { type: "ui", name: "worker_exit", payload: event };
+  }
+
+  if (event.type === "extension_ui_request") {
+    return {
+      type: "extension_ui_request",
+      payload: event as RinExtensionUiRequest,
+    };
+  }
+
+  if (event.type === "extension_error") {
+    return { type: "extension_error", payload: event };
   }
 
   if (event.type === "response") {
@@ -133,11 +150,15 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   }
 
   async submit(text: string) {
-    await this.send({ type: "prompt", message: text });
+    await this.prompt(text);
+  }
+
+  async prompt(text: string, options: Record<string, unknown> = {}) {
+    await this.request({ type: "prompt", message: text, ...options });
   }
 
   async abort() {
-    await this.send({ type: "abort" });
+    await this.request({ type: "abort" });
   }
 
   async getAutocompleteItems(
@@ -190,13 +211,11 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     commandName: string,
     argumentPrefix: string,
   ): Promise<FrontendAutocompleteItem[]> {
-    const data = this.getData(
-      await this.send({
-        type: "get_command_argument_completions",
-        commandName,
-        argumentPrefix,
-      }),
-    );
+    const data = await this.request<any>({
+      type: "get_command_argument_completions",
+      commandName,
+      argumentPrefix,
+    });
     const items = Array.isArray(data?.items) ? data.items : [];
     return items.map((item: any, index: number) => ({
       id: String(item?.id || item?.value || item?.label || index),
@@ -207,6 +226,23 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
         typeof item?.description === "string" ? item.description : undefined,
       kind: "other" as const,
     }));
+  }
+
+  async getState() {
+    return await this.request<Record<string, unknown>>({ type: "get_state" });
+  }
+
+  async getMessages() {
+    const data = await this.request<any>({ type: "get_messages" });
+    return Array.isArray(data?.messages) ? data.messages : [];
+  }
+
+  async runCommand(commandLine: string) {
+    return await this.request({ type: "run_command", commandLine });
+  }
+
+  async respondExtensionUi(response: RinExtensionUiResponse) {
+    await this.send(response);
   }
 
   async listSessions(): Promise<FrontendSessionItem[]> {
@@ -257,7 +293,11 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     return Boolean(this.socket && !this.socket.destroyed);
   }
 
-  async send(command: any) {
+  async request<T = unknown>(command: RinRpcCommand): Promise<T> {
+    return this.getData(await this.send(command)) as T;
+  }
+
+  async send(command: RinRpcCommand): Promise<RinRpcResponse> {
     if (!this.socket || this.socket.destroyed)
       throw new Error("rin_tui_not_connected");
     const id =

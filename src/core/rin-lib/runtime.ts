@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { isContextOverflow } from "@mariozechner/pi-ai";
 
+import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import { estimateContextTokens } from "../rin-tui/session-helpers.js";
 import {
   buildConfiguredLanguageSystemPrompt,
@@ -794,6 +795,7 @@ export async function createConfiguredAgentSession(
     createAgentSessionRuntime,
     createAgentSessionServices,
     createAgentSessionFromServices,
+    SettingsManager,
     SessionManager,
   } = codingAgentModule as any;
 
@@ -828,9 +830,13 @@ export async function createConfiguredAgentSession(
     }
     applyRuntimeProfileEnvironment({ agentDir: runtimeAgentDir });
 
+    const settingsManager = SettingsManager.create(runtimeCwd, runtimeAgentDir);
+    applyBundledRinExtensionAliases(settingsManager);
+
     const services = await createAgentSessionServices({
       cwd: runtimeCwd,
       agentDir: runtimeAgentDir,
+      settingsManager,
       resourceLoaderOptions: {
         additionalExtensionPaths: options.additionalExtensionPaths ?? [],
         noExtensions: options.noExtensions,

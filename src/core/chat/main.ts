@@ -67,9 +67,12 @@ import { isOwnerPresentForGroup, shouldProcessText } from "./decision.js";
 import {
   createChatRuntimeApp,
   createChatRuntimeH,
-  instantiateBuiltInChatRuntimeAdapters,
+  instantiateChatRuntimeAdapters,
 } from "../chat-runtime/index.js";
-import { listChatRuntimeAdapterEntries } from "./runtime-config.js";
+import {
+  ensureChatRuntimeDependencies,
+  listChatRuntimeAdapterEntries,
+} from "./runtime-config.js";
 import { composeChatKey, loadIdentity, trustOf } from "./support.js";
 import { sendOutboxPayload } from "./transport.js";
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
@@ -289,8 +292,17 @@ export async function startChatBridge(
 
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
-  const runtimeAdapters = instantiateBuiltInChatRuntimeAdapters(app, {
+  const chatRuntimeRoot = path.join(dataDir, "chat-runtime");
+  try {
+    ensureChatRuntimeDependencies(chatRuntimeRoot, settings);
+  } catch (error: any) {
+    logger.warn(
+      `chat runtime dependency install failed err=${String(error?.message || error)}`,
+    );
+  }
+  const runtimeAdapters = await instantiateChatRuntimeAdapters(app, {
     dataDir,
+    runtimeRoot: chatRuntimeRoot,
     settings,
     adapterEntries: listChatRuntimeAdapterEntries(settings),
     logger,

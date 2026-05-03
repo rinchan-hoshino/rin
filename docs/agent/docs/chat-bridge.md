@@ -24,6 +24,39 @@ The built-in direct runtime currently includes:
 - Slack
 - Minecraft / QueQiao
 
+## Custom adapter provider packages
+
+Custom chat bridge adapters are trusted Node.js packages loaded only by the chat runtime. They are not Pi extensions, do not run in the Pi extension runner, and do not change Rin-owned product capabilities.
+
+A package may export any one of these provider shapes:
+
+```ts
+export function createAdapter(input) {
+  /* ... */
+}
+export default {
+  createAdapter(input) {
+    /* ... */
+  },
+};
+export const chatBridgeProvider = {
+  createAdapter(input) {
+    /* ... */
+  },
+};
+```
+
+`createAdapter(input)` receives:
+
+- `app`: the chat runtime app; call `app.register(adapter, bot)` if you self-register
+- `dataDir`: Rin data directory
+- `runtimeRoot`: the isolated custom chat-runtime package root
+- `key`, `name`, `packageName`: normalized adapter identity
+- `config`: this adapter instance config
+- `logger`: optional logger
+
+The provider can either self-register or return `{ adapter, bot }`. The adapter may expose async `start()` and `stop()`. The bot should expose at least `platform`, `selfId`, `status`, and `sendMessage(chatId, content)`; expose platform-specific APIs under `internal` when available so `chat_bridge` users can access them through `scope.internal`.
+
 ## Runtime objects
 
 The code runs as an async function body.

@@ -1,3 +1,16 @@
+import type {
+  RinExtensionUiRequest,
+  RinExtensionUiResponse,
+  RinFrontendAutocompleteItem,
+  RinFrontendClient,
+  RinFrontendCommandItem,
+  RinFrontendEvent,
+  RinFrontendModelItem,
+  RinFrontendSessionItem,
+  RinRpcCommand,
+  RinRpcResponse,
+} from "../rin-frontend-sdk/index.js";
+
 export interface FrontendMessageDeltaEvent {
   type: "message_delta";
   messageId: string;
@@ -39,43 +52,30 @@ export interface FrontendUiEvent {
   payload: unknown;
 }
 
+export interface FrontendExtensionUiRequestEvent {
+  type: "extension_ui_request";
+  payload: RinExtensionUiRequest;
+}
+
+export interface FrontendExtensionErrorEvent {
+  type: "extension_error";
+  payload: unknown;
+}
+
 export type InteractiveFrontendEvent =
   | FrontendMessageDeltaEvent
   | FrontendMessageDoneEvent
   | FrontendStatusEvent
   | FrontendToolEvent
   | FrontendSessionChangedEvent
+  | FrontendExtensionUiRequestEvent
+  | FrontendExtensionErrorEvent
   | FrontendUiEvent;
 
-export interface FrontendAutocompleteItem {
-  id: string;
-  label: string;
-  insertText?: string;
-  detail?: string;
-  kind?: "command" | "file" | "symbol" | "session" | "model" | "other";
-}
-
-export interface FrontendCommandItem {
-  id: string;
-  name: string;
-  description?: string;
-  category?: string;
-  source?: string;
-}
-
-export interface FrontendSessionItem {
-  id: string;
-  title: string;
-  subtitle?: string;
-  isActive?: boolean;
-}
-
-export interface FrontendModelItem {
-  id: string;
-  label: string;
-  provider?: string;
-  description?: string;
-}
+export type FrontendAutocompleteItem = RinFrontendAutocompleteItem;
+export type FrontendCommandItem = RinFrontendCommandItem;
+export type FrontendSessionItem = RinFrontendSessionItem;
+export type FrontendModelItem = RinFrontendModelItem;
 
 export interface FrontendDialogSpec {
   id: string;
@@ -101,5 +101,9 @@ export interface RpcFrontendClient extends InteractiveFrontendSurface {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   isConnected(): boolean;
-  send(command: unknown): Promise<any>;
+  request<T = unknown>(command: RinRpcCommand): Promise<T>;
+  send(command: RinRpcCommand): Promise<RinRpcResponse>;
+  respondExtensionUi(response: RinExtensionUiResponse): Promise<void>;
 }
+
+export type { RinFrontendClient, RinFrontendEvent };

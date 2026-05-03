@@ -104,6 +104,67 @@ test("rpc client supports injected in-process transport connectors", async () =>
   ]);
 });
 
+test("rpc client exposes typed extension UI events and responses", async () => {
+  const client = new RinDaemonFrontendClient("/tmp/fake.sock");
+  const events = [];
+  client.subscribe((event) => events.push(event));
+
+  RinDaemonFrontendClient.prototype.handleLine.call(
+    client,
+    JSON.stringify({
+      type: "extension_ui_request",
+      id: "ui-1",
+      method: "confirm",
+      title: "Confirm",
+      message: "Proceed?",
+    }),
+  );
+
+  assert.deepEqual(events[0], {
+    type: "extension_ui_request",
+    payload: {
+      type: "extension_ui_request",
+      id: "ui-1",
+      method: "confirm",
+      title: "Confirm",
+      message: "Proceed?",
+    },
+  });
+
+  let sent;
+  client.send = async (payload) => {
+    sent = payload;
+    return { success: true, data: {} };
+  };
+
+  await client.respondExtensionUi({
+    type: "extension_ui_response",
+    id: "ui-1",
+    confirmed: true,
+  });
+  assert.deepEqual(sent, {
+    type: "extension_ui_response",
+    id: "ui-1",
+    confirmed: true,
+  });
+});
+
+test("rpc client typed request unwraps daemon response data", async () => {
+  const client = new RinDaemonFrontendClient("/tmp/fake.sock");
+  client.isConnected = () => true;
+  client.send = async (payload) => ({
+    success: true,
+    data: { payload },
+  });
+
+  assert.deepEqual(await client.getState(), {
+    payload: { type: "get_state" },
+  });
+  assert.deepEqual(await client.runCommand("/hello"), {
+    payload: { type: "run_command", commandLine: "/hello" },
+  });
+});
+
 test("rpc client normalizes session list display metadata from daemon responses", async () => {
   const client = new RinDaemonFrontendClient("/tmp/fake.sock");
   client.isConnected = () => true;

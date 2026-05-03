@@ -103,10 +103,72 @@ Notes for the agent:
 
 - `packageName` is the npm package name
 - `version` is optional and defaults to `latest`
-- `pluginKey` is the internal adapter key for that package
+- `pluginKey` is the package's adapter/config key kept for compatibility with existing adapter package naming
 - `config` can be a single config object, an array of named instances, or a keyed object map just like other adapter config blocks
-- after editing `settings.json`, restart Rin; Rin will materialize the custom runtime package and install any missing custom adapter dependencies automatically before loading the bridge config
+- after editing `settings.json`, restart Rin; Rin attempts to materialize the custom runtime package, install any missing custom adapter dependencies, and load provider exports before starting the bridge
+- custom adapter packages must export `createAdapter`, `default.createAdapter`, or `chatBridgeProvider.createAdapter`; see `~/.rin/docs/rin/docs/chat-bridge.md`
 - treat custom adapters as trusted-code execution because they run as third-party Node.js code under the Rin user account
+
+## Rin extension switches
+
+Rin ships optional browser/computer control as normal Pi extension packages under the installed app. They are not core Rin capabilities; they are "built in" only because the installer includes their code. If `extensions` is missing or `[]`, both tools are off.
+
+Example installed `settings.json`:
+
+```json
+{
+  "extensions": ["rin:browser-use", "rin:computer-use"]
+}
+```
+
+Optional bundled-extension configuration follows Rin's extension-file convention. Rin does not create these files by default; create them only when overriding the open-box behavior:
+
+```jsonc
+// ~/.rin/extensions/rin-browser-use.json
+{
+  "command": "agent-browser",
+  "args": [],
+}
+```
+
+```jsonc
+// ~/.rin/extensions/rin-computer-use.json
+{
+  "adapter": {
+    "command": "my-computer-adapter",
+    "args": [],
+  },
+  "allowInstall": false,
+}
+```
+
+Notes for the agent:
+
+- `rin:browser-use` registers `browser_use` and always drives the external `agent-browser` CLI; if no command is configured, it uses `agent-browser` from `PATH`, then falls back to the latest npm package through `npx -y agent-browser`
+- `rin:computer-use` registers `computer_use`; if no adapter command is configured, it uses platform backends for Windows, Linux, or macOS
+- use Pi resource filters with the Rin alias, for example `!rin:browser-use`, to disable a previously enabled bundled resource
+
+Daemon worker extensions are configured separately because they are daemon-process background providers, not session tools:
+
+```json
+{
+  "rinExtensions": {
+    "daemonWorkers": [
+      {
+        "name": "example-worker",
+        "packageName": "rin-daemon-worker-example",
+        "version": "latest",
+        "config": {}
+      }
+    ]
+  }
+}
+```
+
+- only configure trusted daemon worker package names and versions
+- `daemonWorkers` are packages loaded by the daemon process for long-running async work; they are not Pi extensions and do not run in std mode
+- daemon worker packages may be installed or updated with npm under `~/.rin/data/daemon-runtime` during daemon startup
+- after editing `settings.json`, restart Rin so the daemon reloads daemon workers
 
 ## Web search
 

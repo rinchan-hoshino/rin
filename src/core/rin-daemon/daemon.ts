@@ -41,6 +41,7 @@ import {
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
 import { listContinuableInterruptedTurnSessionFiles } from "../session/turn-state.js";
+import { RinDaemonExtensionManager } from "./extensions.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 
 function writeLine(socket: RpcSocketLike, payload: unknown) {
@@ -122,6 +123,13 @@ export async function startDaemon(
     chat: options.chat,
   });
   cronScheduler.start();
+
+  const daemonExtensionManager = new RinDaemonExtensionManager({
+    cwd: runtime.cwd,
+    agentDir: runtime.agentDir,
+    logger: console,
+  });
+  await daemonExtensionManager.start();
 
   for (const candidate of [socketPath, bridgeSocketPath]) {
     try {
@@ -600,6 +608,7 @@ export async function startDaemon(
     if (shuttingDown) return;
     shuttingDown = true;
     cronScheduler.stop();
+    await daemonExtensionManager.stop().catch(() => {});
     workerPool.beginShutdown();
     for (const socket of Array.from(activeSockets)) {
       try {
