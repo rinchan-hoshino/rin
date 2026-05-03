@@ -4,7 +4,9 @@ type ThinkingLevelModel = {
   provider?: string | null;
   id?: string | null;
   reasoning?: boolean | null;
-  thinkingLevelMap?: Partial<Record<AvailableThinkingLevel, string | null>> | null;
+  thinkingLevelMap?: Partial<
+    Record<AvailableThinkingLevel, string | null>
+  > | null;
 };
 
 export const ALL_THINKING_LEVELS = [
