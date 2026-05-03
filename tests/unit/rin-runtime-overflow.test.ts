@@ -13,21 +13,20 @@ const runtimeMod = await import(
     .href
 );
 
-test("Rin treats WebSocket close 1009 as context overflow", () => {
-  assert.equal(
-    runtimeMod.isRinContextOverflow(
-      { stopReason: "error", errorMessage: "WebSocket closed 1009" },
-      272000,
-    ),
-    true,
-  );
-  assert.equal(
-    runtimeMod.isRinContextOverflow(
-      { stopReason: "error", errorMessage: "WebSocket error" },
-      272000,
-    ),
-    false,
-  );
+test("Rin classifies Codex WebSocket failures by recovery path", () => {
+  const close1009 = {
+    stopReason: "error",
+    errorMessage: "WebSocket closed 1009",
+  };
+  const generic = {
+    stopReason: "error",
+    errorMessage: "WebSocket error",
+  };
+
+  assert.equal(runtimeMod.isRinContextOverflow(close1009, 272000), true);
+  assert.equal(runtimeMod.isRinRetryableProviderError(close1009), false);
+  assert.equal(runtimeMod.isRinContextOverflow(generic, 272000), false);
+  assert.equal(runtimeMod.isRinRetryableProviderError(generic), true);
 });
 
 test("Rin overflow compaction patch compacts and retries WebSocket 1009", async () => {
@@ -66,4 +65,27 @@ test("Rin overflow compaction patch compacts and retries WebSocket 1009", async 
   assert.deepEqual(calls, [["overflow", true]]);
   assert.deepEqual(session.agent.state.messages, [{ role: "user" }]);
   assert.equal(session._overflowRecoveryAttempted, true);
+});
+
+test("Rin retry patch treats generic WebSocket failures as retryable", () => {
+  const session: any = {
+    _isRetryableError: () => false,
+  };
+
+  runtimeMod.applyRinRetryableProviderErrors(session);
+
+  assert.equal(
+    session._isRetryableError({
+      stopReason: "error",
+      errorMessage: "WebSocket error",
+    }),
+    true,
+  );
+  assert.equal(
+    session._isRetryableError({
+      stopReason: "error",
+      errorMessage: "WebSocket closed 1009",
+    }),
+    false,
+  );
 });

@@ -496,6 +496,7 @@ const MID_TURN_COMPACTION_KEY = Symbol.for("rin.midTurnCompaction");
 const DISABLE_END_TURN_THRESHOLD_KEY = Symbol.for(
   "rin.disableEndTurnThresholdCompaction",
 );
+const RETRYABLE_PROVIDER_ERRORS_KEY = Symbol.for("rin.retryableProviderErrors");
 const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 88;
 const MID_TURN_CONTINUATION_BLOCK = [
   "Context compacted; treat this as a routine internal checkpoint.",
@@ -515,6 +516,13 @@ export function isRinContextOverflow(message: any, contextWindow?: number) {
   if (message?.stopReason !== "error") return false;
   const errorMessage = String(message?.errorMessage || "");
   return /\bWebSocket closed\s+1009\b/i.test(errorMessage);
+}
+
+export function isRinRetryableProviderError(message: any) {
+  if (message?.stopReason !== "error") return false;
+  const errorMessage = String(message?.errorMessage || "");
+  if (/\bWebSocket closed\s+1009\b/i.test(errorMessage)) return false;
+  return /\bWebSocket (?:error|closed)\b/i.test(errorMessage);
 }
 
 function buildMidTurnLlmContext(
@@ -602,6 +610,22 @@ export function applyDisableEndTurnThresholdCompaction(session: any) {
   };
 
   (session as any)[DISABLE_END_TURN_THRESHOLD_KEY] = { original };
+}
+
+export function applyRinRetryableProviderErrors(session: any) {
+  if (!session || typeof session !== "object") return;
+  if ((session as any)[RETRYABLE_PROVIDER_ERRORS_KEY]) return;
+  const original =
+    typeof session._isRetryableError === "function"
+      ? session._isRetryableError.bind(session)
+      : null;
+  if (!original) return;
+
+  session._isRetryableError = function patchedIsRetryableError(message: any) {
+    return original(message) || isRinRetryableProviderError(message);
+  };
+
+  (session as any)[RETRYABLE_PROVIDER_ERRORS_KEY] = { original };
 }
 
 export function applyMidTurnCompaction(
@@ -887,6 +911,7 @@ export async function createConfiguredAgentSession(
 
     applyRinPromptBuilder(result.session);
     applyDisableEndTurnThresholdCompaction(result.session);
+    applyRinRetryableProviderErrors(result.session);
     applyMidTurnCompaction(result.session);
     applyOverflowContinuationPrompt(result.session);
     applyAutoReloadAfterCompaction(result.session);
