@@ -8,6 +8,8 @@ export type {
   RinFrontendEvent,
   RinFrontendModelItem,
   RinFrontendSessionItem,
+  RinNewSessionOptions,
+  RinNewSessionResult,
   RinPromptOptions,
   RinRpcCommand,
   RinRpcResponse,

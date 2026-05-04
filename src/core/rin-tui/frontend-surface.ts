@@ -7,6 +7,8 @@ import type {
   RinFrontendEvent,
   RinFrontendModelItem,
   RinFrontendSessionItem,
+  RinNewSessionOptions,
+  RinNewSessionResult,
   RinRpcCommand,
   RinRpcResponse,
 } from "../rin-frontend-sdk/index.js";
@@ -103,6 +105,12 @@ export interface RpcFrontendClient extends InteractiveFrontendSurface {
   isConnected(): boolean;
   request<T = unknown>(command: RinRpcCommand): Promise<T>;
   send(command: RinRpcCommand): Promise<RinRpcResponse>;
+  prompt(text: string, options?: Record<string, unknown>): Promise<void>;
+  getState(): Promise<Record<string, unknown>>;
+  runCommand(commandLine: string): Promise<unknown>;
+  newSession(options?: RinNewSessionOptions): Promise<RinNewSessionResult>;
+  setModel(provider: string, modelId: string): Promise<unknown>;
+  setThinkingLevel(level: string): Promise<unknown>;
   respondExtensionUi(response: RinExtensionUiResponse): Promise<void>;
 }
 

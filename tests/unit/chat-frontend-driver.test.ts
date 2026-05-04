@@ -36,6 +36,100 @@ async function emitDriverEvent(driver: any, payload: any) {
   await driver.handleClientEvent({ type: "ui", payload });
 }
 
+function createFrontendClient() {
+  const calls: any[] = [];
+  let listener: any = null;
+  let connected = false;
+  let sessionFile = "/tmp/frontend-chat.jsonl";
+  return {
+    calls,
+    async connect() {
+      connected = true;
+    },
+    async disconnect() {
+      connected = false;
+    },
+    isConnected() {
+      return connected;
+    },
+    subscribe(nextListener: any) {
+      listener = nextListener;
+      return () => {
+        if (listener === nextListener) listener = null;
+      };
+    },
+    async getState() {
+      return { sessionFile, sessionId: "frontend-session", isStreaming: false };
+    },
+    async prompt(text: string, options: any = {}) {
+      calls.push({ type: "prompt", text, options });
+      await listener?.({
+        type: "ui",
+        payload: {
+          type: "rpc_turn_event",
+          event: "complete",
+          requestTag: options.requestTag,
+          finalText: "frontend final",
+          sessionId: "frontend-session",
+          sessionFile,
+        },
+      });
+    },
+    async runCommand(commandLine: string) {
+      calls.push({ type: "runCommand", commandLine });
+      return { handled: true, text: "command done", sessionFile };
+    },
+    async resumeSession(nextSessionFile: string) {
+      calls.push({ type: "resumeSession", sessionFile: nextSessionFile });
+      sessionFile = nextSessionFile;
+    },
+    async newSession(options: any = {}) {
+      calls.push({ type: "newSession", options });
+      sessionFile = "/tmp/frontend-managed.jsonl";
+      return { cancelled: false, sessionFile, sessionId: "frontend-session" };
+    },
+    async listModels() {
+      return [];
+    },
+    async setModel() {},
+    async setThinkingLevel(level: string) {
+      calls.push({ type: "setThinkingLevel", level });
+    },
+    async request(command: any) {
+      calls.push({ type: "request", command });
+      return {};
+    },
+    async send(command: any) {
+      return {
+        type: "response",
+        command: command.type,
+        success: true,
+        data: {},
+      };
+    },
+    async submit(text: string) {
+      await this.prompt(text);
+    },
+    async abort() {},
+    async getMessages() {
+      return [];
+    },
+    async getCommands() {
+      return [];
+    },
+    async getAutocompleteItems() {
+      return [];
+    },
+    async getCommandArgumentCompletions() {
+      return [];
+    },
+    async listSessions() {
+      return [];
+    },
+    async respondExtensionUi() {},
+  };
+}
+
 async function emitRpcTurnComplete(
   driver: any,
   requestTag: string,
@@ -54,6 +148,25 @@ async function emitRpcTurnComplete(
     sessionFile,
   });
 }
+
+test("chat frontend driver runs chat turns through a frontend client", async () => {
+  const client = createFrontendClient();
+  const driver = new ChatFrontendDriver({ clientFactory: () => client });
+
+  const result = await driver.runTurn({
+    text: "hello",
+    managedSessionLeaf: "telegram/1:2",
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  assert.equal(result.sessionFile, "/tmp/frontend-managed.jsonl");
+  assert.deepEqual(
+    client.calls.map((call: any) => call.type),
+    ["newSession", "prompt"],
+  );
+  assert.equal(client.calls[0].options.managedSessionLeaf, "telegram/1:2");
+  assert.equal(client.calls[1].text, "hello");
+});
 
 test("chat frontend driver does not leak growing final-answer prefixes as interim", async () => {
   const driver = createDriver();

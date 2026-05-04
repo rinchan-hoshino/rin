@@ -241,6 +241,21 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     return await this.request({ type: "run_command", commandLine });
   }
 
+  async newSession(options: Record<string, unknown> = {}) {
+    return await this.request<Record<string, unknown>>({
+      type: "new_session",
+      ...options,
+    });
+  }
+
+  async setModel(provider: string, modelId: string) {
+    return await this.request({ type: "set_model", provider, modelId });
+  }
+
+  async setThinkingLevel(level: string) {
+    return await this.request({ type: "set_thinking_level", level });
+  }
+
   async respondExtensionUi(response: RinExtensionUiResponse) {
     await this.send(response);
   }

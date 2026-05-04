@@ -126,6 +126,15 @@ export type RinSessionState = {
   [key: string]: unknown;
 };
 
+export type RinNewSessionOptions = {
+  managedSessionLeaf?: string;
+  parentSession?: string;
+};
+
+export type RinNewSessionResult = RinSessionState & {
+  cancelled?: boolean;
+};
+
 export type RinPromptOptions = {
   images?: unknown[];
   streamingBehavior?: "steer" | "followUp";
@@ -153,6 +162,9 @@ export interface RinFrontendClient {
   ): Promise<RinFrontendAutocompleteItem[]>;
   listSessions(): Promise<RinFrontendSessionItem[]>;
   resumeSession(sessionId: string): Promise<void>;
+  newSession(options?: RinNewSessionOptions): Promise<RinNewSessionResult>;
   listModels(): Promise<RinFrontendModelItem[]>;
+  setModel(provider: string, modelId: string): Promise<unknown>;
+  setThinkingLevel(level: string): Promise<unknown>;
   respondExtensionUi(response: RinExtensionUiResponse): Promise<void>;
 }
