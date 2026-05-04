@@ -28,7 +28,7 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 - `docs/runtime-layout.md`: runtime layout, stable paths, launcher ownership, and paths safe for agents to reference.
 - `docs/builtin-extensions.md`: builtin capabilities and default extra capabilities provided by Rin core.
 - `docs/capabilities.md`: compact agent-facing behavior and conventions for Rin features.
-- `docs/chat-bridge.md`: `chat_bridge` runtime objects, rich send examples, and adapter notes.
+- `docs/chat-bridge.md`: chat bridge SDK/configuration workflows, stored chat paths, rich content notes, and adapter notes.
 
 ## Reading order
 

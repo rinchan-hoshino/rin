@@ -8,19 +8,17 @@ const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "../..",
 );
-const fetchIndex = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "fetch", "index.js")).href
+const webSearchIndex = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-web-search", "index.js"),
+  ).href
 );
 
-function getFetchTool() {
-  const tools = fetchIndex.default().tools || [];
-  const tool = tools.find((entry) => entry.name === "fetch");
+function getWebSearchTool() {
+  const tools = webSearchIndex.default().tools || [];
+  const tool = tools.find((entry) => entry.name === "web_search");
   assert.ok(tool);
   return tool;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function withServer(handler, fn) {
@@ -38,9 +36,10 @@ async function withServer(handler, fn) {
   }
 }
 
-test("fetch tool keeps agent and user response headers consistent", async () => {
+test("web_search fetches URLs with Chrome-like headers and Readability markdown", async () => {
   await withServer(
     (request, response) => {
+      assert.match(request.headers["user-agent"] || "", /Chrome/);
       if (request.url === "/redirect") {
         response.writeHead(302, { location: "/page" });
         response.end();
@@ -48,37 +47,28 @@ test("fetch tool keeps agent and user response headers consistent", async () => 
       }
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(
-        "<html><head><title>Demo Title</title></head><body><main>Hello <b>Rin</b></main></body></html>",
+        "<html><head><title>Demo Title</title></head><body><main><h1>Readable</h1><p>Hello <b>Rin</b></p></main><nav>ignore</nav></body></html>",
       );
     },
     async (baseUrl) => {
-      const tool = getFetchTool();
+      const tool = getWebSearchTool();
       const result = await tool.execute(
         "tool-fetch",
-        { url: `${baseUrl}/redirect` },
+        { q: `${baseUrl}/redirect` },
         undefined,
         undefined,
       );
-      const finalUrl = `${baseUrl}/page`;
       const agentText = String(result.content?.[0]?.text || "");
       const userText = String(result.details?.userText || "");
 
-      assert.match(
-        agentText,
-        new RegExp(`^Fetched: ${escapeRegExp(finalUrl)}`, "m"),
-      );
-      assert.doesNotMatch(agentText, /^Final URL:/m);
-      assert.match(
-        userText,
-        new RegExp(`^Final URL: ${escapeRegExp(finalUrl)}`, "m"),
-      );
-      assert.doesNotMatch(userText, /^Fetched:/m);
-      assert.match(agentText, /Status: 200 OK/);
+      assert.equal(result.details?.mode, "fetch");
+      assert.equal(result.details?.fetch?.finalUrl, `${baseUrl}/page`);
+      assert.match(agentText, /web_fetch ok/);
+      assert.match(agentText, /status=200 OK/);
+      assert.match(userText, new RegExp(`Fetched: ${baseUrl}/page`));
       assert.match(userText, /Status: 200 OK/);
-      assert.match(agentText, /Title: Demo Title/);
-      assert.match(userText, /Title: Demo Title/);
-      assert.match(agentText, /Hello\s+Rin/);
-      assert.match(userText, /Hello\s+Rin/);
+      assert.match(userText, /Title: Demo Title|Title: Readable/);
+      assert.match(userText, /Hello \*\*Rin\*\*|Hello Rin/);
     },
   );
 });

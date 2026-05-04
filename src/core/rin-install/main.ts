@@ -76,9 +76,15 @@ async function launchInstallerInitTui(options: {
   rinPath: string;
   sourceRoot: string;
 }) {
-  return await runCommand(options.rinPath, ["/init"], {
-    cwd: options.sourceRoot,
-  });
+  return await runCommand(
+    options.rinPath,
+    [
+      "The user is requesting initialization. Read `~/.rin/docs/rin/docs/capabilities.md` and follow its `Initialization mode` guidance before responding.",
+    ],
+    {
+      cwd: options.sourceRoot,
+    },
+  );
 }
 
 export async function startInstaller() {

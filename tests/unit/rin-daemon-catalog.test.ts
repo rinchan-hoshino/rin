@@ -49,7 +49,7 @@ test("daemon catalog lists builtin and extension commands without session worker
     const names = new Set(commands.map((item) => item.name));
     assert.equal(names.has("settings"), true);
     assert.equal(names.has("model"), true);
-    assert.equal(names.has("init"), true);
+    assert.equal(names.has("init"), false);
   });
 });
 

@@ -11,6 +11,7 @@ import {
   prepareTruncatedText,
   renderTextToolResult,
 } from "../pi/render-utils.js";
+import { fetchReadableUrl, parseFetchUrl } from "./url-fetch.js";
 
 function trimSnippet(value: string, max = 220): string {
   const text = String(value || "")
@@ -98,6 +99,7 @@ function formatWebSearchResult(
       mimeType?: string;
     }>;
     details?: {
+      mode?: string;
       truncation?: TruncationResult;
       emptyMessage?: string;
       hiddenCount?: number;
@@ -108,10 +110,13 @@ function formatWebSearchResult(
   theme: any,
   showImages: boolean,
 ) {
-  const topResultsNotice = formatHiddenResultsNotice(
-    result.details?.totalResults ?? 0,
-    result.details?.hiddenCount ?? 0,
-  );
+  const topResultsNotice =
+    result.details?.mode === "fetch"
+      ? ""
+      : formatHiddenResultsNotice(
+          result.details?.totalResults ?? 0,
+          result.details?.hiddenCount ?? 0,
+        );
   return renderTextToolResult(result, options, theme, showImages, {
     extraMutedLines: topResultsNotice ? [topResultsNotice] : [],
   });
@@ -123,7 +128,44 @@ async function loadSearchWeb() {
 }
 
 function formatWebSearchCall(args: any, theme: any) {
-  return formatToolCallLine("web_search", String(args?.q || "").trim(), theme);
+  const query = String(args?.q || "").trim();
+  const url = parseFetchUrl(query);
+  return formatToolCallLine("web_search", url ? `fetch ${url}` : query, theme);
+}
+
+function formatFetchAgentResult(
+  response: Awaited<ReturnType<typeof fetchReadableUrl>>,
+) {
+  const lines = [
+    `web_fetch ${response.ok ? "ok" : "error"}`,
+    `url=${response.finalUrl || response.url}`,
+    response.status
+      ? `status=${response.status} ${response.statusText}`.trim()
+      : "",
+    response.mimeType ? `mime=${response.mimeType}` : "",
+    `bytes=${response.bytes}`,
+    response.title ? `title=${response.title}` : "",
+    "",
+    response.ok ? response.text || "" : response.error || "fetch_failed",
+  ].filter((line) => line !== "");
+  return lines.join("\n");
+}
+
+function formatFetchUserResult(
+  response: Awaited<ReturnType<typeof fetchReadableUrl>>,
+) {
+  const lines = [
+    `Fetched: ${response.finalUrl || response.url}`,
+    response.status
+      ? `Status: ${response.status} ${response.statusText}`.trim()
+      : "",
+    response.mimeType ? `MIME: ${response.mimeType}` : "",
+    `Bytes: ${response.bytes}`,
+    response.title ? `Title: ${response.title}` : "",
+    "",
+    response.ok ? response.text || "" : response.error || "fetch_failed",
+  ].filter((line) => line !== "");
+  return lines.join("\n");
 }
 
 export default function webSearchModule(): RinCapabilityDefinition {
@@ -133,16 +175,23 @@ export default function webSearchModule(): RinCapabilityDefinition {
       {
         name: "web_search",
         label: "Web Search",
-        description: "Search the web.",
-        promptSnippet: "Search the web.",
+        description: "Search or fetch web pages.",
+        promptSnippet: "Search or fetch a web page.",
         promptGuidelines: [
           "Use web_search proactively whenever web information may be relevant; better to search and confirm than to guess.",
+          "When q is an HTTP(S) URL, web_search gets the page directly and extracts readable content instead of running a search.",
         ],
         parameters: Type.Object({
           q: Type.String({
             description:
-              "Focused web search query. Prefer a few distinctive keywords instead of full sentences; use quotes for exact phrases, site:example.com for domain scoping, -term to exclude terms, and OR for alternatives. For different topics, split them into separate web_search calls instead of one overloaded query.",
+              "Focused web search query, or an HTTP(S) URL to fetch directly. For search queries, prefer a few distinctive keywords instead of full sentences; use quotes for exact phrases, site:example.com for domain scoping, -term to exclude terms, and OR for alternatives. For different topics, split them into separate web_search calls instead of one overloaded query.",
           }),
+          format: Type.Optional(
+            Type.Union([Type.Literal("markdown"), Type.Literal("text")], {
+              description:
+                "Optional fetch output format when q is an HTTP(S) URL. Allowed values: `markdown` or `text`.",
+            }),
+          ),
           limit: Type.Optional(Type.Number({ minimum: 1, maximum: 8 })),
           freshness: Type.Optional(
             Type.Union(
@@ -164,7 +213,37 @@ export default function webSearchModule(): RinCapabilityDefinition {
             }),
           ),
         }),
-        execute: async (_toolCallId, params) => {
+        execute: async (_toolCallId, params, signal) => {
+          const url = parseFetchUrl((params as any)?.q);
+          if (url) {
+            const response = await fetchReadableUrl({
+              url,
+              format: (params as any)?.format,
+              signal,
+            });
+            const agentText = formatFetchAgentResult(response);
+            const userText = formatFetchUserResult(response);
+            const truncated = prepareTruncatedText(agentText);
+            const details: {
+              mode: "fetch";
+              truncation?: TruncationResult;
+              userText: string;
+              fetch: typeof response;
+            } = {
+              mode: "fetch",
+              userText,
+              fetch: response,
+            };
+            if (truncated.truncation) {
+              details.truncation = truncated.truncation;
+            }
+            return {
+              content: [{ type: "text", text: truncated.outputText }],
+              details,
+              isError: response.ok !== true,
+            };
+          }
+
           const searchWeb = await loadSearchWeb();
           const normalizedParams = {
             ...(params as any),
@@ -186,6 +265,7 @@ export default function webSearchModule(): RinCapabilityDefinition {
           const rows = Array.isArray(response?.results) ? response.results : [];
           const hiddenCount = rows.length > 3 ? rows.length - 3 : 0;
           const details: {
+            mode: "search";
             truncation?: TruncationResult;
             emptyMessage?: string;
             hiddenCount?: number;
@@ -193,6 +273,7 @@ export default function webSearchModule(): RinCapabilityDefinition {
             userText?: string;
             attempts?: unknown[];
           } = {
+            mode: "search",
             hiddenCount,
             totalResults: rows.length,
             userText,

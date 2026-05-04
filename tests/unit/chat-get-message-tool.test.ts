@@ -8,21 +8,21 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const getChatMessageMod = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat", "get-chat-message.js"),
-  ).href
+const chatModule = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "index.js")).href
 );
 
-test("get_chat_msg contributes the chat reply lookup system guidance", () => {
-  const tools: any[] =
-    getChatMessageMod.default({
-      agentDir: rootDir,
-    }).tools || [];
-
-  const getChatMessageTool = tools.find((tool) => tool.name === "get_chat_msg");
-  assert.ok(getChatMessageTool);
-  assert.deepEqual(getChatMessageTool.promptGuidelines, [
-    "When chat metadata has `reply to message id: <id>`, always call get_chat_msg with that id before answering.",
-  ]);
+test("chat message and log helpers are documentation-driven instead of tools", () => {
+  const tools: any[] = chatModule.default().tools || [];
+  for (const name of [
+    "get_chat_msg",
+    "list_chat_log",
+    "save_chat_user_identity",
+  ]) {
+    assert.equal(
+      tools.some((tool) => tool.name === name),
+      false,
+      `${name} should not be exposed as a tool`,
+    );
+  }
 });

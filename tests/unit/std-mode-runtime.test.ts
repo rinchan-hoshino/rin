@@ -49,18 +49,18 @@ test("std configured session keeps daemon-independent Rin tools usable without d
 
   try {
     const session = runtime.session;
-    for (const name of ["search_memory", "web_search", "fetch"]) {
+    for (const name of ["search_memory", "web_search"]) {
       assert.ok(session.getToolDefinition(name), `${name} should be available`);
     }
     assert.ok(
-      session._customTools?.some((tool: any) => tool?.name === "fetch"),
+      session._customTools?.some((tool: any) => tool?.name === "web_search"),
       "Rin tools should enter the Pi session through SDK customTools",
     );
     assert.ok(
-      session.__rinCapabilities
+      !session.__rinCapabilities
         ?.getRegisteredCommands()
         ?.some((command: any) => command.invocationName === "init"),
-      "Rin commands should be kept in the direct capability set",
+      "self-improve init should be documentation-driven instead of a slash command",
     );
 
     const memoryResult = await session
@@ -74,15 +74,16 @@ test("std configured session keeps daemon-independent Rin tools usable without d
     const address = server.address();
     assert.equal(typeof address, "object");
     const fetchResult = await session
-      .getToolDefinition("fetch")
+      .getToolDefinition("web_search")
       .execute(
         "tool-fetch",
-        { url: `http://127.0.0.1:${address?.port}/demo` },
+        { q: `http://127.0.0.1:${address?.port}/demo` },
         undefined,
         undefined,
         { agentDir },
       );
     assert.match(fetchResult.content[0].text, /std fetch ok/);
+    assert.equal(fetchResult.details.mode, "fetch");
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => {
@@ -128,8 +129,22 @@ test("std configured session registration does not require daemon-only tools to 
 
   try {
     const session = runtime.session;
-    for (const name of ["get_task", "save_task", "chat_bridge"]) {
-      assert.ok(session.getToolDefinition(name), `${name} should register`);
+    assert.ok(session.getToolDefinition("task_control"));
+    for (const name of [
+      "fetch",
+      "get_task",
+      "save_task",
+      "manage_task",
+      "chat_bridge",
+      "get_chat_msg",
+      "list_chat_log",
+      "save_chat_user_identity",
+    ]) {
+      assert.equal(
+        session.getToolDefinition(name),
+        undefined,
+        `${name} should not register`,
+      );
     }
   } finally {
     await runtime.runtime?.dispose?.().catch?.(() => {});

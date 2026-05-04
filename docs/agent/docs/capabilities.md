@@ -54,13 +54,19 @@ Rin separates session history memory from self-improvement state. As an agent, y
 
 Use Pi-style `rin -p` or `rin --mode json` for isolated, scriptable one-shot agent turns from `bash`, including optional model/thinking selection and `--chat-key` delivery. Read `~/.rin/docs/rin/docs/non-interactive-cli.md` before building automation around it.
 
+## Initialization mode
+
+If the user asks to initialize Rin, restart initial setup, or set long-term assistant preferences, read this section and enter initialization mode.
+
+In initialization mode, establish language first, collect durable assistant identity, user address preferences, and default voice/style preferences, then persist durable results with `save_prompts`.
+
 ## Scheduled tasks
 
 Rin provides scheduled task support. As an agent, you should know that:
 
-- you can create one-time, interval, and cron-style tasks
+- you can create one-time, interval, and cron-style tasks through documented configuration or SDK workflows
 - it is suitable for reminders, periodic checks, delayed follow-ups, and background automation
-- when a task should stop running without being removed, pause it; when it should be removed entirely, delete it
+- use `task_control` only to pause or resume an existing task; create, update, delete, and inspect tasks through the documented workflow instead of a model tool
 
 ## Chat bridge
 
@@ -70,44 +76,11 @@ Rin can bridge chat platforms through a framework-neutral chat bridge layer. The
 - the prompt may include `chatKey`, chat name, sender identity, and related context
 - chat rich content is written with Markdown, including native rich objects such as at, quote, image, file, video, audio, and sticker syntax
 - native mentions require exact platform user ids; raw `@name` text is visible text only
-- `chat_bridge` is the live bridge tool for advanced chat-platform operations and rich chat sending
-- read `~/.rin/docs/rin/docs/chat-bridge.md` for runtime objects, examples, and adapter notes
+- chat platform actions, stored-message lookup, log inspection, and identity updates are SDK/file workflows rather than model tools
+- read `~/.rin/docs/rin/docs/chat-bridge.md` for SDK/runtime objects, examples, built-in adapter notes, and stored chat paths
 - `/chat` is the TUI command for configuring the built-in official adapters
 - `/chat` goes directly into platform selection in the TUI; the installer keeps the separate yes/no gate
 - official adapter setup should prefer the minimum runnable fields, default to polling / socket modes when the adapter supports them, avoid webhook-only setup when possible, and include direct official links for required values
-
-### Custom chat bridge adapters
-
-The product-facing name is chat bridge. The internal runtime config key currently remains `settings.json -> chat` for compatibility.
-
-If a user wants a custom chat bridge adapter that Rin does not ship as a built-in guided option, use the internal config shape below:
-
-```json
-{
-  "chat": {
-    "customAdapters": [
-      {
-        "packageName": "chat-plugin-adapter-example",
-        "version": "latest",
-        "pluginKey": "adapter-example",
-        "config": {
-          "token": "..."
-        }
-      }
-    ]
-  }
-}
-```
-
-Notes for the agent:
-
-- `packageName` is the npm package name
-- `version` is optional and defaults to `latest`
-- `pluginKey` is the package's adapter/config key kept for compatibility with existing adapter package naming
-- `config` can be a single config object, an array of named instances, or a keyed object map just like other adapter config blocks
-- after editing `settings.json`, restart Rin; Rin attempts to materialize the custom runtime package, install any missing custom adapter dependencies, and load provider exports before starting the bridge
-- custom adapter packages must export `createAdapter`, `default.createAdapter`, or `chatBridgeProvider.createAdapter`; see `~/.rin/docs/rin/docs/chat-bridge.md`
-- treat custom adapters as trusted-code execution because they run as third-party Node.js code under the Rin user account
 
 ## Rin extension switches
 
@@ -174,18 +147,12 @@ Daemon worker extensions are configured separately because they are daemon-proce
 
 ## Web search
 
-Rin provides live web search. As an agent, you should know that:
+Rin provides live web search and direct URL fetching through `web_search`. As an agent, you should know that:
 
 - for latest, time-sensitive, version-sensitive, or potentially changed information, you should search proactively
 - use fresh search results as the primary source for those questions, with memory as supporting context
-
-## Direct URL fetch
-
-Rin provides a `fetch` tool. As an agent, you should know that:
-
-- use it when the user already gave you a specific URL and wants it read directly
-- prefer it over `web_search` when discovery is not needed
-- it returns readable text content rather than downloading files
+- when `q` is an HTTP(S) URL, `web_search` gets that page directly, uses a Chrome-like user agent, and extracts readable markdown/text from HTML with Readability-style extraction
+- use URL mode when the user already gave you a specific URL and discovery is not needed
 
 ## Runtime activity status
 

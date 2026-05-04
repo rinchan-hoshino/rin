@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 import YAML from "yaml";
 
@@ -20,8 +19,6 @@ type NormalizedChatRuntimeAdapter = {
   pluginKey: string;
   entries: AdapterEntry[];
   builtIn: boolean;
-  packageName?: string;
-  version?: string;
 };
 
 type ChatRuntimePackageJson = {
@@ -37,8 +34,6 @@ type ChatRuntimeAdapterSource = {
   value: unknown;
   defaults: Record<string, any>;
   builtIn: boolean;
-  packageName?: string;
-  version?: string;
 };
 
 const SETUP_ONLY_ADAPTER_FIELDS = new Set([
@@ -176,51 +171,6 @@ function collectBuiltInChatAdapterSources(
   }));
 }
 
-function normalizeCustomAdapterFallbackPrefix(
-  adapter: Record<string, any>,
-  pluginKey: string,
-  packageName: string,
-) {
-  return (
-    safeString(adapter.name).trim() ||
-    pluginKey.replace(/^adapter-/, "") ||
-    packageName.replace(/^@/, "").replace(/[^A-Za-z0-9._-]+/g, "-")
-  );
-}
-
-function normalizeCustomChatAdapterSource(
-  value: unknown,
-): ChatRuntimeAdapterSource | null {
-  if (!isJsonRecord(value)) return null;
-
-  const packageName = safeString(value.packageName).trim();
-  const version = safeString(value.version).trim() || "latest";
-  const pluginKey = safeString(value.pluginKey).trim();
-  const config = value.config;
-  if (value.enabled === false || !packageName || !pluginKey || !config) {
-    return null;
-  }
-
-  return {
-    key: normalizeCustomAdapterFallbackPrefix(value, pluginKey, packageName),
-    pluginKey,
-    value: config,
-    defaults: isJsonRecord(value.defaults) ? cloneJson(value.defaults) : {},
-    builtIn: false,
-    packageName,
-    version,
-  };
-}
-
-function collectCustomChatAdapterSources(
-  chat: Record<string, any> | undefined,
-): ChatRuntimeAdapterSource[] {
-  const items = Array.isArray(chat?.customAdapters) ? chat.customAdapters : [];
-  return items
-    .map((item) => normalizeCustomChatAdapterSource(item))
-    .filter((item): item is ChatRuntimeAdapterSource => Boolean(item));
-}
-
 function normalizeChatRuntimeAdapter(
   source: ChatRuntimeAdapterSource,
 ): NormalizedChatRuntimeAdapter {
@@ -228,38 +178,23 @@ function normalizeChatRuntimeAdapter(
     key: source.key,
     pluginKey: source.pluginKey,
     builtIn: source.builtIn,
-    packageName: source.packageName,
-    version: source.version,
     entries: normalizeAdapterEntries(source.value, source.defaults, source.key),
   };
 }
 
-function collectRuntimeDependencies(
-  adapters: NormalizedChatRuntimeAdapter[],
-): Record<string, string> {
-  const dependencies = new Map<string, string>();
-
-  for (const adapter of adapters) {
-    if (!adapter.builtIn && adapter.packageName) {
-      dependencies.set(adapter.packageName, adapter.version || "latest");
-    }
-  }
-
-  return Object.fromEntries(
-    [...dependencies.entries()].sort(([a], [b]) => a.localeCompare(b)),
-  ) as Record<string, string>;
+function collectRuntimeDependencies(): Record<string, string> {
+  return {};
 }
 
 function buildNormalizedChatRuntime(settings: unknown) {
   const chat = getStoredChatConfigRoot(settings);
-  const adapters = [
-    ...collectBuiltInChatAdapterSources(chat),
-    ...collectCustomChatAdapterSources(chat),
-  ].map((adapter) => normalizeChatRuntimeAdapter(adapter));
+  const adapters = collectBuiltInChatAdapterSources(chat).map((adapter) =>
+    normalizeChatRuntimeAdapter(adapter),
+  );
 
   return {
     adapters,
-    dependencies: collectRuntimeDependencies(adapters),
+    dependencies: collectRuntimeDependencies(),
   };
 }
 
@@ -291,7 +226,6 @@ export type ChatRuntimeAdapterEntry = {
   name: string;
   config: Record<string, any>;
   builtIn: boolean;
-  packageName?: string;
 };
 
 export function listChatRuntimeAdapterEntries(settings: unknown) {
@@ -301,7 +235,6 @@ export function listChatRuntimeAdapterEntries(settings: unknown) {
       name: entry.name,
       config: entry.config,
       builtIn: adapter.builtIn,
-      packageName: adapter.packageName,
     })),
   );
 }
@@ -317,30 +250,11 @@ export function buildChatRuntimePackageJson(
   };
 }
 
-function dependencyInstallPath(rootDir: string, packageName: string) {
-  const normalized = safeString(packageName).trim();
-  if (!normalized) return "";
-  return path.join(rootDir, "node_modules", ...normalized.split("/"));
-}
-
 function shouldInstallChatRuntimePackage(
-  rootDir: string,
-  runtimePackage: ChatRuntimePackageJson,
+  _rootDir: string,
+  _runtimePackage: ChatRuntimePackageJson,
 ) {
-  const dependencies = runtimePackage.dependencies || {};
-  if (!Object.keys(dependencies).length) return false;
-  const packageJsonPath = path.join(rootDir, "package.json");
-  const lockPath = path.join(rootDir, "package-lock.json");
-  const expectedText = `${JSON.stringify(runtimePackage, null, 2)}\n`;
-  const currentText = fs.existsSync(packageJsonPath)
-    ? fs.readFileSync(packageJsonPath, "utf8")
-    : "";
-  if (currentText !== expectedText) return true;
-  if (!fs.existsSync(lockPath)) return true;
-  return Object.keys(dependencies).some(
-    (packageName) =>
-      !fs.existsSync(dependencyInstallPath(rootDir, packageName)),
-  );
+  return false;
 }
 
 export function shouldInstallChatRuntimeDependencies(
@@ -357,51 +271,9 @@ export function ensureChatRuntimeDependencies(
   rootDir: string,
   settings: unknown,
 ) {
-  const runtimePackage = buildChatRuntimePackageJson(settings);
-  const dependencies = runtimePackage.dependencies || {};
-  if (!Object.keys(dependencies).length) {
-    return {
-      installed: false,
-      dependencies,
-      rootDir,
-    };
-  }
-  if (!shouldInstallChatRuntimePackage(rootDir, runtimePackage)) {
-    return {
-      installed: false,
-      dependencies,
-      rootDir,
-    };
-  }
-  ensureDir(rootDir);
-  const packageJsonPath = path.join(rootDir, "package.json");
-  writeJsonFile(packageJsonPath, runtimePackage);
-  try {
-    execFileSync(
-      "npm",
-      [
-        "install",
-        "--no-audit",
-        "--no-fund",
-        "--omit=dev",
-        "--legacy-peer-deps",
-      ],
-      {
-        cwd: rootDir,
-        stdio: "pipe",
-        encoding: "utf8",
-        timeout: 120000,
-      },
-    );
-  } catch (error: any) {
-    const detail = safeString(
-      error?.stderr || error?.stdout || error?.message || error,
-    ).trim();
-    throw new Error(`chat_runtime_install_failed${detail ? `:${detail}` : ""}`);
-  }
   return {
-    installed: true,
-    dependencies,
+    installed: false,
+    dependencies: buildChatRuntimePackageJson(settings).dependencies,
     rootDir,
   };
 }

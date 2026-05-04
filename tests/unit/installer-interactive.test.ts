@@ -114,7 +114,7 @@ test("installer interactive helpers describe dir state and plan text", () => {
     targetUser: "bob",
   });
   assert.ok(initExit.includes("open Rin: rin -u bob"));
-  assert.ok(initExit.includes("/init"));
+  assert.ok(initExit.includes("restart initialization"));
 
   const launcherPath = "/home/alice/.local/bin/rin";
   const pathMissingInitExit = interactive.buildPostInstallInitExitText({

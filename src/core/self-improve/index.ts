@@ -16,8 +16,6 @@ import {
   executeSelfImproveTool,
   formatSelfImproveAgentResult,
   formatSelfImproveResult,
-  markOnboardingPrompted,
-  resolveAgentDir,
 } from "./lib.js";
 import {
   describeSelfImprovePromptSlot,
@@ -46,21 +44,6 @@ function getSessionReviewState(sessionId: string) {
   };
   reviewStateBySession.set(key, current);
   return current;
-}
-
-function triggerInitConversation(
-  options: Pick<RinCapabilityOptions, "sendMessage">,
-  _mode: "auto" | "manual",
-  busy: boolean,
-) {
-  options.sendMessage(
-    {
-      customType: "self-improve-init-trigger",
-      content: "The user is requesting initialization.",
-      display: false,
-    },
-    busy ? { triggerTurn: true, deliverAs: "followUp" } : { triggerTurn: true },
-  );
 }
 
 async function processSelfImproveReview(
@@ -412,21 +395,5 @@ export default function selfImproveModule(
         },
       ],
     },
-    commands: [
-      {
-        name: "init",
-        description: "Start or restart self-improve onboarding conversation.",
-        handler: async (_args, ctx) => {
-          await markOnboardingPrompted(resolveAgentDir, "manual:/init");
-          ctx.ui.notify(
-            ctx.isIdle()
-              ? "Self-improve onboarding started."
-              : "Self-improve onboarding queued.",
-            "info",
-          );
-          triggerInitConversation(options, "manual", !ctx.isIdle());
-        },
-      },
-    ],
   };
 }

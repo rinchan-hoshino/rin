@@ -159,10 +159,11 @@ test("self-improve format renders stable result variants", () => {
   );
 });
 
-test("memory onboarding helper keeps hidden instructions and pending state", () => {
+test("memory onboarding helper points initialization to docs", () => {
   const prompt = onboarding.buildOnboardingPrompt("manual");
+  assert.ok(prompt.includes("The user is requesting initialization."));
+  assert.ok(prompt.includes("~/.rin/docs/rin/docs/capabilities.md"));
+  assert.ok(prompt.includes("Initialization mode"));
   assert.ok(prompt.includes("Do not mention, quote, summarize"));
-  assert.ok(prompt.includes("preferred language"));
-  assert.ok(prompt.includes("you are still learning"));
-  assert.ok(prompt.includes("trust the process"));
+  assert.equal(prompt.includes("one question"), false);
 });

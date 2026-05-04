@@ -10,7 +10,6 @@ Rin's agent working directory is usually `~/.rin/`.
 - `memory/`: markdown-backed memory data
 - `routines/`: routine prompts and task files
 - `data/`: daemon, index, chat bridge, web-search, and other runtime state
-  - custom chat bridge / Chat adapter packages, when used, are installed here via the generated runtime `package.json`
 - `docs/rin/`: Rin-specific agent docs
 - `docs/pi/`: installed copies of upstream Pi docs
 - `docs/release/`: release-note metadata used by `/changelog`

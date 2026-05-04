@@ -1,16 +1,6 @@
-# Chat Bridge Tool
+# Chat Bridge Workflows
 
-`chat_bridge` runs constrained TypeScript/JavaScript code against the live chat bridge runtime.
-
-## When to use it
-
-Use `chat_bridge` for tasks such as:
-
-- sending a message to a specified chat
-- sending mixed text / mention / image / file content
-- using platform-specific bridge APIs
-- chat management actions
-- complex interactive chat flows
+Rin bridges chat platforms through a framework-neutral chat runtime. Chat bridge work is no longer exposed as a general `chat_bridge` model tool. Use documented SDK, configuration, message-store, or platform-adapter workflows from normal file and shell tools instead.
 
 ## Built-in direct runtime adapters
 
@@ -24,235 +14,66 @@ The built-in direct runtime currently includes:
 - Slack
 - Minecraft / QueQiao
 
-## Custom adapter provider packages
+## When to use which path
 
-Custom chat bridge adapters are trusted Node.js packages loaded only by the chat runtime. They are not Pi extensions, do not run in the Pi extension runner, and do not change Rin-owned product capabilities.
+- Use `/chat` in the TUI to configure official built-in adapters.
+- Use adapter configuration under `settings.json -> chat` for scripted setup of built-in adapters.
+- Use the chat runtime/adapter SDK from a script when you need live platform actions such as sending, replying, reacting, moderation, or platform API lookup.
+- Read the local message store directly when you only need already stored chat context.
+- Update saved identity/trust data through the documented identity store or SDK path instead of a model tool.
 
-A package may export any one of these provider shapes:
+## Rich message parts
 
-```ts
-export function createAdapter(input) {
-  /* ... */
-}
-export default {
-  createAdapter(input) {
-    /* ... */
-  },
-};
-export const chatBridgeProvider = {
-  createAdapter(input) {
-    /* ... */
-  },
-};
+Rin chat rich content uses structured parts or Markdown rich-object syntax. Supported rich intents include:
+
+- text / markdown
+- native mention by exact platform user id
+- quote / reply by exact platform message id
+- image / file / video / audio / sticker by local path or URL
+
+Native mentions require exact platform user ids. Raw `@name` text is visible text only.
+
+## Stored chat context
+
+For plain inspection of already stored chat records, read the local message store directly with `read` or `bash`.
+
+Normal installs store chat records under:
+
+```text
+<agentDir>/data/chat-message-store/
 ```
 
-`createAdapter(input)` receives:
+Replace `<agentDir>` with the active Rin agent directory, usually `~/.rin`.
 
-- `app`: the chat runtime app; call `app.register(adapter, bot)` if you self-register
-- `dataDir`: Rin data directory
-- `runtimeRoot`: the isolated custom chat-runtime package root
-- `key`, `name`, `packageName`: normalized adapter identity
-- `config`: this adapter instance config
-- `logger`: optional logger
+Useful paths:
 
-The provider can either self-register or return `{ adapter, bot }`. The adapter may expose async `start()` and `stop()`. The bot should expose at least `platform`, `selfId`, `status`, and `sendMessage(chatId, content)`; expose platform-specific APIs under `internal` when available so `chat_bridge` users can access them through `scope.internal`.
+- records: `data/chat-message-store/records/<first-two-record-key-chars>/<recordKey>.json`
+- message-id index: `data/chat-message-store/indexes/by-message-id/<first-two-index-key-chars>/<indexKey>.json`
+- chat/date index: `data/chat-message-store/indexes/by-chat-date/<platform>/<botId-if-present>/<chatId>/<YYYY-MM-DD>.json`
 
-## Runtime objects
+Cookbook:
 
-The code runs as an async function body.
+1. known `chatKey` and `messageId`: compute the record key, then read the matching record JSON
+2. known `messageId` only: read the message-id index, then read each relative record path it lists
+3. known `chatKey` and date: read the chat/date index, then read the listed record keys and sort by `receivedAt` / `processedAt`
 
-Available globals:
+When both `chatKey` and `messageId` are known, the record key is SHA-1 of `chatKey + "\n" + messageId`:
 
-- `chat`
-  - current bound chat scope when the current session is already bound to a chat
-  - `null` when there is no current bound chat
-- `bot`
-  - intentionally thin shared bridge surface for the current bound chat scope
-  - primarily for the minimal common send path and a few stable fields
-- `internal`
-  - primary platform-specific API for the current bound chat scope
-  - prefer this for most chat-platform operations
-  - some platforms also expose bound official client objects such as `internal.client`, `internal.web`, `internal.openapi`, `internal.wsClient`, or `internal.ws`
-- `h`
-  - message element builder
-- `store`
-  - local message / chat-log helpers for the current bound chat scope
-- `identity`
-  - local trust helpers for the current bound chat scope
-- `helpers`
-  - bridge helpers
-
-## `helpers`
-
-- `helpers.currentChatKey`
-  - current bound chat key, if any
-- `helpers.useChat(chatKey)`
-  - returns a bound scope for another chat
-  - the returned object has:
-    - `chat`
-    - `bot`
-    - `internal`
-    - `h`
-    - `store`
-    - `identity`
-    - `helpers`
-- `helpers.send(input)`
-  - tracked outbound send for the current bound scope
-- `helpers.reply(replyToMessageId, input)`
-  - tracked outbound reply for the current bound scope
-- `helpers.serialize(value)`
-  - safe JSON-like serialization helper
-
-## Message input
-
-`helpers.send()` and `helpers.reply()` accept either:
-
-- a string
-- one part object
-- an array of parts
-- an object with `parts`
-
-Supported parts:
-
-- `{ type: "text", text: "hello" }`
-- `{ type: "markdown", text: "**hello**" }`
-- `{ type: "at", id: "123", name?: "name" }`; `id` is required for native mentions
-- `{ type: "quote", id: "456" }`
-- `{ type: "image", path?: "/abs/file.png", url?: "https://...", mimeType?: "image/png" }`
-- `{ type: "file", path?: "/abs/file.zip", url?: "https://...", name?: "file.zip", mimeType?: "application/zip" }`
-- `{ type: "video", path?: "/abs/file.mp4", url?: "https://...", name?: "file.mp4", mimeType?: "video/mp4" }`
-- `{ type: "audio", path?: "/abs/file.mp3", url?: "https://...", name?: "file.mp3", mimeType?: "audio/mpeg" }`
-- `{ type: "sticker", path?: "/abs/file.webp", url?: "https://...", name?: "sticker.webp", mimeType?: "image/webp" }`
-
-## Basic template
-
-```ts
-const scope = chat ?? helpers.useChat("telegram/8623230033:-1001234567890");
-
-return await scope.internal.getChat({ chat_id: scope.chat.chatId });
+```sh
+agent_dir="${RIN_AGENT_DIR:-$HOME/.rin}"
+chat_key='onebot/2301401877:1067390680'
+message_id='1234567890'
+record_key=$(node -e 'const crypto=require("crypto"); const [chatKey,messageId]=process.argv.slice(1); console.log(crypto.createHash("sha1").update(`${chatKey}\n${messageId}`).digest("hex"));' "$chat_key" "$message_id")
+record_path="$agent_dir/data/chat-message-store/records/${record_key:0:2}/$record_key.json"
 ```
 
-## Examples
+When only `messageId` is known, read the message-id index first; it contains relative record paths:
 
-### Send text to a specified chat
-
-```ts
-const room = helpers.useChat("onebot/2301401877:1067390680");
-await room.helpers.send("你好");
-return "ok";
+```sh
+agent_dir="${RIN_AGENT_DIR:-$HOME/.rin}"
+message_id='1234567890'
+index_key=$(node -e 'const crypto=require("crypto"); console.log(crypto.createHash("sha1").update(process.argv[1]).digest("hex"));' "$message_id")
+index_path="$agent_dir/data/chat-message-store/indexes/by-message-id/${index_key:0:2}/$index_key.json"
 ```
 
-### Send mixed content
-
-```ts
-const room = helpers.useChat("telegram/8623230033:-1001234567890");
-await room.helpers.send([
-  { type: "text", text: "看这个" },
-  { type: "image", url: "https://example.com/demo.png" },
-]);
-return "sent";
-```
-
-### Use the thin shared `bot` surface
-
-```ts
-const scope = helpers.useChat("telegram/8623230033:-1001234567890");
-return await scope.bot.sendMessage(scope.chat.chatId, [scope.h.text("hello")]);
-```
-
-### Use a platform-specific method
-
-```ts
-const scope = helpers.useChat("telegram/8623230033:-1001234567890");
-return await scope.internal.getChatMember({
-  chat_id: scope.chat.chatId,
-  user_id: 123456789,
-});
-```
-
-### Use Telegram reaction through `internal`
-
-```ts
-const scope = chat ?? helpers.useChat("telegram/8623230033:-1001234567890");
-const target = scope.store
-  .listLog()
-  .entries.filter((item) => item && item.role === "user" && item.messageId)
-  .at(-1);
-if (!target) throw new Error("no target message");
-await scope.internal.setMessageReaction({
-  chat_id: scope.chat.chatId,
-  message_id: Number(target.messageId),
-  reaction: [{ type: "emoji", emoji: "👍" }],
-});
-return { messageId: target.messageId, emoji: "👍" };
-```
-
-### Use Discord typing and reaction helpers
-
-```ts
-const scope = chat ?? helpers.useChat("discord/123456789012345678");
-await scope.internal.sendTyping(scope.chat.chatId);
-return await scope.internal.createReaction(
-  scope.chat.chatId,
-  "123456789012345679",
-  "🔥",
-);
-```
-
-### Use Slack Web API through `internal`
-
-```ts
-const scope = chat ?? helpers.useChat("slack/C0123456789");
-return await scope.internal.postMessage({
-  channel: scope.chat.chatId,
-  text: "hello from chat_bridge",
-});
-```
-
-### Use QQ channel or group send through `internal`
-
-```ts
-const scope = chat ?? helpers.useChat("qq/channel:1234567890");
-return await scope.internal.postMessage(
-  scope.chat.chatId.replace(/^channel:/, ""),
-  {
-    content: "hello",
-    msg_type: 0,
-  },
-);
-```
-
-### Use Lark message create through `internal`
-
-```ts
-const scope = chat ?? helpers.useChat("lark/oc_xxxxxxxxxx");
-return await scope.internal.createMessage({
-  params: { receive_id_type: "chat_id" },
-  data: {
-    receive_id: scope.chat.chatId,
-    msg_type: "text",
-    content: JSON.stringify({ text: "hello" }),
-  },
-});
-```
-
-### Use Minecraft / QueQiao bridge actions
-
-```ts
-const scope = chat ?? helpers.useChat("minecraft/Survival");
-return await scope.internal.sendRconCommand("list");
-```
-
-### Inspect local stored message context
-
-```ts
-const scope = chat ?? helpers.useChat("onebot/2301401877:1067390680");
-return scope.store.getMessage("1234567890");
-```
-
-## Notes
-
-- prefer `internal` for most platform operations
-- treat `bot` as a very small shared surface rather than the main capability layer
-- use `helpers.useChat(chatKey)` when you need to act on a different chat
-- returned values are passed through with safe serialization when needed
+When listing one chat/date, read the chat/date index to get `recordKeys`, then read the matching record files.

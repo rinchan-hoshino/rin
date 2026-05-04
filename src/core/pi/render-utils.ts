@@ -117,18 +117,11 @@ const TOOL_CALL_PREFIXES: Record<string, string> = {
   read: "read",
   write: "write",
   edit: "edit",
-  fetch: "GET",
   web_search: "🌐",
   search_memory: "🧠",
   save_prompts: "📌",
   generate_codex_image: "image",
-  get_task: "tasks",
-  save_task: "schedule",
-  manage_task: "task",
-  chat_bridge: "chat",
-  get_chat_msg: "msg",
-  list_chat_log: "log",
-  save_chat_user_identity: "trust",
+  task_control: "task",
 };
 
 export function getToolCallDisplayPrefix(toolName: unknown) {

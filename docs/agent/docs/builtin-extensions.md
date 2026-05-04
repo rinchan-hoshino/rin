@@ -7,8 +7,7 @@ Most of these capabilities are registered directly by Rin core rather than being
 
 - `web-search`
   - provides live web search
-- `fetch`
-  - provides direct URL text fetching
+  - gets web pages directly when `q` is an HTTP(S) URL
 - `memory`
   - provides `*_memory` tools and memory-related prompt support
 - `reset-system-prompt`
@@ -20,10 +19,11 @@ Most of these capabilities are registered directly by Rin core rather than being
 - `tui-input-compat`
   - smooths over some TUI input compatibility issues
 - `task`
-  - provides task management tools such as `list_tasks`, `save_task`, and `pause_task`
+  - provides `task_control` for pausing or resuming existing scheduled tasks
+  - task creation, updates, deletion, and inspection are documented workflows rather than agent tools
 - `chat`
-  - provides `chat_bridge`, `get_chat_msg`, `list_chat_log`, and `save_chat_user_identity`
   - provides `/chat` for official adapter setup inside the TUI
+  - chat sending, stored-message lookup, log inspection, and identity updates are documented SDK/file workflows rather than agent tools
   - `/chat` enters platform selection directly, keeps installer-only opt-in confirmation, prefers the minimum runnable fields, defaults to polling / socket modes when supported, and includes direct official links for required values
 - `token-usage`
   - records detailed token telemetry under `~/.rin/data/token-usage/usage.db`

@@ -11,12 +11,12 @@ That means you are expected to do useful work during a turn when the user asks f
 - inspect files and directories
 - run shell commands
 - edit or create files
-- search the web or fetch a URL
+- search the web or fetch a URL through web search URL mode
 - recall archived session history
 - manage self-improvement prompts and skills
 - run isolated work through the non-interactive CLI
-- create or inspect scheduled tasks
-- interact with configured chat bridges
+- pause or resume scheduled tasks
+- interact with configured chat bridges through documented SDK/file workflows
 
 The current tool list and system prompt are authoritative for what is actually available in a given turn. Do not assume a capability exists just because it is described here; verify the live tool list and relevant docs.
 
