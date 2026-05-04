@@ -26,6 +26,7 @@ export default function messageHeaderModule(): RinCapabilityDefinition {
     source: string;
     body: string;
     sentAt: number;
+    promptContext?: any;
   }> = [];
   const runtimeRole = getRuntimeRole();
 
@@ -43,7 +44,8 @@ export default function messageHeaderModule(): RinCapabilityDefinition {
           pendingContexts.push({
             source: safeString(event.source).trim(),
             body: safeString(event.text),
-            sentAt: Date.now(),
+            sentAt: Number(event.promptContext?.sentAt) || Date.now(),
+            promptContext: event.promptContext,
           });
 
           return { action: "continue" };
@@ -68,7 +70,11 @@ export default function messageHeaderModule(): RinCapabilityDefinition {
           return {
             message: {
               customType: "message-header-context",
-              content: formatPromptContext(null, current.body, current.sentAt),
+              content: formatPromptContext(
+                current.promptContext || null,
+                current.body,
+                current.sentAt,
+              ),
               display: false,
             },
           };

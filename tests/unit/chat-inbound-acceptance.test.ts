@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { installChatControllerSessionClient } from "../support/chat-controller-session-client.js";
+
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "..",
@@ -40,6 +42,7 @@ async function createController(chatKey = "telegram/1:2") {
       },
     },
   });
+  installChatControllerSessionClient(controller.constructor);
   controller.app = {
     bots: [
       {

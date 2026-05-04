@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { installChatControllerSessionClient } from "../support/chat-controller-session-client.js";
+
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "..",
@@ -36,6 +38,7 @@ async function createController(chatKey = "telegram/1:2") {
       },
     },
   });
+  installChatControllerSessionClient(controller.constructor);
   controller.app = {
     bots: [
       {
@@ -404,8 +407,8 @@ test("chat controller starts /new immediately through the TUI new-session path",
   assert.equal(backendAbortCalled, false);
   assert.deepEqual(await firstTurn, {
     aborted: true,
-    sessionId: "session-old",
-    sessionFile: path.join(controller.agentDir, "sessions", "old-chat.jsonl"),
+    sessionId: "session-new",
+    sessionFile: path.join(controller.agentDir, "sessions", "new-chat.jsonl"),
   });
 
   await emitRpcTurnComplete(
@@ -414,7 +417,7 @@ test("chat controller starts /new immediately through the TUI new-session path",
     "first done",
   );
 
-  assert.deepEqual(calls, ["newSession:chat"]);
+  assert.deepEqual(calls, ["newSession:chat", "newSession:chat"]);
   assert.deepEqual(deliveries, ["Started a new session."]);
   assert.equal(controller.state.sessionFile, "new-chat.jsonl");
 });

@@ -755,11 +755,17 @@ export async function runCustomRpcMode(
         return done(id, type);
       case "prompt": {
         const streamingBehavior = command.streamingBehavior;
-        const promptOptions = {
+        const promptOptions: Record<string, unknown> = {
           images: command.images,
           streamingBehavior,
-          source: "rpc" as any,
+          source: command.source || "rpc",
         };
+        if (command.requestTag !== undefined) {
+          promptOptions.requestTag = command.requestTag;
+        }
+        if (command.promptContext !== undefined) {
+          promptOptions.promptContext = command.promptContext;
+        }
         if (streamingBehavior) {
           await session.prompt(command.message, promptOptions);
           return done(id, "prompt");

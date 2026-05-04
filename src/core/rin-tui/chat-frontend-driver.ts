@@ -4,12 +4,9 @@ import {
   extractMessageText,
   extractTextBeforeFirstToolCall,
 } from "../message-content.js";
+import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
 import { safeString } from "../text-utils.js";
 import type {
-  FrontendAutocompleteItem,
-  FrontendCommandItem,
-  FrontendModelItem,
-  FrontendSessionItem,
   InteractiveFrontendEvent,
   RpcFrontendClient,
 } from "./frontend-surface.js";
@@ -44,12 +41,6 @@ function isAgentAlreadyProcessingError(error: unknown) {
   );
 }
 
-function isQueuedOperationArray(
-  value: unknown,
-): value is Array<{ requestTag?: string }> {
-  return Array.isArray(value);
-}
-
 function isAbortCommand(commandLine: string) {
   return safeString(commandLine).trim() === "/abort";
 }
@@ -58,216 +49,9 @@ function isNewSessionCommand(commandLine: string) {
   return safeString(commandLine).trim() === "/new";
 }
 
-function toSessionState(session: any) {
-  return {
-    sessionFile: session?.sessionManager?.getSessionFile?.(),
-    sessionId: session?.sessionManager?.getSessionId?.(),
-    sessionName: session?.sessionManager?.getSessionName?.(),
-    isStreaming: Boolean(session?.isStreaming),
-    thinkingLevel: session?.thinkingLevel || session?.state?.thinkingLevel,
-  };
-}
-
-class SessionBackedFrontendClient implements ChatFrontendClient {
-  private connected = false;
-  private listeners = new Set<(event: InteractiveFrontendEvent) => void>();
-
-  constructor(private readonly session: any) {}
-
-  async connect() {
-    this.connected = true;
-  }
-
-  async disconnect() {
-    this.connected = false;
-    await this.session?.disconnect?.();
-  }
-
-  isConnected() {
-    return this.connected;
-  }
-
-  subscribe(listener: (event: InteractiveFrontendEvent) => void) {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  async request<T = unknown>(command: any): Promise<T> {
-    const type = safeString(command?.type).trim();
-    if (type === "new_session") return (await this.newSession(command)) as T;
-    if (type === "set_model")
-      return (await this.setModel(command.provider, command.modelId)) as T;
-    if (type === "set_thinking_level")
-      return (await this.setThinkingLevel(command.level)) as T;
-    if (type === "get_state") return (await this.getState()) as T;
-    if (type === "run_command")
-      return (await this.runCommand(command.commandLine)) as T;
-    throw new Error(`unsupported_session_frontend_command:${type}`);
-  }
-
-  async send(command: any) {
-    try {
-      return {
-        type: "response" as const,
-        command: safeString(command?.type).trim(),
-        success: true,
-        data: await this.request(command),
-        id: command?.id,
-      };
-    } catch (error) {
-      return {
-        type: "response" as const,
-        command: safeString(command?.type).trim(),
-        success: false,
-        error: String((error as any)?.message || error),
-        id: command?.id,
-      };
-    }
-  }
-
-  async submit(text: string) {
-    await this.prompt(text);
-  }
-
-  async prompt(text: string, options: Record<string, unknown> = {}) {
-    await this.session.prompt(text, options);
-  }
-
-  async abort() {
-    if (typeof this.session?.agent?.abort === "function") {
-      this.session.agent.abort();
-      return;
-    }
-    await this.session?.abort?.();
-  }
-
-  async getState() {
-    return toSessionState(this.session);
-  }
-
-  async getMessages() {
-    return Array.isArray(this.session?.messages) ? this.session.messages : [];
-  }
-
-  async getCommands(): Promise<FrontendCommandItem[]> {
-    return [];
-  }
-
-  async getAutocompleteItems(): Promise<FrontendAutocompleteItem[]> {
-    return [];
-  }
-
-  async runCommand(commandLine: string) {
-    return await this.session.runCommand(commandLine);
-  }
-
-  async getCommandArgumentCompletions(): Promise<FrontendAutocompleteItem[]> {
-    return [];
-  }
-
-  async listSessions(): Promise<FrontendSessionItem[]> {
-    return [];
-  }
-
-  async resumeSession(sessionId: string) {
-    await this.session.switchSession(sessionId);
-  }
-
-  async newSession(options: Record<string, unknown> = {}) {
-    const managedSessionLeaf = safeString(options.managedSessionLeaf).trim();
-    const completed = await this.session.newSession?.(
-      managedSessionLeaf ? { managedSessionLeaf } : undefined,
-    );
-    return {
-      cancelled: completed === false || Boolean((completed as any)?.cancelled),
-      ...toSessionState(this.session),
-    };
-  }
-
-  async listModels(): Promise<FrontendModelItem[]> {
-    const models = await this.session?.modelRegistry?.getAvailable?.();
-    if (!Array.isArray(models)) return [];
-    return models.map((model: any) => ({
-      id: String(model?.id || ""),
-      label: String(model?.label || model?.id || ""),
-      provider:
-        typeof model?.provider === "string" ? model.provider : undefined,
-      description:
-        typeof model?.description === "string" ? model.description : undefined,
-    }));
-  }
-
-  async setModel(provider: string, modelId: string) {
-    const models = await this.session?.modelRegistry?.getAvailable?.();
-    const model = Array.isArray(models)
-      ? models.find(
-          (item: any) => item?.provider === provider && item?.id === modelId,
-        )
-      : undefined;
-    if (!model) throw new Error(`chat_model_not_found:${provider}/${modelId}`);
-    await this.session.setModel(model);
-    return model;
-  }
-
-  async setThinkingLevel(level: string) {
-    this.session.thinkingLevel = level;
-    if (this.session.state && typeof this.session.state === "object") {
-      this.session.state.thinkingLevel = level;
-    }
-    await this.session.client?.send?.({ type: "set_thinking_level", level });
-    return { level };
-  }
-
-  async respondExtensionUi() {}
-
-  async openDialog() {
-    return null;
-  }
-
-  async respondDialog() {}
-
-  async ensureSessionReady(restoreSessionFile = "", managedSessionLeaf = "") {
-    const current = safeString(
-      this.session?.sessionManager?.getSessionFile?.(),
-    ).trim();
-    const wanted = safeString(restoreSessionFile).trim();
-    const managedLeaf = safeString(managedSessionLeaf).trim();
-    if (
-      managedLeaf &&
-      !wanted &&
-      typeof this.session?.newSession === "function"
-    ) {
-      const completed = await this.session.newSession({
-        managedSessionLeaf: managedLeaf,
-      });
-      if (!completed) throw new Error("rin_new_session_cancelled");
-    } else if (!current && wanted) {
-      await this.session.switchSession(wanted);
-    }
-    const ready = await this.session.ensureSessionReady?.();
-    return { ...toSessionState(this.session), ...(ready || {}) };
-  }
-
-  consumeQueuedOfflineOperation(requestTag?: string) {
-    const tag = safeString(requestTag || "").trim();
-    if (!tag) return false;
-    const queued = this.session?.queuedOfflineOps;
-    if (!isQueuedOperationArray(queued)) return false;
-    const index = queued.findIndex(
-      (item) => safeString(item?.requestTag || "").trim() === tag,
-    );
-    if (index < 0) return false;
-    queued.splice(index, 1);
-    this.session?.syncPendingCount?.();
-    this.session?.emitFrontendStatus?.(true);
-    return true;
-  }
-}
-
 export class ChatFrontendDriver {
   private readonly clientFactory: () => ChatFrontendClient;
   client: ChatFrontendClient | null = null;
-  private injectedSession: any = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
     requestTag?: string;
@@ -284,21 +68,6 @@ export class ChatFrontendDriver {
   constructor(options: { clientFactory?: () => ChatFrontendClient } = {}) {
     this.clientFactory =
       options.clientFactory || (() => new RinDaemonFrontendClient());
-  }
-
-  get session() {
-    return this.injectedSession;
-  }
-
-  set session(value: any) {
-    this.injectedSession = value;
-    if (value) {
-      this.client = new SessionBackedFrontendClient(value);
-      this.frontendState = toSessionState(value);
-    } else if (this.client instanceof SessionBackedFrontendClient) {
-      this.client = null;
-      this.frontendState = {};
-    }
   }
 
   subscribe(listener: (event: ChatFrontendDriverEvent) => void) {
@@ -339,7 +108,6 @@ export class ChatFrontendDriver {
     this.frontendPhase = "idle";
     const client = this.client;
     this.client = null;
-    this.injectedSession = null;
     this.frontendState = {};
     if (client?.disconnect) {
       void client.disconnect().catch(() => {});
@@ -434,6 +202,14 @@ export class ChatFrontendDriver {
   private resetAssistantSegmentTracking() {
     this.deliveredAssistantInterimTexts.clear();
     this.assistantFinalReplyCommitted = false;
+  }
+
+  hasActiveTurn() {
+    return Boolean(this.liveTurn) || this.isStreaming();
+  }
+
+  hasClient() {
+    return Boolean(this.client);
   }
 
   canSteerActiveTurn() {
@@ -647,6 +423,7 @@ export class ChatFrontendDriver {
     managedSessionLeaf?: string;
     model?: string;
     thinkingLevel?: string;
+    promptContext?: PromptContextMeta;
   }): Promise<DriverTurnResult> {
     const sessionFile = safeString(input.sessionFile || "").trim();
     const restoreSessionFile = safeString(
@@ -679,6 +456,7 @@ export class ChatFrontendDriver {
         source: "chat-bridge",
         streamingBehavior: "steer",
         requestTag,
+        promptContext: input.promptContext,
       });
       this.throwIfQueuedOffline(requestTag);
       return {
@@ -701,6 +479,7 @@ export class ChatFrontendDriver {
         images,
         source: "chat-bridge",
         requestTag,
+        promptContext: input.promptContext,
       });
       this.throwIfQueuedOffline(requestTag);
     })();
@@ -728,6 +507,7 @@ export class ChatFrontendDriver {
           source: "chat-bridge",
           streamingBehavior: "steer",
           requestTag: steerRequestTag,
+          promptContext: input.promptContext,
         });
         this.throwIfQueuedOffline(steerRequestTag);
         return {

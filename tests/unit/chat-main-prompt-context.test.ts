@@ -131,7 +131,7 @@ test("chat main carries sender metadata to the controller with the prompt body",
   }
 });
 
-test("chat controller packages sender metadata directly into the session prompt text", async () => {
+test("chat controller passes sender metadata through the frontend prompt context", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -212,14 +212,16 @@ test("chat controller packages sender metadata directly into the session prompt 
       .filter((line) => line.startsWith("["));
     const seen = JSON.parse(rows.at(-1) || "[]");
     assert.equal(seen.length, 1);
-    assert.match(seen[0].text, /^time: /);
-    assert.ok(seen[0].text.includes("chatKey: telegram/1:2"));
-    assert.ok(seen[0].text.includes("sender user id: guest-1"));
-    assert.ok(seen[0].text.includes("sender nickname: AccountNick"));
-    assert.ok(seen[0].text.includes("sender group nickname: GroupCard"));
-    assert.equal(seen[0].text.includes("sender account nickname:"), false);
-    assert.ok(seen[0].text.includes("sender trust: trusted user"));
-    assert.ok(seen[0].text.endsWith("---\nmy name is?"));
+    assert.equal(seen[0].text, "my name is?");
+    assert.deepEqual(seen[0].promptContext, {
+      source: "chat-bridge",
+      chatKey: "telegram/1:2",
+      chatType: "group",
+      userId: "guest-1",
+      nickname: "AccountNick",
+      groupNickname: "GroupCard",
+      identity: "TRUSTED",
+    });
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

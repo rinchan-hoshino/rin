@@ -15,20 +15,9 @@ const { ChatFrontendDriver } = await import(
 );
 
 function createDriver() {
-  const driver = new ChatFrontendDriver();
-  driver.connect = async () => {};
-  driver.session = {
-    isStreaming: false,
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/chat-driver.jsonl",
-      sessionId: "session-driver",
-    }),
-    switchSession: async () => {},
-    sessionManager: {
-      getSessionFile: () => "/tmp/chat-driver.jsonl",
-      getSessionId: () => "session-driver",
-    },
-  };
+  const client = createFrontendClient();
+  const driver = new ChatFrontendDriver({ clientFactory: () => client });
+  (driver as any).testClient = client;
   return driver;
 }
 
@@ -156,6 +145,7 @@ test("chat frontend driver runs chat turns through a frontend client", async () 
   const result = await driver.runTurn({
     text: "hello",
     managedSessionLeaf: "telegram/1:2",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
   });
 
   assert.equal(result.finalText, "frontend final");
@@ -166,6 +156,10 @@ test("chat frontend driver runs chat turns through a frontend client", async () 
   );
   assert.equal(client.calls[0].options.managedSessionLeaf, "telegram/1:2");
   assert.equal(client.calls[1].text, "hello");
+  assert.deepEqual(client.calls[1].options.promptContext, {
+    source: "chat-bridge",
+    chatKey: "telegram/1:2",
+  });
 });
 
 test("chat frontend driver does not leak growing final-answer prefixes as interim", async () => {
@@ -175,7 +169,10 @@ test("chat frontend driver does not leak growing final-answer prefixes as interi
     if (event.type === "assistant_interim") interimTexts.push(event.text);
   });
 
-  driver.session.prompt = async (_text: string, options: any = {}) => {
+  (driver as any).testClient.prompt = async (
+    _text: string,
+    options: any = {},
+  ) => {
     await emitDriverEvent(driver, { type: "agent_start" });
     for (const text of ["I", "I will", "I will check", "I will check this"]) {
       await emitDriverEvent(driver, {
@@ -206,7 +203,10 @@ test("chat frontend driver does not treat a preview as interim when a tool bound
     if (event.type === "assistant_interim") interimTexts.push(event.text);
   });
 
-  driver.session.prompt = async (_text: string, options: any = {}) => {
+  (driver as any).testClient.prompt = async (
+    _text: string,
+    options: any = {},
+  ) => {
     await emitDriverEvent(driver, { type: "agent_start" });
     await emitDriverEvent(driver, {
       type: "message_update",
@@ -235,7 +235,10 @@ test("chat frontend driver emits leading tool-call text as the only interim sour
     if (event.type === "assistant_interim") interimTexts.push(event.text);
   });
 
-  driver.session.prompt = async (_text: string, options: any = {}) => {
+  (driver as any).testClient.prompt = async (
+    _text: string,
+    options: any = {},
+  ) => {
     await emitDriverEvent(driver, { type: "agent_start" });
     await emitDriverEvent(driver, {
       type: "message_end",
@@ -267,18 +270,19 @@ test("chat frontend driver emits leading tool-call text as the only interim sour
 test("chat frontend driver starts managed leaf sessions even after connect reports a default session", async () => {
   const driver = createDriver();
   const calls: string[] = [];
+  const client = (driver as any).testClient;
   let sessionFile = "/tmp/root-session.jsonl";
-  driver.session.sessionManager.getSessionFile = () => sessionFile;
-  driver.session.newSession = async (options: any = {}) => {
+  client.getState = async () => ({
+    sessionFile,
+    sessionId: "session-driver",
+    isStreaming: false,
+  });
+  client.newSession = async (options: any = {}) => {
     calls.push(`newSession:${options.managedSessionLeaf}`);
     sessionFile = "/tmp/rin/sessions/managed/task/created.jsonl";
-    return true;
+    return { cancelled: false, sessionFile, sessionId: "session-driver" };
   };
-  driver.session.ensureSessionReady = async () => {
-    calls.push("ensureSessionReady");
-    return { sessionFile, sessionId: "session-driver" };
-  };
-  driver.session.prompt = async (_text: string, options: any = {}) => {
+  client.prompt = async (_text: string, options: any = {}) => {
     calls.push("prompt");
     await emitRpcTurnComplete(driver, options.requestTag, "done", sessionFile);
   };
@@ -289,7 +293,7 @@ test("chat frontend driver starts managed leaf sessions even after connect repor
   });
 
   assert.equal(result.finalText, "done");
-  assert.deepEqual(calls, ["newSession:task", "ensureSessionReady", "prompt"]);
+  assert.deepEqual(calls, ["newSession:task", "prompt"]);
   assert.equal(
     result.sessionFile,
     "/tmp/rin/sessions/managed/task/created.jsonl",
@@ -303,7 +307,10 @@ test("chat frontend driver does not emit text-only assistant messages as interim
     if (event.type === "assistant_interim") interimTexts.push(event.text);
   });
 
-  driver.session.prompt = async (_text: string, options: any = {}) => {
+  (driver as any).testClient.prompt = async (
+    _text: string,
+    options: any = {},
+  ) => {
     await emitDriverEvent(driver, { type: "agent_start" });
     await emitDriverEvent(driver, {
       type: "message_end",

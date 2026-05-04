@@ -83,11 +83,13 @@ export type RinCapabilitySet = {
     text: string,
     images: any[] | undefined,
     source: any,
+    promptContext?: any,
   ) => Promise<any>;
   emitBeforeAgentStart: (
     prompt: string,
     images: any[] | undefined,
     systemPrompt: string,
+    promptContext?: any,
   ) => Promise<any>;
   getToolDefinitions: () => any[];
   getRegisteredCommands: () => RegisteredRinCommand[];
@@ -276,14 +278,25 @@ export function createRinCapabilitySet(options: {
       }
       return result;
     },
-    async emitInput(text: string, images: any[] | undefined, source: any) {
+    async emitInput(
+      text: string,
+      images: any[] | undefined,
+      source: any,
+      promptContext?: any,
+    ) {
       let currentText = text;
       let currentImages = images;
       const ctx = createContext();
       for (const handler of handlers.get("input") || []) {
         try {
           const result = await handler(
-            { type: "input", text: currentText, images: currentImages, source },
+            {
+              type: "input",
+              text: currentText,
+              images: currentImages,
+              source,
+              promptContext,
+            },
             ctx,
           );
           if (result?.action === "handled") return result;
@@ -299,7 +312,7 @@ export function createRinCapabilitySet(options: {
         ? { action: "transform", text: currentText, images: currentImages }
         : { action: "continue" };
     },
-    async emitBeforeAgentStart(prompt, images, systemPrompt) {
+    async emitBeforeAgentStart(prompt, images, systemPrompt, promptContext) {
       const ctx = createContext();
       const messages: any[] = [];
       let currentSystemPrompt = systemPrompt;
@@ -312,6 +325,7 @@ export function createRinCapabilitySet(options: {
               prompt,
               images,
               systemPrompt: currentSystemPrompt,
+              promptContext,
             },
             ctx,
           );
@@ -542,6 +556,7 @@ function patchPromptForRinCapabilities(
         currentText,
         currentImages,
         options?.source ?? "interactive",
+        options?.promptContext,
       );
       if (result?.action === "handled") {
         options?.preflightResult?.(true);
@@ -565,6 +580,7 @@ function patchPromptForRinCapabilities(
         currentText,
         currentImages,
         session._baseSystemPrompt ?? session.systemPrompt ?? "",
+        options?.promptContext,
       );
       appendPendingCustomMessages(session, result?.messages || []);
       if (result?.systemPrompt !== undefined) {

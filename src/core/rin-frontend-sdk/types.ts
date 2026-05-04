@@ -135,11 +135,27 @@ export type RinNewSessionResult = RinSessionState & {
   cancelled?: boolean;
 };
 
+export type RinPromptContext = {
+  source?: string;
+  sentAt?: number;
+  triggerKind?: string;
+  chatKey?: string;
+  chatName?: string;
+  chatType?: string;
+  userId?: string;
+  nickname?: string;
+  groupNickname?: string;
+  identity?: string;
+  replyToMessageId?: string;
+  attachedFiles?: Array<{ name?: string; path?: string }>;
+};
+
 export type RinPromptOptions = {
   images?: unknown[];
   streamingBehavior?: "steer" | "followUp";
   source?: string;
   requestTag?: string;
+  promptContext?: RinPromptContext;
 };
 
 export interface RinFrontendClient {

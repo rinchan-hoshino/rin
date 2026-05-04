@@ -1595,6 +1595,7 @@ test(
             images: undefined,
             streamingBehavior: "steer",
             source: "rpc",
+            requestTag: "tag-1",
           },
         ],
       ]);
@@ -2142,7 +2143,12 @@ test(
         [
           "second",
           "after swap",
-          { images: undefined, streamingBehavior: undefined, source: "rpc" },
+          {
+            images: undefined,
+            streamingBehavior: undefined,
+            source: "rpc",
+            requestTag: "tag-4",
+          },
         ],
       ]);
       assert.ok(lines.join("").includes('"id":"3"'));

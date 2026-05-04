@@ -5,10 +5,7 @@ import prettyMilliseconds from "pretty-ms";
 
 import type { RpcFrontendClient } from "../rin-tui/frontend-surface.js";
 import { ChatFrontendDriver } from "../rin-tui/chat-frontend-driver.js";
-import {
-  injectPromptContextHeader,
-  type PromptContextMeta,
-} from "../chat-bridge/prompt-context.js";
+import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import {
   resolveStoredSessionFile,
@@ -192,14 +189,6 @@ export class ChatController {
     this.driver.client = value;
   }
 
-  get session() {
-    return this.driver.session;
-  }
-
-  set session(value) {
-    this.driver.session = value;
-  }
-
   get frontendPhase() {
     return this.driver.frontendPhase;
   }
@@ -278,7 +267,7 @@ export class ChatController {
       this.frontendPhase === "sending" ||
       this.frontendPhase === "working" ||
       this.awaitingTurnSettle ||
-      Boolean(this.session?.isStreaming)
+      this.driver.hasActiveTurn()
     );
   }
 
@@ -565,15 +554,15 @@ export class ChatController {
   ) {
     const prompt = buildActiveVoiceAcknowledgementPrompt(commandName);
     if (!prompt) return undefined;
-    const promptText = injectPromptContextHeader(promptMeta, prompt);
     const driver = new ChatFrontendDriver({
       clientFactory: this.frontendClientFactory,
     });
     let sessionFile = "";
     try {
       const result = await driver.runTurn({
-        text: promptText,
+        text: prompt,
         managedSessionLeaf: MANAGED_CHAT_SESSION_LEAF,
+        promptContext: promptMeta,
       });
       sessionFile = result.sessionFile || driver.currentSessionFile();
       return result.finalText;
@@ -744,13 +733,13 @@ export class ChatController {
     this.lastActivityAt = Date.now();
     const wanted = this.getRecoverableSessionFile();
     if (wanted) await this.connect({ restoreSession: true });
-    await this.session?.terminateSession?.();
+    this.driver.dispose();
     delete this.state.sessionFile;
     this.saveState();
   }
 
   async sleepIfIdle() {
-    if (!this.sleepAfterIdleMs || !this.session) return false;
+    if (!this.sleepAfterIdleMs || !this.driver.hasClient()) return false;
     if (this.hasActiveTurn()) return false;
     if (Date.now() - this.lastActivityAt < this.sleepAfterIdleMs) return false;
     this.driver.dispose();
@@ -967,15 +956,15 @@ export class ChatController {
         attachments: input.attachments,
         startedAt: Date.now(),
       });
-      const promptText = injectPromptContextHeader(input.promptMeta, text);
       const result = await this.driver.runTurn({
-        text: promptText,
+        text,
         images,
         sessionFile: wantedSessionFile,
         restoreSessionFile,
         managedSessionLeaf,
         model: input.model,
         thinkingLevel: input.thinkingLevel,
+        promptContext: input.promptMeta,
       });
       this.updateStoredSessionFile(
         result.sessionFile,
@@ -1025,15 +1014,15 @@ export class ChatController {
         replyToMessageId: input.replyToMessageId,
       });
       try {
-        const promptText = injectPromptContextHeader(input.promptMeta, text);
         const result = await this.driver.runTurn({
-          text: promptText,
+          text,
           images,
           sessionFile: wantedSessionFile,
           restoreSessionFile,
           managedSessionLeaf,
           model: input.model,
           thinkingLevel: input.thinkingLevel,
+          promptContext: input.promptMeta,
         });
         this.updateStoredSessionFile(
           result.sessionFile,

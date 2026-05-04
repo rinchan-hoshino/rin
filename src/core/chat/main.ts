@@ -373,7 +373,7 @@ export async function startChatBridge(
     if (controller.chatKey !== controllerChatKey) {
       controller.chatKey = controllerChatKey;
       controller.state.chatKey = controllerChatKey;
-      void controller.session?.reload?.().catch(() => {});
+      controller.dispose();
     }
     return controller;
   };

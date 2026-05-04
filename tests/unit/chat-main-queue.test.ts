@@ -121,6 +121,8 @@ test("chat main treats /resume as a normal prompt after the command is removed",
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
       const seen = [];
@@ -223,6 +225,8 @@ test("chat main forwards command sender identity to controller prompt context", 
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
       const seen = [];
@@ -400,6 +404,8 @@ test("chat main does not retry a queued prompt while the controller is already h
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -525,6 +531,8 @@ test("chat main routes active-turn /new through the chatKey worker immediately",
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -691,6 +699,8 @@ test("chat main lets /abort bypass a same-chat turn waiting for backend admissio
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -844,6 +854,8 @@ test("chat main lets same-chat follow-up enter the chatKey worker as steer", asy
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
@@ -977,6 +989,8 @@ test("chat main retries a transient daemon startup failure without leaking the s
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -1105,6 +1119,8 @@ test("chat main retries a disposed frontend turn without leaking the dispose err
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -1239,6 +1255,8 @@ test("chat main retries an offline-queued frontend turn without leaking the disc
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -1371,6 +1389,8 @@ test("chat main passes quoted reply session metadata through one normal prompt s
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -1489,6 +1509,8 @@ test("chat main omits reply metadata when quoting the latest assistant message",
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -1604,6 +1626,8 @@ test("chat main preserves current quoted trigger text without injecting the quot
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -1731,6 +1755,8 @@ test("chat main accepts mention-only quoted triggers without injecting the quote
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
@@ -1851,6 +1877,8 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);

@@ -117,6 +117,45 @@ test("message header skips duplicate metadata for already formatted chat prompts
   assert.deepEqual(beforeStart, {});
 });
 
+test("message header formats structured chat prompt context at the shared input hook", async () => {
+  const handlers = createHandlers();
+
+  const inputResult = await handlers.input[0]({
+    source: "chat-bridge",
+    text: "hello",
+    promptContext: {
+      source: "chat-bridge",
+      sentAt: 1710000000000,
+      chatKey: "telegram/1:2",
+      chatType: "group",
+      userId: "guest-1",
+      nickname: "Alice",
+      identity: "OTHER",
+    },
+  });
+  assert.deepEqual(inputResult, { action: "continue" });
+
+  const beforeStart = await handlers.before_agent_start[0]({
+    prompt: "hello",
+    systemPrompt: "Base prompt",
+    promptContext: {
+      source: "chat-bridge",
+      sentAt: 1710000000000,
+      chatKey: "telegram/1:2",
+      chatType: "group",
+      userId: "guest-1",
+      nickname: "Alice",
+      identity: "OTHER",
+    },
+  });
+
+  const header = String(beforeStart?.message?.content || "");
+  assert.ok(header.includes("chatKey: telegram/1:2"));
+  assert.ok(header.includes("sender nickname: Alice"));
+  assert.ok(header.endsWith("---\nhello"));
+  assert.equal(beforeStart?.message?.display, false);
+});
+
 test("message header still injects a local hidden timestamp for non-chat prompts", async () => {
   const handlers = createHandlers();
 
