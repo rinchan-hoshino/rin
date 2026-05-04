@@ -10,7 +10,7 @@ import {
 test("installed runtime can reach an isolated interactive TUI user flow", async (t) => {
   if (!isInnerContainerRun()) {
     const result = await runInstallToTuiSmokeInContainer({
-      failOnMissingRuntime: Boolean(
+      failOnUnavailableRuntime: Boolean(
         process.env.CI || process.env.GITHUB_ACTIONS,
       ),
     });

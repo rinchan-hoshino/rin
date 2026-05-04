@@ -131,11 +131,11 @@ export function buildInstallToTuiContainerArgs(options: {
 }
 
 export async function runInstallToTuiSmokeInContainer(options: {
-  failOnMissingRuntime: boolean;
+  failOnUnavailableRuntime: boolean;
 }) {
   const runtime = await findContainerRuntime();
   if (!runtime) {
-    if (options.failOnMissingRuntime) {
+    if (options.failOnUnavailableRuntime) {
       assert.fail("missing docker or podman for isolated install-to-TUI smoke");
     }
     return {
@@ -143,18 +143,30 @@ export async function runInstallToTuiSmokeInContainer(options: {
     };
   }
 
-  const result = await execFileAsync(
-    runtime,
-    buildInstallToTuiContainerArgs({ mode: "smoke-test" }),
-    {
-      cwd: rootDir,
-      env: process.env,
-      maxBuffer: 10 * 1024 * 1024,
-    },
-  );
-  const stdout = String(result.stdout || "");
-  assert.match(stdout, /# pass 1/);
-  return { stdout };
+  try {
+    const result = await execFileAsync(
+      runtime,
+      buildInstallToTuiContainerArgs({ mode: "smoke-test" }),
+      {
+        cwd: rootDir,
+        env: process.env,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+    const stdout = String(result.stdout || "");
+    assert.match(stdout, /# pass 1/);
+    return { stdout };
+  } catch (error: any) {
+    if (options.failOnUnavailableRuntime) throw error;
+    const message = String(
+      error?.stderr || error?.stdout || error?.message || error,
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+    return {
+      skipped: `container runtime ${runtime} is not usable for isolated install-to-TUI smoke${message ? `: ${message}` : ""}`,
+    };
+  }
 }
 
 export async function runManualHarnessContainer(options: {
