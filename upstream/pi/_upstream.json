@@ -1,12 +1,12 @@
 {
   "repo": "https://github.com/badlogic/pi-mono.git",
   "sourceSubdir": "packages/coding-agent",
-  "ref": "v0.72.1",
-  "resolvedCommit": "036bde0a5db25f4ac55525a7b3d15a90717f737d",
-  "syncedAt": "2026-05-02T19:16:11.085Z",
+  "ref": "v0.73.0",
+  "resolvedCommit": "dbcb473d6fdb96f60570b9ebe73e7aa6316fa8fb",
+  "syncedAt": "2026-05-04T19:16:26.867Z",
   "syncMethod": "git sparse-checkout",
   "packageName": "@mariozechner/pi-coding-agent",
-  "packageVersion": "0.72.1",
+  "packageVersion": "0.73.0",
   "paths": [
     "README.md",
     "CHANGELOG.md",
