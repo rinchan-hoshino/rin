@@ -85,6 +85,24 @@ Use Pi resource filters with the alias to disable entries from a broader extensi
 
 If `extensions` is missing or `[]`, both optional tools are off.
 
+### Agent guidance for enabling bundled browser/computer control
+
+When a non-technical user asks to enable browser or computer control, edit their Rin `settings.json` rather than generating optional config files:
+
+```json
+{
+  "extensions": ["rin:browser-use", "rin:computer-use"]
+}
+```
+
+Keep the change minimal:
+
+- preserve existing `extensions` entries and append the needed `rin:` aliases if absent
+- do not create `~/.rin/extensions/rin-browser-use.json` or `~/.rin/extensions/rin-computer-use.json` unless the user needs a non-default command, adapter, timeout, or install policy
+- for `browser_use`, prefer the default path: use `agent-browser` from `PATH`, otherwise let the extension invoke latest `agent-browser` through `npx -y agent-browser`
+- for `computer_use`, let the agent inspect the host OS and install the smallest suitable native tool only when needed, such as `xdotool`/screenshot tools on Linux or `cliclick` on macOS; there is no adapter marketplace or curated adapter list to maintain
+- after changing extension settings, restart or reload the Rin session/daemon as appropriate so Pi resources are reloaded
+
 ## Daemon worker extensions
 
 - disabled unless listed under `settings.json -> rinExtensions.daemonWorkers`

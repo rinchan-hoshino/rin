@@ -147,6 +147,8 @@ Notes for the agent:
 - `rin:browser-use` registers `browser_use` and always drives the external `agent-browser` CLI; if no command is configured, it uses `agent-browser` from `PATH`, then falls back to the latest npm package through `npx -y agent-browser`
 - `rin:computer-use` registers `computer_use`; if no adapter command is configured, it uses platform backends for Windows, Linux, or macOS
 - use Pi resource filters with the Rin alias, for example `!rin:browser-use`, to disable a previously enabled bundled resource
+- for non-technical users, enable the aliases in `settings.json` directly and avoid creating optional config files unless a non-default adapter, command, timeout, or install policy is actually required
+- for `computer_use`, let the agent inspect the OS and install the smallest necessary native backend tool when needed; do not build or expect a curated adapter marketplace
 
 Daemon worker extensions are configured separately because they are daemon-process background providers, not session tools:
 
