@@ -1,13 +1,10 @@
 import { normalizeSessionRef } from "../session/ref.js";
-import {
-  countToolCalls,
-  extractMessageText,
-  extractTextBeforeFirstToolCall,
-} from "../message-content.js";
 import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
+import { createRinFrontendBackendEventTranslator } from "../rin-frontend-sdk/index.js";
 import { safeString } from "../text-utils.js";
 import type {
   InteractiveFrontendEvent,
+  RinFrontendBackendEvent,
   RpcFrontendClient,
 } from "./frontend-surface.js";
 import { RinDaemonFrontendClient } from "./rpc-client.js";
@@ -59,8 +56,9 @@ export class ChatFrontendDriver {
     resolve: (value: any) => void;
     reject: (error: Error) => void;
   } | null = null;
+  private readonly backendEventTranslator =
+    createRinFrontendBackendEventTranslator();
   latestAssistantText = "";
-  deliveredAssistantInterimTexts = new Set<string>();
   assistantFinalReplyCommitted = false;
   frontendPhase: FrontendPhase = "idle";
   listeners = new Set<(event: ChatFrontendDriverEvent) => void>();
@@ -200,7 +198,7 @@ export class ChatFrontendDriver {
   }
 
   private resetAssistantSegmentTracking() {
-    this.deliveredAssistantInterimTexts.clear();
+    this.backendEventTranslator.resetAssistantSegments();
     this.assistantFinalReplyCommitted = false;
   }
 
@@ -218,50 +216,7 @@ export class ChatFrontendDriver {
   }
 
   private clearAssistantInterimState() {
-    this.deliveredAssistantInterimTexts.clear();
-  }
-
-  private emitAssistantInterim(text: string) {
-    const trimmed = safeString(text).trim();
-    if (!trimmed) return false;
-    if (this.deliveredAssistantInterimTexts.has(trimmed)) return false;
-    this.deliveredAssistantInterimTexts.add(trimmed);
-    this.emit({ type: "assistant_interim", text: trimmed });
-    return true;
-  }
-
-  private handleAssistantMessageUpdate(message: any) {
-    const text = safeString(
-      extractMessageText(message?.content, {
-        includeThinking: false,
-        trim: true,
-      }),
-    ).trim();
-    if (!text) return;
-    this.latestAssistantText = text;
-  }
-
-  private handleAssistantMessageEnd(message: any) {
-    const content = message?.content;
-    const hasToolCalls = countToolCalls(content) > 0;
-    const fullText = safeString(
-      extractMessageText(content, {
-        includeThinking: false,
-        trim: true,
-      }),
-    ).trim();
-    if (fullText) this.latestAssistantText = fullText;
-    if (!hasToolCalls) {
-      this.assistantFinalReplyCommitted = true;
-      return;
-    }
-    const interimText = safeString(
-      extractTextBeforeFirstToolCall(content, {
-        includeThinking: false,
-        trim: true,
-      }),
-    ).trim();
-    this.emitAssistantInterim(interimText);
+    this.backendEventTranslator.resetAssistantSegments();
   }
 
   private throwIfQueuedOffline(requestTag?: string) {
@@ -556,31 +511,43 @@ export class ChatFrontendDriver {
 
   async handleClientEvent(event: any) {
     if (!event || typeof event !== "object") return;
-    const payload = event.type === "ui" ? event.payload : event;
-    await this.handleSessionEvent(payload);
+    const backendEvents =
+      event.type === "backend_event"
+        ? [event.payload as RinFrontendBackendEvent]
+        : this.backendEventTranslator.translate(event);
+    for (const backendEvent of backendEvents) {
+      await this.handleBackendEvent(backendEvent);
+    }
   }
 
-  private async handleSessionEvent(event: any) {
-    if (!event || typeof event !== "object") return;
-    if (event.type === "rpc_frontend_status") {
-      this.setFrontendPhase(
-        (safeString(event.phase).trim() as FrontendPhase) || "idle",
-      );
-      if (typeof event.turnActive === "boolean") {
-        this.frontendState.turnActive = event.turnActive;
-      }
-      if (typeof event.isStreaming === "boolean") {
-        this.frontendState.isStreaming = event.isStreaming;
-      }
-      return;
-    }
-    if (event.type === "rpc_turn_event") {
-      if (event.event === "start" || event.event === "heartbeat") {
+  private async handleBackendEvent(event: RinFrontendBackendEvent) {
+    switch (event.type) {
+      case "status":
+        this.setFrontendPhase(
+          event.phase === "compacting" ? "working" : event.phase,
+        );
+        if (typeof event.turnActive === "boolean") {
+          this.frontendState.turnActive = event.turnActive;
+        }
+        if (typeof event.isStreaming === "boolean") {
+          this.frontendState.isStreaming = event.isStreaming;
+        }
+        return;
+      case "turn_accepted":
         this.frontendState.turnActive = true;
         this.emit({ type: "turn_accepted" });
         return;
-      }
-      if (event.event === "complete") {
+      case "assistant_stream":
+        this.latestAssistantText = event.text;
+        return;
+      case "assistant_interim":
+        this.emit({ type: "assistant_interim", text: event.text });
+        return;
+      case "assistant_final":
+        this.latestAssistantText = event.text;
+        this.assistantFinalReplyCommitted = true;
+        return;
+      case "turn_complete": {
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         if (!this.liveTurn) return;
@@ -595,59 +562,30 @@ export class ChatFrontendDriver {
           return;
         }
         this.latestAssistantText = finalText;
-        const session = normalizeSessionRef(event);
         this.updateFrontendStateFrom(event);
         this.setFrontendPhase("idle");
         this.liveTurn.resolve({
           finalText,
           result: event.result,
-          sessionId: session.sessionId,
-          sessionFile: session.sessionFile,
+          sessionId: event.sessionId,
+          sessionFile: event.sessionFile,
         });
         return;
       }
-      if (event.event === "error") {
+      case "turn_error": {
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.setFrontendPhase("idle");
-        const session = normalizeSessionRef(event);
         this.updateFrontendStateFrom(event);
-        const error = new Error(
-          String(event.error || "rpc_turn_failed"),
-        ) as Error & {
+        const error = new Error(event.error) as Error & {
           sessionId?: string;
           sessionFile?: string;
         };
-        error.sessionId = session.sessionId;
-        error.sessionFile = session.sessionFile;
+        error.sessionId = event.sessionId;
+        error.sessionFile = event.sessionFile;
         this.failLiveTurn(error);
         return;
       }
-    }
-
-    switch (event.type) {
-      case "agent_start":
-        this.resetAssistantSegmentTracking();
-        this.latestAssistantText = "";
-        this.frontendState.turnActive = true;
-        this.emit({ type: "turn_accepted" });
-        break;
-      case "message_end":
-        if (event?.message?.role === "assistant") {
-          this.handleAssistantMessageEnd(event.message);
-        }
-        break;
-      case "message_update":
-        if (event?.message?.role === "assistant") {
-          this.handleAssistantMessageUpdate(event.message);
-        }
-        break;
-      case "tool_execution_end":
-      case "tool_execution_start":
-      case "compaction_start":
-      case "compaction_end":
-        this.emit({ type: "turn_accepted" });
-        break;
     }
   }
 }

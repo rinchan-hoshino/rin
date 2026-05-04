@@ -61,6 +61,50 @@ export type RinExtensionUiResponse =
   | { type: "extension_ui_response"; id: string; confirmed: boolean }
   | { type: "extension_ui_response"; id: string; cancelled: true };
 
+export type RinFrontendStatusPhase =
+  | "idle"
+  | "connecting"
+  | "starting"
+  | "sending"
+  | "working"
+  | "compacting";
+
+export type RinFrontendBackendEvent =
+  | {
+      type: "status";
+      phase: RinFrontendStatusPhase;
+      label?: string;
+      connected?: boolean;
+      turnActive?: boolean;
+      isStreaming?: boolean;
+    }
+  | { type: "turn_accepted"; requestTag?: string }
+  | { type: "assistant_stream"; text: string }
+  | { type: "assistant_interim"; text: string }
+  | {
+      type: "assistant_final";
+      text: string;
+      result?: unknown;
+      sessionId?: string;
+      sessionFile?: string;
+      requestTag?: string;
+    }
+  | {
+      type: "turn_complete";
+      finalText?: string;
+      result?: unknown;
+      sessionId?: string;
+      sessionFile?: string;
+      requestTag?: string;
+    }
+  | {
+      type: "turn_error";
+      error: string;
+      sessionId?: string;
+      sessionFile?: string;
+      requestTag?: string;
+    };
+
 export type RinFrontendEvent =
   | {
       type: "message_delta";
@@ -82,6 +126,7 @@ export type RinFrontendEvent =
   | { type: "session_changed"; sessionId: string; title?: string }
   | { type: "extension_ui_request"; payload: RinExtensionUiRequest }
   | { type: "extension_error"; payload: unknown }
+  | { type: "backend_event"; payload: RinFrontendBackendEvent }
   | { type: "ui"; name: string; payload: unknown };
 
 export type RinFrontendAutocompleteItem = {

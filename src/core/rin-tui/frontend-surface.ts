@@ -2,6 +2,7 @@ import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,
   RinFrontendAutocompleteItem,
+  RinFrontendBackendEvent,
   RinFrontendClient,
   RinFrontendCommandItem,
   RinFrontendEvent,
@@ -114,4 +115,4 @@ export interface RpcFrontendClient extends InteractiveFrontendSurface {
   respondExtensionUi(response: RinExtensionUiResponse): Promise<void>;
 }
 
-export type { RinFrontendClient, RinFrontendEvent };
+export type { RinFrontendBackendEvent, RinFrontendClient, RinFrontendEvent };

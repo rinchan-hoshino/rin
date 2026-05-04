@@ -6,8 +6,10 @@ export type {
   RinFrontendClient,
   RinFrontendCommandItem,
   RinFrontendEvent,
+  RinFrontendBackendEvent,
   RinFrontendModelItem,
   RinFrontendSessionItem,
+  RinFrontendStatusPhase,
   RinNewSessionOptions,
   RinNewSessionResult,
   RinPromptOptions,
@@ -15,6 +17,11 @@ export type {
   RinRpcResponse,
   RinSessionState,
 } from "./types.js";
+
+export {
+  createRinFrontendBackendEventTranslator,
+  type RinFrontendBackendEventTranslator,
+} from "./backend-events.js";
 
 export type {
   ExtensionAPI,
