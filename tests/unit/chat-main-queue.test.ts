@@ -284,7 +284,7 @@ test("chat main forwards command sender identity to controller prompt context", 
         call.incomingMessageId !== "m-new" ||
         call.sessionFile !== "" ||
         call.promptMeta?.source !== "chat-bridge" ||
-        call.promptMeta?.triggerKind !== "chat-command" ||
+        "triggerKind" in (call.promptMeta || {}) ||
         call.promptMeta?.chatKey !== "telegram/1:2" ||
         call.promptMeta?.chatType !== "private" ||
         call.promptMeta?.userId !== "trusted-1" ||

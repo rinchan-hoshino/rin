@@ -183,7 +183,6 @@ export type RinNewSessionResult = RinSessionState & {
 export type RinPromptContext = {
   source?: string;
   sentAt?: number;
-  triggerKind?: string;
   chatKey?: string;
   chatName?: string;
   chatType?: string;
@@ -192,6 +191,8 @@ export type RinPromptContext = {
   groupNickname?: string;
   identity?: string;
   replyToMessageId?: string;
+  taskId?: string;
+  taskName?: string;
   attachedFiles?: Array<{ name?: string; path?: string }>;
 };
 

@@ -75,6 +75,7 @@ import {
 } from "./runtime-config.js";
 import { composeChatKey, loadIdentity, trustOf } from "./support.js";
 import { sendOutboxPayload } from "./transport.js";
+import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
@@ -234,6 +235,7 @@ export type ChatBridgeTurnPayload = {
   managedSessionLeaf?: string;
   model?: string;
   thinkingLevel?: string;
+  promptMeta?: PromptContextMeta;
 };
 
 export type ChatBridgeEvalPayload = {
@@ -414,7 +416,6 @@ export async function startChatBridge(
       : replyToMessageId;
     const promptMeta = {
       source: "chat-bridge",
-      triggerKind: "chat-command",
       sentAt: Number.isFinite(Number(session?.timestamp))
         ? Number(session.timestamp)
         : Date.now(),
@@ -834,6 +835,7 @@ export async function startChatBridge(
           managedSessionLeaf: payload?.managedSessionLeaf,
           model: payload?.model,
           thinkingLevel: payload?.thinkingLevel,
+          promptMeta: payload?.promptMeta,
         },
         "prompt",
       );

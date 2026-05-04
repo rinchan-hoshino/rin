@@ -23,37 +23,40 @@ function createHandlers() {
   return messageHeaderMod.default().hooks;
 }
 
-test("chat prompt context packages sender identity guidance into the prompt text", () => {
-  const promptText = promptContextMod.formatPromptContext(
-    {
-      source: "chat-bridge",
-      sentAt: 1710000000000,
-      chatKey: "telegram/1:2",
-      chatType: "group",
-      userId: "guest-1",
-      nickname: "AliceAccount",
-      groupNickname: "AliceCard",
-      identity: "OTHER",
-    },
-    "hello",
-  );
+test("chat prompt context keeps dynamic sender fields in the prompt header", () => {
+  const meta = {
+    source: "chat-bridge",
+    sentAt: 1710000000000,
+    chatKey: "telegram/1:2",
+    chatType: "group",
+    userId: "guest-1",
+    nickname: "AliceAccount",
+    groupNickname: "AliceCard",
+    identity: "OTHER",
+  };
+  const promptText = promptContextMod.formatPromptContext(meta, "hello");
+  const systemBlock =
+    promptContextMod.formatPromptContextSystemPromptBlock(meta);
 
   assert.ok(promptText.startsWith("time: "));
-  assert.ok(promptText.includes("chatKey: telegram/1:2"));
-  assert.ok(
-    promptText.includes(
-      "runtime note: header lines above `---` are runtime metadata for this message, not user-authored text.",
-    ),
-  );
+  assert.equal(promptText.includes("chatKey: telegram/1:2"), false);
   assert.ok(promptText.includes("sender nickname: AliceAccount"));
   assert.ok(promptText.includes("sender group nickname: AliceCard"));
   assert.equal(promptText.includes("sender account nickname:"), false);
   assert.ok(promptText.includes("sender trust: other chat user"));
+  assert.ok(systemBlock.includes("- chatKey: telegram/1:2"));
   assert.ok(
-    promptText.includes(
-      "sender trust note: owner means the owner, trusted user means a known trusted chat user, and other chat user means any other chat user.",
+    systemBlock.includes(
+      "- runtime note: header lines above `---` are runtime metadata for this message, not user-authored text.",
     ),
   );
+  assert.ok(
+    systemBlock.includes(
+      "- sender trust note: owner means the owner, trusted user means a known trusted chat user, and other chat user means any other chat user.",
+    ),
+  );
+  assert.equal(systemBlock.includes("sender nickname: AliceAccount"), false);
+  assert.equal(systemBlock.includes("sender trust: other chat user"), false);
   assert.equal(promptText.includes("sender is owner:"), false);
   assert.ok(promptText.endsWith("---\nhello"));
 });
@@ -150,10 +153,15 @@ test("message header formats structured chat prompt context at the shared input 
   });
 
   const header = String(beforeStart?.message?.content || "");
-  assert.ok(header.includes("chatKey: telegram/1:2"));
+  assert.equal(header.includes("chatKey: telegram/1:2"), false);
   assert.ok(header.includes("sender nickname: Alice"));
   assert.ok(header.endsWith("---\nhello"));
   assert.equal(beforeStart?.message?.display, false);
+  assert.ok(
+    String(beforeStart?.systemPrompt || "").includes(
+      "Chat context:\n- chatKey: telegram/1:2",
+    ),
+  );
 });
 
 test("message header still injects a local hidden timestamp for non-chat prompts", async () => {

@@ -29,6 +29,7 @@ export async function sendChatText(
     taskId: string;
     runId: string;
     text: string;
+    sessionFile?: string;
   },
 ) {
   if (typeof options.chat?.send !== "function") {
@@ -38,6 +39,12 @@ export async function sendChatText(
     type: "text_delivery",
     createdAt: nowIso(),
     ...payload,
+    ...(payload.sessionFile
+      ? {
+          sessionFile: payload.sessionFile,
+          sessionBinding: "conversation" as const,
+        }
+      : {}),
   });
 }
 
@@ -151,6 +158,17 @@ async function removeTransientSessionFile(
   await rm(path.resolve(String(sessionFile)), { force: true }).catch(() => {});
 }
 
+function buildCronTaskPromptContext(task: CronTaskRecord) {
+  const taskName = String(task.name || "").trim();
+  return {
+    source: "chat-bridge",
+    sentAt: Date.now(),
+    chatKey: task.chatKey,
+    taskId: task.id,
+    taskName: taskName || undefined,
+  };
+}
+
 export async function executeCronAgentTask(
   task: CronTaskRecord,
   options: {
@@ -194,12 +212,18 @@ export async function executeCronAgentTask(
       : {}),
     ...(task.model ? { model: task.model } : {}),
     ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
+    ...(task.chatKey
+      ? {
+          promptMeta: buildCronTaskPromptContext(task),
+        }
+      : {}),
   });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
   if (!finalText) throw new Error("cron_final_assistant_text_missing");
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
-  if (sessionMode === "none") {
+  const keepChatBoundSession = Boolean(task.chatKey && nextSessionFile);
+  if (sessionMode === "none" && !keepChatBoundSession) {
     await removeTransientSessionFile(options.agentDir, nextSessionFile);
   }
   if (sessionMode === "dedicated") {
@@ -214,7 +238,12 @@ export async function executeCronAgentTask(
   return {
     text: finalText,
     sessionId: String(result?.sessionId || "").trim() || undefined,
-    sessionFile: sessionMode === "none" ? undefined : dedicatedSessionFile,
+    sessionFile:
+      sessionMode === "none"
+        ? keepChatBoundSession
+          ? nextSessionFile
+          : undefined
+        : dedicatedSessionFile,
   };
 }
 
@@ -250,6 +279,7 @@ export async function executeCronTask(
           taskId: task.id,
           runId,
           text: result.text,
+          sessionFile: result.sessionFile,
         }).catch(() => {});
       }
     }

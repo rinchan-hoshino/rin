@@ -9,16 +9,54 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-image_tag="rin-local-ci:latest"
-
-echo "rin local ci: building container image..."
-docker build -f .ci/local-ci/Dockerfile -t "$image_tag" .
-
 format_targets="$({
   git diff --cached --name-only --diff-filter=ACMR
 } | grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|js|mjs|md|json|yml|yaml)$|^\.github/workflows/.*\.(yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.mjs)$' || true)"
 
+run_host_checks() {
+  echo "rin local ci: running format, lint, test on host fallback..."
+  if [[ -n "$format_targets" ]]; then
+    mapfile -t format_target_args < <(printf '%s\n' "$format_targets" | sed '/^$/d')
+    npm run format:check -- "${format_target_args[@]}"
+  else
+    echo "No staged files need format checking."
+  fi
+  npm run lint
+  npm test
+}
+
+is_unusable_container_runtime_log() {
+  local log_file="$1"
+  grep -Eq 'failed to create TTRPC connection|container runtime docker is not usable' "$log_file"
+}
+
+run_or_host_fallback_on_container_runtime_error() {
+  local log_file
+  log_file="$(mktemp)"
+  if "$@" 2>&1 | tee "$log_file"; then
+    rm -f "$log_file"
+    return 0
+  fi
+  local status=${PIPESTATUS[0]}
+  if is_unusable_container_runtime_log "$log_file"; then
+    rm -f "$log_file"
+    echo "rin local ci: docker cannot start containers in this environment; falling back to host checks." >&2
+    run_host_checks
+    return 0
+  fi
+  rm -f "$log_file"
+  return "$status"
+}
+
+image_tag="rin-local-ci:latest"
+
+echo "rin local ci: building container image..."
+run_or_host_fallback_on_container_runtime_error docker build -f .ci/local-ci/Dockerfile -t "$image_tag" .
+
 tree_id="$(git write-tree)"
 
 echo "rin local ci: running format, lint, test in container..."
-git archive --format=tar "$tree_id" | docker run --rm --network none -e FORMAT_TARGETS_SET=1 -e FORMAT_TARGETS="$format_targets" -i "$image_tag"
+archive_file="$(mktemp)"
+trap 'rm -f "$archive_file"' EXIT
+git archive --format=tar "$tree_id" >"$archive_file"
+run_or_host_fallback_on_container_runtime_error docker run --rm --network none -e FORMAT_TARGETS_SET=1 -e FORMAT_TARGETS="$format_targets" -i "$image_tag" <"$archive_file"

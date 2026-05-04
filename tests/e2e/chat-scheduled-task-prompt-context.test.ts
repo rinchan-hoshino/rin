@@ -13,24 +13,34 @@ const promptContextMod = await import(
   ).href
 );
 
-test("scheduled chat-bound prompt context omits fake sender fields", () => {
+test("scheduled chat-bound prompt context keeps chat and task metadata in the system prompt", () => {
+  const meta = {
+    source: "chat-bridge",
+    chatKey: "telegram/demo:1",
+    taskId: "cron_demo",
+    taskName: "Demo Task",
+  };
   const promptText = promptContextMod.formatPromptContext(
-    {
-      source: "chat-bridge",
-      chatKey: "telegram/demo:1",
-      triggerKind: "scheduled-task",
-    },
+    meta,
     "scheduled hello",
   );
+  const systemBlock =
+    promptContextMod.formatPromptContextSystemPromptBlock(meta);
 
-  assert.ok(promptText.includes("chatKey: telegram/demo:1"));
-  assert.ok(promptText.includes("chat trigger: scheduled task"));
+  assert.equal(promptText.includes("chatKey: telegram/demo:1"), false);
+  assert.equal(promptText.includes("chat trigger:"), false);
+  assert.equal(promptText.includes("task id: cron_demo"), false);
+  assert.equal(promptText.includes("task run id:"), false);
+  assert.equal(promptText.includes("task session mode:"), false);
+  assert.ok(systemBlock.includes("- chatKey: telegram/demo:1"));
+  assert.ok(systemBlock.includes("- task id: cron_demo"));
+  assert.ok(systemBlock.includes("- task name: Demo Task"));
   assert.ok(
-    promptText.includes(
-      "runtime note: header lines above `---` are runtime metadata for this message, not user-authored text.",
+    systemBlock.includes(
+      "- runtime note: header lines above `---` are runtime metadata for this message, not user-authored text.",
     ),
   );
-  assert.equal(promptText.includes("sender user id:"), false);
-  assert.equal(promptText.includes("sender nickname:"), false);
+  assert.equal(systemBlock.includes("sender user id:"), false);
+  assert.equal(systemBlock.includes("sender nickname:"), false);
   assert.ok(promptText.endsWith("---\nscheduled hello"));
 });

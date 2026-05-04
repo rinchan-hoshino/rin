@@ -244,26 +244,43 @@ test("cron dedicated agent task creates and then preserves its bound session", a
     assert.equal(second.text, "done again");
     assert.equal(second.sessionFile, dedicatedSessionFile);
     assert.equal(task.dedicatedSessionFile, dedicatedSessionFile);
-    assert.deepEqual(calls, [
-      {
-        chatKey: "telegram/demo:1",
-        controllerKey: "cron_dedicated",
-        deliveryEnabled: false,
-        affectChatBinding: false,
-        disposeAfterTurn: false,
-        text: "hello",
-        sessionFile: dedicatedSessionFile,
-      },
-      {
-        chatKey: "telegram/demo:1",
-        controllerKey: "cron_dedicated",
-        deliveryEnabled: false,
-        affectChatBinding: false,
-        disposeAfterTurn: false,
-        text: "hello again",
-        sessionFile: dedicatedSessionFile,
-      },
-    ]);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(
+      calls.map((item) => ({
+        chatKey: item.chatKey,
+        controllerKey: item.controllerKey,
+        deliveryEnabled: item.deliveryEnabled,
+        affectChatBinding: item.affectChatBinding,
+        disposeAfterTurn: item.disposeAfterTurn,
+        text: item.text,
+        sessionFile: item.sessionFile,
+      })),
+      [
+        {
+          chatKey: "telegram/demo:1",
+          controllerKey: "cron_dedicated",
+          deliveryEnabled: false,
+          affectChatBinding: false,
+          disposeAfterTurn: false,
+          text: "hello",
+          sessionFile: dedicatedSessionFile,
+        },
+        {
+          chatKey: "telegram/demo:1",
+          controllerKey: "cron_dedicated",
+          deliveryEnabled: false,
+          affectChatBinding: false,
+          disposeAfterTurn: false,
+          text: "hello again",
+          sessionFile: dedicatedSessionFile,
+        },
+      ],
+    );
+    assert.equal(calls[0].promptMeta?.taskId, "cron_dedicated");
+    assert.equal("triggerKind" in (calls[0].promptMeta || {}), false);
+    assert.equal("taskRunId" in (calls[0].promptMeta || {}), false);
+    assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
+    assert.equal(calls[0].systemPromptBlocks, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -311,7 +328,17 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
     });
     assert.equal(result.sessionFile, task.dedicatedSessionFile);
     assert.ok(task.dedicatedSessionFile.endsWith("cron_seeded.jsonl"));
-    assert.deepEqual(calls, [
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      {
+        chatKey: calls[0].chatKey,
+        controllerKey: calls[0].controllerKey,
+        deliveryEnabled: calls[0].deliveryEnabled,
+        affectChatBinding: calls[0].affectChatBinding,
+        disposeAfterTurn: calls[0].disposeAfterTurn,
+        text: calls[0].text,
+        sessionFile: calls[0].sessionFile,
+      },
       {
         chatKey: "telegram/demo:1",
         controllerKey: "cron_seeded",
@@ -327,13 +354,15 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
           "cron_seeded.jsonl",
         ),
       },
-    ]);
+    );
+    assert.equal(calls[0].promptMeta?.taskId, "cron_seeded");
+    assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("cron no-session agent task disposes and removes its transient session file", async () => {
+test("cron unbound no-session agent task disposes and removes its transient session file", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const transientSessionFile = path.join(
     agentDir,
@@ -344,7 +373,6 @@ test("cron no-session agent task disposes and removes its transient session file
   );
   const task = {
     id: "cron_none",
-    chatKey: "telegram/demo:1",
     session: { mode: "none" },
     model: "openai-codex/gpt-5.5",
     thinkingLevel: "low",
@@ -374,7 +402,7 @@ test("cron no-session agent task disposes and removes its transient session file
     assert.equal(task.dedicatedSessionFile, undefined);
     assert.deepEqual(calls, [
       {
-        chatKey: "telegram/demo:1",
+        chatKey: undefined,
         controllerKey: "cron_none",
         deliveryEnabled: false,
         affectChatBinding: false,
@@ -386,6 +414,58 @@ test("cron no-session agent task disposes and removes its transient session file
         thinkingLevel: "low",
       },
     ]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron chat-bound no-session agent task preserves session file for quote resume", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const transientSessionFile = path.join(
+    agentDir,
+    "sessions",
+    "managed",
+    "task",
+    "cron_chat_bound.jsonl",
+  );
+  const task = {
+    id: "cron_chat_bound",
+    name: "Chat Bound Task",
+    chatKey: "telegram/demo:1",
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt: "hello" },
+    trigger: { intervalMs: 60_000 },
+  };
+  const calls = [];
+  try {
+    await fs.mkdir(path.dirname(transientSessionFile), { recursive: true });
+    await fs.writeFile(transientSessionFile, "temporary session", "utf8");
+    const result = await execMod.executeCronAgentTask(task, {
+      agentDir,
+      runId: "run-chat-1",
+      chat: {
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return {
+            finalText: "done",
+            sessionId: "s1",
+            sessionFile: transientSessionFile,
+          };
+        },
+      },
+    });
+    assert.equal(result.text, "done");
+    assert.equal(result.sessionFile, transientSessionFile);
+    assert.equal(
+      await fs.readFile(transientSessionFile, "utf8"),
+      "temporary session",
+    );
+    assert.equal(calls[0].promptMeta?.taskId, "cron_chat_bound");
+    assert.equal(calls[0].promptMeta?.taskName, "Chat Bound Task");
+    assert.equal("triggerKind" in (calls[0].promptMeta || {}), false);
+    assert.equal("taskRunId" in (calls[0].promptMeta || {}), false);
+    assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
+    assert.equal(calls[0].systemPromptBlocks, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -475,6 +555,42 @@ test("cron dedicated agent task uses separate initial and continuation prompts",
       calls.map((item) => item.text),
       ["first turn", "next turn"],
     );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron chat-bound agent task delivery records session binding", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const sessionFile = path.join(
+    agentDir,
+    "sessions",
+    "managed",
+    "task",
+    "cron_delivery.jsonl",
+  );
+  const sent = [];
+  const task = {
+    id: "cron_delivery",
+    chatKey: "telegram/demo:1",
+    session: { mode: "none" },
+    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
+    target: { kind: "agent_prompt", prompt: "hello" },
+    runCount: 1,
+  };
+  try {
+    await execMod.executeCronTask(task, {
+      agentDir,
+      chat: {
+        runTurn: async () => ({ finalText: "done", sessionFile }),
+        send: async (payload) => {
+          sent.push(payload);
+        },
+      },
+    });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].sessionFile, sessionFile);
+    assert.equal(sent[0].sessionBinding, "conversation");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
