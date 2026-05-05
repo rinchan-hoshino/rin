@@ -218,6 +218,7 @@ export class RinDaemonExtensionManager {
     this.chatAdapters.length = 0;
     const entries = listRinDaemonWorkerConfigs(
       readRuntimeSettings(this.options.agentDir),
+      { cwd: this.options.cwd },
     );
     if (!entries.length) return [];
     let runtimeRoot: string;

@@ -60,12 +60,19 @@ async function writeProviderPackage(
   dir: string,
   packageName: string,
   source: string,
+  packageJson: Record<string, unknown> = {},
 ) {
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(
     path.join(dir, "package.json"),
     `${JSON.stringify(
-      { name: packageName, version: "0.0.0", type: "module", main: "index.js" },
+      {
+        name: packageName,
+        version: "0.0.0",
+        type: "module",
+        main: "index.js",
+        ...packageJson,
+      },
       null,
       2,
     )}\n`,
@@ -231,12 +238,13 @@ test("stage B daemon extension manager contributes chat runtime adapters", async
       packageDir,
       "rin-daemon-chat-adapter-test",
       `import fs from "node:fs";
+const markerPath = ${JSON.stringify(markerPath)};
 export const rinDaemonExtension = {
   start(ctx) {
-    ctx.registerChatAdapter(({ app, config }) => ({
+    ctx.registerChatAdapter(({ app }) => ({
       adapter: {
         async start() {
-          fs.appendFileSync(config.markerPath, "chat-start\\n");
+          fs.appendFileSync(markerPath, "chat-start\\n");
           app.emit("message", {
             platform: "extension-test",
             selfId: "bot-1",
@@ -248,7 +256,7 @@ export const rinDaemonExtension = {
           });
         },
         async stop() {
-          fs.appendFileSync(config.markerPath, "chat-stop\\n");
+          fs.appendFileSync(markerPath, "chat-stop\\n");
         },
       },
       bot: {
@@ -256,26 +264,18 @@ export const rinDaemonExtension = {
         selfId: "bot-1",
         status: 1,
         async sendMessage(chatId, content) {
-          fs.appendFileSync(config.markerPath, "send:" + chatId + ":" + String(content) + "\\n");
+          fs.appendFileSync(markerPath, "send:" + chatId + ":" + String(content) + "\\n");
           return ["sent-1"];
         },
       },
-    }), { key: "extension-test", config: ctx.config });
+    }), { key: "extension-test" });
   },
 };
 `,
+      { rin: { daemonExtension: true } },
     );
     await writeJson(path.join(agentDir, "settings.json"), {
-      rinExtensions: {
-        daemonWorkers: [
-          {
-            name: "chat-worker",
-            packageName: "rin-daemon-chat-adapter-test",
-            version: `file:${packageDir}`,
-            config: { markerPath },
-          },
-        ],
-      },
+      extensions: [packageDir],
     });
 
     const warnings: string[] = [];
@@ -286,7 +286,10 @@ export const rinDaemonExtension = {
     });
     const started = await manager.start();
     assert.deepEqual(started, [
-      { name: "chat-worker", packageName: "rin-daemon-chat-adapter-test" },
+      {
+        name: "rin-daemon-chat-adapter-test",
+        packageName: "rin-daemon-chat-adapter-test",
+      },
     ]);
     assert.deepEqual(warnings, []);
     const app = chatRuntime.createChatRuntimeApp(agentDir);
