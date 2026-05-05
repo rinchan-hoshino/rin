@@ -121,7 +121,7 @@ test("chat bridge adapter config materialization applies minimal setup defaults"
   });
 });
 
-test("chat bridge runtime adapter entries use internal built-in runtime adapters", () => {
+test("chat bridge runtime adapter entries expose only configured built-in adapter keys", () => {
   const entries = support.listChatRuntimeAdapterEntries({
     chat: {
       telegram: { token: "telegram-token", protocol: "polling" },
@@ -131,12 +131,8 @@ test("chat bridge runtime adapter entries use internal built-in runtime adapters
   });
 
   assert.deepEqual(
-    entries.map((item) => ({ key: item.key, builtIn: item.builtIn })),
-    [
-      { key: "telegram", builtIn: true },
-      { key: "onebot", builtIn: true },
-      { key: "minecraft", builtIn: true },
-    ],
+    entries.map((item) => item.key),
+    ["telegram", "onebot", "minecraft"],
   );
 });
 

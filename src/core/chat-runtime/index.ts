@@ -1,8 +1,6 @@
-import { createRequire } from "node:module";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 import WebSocket from "ws";
 
@@ -1484,30 +1482,6 @@ class OneBotAdapter {
   }
 }
 
-export type ChatRuntimeAdapterProviderInput = {
-  app: ChatRuntimeApp;
-  dataDir: string;
-  runtimeRoot: string;
-  key: string;
-  name: string;
-  packageName: string;
-  config: Record<string, any>;
-  logger?: any;
-};
-
-export type ChatRuntimeAdapterProviderResult = void | {
-  adapter?: any;
-  bot?: any;
-};
-
-export type ChatRuntimeAdapterProvider = {
-  createAdapter(
-    input: ChatRuntimeAdapterProviderInput,
-  ):
-    | ChatRuntimeAdapterProviderResult
-    | Promise<ChatRuntimeAdapterProviderResult>;
-};
-
 type BuiltInChatRuntimeAdapterConstructor = new (
   app: ChatRuntimeApp,
   dataDir: string,
@@ -1538,14 +1512,10 @@ export function createChatRuntimeH() {
 
 type ChatRuntimeAdapterInstantiationInput = {
   dataDir: string;
-  runtimeRoot?: string;
-  settings?: any;
   adapterEntries: Array<{
     key: string;
     name: string;
     config: Record<string, any>;
-    builtIn?: boolean;
-    packageName?: string;
   }>;
   logger?: any;
 };
@@ -1567,102 +1537,6 @@ function instantiateBuiltInChatRuntimeAdapter(
   }
   new Adapter(app, input.dataDir, entry.config, input.logger);
   return true;
-}
-
-function pickChatRuntimeAdapterProvider(
-  moduleValue: any,
-): ChatRuntimeAdapterProvider | null {
-  const candidates = [
-    moduleValue?.default,
-    moduleValue?.chatBridgeProvider,
-    moduleValue,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate?.createAdapter === "function") return candidate;
-    if (typeof candidate === "function") return { createAdapter: candidate };
-  }
-  return null;
-}
-
-function ensureChatRuntimeImporter(runtimeRoot: string) {
-  ensureDir(runtimeRoot);
-  const importerPath = path.join(runtimeRoot, ".rin-chat-runtime-importer.mjs");
-  if (!fs.existsSync(importerPath)) {
-    fs.writeFileSync(
-      importerPath,
-      "export async function importProvider(specifier) { return await import(specifier); }\n",
-      "utf8",
-    );
-  }
-  return importerPath;
-}
-
-async function importChatRuntimeProviderModule(
-  runtimeRoot: string,
-  packageName: string,
-) {
-  try {
-    const importerPath = ensureChatRuntimeImporter(runtimeRoot);
-    const importer = await import(pathToFileURL(importerPath).href);
-    return await importer.importProvider(packageName);
-  } catch (error: any) {
-    if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
-    const requireFromRuntimeRoot = createRequire(
-      path.join(runtimeRoot, "package.json"),
-    );
-    return await import(
-      pathToFileURL(requireFromRuntimeRoot.resolve(packageName)).href
-    );
-  }
-}
-
-async function loadChatRuntimeAdapterProvider(
-  runtimeRoot: string,
-  packageName: string,
-) {
-  const moduleValue = await importChatRuntimeProviderModule(
-    runtimeRoot,
-    packageName,
-  );
-  const provider = pickChatRuntimeAdapterProvider(moduleValue);
-  if (!provider) throw new Error("provider_missing_createAdapter");
-  return provider;
-}
-
-async function instantiateCustomChatRuntimeAdapter(
-  app: ChatRuntimeApp,
-  input: ChatRuntimeAdapterInstantiationInput,
-  entry: ChatRuntimeAdapterInstantiationInput["adapterEntries"][number],
-) {
-  const packageName = safeString(entry.packageName).trim();
-  if (!packageName) throw new Error("custom_adapter_missing_packageName");
-  const runtimeRoot = input.runtimeRoot || input.dataDir;
-  const provider = await loadChatRuntimeAdapterProvider(
-    runtimeRoot,
-    packageName,
-  );
-  const botCountBefore = app.bots.length;
-  const result = await provider.createAdapter({
-    app,
-    dataDir: input.dataDir,
-    runtimeRoot,
-    key: entry.key,
-    name: entry.name,
-    packageName,
-    config: entry.config,
-    logger: input.logger,
-  });
-  if (result && (result.adapter || result.bot)) {
-    if (!result.adapter || !result.bot) {
-      throw new Error("provider_return_requires_adapter_and_bot");
-    }
-    app.register(result.adapter, result.bot);
-  } else if (result && typeof result === "object") {
-    throw new Error("provider_return_requires_adapter_and_bot");
-  }
-  if (app.bots.length <= botCountBefore) {
-    throw new Error("provider_did_not_register_bot");
-  }
 }
 
 export function instantiateBuiltInChatRuntimeAdapters(
@@ -1691,11 +1565,6 @@ export async function instantiateChatRuntimeAdapters(
   const created: Array<{ key: string; name: string }> = [];
   for (const entry of input.adapterEntries) {
     try {
-      if (entry.builtIn === false) {
-        await instantiateCustomChatRuntimeAdapter(app, input, entry);
-        created.push({ key: entry.key, name: entry.name });
-        continue;
-      }
       if (instantiateBuiltInChatRuntimeAdapter(app, input, entry)) {
         created.push({ key: entry.key, name: entry.name });
       }

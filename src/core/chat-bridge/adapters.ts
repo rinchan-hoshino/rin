@@ -48,8 +48,6 @@ export type ChatBridgeAdapterSpec = {
   key: ChatBridgeBuiltInAdapterKey;
   label: string;
   pluginKey: string;
-  packageName: string;
-  runtimePackageName?: string;
   defaults: Record<string, any>;
   installer: {
     kind: ChatBridgeAdapterSetupKind;
@@ -195,7 +193,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     key: "telegram",
     label: "Telegram",
     pluginKey: "adapter-telegram",
-    packageName: "builtin:telegram",
     defaults: TELEGRAM_DEFAULTS,
     installer: {
       kind: "telegram",
@@ -225,7 +222,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     key: "onebot",
     label: "OneBot",
     pluginKey: "adapter-onebot",
-    packageName: "builtin:onebot",
     defaults: ONEBOT_DEFAULTS,
     installer: {
       kind: "onebot",
@@ -285,7 +281,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     key: "qq",
     label: "QQ",
     pluginKey: "adapter-qq",
-    packageName: "builtin:qq",
     defaults: QQ_DEFAULTS,
     installer: {
       kind: "json",
@@ -348,7 +343,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     key: "lark",
     label: "Feishu / Lark",
     pluginKey: "adapter-lark",
-    packageName: "builtin:lark",
     defaults: LARK_DEFAULTS,
     installer: {
       kind: "json",
@@ -409,7 +403,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     key: "discord",
     label: "Discord",
     pluginKey: "adapter-discord",
-    packageName: "builtin:discord",
     defaults: DISCORD_DEFAULTS,
     installer: {
       kind: "json",
@@ -437,7 +430,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     key: "slack",
     label: "Slack",
     pluginKey: "adapter-slack",
-    packageName: "builtin:slack",
     defaults: SLACK_DEFAULTS,
     installer: {
       kind: "json",
@@ -477,7 +469,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     key: "minecraft",
     label: "Minecraft / QueQiao",
     pluginKey: "adapter-minecraft",
-    packageName: "builtin:minecraft",
     defaults: MINECRAFT_DEFAULTS,
     installer: {
       kind: "json",

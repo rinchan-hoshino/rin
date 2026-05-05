@@ -304,8 +304,6 @@ export async function startChatBridge(
   }
   const runtimeAdapters = await instantiateChatRuntimeAdapters(app, {
     dataDir,
-    runtimeRoot: chatRuntimeRoot,
-    settings,
     adapterEntries: listChatRuntimeAdapterEntries(settings),
     logger,
   });

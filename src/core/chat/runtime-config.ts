@@ -18,7 +18,6 @@ type NormalizedChatRuntimeAdapter = {
   key: string;
   pluginKey: string;
   entries: AdapterEntry[];
-  builtIn: boolean;
 };
 
 type ChatRuntimePackageJson = {
@@ -33,7 +32,6 @@ type ChatRuntimeAdapterSource = {
   pluginKey: string;
   value: unknown;
   defaults: Record<string, any>;
-  builtIn: boolean;
 };
 
 const SETUP_ONLY_ADAPTER_FIELDS = new Set([
@@ -167,7 +165,6 @@ function collectBuiltInChatAdapterSources(
     pluginKey: adapter.pluginKey,
     value: chat?.[adapter.key],
     defaults: adapter.defaults,
-    builtIn: true,
   }));
 }
 
@@ -177,7 +174,6 @@ function normalizeChatRuntimeAdapter(
   return {
     key: source.key,
     pluginKey: source.pluginKey,
-    builtIn: source.builtIn,
     entries: normalizeAdapterEntries(source.value, source.defaults, source.key),
   };
 }
@@ -225,7 +221,6 @@ export type ChatRuntimeAdapterEntry = {
   key: string;
   name: string;
   config: Record<string, any>;
-  builtIn: boolean;
 };
 
 export function listChatRuntimeAdapterEntries(settings: unknown) {
@@ -234,7 +229,6 @@ export function listChatRuntimeAdapterEntries(settings: unknown) {
       key: adapter.key,
       name: entry.name,
       config: entry.config,
-      builtIn: adapter.builtIn,
     })),
   );
 }
