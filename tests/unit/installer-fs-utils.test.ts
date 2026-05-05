@@ -175,6 +175,14 @@ test("syncInstalledDocs copies upstream mirrors into installed doc locations", a
     "# Skill\n",
     "utf8",
   );
+  await fs.mkdir(path.join(tempRoot, "upstream", "prompt-engineer"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(tempRoot, "upstream", "prompt-engineer", "SKILL.md"),
+    "# Prompt Engineer\n",
+    "utf8",
+  );
 
   await fs.mkdir(
     path.join(installDir, "docs", "rin", "builtin-skills", "legacy"),
@@ -209,6 +217,16 @@ test("syncInstalledDocs copies upstream mirrors into installed doc locations", a
   await fs.access(path.join(installDir, "docs", "pi", "docs", "models.md"));
   await fs.access(path.join(installDir, "docs", "pi", "examples", "README.md"));
   await fs.access(path.join(installDir, "docs", "pi", "_upstream.json"));
+  await fs.access(
+    path.join(
+      installDir,
+      "docs",
+      "rin",
+      "builtin-skills",
+      "prompt-engineer",
+      "SKILL.md",
+    ),
+  );
   await fs.access(
     path.join(
       installDir,

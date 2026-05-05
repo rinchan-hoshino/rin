@@ -85,6 +85,11 @@ const INSTALLED_PI_DOC_NAMES = [
   "_upstream.json",
 ] as const;
 
+const INSTALLED_BUILTIN_SKILL_NAMES = [
+  "skill-creator",
+  "prompt-engineer",
+] as const;
+
 const RUNTIME_COPY_ENTRY_NAMES = [
   "dist",
   "node_modules",
@@ -453,13 +458,15 @@ export function syncInstalledDocs(
     elevated,
     deps,
   );
-  syncInstalledDocTree(
-    path.join(sourceRoot, "upstream", "skill-creator"),
-    installedBuiltinSkillRoot(installDir, "skill-creator"),
-    targetUser,
-    elevated,
-    deps,
-  );
+  for (const skillName of INSTALLED_BUILTIN_SKILL_NAMES) {
+    syncInstalledDocTree(
+      path.join(sourceRoot, "upstream", skillName),
+      installedBuiltinSkillRoot(installDir, skillName),
+      targetUser,
+      elevated,
+      deps,
+    );
+  }
   const piDocRoot = path.join(sourceRoot, "upstream", "pi");
   const piInstallRoot = installedPiDocsRoot(installDir);
   const installedPiDocs: string[] = [];

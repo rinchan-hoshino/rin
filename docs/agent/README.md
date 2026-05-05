@@ -41,5 +41,7 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 ## Notes
 
 - Installed Rin agent docs: `~/.rin/docs/rin/`.
+- Installed Rin builtin skills: `~/.rin/docs/rin/builtin-skills/`.
 - Installed upstream Pi reference docs: `~/.rin/docs/pi/`.
-- Repository source for this installed set: `docs/agent/`.
+- Repository source for this installed doc set: `docs/agent/`.
+- Repository source for installed builtin skills: `upstream/skill-creator/` and other skill mirrors under `upstream/`.

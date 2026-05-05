@@ -26,6 +26,7 @@
     "sync:upstreams": "node scripts/sync-upstreams.mjs",
     "sync:pi-docs": "node scripts/sync-upstreams.mjs pi",
     "sync:skill-creator": "node scripts/sync-upstreams.mjs skill-creator",
+    "sync:prompt-engineer": "node scripts/sync-upstreams.mjs prompt-engineer",
     "release:manifest": "node scripts/release/update-release-manifest.mjs",
     "release:changelog": "node scripts/release/verify-changelog.mjs",
     "release:bootstrap": "node scripts/release/export-bootstrap-branch.mjs",
