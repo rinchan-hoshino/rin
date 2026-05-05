@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
 
 import { startChatBridge } from "../../core/chat/main.js";
 import { startDaemon } from "../../core/rin-daemon/daemon.js";
+import { RinDaemonExtensionManager } from "../../core/rin-daemon/extensions.js";
+import {
+  applyRuntimeProfileEnvironment,
+  resolveRuntimeProfile,
+} from "../../core/rin-lib/runtime.js";
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
 import { RinDaemonFrontendClient } from "../../core/rin-tui/rpc-client.js";
 
@@ -25,8 +30,18 @@ async function main() {
     localFrontendConnectorResolver = resolve;
   });
 
+  const runtime = resolveRuntimeProfile();
+  applyRuntimeProfileEnvironment(runtime);
+  const daemonExtensionManager = new RinDaemonExtensionManager({
+    cwd: runtime.cwd,
+    agentDir: runtime.agentDir,
+    logger: console,
+  });
+  await daemonExtensionManager.start();
+
   const chatBridge = await startChatBridge({
     hosted: true,
+    chatAdapterProviders: daemonExtensionManager.getChatAdapterProviders(),
     frontendClientFactory: () =>
       new RinDaemonFrontendClient({
         socketPath: "inprocess://rin-daemon",
@@ -36,10 +51,12 @@ async function main() {
 
   const stopServices = async () => {
     await chatBridge.stop().catch(() => {});
+    await daemonExtensionManager.stop().catch(() => {});
   };
 
   try {
     await startDaemon({
+      daemonExtensionManager,
       workerPath,
       chat: {
         send: async (payload) => await chatBridge.send(payload),

@@ -11,6 +11,10 @@ import {
   readRuntimeSettings,
   type RinExtensionWorkerConfig,
 } from "../rin-extension-settings.js";
+import type {
+  ChatRuntimeExternalAdapterEntry,
+  ChatRuntimeExternalAdapterProvider,
+} from "../chat-runtime/index.js";
 import { ensureDir, stringifyJson } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 
@@ -31,6 +35,14 @@ export type RinDaemonExtensionContext = {
   readonly signal: AbortSignal;
   readonly logger: RinDaemonExtensionLogger;
   runAsync: (label: string, work: () => Promise<void> | void) => void;
+  registerChatAdapter: (
+    provider: ChatRuntimeExternalAdapterProvider,
+    options?: {
+      key?: string;
+      name?: string;
+      config?: Record<string, any>;
+    },
+  ) => void;
 };
 
 type DaemonWorkerProvider = {
@@ -192,6 +204,7 @@ function createWorkerLogger(
 
 export class RinDaemonExtensionManager {
   private readonly workers: RunningWorker[] = [];
+  private readonly chatAdapters: ChatRuntimeExternalAdapterEntry[] = [];
 
   constructor(
     private readonly options: {
@@ -202,6 +215,7 @@ export class RinDaemonExtensionManager {
   ) {}
 
   async start() {
+    this.chatAdapters.length = 0;
     const entries = listRinDaemonWorkerConfigs(
       readRuntimeSettings(this.options.agentDir),
     );
@@ -254,6 +268,17 @@ export class RinDaemonExtensionManager {
               .finally(() => tasks.delete(task));
             tasks.add(task);
           },
+          registerChatAdapter: (provider, options = {}) => {
+            const key = safeString(options.key).trim() || entry.name;
+            const name = safeString(options.name).trim() || key;
+            this.chatAdapters.push({
+              key,
+              name,
+              packageName: entry.packageName,
+              config: options.config || entry.config,
+              provider,
+            });
+          },
         };
         const result = await (provider.createDaemonWorker || provider.start)?.(
           context,
@@ -270,6 +295,10 @@ export class RinDaemonExtensionManager {
       }
     }
     return started;
+  }
+
+  getChatAdapterProviders() {
+    return [...this.chatAdapters];
   }
 
   async stop(timeoutMs = 10_000) {

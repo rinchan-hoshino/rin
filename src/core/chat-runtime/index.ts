@@ -1489,6 +1489,46 @@ type BuiltInChatRuntimeAdapterConstructor = new (
   logger: any,
 ) => any;
 
+export type ChatRuntimeExternalAdapterProviderInput = {
+  app: ChatRuntimeApp;
+  agentDir?: string;
+  dataDir: string;
+  runtimeRoot?: string;
+  h?: any;
+  key: string;
+  name: string;
+  packageName?: string;
+  config: Record<string, any>;
+  logger?: any;
+};
+
+export type ChatRuntimeExternalAdapterProviderResult = void | {
+  adapter?: any;
+  bot?: any;
+};
+
+export type ChatRuntimeExternalAdapterProvider =
+  | ((
+      input: ChatRuntimeExternalAdapterProviderInput,
+    ) =>
+      | ChatRuntimeExternalAdapterProviderResult
+      | Promise<ChatRuntimeExternalAdapterProviderResult>)
+  | {
+      createAdapter(
+        input: ChatRuntimeExternalAdapterProviderInput,
+      ):
+        | ChatRuntimeExternalAdapterProviderResult
+        | Promise<ChatRuntimeExternalAdapterProviderResult>;
+    };
+
+export type ChatRuntimeExternalAdapterEntry = {
+  key: string;
+  name: string;
+  packageName?: string;
+  config: Record<string, any>;
+  provider: ChatRuntimeExternalAdapterProvider;
+};
+
 const BUILT_IN_CHAT_RUNTIME_ADAPTER_FACTORIES: Record<
   ChatBridgeBuiltInAdapterKey,
   BuiltInChatRuntimeAdapterConstructor
@@ -1552,6 +1592,74 @@ export function instantiateBuiltInChatRuntimeAdapters(
     } catch (error: any) {
       input.logger?.warn?.(
         `chat runtime adapter init failed key=${entry.key} name=${entry.name} err=${safeString(error?.message || error)}`,
+      );
+    }
+  }
+  return created;
+}
+
+async function instantiateExternalChatRuntimeAdapter(
+  app: ChatRuntimeApp,
+  input: {
+    agentDir?: string;
+    dataDir: string;
+    runtimeRoot?: string;
+    h?: any;
+    logger?: any;
+  },
+  entry: ChatRuntimeExternalAdapterEntry,
+) {
+  const botCountBefore = app.bots.length;
+  const provider: any = entry.provider;
+  const createAdapter =
+    typeof provider === "function" ? provider : provider?.createAdapter;
+  if (typeof createAdapter !== "function") {
+    throw new Error("external_chat_adapter_missing_createAdapter");
+  }
+  const result = await createAdapter({
+    app,
+    agentDir: input.agentDir,
+    dataDir: input.dataDir,
+    runtimeRoot: input.runtimeRoot,
+    h: input.h,
+    key: entry.key,
+    name: entry.name,
+    packageName: entry.packageName,
+    config: entry.config,
+    logger: input.logger,
+  });
+  if (result && (result.adapter || result.bot)) {
+    if (!result.adapter || !result.bot) {
+      throw new Error("external_chat_adapter_return_requires_adapter_and_bot");
+    }
+    app.register(result.adapter, result.bot);
+  } else if (result && typeof result === "object") {
+    throw new Error("external_chat_adapter_return_requires_adapter_and_bot");
+  }
+  if (app.bots.length <= botCountBefore) {
+    throw new Error("external_chat_adapter_did_not_register_bot");
+  }
+}
+
+export async function instantiateExternalChatRuntimeAdapters(
+  app: ChatRuntimeApp,
+  input: {
+    agentDir?: string;
+    dataDir: string;
+    runtimeRoot?: string;
+    h?: any;
+    adapterEntries: ChatRuntimeExternalAdapterEntry[];
+    logger?: any;
+  },
+) {
+  const created: Array<{ key: string; name: string }> = [];
+  for (const entry of input.adapterEntries) {
+    try {
+      await instantiateExternalChatRuntimeAdapter(app, input, entry);
+      created.push({ key: entry.key, name: entry.name });
+    } catch (error: any) {
+      input.logger?.warn?.(
+        `external chat runtime adapter init failed key=${entry.key} name=${entry.name} err=${safeString(error?.message || error)}`,
       );
     }
   }

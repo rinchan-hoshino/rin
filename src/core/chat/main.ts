@@ -68,6 +68,8 @@ import {
   createChatRuntimeApp,
   createChatRuntimeH,
   instantiateChatRuntimeAdapters,
+  instantiateExternalChatRuntimeAdapters,
+  type ChatRuntimeExternalAdapterEntry,
 } from "../chat-runtime/index.js";
 import {
   ensureChatRuntimeDependencies,
@@ -264,6 +266,7 @@ export type ChatBridgeHandle = {
     additionalExtensionPaths?: string[];
     hosted?: boolean;
     frontendClientFactory?: () => RpcFrontendClient;
+    chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
   };
   stop: () => Promise<void>;
   getStatus: () => ChatBridgeStatus;
@@ -278,6 +281,7 @@ export async function startChatBridge(
     additionalExtensionPaths?: string[];
     hosted?: boolean;
     frontendClientFactory?: () => RpcFrontendClient;
+    chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
   } = {},
 ): Promise<ChatBridgeHandle> {
   const runtime = resolveRuntimeProfile();
@@ -302,11 +306,26 @@ export async function startChatBridge(
       `chat runtime dependency install failed err=${String(error?.message || error)}`,
     );
   }
-  const runtimeAdapters = await instantiateChatRuntimeAdapters(app, {
+  const builtInRuntimeAdapters = await instantiateChatRuntimeAdapters(app, {
     dataDir,
     adapterEntries: listChatRuntimeAdapterEntries(settings),
     logger,
   });
+  const externalRuntimeAdapters = await instantiateExternalChatRuntimeAdapters(
+    app,
+    {
+      agentDir: runtime.agentDir,
+      dataDir,
+      runtimeRoot: chatRuntimeRoot,
+      h,
+      adapterEntries: options.chatAdapterProviders || [],
+      logger,
+    },
+  );
+  const runtimeAdapters = [
+    ...builtInRuntimeAdapters,
+    ...externalRuntimeAdapters,
+  ];
   if (!runtimeAdapters.length) {
     logger.warn("no runtime chat adapters configured");
   }

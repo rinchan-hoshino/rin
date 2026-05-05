@@ -88,6 +88,7 @@ export async function startDaemon(
       | undefined;
     onShutdown?: () => Promise<void> | void;
     registerLocalFrontendConnector?: (connector: RpcSocketConnector) => void;
+    daemonExtensionManager?: RinDaemonExtensionManager;
   } = {},
 ) {
   const socketPath =
@@ -124,12 +125,16 @@ export async function startDaemon(
   });
   cronScheduler.start();
 
-  const daemonExtensionManager = new RinDaemonExtensionManager({
-    cwd: runtime.cwd,
-    agentDir: runtime.agentDir,
-    logger: console,
-  });
-  await daemonExtensionManager.start();
+  const daemonExtensionManager =
+    options.daemonExtensionManager ||
+    new RinDaemonExtensionManager({
+      cwd: runtime.cwd,
+      agentDir: runtime.agentDir,
+      logger: console,
+    });
+  if (!options.daemonExtensionManager) {
+    await daemonExtensionManager.start();
+  }
 
   for (const candidate of [socketPath, bridgeSocketPath]) {
     try {

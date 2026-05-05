@@ -29,6 +29,10 @@ const daemonExtensions = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "extensions.js"),
   ).href
 );
+const chatRuntime = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
+    .href
+);
 const bundledExtensions = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-bundled-extensions.js"))
     .href
@@ -213,6 +217,110 @@ function restoreEnv(name: string, value: string | undefined) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
+
+test("stage B daemon extension manager contributes chat runtime adapters", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-chat-adapter-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-chat-adapter-pkg-"),
+  );
+  const markerPath = path.join(agentDir, "chat-adapter.log");
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-daemon-chat-adapter-test",
+      `import fs from "node:fs";
+export const rinDaemonExtension = {
+  start(ctx) {
+    ctx.registerChatAdapter(({ app, config }) => ({
+      adapter: {
+        async start() {
+          fs.appendFileSync(config.markerPath, "chat-start\\n");
+          app.emit("message", {
+            platform: "extension-test",
+            selfId: "bot-1",
+            messageId: "msg-1",
+            channelId: "room-1",
+            userId: "owner-1",
+            content: "hello from extension",
+            elements: [{ type: "text", attrs: { content: "hello from extension" } }],
+          });
+        },
+        async stop() {
+          fs.appendFileSync(config.markerPath, "chat-stop\\n");
+        },
+      },
+      bot: {
+        platform: "extension-test",
+        selfId: "bot-1",
+        status: 1,
+        async sendMessage(chatId, content) {
+          fs.appendFileSync(config.markerPath, "send:" + chatId + ":" + String(content) + "\\n");
+          return ["sent-1"];
+        },
+      },
+    }), { key: "extension-test", config: ctx.config });
+  },
+};
+`,
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      rinExtensions: {
+        daemonWorkers: [
+          {
+            name: "chat-worker",
+            packageName: "rin-daemon-chat-adapter-test",
+            version: `file:${packageDir}`,
+            config: { markerPath },
+          },
+        ],
+      },
+    });
+
+    const warnings: string[] = [];
+    const manager = new daemonExtensions.RinDaemonExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: (message: string) => warnings.push(String(message)) },
+    });
+    const started = await manager.start();
+    assert.deepEqual(started, [
+      { name: "chat-worker", packageName: "rin-daemon-chat-adapter-test" },
+    ]);
+    assert.deepEqual(warnings, []);
+    const app = chatRuntime.createChatRuntimeApp(agentDir);
+    const messages: any[] = [];
+    app.on("message", (session: any) => messages.push(session));
+    const created = await chatRuntime.instantiateExternalChatRuntimeAdapters(
+      app,
+      {
+        agentDir,
+        dataDir: path.join(agentDir, "data"),
+        runtimeRoot: path.join(agentDir, "data", "chat-runtime"),
+        adapterEntries: manager.getChatAdapterProviders(),
+        logger: { warn: () => {} },
+      },
+    );
+
+    assert.deepEqual(created, [
+      { key: "extension-test", name: "extension-test" },
+    ]);
+    assert.equal(app.bots[0]?.platform, "extension-test");
+    await app.start();
+    await app.stop();
+    await manager.stop();
+
+    assert.equal(messages[0]?.content, "hello from extension");
+    assert.equal(
+      await fs.readFile(markerPath, "utf8"),
+      "chat-start\nchat-stop\n",
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
 
 test("stage B daemon extension manager starts async workers and stops them", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
