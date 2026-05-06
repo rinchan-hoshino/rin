@@ -203,6 +203,39 @@ type InstallerDisplayCopy = {
       setDefaultTarget: boolean;
     },
   ) => string;
+  updaterIntroTitle: string;
+  updateTargetsTitle: string;
+  updatePlanTitle: string;
+  updatedTargetTitle: string;
+  chooseUpdateTargetMessage: string;
+  noUpdateTargetsText: string;
+  updaterNothingUpdated: string;
+  updaterFinishedWithoutWritingChanges: string;
+  publishUpdateConfirmMessage: string;
+  publishingUpdateMessage: string;
+  buildUpdatePlanText: (options: {
+    currentUser: string;
+    targetUser: string;
+    installDir: string;
+    source: string;
+    ownerHome: string;
+    sourceLabel: string;
+  }) => string;
+  buildUpdatedTargetText: (options: {
+    writtenPaths: string[];
+    prunedReleaseCount: number;
+    serviceKind?: string;
+    serviceLabel?: string;
+    serviceHint: string;
+    daemonReady: boolean;
+    userSuffix: string;
+  }) => string;
+  updaterOutroUpdated: (
+    targetUser: string,
+    installDir: string,
+    daemonReady: boolean,
+    userSuffix: string,
+  ) => string;
   buildPostInstallInitExitText: (options: {
     currentUser: string;
     targetUser: string;
@@ -495,6 +528,61 @@ const INSTALLER_DISPLAY_COPY = {
       ]
         .filter(Boolean)
         .join("\n");
+    },
+    updaterIntroTitle: "Rin Updater",
+    updateTargetsTitle: "Update targets",
+    updatePlanTitle: "Update plan",
+    updatedTargetTitle: "Updated target",
+    chooseUpdateTargetMessage: "Choose an installed Rin target to update.",
+    noUpdateTargetsText:
+      "No installed Rin daemon targets were discovered on this system.",
+    updaterNothingUpdated: "Nothing updated.",
+    updaterFinishedWithoutWritingChanges:
+      "Updater finished without writing changes.",
+    publishUpdateConfirmMessage:
+      "Publish the latest built runtime to this installed target now?",
+    publishingUpdateMessage:
+      "Publishing runtime and refreshing the installed target...",
+    buildUpdatePlanText(options) {
+      return [
+        `Current user: ${options.currentUser}`,
+        `Selected daemon user: ${options.targetUser}`,
+        `Install dir: ${options.installDir}`,
+        `Discovered from: ${options.source}`,
+        `Owner home: ${options.ownerHome}`,
+        `Requested source: ${options.sourceLabel}`,
+        "",
+        "Updater policy:",
+        "- publish a new runtime release into the existing install dir",
+        "- prune old runtime releases and keep only the 3 most recent ones",
+        "- refresh launchers and installer metadata for the current user",
+        "- refresh managed daemon service files and restart the daemon when applicable",
+        "- preserve existing provider/auth/settings unless changed elsewhere",
+      ].join("\n");
+    },
+    buildUpdatedTargetText(options) {
+      return [
+        ...options.writtenPaths.map(
+          (item) => `${this.writtenPathLabel}: ${item}`,
+        ),
+        `Removed old releases: ${options.prunedReleaseCount}`,
+        options.serviceKind && options.serviceLabel
+          ? `${options.serviceKind} ${this.serviceLabelLabel}: ${options.serviceLabel}`
+          : "",
+        "",
+        `Service/platform note: ${options.serviceHint}`,
+        `Daemon started now: ${options.daemonReady ? "yes" : "no"}`,
+        "",
+        "Recommended next commands:",
+        `- doctor: rin doctor${options.userSuffix}`,
+        `- open Rin: rin${options.userSuffix}`,
+        "- if RPC mode fails, run `rin doctor` or reopen Rin to enter temporary maintenance mode",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    },
+    updaterOutroUpdated(targetUser, installDir, daemonReady, userSuffix) {
+      return `Updater refreshed ${targetUser} at ${installDir}. ${daemonReady ? `Open with rin${userSuffix}.` : `Use rin start${userSuffix} if you need to start the daemon manually.`}`;
     },
     buildPostInstallInitExitText(options) {
       const rinCommand = options.rinCommand || "rin";
@@ -818,6 +906,57 @@ const INSTALLER_DISPLAY_COPY = {
       ]
         .filter(Boolean)
         .join("\n");
+    },
+    updaterIntroTitle: "Rin 更新器",
+    updateTargetsTitle: "更新目标",
+    updatePlanTitle: "更新计划",
+    updatedTargetTitle: "已更新目标",
+    chooseUpdateTargetMessage: "选择要更新的已安装 Rin 目标。",
+    noUpdateTargetsText: "当前系统上未发现已安装的 Rin 守护进程目标。",
+    updaterNothingUpdated: "未执行更新。",
+    updaterFinishedWithoutWritingChanges: "更新器结束，未写入变更。",
+    publishUpdateConfirmMessage: "现在将最新构建的运行时发布到此目标吗？",
+    publishingUpdateMessage: "正在发布运行时并刷新已安装目标……",
+    buildUpdatePlanText(options) {
+      return [
+        `当前用户: ${options.currentUser}`,
+        `选中的守护进程用户: ${options.targetUser}`,
+        `安装目录: ${options.installDir}`,
+        `发现来源: ${options.source}`,
+        `Owner home: ${options.ownerHome}`,
+        `请求来源: ${options.sourceLabel}`,
+        "",
+        "更新器策略：",
+        "- 将新的运行时版本发布到现有安装目录",
+        "- 清理旧运行时版本，仅保留最近 3 个",
+        "- 为当前用户刷新启动器和安装器元数据",
+        "- 如适用，刷新托管守护进程服务文件并重启守护进程",
+        "- 保留现有 provider / auth / settings，除非其他流程显式修改",
+      ].join("\n");
+    },
+    buildUpdatedTargetText(options) {
+      return [
+        ...options.writtenPaths.map(
+          (item) => `${this.writtenPathLabel}: ${item}`,
+        ),
+        `已移除旧运行时版本: ${options.prunedReleaseCount}`,
+        options.serviceKind && options.serviceLabel
+          ? `${options.serviceKind} ${this.serviceLabelLabel}: ${options.serviceLabel}`
+          : "",
+        "",
+        `服务/平台提示: ${options.serviceHint}`,
+        `守护进程已立即启动: ${options.daemonReady ? "是" : "否"}`,
+        "",
+        "建议的下一步命令：",
+        `- 诊断: rin doctor${options.userSuffix}`,
+        `- 打开 Rin: rin${options.userSuffix}`,
+        "- 如果 RPC 模式失败，请运行 `rin doctor` 或重新打开 Rin 进入临时维护模式",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    },
+    updaterOutroUpdated(targetUser, installDir, daemonReady, userSuffix) {
+      return `更新器已刷新 ${targetUser} 位于 ${installDir} 的安装。${daemonReady ? `请用 rin${userSuffix} 打开。` : `如需手动启动守护进程，请使用 rin start${userSuffix}。`}`;
     },
     buildPostInstallInitExitText(options) {
       const rinCommand = options.rinCommand || "rin";

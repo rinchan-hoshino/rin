@@ -3,6 +3,7 @@ import chalk from "chalk";
 
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
 
+import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
 import { discoverInstalledTargets } from "./update-targets.js";
 import {
   runFinalizeInstallPlanInChild,
@@ -37,20 +38,20 @@ export async function startUpdater(deps: {
   release?: InstalledReleaseInfo;
   select?: typeof select;
   confirm?: typeof confirm;
+  i18n?: InstallerI18n;
 }) {
   const currentUser = deps.detectCurrentUser();
   const promptSelect = deps.select || select;
   const promptConfirm = deps.confirm || confirm;
+  const i18n =
+    deps.i18n || createInstallerI18n(process.env.RIN_INSTALL_LANGUAGE || "en");
 
-  intro("Rin Updater");
+  intro(i18n.updaterIntroTitle);
 
   const targets = discoverInstalledTargets();
   if (!targets.length) {
-    note(
-      "No installed Rin daemon targets were discovered on this system.",
-      "Update targets",
-    );
-    outro("Nothing updated.");
+    note(i18n.noUpdateTargetsText, i18n.updateTargetsTitle);
+    outro(i18n.updaterNothingUpdated);
     return;
   }
 
@@ -61,7 +62,7 @@ export async function startUpdater(deps: {
           Number(
             deps.ensureNotCancelled(
               await promptSelect({
-                message: "Choose an installed Rin target to update.",
+                message: i18n.chooseUpdateTargetMessage,
                 options: targets.map((item, index) => ({
                   value: index,
                   label: `${item.targetUser} → ${item.installDir}`,
@@ -80,34 +81,25 @@ export async function startUpdater(deps: {
     target.targetUser;
 
   note(
-    [
-      `Current user: ${currentUser}`,
-      `Selected daemon user: ${targetUser}`,
-      `Install dir: ${installDir}`,
-      `Discovered from: ${target.source}`,
-      `Owner home: ${target.ownerHome}`,
-      deps.release?.sourceLabel
-        ? `Requested source: ${deps.release.sourceLabel}`
-        : "Requested source: stable latest",
-      "",
-      "Updater policy:",
-      "- publish a new runtime release into the existing install dir",
-      "- prune old runtime releases and keep only the 3 most recent ones",
-      "- refresh launchers and installer metadata for the current user",
-      "- refresh managed daemon service files and restart the daemon when applicable",
-      "- preserve existing provider/auth/settings unless changed elsewhere",
-    ].join("\n"),
-    "Update plan",
+    i18n.buildUpdatePlanText({
+      currentUser,
+      targetUser,
+      installDir,
+      source: target.source,
+      ownerHome: target.ownerHome,
+      sourceLabel: deps.release?.sourceLabel || "stable latest",
+    }),
+    i18n.updatePlanTitle,
   );
 
   const shouldProceed = deps.ensureNotCancelled(
     await promptConfirm({
-      message: "Publish the latest built runtime to this installed target now?",
+      message: i18n.publishUpdateConfirmMessage,
       initialValue: true,
     }),
   );
   if (!shouldProceed) {
-    outro("Updater finished without writing changes.");
+    outro(i18n.updaterFinishedWithoutWritingChanges);
     return;
   }
 
@@ -119,7 +111,7 @@ export async function startUpdater(deps: {
       sourceRoot: deps.repoRootFromHere(),
       ...(deps.release ? { release: deps.release } : {}),
     } satisfies FinalizeInstallOptions,
-    "Publishing runtime and refreshing the installed target...",
+    i18n.publishingUpdateMessage,
   );
 
   const {
@@ -134,38 +126,32 @@ export async function startUpdater(deps: {
   const userSuffix = currentUser === targetUser ? "" : ` -u ${targetUser}`;
 
   note(
-    [
-      `Written: ${written.launcherPath}`,
-      `Written: ${written.rinPath}`,
-      `Written: ${written.rinInstallPath}`,
-      `Written: ${publishedRuntime.currentLink}`,
-      `Written: ${publishedRuntime.releaseRoot}`,
-      installedDocsDir ? `Written: ${installedDocsDir}` : "",
-      ...(Array.isArray(installedDocs?.pi)
-        ? installedDocs.pi.map((item: string) => `Written: ${item}`)
-        : []),
-      result.prunedReleases.removed.length
-        ? `Removed old releases: ${result.prunedReleases.removed.length}`
-        : "Removed old releases: 0",
-      installedService ? `Written: ${installedService.servicePath}` : "",
-      installedService
-        ? `${installedService.kind} label: ${installedService.label}`
-        : "",
-      "",
-      `Service/platform note: ${serviceHint}`,
-      `Daemon started now: ${daemonReady ? "yes" : "no"}`,
-      "",
-      "Recommended next commands:",
-      `- doctor: rin doctor${userSuffix}`,
-      `- open Rin: rin${userSuffix}`,
-      "- if RPC mode fails, run `rin doctor` or reopen Rin to enter temporary maintenance mode",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-    "Updated target",
+    i18n.buildUpdatedTargetText({
+      writtenPaths: [
+        written.launcherPath,
+        written.rinPath,
+        written.rinInstallPath,
+        publishedRuntime.currentLink,
+        publishedRuntime.releaseRoot,
+        installedDocsDir,
+        ...(Array.isArray(installedDocs?.pi) ? installedDocs.pi : []),
+        installedService?.servicePath,
+      ].filter(Boolean) as string[],
+      prunedReleaseCount: result.prunedReleases.removed.length,
+      ...(installedService
+        ? {
+            serviceKind: installedService.kind,
+            serviceLabel: installedService.label,
+          }
+        : {}),
+      serviceHint,
+      daemonReady,
+      userSuffix,
+    }),
+    i18n.updatedTargetTitle,
   );
 
   outro(
-    `Updater refreshed ${targetUser} at ${installDir}. ${daemonReady ? `Open with rin${userSuffix}.` : `Use rin start${userSuffix} if you need to start the daemon manually.`}`,
+    i18n.updaterOutroUpdated(targetUser, installDir, daemonReady, userSuffix),
   );
 }

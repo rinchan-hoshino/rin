@@ -347,13 +347,26 @@ test("promptInstallerLanguage localizes the picker copy for Chinese locales", as
   }
 });
 
-test("createInstallerI18n exposes localized post-install path labels", () => {
+test("createInstallerI18n exposes localized post-install and update copy", () => {
   const en = installerI18n.createInstallerI18n("en");
   const zh = installerI18n.createInstallerI18n("zh-CN");
 
   assert.equal(en.targetInstallDirLabel, "Target install dir");
   assert.equal(en.writtenPathLabel, "Written");
   assert.equal(en.serviceLabelLabel, "label");
+  assert.equal(en.updaterIntroTitle, "Rin Updater");
+  assert.ok(
+    en
+      .buildUpdatePlanText({
+        currentUser: "alice",
+        targetUser: "bob",
+        installDir: "/home/bob/.rin",
+        source: "manifest",
+        ownerHome: "/home/bob",
+        sourceLabel: "stable latest",
+      })
+      .includes("Updater policy:"),
+  );
   assert.equal(
     zh.targetInstallDirLabel,
     "\u76ee\u6807\u5b89\u88c5\u76ee\u5f55",
@@ -362,6 +375,18 @@ test("createInstallerI18n exposes localized post-install path labels", () => {
   assert.equal(zh.serviceLabelLabel, "\u6807\u7b7e");
   assert.equal(zh.confirmActiveLabel, "\u662f");
   assert.equal(zh.confirmInactiveLabel, "\u5426");
+  assert.equal(zh.updaterIntroTitle, "Rin \u66f4\u65b0\u5668");
+  assert.ok(
+    zh
+      .buildUpdatedTargetText({
+        writtenPaths: ["/home/bob/.rin/bin/rin"],
+        prunedReleaseCount: 1,
+        serviceHint: "systemd",
+        daemonReady: true,
+        userSuffix: " -u bob",
+      })
+      .includes("\u5efa\u8bae\u7684\u4e0b\u4e00\u6b65\u547d\u4ee4"),
+  );
 });
 
 test("installer i18n source keeps localized copy in one display table", () => {
@@ -399,6 +424,8 @@ test("update mode reuses installer's language prompt and note renderer", () => {
   assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
   assert.match(updaterSource, /renderInstallerNote/);
   assert.match(updaterSource, /wrapInstallerNoteText/);
+  assert.match(updaterSource, /i18n\.buildUpdatePlanText/);
+  assert.match(updaterSource, /i18n\.buildUpdatedTargetText/);
   assert.match(
     updaterSource,
     /const promptConfirm = deps\.confirm \|\| confirm/,

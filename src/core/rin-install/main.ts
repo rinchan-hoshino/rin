@@ -147,6 +147,7 @@ export async function startInstaller() {
       release: releaseInfoFromEnv(),
       select,
       confirm: localizedConfirm,
+      i18n,
     });
     return;
   }
