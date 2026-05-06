@@ -217,45 +217,6 @@ export default function tokenUsageModule(
           });
         },
       ],
-      input: [
-        async (event, ctx) => {
-          const state = getSessionState(ctx);
-          state.source = safeString(event?.source).trim();
-          state.lastInputPreview = previewText(event?.text);
-          recordEvent(ctx, {
-            eventType: "input",
-            source: state.source,
-            capabilityKind: "user_input",
-            capabilityKey: "user:input",
-            metadata: {
-              textPreview: state.lastInputPreview,
-              imageCount: Array.isArray(event?.images)
-                ? event.images.length
-                : 0,
-            },
-          });
-          return { action: "continue" as const };
-        },
-      ],
-      before_agent_start: [
-        async (event, ctx) => {
-          const state = getSessionState(ctx);
-          state.lastPromptPreview = previewText(event?.prompt);
-          try {
-            state.thinkingLevel =
-              safeString(options.getThinkingLevel()).trim() ||
-              state.thinkingLevel;
-          } catch {}
-          recordEvent(ctx, {
-            eventType: "before_agent_start",
-            phase: "agent",
-            metadata: {
-              promptPreview: state.lastPromptPreview,
-              systemPromptChars: safeString(event?.systemPrompt).length,
-            },
-          });
-        },
-      ],
       model_select: [
         async (event, ctx) => {
           const state = getSessionState(ctx);

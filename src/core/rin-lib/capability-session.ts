@@ -79,19 +79,6 @@ export type RinCapabilitySet = {
   bindCommandContext: (actions?: Partial<CommandContextActions>) => void;
   hasHandlers: (eventName: string) => boolean;
   emit: (event: any) => Promise<any>;
-  emitInput: (
-    text: string,
-    images: any[] | undefined,
-    source: any,
-    promptContext?: any,
-    streamingBehavior?: any,
-  ) => Promise<any>;
-  emitBeforeAgentStart: (
-    prompt: string,
-    images: any[] | undefined,
-    systemPrompt: string,
-    promptContext?: any,
-  ) => Promise<any>;
   getToolDefinitions: () => any[];
   getRegisteredCommands: () => RegisteredRinCommand[];
   getCommand: (name: string) => RegisteredRinCommand | undefined;
@@ -279,76 +266,6 @@ export function createRinCapabilitySet(options: {
       }
       return result;
     },
-    async emitInput(
-      text: string,
-      images: any[] | undefined,
-      source: any,
-      promptContext?: any,
-      streamingBehavior?: any,
-    ) {
-      let currentText = text;
-      let currentImages = images;
-      const ctx = createContext();
-      for (const handler of handlers.get("input") || []) {
-        try {
-          const result = await handler(
-            {
-              type: "input",
-              text: currentText,
-              images: currentImages,
-              source,
-              promptContext,
-              streamingBehavior,
-            },
-            ctx,
-          );
-          if (result?.action === "handled") return result;
-          if (result?.action === "transform") {
-            currentText = result.text;
-            currentImages = result.images ?? currentImages;
-          }
-        } catch (error: any) {
-          emitHandlerError("input", error);
-        }
-      }
-      return currentText !== text || currentImages !== images
-        ? { action: "transform", text: currentText, images: currentImages }
-        : { action: "continue" };
-    },
-    async emitBeforeAgentStart(prompt, images, systemPrompt, promptContext) {
-      const ctx = createContext();
-      const messages: any[] = [];
-      let currentSystemPrompt = systemPrompt;
-      let systemPromptModified = false;
-      for (const handler of handlers.get("before_agent_start") || []) {
-        try {
-          const result = await handler(
-            {
-              type: "before_agent_start",
-              prompt,
-              images,
-              systemPrompt: currentSystemPrompt,
-              promptContext,
-            },
-            ctx,
-          );
-          if (result?.message) messages.push(result.message);
-          if (result?.systemPrompt !== undefined) {
-            currentSystemPrompt = result.systemPrompt;
-            systemPromptModified = true;
-          }
-        } catch (error: any) {
-          emitHandlerError("before_agent_start", error);
-        }
-      }
-      if (messages.length > 0 || systemPromptModified) {
-        return {
-          messages: messages.length > 0 ? messages : undefined,
-          systemPrompt: systemPromptModified ? currentSystemPrompt : undefined,
-        };
-      }
-      return undefined;
-    },
     getToolDefinitions() {
       return Array.from(tools.values()).map((entry) => entry.definition);
     },
@@ -499,113 +416,6 @@ async function emitSessionStart(
   });
 }
 
-function parseSlashCommand(text: string) {
-  const trimmed = String(text || "").trimStart();
-  if (!trimmed.startsWith("/")) return undefined;
-  const body = trimmed.slice(1);
-  const whitespace = body.search(/\s/);
-  if (whitespace < 0) return { name: body, args: "" };
-  return {
-    name: body.slice(0, whitespace),
-    args: body.slice(whitespace).trimStart(),
-  };
-}
-
-function appendPendingCustomMessages(session: any, messages: any[]) {
-  if (!Array.isArray(messages) || messages.length <= 0) return;
-  if (!Array.isArray(session._pendingNextTurnMessages)) {
-    session._pendingNextTurnMessages = [];
-  }
-  for (const message of messages) {
-    session._pendingNextTurnMessages.push({
-      role: "custom",
-      customType: message.customType,
-      content: message.content,
-      display: message.display,
-      details: message.details,
-      timestamp: Date.now(),
-    });
-  }
-}
-
-function patchPromptForRinCapabilities(
-  session: any,
-  capabilitySet: RinCapabilitySet,
-) {
-  if (session.__rinCapabilityPromptPatched) return;
-  session.__rinCapabilityPromptPatched = true;
-  const originalPrompt = session.prompt?.bind(session);
-  if (typeof originalPrompt !== "function") return;
-
-  session.prompt = async (text: string, options?: any) => {
-    const expandPromptTemplates = options?.expandPromptTemplates ?? true;
-    const command = expandPromptTemplates ? parseSlashCommand(text) : undefined;
-    if (command) {
-      const rinCommand = capabilitySet.getCommand(command.name);
-      if (rinCommand) {
-        await rinCommand.handler(
-          command.args,
-          capabilitySet.createCommandContext(),
-        );
-        options?.preflightResult?.(true);
-        return;
-      }
-    }
-
-    let currentText = text;
-    let currentImages = options?.images;
-    if (capabilitySet.hasHandlers("input")) {
-      const result = await capabilitySet.emitInput(
-        currentText,
-        currentImages,
-        options?.source ?? "interactive",
-        options?.promptContext,
-        options?.streamingBehavior,
-      );
-      if (result?.action === "handled") {
-        options?.preflightResult?.(true);
-        return;
-      }
-      if (result?.action === "transform") {
-        currentText = result.text;
-        currentImages = result.images ?? currentImages;
-      }
-    }
-
-    const nextOptions =
-      currentImages === options?.images
-        ? options
-        : { ...(options || {}), images: currentImages };
-
-    let restoreBasePrompt = false;
-    let previousBasePrompt: string | undefined;
-    if (options?.streamingBehavior && session.isStreaming) {
-      return await originalPrompt(currentText, nextOptions);
-    }
-
-    if (capabilitySet.hasHandlers("before_agent_start")) {
-      const result = await capabilitySet.emitBeforeAgentStart(
-        currentText,
-        currentImages,
-        session._baseSystemPrompt ?? session.systemPrompt ?? "",
-        options?.promptContext,
-      );
-      appendPendingCustomMessages(session, result?.messages || []);
-      if (result?.systemPrompt !== undefined) {
-        previousBasePrompt = session._baseSystemPrompt;
-        session._baseSystemPrompt = result.systemPrompt;
-        restoreBasePrompt = true;
-      }
-    }
-
-    try {
-      return await originalPrompt(currentText, nextOptions);
-    } finally {
-      if (restoreBasePrompt) session._baseSystemPrompt = previousBasePrompt;
-    }
-  };
-}
-
 function subscribeRinCapabilityEvents(
   session: any,
   capabilitySet: RinCapabilitySet,
@@ -630,7 +440,6 @@ export async function attachRinCapabilitiesToSession(
 ) {
   const capabilitySet = options.capabilitySet;
   bindCapabilitySetToSession(capabilitySet, session);
-  patchPromptForRinCapabilities(session, capabilitySet);
   subscribeRinCapabilityEvents(session, capabilitySet);
   session.__rinCapabilities = capabilitySet;
 

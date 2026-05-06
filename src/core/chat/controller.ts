@@ -5,7 +5,10 @@ import prettyMilliseconds from "pretty-ms";
 
 import type { RpcFrontendClient } from "../rin-tui/frontend-surface.js";
 import { ChatFrontendDriver } from "../rin-tui/chat-frontend-driver.js";
-import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
+import {
+  injectPromptContextHeader,
+  type PromptContextMeta,
+} from "../chat-bridge/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import {
   resolveStoredSessionFile,
@@ -53,6 +56,13 @@ function commandNameFromCommandLine(commandLine: string) {
   const commandPart = trimmed.slice(1).trim();
   if (!commandPart) return "";
   return safeString(commandPart.split(/\s+/, 1)[0]).trim();
+}
+
+function formatPromptForChatContext(
+  text: string,
+  promptMeta?: PromptContextMeta,
+) {
+  return injectPromptContextHeader(promptMeta, text);
 }
 
 function buildActiveVoiceAcknowledgementPrompt(commandName: string) {
@@ -590,7 +600,7 @@ export class ChatController {
     let sessionFile = "";
     try {
       const result = await driver.runTurn({
-        text: prompt,
+        text: formatPromptForChatContext(prompt, promptMeta),
         managedSessionLeaf: MANAGED_CHAT_SESSION_LEAF,
         promptContext: promptMeta,
       });
@@ -987,7 +997,7 @@ export class ChatController {
         startedAt: Date.now(),
       });
       const result = await this.driver.runTurn({
-        text,
+        text: formatPromptForChatContext(text, input.promptMeta),
         images,
         sessionFile: wantedSessionFile,
         restoreSessionFile,
@@ -1045,7 +1055,7 @@ export class ChatController {
       });
       try {
         const result = await this.driver.runTurn({
-          text,
+          text: formatPromptForChatContext(text, input.promptMeta),
           images,
           sessionFile: wantedSessionFile,
           restoreSessionFile,

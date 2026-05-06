@@ -79,6 +79,19 @@ export function formatPromptContext(
     `time: ${formatTimestamp(Number(meta?.sentAt) || fallbackTimestamp)}`,
   ];
   if (meta?.source === "chat-bridge") {
+    lines.push(
+      "runtime metadata: header lines above --- are not user-authored text",
+    );
+    const chatKey = safeString(meta.chatKey).trim();
+    const chatName = safeString(meta.chatName).trim();
+    const chatType = safeString(meta.chatType).trim();
+    if (chatKey) lines.push(`chatKey: ${chatKey}`);
+    if (chatName) lines.push(`chat name: ${chatName}`);
+    if (chatType) lines.push(`chat type: ${chatType}`);
+    const taskId = safeString(meta.taskId).trim();
+    const taskName = safeString(meta.taskName).trim();
+    if (taskId) lines.push(`task id: ${taskId}`);
+    if (taskName) lines.push(`task name: ${taskName}`);
     const hasSenderContext = Boolean(
       safeString(meta.userId).trim() ||
       safeString(meta.nickname).trim() ||

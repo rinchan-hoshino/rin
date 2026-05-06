@@ -119,14 +119,11 @@ test("buildFinalAppSystemPrompt injects a continuation prompt after automatic co
     assistantPreview: "Need to continue editing tests.",
   });
 
-  const beforeStart = await session.__rinCapabilities?.emitBeforeAgentStart(
-    "",
-    undefined,
-    baseSystemPrompt,
-  );
-  const finalSystemPrompt = String(
-    beforeStart?.systemPrompt || baseSystemPrompt,
-  );
+  const finalSystemPrompt =
+    runtimeMod.consumeCompactionContinuationSystemPrompt(
+      session,
+      baseSystemPrompt,
+    );
 
   assert.ok(
     finalSystemPrompt.includes(
@@ -145,12 +142,10 @@ test("buildFinalAppSystemPrompt injects a continuation prompt after automatic co
     false,
   );
 
-  const afterConsume = await session.__rinCapabilities?.emitBeforeAgentStart(
-    "",
-    undefined,
+  const secondPrompt = runtimeMod.consumeCompactionContinuationSystemPrompt(
+    session,
     baseSystemPrompt,
   );
-  const secondPrompt = String(afterConsume?.systemPrompt || baseSystemPrompt);
   assert.equal(
     secondPrompt.includes(
       "Context compacted; treat this as a routine internal checkpoint.",

@@ -13,7 +13,7 @@ const promptContextMod = await import(
   ).href
 );
 
-test("scheduled chat-bound prompt context keeps chat and task metadata in the system prompt", () => {
+test("scheduled chat-bound prompt context keeps chat and task metadata in the prompt header", () => {
   const meta = {
     source: "chat-bridge",
     chatKey: "telegram/demo:1",
@@ -27,9 +27,9 @@ test("scheduled chat-bound prompt context keeps chat and task metadata in the sy
   const systemBlock =
     promptContextMod.formatPromptContextSystemPromptBlock(meta);
 
-  assert.equal(promptText.includes("chatKey: telegram/demo:1"), false);
+  assert.ok(promptText.includes("chatKey: telegram/demo:1"));
   assert.equal(promptText.includes("chat trigger:"), false);
-  assert.equal(promptText.includes("task id: cron_demo"), false);
+  assert.ok(promptText.includes("task id: cron_demo"));
   assert.equal(promptText.includes("task run id:"), false);
   assert.equal(promptText.includes("task session mode:"), false);
   assert.ok(systemBlock.includes("- chatKey: telegram/demo:1"));

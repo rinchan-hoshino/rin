@@ -45,20 +45,12 @@ export async function buildFinalAppSystemPrompt(options = {}) {
     const baseSystemPrompt = String(
       runtimeMod.ensureSessionBaseSystemPrompt(session),
     );
-    const beforeStart = await session.__rinCapabilities?.emitBeforeAgentStart(
-      prompt,
-      images,
-      baseSystemPrompt,
-    );
-    const finalSystemPrompt = String(
-      beforeStart?.systemPrompt || baseSystemPrompt,
-    );
+    const finalSystemPrompt = baseSystemPrompt;
 
     return {
       session,
       baseSystemPrompt,
       finalSystemPrompt,
-      beforeStart,
     };
   } finally {
     if (previousRinDir == null) delete process.env.RIN_DIR;

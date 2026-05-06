@@ -23,9 +23,7 @@ import {
   getCompactionContinuationMarkerPath,
   writeCompactionContinuationMarker,
 } from "./compaction-continuation.js";
-import autoCompactContinueModule from "./auto-compact-continue.js";
 import memoryModule from "../memory/index.js";
-import messageHeaderModule from "../chat-bridge/message-header.js";
 import selfImproveModule from "../self-improve/index.js";
 import taskModule from "../task/index.js";
 import tokenUsageModule from "../token-usage/index.js";
@@ -67,8 +65,6 @@ export function createRinCapabilityDefinitions(
     webSearchModule(),
     memoryModule(options),
     selfImproveModule(options),
-    messageHeaderModule(),
-    autoCompactContinueModule(),
     taskModule(),
     chatModule(),
     tokenUsageModule(options),
@@ -400,6 +396,29 @@ export function clearSessionBaseSystemPrompt(
   applySessionBaseSystemPrompt(session, "");
 }
 
+const COMPACTION_CONTINUATION_BLOCK = [
+  "Context compacted; treat this as a routine internal checkpoint.",
+  "Resume the current task immediately from its current state.",
+  "Execute the next concrete step directly without narration.",
+  "If work remains, keep doing it.",
+].join("\n");
+
+function appendCompactionContinuationBlock(systemPrompt: string) {
+  const base = String(systemPrompt || "").trim();
+  return base
+    ? `${base}\n\n${COMPACTION_CONTINUATION_BLOCK}`
+    : COMPACTION_CONTINUATION_BLOCK;
+}
+
+export function consumeCompactionContinuationSystemPrompt(
+  session: any,
+  systemPrompt: string,
+) {
+  const marker = consumeCompactionContinuationMarker(session);
+  if (!marker) return systemPrompt;
+  return appendCompactionContinuationBlock(systemPrompt);
+}
+
 export function ensureSessionBaseSystemPrompt(session: any): string {
   if (!session || typeof session !== "object") return "";
   const state = session[LAZY_SYSTEM_PROMPT_STATE_KEY] as
@@ -466,8 +485,20 @@ function applyRinPromptBuilder(session: any) {
     typeof session.prompt === "function" ? session.prompt.bind(session) : null;
   if (originalPrompt) {
     session.prompt = async (text: string, options?: any) => {
-      ensureSessionBaseSystemPrompt(session);
-      return await originalPrompt(text, options);
+      const basePrompt = ensureSessionBaseSystemPrompt(session);
+      const nextPrompt = consumeCompactionContinuationSystemPrompt(
+        session,
+        basePrompt,
+      );
+      if (nextPrompt === basePrompt) {
+        return await originalPrompt(text, options);
+      }
+      applySessionBaseSystemPrompt(session, nextPrompt);
+      try {
+        return await originalPrompt(text, options);
+      } finally {
+        applySessionBaseSystemPrompt(session, basePrompt);
+      }
     };
   }
 
@@ -495,12 +526,7 @@ const DISABLE_END_TURN_THRESHOLD_KEY = Symbol.for(
 );
 const RETRYABLE_PROVIDER_ERRORS_KEY = Symbol.for("rin.retryableProviderErrors");
 const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 50;
-const MID_TURN_CONTINUATION_BLOCK = [
-  "Context compacted; treat this as a routine internal checkpoint.",
-  "Resume the current task immediately from its current state.",
-  "Execute the next concrete step directly without narration.",
-  "If work remains, keep doing it.",
-].join("\n");
+const MID_TURN_CONTINUATION_BLOCK = COMPACTION_CONTINUATION_BLOCK;
 
 function mutateMessageArray(target: any[], source: any[]) {
   if (!Array.isArray(target)) return;
@@ -910,6 +936,7 @@ export async function createConfiguredAgentSession(
       previousSessionFile:
         String(sessionStartEvent?.previousSessionFile || "") || undefined,
     });
+    clearCompactionContinuationMarker(result.session);
 
     applyRinPromptBuilder(result.session);
     applyDisableEndTurnThresholdCompaction(result.session);
