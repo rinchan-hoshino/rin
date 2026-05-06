@@ -11,6 +11,7 @@ import {
 } from "./apply-plan.js";
 import { renderInstallerNote, wrapInstallerNoteText } from "./interactive.js";
 import { runInstallerProgress } from "./progress.js";
+import { targetHomeForUser } from "./users.js";
 
 export function renderUpdaterNote(message?: string, title?: string) {
   return renderInstallerNote(
@@ -32,6 +33,30 @@ function note(message?: string, title?: string) {
   process.stdout.write(`${renderUpdaterNote(message, title)}\n`);
 }
 
+async function selectUpdateTarget(
+  ensureNotCancelled: <T>(value: T | symbol) => T,
+  promptSelect: typeof select,
+  i18n: InstallerI18n,
+) {
+  const targets = discoverInstalledTargets();
+  if (!targets.length) return null;
+  if (targets.length === 1) return targets[0]!;
+  return targets[
+    Number(
+      ensureNotCancelled(
+        await promptSelect({
+          message: i18n.chooseUpdateTargetMessage,
+          options: targets.map((item, index) => ({
+            value: index,
+            label: `${item.targetUser} → ${item.installDir}`,
+            hint: `${item.ownerHome} · ${item.source}`,
+          })),
+        }),
+      ),
+    )
+  ]!;
+}
+
 export async function startUpdater(deps: {
   detectCurrentUser: () => string;
   repoRootFromHere: () => string;
@@ -49,37 +74,29 @@ export async function startUpdater(deps: {
 
   intro(i18n.updaterIntroTitle);
 
-  const targets = discoverInstalledTargets();
-  if (!targets.length) {
+  const requestedInstallDir = String(
+    process.env.RIN_UPDATE_INSTALL_DIR || "",
+  ).trim();
+  const requestedTargetUser = String(
+    process.env.RIN_UPDATE_TARGET_USER || "",
+  ).trim();
+  const target =
+    requestedInstallDir && requestedTargetUser
+      ? {
+          targetUser: requestedTargetUser,
+          installDir: requestedInstallDir,
+          ownerHome: targetHomeForUser(requestedTargetUser),
+          source: "launcher" as const,
+        }
+      : await selectUpdateTarget(deps.ensureNotCancelled, promptSelect, i18n);
+  if (!target) {
     note(i18n.noUpdateTargetsText, i18n.updateTargetsTitle);
     outro(i18n.updaterNothingUpdated);
     return;
   }
 
-  const target =
-    targets.length === 1
-      ? targets[0]!
-      : targets[
-          Number(
-            deps.ensureNotCancelled(
-              await promptSelect({
-                message: i18n.chooseUpdateTargetMessage,
-                options: targets.map((item, index) => ({
-                  value: index,
-                  label: `${item.targetUser} → ${item.installDir}`,
-                  hint: `${item.ownerHome} · ${item.source}`,
-                })),
-              }),
-            ),
-          )
-        ]!;
-
-  const installDir =
-    String(process.env.RIN_UPDATE_INSTALL_DIR || target.installDir).trim() ||
-    target.installDir;
-  const targetUser =
-    String(process.env.RIN_UPDATE_TARGET_USER || target.targetUser).trim() ||
-    target.targetUser;
+  const installDir = target.installDir;
+  const targetUser = target.targetUser;
 
   note(
     i18n.buildUpdateTargetText({

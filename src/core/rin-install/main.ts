@@ -34,7 +34,7 @@ import {
 import { createInstallerI18n, promptInstallerLanguage } from "./i18n.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeInstallPlan } from "./finalize.js";
-import { detectLocalLanguageTag } from "../language.js";
+import { detectLocalLanguageTag, normalizeLanguageTag } from "../language.js";
 import { releaseInfoFromEnv } from "../rin-lib/release.js";
 import { runGuiInstaller, shouldStartGuiInstaller } from "./gui.js";
 import {
@@ -42,6 +42,11 @@ import {
   listSystemUsers,
   targetHomeForUser,
 } from "./users.js";
+import {
+  defaultInstallDirForHome,
+  installSettingsPath,
+  installerManifestPaths,
+} from "./paths.js";
 import { startUpdater } from "./updater.js";
 import { runInstallerProgress } from "./progress.js";
 import {
@@ -83,6 +88,25 @@ function note(message?: string, title?: string) {
       symbol: chalk.green,
       title: chalk.reset,
     })}\n`,
+  );
+}
+
+function readInstalledUpdateLanguage(targetUser: string, installDir: string) {
+  const ownerHome = targetHomeForUser(targetUser);
+  const candidates = [
+    installSettingsPath(installDir),
+    ...installerManifestPaths(installDir, ownerHome).recoveryPaths,
+  ];
+  for (const candidate of candidates) {
+    const language = normalizeLanguageTag(
+      readJsonFile<any>(candidate, {})?.language,
+      "",
+    );
+    if (language) return language;
+  }
+  return (
+    normalizeLanguageTag(process.env.RIN_INSTALL_LANGUAGE, "") ||
+    detectLocalLanguageTag("en")
   );
 }
 
@@ -129,9 +153,15 @@ export async function startInstaller() {
       .trim()
       .toLowerCase() === "update"
   ) {
-    const selectedLanguage =
-      String(process.env.RIN_INSTALL_LANGUAGE || "").trim() ||
-      detectLocalLanguageTag("en");
+    const updateTargetUser = String(
+      process.env.RIN_UPDATE_TARGET_USER || detectCurrentUser(),
+    ).trim();
+    const updateTargetHome = targetHomeForUser(updateTargetUser);
+    const selectedLanguage = readInstalledUpdateLanguage(
+      updateTargetUser,
+      String(process.env.RIN_UPDATE_INSTALL_DIR || "").trim() ||
+        defaultInstallDirForHome(updateTargetHome),
+    );
     process.env.RIN_INSTALL_LANGUAGE = selectedLanguage;
     const i18n = createInstallerI18n(selectedLanguage);
     const localizedConfirm: typeof confirm = (options) =>
