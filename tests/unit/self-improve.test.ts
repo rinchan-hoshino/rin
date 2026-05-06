@@ -40,6 +40,11 @@ const selfImproveIndex = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "self-improve", "index.js"))
     .href
 );
+const maintainer = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "self-improve", "maintainer.js"),
+  ).href
+);
 
 async function withTempRoot(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-memory-test-"));
@@ -61,6 +66,14 @@ function historyPath(root) {
 function selfImproveRoot(root) {
   return selfImprovePaths.resolveSelfImproveRoot(root);
 }
+
+test("memory maintenance forks disable routine auto compaction", () => {
+  const session = { autoCompactionEnabled: true };
+
+  maintainer.disableRoutineCompactionForMaintenanceFork(session);
+
+  assert.equal(session.autoCompactionEnabled, false);
+});
 
 test("self-improve paths resolve under the agent root", () => {
   const root = "/tmp/rin-agent";

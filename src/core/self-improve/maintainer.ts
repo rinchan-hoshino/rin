@@ -139,6 +139,15 @@ async function createForkedSessionManager(options: {
   };
 }
 
+export function disableRoutineCompactionForMaintenanceFork(session: any) {
+  if (!session || typeof session !== "object") return;
+  // Memory-maintenance forks are background extraction turns. They should not
+  // spend an extra model turn on ordinary threshold-based compaction; only the
+  // runtime's provider-error/context-overflow recovery path should compact when
+  // the request would otherwise fail.
+  session.autoCompactionEnabled = false;
+}
+
 async function runForkedSessionPrompt(options: {
   agentDir: string;
   sessionFile: string;
@@ -159,6 +168,7 @@ async function runForkedSessionPrompt(options: {
     // session's model options so provider prefix caching matches a normal
     // appended turn on the same conversation.
   });
+  disableRoutineCompactionForMaintenanceFork(session);
   try {
     await session.prompt(options.prompt, {
       expandPromptTemplates: false,
