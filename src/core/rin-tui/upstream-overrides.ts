@@ -315,54 +315,38 @@ function preserveScrollbackOnFullRedraw() {
   };
 }
 
-function renderRootSessionSelectorHeader(header: any, width: number) {
-  const title = "Resume Session";
-  const sortLabel =
-    header?.sortMode === "threaded"
-      ? "Threaded"
-      : header?.sortMode === "recent"
-        ? "Recent"
-        : "Fuzzy";
-  const nameLabel = header?.nameFilter === "all" ? "All" : "Named";
-  const rightText = header?.loading
-    ? `Loading ${header.loadProgress ? `${header.loadProgress.loaded}/${header.loadProgress.total}` : "..."}`
-    : `Name: ${nameLabel}  Sort: ${sortLabel}`;
-  const availableLeft = Math.max(0, width - rightText.length - 1);
-  const left = truncateToWidth(title, availableLeft, "");
-  const spacing = Math.max(1, width - left.length - rightText.length);
-
-  let hintLine = 're:<pattern> regex · "phrase" exact';
-  if (header?.confirmingDeletePath != null) {
-    hintLine = "Delete session? enter to confirm · esc to cancel";
-  } else if (header?.statusMessage?.message) {
-    hintLine = String(header.statusMessage.message);
-  }
-
-  const pathState = header?.showPath ? "on" : "off";
-  const actionLine = `sort · named · delete · path ${pathState}${header?.showRenameHint ? " · rename" : ""}`;
-  return [
-    `${left}${" ".repeat(spacing)}${rightText}`,
-    truncateToWidth(hintLine, width, "…"),
-    truncateToWidth(actionLine, width, "…"),
-  ];
+function renderSessionSelectorHeaderWithoutCwdLabels(
+  header: any,
+  render: (width: number) => unknown,
+  width: number,
+) {
+  const lines = render.call(header, width);
+  if (!Array.isArray(lines)) return lines;
+  return lines.map((line) =>
+    typeof line === "string"
+      ? line
+          .replace(
+            /Resume Session \((?:Current Folder|All)\)/g,
+            "Resume Session",
+          )
+          .replace(/Current Folder/g, "Sessions")
+      : line,
+  );
 }
 
 function configureRootSessionSelectorPresentation(selector: any) {
   if (!selector || typeof selector !== "object") return;
 
   if (selector.header && typeof selector.header.render === "function") {
-    selector.header.render = function renderWithoutDirectoryScope(
+    const originalRender = selector.header.render;
+    selector.header.render = function renderWithPiStyleWithoutCwdLabels(
       width: number,
     ) {
-      return renderRootSessionSelectorHeader(this, width);
-    };
-  }
-
-  if (typeof selector.toggleScope === "function") {
-    selector.toggleScope = () => {
-      selector.header?.setStatusMessage?.(null);
-      selector.header?.setScope?.("current");
-      selector.header?.requestRender?.();
+      return renderSessionSelectorHeaderWithoutCwdLabels(
+        this,
+        originalRender,
+        width,
+      );
     };
   }
 
