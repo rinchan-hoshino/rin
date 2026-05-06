@@ -67,12 +67,12 @@ function createPollingWorkingIndicator(platform: string, getBot: () => any) {
             : typeof bot?.internal?.deleteReaction === "function"
               ? bot.internal.deleteReaction.bind(bot.internal)
               : null;
-      if (messageId && createReaction) {
+      if (messageId && createReaction && context?.reactionDue !== false) {
         const key = `${chatId}:${messageId}`;
         const previousEmoji = reactions.get(key) || "";
         const nextEmoji = getWorkingReactionFrame(
           platform,
-          Number(context?.tick || 0),
+          Number(context?.reactionTick ?? context?.tick ?? 0),
         );
         if (nextEmoji && previousEmoji !== nextEmoji) {
           if (previousEmoji && deleteReaction) {

@@ -29,6 +29,7 @@ import { restorePromptParts, sendOutboxPayload } from "./transport.js";
 import { isTransientChatRuntimeError } from "./runtime-errors.js";
 
 const INTERIM_PREFIX = "··· ";
+const WORKING_REACTION_INTERVAL_MS = 30_000;
 
 type ChatTurnMeta = {
   incomingMessageId?: string;
@@ -489,9 +490,18 @@ export class ChatController {
       ? this.activeWorkingIndicators
       : this.getWorkingIndicators();
     this.activeWorkingIndicators = indicators;
+    const now = Date.now();
+    const messageId = this.currentIncomingMessageId();
+    const reactionDue =
+      Boolean(messageId) &&
+      (this.lastWorkingReactionAt <= 0 ||
+        now - this.lastWorkingReactionAt >= WORKING_REACTION_INTERVAL_MS);
     const context = this.workingIndicatorContext({
       event: "tick",
       tick: this.workingIndicatorTick,
+      reactionDue,
+      reactionTick: this.workingReactionTick,
+      reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
     });
     const results = await Promise.all(
       indicators
@@ -503,6 +513,10 @@ export class ChatController {
         ),
     );
     this.workingIndicatorTick += 1;
+    if (reactionDue) {
+      this.lastWorkingReactionAt = now;
+      this.workingReactionTick += 1;
+    }
     return results.some(Boolean);
   }
 

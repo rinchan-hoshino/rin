@@ -802,11 +802,12 @@ class TelegramAdapter {
     await this.callApi("sendChatAction", { chat_id: chatId, action: "typing" });
     const messageId = safeString(context?.messageId).trim();
     if (!messageId) return true;
+    if (context?.reactionDue === false) return true;
     const key = `${chatId}:${messageId}`;
     const previousEmoji = this.workingReactions.get(key) || "";
     const nextEmoji = getWorkingReactionFrame(
       "telegram",
-      Number(context?.tick || 0),
+      Number(context?.reactionTick ?? context?.tick ?? 0),
     );
     if (!nextEmoji || previousEmoji === nextEmoji) return true;
     await this.createReaction(chatId, messageId, nextEmoji);
@@ -1389,11 +1390,12 @@ class OneBotAdapter {
     const chatId = safeString(context?.chatId).trim();
     const messageId = safeString(context?.messageId).trim();
     if (!isOneBotGroupChatId(chatId) || !messageId) return false;
+    if (context?.reactionDue === false) return true;
     const key = `${chatId}:${messageId}`;
     const previousEmoji = this.workingReactions.get(key) || "";
     const nextEmoji = getWorkingReactionFrame(
       "onebot",
-      Number(context?.tick || 0),
+      Number(context?.reactionTick ?? context?.tick ?? 0),
     );
     if (!nextEmoji || previousEmoji === nextEmoji) return true;
     if (previousEmoji)

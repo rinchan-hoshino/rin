@@ -63,10 +63,10 @@ function testPollingIndicator(actions = [], reactions = [], selfId = "1") {
   let emoji = "";
   return {
     type: "polling",
-    async tick({ chatId, messageId, tick }) {
+    async tick({ chatId, messageId, tick, reactionDue, reactionTick }) {
       actions.push({ chat_id: chatId, action: "typing" });
-      if (messageId) {
-        emoji = Number(tick || 0) % 2 ? "🔥" : "🤔";
+      if (messageId && reactionDue !== false) {
+        emoji = Number(reactionTick ?? tick ?? 0) % 2 ? "🔥" : "🤔";
         reactions.push(["create", chatId, messageId, emoji]);
       }
       return true;
@@ -84,9 +84,10 @@ function testReactionPollingIndicator(reactions = [], selfId = "1") {
   let emoji = "";
   return {
     type: "polling",
-    async tick({ chatId, messageId, tick }) {
+    async tick({ chatId, messageId, tick, reactionDue, reactionTick }) {
       if (!messageId) return false;
-      emoji = Number(tick || 0) % 2 ? "🔥" : "🤔";
+      if (reactionDue === false) return true;
+      emoji = Number(reactionTick ?? tick ?? 0) % 2 ? "🔥" : "🤔";
       reactions.push(["create", chatId, messageId, emoji]);
       return true;
     },
@@ -935,6 +936,15 @@ test("chat controller polls typing and rotating reactions while a turn is active
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [
+    { chat_id: "2", action: "typing" },
+    { chat_id: "2", action: "typing" },
+  ]);
+  assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
+
+  controller.lastWorkingReactionAt -= 30_000;
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(actions, [
+    { chat_id: "2", action: "typing" },
     { chat_id: "2", action: "typing" },
     { chat_id: "2", action: "typing" },
   ]);
