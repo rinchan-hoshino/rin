@@ -64,10 +64,29 @@ export default function messageHeaderModule(): RinCapabilityDefinition {
             return { action: "continue" };
           }
 
+          const source = safeString(event.source).trim();
+          const body = safeString(event.text);
+          const sentAt = Number(event.promptContext?.sentAt) || Date.now();
+          if (
+            source === "chat-bridge" &&
+            event.streamingBehavior &&
+            !isPromptContextFormatted(body)
+          ) {
+            return {
+              action: "transform",
+              text: formatPromptContext(
+                event.promptContext || null,
+                body,
+                sentAt,
+              ),
+              images: event.images,
+            };
+          }
+
           pendingContexts.push({
-            source: safeString(event.source).trim(),
-            body: safeString(event.text),
-            sentAt: Number(event.promptContext?.sentAt) || Date.now(),
+            source,
+            body,
+            sentAt,
             promptContext: event.promptContext,
           });
 

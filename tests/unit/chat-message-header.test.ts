@@ -164,6 +164,41 @@ test("message header formats structured chat prompt context at the shared input 
   );
 });
 
+test("message header formats streaming chat steering without pending hook state", async () => {
+  const handlers = createHandlers();
+
+  const inputResult = await handlers.input[0]({
+    source: "chat-bridge",
+    text: "steer now",
+    streamingBehavior: "steer",
+    promptContext: {
+      source: "chat-bridge",
+      sentAt: 1710000000000,
+      chatKey: "telegram/1:2",
+      chatType: "group",
+      userId: "guest-1",
+      nickname: "Alice",
+      identity: "OTHER",
+    },
+  });
+
+  assert.equal(inputResult.action, "transform");
+  assert.ok(inputResult.text.includes("sender nickname: Alice"));
+  assert.ok(inputResult.text.endsWith("---\nsteer now"));
+
+  const beforeStart = await handlers.before_agent_start[0]({
+    prompt: "next prompt",
+    systemPrompt: "Base prompt",
+  });
+  assert.ok(
+    String(beforeStart?.message?.content || "").endsWith("---\nnext prompt"),
+  );
+  assert.equal(
+    String(beforeStart?.message?.content || "").includes("steer now"),
+    false,
+  );
+});
+
 test("message header still injects a local hidden timestamp for non-chat prompts", async () => {
   const handlers = createHandlers();
 

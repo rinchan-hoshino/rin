@@ -84,6 +84,7 @@ export type RinCapabilitySet = {
     images: any[] | undefined,
     source: any,
     promptContext?: any,
+    streamingBehavior?: any,
   ) => Promise<any>;
   emitBeforeAgentStart: (
     prompt: string,
@@ -283,6 +284,7 @@ export function createRinCapabilitySet(options: {
       images: any[] | undefined,
       source: any,
       promptContext?: any,
+      streamingBehavior?: any,
     ) {
       let currentText = text;
       let currentImages = images;
@@ -296,6 +298,7 @@ export function createRinCapabilitySet(options: {
               images: currentImages,
               source,
               promptContext,
+              streamingBehavior,
             },
             ctx,
           );
@@ -557,6 +560,7 @@ function patchPromptForRinCapabilities(
         currentImages,
         options?.source ?? "interactive",
         options?.promptContext,
+        options?.streamingBehavior,
       );
       if (result?.action === "handled") {
         options?.preflightResult?.(true);
@@ -575,6 +579,10 @@ function patchPromptForRinCapabilities(
 
     let restoreBasePrompt = false;
     let previousBasePrompt: string | undefined;
+    if (options?.streamingBehavior && session.isStreaming) {
+      return await originalPrompt(currentText, nextOptions);
+    }
+
     if (capabilitySet.hasHandlers("before_agent_start")) {
       const result = await capabilitySet.emitBeforeAgentStart(
         currentText,
