@@ -10,7 +10,6 @@ import {
   ProcessTerminal,
   Spacer,
   Text,
-  TUI_KEYBINDINGS,
   truncateToWidth,
 } from "@mariozechner/pi-tui";
 
@@ -220,13 +219,6 @@ function shouldIgnoreInteractiveSigint(instance: any) {
   return instance?.ui?.stopped === true;
 }
 
-function applyRinDefaultKeybindings() {
-  const newLineBinding = TUI_KEYBINDINGS["tui.input.newLine"] as {
-    defaultKeys: string | string[];
-  };
-  newLineBinding.defaultKeys = "ctrl+j";
-}
-
 function stripClearScrollback(data: string) {
   return data.includes(CLEAR_SCROLLBACK_SEQUENCE)
     ? data.split(CLEAR_SCROLLBACK_SEQUENCE).join("")
@@ -430,8 +422,6 @@ function createSessionSelectorLoaders(instance: any) {
 export async function applyRinTuiOverrides() {
   if (applied) return;
   applied = true;
-
-  applyRinDefaultKeybindings();
 
   preserveScrollbackOnFullRedraw();
 
