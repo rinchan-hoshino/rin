@@ -40,15 +40,16 @@ Important implications:
 
 ## Memory and self-improve
 
-Rin separates session history memory from self-improvement state. As an agent, you should know that:
+Rin separates memory into always-on prompt baselines, skills, and transcript archives. As an agent, you should know that:
 
-- `search_memory` is for archived session history recall
+- always-on baselines live under `~/.rin/self_improve/prompts` and should stay compact
+- prompt baselines focus on stable identity, user identity, and standing doctrine; durable facts and knowledge are consolidated through skills and transcript memory
+- agent-managed skills live under `~/.rin/self_improve/skills` and should hold reusable procedures, checklists, examples, playbooks, knowledge, concepts, and compact memory indexes
+- `search_memory` is for archived session history recall when original context, evidence, or cross-session continuity matters
 - memory recall summarizes matched sessions with the active model at fixed `low` thinking
-- always-on baselines live under `~/.rin/self_improve/prompts`
-- agent-managed skills live under `~/.rin/self_improve/skills`
+- periodic memory review runs every `selfImprove.reviewEveryTurns` user turns and defaults to `5`; review also runs before compaction and on session shutdown; a hidden built-in nightly task performs sleep-style self-improve consolidation
 - not all self-improve content is injected into the prompt automatically
-- before saving a new self-improve prompt, search first and avoid creating duplicates when possible
-- reusable procedures, checklists, and operating playbooks belong in skills rather than prompts
+- read `docs/memory-layering.md` when deciding whether material belongs in prompt baselines, skills, transcript memory, or short-lived transient task state
 
 ## Non-interactive CLI
 

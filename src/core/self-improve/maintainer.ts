@@ -92,14 +92,22 @@ function diffManagedArtifactSnapshots(
   return changed;
 }
 
-function buildSelfImproveReviewPrompt(_trigger: string): string {
-  const prompt = [
-    "Review the conversation and derive durable conclusions that should still matter across sessions.",
-    "Use save_prompts for prompt baselines and skills for reusable procedures, materials, and knowledge.",
-    "Simultaneously consolidate, compress, and improve existing prompt slots and skills instead of only adding new content.",
-  ];
+function selfImproveMemoryMaintenanceManualPath(agentDir: string) {
+  return path.join(
+    agentDir,
+    "docs",
+    "rin",
+    "docs",
+    "self-improve-memory-maintenance.md",
+  );
+}
 
-  return prompt.join(" ");
+export function buildSelfImproveReviewPrompt(
+  trigger: string,
+  agentDir = "<agentDir>",
+): string {
+  void trigger;
+  return `Follow the manual at ${selfImproveMemoryMaintenanceManualPath(agentDir)} to perform the self-improve review for the conversation above.`;
 }
 
 async function createForkedSessionManager(options: {
@@ -282,7 +290,10 @@ async function runForkedSessionSelfImproveReview(options: {
     agentDir: options.agentDir,
     sessionFile: options.sessionFile,
     leafId: options.leafId,
-    prompt: buildSelfImproveReviewPrompt(safeString(options.trigger).trim()),
+    prompt: buildSelfImproveReviewPrompt(
+      safeString(options.trigger).trim(),
+      options.agentDir,
+    ),
     additionalExtensionPaths: options.additionalExtensionPaths,
   });
   const after = await captureManagedArtifactSnapshot(options.agentDir);

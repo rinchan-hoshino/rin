@@ -9,13 +9,20 @@ Most of these capabilities are registered directly by Rin core rather than being
   - provides live web search
   - gets web pages directly when `q` is an HTTP(S) URL
 - `memory`
-  - provides `*_memory` tools and memory-related prompt support
-- `reset-system-prompt`
-  - adds Rin's default stance and chat style prefix to the agent
+  - provides `search_memory`, transcript archiving, and the searchable session-history index
+- `self-improve`
+  - provides compact prompt baselines, agent-managed skills, periodic review, and hidden nightly consolidation
+- Rin system prompt assembly
+  - adds Rin's default stance, tool guidance, configured baselines, and available skill metadata
+  - keeps the effective base system prompt stable within a session until the session is refreshed or reloaded
 - `message-header`
   - adds message metadata such as `sent at`; adds chat-specific context in chat bridge scenarios
 - `freeze-session-runtime`
   - keeps the effective system prompt stable within a session
+- `tui-input-compat`
+  - smooths over some TUI input compatibility issues
+- `subagent`
+  - provides `run_subagent` and `list_models`
 - `task`
   - provides `task_control` for pausing or resuming existing scheduled tasks
   - task creation, updates, deletion, and inspection are documented workflows rather than agent tools

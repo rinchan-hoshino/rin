@@ -19,3 +19,5 @@ This module owns:
 - recall summaries are steered to fuse the overall session context with why the current query matched
 
 It does not own always-on prompts or agent-managed skills. Those belong to the `self-improve` module.
+
+In the layered memory model, this module owns episodic memory: original session material that can be reactivated through targeted recall instead of being copied into the always-on prompt.

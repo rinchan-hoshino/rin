@@ -74,12 +74,7 @@ export async function saveSelfImprovePromptDoc(
     tags: normalizeList(params.tags || []),
     aliases: normalizeList(params.aliases || []),
     scope: ensureScope(safeString(params.scope || "global")),
-    kind: ensureKind(
-      safeString(
-        params.kind ||
-          (selfImprovePromptSlot === "core_facts" ? "fact" : "instruction"),
-      ),
-    ),
+    kind: ensureKind(safeString(params.kind || "instruction")),
     sensitivity: safeString(params.sensitivity || "normal").trim() || "normal",
     source: safeString(params.source || "").trim(),
     updated_at: nowIso(),

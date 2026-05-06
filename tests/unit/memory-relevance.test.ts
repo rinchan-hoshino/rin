@@ -144,13 +144,13 @@ test("self-improve compile renders prompt slots", () => {
       updated_at: "2026-01-01T00:00:00.000Z",
     },
     {
-      id: "core-facts",
-      name: "Core Facts",
+      id: "core-doctrine",
+      name: "Core Doctrine",
       description: "Use SearXNG",
       content: "Keep SearXNG design.",
-      self_improve_prompt_slot: "core_facts",
+      self_improve_prompt_slot: "core_doctrine",
       scope: "global",
-      kind: "fact",
+      kind: "instruction",
       tags: ["search"],
       aliases: [],
       exposure: "self_improve_prompts",
@@ -174,7 +174,7 @@ test("self-improve compile renders prompt slots", () => {
   );
   assert.ok(
     out.self_improve_prompt_context.includes(
-      "[core_facts] Keep SearXNG design.",
+      "[core_doctrine] Keep SearXNG design.",
     ),
   );
 });

@@ -45,11 +45,10 @@ export const selfImproveActionParams = Type.Object({
         Type.Literal("agent_profile"),
         Type.Literal("user_profile"),
         Type.Literal("core_doctrine"),
-        Type.Literal("core_facts"),
       ],
       {
         description:
-          "Self-improve prompt slot name. Allowed values: `agent_profile`, `user_profile`, `core_doctrine`, `core_facts`.",
+          "Self-improve prompt slot name. Allowed values: `agent_profile`, `user_profile`, or `core_doctrine`. Durable facts and knowledge belong in skills.",
       },
     ),
   ),

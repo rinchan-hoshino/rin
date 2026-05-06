@@ -634,7 +634,7 @@ test("cron execution shell task returns summarized success body", async () => {
   assert.ok(text.includes("stdout:"));
 });
 
-test("cron scheduler installs the built-in daily memory index repair task", async () => {
+test("cron scheduler installs built-in daily memory maintenance tasks", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
@@ -653,6 +653,22 @@ test("cron scheduler installs the built-in daily memory index repair task", asyn
     assert.equal(builtIn.trigger.expression, "17 4 * * *");
     assert.equal(builtIn.target.kind, "shell_command");
     assert.match(builtIn.target.command, /memory-index repair/);
+
+    const sleep = scheduler.getTask(
+      "builtin_self_improve_sleep_consolidation_daily",
+      { includeBuiltIn: true },
+    );
+    assert.ok(sleep);
+    assert.equal(sleep.builtIn, true);
+    assert.equal(sleep.trigger.expression, "43 3 * * *");
+    assert.equal(sleep.session.mode, "none");
+    assert.equal(sleep.target.kind, "agent_prompt");
+    assert.equal(
+      sleep.target.prompt,
+      `Follow the manual at ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to consolidate existing self-improvement documents.`,
+    );
+    assert.doesNotMatch(sleep.target.prompt, /conversation above/);
+    assert.doesNotMatch(sleep.target.prompt, /## Basic concepts/);
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -710,6 +726,11 @@ test("cron scheduler protects built-in tasks from public mutation", async () => 
           target: { kind: "shell_command", command: "echo nope" },
         }),
       /cron_builtin_task_protected:builtin_memory_index_repair_daily/,
+    );
+    assert.throws(
+      () =>
+        scheduler.pauseTask("builtin_self_improve_sleep_consolidation_daily"),
+      /cron_builtin_task_protected:builtin_self_improve_sleep_consolidation_daily/,
     );
   } finally {
     scheduler.stop();

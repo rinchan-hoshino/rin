@@ -5,7 +5,7 @@ import { nowIso } from "./core/utils.js";
 import { initStatePath } from "./paths.js";
 
 const REQUIRED_INIT_SLOTS = ["agent_profile", "user_profile"];
-const OPTIONAL_INIT_SLOTS = ["core_doctrine", "core_facts"];
+const OPTIONAL_INIT_SLOTS = ["core_doctrine"];
 
 function resolveInitStatePath(resolveAgentDir: () => string) {
   return initStatePath(resolveAgentDir());

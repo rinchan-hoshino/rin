@@ -227,7 +227,7 @@ test("automatic self-improve handlers queue managed task sessions", async () => 
       },
     };
 
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       await messageEnd({ message: { role: "user" } }, ctx);
       await messageEnd({ message: { role: "assistant" } }, ctx);
     }
@@ -236,7 +236,62 @@ test("automatic self-improve handlers queue managed task sessions", async () => 
     assert.equal(queue.length, 1);
     assert.equal(queue[0].kind, "self_improve_review");
     assert.equal(queue[0].sessionFile, managedSessionFile);
+    assert.equal(queue[0].snapshotKey, "review:5");
   });
+});
+
+test("automatic self-improve review interval is configurable", async () => {
+  await withTempRoot(async (root) => {
+    await fs.writeFile(
+      path.join(root, "settings.json"),
+      JSON.stringify({ selfImprove: { reviewEveryTurns: 3 } }),
+      "utf8",
+    );
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const sessionFile = path.join(root, "sessions", "configurable.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "configurable-review-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-configurable",
+        isPersisted: () => true,
+      },
+    };
+
+    for (let i = 0; i < 3; i += 1) {
+      await messageEnd({ message: { role: "user" } }, ctx);
+      await messageEnd({ message: { role: "assistant" } }, ctx);
+    }
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:3");
+  });
+});
+
+test("self-improve review prompt delegates shared maintenance rules", () => {
+  const prompt = maintainer.buildSelfImproveReviewPrompt(
+    "self_improve:periodic_review",
+    "/tmp/rin-agent",
+  );
+  assert.equal(
+    prompt,
+    "Follow the manual at /tmp/rin-agent/docs/rin/docs/self-improve-memory-maintenance.md to perform the self-improve review for the conversation above.",
+  );
+  assert.doesNotMatch(prompt, /^- Trigger:/m);
+  assert.doesNotMatch(prompt, /## Basic concepts/);
+  assert.doesNotMatch(prompt, /## Document writing rules/);
+  assert.doesNotMatch(prompt, /## Destination rules/);
+  assert.doesNotMatch(prompt, /core_facts/);
 });
 
 test("automatic self-improve handlers require persisted sessions", async () => {
@@ -262,7 +317,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
       },
     };
 
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       await messageEnd({ message: { role: "user" } }, ctx);
       await messageEnd({ message: { role: "assistant" } }, ctx);
     }
@@ -272,16 +327,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
   });
 });
 
-test("save_prompts describes agent_profile as including standing user expectations", () => {
-  const tool = registerSavePromptsTool();
-  assert.ok(tool);
-  assert.match(
-    String(tool.parameters.properties.slot.description || ""),
-    /agent_profile` stores the assistant's stable role, tone, behavior style, and the user's standing expectations for how the assistant should generally respond/,
-  );
-});
-
-function registerSavePromptsTool() {
+test("self-improve module does not expose save_prompts as a user-facing tool", () => {
   const tools =
     selfImproveIndex.default({
       sendMessage() {},
@@ -289,57 +335,10 @@ function registerSavePromptsTool() {
         return "medium";
       },
     }).tools || [];
-  return tools.find((entry) => entry.name === "save_prompts");
-}
-
-test("save_prompts output and details do not expose prompt slot file paths", async () => {
-  await withTempRoot(async (root) => {
-    const previousRinDir = process.env.RIN_DIR;
-    const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
-    try {
-      process.env.RIN_DIR = root;
-      delete process.env.PI_CODING_AGENT_DIR;
-      await store.saveSelfImprovePromptDoc(
-        {
-          name: "agent profile",
-          content: "Speak concise Chinese by default.",
-          selfImprovePromptSlot: "agent_profile",
-          scope: "global",
-        },
-        root,
-      );
-
-      const tool = registerSavePromptsTool();
-      assert.ok(tool);
-      const loaded = await tool.execute("tool-call", { slot: "agent_profile" });
-      assert.equal(
-        JSON.stringify(loaded).includes(
-          "self_improve/prompts/agent_profile.md",
-        ),
-        false,
-      );
-      assert.equal(JSON.stringify(loaded.details).includes("path"), false);
-
-      const updated = await tool.execute("tool-call", {
-        slot: "agent_profile",
-        baseContent: "- Speak concise Chinese by default.",
-        content: "Speak concise Chinese by default. Keep replies natural.",
-      });
-      assert.equal(
-        JSON.stringify(updated).includes(
-          "self_improve/prompts/agent_profile.md",
-        ),
-        false,
-      );
-      assert.equal(JSON.stringify(updated.details).includes("path"), false);
-    } finally {
-      if (previousRinDir === undefined) delete process.env.RIN_DIR;
-      else process.env.RIN_DIR = previousRinDir;
-      if (previousPiAgentDir === undefined)
-        delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
-    }
-  });
+  assert.equal(
+    tools.some((entry) => entry.name === "save_prompts"),
+    false,
+  );
 });
 
 test("store executeSelfImproveAction compiles saved self-improve prompts", async () => {
@@ -618,37 +617,20 @@ test("self-improve doc loading uses prompt slot filenames and ignores skill docs
   });
 });
 
-test("saveSelfImprovePromptDoc supports core_facts with fact kind by default", async () => {
+test("saveSelfImprovePromptDoc accepts only active prompt baseline slots", async () => {
   await withTempRoot(async (root) => {
-    const saved = await store.saveSelfImprovePromptDoc(
-      {
-        name: "core facts",
-        content:
-          "User prefers concise Chinese replies. Project repo is /srv/app.",
-        selfImprovePromptSlot: "core_facts",
-        scope: "global",
-      },
-      root,
-    );
-
-    assert.equal(saved.doc.self_improve_prompt_slot, "core_facts");
-    assert.equal(saved.doc.kind, "fact");
-    assert.equal(
-      await fs.readFile(
-        path.join(selfImproveRoot(root), "prompts", "core_facts.md"),
-        "utf8",
-      ),
-      "- User prefers concise Chinese replies. Project repo is /srv/app.\n",
-    );
-
-    const compiled = await store.compileSelfImprove(
-      { query: "concise replies" },
-      root,
-    );
-    assert.ok(
-      String(compiled.self_improve_prompt_context).includes(
-        "[core_facts] - User prefers concise Chinese replies. Project repo is /srv/app.",
-      ),
+    await assert.rejects(
+      () =>
+        store.saveSelfImprovePromptDoc(
+          {
+            name: "unsupported slot",
+            content: "User prefers concise Chinese replies.",
+            selfImprovePromptSlot: "unsupported_slot",
+            scope: "global",
+          },
+          root,
+        ),
+      /self_improve_prompt_slot_required:agent_profile,user_profile,core_doctrine/,
     );
   });
 });
@@ -657,16 +639,16 @@ test("removeSelfImprovePromptDoc deletes prompt slot files", async () => {
   await withTempRoot(async (root) => {
     await store.saveSelfImprovePromptDoc(
       {
-        name: "core facts",
-        content: "User prefers concise Chinese replies.",
-        selfImprovePromptSlot: "core_facts",
+        name: "core doctrine",
+        content: "Prefer concise replies.",
+        selfImprovePromptSlot: "core_doctrine",
         scope: "global",
       },
       root,
     );
 
     const removed = await store.removeSelfImprovePromptDoc(
-      { selfImprovePromptSlot: "core_facts" },
+      { selfImprovePromptSlot: "core_doctrine" },
       root,
     );
     assert.equal(removed.action, "remove_self_improve_prompt");
@@ -676,7 +658,7 @@ test("removeSelfImprovePromptDoc deletes prompt slot files", async () => {
       root,
     );
     assert.equal(
-      String(compiled.self_improve_prompt_context).includes("[core_facts]"),
+      String(compiled.self_improve_prompt_context).includes("[core_doctrine]"),
       false,
     );
   });

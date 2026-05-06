@@ -174,8 +174,6 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
     process.env.RIN_DIR ||
     process.env[PI_AGENT_DIR_ENV] ||
     resolveRuntimeProfile().agentDir;
-  const managedSkillPaths = getManagedSkillPaths(promptAgentDir);
-
   const uniqueGuidelines: string[] = [];
   const seen = new Set<string>();
   const addGuideline = (value: string) => {
@@ -192,13 +190,6 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
   for (const guideline of [...DEFAULT_PI_GUIDELINES, ...promptGuidelines]) {
     addGuideline(guideline);
   }
-
-  const skillGuidanceBlock = [
-    "Self improve skills guidance:",
-    `- Always save reusable procedures, workflows, checklists, playbooks, reference material, and durable knowledge as skills under ${managedSkillPaths[0]} instead of in save_prompts content, and always use the skill-creator skill to create or update those skills.`,
-    "- When material for one topic starts needing steps, branching logic, examples, or several related lines, move it into a skill and keep only a short durable baseline in save_prompts.",
-    "- Prefer revising an existing relevant skill over creating another similar one.",
-  ].join("\n");
 
   const toolsList =
     validToolNames.length > 0
@@ -237,8 +228,6 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
       guidelines,
       "",
       RICH_CHAT_CONTENT_SYNTAX,
-      "",
-      skillGuidanceBlock,
       "",
       docsBlock,
       configuredLanguageBlock ? `\n${configuredLanguageBlock}` : "",

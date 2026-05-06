@@ -45,7 +45,7 @@ function promptDocFromFile(filePath: string, text: string): MemoryDoc | null {
     tags: [],
     aliases: [],
     scope: "global",
-    kind: slot === "core_facts" ? "fact" : "instruction",
+    kind: "instruction",
     sensitivity: "normal",
     source: "",
     updated_at: now,
@@ -120,10 +120,11 @@ export function memoryPromptPath(rootDir: string, slot: string): string {
 
 export function assertMemoryPromptDoc(doc: MemoryDoc): void {
   const slot = safeString(doc.self_improve_prompt_slot).trim();
-  if (!MEMORY_PROMPT_SLOTS.includes(slot as any))
+  if (!MEMORY_PROMPT_SLOTS.includes(slot as any)) {
     throw new Error(
       `self_improve_prompt_slot_required:${MEMORY_PROMPT_SLOTS.join(",")}`,
     );
+  }
   const limits = MEMORY_PROMPT_LIMITS[slot];
   if (!limits) throw new Error(`self_improve_prompt_slot_invalid:${slot}`);
   if (!limits.fidelity.includes(doc.fidelity))

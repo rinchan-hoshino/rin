@@ -67,7 +67,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
 
   assert.ok(baseSystemPrompt.includes("Available tools:"));
   assert.ok(baseSystemPrompt.includes("- search_memory:"));
-  assert.ok(baseSystemPrompt.includes("- save_prompts:"));
+  assert.equal(baseSystemPrompt.includes("- save_prompts:"), false);
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
   assert.ok(baseSystemPrompt.includes("Chat rich content Markdown syntax:"));
   assert.ok(
@@ -85,10 +85,13 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     ),
   );
   assert.ok(!finalSystemPrompt.includes("# Self-improve guidance"));
-  assert.ok(
-    finalSystemPrompt.includes(
-      "Use save_prompts when a durable baseline about the assistant, the user, durable methods and values, or durable facts and operating conventions should remain available by default in future turns rather than only for session-local progress or one-off task state",
-    ),
+  assert.equal(
+    finalSystemPrompt.includes("Self improve skills guidance:"),
+    false,
+  );
+  assert.equal(
+    finalSystemPrompt.includes("Use save_prompts when a durable baseline"),
+    false,
   );
 });
 
@@ -198,8 +201,8 @@ test("persisted system prompt restores across resume and refreshes on reload", a
   const promptDir = path.join(agentDir, "self_improve", "prompts");
   fs.mkdirSync(promptDir, { recursive: true });
   fs.writeFileSync(
-    path.join(promptDir, "core_facts.md"),
-    "Original persisted fact.\n",
+    path.join(promptDir, "core_doctrine.md"),
+    "Original persisted method.\n",
   );
 
   const firstRuntime = await runtimeMod.createConfiguredAgentSession({
@@ -211,7 +214,7 @@ test("persisted system prompt restores across resume and refreshes on reload", a
   );
   const sessionFile = firstRuntime.session.sessionFile;
   assert.ok(sessionFile);
-  assert.ok(firstPrompt.includes("Original persisted fact."));
+  assert.ok(firstPrompt.includes("Original persisted method."));
 
   const entries = firstRuntime.session.sessionManager.getEntries();
   assert.ok(
@@ -235,8 +238,8 @@ test("persisted system prompt restores across resume and refreshes on reload", a
   await firstRuntime.runtime.dispose();
 
   fs.writeFileSync(
-    path.join(promptDir, "core_facts.md"),
-    "Updated fact after resume.\n",
+    path.join(promptDir, "core_doctrine.md"),
+    "Updated method after resume.\n",
   );
 
   const resumedManager = SessionManager.open(
@@ -252,14 +255,14 @@ test("persisted system prompt restores across resume and refreshes on reload", a
     resumedRuntime.session,
   );
   assert.equal(resumedPrompt, firstPrompt);
-  assert.equal(resumedPrompt.includes("Updated fact after resume."), false);
+  assert.equal(resumedPrompt.includes("Updated method after resume."), false);
 
   await resumedRuntime.session.reload();
   const reloadedPrompt = runtimeMod.ensureSessionBaseSystemPrompt(
     resumedRuntime.session,
   );
   assert.notEqual(reloadedPrompt, firstPrompt);
-  assert.ok(reloadedPrompt.includes("Updated fact after resume."));
+  assert.ok(reloadedPrompt.includes("Updated method after resume."));
   await resumedRuntime.runtime.dispose();
 });
 
@@ -291,8 +294,8 @@ test("forked sessions restore the source persisted system prompt", async (t) => 
   const promptDir = path.join(agentDir, "self_improve", "prompts");
   fs.mkdirSync(promptDir, { recursive: true });
   fs.writeFileSync(
-    path.join(promptDir, "core_facts.md"),
-    "Original fork fact.\n",
+    path.join(promptDir, "core_doctrine.md"),
+    "Original fork method.\n",
   );
 
   const sourceRuntime = await runtimeMod.createConfiguredAgentSession({
@@ -315,8 +318,8 @@ test("forked sessions restore the source persisted system prompt", async (t) => 
   await sourceRuntime.runtime.dispose();
 
   fs.writeFileSync(
-    path.join(promptDir, "core_facts.md"),
-    "Updated fact after fork.\n",
+    path.join(promptDir, "core_doctrine.md"),
+    "Updated method after fork.\n",
   );
   const forkManager = sessionForkMod.forkSessionManagerCompat(
     SessionManager,
@@ -335,7 +338,7 @@ test("forked sessions restore the source persisted system prompt", async (t) => 
   );
 
   assert.equal(forkPrompt, sourcePrompt);
-  assert.equal(forkPrompt.includes("Updated fact after fork."), false);
+  assert.equal(forkPrompt.includes("Updated method after fork."), false);
   await forkRuntime.runtime.dispose();
 });
 

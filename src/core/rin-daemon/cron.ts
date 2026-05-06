@@ -249,6 +249,39 @@ function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
   return task;
 }
 
+function createBuiltInSelfImproveSleepConsolidationTask(
+  agentDir: string,
+): CronTaskRecord {
+  const createdAt = nowIso();
+  const manualPath = path.join(
+    agentDir,
+    "docs",
+    "rin",
+    "docs",
+    "self-improve-memory-maintenance.md",
+  );
+  const prompt = `Follow the manual at ${manualPath} to consolidate existing self-improvement documents.`;
+  const task: CronTaskRecord = {
+    id: "builtin_self_improve_sleep_consolidation_daily",
+    builtIn: true,
+    createdAt,
+    updatedAt: createdAt,
+    name: "Consolidate self-improve memory",
+    enabled: true,
+    thinkingLevel: "low",
+    trigger: {
+      expression: "43 3 * * *",
+      timezone: "local",
+    },
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt },
+    runCount: 0,
+    running: false,
+  };
+  task.nextRunAt = computeNextRunAt(task, Date.now());
+  return task;
+}
+
 function mergeBuiltInTaskState(
   existing: CronTaskRecord | undefined,
   builtin: CronTaskRecord,
@@ -582,9 +615,14 @@ export class CronScheduler {
   }
 
   private installBuiltInTasks() {
-    const builtin = createBuiltInMemoryIndexRepairTask(this.options.agentDir);
-    const existing = this.tasks.get(builtin.id);
-    this.tasks.set(builtin.id, mergeBuiltInTaskState(existing, builtin));
+    const builtins = [
+      createBuiltInMemoryIndexRepairTask(this.options.agentDir),
+      createBuiltInSelfImproveSleepConsolidationTask(this.options.agentDir),
+    ];
+    for (const builtin of builtins) {
+      const existing = this.tasks.get(builtin.id);
+      this.tasks.set(builtin.id, mergeBuiltInTaskState(existing, builtin));
+    }
   }
 
   private async tick() {

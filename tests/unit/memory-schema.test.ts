@@ -17,7 +17,7 @@ const schema = await import(
 test("memory schema parses and renders markdown docs consistently", () => {
   const doc = schema.parseMarkdownDoc(
     "/tmp/demo.md",
-    `---\nname: Demo\nexposure: self_improve_prompts\nself_improve_prompt_slot: core_facts\ntags:\n  - one\n  - two\n---\nhello world\n`,
+    `---\nname: Demo\nexposure: self_improve_prompts\nself_improve_prompt_slot: core_doctrine\ntags:\n  - one\n  - two\n---\nhello world\n`,
   );
   assert.equal(doc.name, "Demo");
   assert.deepEqual(doc.tags, ["one", "two"]);

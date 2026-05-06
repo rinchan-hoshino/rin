@@ -59,7 +59,6 @@ export const MEMORY_PROMPT_SLOTS = [
   "agent_profile",
   "user_profile",
   "core_doctrine",
-  "core_facts",
 ] as const;
 
 export const MEMORY_PROMPT_LIMITS: Record<
@@ -68,8 +67,7 @@ export const MEMORY_PROMPT_LIMITS: Record<
 > = {
   agent_profile: { maxLines: 8, fidelity: ["exact", "fuzzy"] },
   user_profile: { maxLines: 4, fidelity: ["exact", "fuzzy"] },
-  core_doctrine: { maxLines: 16, fidelity: ["fuzzy", "exact"] },
-  core_facts: { maxLines: 32, fidelity: ["exact", "fuzzy"] },
+  core_doctrine: { maxLines: 32, fidelity: ["fuzzy", "exact"] },
 };
 
 export const CHRONICLE_TAG = "chronicle";

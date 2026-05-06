@@ -28,7 +28,7 @@ test("self-improve format builds compact compiled prompt", () => {
         content: "Concise",
       },
       {
-        self_improve_prompt_slot: "core_facts",
+        self_improve_prompt_slot: "core_doctrine",
         preview: "Verified",
       },
       {
@@ -45,7 +45,7 @@ test("self-improve format builds compact compiled prompt", () => {
     ],
   });
   assert.match(text, /Agent profile:\nConcise/);
-  assert.match(text, /Core facts:\nVerified/);
+  assert.match(text, /Core doctrine:\nVerified/);
   assert.match(text, /Project rules:\nSpecific/);
   assert.ok(!text.includes("ignored"));
   assert.ok(!text.includes("# Self-Improve Prompts"));

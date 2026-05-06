@@ -20,9 +20,9 @@ See `docs/runtime-layout.md` for the authoritative layout.
 
 ### Memory
 
-Rin provides its own markdown-backed memory system and prompt integration.
+Rin separates always-on prompt baselines, skills, and transcript archives.
 Do not assume upstream pi memory behavior or prompt injection rules apply unchanged.
-See `docs/capabilities.md` for agent-facing behavior.
+See `docs/memory-layering.md` and `docs/capabilities.md` for agent-facing behavior.
 
 ### Builtin capabilities
 
@@ -47,5 +47,5 @@ When the task involves Rin runtime behavior, launcher layout, daemon behavior, m
 
 1. `README.md`
 2. `docs/pi-overrides.md`
-3. the relevant topic document such as `docs/runtime-layout.md`, `docs/builtin-extensions.md`, or `docs/capabilities.md`
+3. the relevant topic document such as `docs/runtime-layout.md`, `docs/builtin-extensions.md`, `docs/memory-layering.md`, or `docs/capabilities.md`
 4. upstream pi docs only as needed, with Rin overrides in mind
