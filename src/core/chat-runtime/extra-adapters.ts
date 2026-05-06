@@ -1196,19 +1196,22 @@ export class LarkAdapter {
   private readonly app: any;
   private readonly config: Record<string, any>;
   private readonly logger: any;
+  private readonly cacheDir: string;
   private client: any = null;
   private wsClient: any = null;
   readonly bot: any;
 
   constructor(
     app: any,
-    _dataDir: string,
+    dataDir: string,
     config: Record<string, any>,
     logger: any,
   ) {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:lark", logger);
+    this.cacheDir = path.join(dataDir, "chat-runtime-cache", "lark");
+    ensureDir(this.cacheDir);
     const internal: any = {
       client: null,
       wsClient: null,
@@ -1226,6 +1229,8 @@ export class LarkAdapter {
         await this.client?.im?.messageReaction?.list?.(options),
       listChatMembers: async (options: any) =>
         await this.client?.im?.chatMembers?.get?.(options),
+      getMessageResource: async (options: any) =>
+        await this.client?.im?.messageResource?.get?.(options),
       getUser: async (options: any) =>
         await this.client?.contact?.user?.get?.(options),
     };
@@ -1497,6 +1502,90 @@ export class LarkAdapter {
     );
   }
 
+  private async cacheLarkMessageResource(
+    messageId: string,
+    fileKey: string,
+    resourceType: "image" | "file",
+    rawName = "",
+  ) {
+    if (!messageId || !fileKey) return null;
+    const response = await this.client?.im?.messageResource?.get?.({
+      path: { message_id: messageId, file_key: fileKey },
+      params: { type: resourceType },
+    });
+    if (!response || typeof response.writeFile !== "function") return null;
+    const mimeType = safeString(
+      response.headers?.["content-type"] ||
+        response.headers?.["Content-Type"] ||
+        "",
+    )
+      .split(";", 1)[0]
+      .trim();
+    const name = ensureExtension(
+      ensureFileName(rawName || `${resourceType}-${fileKey}`),
+      mimeType,
+    );
+    const fullPath = path.join(this.cacheDir, `${Date.now()}-${name}`);
+    await response.writeFile(fullPath);
+    return { path: fullPath, name, mimeType };
+  }
+
+  private async resolveLarkMessageResources(messageId: string, nodes: any[]) {
+    const resolved: any[] = [];
+    for (const node of nodes) {
+      const type = safeString(node?.type).trim().toLowerCase();
+      if (type !== "image" && type !== "file") {
+        resolved.push(node);
+        continue;
+      }
+      const attrs =
+        node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
+      const src = safeString(
+        attrs.src || attrs.url || attrs.file || attrs.path || "",
+      ).trim();
+      if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src)) {
+        resolved.push(node);
+        continue;
+      }
+      const resourceType = type === "image" ? "image" : "file";
+      try {
+        const cached = await this.cacheLarkMessageResource(
+          messageId,
+          src,
+          resourceType,
+          safeString(attrs.name || attrs.file || src).trim(),
+        );
+        if (cached) {
+          resolved.push(
+            normalizeNode(
+              type,
+              compactObject({
+                ...attrs,
+                src: fileUrl(cached.path),
+                file: cached.name,
+                name: cached.name,
+                mime: cached.mimeType || undefined,
+                mimeType: cached.mimeType || undefined,
+              }),
+            ),
+          );
+          continue;
+        }
+      } catch (error: any) {
+        this.logger?.warn?.(
+          `get lark message resource failed id=${messageId} key=${src} type=${resourceType} err=${safeString(error?.message || error)}`,
+        );
+      }
+      resolved.push(
+        normalizeNode(
+          type,
+          compactObject({ ...attrs, src: undefined, file: undefined }),
+        ),
+      );
+    }
+    return resolved;
+  }
+
   async createReaction(_chatId: string, messageId: string, emoji: string) {
     const emojiType = toLarkReactionType(emoji);
     if (!emojiType) throw new Error("lark_reaction_emoji_required");
@@ -1588,12 +1677,18 @@ export class LarkAdapter {
       return key && key === safeString(this.bot?.selfId).trim();
     });
     const isForward = msgType === "merge_forward";
-    const elements = isForward
+    const rawElements = isForward
       ? [await this.buildLarkForwardNode(message)]
       : this.parseLarkMessageContentNodes(
           msgType,
           safeString(message?.content || ""),
           mentions,
+        );
+    const elements = isForward
+      ? rawElements
+      : await this.resolveLarkMessageResources(
+          safeString(message?.message_id || "").trim(),
+          rawElements,
         );
     const renderedContent = renderPlainTextFromNodes(elements).trim();
     const strippedContent = isForward

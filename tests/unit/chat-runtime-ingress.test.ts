@@ -367,6 +367,73 @@ test("lark runtime reads merged forward messages into inbound text", async () =>
   assert.doesNotMatch(stored.routing?.text, /Merged and Forwarded Message/);
 });
 
+test("lark runtime downloads image message resources before inbox persistence", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const dataDir = path.join(agentDir, "data");
+  const app = runtime.createChatRuntimeApp(agentDir);
+  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+    dataDir,
+    settings: {},
+    adapterEntries: [
+      {
+        key: "lark",
+        name: "Feishu",
+        config: { appId: "cli-test", appSecret: "secret" },
+      },
+    ],
+  });
+  const adapter = [...app.adapters][0];
+  adapter.bot.selfId = "cli-test";
+  const calls = [];
+  adapter.client = {
+    im: {
+      messageResource: {
+        get: async (options) => {
+          calls.push(options);
+          return {
+            headers: { "content-type": "image/png" },
+            writeFile: async (filePath) => {
+              await fs.writeFile(filePath, Buffer.from("demo-image"));
+              return filePath;
+            },
+          };
+        },
+      },
+    },
+  };
+  const seen = [];
+  app.on("message", (session) => seen.push(session));
+
+  await adapter.handleMessage({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_sender" } },
+    message: {
+      message_id: "om-image",
+      message_type: "image",
+      chat_id: "oc_chat",
+      chat_type: "group",
+      create_time: "1713436800000",
+      content: JSON.stringify({ image_key: "img_v2_demo" }),
+    },
+  });
+
+  assert.deepEqual(calls, [
+    {
+      path: { message_id: "om-image", file_key: "img_v2_demo" },
+      params: { type: "image" },
+    },
+  ]);
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].elements[0].attrs.src, /^file:\/\//);
+  assert.equal(seen[0].elements[0].attrs.mimeType, "image/png");
+
+  const files = inbox.listPendingChatInboxFiles(agentDir);
+  const stored = inbox.readChatInboxItem(files[0]);
+  assert.match(stored.elements[0].attrs.src, /^file:\/\//);
+  assert.equal(stored.elements[0].attrs.mimeType, "image/png");
+});
+
 test("onebot runtime reads merged forward messages into inbound text", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
