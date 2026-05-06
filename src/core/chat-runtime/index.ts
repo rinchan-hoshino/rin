@@ -1444,6 +1444,156 @@ class OneBotAdapter {
     return true;
   }
 
+  private normalizeInboundSegmentNodes(segments: unknown) {
+    const nodes: any[] = [];
+    for (const segment of parseOneBotSegments(segments)) {
+      const type = safeString(segment.type).toLowerCase();
+      const data =
+        segment.data && typeof segment.data === "object" ? segment.data : {};
+      if (type === "text") {
+        const text = safeString(data?.text || "");
+        if (text) nodes.push(normalizeNode("text", { content: text }));
+        continue;
+      }
+      if (type === "at") {
+        const id = safeString(data?.qq || data?.id || "").trim();
+        const name = safeString(data?.name || "").trim() || undefined;
+        nodes.push(normalizeNode("at", compactObject({ id, name })));
+        continue;
+      }
+      if (type === "image" || type === "img") {
+        const src = safeString(data?.url || data?.file || "").trim();
+        if (src) {
+          nodes.push(
+            normalizeNode(
+              "image",
+              compactObject({
+                src,
+                name: safeString(data?.file).trim() || undefined,
+              }),
+            ),
+          );
+        }
+        continue;
+      }
+      if (
+        [
+          "file",
+          "video",
+          "record",
+          "audio",
+          "voice",
+          "sticker",
+          "face",
+          "mface",
+        ].includes(type)
+      ) {
+        const nodeType =
+          type === "record" || type === "voice"
+            ? "audio"
+            : type === "face" || type === "mface"
+              ? "sticker"
+              : type;
+        const src = safeString(data?.url || data?.file || "").trim();
+        nodes.push(
+          normalizeNode(
+            nodeType,
+            compactObject({
+              src: src || undefined,
+              id: safeString(data?.id || data?.qq).trim() || undefined,
+              name:
+                safeString(data?.name || data?.file || data?.text).trim() ||
+                undefined,
+            }),
+          ),
+        );
+        continue;
+      }
+      if (type === "forward") {
+        const id = safeString(data?.id || data?.resid || "").trim();
+        nodes.push(
+          normalizeNode(
+            "forward",
+            compactObject({
+              id,
+              title: safeString(data?.title || data?.name).trim() || undefined,
+            }),
+          ),
+        );
+      }
+    }
+    return nodes;
+  }
+
+  private pickOneBotForwardMessages(data: any, response?: any) {
+    const candidates = [
+      data?.messages,
+      data?.content,
+      data?.message,
+      response?.messages,
+      response?.content,
+      response?.message,
+    ];
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) return candidate;
+      if (candidate && typeof candidate === "object") {
+        if (Array.isArray(candidate.messages)) return candidate.messages;
+        if (Array.isArray(candidate.content)) return candidate.content;
+      }
+    }
+    return [] as any[];
+  }
+
+  private async buildOneBotForwardNode(data: Record<string, any>) {
+    const id = safeString(data?.id || data?.resid || data?.file || "").trim();
+    let response: any = undefined;
+    if (id) {
+      try {
+        response = await this.callAction("get_forward_msg", { id });
+      } catch (error: any) {
+        this.logger.warn(
+          `get_forward_msg failed id=${id} err=${safeString(error?.message || error)}`,
+        );
+      }
+    }
+    const messages = this.pickOneBotForwardMessages(data, response);
+    const children: any[] = [];
+    for (const message of messages) {
+      const sender =
+        message?.sender && typeof message.sender === "object"
+          ? message.sender
+          : {};
+      const name =
+        safeString(
+          sender?.card ||
+            sender?.nickname ||
+            sender?.nick ||
+            sender?.name ||
+            message?.nickname ||
+            message?.user_id ||
+            "",
+        ).trim() || "unknown";
+      const nodes = this.normalizeInboundSegmentNodes(
+        message?.content ?? message?.message ?? message?.raw_message ?? "",
+      );
+      const body = renderPlainTextFromNodes(nodes).trim();
+      children.push(
+        normalizeNode("text", {
+          content: `${name}: ${body || "[unsupported message]"}\n`,
+        }),
+      );
+    }
+    return normalizeNode(
+      "forward",
+      compactObject({
+        id,
+        title: safeString(data?.title || data?.name).trim() || undefined,
+        count: messages.length ? String(messages.length) : undefined,
+      }),
+      children,
+    );
+  }
+
   private async buildSession(payload: any) {
     const messageType = safeString(payload?.message_type).trim();
     const selfId = safeString(payload?.self_id || this.bot.selfId).trim();
@@ -1460,6 +1610,7 @@ class OneBotAdapter {
     const textParts: string[] = [];
     let mentionSelf = false;
     let quote: any = undefined;
+    let hasSemanticForward = false;
     for (const segment of segments) {
       const type = safeString(segment.type).toLowerCase();
       const data =
@@ -1529,10 +1680,18 @@ class OneBotAdapter {
       }
       if (type === "reply") {
         quote = parseOneBotReplyQuote(data);
+        continue;
+      }
+      if (type === "forward") {
+        elements.push(await this.buildOneBotForwardNode(data));
+        hasSemanticForward = true;
       }
     }
+    const renderedContent = renderPlainTextFromNodes(elements);
     const content = safeString(
-      payload?.raw_message || renderPlainTextFromNodes(elements),
+      hasSemanticForward
+        ? renderedContent
+        : payload?.raw_message || renderedContent,
     ).trim();
     const strippedContent = textParts.join("").trim() || content;
     const sender =

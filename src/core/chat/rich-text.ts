@@ -140,6 +140,16 @@ function renderNodeMarkdown(
       const marker = id ? `[quote:${id}]` : "[quote]";
       return body ? `${marker}\n> ${body.replace(/\n/g, "\n> ")}` : marker;
     }
+    case "forward": {
+      const body = normalizeRenderedText(
+        renderNodeMarkdown(childrenOf(node), options),
+      );
+      const id = safeString(attrs.id || attrs.messageId).trim();
+      const title =
+        safeString(attrs.title).trim() || safeString(attrs.name).trim();
+      const marker = ["forward", title, id].filter(Boolean).join(": ");
+      return body ? `[${marker}]\n${body}` : `[${marker}]`;
+    }
     case "image":
     case "img":
     case "file":

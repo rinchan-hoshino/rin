@@ -285,6 +285,79 @@ test("slack runtime acks only after the inbound event is emitted", async () => {
   assert.deepEqual(order, ["emit", "ack:1"]);
 });
 
+test("onebot runtime reads merged forward messages into inbound text", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const app = runtime.createChatRuntimeApp(agentDir);
+  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+    dataDir: path.join(agentDir, "data"),
+    settings: {},
+    adapterEntries: [
+      {
+        key: "onebot",
+        name: "OneBot",
+        config: { endpoint: "ws://127.0.0.1:1", selfId: "1" },
+      },
+    ],
+  });
+  const adapter = [...app.adapters][0];
+  const calls = [];
+  adapter.callAction = async (action, params) => {
+    calls.push({ action, params });
+    assert.equal(action, "get_forward_msg");
+    assert.deepEqual(params, { id: "forward-1" });
+    return {
+      messages: [
+        {
+          sender: { nickname: "Alice" },
+          content: [{ type: "text", data: { text: "hello" } }],
+        },
+        {
+          sender: { nickname: "Bob" },
+          content: [
+            { type: "text", data: { text: "look" } },
+            {
+              type: "image",
+              data: { url: "https://example.test/a.png", file: "a.png" },
+            },
+          ],
+        },
+      ],
+    };
+  };
+  const seen = [];
+  app.on("message", (session) => seen.push(session));
+
+  await adapter.handleSocketMessage(
+    JSON.stringify({
+      post_type: "message",
+      message_type: "group",
+      self_id: 1,
+      user_id: 42,
+      group_id: 100,
+      message_id: 201,
+      message: [{ type: "forward", data: { id: "forward-1" } }],
+      raw_message: "[CQ:forward,id=forward-1]",
+      sender: { nickname: "Tester" },
+    }),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].content, /\[forward: forward-1\]/);
+  assert.match(seen[0].content, /Alice: hello/);
+  assert.match(seen[0].content, /Bob: look/);
+  assert.match(seen[0].content, /image: a\.png/);
+  assert.doesNotMatch(seen[0].content, /\[CQ:forward/);
+  assert.equal(seen[0].elements[0].type, "forward");
+
+  const files = inbox.listPendingChatInboxFiles(agentDir);
+  const stored = inbox.readChatInboxItem(files[0]);
+  assert.match(stored.routing?.text, /Alice: hello/);
+  assert.doesNotMatch(stored.routing?.text, /\[CQ:forward/);
+});
+
 test("onebot runtime maps the working thinking reaction to a QQ desktop-visible face", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
