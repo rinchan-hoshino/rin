@@ -26,6 +26,7 @@ import {
   runCommand,
 } from "../rin-install/common.js";
 import { loadInstallRecordFromCandidates } from "../rin-install/install-record.js";
+import { runInstallerProgress } from "../rin-install/progress.js";
 import {
   defaultInstallDirForHome,
   installRecordCandidatesForHome,
@@ -275,6 +276,38 @@ export function requireTool(name: string, paths: string[] = []) {
 
 function runCommandSync(command: string, args: string[], options: any = {}) {
   execFileSync(command, args, { stdio: "inherit", ...options });
+}
+
+function runLoggedUpdateCommandSync(
+  command: string,
+  args: string[],
+  label: string,
+  logFile: string,
+  options: any = {},
+) {
+  if (!process.stderr.isTTY) {
+    runCommandSync(command, args, options);
+    return;
+  }
+
+  const fd = fs.openSync(logFile, "a");
+  try {
+    fs.writeSync(fd, `\n$ ${[command, ...args].join(" ")}\n`);
+    execFileSync(command, args, {
+      ...options,
+      stdio: ["ignore", fd, fd],
+    });
+  } catch (error) {
+    try {
+      const log = fs.readFileSync(logFile, "utf8").trimEnd();
+      const recent = log.split("\n").slice(-80).join("\n");
+      if (recent)
+        process.stderr.write(`\n${label} failed; recent log:\n${recent}\n`);
+    } catch {}
+    throw error;
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function resolveGitCommitForRelease(
@@ -583,6 +616,9 @@ export async function runUpdate(parsed: ParsedArgs) {
       [
         "exec",
         "--yes",
+        "--loglevel=error",
+        "--no-fund",
+        "--no-audit",
         "--package",
         `${packageName}@${resolvedRelease.version}`,
         "--",
@@ -612,6 +648,7 @@ export async function runUpdate(parsed: ParsedArgs) {
   const tmpDir = path.join(tempRoot, "tmp");
   const archivePath = path.join(tempRoot, "rin.tar.gz");
   const sourceRoot = path.join(tempRoot, "src");
+  const logFile = path.join(tempRoot, "update.log");
   const buildEnv = {
     ...process.env,
     TMPDIR: tmpDir,
@@ -622,38 +659,64 @@ export async function runUpdate(parsed: ParsedArgs) {
   try {
     fs.mkdirSync(sourceRoot, { recursive: true });
     fs.mkdirSync(tmpDir, { recursive: true });
-    if (curl) {
-      runCommandSync(curl, [
-        "-fsSL",
-        resolvedRelease.archiveUrl,
-        "-o",
-        archivePath,
-      ]);
-    } else if (wget) {
-      runCommandSync(wget, ["-qO", archivePath, resolvedRelease.archiveUrl]);
-    } else {
-      throw new Error("rin_missing_required_tool:curl_or_wget");
-    }
-    runCommandSync(tar, [
-      "-xzf",
-      archivePath,
-      "-C",
-      sourceRoot,
-      "--strip-components=1",
-    ]);
+    fs.writeFileSync(logFile, "", "utf8");
 
-    if (fs.existsSync(path.join(sourceRoot, "package-lock.json"))) {
-      runCommandSync(npm, ["ci", "--no-fund", "--no-audit"], {
-        cwd: sourceRoot,
-        env: buildEnv,
-      });
-    } else {
-      runCommandSync(npm, ["install", "--no-fund", "--no-audit"], {
-        cwd: sourceRoot,
-        env: buildEnv,
-      });
-    }
-    runCommandSync(npm, ["run", "build"], { cwd: sourceRoot, env: buildEnv });
+    await runInstallerProgress("Fetching update source", () => {
+      if (curl) {
+        runLoggedUpdateCommandSync(
+          curl,
+          ["-fsSL", resolvedRelease.archiveUrl, "-o", archivePath],
+          "Fetching update source",
+          logFile,
+        );
+      } else if (wget) {
+        runLoggedUpdateCommandSync(
+          wget,
+          ["-qO", archivePath, resolvedRelease.archiveUrl],
+          "Fetching update source",
+          logFile,
+        );
+      } else {
+        throw new Error("rin_missing_required_tool:curl_or_wget");
+      }
+    });
+    await runInstallerProgress("Preparing update source", () =>
+      runLoggedUpdateCommandSync(
+        tar,
+        ["-xzf", archivePath, "-C", sourceRoot, "--strip-components=1"],
+        "Preparing update source",
+        logFile,
+      ),
+    );
+
+    await runInstallerProgress("Installing update dependencies", () => {
+      if (fs.existsSync(path.join(sourceRoot, "package-lock.json"))) {
+        runLoggedUpdateCommandSync(
+          npm,
+          ["ci", "--no-fund", "--no-audit", "--loglevel=error"],
+          "Installing update dependencies",
+          logFile,
+          { cwd: sourceRoot, env: buildEnv },
+        );
+      } else {
+        runLoggedUpdateCommandSync(
+          npm,
+          ["install", "--no-fund", "--no-audit", "--loglevel=error"],
+          "Installing update dependencies",
+          logFile,
+          { cwd: sourceRoot, env: buildEnv },
+        );
+      }
+    });
+    await runInstallerProgress("Building update runtime", () =>
+      runLoggedUpdateCommandSync(
+        npm,
+        ["run", "build", "--silent"],
+        "Building update runtime",
+        logFile,
+        { cwd: sourceRoot, env: buildEnv },
+      ),
+    );
 
     runCommandSync(
       process.execPath,

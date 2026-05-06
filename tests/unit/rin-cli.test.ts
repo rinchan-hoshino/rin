@@ -58,6 +58,9 @@ test("rin update delegates final update UI to rin-install update mode", () => {
   assert.match(source, /RIN_UPDATE_TARGET_USER/);
   assert.match(source, /RIN_UPDATE_INSTALL_DIR/);
   assert.match(source, /rin-install/);
+  assert.match(source, /runInstallerProgress/);
+  assert.match(source, /runLoggedUpdateCommandSync/);
+  assert.match(source, /--loglevel=error/);
   assert.doesNotMatch(source, /finalizeCoreUpdate/);
   assert.equal(source.includes("rin update:"), false);
 });

@@ -428,7 +428,7 @@ test("installer i18n source keeps localized copy in one display table", () => {
   );
 });
 
-test("update mode reuses installer's language prompt and note renderer", () => {
+test("update mode skips language prompt and reuses installer note renderer", () => {
   const mainSource = readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "main.ts"),
     "utf8",
@@ -438,7 +438,11 @@ test("update mode reuses installer's language prompt and note renderer", () => {
     "utf8",
   );
 
-  assert.match(mainSource, /RIN_INSTALL_MODE[\s\S]+promptInstallerLanguage/);
+  const updateModeBlock = mainSource.slice(
+    mainSource.indexOf('String(process.env.RIN_INSTALL_MODE || "")'),
+    mainSource.indexOf("if (shouldStartGuiInstaller"),
+  );
+  assert.doesNotMatch(updateModeBlock, /promptInstallerLanguage/);
   assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
   assert.match(updaterSource, /renderInstallerNote/);
   assert.match(updaterSource, /wrapInstallerNoteText/);

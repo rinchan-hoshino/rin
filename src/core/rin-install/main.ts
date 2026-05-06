@@ -34,6 +34,7 @@ import {
 import { createInstallerI18n, promptInstallerLanguage } from "./i18n.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeInstallPlan } from "./finalize.js";
+import { detectLocalLanguageTag } from "../language.js";
 import { releaseInfoFromEnv } from "../rin-lib/release.js";
 import { runGuiInstaller, shouldStartGuiInstaller } from "./gui.js";
 import {
@@ -128,11 +129,9 @@ export async function startInstaller() {
       .trim()
       .toLowerCase() === "update"
   ) {
-    const selectedLanguage = await promptInstallerLanguage({
-      ensureNotCancelled,
-      select,
-      text,
-    });
+    const selectedLanguage =
+      String(process.env.RIN_INSTALL_LANGUAGE || "").trim() ||
+      detectLocalLanguageTag("en");
     process.env.RIN_INSTALL_LANGUAGE = selectedLanguage;
     const i18n = createInstallerI18n(selectedLanguage);
     const localizedConfirm: typeof confirm = (options) =>
