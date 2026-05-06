@@ -556,6 +556,42 @@ test("lark adapter sends markdown nodes as native markdown rich text", async () 
   });
 });
 
+test("lark adapter terminates markdown lists before following plain lines", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("oc_1", [
+      h.markdown(
+        "- first\nplain\n- second\nplain again\n```\n- not a list\nplain code\n```",
+      ),
+    ]);
+
+    assert.deepEqual(result, ["m1"]);
+    const content = JSON.parse(calls[0].data.content);
+    assert.equal(
+      content.zh_cn.content[0][0].text,
+      "- first\n\nplain\n- second\n\nplain again\n```\n- not a list\nplain code\n```",
+    );
+  });
+});
+
 test("slack adapter splits oversized text posts into multiple threaded messages", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {

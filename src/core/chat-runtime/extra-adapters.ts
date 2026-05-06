@@ -135,6 +135,26 @@ function escapeLarkTagAttr(text: string) {
   return escapeLarkTagText(text).replace(/"/g, "&quot;");
 }
 
+function normalizeLarkMarkdownListBlocks(text: string) {
+  const lines = safeString(text).replace(/\r\n?/g, "\n").split("\n");
+  const out: string[] = [];
+  let inFence = false;
+  let previousWasList = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) inFence = !inFence;
+    const blank = !line.trim();
+    const listItem = !inFence && /^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)/.test(line);
+    if (!inFence && previousWasList && !blank && !listItem) {
+      const last = out[out.length - 1];
+      if (last !== undefined && last.trim()) out.push("");
+    }
+    out.push(line);
+    previousWasList = !inFence && listItem;
+    if (blank) previousWasList = false;
+  }
+  return out.join("\n");
+}
+
 const QQ_REACTION_EMOJI_IDS: Record<string, string> = {
   "🤔": "212",
   "🔥": "128293",
@@ -1334,15 +1354,17 @@ export class LarkAdapter {
 
   private async sendMessage(chatId: string, content: any) {
     const { work } = prepareOutboundNodes(content);
-    const text = renderMarkdownFromNodes(work, {
-      renderAt(attrs) {
-        const id = safeString(attrs.id).trim();
-        const name = safeString(attrs.name).trim();
-        return id
-          ? `<at user_id="${escapeLarkTagAttr(id)}">${escapeLarkTagText(name)}</at>`
-          : name;
-      },
-    });
+    const text = normalizeLarkMarkdownListBlocks(
+      renderMarkdownFromNodes(work, {
+        renderAt(attrs) {
+          const id = safeString(attrs.id).trim();
+          const name = safeString(attrs.name).trim();
+          return id
+            ? `<at user_id="${escapeLarkTagAttr(id)}">${escapeLarkTagText(name)}</at>`
+            : name;
+        },
+      }),
+    );
     if (!text) throw new Error("lark_send_message_empty");
     const result = await this.client.im.message.create({
       params: {
