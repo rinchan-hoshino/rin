@@ -29,7 +29,6 @@ import messageHeaderModule from "../chat-bridge/message-header.js";
 import selfImproveModule from "../self-improve/index.js";
 import taskModule from "../task/index.js";
 import tokenUsageModule from "../token-usage/index.js";
-import tuiInputCompatModule from "../rin-tui/input-compat.js";
 import webSearchModule from "../rin-web-search/index.js";
 import chatModule from "../chat/index.js";
 import type {
@@ -70,7 +69,6 @@ export function createRinCapabilityDefinitions(
     selfImproveModule(options),
     messageHeaderModule(),
     autoCompactContinueModule(),
-    tuiInputCompatModule(),
     taskModule(),
     chatModule(),
     tokenUsageModule(options),

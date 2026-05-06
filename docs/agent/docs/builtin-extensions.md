@@ -16,8 +16,6 @@ Most of these capabilities are registered directly by Rin core rather than being
   - adds message metadata such as `sent at`; adds chat-specific context in chat bridge scenarios
 - `freeze-session-runtime`
   - keeps the effective system prompt stable within a session
-- `tui-input-compat`
-  - smooths over some TUI input compatibility issues
 - `task`
   - provides `task_control` for pausing or resuming existing scheduled tasks
   - task creation, updates, deletion, and inspection are documented workflows rather than agent tools
