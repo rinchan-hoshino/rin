@@ -98,14 +98,12 @@ function Parse-Args([string[]]$Values) {
 Parse-Args @($args | ForEach-Object { [string]$_ })
 
 if ($mode -eq "update") {
-  $prefix = "rin-update"
   $workPrefix = "rin-update"
   $fetchLabel = "Fetching updater source"
   $prepLabel = "Preparing updater source"
   $buildLabel = "Building updater"
   $launchLabel = "Launching updater..."
 } else {
-  $prefix = "rin-install"
   $workPrefix = "rin-install"
   $fetchLabel = "Fetching installer source"
   $prepLabel = "Preparing installer source"
@@ -125,26 +123,37 @@ $manifestPath = Join-Path $workDir "release-manifest.json"
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
 function Say([string]$Message) {
-  Write-Host "[$prefix] $Message"
+  Write-Host $Message
 }
 
-function Fetch-File([string]$Url, [string]$OutFile) {
-  Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutFile
+function Invoke-WithSpinner([string]$Label, [scriptblock]$Action) {
+  $frames = @("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+  $job = Start-Job -ScriptBlock $Action
+  $index = 0
+  try {
+    while ($job.State -eq "Running") {
+      if (-not [Console]::IsOutputRedirected) {
+        Write-Host -NoNewline ("`r{0} {1}" -f $frames[$index], $Label)
+      }
+      $index = ($index + 1) % $frames.Count
+      Start-Sleep -Milliseconds 100
+    }
+    Receive-Job -Job $job -Wait -ErrorAction Stop | Out-Null
+    if (-not [Console]::IsOutputRedirected) {
+      Write-Host ("`r✓ {0}        " -f $Label)
+    }
+  } catch {
+    if (-not [Console]::IsOutputRedirected) {
+      Write-Host ("`r✗ {0}        " -f $Label)
+    }
+    throw
+  } finally {
+    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Url-Encode-Path([string]$Value) {
   (($Value -split "/") | ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join "/"
-}
-
-function Fetch-Manifest {
-  $rawBase = ($repoUrl -replace "^https://github.com/", "https://raw.githubusercontent.com/") -replace "\.git$", ""
-  $primaryUrl = "$rawBase/$bootstrapBranch/release-manifest.json"
-  $fallbackUrl = "$rawBase/main/release-manifest.json"
-  try {
-    Fetch-File $primaryUrl $manifestPath
-  } catch {
-    Fetch-File $fallbackUrl $manifestPath
-  }
 }
 
 function Get-Property($Object, [string]$Name) {
@@ -233,8 +242,16 @@ function Set-Release-Env($Release) {
 }
 
 try {
-  Say "Fetching release manifest"
-  Fetch-Manifest
+  Invoke-WithSpinner "Fetching release manifest" {
+    $rawBase = ($using:repoUrl -replace "^https://github.com/", "https://raw.githubusercontent.com/") -replace "\.git$", ""
+    $primaryUrl = "$rawBase/$using:bootstrapBranch/release-manifest.json"
+    $fallbackUrl = "$rawBase/main/release-manifest.json"
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri $primaryUrl -OutFile $using:manifestPath
+    } catch {
+      Invoke-WebRequest -UseBasicParsing -Uri $fallbackUrl -OutFile $using:manifestPath
+    }
+  }
   $release = Resolve-Release
   Set-Release-Env $release
 
@@ -244,22 +261,35 @@ try {
     exit $LASTEXITCODE
   }
 
-  Say $fetchLabel
-  Fetch-File $release.ArchiveUrl $archive
+  $releaseArchiveUrl = $release.ArchiveUrl
+  Invoke-WithSpinner $fetchLabel {
+    Invoke-WebRequest -UseBasicParsing -Uri $using:releaseArchiveUrl -OutFile $using:archive
+  }
   New-Item -ItemType Directory -Force -Path $srcDir | Out-Null
-  Say $prepLabel
-  tar -xzf $archive -C $srcDir --strip-components=1
+  Invoke-WithSpinner $prepLabel {
+    tar -xzf $using:archive -C $using:srcDir --strip-components=1
+    if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }
+  }
   Push-Location $srcDir
   try {
     if (Test-Path -LiteralPath "package-lock.json") {
-      npm ci --no-fund --no-audit
+      Invoke-WithSpinner "Installing dependencies" {
+        Set-Location $using:srcDir
+        npm ci --no-fund --no-audit
+        if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
+      }
     } else {
-      npm install --no-fund --no-audit
+      Invoke-WithSpinner "Installing dependencies" {
+        Set-Location $using:srcDir
+        npm install --no-fund --no-audit
+        if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
+      }
     }
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Say $buildLabel
-    npm run build
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Invoke-WithSpinner $buildLabel {
+      Set-Location $using:srcDir
+      npm run build
+      if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+    }
     Say $launchLabel
     node "dist/app/rin-install/main.js"
     exit $LASTEXITCODE

@@ -13,6 +13,7 @@ import {
   createInstallerI18n,
   type InstallerI18n,
 } from "../rin-install/i18n.js";
+import { runInstallerProgress } from "../rin-install/progress.js";
 
 export type ChatBridgePromptApi = {
   ensureNotCancelled: <T>(value: T | symbol | undefined | null) => T;
@@ -428,15 +429,22 @@ async function promptChatBridgeAdapterConfig(
     promptDefinition.fields,
     i18n,
   );
-  return {
-    detail: describeConfiguredAdapter(
-      adapterKey,
-      values,
-      i18n,
-      promptDefinition.detail,
-    ),
-    config: promptDefinition.config(values),
-  };
+  return await runInstallerProgress(
+    i18n.preparingChatBridgeMessage,
+    () => ({
+      detail: describeConfiguredAdapter(
+        adapterKey,
+        values,
+        i18n,
+        promptDefinition.detail,
+      ),
+      config: promptDefinition.config(values),
+    }),
+    {
+      successMessage: i18n.installStepComplete,
+      failureMessage: i18n.installStepFailed,
+    },
+  );
 }
 
 function adapterSelectHint(

@@ -100,6 +100,8 @@ test("installer GUI plan reuses installer plan text and escapes the HTML shell",
   assert.match(html, /installer:models/);
   assert.match(html, /installer:auth:api-key/);
   assert.match(html, /installer:apply/);
+  assert.match(html, /data-busy/);
+  assert.match(html, /rinInstallerSpin/);
   assert.match(html, /window\.rinDesktop\.send/);
   assert.doesNotMatch(html, /fetch\(|\/api\/|<script src=/);
 });

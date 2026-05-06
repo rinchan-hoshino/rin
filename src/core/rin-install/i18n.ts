@@ -270,6 +270,13 @@ type InstallerDisplayCopy = {
     targetGid: number;
   }) => string;
   ownershipNotWritableText: string;
+  preparingInstallerMessage: string;
+  applyingTargetSelectionMessage: string;
+  inspectingInstallDirectoryMessage: string;
+  loadingModelChoicesMessage: string;
+  savingProviderAuthMessage: string;
+  preparingChatBridgeMessage: string;
+  refreshingInstalledTargetMessage: string;
   publishingRuntimeMessageElevated: string;
   publishingRuntimeMessage: string;
   launchingInitText: string;
@@ -670,6 +677,14 @@ const INSTALLER_DISPLAY_COPY = {
     },
     ownershipNotWritableText:
       "The selected install directory is not writable by the current installer process.",
+    preparingInstallerMessage: "Preparing installer context...",
+    applyingTargetSelectionMessage: "Applying target selection...",
+    inspectingInstallDirectoryMessage: "Inspecting install directory...",
+    loadingModelChoicesMessage: "Loading model and provider state...",
+    savingProviderAuthMessage: "Saving provider authentication...",
+    preparingChatBridgeMessage: "Preparing chat bridge configuration...",
+    refreshingInstalledTargetMessage:
+      "Publishing runtime and refreshing the installed target...",
     publishingRuntimeMessageElevated:
       "Publishing runtime and writing configuration with elevated permissions...",
     publishingRuntimeMessage: "Publishing runtime and writing configuration...",
@@ -1056,6 +1071,13 @@ const INSTALLER_DISPLAY_COPY = {
       ].join("\n");
     },
     ownershipNotWritableText: "当前安装器进程对所选安装目录没有写权限。",
+    preparingInstallerMessage: "正在准备安装器上下文……",
+    applyingTargetSelectionMessage: "正在应用目标选择……",
+    inspectingInstallDirectoryMessage: "正在检查安装目录……",
+    loadingModelChoicesMessage: "正在加载模型和提供商状态……",
+    savingProviderAuthMessage: "正在保存提供商认证……",
+    preparingChatBridgeMessage: "正在准备聊天接入配置……",
+    refreshingInstalledTargetMessage: "正在发布运行时并刷新已安装目标……",
     publishingRuntimeMessageElevated: "正在以提权方式发布运行时并写入配置……",
     publishingRuntimeMessage: "正在发布运行时并写入配置……",
     launchingInitText: [

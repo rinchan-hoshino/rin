@@ -38,6 +38,55 @@ fetch() {
   exit 1
 }
 
+has_tty() {
+  [ -t 1 ] && [ -t 2 ]
+}
+
+render_spinner() {
+  label=$1
+  pid=$2
+  i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    case $i in
+      0) frame='⠋' ;;
+      1) frame='⠙' ;;
+      2) frame='⠹' ;;
+      3) frame='⠸' ;;
+      4) frame='⠼' ;;
+      5) frame='⠴' ;;
+      6) frame='⠦' ;;
+      7) frame='⠧' ;;
+      8) frame='⠇' ;;
+      *) frame='⠏' ;;
+    esac
+    if has_tty; then
+      printf '\r%s %s' "$frame" "$label"
+    fi
+    i=$(( (i + 1) % 10 ))
+    sleep 0.1
+  done
+}
+
+run_step() {
+  label=$1
+  shift
+  "$@" &
+  pid=$!
+  render_spinner "$label" "$pid"
+  set +e
+  wait "$pid"
+  status=$?
+  set -e
+  if has_tty; then
+    if [ "$status" -eq 0 ]; then
+      printf '\r✓ %s\033[K\n' "$label"
+    else
+      printf '\r✗ %s\033[K\n' "$label"
+    fi
+  fi
+  return "$status"
+}
+
 fetch_bootstrap_script() {
   if fetch "$BOOTSTRAP_SCRIPT_URL" "$BOOTSTRAP_SCRIPT"; then
     return 0
@@ -50,5 +99,5 @@ fetch_bootstrap_script() {
   return 1
 }
 
-fetch_bootstrap_script
+run_step "Fetching Rin bootstrap" fetch_bootstrap_script
 sh "$BOOTSTRAP_SCRIPT" "$BOOTSTRAP_MODE" "$@"

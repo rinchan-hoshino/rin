@@ -42,6 +42,7 @@ import {
   targetHomeForUser,
 } from "./users.js";
 import { startUpdater } from "./updater.js";
+import { runInstallerProgress } from "./progress.js";
 import {
   installCloudTarget,
   installContainerTarget,
@@ -165,8 +166,14 @@ export async function startInstaller() {
   process.env.RIN_INSTALL_LANGUAGE = selectedLanguage;
   const i18n = createInstallerI18n(selectedLanguage);
 
-  const currentUser = detectCurrentUser();
-  const allUsers = listSystemUsers();
+  const { currentUser, allUsers } = await runInstallerProgress(
+    i18n.preparingInstallerMessage,
+    () => ({
+      currentUser: detectCurrentUser(),
+      allUsers: listSystemUsers(),
+    }),
+    { successMessage: i18n.installStepComplete },
+  );
   intro(i18n.introTitle);
   const localizedConfirm: typeof confirm = (options) =>
     confirm({
@@ -209,35 +216,70 @@ export async function startInstaller() {
   }
 
   if (target.kind === "ssh") {
-    const registered = installExistingSshTarget(target);
+    const registered = await runInstallerProgress(
+      i18n.applyingTargetSelectionMessage,
+      () => installExistingSshTarget(target),
+      {
+        successMessage: i18n.installStepComplete,
+        failureMessage: i18n.installStepFailed,
+      },
+    );
     outro(
       `Installed and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
     );
     return;
   }
   if (target.kind === "container") {
-    const registered = installContainerTarget(target);
+    const registered = await runInstallerProgress(
+      i18n.applyingTargetSelectionMessage,
+      () => installContainerTarget(target),
+      {
+        successMessage: i18n.installStepComplete,
+        failureMessage: i18n.installStepFailed,
+      },
+    );
     outro(
       `Installed and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
     );
     return;
   }
   if (target.kind === "cloud") {
-    const registered = installCloudTarget(target);
+    const registered = await runInstallerProgress(
+      i18n.applyingTargetSelectionMessage,
+      () => installCloudTarget(target),
+      {
+        successMessage: i18n.installStepComplete,
+        failureMessage: i18n.installStepFailed,
+      },
+    );
     outro(
       `Provisioned, installed, and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
     );
     return;
   }
   if (target.kind === "nas") {
-    const registered = installNasTarget(target);
+    const registered = await runInstallerProgress(
+      i18n.applyingTargetSelectionMessage,
+      () => installNasTarget(target),
+      {
+        successMessage: i18n.installStepComplete,
+        failureMessage: i18n.installStepFailed,
+      },
+    );
     outro(
       `Installed and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
     );
     return;
   }
   if (target.kind === "vm") {
-    const registered = installVmTarget(target);
+    const registered = await runInstallerProgress(
+      i18n.applyingTargetSelectionMessage,
+      () => installVmTarget(target),
+      {
+        successMessage: i18n.installStepComplete,
+        failureMessage: i18n.installStepFailed,
+      },
+    );
     outro(
       `Provisioned, installed, and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
     );
@@ -245,10 +287,11 @@ export async function startInstaller() {
   }
 
   const { targetUser, installDir } = target;
-  const installDirNote = describeInstallDirState(
-    installDir,
-    summarizeDirState(installDir),
-    i18n,
+  const installDirNote = await runInstallerProgress(
+    i18n.inspectingInstallDirectoryMessage,
+    () =>
+      describeInstallDirState(installDir, summarizeDirState(installDir), i18n),
+    { successMessage: i18n.installStepComplete },
   );
   note(installDirNote.text, installDirNote.title);
   const setDefaultTarget =
@@ -320,25 +363,35 @@ export async function startInstaller() {
     return;
   }
 
-  const result = await runFinalizeInstallPlanInChild(
+  const installSpinnerMessage = needsElevatedWrite
+    ? i18n.publishingRuntimeMessageElevated
+    : i18n.publishingRuntimeMessage;
+  const result = await runInstallerProgress(
+    installSpinnerMessage,
+    () =>
+      runFinalizeInstallPlanInChild(
+        {
+          currentUser,
+          targetUser,
+          installDir,
+          provider,
+          modelId,
+          thinkingLevel,
+          language: selectedLanguage,
+          setDefaultTarget,
+          chatDescription,
+          chatDetail,
+          chatConfig,
+          authData: authResult.authData || {},
+          release: releaseInfoFromEnv(),
+        },
+        installSpinnerMessage,
+        { writeStatus() {} },
+      ),
     {
-      currentUser,
-      targetUser,
-      installDir,
-      provider,
-      modelId,
-      thinkingLevel,
-      language: selectedLanguage,
-      setDefaultTarget,
-      chatDescription,
-      chatDetail,
-      chatConfig,
-      authData: authResult.authData || {},
-      release: releaseInfoFromEnv(),
+      successMessage: i18n.installStepComplete,
+      failureMessage: i18n.installStepFailed,
     },
-    needsElevatedWrite
-      ? i18n.publishingRuntimeMessageElevated
-      : i18n.publishingRuntimeMessage,
   );
   const {
     written,

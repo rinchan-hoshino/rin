@@ -10,6 +10,7 @@ import {
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
 import { renderInstallerNote, wrapInstallerNoteText } from "./interactive.js";
+import { runInstallerProgress } from "./progress.js";
 
 export function renderUpdaterNote(message?: string, title?: string) {
   return renderInstallerNote(
@@ -114,19 +115,23 @@ export async function startUpdater(deps: {
     return;
   }
 
-  const result = await runFinalizeInstallPlanInChild(
+  const result = await runInstallerProgress(
+    i18n.refreshingInstalledTargetMessage,
+    () =>
+      runFinalizeInstallPlanInChild(
+        {
+          currentUser,
+          targetUser,
+          installDir,
+          sourceRoot: deps.repoRootFromHere(),
+          ...(deps.release ? { release: deps.release } : {}),
+        } satisfies FinalizeInstallOptions,
+        i18n.refreshingInstalledTargetMessage,
+        { writeStatus() {} },
+      ),
     {
-      currentUser,
-      targetUser,
-      installDir,
-      sourceRoot: deps.repoRootFromHere(),
-      ...(deps.release ? { release: deps.release } : {}),
-    } satisfies FinalizeInstallOptions,
-    i18n.publishingUpdateMessage,
-    {
-      writeStatus(message) {
-        note(message, i18n.updatingTargetTitle);
-      },
+      successMessage: i18n.installStepComplete,
+      failureMessage: i18n.installStepFailed,
     },
   );
 

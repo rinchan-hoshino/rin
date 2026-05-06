@@ -303,6 +303,8 @@ export function buildGuiInstallerHtml() {
     button { cursor: pointer; }
     pre { white-space: pre-wrap; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 10px; padding: 12px; overflow: auto; }
     .notice { padding: 12px; border-radius: 10px; background: color-mix(in srgb, Highlight 12%, Canvas); }
+    @keyframes rinInstallerSpin { to { transform: rotate(360deg); } }
+    .notice[data-busy="true"]::before { content: ""; display: inline-block; width: 0.85em; height: 0.85em; margin-right: 0.5em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 999px; animation: rinInstallerSpin 0.8s linear infinite; vertical-align: -0.12em; }
     .steps { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; padding: 0; list-style: none; }
     .steps li { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 999px; padding: 6px 10px; }
     .steps li[aria-current="step"] { background: Highlight; color: HighlightText; }
@@ -410,6 +412,16 @@ export function buildGuiInstallerHtml() {
 
     function send(command) { window.rinDesktop.send(command); }
 
+    function setBusy(element, message) {
+      element.dataset.busy = 'true';
+      element.textContent = message;
+    }
+
+    function clearBusy(element, message) {
+      delete element.dataset.busy;
+      if (message !== undefined) element.textContent = message;
+    }
+
     function showStep(index) {
       currentStep = Math.max(0, Math.min(index, stepPanels.length - 1));
       stepPanels.forEach((panel, panelIndex) => {
@@ -449,6 +461,7 @@ export function buildGuiInstallerHtml() {
 
     function loadModels() {
       const data = new FormData(form);
+      setBusy(modelStatus, 'Loading local model and provider auth state…');
       send({ type: 'installer:models', installDir: String(data.get('installDir') || '') });
     }
 
@@ -469,12 +482,13 @@ export function buildGuiInstallerHtml() {
 
     function refreshPlan(event) {
       if (event) event.preventDefault();
+      plan.textContent = 'Refreshing install plan…';
       send({ type: 'installer:plan', input: installerPayload() });
     }
 
     function saveProviderAuth() {
       saveAuthButton.disabled = true;
-      authStatus.textContent = 'Saving provider auth…';
+      setBusy(authStatus, 'Saving provider auth…');
       const data = new FormData(form);
       send({
         type: 'installer:auth:api-key',
@@ -488,12 +502,13 @@ export function buildGuiInstallerHtml() {
 
     function applyInstallation() {
       applyButton.disabled = true;
-      applyStatus.textContent = 'Applying installation… keep this desktop window open.';
+      setBusy(applyStatus, 'Applying installation… keep this desktop window open.');
       send({ type: 'installer:apply', input: installerPayload() });
     }
 
     window.rinDesktop.onEvent((payload) => {
       if (payload.type === 'installer:models') {
+        clearBusy(modelStatus);
         modelChoices = payload.models || [];
         const providers = [...new Set(modelChoices.map((model) => model.provider))];
         setOptions(providerSelect, providers.length ? providers.map((provider) => ({ value: provider, label: provider })) : [{ value: 'pending', label: 'No providers found' }], providerSelect.value);
@@ -506,22 +521,22 @@ export function buildGuiInstallerHtml() {
         saveAuthButton.disabled = false;
         if (payload.ok) {
           form.elements.apiKey.value = '';
-          authStatus.textContent = 'Provider auth saved for ' + payload.provider + '.';
+          clearBusy(authStatus, 'Provider auth saved for ' + payload.provider + '.');
           loadModels();
         } else {
-          authStatus.textContent = payload.error || 'rin_installer_gui_auth_failed';
+          clearBusy(authStatus, payload.error || 'rin_installer_gui_auth_failed');
         }
       } else if (payload.type === 'installer:apply') {
         applyButton.disabled = false;
         if (payload.ok) {
-          applyStatus.textContent = 'Installation applied. Settings: ' + (payload.result && payload.result.written && payload.result.written.settingsPath || 'written');
+          clearBusy(applyStatus, 'Installation applied. Settings: ' + (payload.result && payload.result.written && payload.result.written.settingsPath || 'written'));
         } else if (payload.terminalCommand) {
-          applyStatus.textContent = 'Terminal confirmation required. Run this command in the launch terminal: ' + payload.terminalCommand;
+          clearBusy(applyStatus, 'Terminal confirmation required. Run this command in the launch terminal: ' + payload.terminalCommand);
         } else {
-          applyStatus.textContent = payload.error || 'rin_installer_gui_apply_failed';
+          clearBusy(applyStatus, payload.error || 'rin_installer_gui_apply_failed');
         }
       } else if (payload.type === 'installer:error') {
-        modelStatus.textContent = payload.error || 'rin_installer_gui_error';
+        clearBusy(modelStatus, payload.error || 'rin_installer_gui_error');
       }
     });
 

@@ -4,7 +4,6 @@ set -eu
 MODE=${1:-install}
 case "$MODE" in
   install)
-    PREFIX=rin-install
     WORK_PREFIX=rin-install
     LOG_NAME=install.log
     MANIFEST_LABEL='Fetching release manifest'
@@ -16,7 +15,6 @@ case "$MODE" in
     NPM_ERROR='rin installer requires npm'
     ;;
   update)
-    PREFIX=rin-update
     WORK_PREFIX=rin-update
     LOG_NAME=update.log
     MANIFEST_LABEL='Fetching release manifest'
@@ -101,7 +99,7 @@ render_spinner() {
       *) frame='⠏' ;;
     esac
     if has_tty; then
-      printf '\r[%s] %s %s' "$PREFIX" "$frame" "$label" >"$TTY"
+      printf '\r%s %s' "$frame" "$label" >"$TTY"
     fi
     i=$(( (i + 1) % 10 ))
     sleep 0.1
@@ -121,13 +119,13 @@ run_step() {
   set -e
   if has_tty; then
     if [ "$status" -eq 0 ]; then
-      printf '\r[%s] ✓ %s\033[K\n' "$PREFIX" "$label" >"$TTY"
+      printf '\r✓ %s\033[K\n' "$label" >"$TTY"
     else
-      printf '\r[%s] ✗ %s\033[K\n' "$PREFIX" "$label" >"$TTY"
+      printf '\r✗ %s\033[K\n' "$label" >"$TTY"
     fi
   fi
   if [ "$status" -ne 0 ]; then
-    say "[$PREFIX] command failed; recent log:"
+    say "Command failed; recent log:"
     tail -n 80 "$LOGFILE" >&2 || true
     exit "$status"
   fi
@@ -472,14 +470,14 @@ eval "$(RIN_RELEASE_CHANNEL=$CHANNEL RIN_RELEASE_BRANCH=$BRANCH RIN_RELEASE_VERS
 PACKAGE_NAME=${PACKAGE_NAME:-${RIN_NPM_PACKAGE:-@rinchanai20260422/rin}}
 
 if [ "$CHANNEL" = stable ]; then
-  say "[$PREFIX] $LAUNCH_LABEL"
   if command -v npm >/dev/null 2>&1; then
     if has_tty; then
+      say "$LAUNCH_LABEL"
       launch_published_installer </dev/tty >/dev/tty 2>&1
       exit $?
     fi
-    launch_published_installer
-    exit $?
+    run_step "$LAUNCH_LABEL" launch_published_installer
+    exit 0
   fi
   echo "$NPM_ERROR" >&2
   exit 1
@@ -502,7 +500,7 @@ else
 fi
 
 run_step "$BUILD_LABEL" npm run build
-say "[$PREFIX] $LAUNCH_LABEL"
+say "$LAUNCH_LABEL"
 
 if has_tty; then
   launch_installer_entry </dev/tty >/dev/tty 2>&1

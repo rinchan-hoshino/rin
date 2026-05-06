@@ -226,6 +226,31 @@ test("bootstrap entrypoint rejects missing legacy selector values", async () => 
   );
 });
 
+test("bootstrap scripts render progress without rin-install log prefixes", async () => {
+  for (const scriptName of [
+    "install.sh",
+    "scripts/bootstrap-entrypoint.sh",
+    "scripts/bootstrap-entrypoint.ps1",
+  ]) {
+    const content = await fs.readFile(path.join(rootDir, scriptName), "utf8");
+    assert.doesNotMatch(content, /\[rin-(?:install|update)\]/);
+  }
+  assert.match(
+    await fs.readFile(
+      path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+      "utf8",
+    ),
+    /render_spinner/,
+  );
+  assert.match(
+    await fs.readFile(
+      path.join(rootDir, "scripts", "bootstrap-entrypoint.ps1"),
+      "utf8",
+    ),
+    /Invoke-WithSpinner/,
+  );
+});
+
 test("stable install and update wrappers resolve release metadata before launching npm installer and leave no temp work dirs", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);

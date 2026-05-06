@@ -6,6 +6,7 @@ import { computeAvailableThinkingLevels } from "../model-thinking-levels.js";
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
 import { installAuthPath } from "./paths.js";
+import { runInstallerProgress } from "./progress.js";
 
 export { computeAvailableThinkingLevels };
 
@@ -73,9 +74,13 @@ export async function configureProviderAuth(
   },
 ) {
   const i18n = deps.i18n || createInstallerI18n();
-  const authStorage = await createInstallerAuthStorage(
-    installDir,
-    deps.readJsonFile,
+  const authStorage = await runInstallerProgress(
+    i18n.loadingModelChoicesMessage,
+    () => createInstallerAuthStorage(installDir, deps.readJsonFile),
+    {
+      successMessage: i18n.installStepComplete,
+      failureMessage: i18n.installStepFailed,
+    },
   );
   if (authStorage.hasAuth?.(provider)) {
     return {
@@ -105,7 +110,7 @@ export async function configureProviderAuth(
           );
         },
         async onPrompt(prompt: { message: string; placeholder?: string }) {
-          return String(
+          const value = String(
             deps.ensureNotCancelled(
               await text({
                 message: prompt.message || i18n.enterLoginValueMessage,
@@ -116,6 +121,10 @@ export async function configureProviderAuth(
               }),
             ),
           ).trim();
+          loginSpinner.start(
+            i18n.waitingForLogin(oauthProvider.name || provider),
+          );
+          return value;
         },
         onProgress(message: string) {
           loginSpinner.message(
@@ -123,7 +132,7 @@ export async function configureProviderAuth(
           );
         },
         async onManualCodeInput() {
-          return String(
+          const value = String(
             deps.ensureNotCancelled(
               await text({
                 message: i18n.manualCodeInputMessage,
@@ -134,6 +143,10 @@ export async function configureProviderAuth(
               }),
             ),
           ).trim();
+          loginSpinner.start(
+            i18n.waitingForLogin(oauthProvider.name || provider),
+          );
+          return value;
         },
         signal: AbortSignal.timeout(10 * 60 * 1000),
       });
@@ -160,10 +173,19 @@ export async function configureProviderAuth(
       }),
     ),
   ).trim();
-  authStorage.set(provider, { type: "api_key", key: token });
-  return {
-    available: true,
-    authKind: "api_key",
-    authData: authStorage.getAll?.() || {},
-  };
+  return await runInstallerProgress(
+    i18n.savingProviderAuthMessage,
+    () => {
+      authStorage.set(provider, { type: "api_key", key: token });
+      return {
+        available: true,
+        authKind: "api_key",
+        authData: authStorage.getAll?.() || {},
+      };
+    },
+    {
+      successMessage: i18n.installStepComplete,
+      failureMessage: i18n.installStepFailed,
+    },
+  );
 }

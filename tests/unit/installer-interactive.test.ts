@@ -387,6 +387,26 @@ test("createInstallerI18n exposes localized post-install and update copy", () =>
   );
 });
 
+test("installer steps show progress after user input before work runs", () => {
+  const sources = [
+    "src/core/rin-install/main.ts",
+    "src/core/rin-install/interactive.ts",
+    "src/core/rin-install/provider-auth.ts",
+    "src/core/rin-install/updater.ts",
+    "src/core/chat-bridge/setup.ts",
+  ]
+    .map((item) => readFileSync(path.join(rootDir, item), "utf8"))
+    .join("\n");
+
+  assert.match(sources, /runInstallerProgress/);
+  assert.match(sources, /applyingTargetSelectionMessage/);
+  assert.match(sources, /inspectingInstallDirectoryMessage/);
+  assert.match(sources, /loadingModelChoicesMessage/);
+  assert.match(sources, /savingProviderAuthMessage/);
+  assert.match(sources, /preparingChatBridgeMessage/);
+  assert.match(sources, /refreshingInstalledTargetMessage/);
+});
+
 test("installer i18n source keeps localized copy in one display table", () => {
   const source = readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "i18n.ts"),
