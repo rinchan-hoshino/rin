@@ -192,6 +192,19 @@ async function runInteractiveMode(
   }
 }
 
+export async function runPreinitializedInteractiveMode(
+  interactiveMode: InteractiveMode,
+) {
+  const mode = interactiveMode as any;
+  const originalInit = mode.init;
+  mode.init = async () => {};
+  try {
+    await mode.run();
+  } finally {
+    mode.init = originalInit;
+  }
+}
+
 async function startStdTui(
   resourceOptions: Partial<TuiResourceOptions>,
   profile: ReturnType<typeof startupProfiler>,
@@ -264,7 +277,7 @@ async function startRpcTui(
   profile.mark("interactive-mode-and-rpc-ready");
 
   try {
-    await interactiveMode.run();
+    await runPreinitializedInteractiveMode(interactiveMode);
   } catch (error) {
     interactiveMode.stop?.();
     throw error;

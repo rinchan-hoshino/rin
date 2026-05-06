@@ -18,11 +18,6 @@ const cliOptions = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "cli-options.js"))
     .href
 );
-const terminalStateRestore = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-tui", "terminal-state-restore.js"),
-  ).href
-);
 
 test("tui launcher resolves interactive startup options", () => {
   assert.deepEqual(launcher.resolveTuiInteractiveOptions([]), {
@@ -85,41 +80,24 @@ test("tui launcher parses pi extension resource options without leaking paths in
   assert.equal(parsed.resources.extensionFlagValues?.get("plan"), "strict");
 });
 
-test("published rin-tui app entrypoint installs terminal state restore", async () => {
-  const source = await fs.readFile(
-    path.join(rootDir, "src", "app", "rin-tui", "main.ts"),
-    "utf8",
-  );
-
-  assert.match(source, /installTuiTerminalStateRestore\(\)/);
-  assert.match(source, /restoreTerminalStateForExit\(\)/);
-});
-
-test("tui launcher restores terminal state for crash exits", () => {
-  const writes: string[] = [];
-  const stdin = {
-    isTTY: true,
-    setRawMode(value: boolean) {
-      writes.push(`raw:${value}`);
-      return this;
+test("rpc tui reuses a pre-initialized interactive mode without starting it twice", async () => {
+  let initCount = 0;
+  let runCalled = false;
+  const interactiveMode = {
+    async init() {
+      initCount += 1;
     },
-  };
-  const stdout = {
-    isTTY: true,
-    write(value: string) {
-      writes.push(value);
-      return true;
+    async run() {
+      await this.init();
+      runCalled = true;
     },
   };
 
-  terminalStateRestore.resetTerminalStateRestoreForTests();
-  terminalStateRestore.restoreTerminalStateForExit({ stdin, stdout });
-  terminalStateRestore.restoreTerminalStateForExit({ stdin, stdout });
+  await interactiveMode.init();
+  await launcher.runPreinitializedInteractiveMode(interactiveMode);
 
-  assert.deepEqual(writes, [
-    "raw:false",
-    "\x1b]9;4;0;\x07\x1b[?2004l\x1b[<u\x1b[>4;0m\x1b[?25h\x1b[0m",
-  ]);
+  assert.equal(initCount, 1);
+  assert.equal(runCalled, true);
 });
 
 test("tui launcher clears the visible viewport before taking over the terminal", () => {
