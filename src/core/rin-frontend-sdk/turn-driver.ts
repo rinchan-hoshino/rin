@@ -1,17 +1,22 @@
 import { normalizeSessionRef } from "../session/ref.js";
-import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
-import { createRinFrontendBackendEventTranslator } from "../rin-frontend-sdk/index.js";
 import { safeString } from "../text-utils.js";
+import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
 import type {
-  InteractiveFrontendEvent,
   RinFrontendBackendEvent,
-  RpcFrontendClient,
-} from "./frontend-surface.js";
-import { RinDaemonFrontendClient } from "./rpc-client.js";
+  RinFrontendClient,
+  RinFrontendEvent,
+  RinNewSessionResult,
+  RinPromptContext,
+} from "./types.js";
 
-type FrontendPhase = "idle" | "connecting" | "starting" | "sending" | "working";
+export type RinFrontendTurnPhase =
+  | "idle"
+  | "connecting"
+  | "starting"
+  | "sending"
+  | "working";
 
-type DriverTurnResult = {
+export type RinFrontendTurnResult = {
   finalText?: string;
   result?: any;
   steered?: boolean;
@@ -19,12 +24,12 @@ type DriverTurnResult = {
   sessionFile?: string;
 };
 
-export type ChatFrontendDriverEvent =
-  | { type: "frontend_status"; phase: FrontendPhase }
+export type RinFrontendTurnDriverEvent =
+  | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "turn_accepted" }
   | { type: "assistant_interim"; text: string };
 
-type ChatFrontendClient = RpcFrontendClient & {
+export type RinFrontendTurnClient = RinFrontendClient & {
   ensureSessionReady?: (
     restoreSessionFile?: string,
     managedSessionLeaf?: string,
@@ -46,9 +51,10 @@ function isNewSessionCommand(commandLine: string) {
   return safeString(commandLine).trim() === "/new";
 }
 
-export class ChatFrontendDriver {
-  private readonly clientFactory: () => ChatFrontendClient;
-  client: ChatFrontendClient | null = null;
+export class RinFrontendTurnDriver {
+  private readonly clientFactory: () => RinFrontendTurnClient;
+  private readonly promptSource: string;
+  client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
     requestTag?: string;
@@ -60,20 +66,23 @@ export class ChatFrontendDriver {
     createRinFrontendBackendEventTranslator();
   latestAssistantText = "";
   assistantFinalReplyCommitted = false;
-  frontendPhase: FrontendPhase = "idle";
-  listeners = new Set<(event: ChatFrontendDriverEvent) => void>();
+  frontendPhase: RinFrontendTurnPhase = "idle";
+  listeners = new Set<(event: RinFrontendTurnDriverEvent) => void>();
 
-  constructor(options: { clientFactory?: () => ChatFrontendClient } = {}) {
-    this.clientFactory =
-      options.clientFactory || (() => new RinDaemonFrontendClient());
+  constructor(options: {
+    clientFactory: () => RinFrontendTurnClient;
+    promptSource?: string;
+  }) {
+    this.clientFactory = options.clientFactory;
+    this.promptSource = safeString(options.promptSource).trim() || "frontend";
   }
 
-  subscribe(listener: (event: ChatFrontendDriverEvent) => void) {
+  subscribe(listener: (event: RinFrontendTurnDriverEvent) => void) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  private emit(event: ChatFrontendDriverEvent) {
+  private emit(event: RinFrontendTurnDriverEvent) {
     for (const listener of this.listeners) {
       try {
         listener(event);
@@ -85,7 +94,7 @@ export class ChatFrontendDriver {
     if (!this.client) this.client = this.clientFactory();
     if (!this.client.isConnected()) {
       await this.client.connect();
-      this.client.subscribe((event: any) => {
+      this.client.subscribe((event: RinFrontendEvent) => {
         void this.handleClientEvent(event).catch(() => {});
       });
     }
@@ -101,7 +110,7 @@ export class ChatFrontendDriver {
   }
 
   dispose() {
-    this.failLiveTurn(new Error("chat_controller_disposed"));
+    this.failLiveTurn(new Error("frontend_turn_driver_disposed"));
     this.resetAssistantSegmentTracking();
     this.frontendPhase = "idle";
     const client = this.client;
@@ -122,8 +131,9 @@ export class ChatFrontendDriver {
   private updateFrontendStateFrom(value: unknown) {
     const session = normalizeSessionRef(value);
     if (session.sessionId) this.frontendState.sessionId = session.sessionId;
-    if (session.sessionFile)
+    if (session.sessionFile) {
       this.frontendState.sessionFile = session.sessionFile;
+    }
   }
 
   currentSessionId() {
@@ -135,11 +145,11 @@ export class ChatFrontendDriver {
   }
 
   private createTurnRequestTag() {
-    return `chat_turn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    return `frontend_turn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   }
 
   private startLiveTurn(requestTag?: string) {
-    if (this.liveTurn) throw new Error("chat_turn_already_running");
+    if (this.liveTurn) throw new Error("frontend_turn_already_running");
     let resolve!: (value: any) => void;
     let reject!: (error: Error) => void;
     const liveTurn = {
@@ -169,7 +179,7 @@ export class ChatFrontendDriver {
     liveTurn.reject(error);
   }
 
-  private setFrontendPhase(phase: FrontendPhase) {
+  private setFrontendPhase(phase: RinFrontendTurnPhase) {
     this.frontendPhase = phase;
     this.emit({ type: "frontend_status", phase: this.frontendPhase });
   }
@@ -227,7 +237,7 @@ export class ChatFrontendDriver {
   private async switchSessionIfNeeded(sessionFile?: string) {
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return { changed: false };
-    if (!this.client) throw new Error("chat_session_not_connected");
+    if (!this.client) throw new Error("frontend_session_not_connected");
     const before = this.currentSessionFile();
     if (before !== wanted) await this.client.resumeSession(wanted);
     await this.refreshFrontendState().catch(() => {});
@@ -247,7 +257,7 @@ export class ChatFrontendDriver {
     restoreSessionFile = "",
     managedSessionLeaf = "",
   ) {
-    if (!this.client) throw new Error("chat_session_not_connected");
+    if (!this.client) throw new Error("frontend_session_not_connected");
     if (this.client.ensureSessionReady) {
       const ready = await this.client.ensureSessionReady(
         restoreSessionFile,
@@ -303,12 +313,12 @@ export class ChatFrontendDriver {
     await this.connect({
       restoreSessionFile: skipSessionRecovery ? "" : restoreSessionFile,
     });
-    if (!this.client) throw new Error("chat_session_not_connected");
+    if (!this.client) throw new Error("frontend_session_not_connected");
     if (isNewSessionCommand(commandLine)) {
       if (sessionFile && !managedSessionLeaf) {
         throw new Error("new_session_session_file_unsupported");
       }
-      const value = await this.client.newSession(
+      const value: RinNewSessionResult = await this.client.newSession(
         managedSessionLeaf ? { managedSessionLeaf } : undefined,
       );
       this.updateFrontendStateFrom(value);
@@ -350,7 +360,7 @@ export class ChatFrontendDriver {
     model?: string;
     thinkingLevel?: string;
   }) {
-    if (!this.client) throw new Error("chat_session_not_connected");
+    if (!this.client) throw new Error("frontend_session_not_connected");
     const modelRef = safeString(options.model || "").trim();
     if (modelRef) {
       const [provider, ...modelIdParts] = modelRef.split("/");
@@ -359,7 +369,7 @@ export class ChatFrontendDriver {
       const model = models.find(
         (item: any) => item?.provider === provider && item?.id === modelId,
       );
-      if (!model) throw new Error(`chat_model_not_found:${modelRef}`);
+      if (!model) throw new Error(`frontend_model_not_found:${modelRef}`);
       await this.client.setModel(provider, modelId);
     }
 
@@ -378,8 +388,10 @@ export class ChatFrontendDriver {
     managedSessionLeaf?: string;
     model?: string;
     thinkingLevel?: string;
-    promptContext?: PromptContextMeta;
-  }): Promise<DriverTurnResult> {
+    promptContext?: RinPromptContext;
+    source?: string;
+  }): Promise<RinFrontendTurnResult> {
+    const promptSource = safeString(input.source).trim() || this.promptSource;
     const sessionFile = safeString(input.sessionFile || "").trim();
     const restoreSessionFile = safeString(
       input.restoreSessionFile || "",
@@ -388,7 +400,7 @@ export class ChatFrontendDriver {
       input.managedSessionLeaf || "",
     ).trim();
     await this.connect({ restoreSessionFile });
-    if (!this.client) throw new Error("chat_session_not_connected");
+    if (!this.client) throw new Error("frontend_session_not_connected");
     if (sessionFile) {
       await this.switchSessionIfNeeded(sessionFile);
     }
@@ -408,7 +420,7 @@ export class ChatFrontendDriver {
       const requestTag = this.createTurnRequestTag();
       await this.client.prompt(text, {
         images,
-        source: "chat-bridge",
+        source: promptSource,
         streamingBehavior: "steer",
         requestTag,
         promptContext: input.promptContext,
@@ -432,7 +444,7 @@ export class ChatFrontendDriver {
     const promptSubmission = (async () => {
       await this.client!.prompt(text, {
         images,
-        source: "chat-bridge",
+        source: promptSource,
         requestTag,
         promptContext: input.promptContext,
       });
@@ -459,7 +471,7 @@ export class ChatFrontendDriver {
         const steerRequestTag = this.createTurnRequestTag();
         await this.client.prompt(text, {
           images,
-          source: "chat-bridge",
+          source: promptSource,
           streamingBehavior: "steer",
           requestTag: steerRequestTag,
           promptContext: input.promptContext,
@@ -479,7 +491,7 @@ export class ChatFrontendDriver {
       this.failLiveTurn(
         error instanceof Error
           ? error
-          : new Error(String(error || "chat_turn_failed")),
+          : new Error(String(error || "frontend_turn_failed")),
       );
       throw error;
     }

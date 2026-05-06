@@ -8,15 +8,18 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const { ChatFrontendDriver } = await import(
+const { RinFrontendTurnDriver } = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-tui", "chat-frontend-driver.js"),
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "turn-driver.js"),
   ).href
 );
 
 function createDriver() {
   const client = createFrontendClient();
-  const driver = new ChatFrontendDriver({ clientFactory: () => client });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
   (driver as any).testClient = client;
   return driver;
 }
@@ -138,9 +141,12 @@ async function emitRpcTurnComplete(
   });
 }
 
-test("chat frontend driver runs chat turns through a frontend client", async () => {
+test("frontend SDK turn driver runs turns through a frontend client", async () => {
   const client = createFrontendClient();
-  const driver = new ChatFrontendDriver({ clientFactory: () => client });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
 
   const result = await driver.runTurn({
     text: "hello",
@@ -162,7 +168,34 @@ test("chat frontend driver runs chat turns through a frontend client", async () 
   });
 });
 
-test("chat frontend driver does not leak growing final-answer prefixes as interim", async () => {
+test("frontend SDK turn driver steers through native prompt streamingBehavior", async () => {
+  const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: true,
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "steer now",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+
+  assert.equal(result.steered, true);
+  assert.equal(client.calls[0].type, "prompt");
+  assert.equal(client.calls[0].text, "steer now");
+  assert.equal(client.calls[0].options.streamingBehavior, "steer");
+  assert.equal(client.calls[0].options.source, "chat-bridge");
+});
+
+test("frontend SDK turn driver does not leak growing final-answer prefixes as interim", async () => {
   const driver = createDriver();
   const interimTexts: string[] = [];
   driver.subscribe((event: any) => {
@@ -196,7 +229,7 @@ test("chat frontend driver does not leak growing final-answer prefixes as interi
   assert.deepEqual(interimTexts, []);
 });
 
-test("chat frontend driver does not treat a preview as interim when a tool boundary follows", async () => {
+test("frontend SDK turn driver does not treat a preview as interim when a tool boundary follows", async () => {
   const driver = createDriver();
   const interimTexts: string[] = [];
   driver.subscribe((event: any) => {
@@ -228,7 +261,7 @@ test("chat frontend driver does not treat a preview as interim when a tool bound
   assert.deepEqual(interimTexts, []);
 });
 
-test("chat frontend driver emits leading tool-call text as the only interim source", async () => {
+test("frontend SDK turn driver emits leading tool-call text as the only interim source", async () => {
   const driver = createDriver();
   const interimTexts: string[] = [];
   driver.subscribe((event: any) => {
@@ -267,7 +300,7 @@ test("chat frontend driver emits leading tool-call text as the only interim sour
   assert.deepEqual(interimTexts, ["I will check this"]);
 });
 
-test("chat frontend driver starts managed leaf sessions even after connect reports a default session", async () => {
+test("frontend SDK turn driver starts managed leaf sessions even after connect reports a default session", async () => {
   const driver = createDriver();
   const calls: string[] = [];
   const client = (driver as any).testClient;
@@ -300,7 +333,7 @@ test("chat frontend driver starts managed leaf sessions even after connect repor
   );
 });
 
-test("chat frontend driver does not emit text-only assistant messages as interim", async () => {
+test("frontend SDK turn driver does not emit text-only assistant messages as interim", async () => {
   const driver = createDriver();
   const interimTexts: string[] = [];
   driver.subscribe((event: any) => {

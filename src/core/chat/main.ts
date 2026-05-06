@@ -7,7 +7,7 @@ import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
-import type { RpcFrontendClient } from "../rin-tui/frontend-surface.js";
+import type { RinFrontendTurnClient } from "../rin-frontend-sdk/index.js";
 import {
   executeChatBridgeCode,
   renderChatBridgeResult,
@@ -267,7 +267,7 @@ export type ChatBridgeHandle = {
   options: {
     additionalExtensionPaths?: string[];
     hosted?: boolean;
-    frontendClientFactory?: () => RpcFrontendClient;
+    frontendClientFactory?: () => RinFrontendTurnClient;
     chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
   };
   stop: () => Promise<void>;
@@ -282,7 +282,7 @@ export async function startChatBridge(
   options: {
     additionalExtensionPaths?: string[];
     hosted?: boolean;
-    frontendClientFactory?: () => RpcFrontendClient;
+    frontendClientFactory?: () => RinFrontendTurnClient;
     chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
   } = {},
 ): Promise<ChatBridgeHandle> {

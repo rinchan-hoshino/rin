@@ -12,6 +12,7 @@ export type {
   RinFrontendStatusPhase,
   RinNewSessionOptions,
   RinNewSessionResult,
+  RinPromptContext,
   RinPromptOptions,
   RinRpcCommand,
   RinRpcResponse,
@@ -22,6 +23,14 @@ export {
   createRinFrontendBackendEventTranslator,
   type RinFrontendBackendEventTranslator,
 } from "./backend-events.js";
+
+export {
+  RinFrontendTurnDriver,
+  type RinFrontendTurnClient,
+  type RinFrontendTurnDriverEvent,
+  type RinFrontendTurnPhase,
+  type RinFrontendTurnResult,
+} from "./turn-driver.js";
 
 export type {
   ExtensionAPI,

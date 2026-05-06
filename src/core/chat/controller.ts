@@ -3,8 +3,11 @@ import path from "node:path";
 
 import prettyMilliseconds from "pretty-ms";
 
-import type { RpcFrontendClient } from "../rin-tui/frontend-surface.js";
-import { ChatFrontendDriver } from "../rin-tui/chat-frontend-driver.js";
+import {
+  RinFrontendTurnDriver,
+  type RinFrontendTurnClient,
+} from "../rin-frontend-sdk/index.js";
+import { RinDaemonFrontendClient } from "../rin-tui/rpc-client.js";
 import {
   injectPromptContextHeader,
   type PromptContextMeta,
@@ -133,8 +136,8 @@ export class ChatController {
   agentDir: string;
   statePath: string;
   state: ChatState;
-  driver: ChatFrontendDriver;
-  frontendClientFactory?: () => RpcFrontendClient;
+  driver: RinFrontendTurnDriver;
+  frontendClientFactory?: () => RinFrontendTurnClient;
   turnQueue: Promise<void> = Promise.resolve();
   logger: any;
   h: any;
@@ -163,7 +166,7 @@ export class ChatController {
       deliveryEnabled?: boolean;
       affectChatBinding?: boolean;
       statePath?: string;
-      frontendClientFactory?: () => RpcFrontendClient;
+      frontendClientFactory?: () => RinFrontendTurnClient;
       sleepAfterIdleMs?: number;
     },
   ) {
@@ -180,8 +183,10 @@ export class ChatController {
     this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
     this.frontendClientFactory = deps.frontendClientFactory;
     if (!this.state.chatKey) this.state.chatKey = chatKey;
-    this.driver = new ChatFrontendDriver({
-      clientFactory: deps.frontendClientFactory,
+    this.driver = new RinFrontendTurnDriver({
+      clientFactory:
+        deps.frontendClientFactory || (() => new RinDaemonFrontendClient()),
+      promptSource: "chat-bridge",
     });
     this.driver.subscribe((event) => {
       void this.handleFrontendEvent(event).catch(() => {});
@@ -594,8 +599,10 @@ export class ChatController {
   ) {
     const prompt = buildActiveVoiceAcknowledgementPrompt(commandName);
     if (!prompt) return undefined;
-    const driver = new ChatFrontendDriver({
-      clientFactory: this.frontendClientFactory,
+    const driver = new RinFrontendTurnDriver({
+      clientFactory:
+        this.frontendClientFactory || (() => new RinDaemonFrontendClient()),
+      promptSource: "chat-bridge",
     });
     let sessionFile = "";
     try {
@@ -603,6 +610,7 @@ export class ChatController {
         text: formatPromptForChatContext(prompt, promptMeta),
         managedSessionLeaf: MANAGED_CHAT_SESSION_LEAF,
         promptContext: promptMeta,
+        source: "chat-bridge",
       });
       sessionFile = result.sessionFile || driver.currentSessionFile();
       return result.finalText;
@@ -1005,6 +1013,7 @@ export class ChatController {
         model: input.model,
         thinkingLevel: input.thinkingLevel,
         promptContext: input.promptMeta,
+        source: "chat-bridge",
       });
       this.updateStoredSessionFile(
         result.sessionFile,
@@ -1063,6 +1072,7 @@ export class ChatController {
           model: input.model,
           thinkingLevel: input.thinkingLevel,
           promptContext: input.promptMeta,
+          source: "chat-bridge",
         });
         this.updateStoredSessionFile(
           result.sessionFile,
