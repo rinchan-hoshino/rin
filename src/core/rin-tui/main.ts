@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { startTui } from "./launcher.js";
 import {
-  installTuiFatalTerminalReset,
+  installTuiTerminalStateRestore,
   restoreTerminalStateForExit,
-} from "./terminal-cleanup.js";
+} from "./terminal-state-restore.js";
 
-installTuiFatalTerminalReset();
+installTuiTerminalStateRestore();
 
 startTui().catch((error: any) => {
   restoreTerminalStateForExit();

@@ -6,11 +6,11 @@
  */
 import { startTui } from "../../core/rin-tui/launcher.js";
 import {
-  installTuiFatalTerminalReset,
+  installTuiTerminalStateRestore,
   restoreTerminalStateForExit,
-} from "../../core/rin-tui/terminal-cleanup.js";
+} from "../../core/rin-tui/terminal-state-restore.js";
 
-installTuiFatalTerminalReset();
+installTuiTerminalStateRestore();
 
 startTui().catch((error: any) => {
   restoreTerminalStateForExit();

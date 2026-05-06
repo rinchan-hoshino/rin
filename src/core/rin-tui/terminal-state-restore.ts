@@ -1,9 +1,11 @@
 import fs from "node:fs";
 
-const TERMINAL_RESTORE_SEQUENCE = "\x1b[?25h\x1b[0m\x1b[?2004l\x1b[?1049l";
+const TERMINAL_RESTORE_SEQUENCE =
+  "\x1b]9;4;0;\x07\x1b[?2004l\x1b[<u\x1b[>4;0m\x1b[?25h\x1b[0m";
 
-let fatalTerminalResetInstalled = false;
+let terminalStateRestoreInstalled = false;
 let terminalRestoredForExit = false;
+let initialRawMode: boolean | undefined;
 
 function writeSync(stream: NodeJS.WriteStream, value: string) {
   try {
@@ -14,7 +16,7 @@ function writeSync(stream: NodeJS.WriteStream, value: string) {
     }
     stream.write(value);
   } catch {
-    // Best effort only: fatal-exit cleanup must not mask the original error.
+    // Best effort only: exit cleanup must not mask the original error.
   }
 }
 
@@ -34,7 +36,7 @@ export function restoreTerminalStateForExit(
 
   try {
     if (stdin?.isTTY && typeof stdin.setRawMode === "function") {
-      stdin.setRawMode(false);
+      stdin.setRawMode(initialRawMode ?? false);
     }
   } catch {
     // Best effort only: leave the real crash/error visible.
@@ -47,30 +49,35 @@ export function restoreTerminalStateForExit(
   }
 }
 
-function reportFatalError(error: unknown) {
+function reportTerminalCrash(error: unknown) {
   const message = String((error as any)?.stack || error || "rin_tui_failed");
   console.error(message);
 }
 
-export function installTuiFatalTerminalReset() {
-  if (fatalTerminalResetInstalled) return;
-  fatalTerminalResetInstalled = true;
+export function installTuiTerminalStateRestore(
+  streams: { stdin?: NodeJS.ReadStream | undefined } = {},
+) {
+  if (terminalStateRestoreInstalled) return;
+  terminalStateRestoreInstalled = true;
+  initialRawMode = Boolean((streams.stdin ?? process.stdin)?.isRaw);
 
   process.once("exit", () => {
     restoreTerminalStateForExit();
   });
   process.once("uncaughtException", (error) => {
     restoreTerminalStateForExit();
-    reportFatalError(error);
+    reportTerminalCrash(error);
     process.exit(1);
   });
   process.once("unhandledRejection", (reason) => {
     restoreTerminalStateForExit();
-    reportFatalError(reason);
+    reportTerminalCrash(reason);
     process.exit(1);
   });
 }
 
-export function resetTerminalCleanupForTests() {
+export function resetTerminalStateRestoreForTests() {
   terminalRestoredForExit = false;
+  terminalStateRestoreInstalled = false;
+  initialRawMode = undefined;
 }
