@@ -16,6 +16,7 @@ import {
   normalizeNode,
   prepareOutboundNodes,
   readBinaryFromNode,
+  renderMarkdownFromNodes,
   renderPlainTextFromNodes,
   safeString,
   sleep,
@@ -35,6 +36,16 @@ const LARK_REACTION_TYPES: Record<string, string> = {
   "🤔": "THINKING",
   "🔥": "FIRE",
 };
+
+function hasNodeType(nodes: any[], expectedType: string): boolean {
+  const expected = safeString(expectedType).trim().toLowerCase();
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    const type = safeString(node?.type).trim().toLowerCase();
+    if (type === expected) return true;
+    if (hasNodeType(node?.children, expected)) return true;
+  }
+  return false;
+}
 
 const QQ_REACTION_EMOJI_IDS: Record<string, string> = {
   "🤔": "212",
@@ -1225,13 +1236,19 @@ export class LarkAdapter {
 
   private async sendMessage(chatId: string, content: any) {
     const { work } = prepareOutboundNodes(content);
-    const text = renderPlainTextFromNodes(work, {
-      renderAt(attrs) {
-        const id = safeString(attrs.id).trim();
-        const name = safeString(attrs.name).trim() || id;
-        return id ? `<at user_id="${id}">${name}</at>` : name;
-      },
-    });
+    const containsMarkdown =
+      hasNodeType(work, "markdown") || hasNodeType(work, "md");
+    const renderAt = (attrs: Record<string, any>) => {
+      const id = safeString(attrs.id).trim();
+      const name = safeString(attrs.name).trim() || id;
+      if (!id) return name;
+      return containsMarkdown
+        ? `<at id=${id}></at>`
+        : `<at user_id="${id}">${name}</at>`;
+    };
+    const text = containsMarkdown
+      ? renderMarkdownFromNodes(work, { renderAt })
+      : renderPlainTextFromNodes(work, { renderAt });
     if (!text) throw new Error("lark_send_message_empty");
     const result = await this.client.im.message.create({
       params: {
@@ -1239,8 +1256,13 @@ export class LarkAdapter {
       },
       data: {
         receive_id: chatId,
-        msg_type: "text",
-        content: JSON.stringify({ text }),
+        msg_type: containsMarkdown ? "interactive" : "text",
+        content: containsMarkdown
+          ? JSON.stringify({
+              config: { wide_screen_mode: true },
+              elements: [{ tag: "markdown", content: text }],
+            })
+          : JSON.stringify({ text }),
       },
     });
     return [

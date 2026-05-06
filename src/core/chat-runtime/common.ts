@@ -9,6 +9,7 @@ import {
   isImageName,
 } from "../chat/file-utils.js";
 import {
+  renderChatNodesMarkdown,
   renderChatNodesPlain,
   expandRichTextSyntaxNodes,
   renderChatNodesTelegramHtml,
@@ -197,6 +198,13 @@ export function renderPlainTextFromNodes(
   options: RenderPlainTextOptions = {},
 ) {
   return renderChatNodesPlain(nodes, options);
+}
+
+export function renderMarkdownFromNodes(
+  nodes: any[],
+  options: RenderPlainTextOptions = {},
+) {
+  return renderChatNodesMarkdown(nodes, options);
 }
 
 export function renderTelegramHtmlFromNodes(

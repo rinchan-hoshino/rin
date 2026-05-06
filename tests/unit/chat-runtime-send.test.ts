@@ -354,6 +354,46 @@ test("lark adapter renders structured at using Lark at tags", async () => {
   });
 });
 
+test("lark adapter sends markdown nodes as interactive markdown cards", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("oc_1", [
+      h.markdown("**bold** [docs](https://example.com)"),
+      h.text("\n"),
+      h.at("ou_123", { name: "Alice" }),
+    ]);
+
+    assert.deepEqual(result, ["m1"]);
+    assert.equal(calls[0].data.msg_type, "interactive");
+    const content = JSON.parse(calls[0].data.content);
+    assert.deepEqual(content.config, { wide_screen_mode: true });
+    assert.deepEqual(content.elements, [
+      {
+        tag: "markdown",
+        content: "**bold** [docs](https://example.com)\n<at id=ou_123></at>",
+      },
+    ]);
+  });
+});
+
 test("slack adapter splits oversized text posts into multiple threaded messages", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
