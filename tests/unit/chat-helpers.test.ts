@@ -71,16 +71,57 @@ test("chat chat helpers extract reply ids and quote text from canonical chat quo
   const session = {
     quote: {
       messageId: "quoted-42",
+      userId: "owner-1",
+      nickname: "Owner",
       content: "older context",
     },
   };
   assert.equal(helpers.pickReplyToMessageId(session), "quoted-42");
   assert.deepEqual(helpers.summarizeQuote(session), {
     messageId: "quoted-42",
-    userId: undefined,
-    nickname: undefined,
+    userId: "owner-1",
+    nickname: "Owner",
     content: "older context",
   });
+});
+
+test("chat chat helpers pick only own unsessioned quote text", () => {
+  const ownQuoteSession = {
+    userId: "owner-1",
+    quote: {
+      messageId: "quoted-42",
+      userId: "owner-1",
+      content: "older context",
+    },
+  };
+  assert.equal(
+    helpers.pickUnsessionedOwnQuoteText({ session: ownQuoteSession }),
+    "older context",
+  );
+  assert.equal(
+    helpers.prependQuoteTextToPromptBody("please continue", "older context"),
+    "older context\n\nplease continue",
+  );
+  assert.equal(
+    helpers.pickUnsessionedOwnQuoteText({
+      session: ownQuoteSession,
+      linkedSessionFile: "/tmp/session.jsonl",
+    }),
+    "",
+  );
+  assert.equal(
+    helpers.pickUnsessionedOwnQuoteText({
+      session: {
+        userId: "owner-1",
+        quote: {
+          messageId: "quoted-42",
+          userId: "guest-1",
+          content: "someone else's context",
+        },
+      },
+    }),
+    "",
+  );
 });
 
 test("chat chat helpers derive incoming text from elements", () => {

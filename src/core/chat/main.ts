@@ -38,7 +38,9 @@ import {
   pickReplyToMessageId,
   pickSenderGroupNickname,
   pickSenderNickname,
+  pickUnsessionedOwnQuoteText,
   pickUserId,
+  prependQuoteTextToPromptBody,
   safeString,
   hasInboundChatMessageReplyBoundary,
   isReplyToLatestAssistantMessage,
@@ -520,11 +522,19 @@ export async function startChatBridge(
     const linkedSessionFile = safeString(
       replySession?.sessionFile || "",
     ).trim();
-    const promptReplyToMessageId = isReplyToLatestAssistantMessage(
-      runtime.agentDir,
-      decision.chatKey,
-      replyToMessageId,
-    )
+    const quotedOwnMessageText = pickUnsessionedOwnQuoteText({
+      session,
+      linked: replySession?.linked,
+      linkedSessionFile,
+    });
+    const shouldOmitPromptReplyTo =
+      Boolean(quotedOwnMessageText) ||
+      isReplyToLatestAssistantMessage(
+        runtime.agentDir,
+        decision.chatKey,
+        replyToMessageId,
+      );
+    const promptReplyToMessageId = shouldOmitPromptReplyTo
       ? ""
       : replyToMessageId;
     const { attachments, failures } = await extractInboundAttachments(
@@ -546,9 +556,13 @@ export async function startChatBridge(
       );
     }
     const inboundAttachmentNotice = buildInboundAttachmentNotice(failures);
+    const turnText = prependQuoteTextToPromptBody(
+      decision.text,
+      quotedOwnMessageText,
+    );
     const promptBody = inboundAttachmentNotice
-      ? `${decision.text}\n\n${inboundAttachmentNotice}`
-      : decision.text;
+      ? `${turnText}\n\n${inboundAttachmentNotice}`
+      : turnText;
     const promptMeta = {
       source: "chat-bridge",
       sentAt: Number.isFinite(Number(session?.timestamp))

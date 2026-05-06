@@ -12,6 +12,7 @@ import {
 } from "./message-store.js";
 import {
   buildInboundStoredChatMessageInput,
+  pickReplyToMessageId,
   pickUserId,
 } from "./inbound-normalization.js";
 import {
@@ -161,6 +162,53 @@ export function lookupReplySession(
     linked,
     sessionFile: resolveStoredSessionFile(agentDir, linked.sessionFile),
   };
+}
+
+function pickQuoteSenderUserId(quote: any) {
+  return safeString(
+    quote?.userId ||
+      quote?.user?.id ||
+      quote?.author?.userId ||
+      quote?.author?.id ||
+      "",
+  ).trim();
+}
+
+function pickQuoteContent(quote: any, linked: any) {
+  return safeString(
+    quote?.content ||
+      quote?.message?.content ||
+      linked?.text ||
+      linked?.strippedContent ||
+      linked?.rawContent ||
+      "",
+  ).trim();
+}
+
+export function pickUnsessionedOwnQuoteText(input: {
+  session: any;
+  linked?: any;
+  linkedSessionFile?: string;
+}) {
+  const replyToMessageId = pickReplyToMessageId(input.session);
+  if (!replyToMessageId || safeString(input.linkedSessionFile).trim()) {
+    return "";
+  }
+  const senderUserId = pickUserId(input.session);
+  if (!senderUserId) return "";
+  const quote = input.session?.quote;
+  const quoteUserId =
+    pickQuoteSenderUserId(quote) || safeString(input.linked?.userId).trim();
+  if (quoteUserId !== senderUserId) return "";
+  return pickQuoteContent(quote, input.linked);
+}
+
+export function prependQuoteTextToPromptBody(text: string, quoteText: string) {
+  const body = safeString(text).trim();
+  const quoteBody = safeString(quoteText).trim();
+  if (!quoteBody) return body;
+  if (!body) return quoteBody;
+  return `${quoteBody}\n\n${body}`;
 }
 
 function chatMessageSortTime(record: any) {

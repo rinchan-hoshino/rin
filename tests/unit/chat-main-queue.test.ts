@@ -1609,7 +1609,7 @@ test("chat main omits reply metadata when quoting the latest assistant message",
   }
 });
 
-test("chat main preserves current quoted trigger text without injecting the quoted message", async () => {
+test("chat main prepends own unsessioned quoted message to trigger text", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1712,8 +1712,8 @@ test("chat main preserves current quoted trigger text without injecting the quot
         first.mode !== "prompt" ||
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
-        first.promptMetaReplyTo !== "m-rich-source" ||
-        first.text !== "please explain this"
+        first.promptMetaReplyTo !== null ||
+        first.text !== "look at this image\\n\\nplease explain this"
       ) {
         throw new Error(JSON.stringify({ seen }));
       }
@@ -1738,7 +1738,7 @@ test("chat main preserves current quoted trigger text without injecting the quot
   }
 });
 
-test("chat main accepts mention-only quoted triggers without injecting the quoted message", async () => {
+test("chat main uses own unsessioned quoted message as mention-only trigger text", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1834,8 +1834,8 @@ test("chat main accepts mention-only quoted triggers without injecting the quote
         first.mode !== "prompt" ||
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
-        first.promptMetaReplyTo !== "m-rich-source" ||
-        first.text !== ""
+        first.promptMetaReplyTo !== null ||
+        first.text !== "quoted body should only be fetched explicitly"
       ) {
         throw new Error(JSON.stringify({ seen }));
       }

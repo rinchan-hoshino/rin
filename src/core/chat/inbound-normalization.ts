@@ -201,11 +201,19 @@ export function summarizeQuote(session: any) {
     safeString(quote?.messageId || quote?.id || "").trim() || undefined;
   const userId =
     safeString(
-      quote?.user?.id || quote?.author?.userId || quote?.author?.id || "",
+      quote?.userId ||
+        quote?.user?.id ||
+        quote?.author?.userId ||
+        quote?.author?.id ||
+        "",
     ).trim() || undefined;
   const nickname =
     safeString(
-      quote?.user?.name || quote?.author?.name || quote?.author?.nick || "",
+      quote?.nickname ||
+        quote?.user?.name ||
+        quote?.author?.name ||
+        quote?.author?.nick ||
+        "",
     ).trim() || undefined;
   const content =
     safeString(quote?.content || quote?.message?.content || "").trim() ||
