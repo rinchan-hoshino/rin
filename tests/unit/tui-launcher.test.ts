@@ -80,6 +80,19 @@ test("tui launcher parses pi extension resource options without leaking paths in
   assert.equal(parsed.resources.extensionFlagValues?.get("plan"), "strict");
 });
 
+test("tui launcher keeps appended system prompts out of initial user messages", () => {
+  const parsed = cliOptions.parseTuiCliOptions([
+    "--append-system-prompt",
+    "hidden init guidance",
+    "Start Rin initialization.",
+  ]);
+
+  assert.equal(parsed.initialMessage, "Start Rin initialization.");
+  assert.deepEqual(parsed.resources.appendSystemPrompt, [
+    "hidden init guidance",
+  ]);
+});
+
 test("tui launcher maps quiet startup to Pi version-check skip env", () => {
   const env = {};
   launcher.applyQuietStartupVersionCheckEnv(

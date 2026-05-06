@@ -42,6 +42,7 @@ import {
   targetHomeForUser,
 } from "./users.js";
 import { startUpdater } from "./updater.js";
+import { buildOnboardingPrompt } from "../self-improve/onboarding.js";
 import {
   installCloudTarget,
   installContainerTarget,
@@ -91,7 +92,9 @@ async function launchInstallerInitTui(options: {
   return await runCommand(
     options.rinPath,
     [
-      "The user is requesting initialization. Read `~/.rin/docs/rin/docs/capabilities.md` and follow its `Initialization mode` guidance before responding.",
+      "--append-system-prompt",
+      buildOnboardingPrompt("auto"),
+      "Start Rin initialization.",
     ],
     {
       cwd: options.sourceRoot,

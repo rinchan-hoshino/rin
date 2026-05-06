@@ -56,9 +56,7 @@ Use Pi-style `rin -p` or `rin --mode json` for isolated, scriptable one-shot age
 
 ## Initialization mode
 
-If the user asks to initialize Rin, restart initial setup, or set long-term assistant preferences, read this section and enter initialization mode.
-
-In initialization mode, establish language first, collect durable assistant identity, user address preferences, and default voice/style preferences, then persist durable results with `save_prompts`.
+If the user asks to initialize Rin, restart initial setup, or set long-term assistant preferences, read `~/.rin/docs/rin/docs/initialization.md` and follow its guidance.
 
 ## Scheduled tasks
 
