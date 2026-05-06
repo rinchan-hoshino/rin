@@ -285,6 +285,88 @@ test("slack runtime acks only after the inbound event is emitted", async () => {
   assert.deepEqual(order, ["emit", "ack:1"]);
 });
 
+test("lark runtime reads merged forward messages into inbound text", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const app = runtime.createChatRuntimeApp(agentDir);
+  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+    dataDir: path.join(agentDir, "data"),
+    settings: {},
+    adapterEntries: [
+      {
+        key: "lark",
+        name: "Lark",
+        config: { appId: "cli-test", appSecret: "secret" },
+      },
+    ],
+  });
+  const adapter = [...app.adapters][0];
+  adapter.bot.selfId = "cli-test";
+  const calls = [];
+  adapter.client = {
+    im: {
+      message: {
+        get: async (options) => {
+          calls.push(options);
+          return {
+            data: {
+              items: [
+                {
+                  message_id: "om-forward",
+                  msg_type: "merge_forward",
+                  body: { content: "Merged and Forwarded Message" },
+                },
+                {
+                  message_id: "om-child-1",
+                  msg_type: "text",
+                  sender: { id: "Alice" },
+                  body: { content: JSON.stringify({ text: "hello" }) },
+                },
+                {
+                  message_id: "om-child-2",
+                  msg_type: "image",
+                  sender: { id: "Bob" },
+                  body: { content: JSON.stringify({ image_key: "img-key" }) },
+                },
+              ],
+            },
+          };
+        },
+      },
+    },
+  };
+  const seen = [];
+  app.on("message", (session) => seen.push(session));
+
+  await adapter.handleMessage({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_sender" } },
+    message: {
+      message_id: "om-forward",
+      message_type: "merge_forward",
+      chat_id: "oc_chat",
+      chat_type: "group",
+      create_time: "1713436800000",
+      content: "Merged and Forwarded Message",
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { path: { message_id: "om-forward" }, params: { user_id_type: "open_id" } },
+  ]);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].elements[0].type, "forward");
+  assert.match(seen[0].content, /\[forward: merged forward: om-forward\]/);
+  assert.match(seen[0].content, /Alice: hello/);
+  assert.match(seen[0].content, /Bob: image: img-key/);
+  assert.doesNotMatch(seen[0].content, /Merged and Forwarded Message/);
+
+  const files = inbox.listPendingChatInboxFiles(agentDir);
+  const stored = inbox.readChatInboxItem(files[0]);
+  assert.match(stored.routing?.text, /Alice: hello/);
+  assert.doesNotMatch(stored.routing?.text, /Merged and Forwarded Message/);
+});
+
 test("onebot runtime reads merged forward messages into inbound text", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),

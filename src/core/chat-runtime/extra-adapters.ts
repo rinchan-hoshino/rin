@@ -1320,6 +1320,183 @@ export class LarkAdapter {
     }
   }
 
+  private parsePostContentNodes(parsed: any) {
+    const root = parsed?.zh_cn || parsed?.en_us || parsed;
+    const lines = Array.isArray(root?.content) ? root.content : [];
+    const nodes: any[] = [];
+    for (const line of lines) {
+      const parts = Array.isArray(line) ? line : [];
+      for (const part of parts) {
+        const tag = safeString(part?.tag).trim().toLowerCase();
+        if (tag === "at") {
+          nodes.push(
+            normalizeNode(
+              "at",
+              compactObject({
+                id: safeString(part?.user_id || part?.id).trim() || undefined,
+                name:
+                  safeString(part?.user_name || part?.name).trim() || undefined,
+              }),
+            ),
+          );
+          continue;
+        }
+        if (tag === "img" || tag === "image") {
+          const src = safeString(part?.image_key || part?.src).trim();
+          nodes.push(
+            normalizeNode(
+              "image",
+              compactObject({
+                src: src || undefined,
+                name:
+                  safeString(part?.alt || part?.image_key).trim() || undefined,
+              }),
+            ),
+          );
+          continue;
+        }
+        const text = safeString(part?.text || part?.href || "");
+        if (text) {
+          nodes.push(
+            normalizeNode(tag === "md" ? "markdown" : "text", {
+              content: text,
+            }),
+          );
+        }
+      }
+      if (parts.length) nodes.push(normalizeNode("br"));
+    }
+    if (nodes.at(-1)?.type === "br") nodes.pop();
+    return nodes;
+  }
+
+  private parseLarkMessageContentNodes(
+    msgType: string,
+    rawContent: string,
+    mentions: any[] = [],
+  ) {
+    const type = safeString(msgType).trim().toLowerCase();
+    const raw = safeString(rawContent).trim();
+    let parsed: any = undefined;
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {}
+    }
+    if (type === "post") return this.parsePostContentNodes(parsed);
+    if (type === "image") {
+      const src = safeString(parsed?.image_key || parsed?.key || raw).trim();
+      return [normalizeNode("image", compactObject({ src }))];
+    }
+    if (type === "file") {
+      const src = safeString(parsed?.file_key || parsed?.key || raw).trim();
+      const name = safeString(parsed?.file_name || parsed?.name).trim();
+      return [normalizeNode("file", compactObject({ src, name }))];
+    }
+    const parsedText = this.parseMessageContent(raw);
+    const nodes: any[] = [];
+    const mentionByKey = new Map<string, any>();
+    for (const mention of mentions) {
+      const key = safeString(mention?.key).trim();
+      if (key) mentionByKey.set(key, mention);
+    }
+    const pattern = /(@_[a-zA-Z0-9_-]+)/g;
+    let cursor = 0;
+    for (const match of parsedText.text.matchAll(pattern)) {
+      const index = typeof match.index === "number" ? match.index : cursor;
+      const before = parsedText.text.slice(cursor, index);
+      if (before) nodes.push(normalizeNode("text", { content: before }));
+      cursor = index + safeString(match[0]).length;
+      const mention = mentionByKey.get(safeString(match[1]).trim());
+      if (mention) {
+        nodes.push(
+          normalizeNode(
+            "at",
+            compactObject({
+              id:
+                safeString(mention?.id || mention?.open_id).trim() || undefined,
+              name: safeString(mention?.name).trim() || undefined,
+            }),
+          ),
+        );
+      } else {
+        nodes.push(normalizeNode("text", { content: safeString(match[0]) }));
+      }
+    }
+    const tail = parsedText.text.slice(cursor);
+    if (tail) nodes.push(normalizeNode("text", { content: tail }));
+    return nodes.length
+      ? nodes
+      : raw
+        ? [normalizeNode("text", { content: raw })]
+        : [];
+  }
+
+  private pickLarkMessageItems(response: any) {
+    const candidates = [response?.data?.items, response?.items];
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) return candidate;
+    }
+    return [] as any[];
+  }
+
+  private larkForwardSenderName(message: any) {
+    const sender =
+      message?.sender && typeof message.sender === "object"
+        ? message.sender
+        : {};
+    return (
+      safeString(sender?.id).trim() ||
+      safeString(sender?.sender_id?.open_id).trim() ||
+      safeString(sender?.sender_id?.user_id).trim() ||
+      safeString(message?.message_id).trim() ||
+      "unknown"
+    );
+  }
+
+  private async buildLarkForwardNode(message: any) {
+    const id = safeString(message?.message_id).trim();
+    let items: any[] = [];
+    if (id) {
+      try {
+        const response = await this.client?.im?.message?.get?.({
+          path: { message_id: id },
+          params: { user_id_type: "open_id" },
+        });
+        items = this.pickLarkMessageItems(response);
+      } catch (error: any) {
+        this.logger?.warn?.(
+          `get lark merged forward failed id=${id} err=${safeString(error?.message || error)}`,
+        );
+      }
+    }
+    const children: any[] = [];
+    for (const item of items) {
+      if (safeString(item?.message_id).trim() === id) continue;
+      const body = item?.body && typeof item.body === "object" ? item.body : {};
+      const nodes = this.parseLarkMessageContentNodes(
+        safeString(item?.msg_type).trim(),
+        safeString(body?.content || item?.content || ""),
+        Array.isArray(item?.mentions) ? item.mentions : [],
+      );
+      const rendered = renderMarkdownFromNodes(nodes).trim();
+      children.push(
+        normalizeNode("text", {
+          content: `${this.larkForwardSenderName(item)}: ${rendered || "[unsupported message]"}\n`,
+        }),
+      );
+    }
+    return normalizeNode(
+      "forward",
+      compactObject({
+        id,
+        title: "merged forward",
+        count: children.length ? String(children.length) : undefined,
+      }),
+      children,
+    );
+  }
+
   async createReaction(_chatId: string, messageId: string, emoji: string) {
     const emojiType = toLarkReactionType(emoji);
     if (!emojiType) throw new Error("lark_reaction_emoji_required");
@@ -1397,16 +1574,31 @@ export class LarkAdapter {
         "",
     ).trim();
     if (!senderId) return;
+    const msgType = safeString(
+      message?.message_type || message?.msg_type || "",
+    ).trim();
     const parsed = this.parseMessageContent(safeString(message?.content || ""));
-    const mentionSelf = (
-      Array.isArray(message?.mentions) ? message.mentions : parsed.mentions
-    ).some((item: any) => {
+    const mentions = Array.isArray(message?.mentions)
+      ? message.mentions
+      : parsed.mentions;
+    const mentionSelf = mentions.some((item: any) => {
       const key = safeString(
         item?.key || item?.id || item?.open_id || "",
       ).trim();
       return key && key === safeString(this.bot?.selfId).trim();
     });
-    const strippedContent = parsed.text;
+    const isForward = msgType === "merge_forward";
+    const elements = isForward
+      ? [await this.buildLarkForwardNode(message)]
+      : this.parseLarkMessageContentNodes(
+          msgType,
+          safeString(message?.content || ""),
+          mentions,
+        );
+    const renderedContent = renderPlainTextFromNodes(elements).trim();
+    const strippedContent = isForward
+      ? renderedContent
+      : renderedContent || parsed.text;
     const isDirect =
       safeString(message?.chat_type || "")
         .trim()
@@ -1415,10 +1607,6 @@ export class LarkAdapter {
       safeString(sender?.sender_type).trim() === "user"
         ? safeString(sender?.sender_id?.open_id || "").trim()
         : undefined;
-    const elements: any[] = [];
-    if (strippedContent) {
-      elements.push(normalizeNode("text", { content: strippedContent }));
-    }
     this.app.emit("message", {
       platform: "lark",
       selfId: safeString(this.bot?.selfId).trim() || undefined,
@@ -1445,7 +1633,7 @@ export class LarkAdapter {
         : undefined,
       guildName: undefined,
       isDirect,
-      content: parsed.text,
+      content: strippedContent,
       stripped: {
         appel: mentionSelf,
         content: strippedContent,
