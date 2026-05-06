@@ -319,7 +319,7 @@ test("discord adapter splits oversized text sends and keeps attachments on the f
   });
 });
 
-test("lark adapter sends text and structured at as interactive markdown cards", async () => {
+test("lark adapter sends text and structured at as native markdown rich text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -346,19 +346,23 @@ test("lark adapter sends text and structured at as interactive markdown cards", 
     ]);
 
     assert.deepEqual(result, ["m1"]);
-    assert.equal(calls[0].data.msg_type, "interactive");
-    const content = JSON.parse(calls[0].data.content);
-    assert.deepEqual(content.config, { wide_screen_mode: true });
-    assert.deepEqual(content.elements, [
-      {
-        tag: "markdown",
-        content: "<at id=ou_123></at> hello",
+    assert.equal(calls[0].data.msg_type, "post");
+    assert.deepEqual(JSON.parse(calls[0].data.content), {
+      zh_cn: {
+        content: [
+          [
+            {
+              tag: "md",
+              text: '<at user_id="ou_123">Alice</at> hello',
+            },
+          ],
+        ],
       },
-    ]);
+    });
   });
 });
 
-test("lark adapter sends markdown nodes as interactive markdown cards", async () => {
+test("lark adapter sends markdown nodes as native markdown rich text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -386,15 +390,19 @@ test("lark adapter sends markdown nodes as interactive markdown cards", async ()
     ]);
 
     assert.deepEqual(result, ["m1"]);
-    assert.equal(calls[0].data.msg_type, "interactive");
-    const content = JSON.parse(calls[0].data.content);
-    assert.deepEqual(content.config, { wide_screen_mode: true });
-    assert.deepEqual(content.elements, [
-      {
-        tag: "markdown",
-        content: "**bold** [docs](https://example.com)\n<at id=ou_123></at>",
+    assert.equal(calls[0].data.msg_type, "post");
+    assert.deepEqual(JSON.parse(calls[0].data.content), {
+      zh_cn: {
+        content: [
+          [
+            {
+              tag: "md",
+              text: '**bold** [docs](https://example.com)\n<at user_id="ou_123">Alice</at>',
+            },
+          ],
+        ],
       },
-    ]);
+    });
   });
 });
 

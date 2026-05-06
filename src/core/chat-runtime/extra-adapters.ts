@@ -37,6 +37,17 @@ const LARK_REACTION_TYPES: Record<string, string> = {
   "🔥": "FIRE",
 };
 
+function escapeLarkTagText(text: string) {
+  return safeString(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeLarkTagAttr(text: string) {
+  return escapeLarkTagText(text).replace(/"/g, "&quot;");
+}
+
 const QQ_REACTION_EMOJI_IDS: Record<string, string> = {
   "🤔": "212",
   "🔥": "128293",
@@ -1229,7 +1240,10 @@ export class LarkAdapter {
     const text = renderMarkdownFromNodes(work, {
       renderAt(attrs) {
         const id = safeString(attrs.id).trim();
-        return id ? `<at id=${id}></at>` : safeString(attrs.name).trim();
+        const name = safeString(attrs.name).trim();
+        return id
+          ? `<at user_id="${escapeLarkTagAttr(id)}">${escapeLarkTagText(name)}</at>`
+          : name;
       },
     });
     if (!text) throw new Error("lark_send_message_empty");
@@ -1239,10 +1253,11 @@ export class LarkAdapter {
       },
       data: {
         receive_id: chatId,
-        msg_type: "interactive",
+        msg_type: "post",
         content: JSON.stringify({
-          config: { wide_screen_mode: true },
-          elements: [{ tag: "markdown", content: text }],
+          zh_cn: {
+            content: [[{ tag: "md", text }]],
+          },
         }),
       },
     });
