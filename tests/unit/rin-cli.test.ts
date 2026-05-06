@@ -48,6 +48,19 @@ test("version subcommand prints package version without launching Rin", () => {
   assert.equal(parsed.releaseVersion, "1.2.3");
 });
 
+test("rin update output uses installer-style presentation helpers", () => {
+  const source = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin", "shared.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /renderInstallerNote/);
+  assert.match(source, /runUpdateProgress/);
+  assert.match(source, /buildUpdatePlanText/);
+  assert.match(source, /buildUpdatedTargetText/);
+  assert.equal(source.includes("rin update:"), false);
+});
+
 test("cli help omits removed run command and exposes Pi-style non-interactive flags", () => {
   const output = execFileSync(
     process.execPath,
