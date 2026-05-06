@@ -42,7 +42,6 @@ import {
   targetHomeForUser,
 } from "./users.js";
 import { startUpdater } from "./updater.js";
-import { buildOnboardingPrompt } from "../self-improve/onboarding.js";
 import {
   installCloudTarget,
   installContainerTarget,
@@ -89,17 +88,9 @@ async function launchInstallerInitTui(options: {
   rinPath: string;
   sourceRoot: string;
 }) {
-  return await runCommand(
-    options.rinPath,
-    [
-      "--append-system-prompt",
-      buildOnboardingPrompt("auto"),
-      "Start Rin initialization.",
-    ],
-    {
-      cwd: options.sourceRoot,
-    },
-  );
+  return await runCommand(options.rinPath, ["--init"], {
+    cwd: options.sourceRoot,
+  });
 }
 
 export async function startInstaller() {

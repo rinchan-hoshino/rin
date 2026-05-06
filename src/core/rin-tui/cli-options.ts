@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { buildOnboardingPrompt } from "../self-improve/onboarding.js";
+
 export type TuiResourceOptions = {
   additionalExtensionPaths: string[];
   noExtensions?: boolean;
@@ -200,20 +202,10 @@ export function parseTuiCliOptions(
       resources.systemPrompt = arg.slice("--system-prompt=".length);
       continue;
     }
-    if (arg === "--append-system-prompt") {
-      const value = readValue(argv, index);
-      if (value !== undefined) {
-        resources.appendSystemPrompt = resources.appendSystemPrompt ?? [];
-        resources.appendSystemPrompt.push(value);
-        index += 1;
-      }
-      continue;
-    }
-    if (arg.startsWith("--append-system-prompt=")) {
+    if (arg === "--init") {
       resources.appendSystemPrompt = resources.appendSystemPrompt ?? [];
-      resources.appendSystemPrompt.push(
-        arg.slice("--append-system-prompt=".length),
-      );
+      resources.appendSystemPrompt.push(buildOnboardingPrompt("manual"));
+      messages.push("Start Rin initialization.");
       continue;
     }
 
