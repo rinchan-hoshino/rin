@@ -319,7 +319,7 @@ test("discord adapter splits oversized text sends and keeps attachments on the f
   });
 });
 
-test("lark adapter renders structured at using Lark at tags", async () => {
+test("lark adapter sends text and structured at as interactive markdown cards", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -346,11 +346,15 @@ test("lark adapter renders structured at using Lark at tags", async () => {
     ]);
 
     assert.deepEqual(result, ["m1"]);
-    assert.equal(calls[0].data.msg_type, "text");
-    assert.equal(
-      JSON.parse(calls[0].data.content).text,
-      '<at user_id="ou_123">Alice</at> hello',
-    );
+    assert.equal(calls[0].data.msg_type, "interactive");
+    const content = JSON.parse(calls[0].data.content);
+    assert.deepEqual(content.config, { wide_screen_mode: true });
+    assert.deepEqual(content.elements, [
+      {
+        tag: "markdown",
+        content: "<at id=ou_123></at> hello",
+      },
+    ]);
   });
 });
 
