@@ -776,104 +776,6 @@ export class RpcInteractiveSession {
     await this.refreshState(REFRESH_MESSAGES_AND_SESSION).catch(() => {});
   }
 
-  private getOAuthProviders() {
-    const providers = this.modelRegistry?.authStorage?.getOAuthProviders?.();
-    return Array.isArray(providers) ? providers : [];
-  }
-
-  private formatOAuthProviders() {
-    const providers = this.getOAuthProviders()
-      .slice(0, 50)
-      .map((provider: any) => {
-        const id = String(provider?.id || "").trim();
-        const name = String(provider?.name || id).trim();
-        const credential = this.modelRegistry?.authStorage?.get?.(id);
-        const suffix = credential?.type ? ` (${credential.type})` : "";
-        return name && name !== id
-          ? `${id} — ${name}${suffix}`
-          : `${id}${suffix}`;
-      })
-      .filter(Boolean);
-    return providers.length
-      ? ["OAuth providers:", ...providers].join("\n")
-      : "No OAuth providers available.";
-  }
-
-  private findOAuthProvider(providerId: string) {
-    return this.getOAuthProviders().find(
-      (provider: any) => String(provider?.id || "").trim() === providerId,
-    );
-  }
-
-  private emitStatus(level: "info" | "warning" | "error", text: string) {
-    this.emitEvent({ type: "status", level, text } as any);
-  }
-
-  private async runOAuthSlashCommand(
-    command: "login" | "logout",
-    argsText: string,
-  ) {
-    await this.ensureRemoteSession();
-    await this.modelRegistry.sync().catch(() => {});
-    const providerId = String(argsText || "").trim();
-    if (!providerId) {
-      return {
-        handled: true,
-        text: `${this.formatOAuthProviders()}\nUsage: /${command} <provider>`,
-      };
-    }
-    if (!this.findOAuthProvider(providerId)) {
-      return { handled: true, text: `OAuth provider not found: ${providerId}` };
-    }
-    if (command === "logout") {
-      this.modelRegistry.authStorage.logout(providerId);
-      await this.modelRegistry.sync().catch(() => {});
-      await this.refreshState(REFRESH_MODELS).catch(() => {});
-      return { handled: true, text: `Logged out: ${providerId}` };
-    }
-
-    const messages: string[] = [];
-    await this.modelRegistry.authStorage.login(providerId, {
-      onAuth: (info: any) => {
-        const url = String(info?.url || "").trim();
-        const instructions = String(info?.instructions || "").trim();
-        const text = [
-          url ? `Open this URL to continue login:\n${url}` : "",
-          instructions,
-        ]
-          .filter(Boolean)
-          .join("\n");
-        if (text) {
-          messages.push(text);
-          this.emitStatus("info", text);
-        }
-      },
-      onProgress: (message: string) => {
-        const text = String(message || "").trim();
-        if (text) {
-          messages.push(text);
-          this.emitStatus("info", text);
-        }
-      },
-      onPrompt: async (prompt: any) => {
-        const message = String(prompt?.message || "Login input required.");
-        this.emitStatus("warning", message);
-        throw new Error(message);
-      },
-      onManualCodeInput: async () => {
-        const message = "Manual OAuth code input is required.";
-        this.emitStatus("warning", message);
-        throw new Error(message);
-      },
-    });
-    await this.modelRegistry.sync().catch(() => {});
-    await this.refreshState(REFRESH_MODELS).catch(() => {});
-    return {
-      handled: true,
-      text: [...messages, `Login complete: ${providerId}`].join("\n"),
-    };
-  }
-
   async runCommand(commandLine: string) {
     const trimmed = String(commandLine || "").trim();
     if (trimmed === "/abort") {
@@ -906,18 +808,6 @@ export class RpcInteractiveSession {
             : "Session switch cancelled.",
         };
       }
-    }
-    if (trimmed === "/login" || trimmed.startsWith("/login ")) {
-      return await this.runOAuthSlashCommand(
-        "login",
-        trimmed === "/login" ? "" : trimmed.slice("/login ".length),
-      );
-    }
-    if (trimmed === "/logout" || trimmed.startsWith("/logout ")) {
-      return await this.runOAuthSlashCommand(
-        "logout",
-        trimmed === "/logout" ? "" : trimmed.slice("/logout ".length),
-      );
     }
     await this.ensureRemoteSession();
     const data = await this.call("run_command", { commandLine });
