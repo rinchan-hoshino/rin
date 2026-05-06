@@ -105,7 +105,7 @@ function createPollingWorkingIndicator(platform: string, getBot: () => any) {
 
 const LARK_REACTION_TYPES: Record<string, string> = {
   "🤔": "THINKING",
-  "🔥": "FIRE",
+  "🔥": "Fire",
 };
 
 function escapeLarkTagText(text: string) {

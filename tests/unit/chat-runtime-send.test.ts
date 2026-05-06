@@ -362,6 +362,31 @@ test("lark adapter sends text and structured at as native markdown rich text", a
   });
 });
 
+test("lark adapter maps fire working reaction to the supported emoji type", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        messageReaction: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return {};
+          },
+        },
+      },
+    };
+
+    assert.equal(await app.bots[0].createReaction("oc_1", "om_1", "🔥"), true);
+    assert.equal(calls[0].data.reaction_type.emoji_type, "Fire");
+  });
+});
+
 test("lark adapter sends markdown nodes as native markdown rich text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
