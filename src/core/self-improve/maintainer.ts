@@ -30,6 +30,10 @@ type ExtensionCtxLike = {
   model?: Model<any> | null;
 };
 
+const MAINTENANCE_FORK_COMPACTION_GUARD_KEY = Symbol.for(
+  "rin.selfImproveMaintenanceForkCompactionGuard",
+);
+
 type MaintenanceChangedFile = {
   path: string;
   change: "created" | "updated" | "deleted";
@@ -154,6 +158,25 @@ export function disableRoutineCompactionForMaintenanceFork(session: any) {
   // runtime's provider-error/context-overflow recovery path should compact when
   // the request would otherwise fail.
   session.autoCompactionEnabled = false;
+
+  if ((session as any)[MAINTENANCE_FORK_COMPACTION_GUARD_KEY]) return;
+  const originalRunAutoCompaction =
+    typeof session._runAutoCompaction === "function"
+      ? session._runAutoCompaction.bind(session)
+      : null;
+  if (!originalRunAutoCompaction) return;
+
+  session._runAutoCompaction = async function guardedRunAutoCompaction(
+    reason: unknown,
+    ...args: any[]
+  ) {
+    if (safeString(reason).trim() !== "overflow") return undefined;
+    return await originalRunAutoCompaction(reason, ...args);
+  };
+
+  (session as any)[MAINTENANCE_FORK_COMPACTION_GUARD_KEY] = {
+    originalRunAutoCompaction,
+  };
 }
 
 async function runForkedSessionPrompt(options: {
