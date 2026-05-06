@@ -59,6 +59,14 @@ function createPollingWorkingIndicator(platform: string, getBot: () => any) {
           : typeof bot?.internal?.createReaction === "function"
             ? bot.internal.createReaction.bind(bot.internal)
             : null;
+      const deleteReaction =
+        typeof bot?.deleteReaction === "function"
+          ? bot.deleteReaction.bind(bot)
+          : typeof bot?.internal?.deleteOwnReaction === "function"
+            ? bot.internal.deleteOwnReaction.bind(bot.internal)
+            : typeof bot?.internal?.deleteReaction === "function"
+              ? bot.internal.deleteReaction.bind(bot.internal)
+              : null;
       if (messageId && createReaction) {
         const key = `${chatId}:${messageId}`;
         const previousEmoji = reactions.get(key) || "";
@@ -67,6 +75,14 @@ function createPollingWorkingIndicator(platform: string, getBot: () => any) {
           Number(context?.tick || 0),
         );
         if (nextEmoji && previousEmoji !== nextEmoji) {
+          if (previousEmoji && deleteReaction) {
+            await deleteReaction(
+              chatId,
+              messageId,
+              previousEmoji,
+              safeString(bot?.selfId).trim() || undefined,
+            );
+          }
           await createReaction(chatId, messageId, nextEmoji);
           reactions.set(key, nextEmoji);
           sent = true;

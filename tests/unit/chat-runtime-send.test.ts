@@ -362,6 +362,58 @@ test("lark adapter sends text and structured at as native markdown rich text", a
   });
 });
 
+test("lark working indicator replaces the previous reaction frame", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        messageReaction: {
+          create: async (payload: any) => {
+            calls.push(["create", payload]);
+            return {};
+          },
+          list: async (payload: any) => {
+            calls.push(["list", payload]);
+            return {
+              data: {
+                items: [
+                  {
+                    reaction_id: "reaction-thinking",
+                    reaction_type: { emoji_type: "THINKING" },
+                    operator: { operator_type: "app" },
+                  },
+                ],
+              },
+            };
+          },
+          delete: async (payload: any) => {
+            calls.push(["delete", payload]);
+            return {};
+          },
+        },
+      },
+    };
+
+    const [indicator] = app.bots[0].workingIndicators;
+    await indicator.tick({ chatId: "oc_1", messageId: "om_1", tick: 0 });
+    await indicator.tick({ chatId: "oc_1", messageId: "om_1", tick: 1 });
+
+    assert.deepEqual(
+      calls.map(([kind]) => kind),
+      ["create", "list", "delete", "create"],
+    );
+    assert.equal(calls[0][1].data.reaction_type.emoji_type, "THINKING");
+    assert.equal(calls[2][1].path.reaction_id, "reaction-thinking");
+    assert.equal(calls[3][1].data.reaction_type.emoji_type, "Fire");
+  });
+});
+
 test("lark adapter maps fire working reaction to the supported emoji type", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
