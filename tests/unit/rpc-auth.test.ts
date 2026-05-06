@@ -32,6 +32,18 @@ test("rpc auth proxy normalizes oauth state snapshots", async () => {
               { id: " gemini ", name: "" },
               { id: " ", name: "ignored" },
             ],
+            providerDisplayNames: {
+              " openai ": " OpenAI ",
+              gemini: "",
+            },
+            providerAuthStatuses: {
+              openai: {
+                configured: true,
+                source: " oauth ",
+                label: " Account ",
+              },
+              gemini: { configured: false },
+            },
           },
         });
       }
@@ -49,6 +61,16 @@ test("rpc auth proxy normalizes oauth state snapshots", async () => {
     { id: "openai", name: "OpenAI", usesCallbackServer: true },
     { id: "gemini", name: "gemini" },
   ]);
+  assert.equal(auth.getProviderDisplayName(" openai "), "OpenAI");
+  assert.equal(auth.getProviderDisplayName("gemini"), "gemini");
+  assert.deepEqual(auth.getProviderAuthStatus("openai"), {
+    configured: true,
+    source: "oauth",
+    label: "Account",
+  });
+  assert.deepEqual(auth.getProviderAuthStatus("gemini"), {
+    configured: false,
+  });
 });
 
 test("rpc auth proxy responds to oauth login events and applies completion state", async () => {

@@ -30,6 +30,12 @@ type OAuthProviderSummary = {
   usesCallbackServer: boolean;
 };
 
+type ProviderAuthStatusSummary = {
+  configured: boolean;
+  source?: string;
+  label?: string;
+};
+
 type SlashCommandCollectorSpec<T> = {
   source: unknown;
   getName: (value: T) => unknown;
@@ -252,6 +258,68 @@ function collectOAuthProviders(authStorage: any) {
   return providers;
 }
 
+function collectModelProviderIds(modelRegistry: any) {
+  const providerIds = new Set<string>();
+  for (const model of asArray<any>(modelRegistry?.getAll?.())) {
+    const providerId = normalizeProviderId(model?.provider);
+    if (providerId) providerIds.add(providerId);
+  }
+  return providerIds;
+}
+
+function collectOAuthProviderIds(authStorage: any) {
+  const providerIds = new Set<string>();
+  for (const provider of asArray<any>(authStorage?.getOAuthProviders?.())) {
+    const providerId = normalizeProviderId(provider?.id);
+    if (providerId) providerIds.add(providerId);
+  }
+  for (const provider of asArray<string>(authStorage?.list?.())) {
+    const providerId = normalizeProviderId(provider);
+    if (providerId) providerIds.add(providerId);
+  }
+  return providerIds;
+}
+
+function collectProviderIds(modelRegistry: any, authStorage: any) {
+  return new Set([
+    ...collectModelProviderIds(modelRegistry),
+    ...collectOAuthProviderIds(authStorage),
+  ]);
+}
+
+function normalizeProviderAuthStatus(value: any): ProviderAuthStatusSummary {
+  const source = trimText(value?.source);
+  const label = trimText(value?.label);
+  return {
+    configured: Boolean(value?.configured),
+    ...(source ? { source } : {}),
+    ...(label ? { label } : {}),
+  };
+}
+
+function collectProviderDisplayNames(modelRegistry: any, authStorage: any) {
+  const displayNames: Record<string, string> = {};
+  for (const providerId of collectProviderIds(modelRegistry, authStorage)) {
+    const displayName = trimText(
+      modelRegistry?.getProviderDisplayName?.(providerId),
+    );
+    if (displayName) displayNames[providerId] = displayName;
+  }
+  return displayNames;
+}
+
+function collectProviderAuthStatuses(modelRegistry: any, authStorage: any) {
+  const statuses: Record<string, ProviderAuthStatusSummary> = {};
+  for (const providerId of collectProviderIds(modelRegistry, authStorage)) {
+    const status = normalizeProviderAuthStatus(
+      modelRegistry?.getProviderAuthStatus?.(providerId),
+    );
+    if (!status.configured && !status.source) continue;
+    statuses[providerId] = status;
+  }
+  return statuses;
+}
+
 export function getOAuthStateFromStorage(authStorage: any) {
   return {
     credentials: collectOAuthCredentials(authStorage),
@@ -259,6 +327,27 @@ export function getOAuthStateFromStorage(authStorage: any) {
   };
 }
 
+export function getOAuthStateFromModelRegistry(modelRegistry: any) {
+  const authStorage = modelRegistry?.authStorage;
+  const providerDisplayNames = collectProviderDisplayNames(
+    modelRegistry,
+    authStorage,
+  );
+  const providerAuthStatuses = collectProviderAuthStatuses(
+    modelRegistry,
+    authStorage,
+  );
+  return {
+    ...getOAuthStateFromStorage(authStorage),
+    ...(Object.keys(providerDisplayNames).length
+      ? { providerDisplayNames }
+      : {}),
+    ...(Object.keys(providerAuthStatuses).length
+      ? { providerAuthStatuses }
+      : {}),
+  };
+}
+
 export function getSessionOAuthState(session: any) {
-  return getOAuthStateFromStorage(session?.modelRegistry?.authStorage);
+  return getOAuthStateFromModelRegistry(session?.modelRegistry);
 }

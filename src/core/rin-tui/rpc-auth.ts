@@ -7,6 +7,11 @@ type OAuthProviderSummary = {
   name: string;
   usesCallbackServer?: boolean;
 };
+type ProviderAuthStatusSummary = {
+  configured: boolean;
+  source?: string;
+  label?: string;
+};
 type LoginState = {
   onAuth?: (info: { url: string; instructions?: string }) => void;
   onPrompt?: (prompt: {
@@ -94,16 +99,50 @@ function normalizeProviders(input: any): OAuthProviderSummary[] {
   return providers;
 }
 
+function normalizeStringMap(input: any) {
+  const values: Record<string, string> = {};
+  if (!input || typeof input !== "object") return values;
+  for (const [key, value] of Object.entries(input)) {
+    const id = normalizeProviderId(key);
+    const text = trimText(value);
+    if (id && text) values[id] = text;
+  }
+  return values;
+}
+
+function normalizeProviderAuthStatuses(input: any) {
+  const statuses: Record<string, ProviderAuthStatusSummary> = {};
+  if (!input || typeof input !== "object") return statuses;
+  for (const [key, value] of Object.entries(input)) {
+    const id = normalizeProviderId(key);
+    if (!id) continue;
+    const source = trimText((value as any)?.source);
+    const label = trimText((value as any)?.label);
+    statuses[id] = {
+      configured: Boolean((value as any)?.configured),
+      ...(source ? { source } : {}),
+      ...(label ? { label } : {}),
+    };
+  }
+  return statuses;
+}
+
 export function createAuthStorageProxy(client: RpcFrontendClient) {
   const state = {
     credentials: {} as Record<string, OAuthCredentialSummary>,
     providers: [] as OAuthProviderSummary[],
+    providerDisplayNames: {} as Record<string, string>,
+    providerAuthStatuses: {} as Record<string, ProviderAuthStatusSummary>,
     logins: new Map<string, LoginState>(),
   };
 
   const applyState = (data: any) => {
     state.credentials = normalizeCredentials(data?.credentials);
     state.providers = normalizeProviders(data?.providers);
+    state.providerDisplayNames = normalizeStringMap(data?.providerDisplayNames);
+    state.providerAuthStatuses = normalizeProviderAuthStatuses(
+      data?.providerAuthStatuses,
+    );
   };
 
   const cleanupLogin = (loginId: string) => {
@@ -220,6 +259,15 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       state.credentials[normalizeProviderId(providerId)],
     getOAuthProviders: () =>
       state.providers.map((provider) => ({ ...provider })),
+    getProviderDisplayName(providerId: string) {
+      const id = normalizeProviderId(providerId);
+      if (!id) return id;
+      return state.providerDisplayNames[id] || id;
+    },
+    getProviderAuthStatus(providerId: string) {
+      const id = normalizeProviderId(providerId);
+      return { ...(state.providerAuthStatuses[id] || { configured: false }) };
+    },
     applyState,
     async sync() {
       const response: any = await client.send({ type: "get_oauth_state" });

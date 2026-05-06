@@ -19,6 +19,7 @@ const {
   collectSlashCommands,
   dedupeSlashCommands,
   getExtensionSlashCommands,
+  getOAuthStateFromModelRegistry,
   getOAuthStateFromStorage,
   getPromptSlashCommands,
   getSkillSlashCommands,
@@ -196,8 +197,8 @@ test("catalog helpers collect runtime slash commands in source order", () => {
   );
 });
 
-test("catalog helpers read oauth state from auth storage", () => {
-  const state = getOAuthStateFromStorage({
+function createCatalogAuthStorage() {
+  return {
     list: () => [" gemini ", "missing", "", "gemini"],
     get: (providerId) => {
       const normalized = String(providerId).trim();
@@ -221,7 +222,11 @@ test("catalog helpers read oauth state from auth storage", () => {
         usesCallbackServer: 1,
       },
     ],
-  });
+  };
+}
+
+test("catalog helpers read oauth state from auth storage", () => {
+  const state = getOAuthStateFromStorage(createCatalogAuthStorage());
 
   assert.deepEqual(state, {
     credentials: {
@@ -235,5 +240,45 @@ test("catalog helpers read oauth state from auth storage", () => {
         usesCallbackServer: true,
       },
     ],
+  });
+});
+
+test("catalog helpers include backend provider display names and auth status", () => {
+  const state = getOAuthStateFromModelRegistry({
+    authStorage: createCatalogAuthStorage(),
+    getAll: () => [
+      { provider: "gemini", id: "gemini-pro" },
+      { provider: "openai", id: "gpt-5" },
+    ],
+    getProviderDisplayName(providerId) {
+      return providerId === "openai" ? "OpenAI" : "Google Gemini";
+    },
+    getProviderAuthStatus(providerId) {
+      if (providerId === "openai") {
+        return {
+          configured: true,
+          source: "environment",
+          label: "OPENAI_API_KEY",
+        };
+      }
+      if (providerId === "gemini") {
+        return { configured: true, source: "api_key" };
+      }
+      return { configured: false };
+    },
+  });
+
+  assert.deepEqual(state.providerDisplayNames, {
+    gemini: "Google Gemini",
+    missing: "Google Gemini",
+    openai: "OpenAI",
+  });
+  assert.deepEqual(state.providerAuthStatuses, {
+    gemini: { configured: true, source: "api_key" },
+    openai: {
+      configured: true,
+      source: "environment",
+      label: "OPENAI_API_KEY",
+    },
   });
 });

@@ -275,7 +275,15 @@ test("rpc model registry exposes all models for login provider selection", async
             data: { models: availableModels },
           });
         case "get_oauth_state":
-          return Promise.resolve({ success: true, data: {} });
+          return Promise.resolve({
+            success: true,
+            data: {
+              providerDisplayNames: { anthropic: "Anthropic" },
+              providerAuthStatuses: {
+                openai: { configured: true, source: "environment" },
+              },
+            },
+          });
         default:
           throw new Error(`unexpected command: ${payload.type}`);
       }
@@ -290,11 +298,16 @@ test("rpc model registry exposes all models for login provider selection", async
   registry.authStorage.applyState({
     credentials: { anthropic: { type: "api_key" } },
     providers: [],
+    providerDisplayNames: { anthropic: "Anthropic" },
+    providerAuthStatuses: {
+      openai: { configured: true, source: "environment" },
+    },
   });
   assert.deepEqual(registry.getAvailable(), [...availableModels, allModels[1]]);
-  assert.equal(registry.getProviderDisplayName("anthropic"), "anthropic");
+  assert.equal(registry.getProviderDisplayName("anthropic"), "Anthropic");
   assert.deepEqual(registry.getProviderAuthStatus("openai"), {
-    configured: false,
+    configured: true,
+    source: "environment",
   });
   assert.deepEqual(sent, [
     "get_all_models",

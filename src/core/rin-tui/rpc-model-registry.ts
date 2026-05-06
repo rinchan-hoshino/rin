@@ -39,26 +39,10 @@ export function createModelRegistry(client: RpcFrontendClient) {
       );
     },
     getProviderDisplayName(provider: string) {
-      const providerId = String(provider || "").trim();
-      if (!providerId) return providerId;
-      const oauthProvider = authStorage
-        .getOAuthProviders()
-        .find((entry) => entry.id === providerId);
-      const namedModel = state.allModels.find(
-        (model) =>
-          model?.provider === providerId &&
-          typeof model?.providerName === "string" &&
-          model.providerName.trim(),
-      );
-      return (
-        oauthProvider?.name || namedModel?.providerName?.trim() || providerId
-      );
+      return authStorage.getProviderDisplayName(provider);
     },
     getProviderAuthStatus(provider: string) {
-      const credential = authStorage.get(provider);
-      return credential?.type
-        ? { configured: true, source: credential.type }
-        : { configured: false };
+      return authStorage.getProviderAuthStatus(provider);
     },
     isUsingOAuth(model: any) {
       return authStorage.get(model?.provider)?.type === "oauth";

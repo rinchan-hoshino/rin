@@ -9,7 +9,7 @@ import { loadRinCodingAgent } from "../rin-lib/loader.js";
 import { createRinCapabilitySet } from "../rin-lib/capability-session.js";
 import {
   collectRuntimeSlashCommands,
-  getOAuthStateFromStorage,
+  getOAuthStateFromModelRegistry,
 } from "./catalog-helpers.js";
 
 type CatalogOptions = {
@@ -201,7 +201,7 @@ export async function listCatalogModels(options: CatalogOptions = {}) {
 }
 
 export async function getCatalogOAuthState(options: CatalogOptions = {}) {
-  return withCatalogContext(options, async ({ authStorage }) => {
-    return getOAuthStateFromStorage(authStorage);
+  return withCatalogContext(options, async ({ modelRegistry }) => {
+    return getOAuthStateFromModelRegistry(modelRegistry);
   });
 }
