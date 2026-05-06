@@ -127,11 +127,26 @@ export async function startInstaller() {
       .trim()
       .toLowerCase() === "update"
   ) {
+    const selectedLanguage = await promptInstallerLanguage({
+      ensureNotCancelled,
+      select,
+      text,
+    });
+    process.env.RIN_INSTALL_LANGUAGE = selectedLanguage;
+    const i18n = createInstallerI18n(selectedLanguage);
+    const localizedConfirm: typeof confirm = (options) =>
+      confirm({
+        active: i18n.confirmActiveLabel,
+        inactive: i18n.confirmInactiveLabel,
+        ...options,
+      });
     await startUpdater({
       detectCurrentUser,
       repoRootFromHere,
       ensureNotCancelled,
       release: releaseInfoFromEnv(),
+      select,
+      confirm: localizedConfirm,
     });
     return;
   }

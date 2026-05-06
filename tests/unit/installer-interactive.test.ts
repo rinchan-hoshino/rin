@@ -385,6 +385,26 @@ test("installer i18n source keeps localized copy in one display table", () => {
   );
 });
 
+test("update mode reuses installer's language prompt and note renderer", () => {
+  const mainSource = readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "main.ts"),
+    "utf8",
+  );
+  const updaterSource = readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "updater.ts"),
+    "utf8",
+  );
+
+  assert.match(mainSource, /RIN_INSTALL_MODE[\s\S]+promptInstallerLanguage/);
+  assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
+  assert.match(updaterSource, /renderInstallerNote/);
+  assert.match(updaterSource, /wrapInstallerNoteText/);
+  assert.match(
+    updaterSource,
+    /const promptConfirm = deps\.confirm \|\| confirm/,
+  );
+});
+
 test("promptProviderSetup reuses complete existing provider config", async () => {
   const installDir = "/tmp/demo";
   const result = await interactive.promptProviderSetup(

@@ -12,7 +12,10 @@ import { renderInstallerNote, wrapInstallerNoteText } from "./interactive.js";
 
 export function renderUpdaterNote(message?: string, title?: string) {
   return renderInstallerNote(
-    wrapInstallerNoteText(String(message || ""), process.stderr.columns),
+    wrapInstallerNoteText(
+      String(message || ""),
+      process.stderr.columns || process.stdout.columns || 80,
+    ),
     String(title || ""),
     {
       border: chalk.gray,
@@ -32,8 +35,13 @@ export async function startUpdater(deps: {
   repoRootFromHere: () => string;
   ensureNotCancelled: <T>(value: T | symbol) => T;
   release?: InstalledReleaseInfo;
+  select?: typeof select;
+  confirm?: typeof confirm;
 }) {
   const currentUser = deps.detectCurrentUser();
+  const promptSelect = deps.select || select;
+  const promptConfirm = deps.confirm || confirm;
+
   intro("Rin Updater");
 
   const targets = discoverInstalledTargets();
@@ -52,7 +60,7 @@ export async function startUpdater(deps: {
       : targets[
           Number(
             deps.ensureNotCancelled(
-              await select({
+              await promptSelect({
                 message: "Choose an installed Rin target to update.",
                 options: targets.map((item, index) => ({
                   value: index,
@@ -93,7 +101,7 @@ export async function startUpdater(deps: {
   );
 
   const shouldProceed = deps.ensureNotCancelled(
-    await confirm({
+    await promptConfirm({
       message: "Publish the latest built runtime to this installed target now?",
       initialValue: true,
     }),
