@@ -69,6 +69,18 @@ test("installer interactive helpers describe dir state and plan text", () => {
   );
   assert.ok(!plainSection.includes("╭"));
 
+  const renderedZhNote = interactive.renderInstallerNote(
+    "\u76ee\u5f55\u5c06\u4f1a\u521b\u5efa\uff1a/tmp/\u94c3\u9171\nASCII line",
+    "\u5b89\u88c5\u76ee\u5f55",
+  );
+  const noteWidths = renderedZhNote
+    .split("\n")
+    .filter(Boolean)
+    .slice(1)
+    .map((line) => interactive.installerTextDisplayWidth(line));
+  assert.equal(new Set(noteWidths).size, 1);
+  assert.ok(renderedZhNote.includes("\u5b89\u88c5\u76ee\u5f55"));
+
   const wrapped = interactive.wrapInstallerNoteText(
     "- \u8fd9\u662f\u4e00\u884c\u8db3\u591f\u957f\u7684\u4e2d\u6587\u5b89\u88c5\u5668\u8bf4\u660e\uff0c\u9700\u8981\u5728\u8fdb\u5165 clack note \u524d\u5148\u6362\u884c\uff0c\u907f\u514d\u8fb9\u6846\u88ab\u957f\u884c\u6491\u574f\u3002",
     56,
