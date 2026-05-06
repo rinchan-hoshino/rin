@@ -231,6 +231,61 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller does not bind a transient default session before managed prompt creation", async () => {
+  const controller = await createController();
+  delete controller.connect;
+  controller.commitPendingDelivery = async function () {
+    this.stagedDelivery = null;
+  };
+
+  const defaultSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "default-before-managed.jsonl",
+  );
+  const managedSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "created-after-connect.jsonl",
+  );
+  let currentSessionFile = defaultSessionFile;
+  const observedStateAtPrompt = [];
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => currentSessionFile,
+      getSessionId: () => "session-managed",
+      getSessionName: () => controller.chatKey,
+    },
+    newSession: async () => {
+      currentSessionFile = managedSessionFile;
+      return true;
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: currentSessionFile,
+      sessionId: "session-managed",
+    }),
+    prompt: async (_text, options = {}) => {
+      observedStateAtPrompt.push(controller.state.sessionFile);
+      emitRpcTurnComplete(controller, options, "managed prompt final");
+    },
+    switchSession: async (sessionFile) => {
+      currentSessionFile = sessionFile;
+    },
+  };
+
+  await controller.runTurn({ text: "hello", attachments: [] });
+
+  assert.deepEqual(observedStateAtPrompt, [undefined]);
+  assert.equal(
+    controller.state.sessionFile,
+    "managed/chat/created-after-connect.jsonl",
+  );
+});
+
 test("chat controller skips recovery bootstrap and asks the active voice to acknowledge /new", async () => {
   const controller = await createController();
   const calls = [];
