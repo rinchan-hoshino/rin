@@ -1,4 +1,5 @@
-import { confirm, intro, note, outro, select } from "@clack/prompts";
+import { confirm, intro, outro, select } from "@clack/prompts";
+import chalk from "chalk";
 
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
 
@@ -7,6 +8,24 @@ import {
   runFinalizeInstallPlanInChild,
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
+import { renderInstallerNote, wrapInstallerNoteText } from "./interactive.js";
+
+export function renderUpdaterNote(message?: string, title?: string) {
+  return renderInstallerNote(
+    wrapInstallerNoteText(String(message || ""), process.stderr.columns),
+    String(title || ""),
+    {
+      border: chalk.gray,
+      body: chalk.dim,
+      symbol: chalk.green,
+      title: chalk.reset,
+    },
+  );
+}
+
+function note(message?: string, title?: string) {
+  process.stdout.write(`${renderUpdaterNote(message, title)}\n`);
+}
 
 export async function startUpdater(deps: {
   detectCurrentUser: () => string;

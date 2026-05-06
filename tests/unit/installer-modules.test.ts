@@ -25,6 +25,10 @@ const installRecord = await import(
     path.join(rootDir, "dist", "core", "rin-install", "install-record.js"),
   ).href
 );
+const updater = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "updater.js"))
+    .href
+);
 
 async function withTempDir(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-installer-test-"));
@@ -34,6 +38,22 @@ async function withTempDir(fn) {
     await fs.rm(dir, { recursive: true, force: true });
   }
 }
+
+test("updater renders install-style note boxes", () => {
+  const rendered = updater.renderUpdaterNote(
+    [
+      "Current user: demo",
+      "Selected daemon user: demo",
+      "Install dir: /home/demo/.rin",
+    ].join("\n"),
+    "Update plan",
+  );
+
+  assert.match(rendered, /◇ {2}Update plan/);
+  assert.match(rendered, /│ {2}Current user: demo/);
+  assert.match(rendered, /│ {2}Selected daemon user: demo/);
+  assert.match(rendered, /├─+╯/);
+});
 
 test("provider-auth computes available thinking levels deterministically", () => {
   assert.deepEqual(
