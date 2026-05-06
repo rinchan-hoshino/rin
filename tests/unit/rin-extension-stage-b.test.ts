@@ -239,9 +239,8 @@ test("stage B daemon extension manager contributes chat runtime adapters", async
       "rin-daemon-chat-adapter-test",
       `import fs from "node:fs";
 const markerPath = ${JSON.stringify(markerPath)};
-export const rinDaemonExtension = {
-  start(ctx) {
-    ctx.registerChatAdapter(({ app }) => ({
+export function createDaemonWorker(ctx) {
+  ctx.registerChatAdapter(({ app }) => ({
       adapter: {
         async start() {
           fs.appendFileSync(markerPath, "chat-start\\n");
@@ -269,10 +268,8 @@ export const rinDaemonExtension = {
         },
       },
     }), { key: "extension-test" });
-  },
-};
+}
 `,
-      { rin: { daemonExtension: true } },
     );
     await writeJson(path.join(agentDir, "settings.json"), {
       extensions: [packageDir],
@@ -319,6 +316,39 @@ export const rinDaemonExtension = {
       await fs.readFile(markerPath, "utf8"),
       "chat-start\nchat-stop\n",
     );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
+
+test("stage B daemon extension manager ignores direct extensions without daemon entry", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-ignore-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-nondaemon-extension-pkg-"),
+  );
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-nondaemon-extension-test",
+      `export default function activate() { throw new Error("should_not_run"); }\n`,
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: [packageDir],
+    });
+
+    const warnings: string[] = [];
+    const manager = new daemonExtensions.RinDaemonExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: (message: string) => warnings.push(String(message)) },
+    });
+
+    assert.deepEqual(await manager.start(), []);
+    assert.deepEqual(manager.getChatAdapterProviders(), []);
+    assert.deepEqual(warnings, []);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
     await fs.rm(packageDir, { recursive: true, force: true });

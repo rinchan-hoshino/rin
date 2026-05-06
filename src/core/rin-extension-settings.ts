@@ -10,6 +10,7 @@ export type RinExtensionWorkerConfig = {
   packageName: string;
   version: string;
   config: Record<string, any>;
+  optional?: boolean;
 };
 
 export type RinExtensionConfigOptions = {
@@ -70,13 +71,6 @@ function resolveLocalExtensionPath(entry: unknown, cwd: string) {
     : path.dirname(resolved);
 }
 
-function packageDeclaresDaemonExtension(packageJson: any) {
-  return (
-    packageJson?.rin?.daemonExtension === true ||
-    packageJson?.rin?.daemonWorker === true
-  );
-}
-
 function normalizeDirectExtensionWorkerConfig(
   entry: unknown,
   cwd: string,
@@ -85,7 +79,6 @@ function normalizeDirectExtensionWorkerConfig(
   if (!extensionPath) return null;
   const packageJsonPath = path.join(extensionPath, "package.json");
   const packageJson = readJsonFile<any>(packageJsonPath, null);
-  if (!packageDeclaresDaemonExtension(packageJson)) return null;
   const packageName = safeString(packageJson?.name).trim();
   if (!packageName) return null;
   return {
@@ -93,6 +86,7 @@ function normalizeDirectExtensionWorkerConfig(
     packageName,
     version: `file:${extensionPath}`,
     config: {},
+    optional: true,
   };
 }
 

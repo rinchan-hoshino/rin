@@ -134,12 +134,14 @@ export function ensureDaemonExtensionDependencies(
 
 function pickDaemonWorkerProvider(
   moduleValue: any,
+  options: { allowDefault?: boolean } = {},
 ): DaemonWorkerProvider | null {
   const candidates = [
-    moduleValue?.rinDaemonExtension,
-    moduleValue?.daemonWorkerProvider,
-    moduleValue?.default,
-    moduleValue,
+    moduleValue?.createDaemonWorker,
+    options.allowDefault ? moduleValue?.rinDaemonExtension : undefined,
+    options.allowDefault ? moduleValue?.daemonWorkerProvider : undefined,
+    options.allowDefault ? moduleValue?.default : undefined,
+    options.allowDefault ? moduleValue : undefined,
   ];
   for (const candidate of candidates) {
     if (
@@ -180,13 +182,16 @@ async function importDaemonWorkerProviderModule(
 async function loadDaemonWorkerProvider(
   runtimeRoot: string,
   packageName: string,
+  options: { allowDefault?: boolean } = {},
 ) {
   const moduleValue = await importDaemonWorkerProviderModule(
     runtimeRoot,
     packageName,
   );
-  const provider = pickDaemonWorkerProvider(moduleValue);
-  if (!provider) throw new Error("provider_missing_createDaemonWorker");
+  const provider = pickDaemonWorkerProvider(moduleValue, options);
+  if (!provider && options.allowDefault) {
+    throw new Error("provider_missing_createDaemonWorker");
+  }
   return provider;
 }
 
@@ -241,7 +246,9 @@ export class RinDaemonExtensionManager {
         const provider = await loadDaemonWorkerProvider(
           runtimeRoot,
           entry.packageName,
+          { allowDefault: !entry.optional },
         );
+        if (!provider && entry.optional) continue;
         const controller = new AbortController();
         const tasks = new Set<Promise<void>>();
         const running: RunningWorker = { entry, controller, tasks };
