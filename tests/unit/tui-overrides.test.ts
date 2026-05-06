@@ -572,12 +572,13 @@ test("session selector rename ignores blank names", async () => {
   }
 });
 
-test("rpc session resync rebinds runtime state and rerenders history", async () => {
+test("rpc session resync rebinds runtime state and redraws history directly", async () => {
   await overrides.applyRinTuiOverrides();
 
   let runtimeChanges = 0;
   let renders = 0;
-  let historyRenders = 0;
+  let directHistoryRenders = 0;
+  let initialStateRenders = 0;
   const ui = {
     requestRender() {
       renders += 1;
@@ -591,17 +592,28 @@ test("rpc session resync rebinds runtime state and rerenders history", async () 
         return null;
       },
     },
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: [] };
+      },
+    },
     handleRuntimeSessionChange: async () => {
       runtimeChanges += 1;
     },
     renderCurrentSessionState() {
-      historyRenders += 1;
+      initialStateRenders += 1;
+    },
+    renderSessionContext(_context, options) {
+      directHistoryRenders += 1;
+      assert.deepEqual(options, { updateFooter: true, populateHistory: true });
     },
     statusContainer: {
       clear() {},
       addChild() {},
     },
     chatContainer: { clear() {}, addChild() {}, removeChild() {} },
+    pendingMessagesContainer: { clear() {} },
+    pendingTools: new Map(),
     defaultEditor: { onEscape() {} },
     footer: { invalidate() {} },
     flushCompactionQueue() {},
@@ -615,8 +627,56 @@ test("rpc session resync rebinds runtime state and rerenders history", async () 
   });
 
   assert.equal(runtimeChanges, 1);
-  assert.equal(historyRenders, 1);
+  assert.equal(initialStateRenders, 0);
+  assert.equal(directHistoryRenders, 1);
   assert.ok(renders >= 1);
+});
+
+test("rpc session resync redraw does not replay initial compaction status notice", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const statusMessages = [];
+  let directHistoryRenders = 0;
+  const instance = {
+    isInitialized: true,
+    ui: { requestRender() {} },
+    session: {
+      getFrontendStatusEvent() {
+        return null;
+      },
+    },
+    handleRuntimeSessionChange: async () => {},
+    renderSessionContext() {
+      directHistoryRenders += 1;
+    },
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: [] };
+      },
+      getEntries() {
+        return [{ type: "compaction" }];
+      },
+    },
+    showStatus(message) {
+      statusMessages.push(message);
+    },
+    chatContainer: { clear() {} },
+    pendingMessagesContainer: { clear() {} },
+    pendingTools: new Map(),
+    statusContainer: { clear() {}, addChild() {} },
+  };
+
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_session_resynced",
+  });
+
+  assert.equal(directHistoryRenders, 1);
+  assert.deepEqual(statusMessages, []);
+
+  codingAgentModule.InteractiveMode.prototype.renderInitialMessages.call(
+    instance,
+  );
+  assert.deepEqual(statusMessages, ["Session compacted 1 time"]);
 });
 
 test("rpc startup submissions are buffered until the input loop starts", async () => {
@@ -777,7 +837,15 @@ test("rpc session resync clears pending local user echo", async () => {
     },
     updatePendingMessagesDisplay() {},
     handleRuntimeSessionChange: async () => {},
-    renderCurrentSessionState() {},
+    renderSessionContext() {},
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: [] };
+      },
+    },
+    chatContainer: { clear() {} },
+    pendingMessagesContainer: { clear() {} },
+    pendingTools: new Map(),
   };
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
