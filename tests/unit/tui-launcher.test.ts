@@ -18,6 +18,11 @@ const cliOptions = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "cli-options.js"))
     .href
 );
+const terminalCleanup = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-tui", "terminal-cleanup.js"),
+  ).href
+);
 
 test("tui launcher resolves interactive startup options", () => {
   assert.deepEqual(launcher.resolveTuiInteractiveOptions([]), {
@@ -78,6 +83,43 @@ test("tui launcher parses pi extension resource options without leaking paths in
     path.join("/repo", "theme.json"),
   ]);
   assert.equal(parsed.resources.extensionFlagValues?.get("plan"), "strict");
+});
+
+test("published rin-tui app entrypoint installs fatal terminal cleanup", async () => {
+  const source = await fs.readFile(
+    path.join(rootDir, "src", "app", "rin-tui", "main.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /installTuiFatalTerminalReset\(\)/);
+  assert.match(source, /restoreTerminalStateForExit\(\)/);
+});
+
+test("tui launcher restores terminal state for fatal exits", () => {
+  const writes: string[] = [];
+  const stdin = {
+    isTTY: true,
+    setRawMode(value: boolean) {
+      writes.push(`raw:${value}`);
+      return this;
+    },
+  };
+  const stdout = {
+    isTTY: true,
+    write(value: string) {
+      writes.push(value);
+      return true;
+    },
+  };
+
+  terminalCleanup.resetTerminalCleanupForTests();
+  terminalCleanup.restoreTerminalStateForExit({ stdin, stdout });
+  terminalCleanup.restoreTerminalStateForExit({ stdin, stdout });
+
+  assert.deepEqual(writes, [
+    "raw:false",
+    "\x1b[?25h\x1b[0m\x1b[?2004l\x1b[?1049l",
+  ]);
 });
 
 test("tui launcher maps init mode to hidden onboarding guidance", () => {
