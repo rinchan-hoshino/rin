@@ -2,8 +2,6 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { spinner } from "@clack/prompts";
-import chalk from "chalk";
 import { safeString } from "../text-utils.js";
 
 import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
@@ -27,13 +25,7 @@ import {
   repoRootFromHere,
   runCommand,
 } from "../rin-install/common.js";
-import { finalizeCoreUpdate } from "../rin-install/finalize.js";
-import { createInstallerI18n } from "../rin-install/i18n.js";
 import { loadInstallRecordFromCandidates } from "../rin-install/install-record.js";
-import {
-  renderInstallerNote,
-  wrapInstallerNoteText,
-} from "../rin-install/interactive.js";
 import {
   defaultInstallDirForHome,
   installRecordCandidatesForHome,
@@ -44,6 +36,7 @@ import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import {
   type ReleaseChannel,
   type ResolvedRelease,
+  getReleasePackageName,
   getReleaseRepoUrl,
   loadReleaseManifestForNetwork,
   resolveReleaseRequest,
@@ -282,77 +275,6 @@ export function requireTool(name: string, paths: string[] = []) {
 
 function runCommandSync(command: string, args: string[], options: any = {}) {
   execFileSync(command, args, { stdio: "inherit", ...options });
-}
-
-function renderUpdateNote(message?: string, title?: string) {
-  return renderInstallerNote(
-    wrapInstallerNoteText(
-      String(message || ""),
-      process.stderr.columns || process.stdout.columns || 80,
-    ),
-    String(title || ""),
-    {
-      border: chalk.gray,
-      body: chalk.dim,
-      symbol: chalk.green,
-      title: chalk.reset,
-    },
-  );
-}
-
-function updateNote(message?: string, title?: string) {
-  process.stdout.write(`${renderUpdateNote(message, title)}\n`);
-}
-
-async function runUpdateProgress<T>(
-  message: string,
-  action: () => T | Promise<T>,
-  options: { successMessage?: string; failureMessage?: string } = {},
-): Promise<T> {
-  if (!process.stderr.isTTY) return await action();
-
-  const progress = spinner();
-  progress.start(message);
-  try {
-    const result = await action();
-    progress.stop(options.successMessage || message);
-    return result;
-  } catch (error) {
-    progress.stop(options.failureMessage || message);
-    throw error;
-  }
-}
-
-function runLoggedUpdateCommandSync(
-  command: string,
-  args: string[],
-  label: string,
-  logFile: string,
-  options: any = {},
-) {
-  if (!process.stderr.isTTY) {
-    runCommandSync(command, args, options);
-    return;
-  }
-
-  const fd = fs.openSync(logFile, "a");
-  try {
-    fs.writeSync(fd, `\n$ ${[command, ...args].join(" ")}\n`);
-    execFileSync(command, args, {
-      ...options,
-      stdio: ["ignore", fd, fd],
-    });
-  } catch (error) {
-    try {
-      const log = fs.readFileSync(logFile, "utf8").trimEnd();
-      const recent = log.split("\n").slice(-80).join("\n");
-      if (recent)
-        process.stderr.write(`\n${label} failed; recent log:\n${recent}\n`);
-    } catch {}
-    throw error;
-  } finally {
-    fs.closeSync(fd);
-  }
 }
 
 function resolveGitCommitForRelease(
@@ -630,7 +552,46 @@ export function resolveParsedArgs(
 
 export async function runUpdate(parsed: ParsedArgs) {
   const installDir = resolveInstallDirForTarget(parsed);
-  const i18n = createInstallerI18n(process.env.RIN_INSTALL_LANGUAGE || "en");
+  const manifest = await loadReleaseManifestForNetwork();
+  const requestedRelease = resolveReleaseRequest(manifest, {
+    channel: parsed.releaseChannel,
+    branch: parsed.releaseBranch,
+    version: parsed.releaseVersion,
+  });
+  const resolvedRelease = resolveGitCommitForRelease(
+    manifest.git?.repoUrl || getReleaseRepoUrl(manifest),
+    requestedRelease,
+  );
+  const npm = requireTool("npm", ["/usr/bin/npm", "/bin/npm"]);
+  const installerEnv = {
+    ...process.env,
+    RIN_INSTALL_MODE: "update",
+    RIN_UPDATE_TARGET_USER: parsed.targetUser,
+    RIN_UPDATE_INSTALL_DIR: installDir,
+    RIN_RELEASE_CHANNEL: resolvedRelease.channel,
+    RIN_RELEASE_VERSION: resolvedRelease.version,
+    RIN_RELEASE_BRANCH: resolvedRelease.branch,
+    RIN_RELEASE_REF: resolvedRelease.ref,
+    RIN_RELEASE_SOURCE_LABEL: resolvedRelease.sourceLabel,
+    RIN_RELEASE_ARCHIVE_URL: resolvedRelease.archiveUrl,
+  };
+
+  if (resolvedRelease.channel === "stable") {
+    const packageName = getReleasePackageName(manifest);
+    runCommandSync(
+      npm,
+      [
+        "exec",
+        "--yes",
+        "--package",
+        `${packageName}@${resolvedRelease.version}`,
+        "--",
+        "rin-install",
+      ],
+      { env: installerEnv },
+    );
+    return;
+  }
 
   const curl =
     process.platform === "win32"
@@ -645,14 +606,12 @@ export async function runUpdate(parsed: ParsedArgs) {
         ? "/usr/bin/wget"
         : "";
   const tar = requireTool("tar", ["/usr/bin/tar", "/bin/tar"]);
-  const npm = requireTool("npm", ["/usr/bin/npm", "/bin/npm"]);
   const workRoot = updateWorkRoot();
   cleanupStaleUpdateWorkDirs(workRoot);
   const tempRoot = fs.mkdtempSync(path.join(workRoot, "work-"));
   const tmpDir = path.join(tempRoot, "tmp");
   const archivePath = path.join(tempRoot, "rin.tar.gz");
   const sourceRoot = path.join(tempRoot, "src");
-  const logFile = path.join(tempRoot, "update.log");
   const buildEnv = {
     ...process.env,
     TMPDIR: tmpDir,
@@ -663,172 +622,43 @@ export async function runUpdate(parsed: ParsedArgs) {
   try {
     fs.mkdirSync(sourceRoot, { recursive: true });
     fs.mkdirSync(tmpDir, { recursive: true });
-    fs.writeFileSync(logFile, "", "utf8");
+    if (curl) {
+      runCommandSync(curl, [
+        "-fsSL",
+        resolvedRelease.archiveUrl,
+        "-o",
+        archivePath,
+      ]);
+    } else if (wget) {
+      runCommandSync(wget, ["-qO", archivePath, resolvedRelease.archiveUrl]);
+    } else {
+      throw new Error("rin_missing_required_tool:curl_or_wget");
+    }
+    runCommandSync(tar, [
+      "-xzf",
+      archivePath,
+      "-C",
+      sourceRoot,
+      "--strip-components=1",
+    ]);
 
-    const manifest = await runUpdateProgress(
-      "Fetching release manifest",
-      () => loadReleaseManifestForNetwork(),
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-    const requestedRelease = resolveReleaseRequest(manifest, {
-      channel: parsed.releaseChannel,
-      branch: parsed.releaseBranch,
-      version: parsed.releaseVersion,
-    });
-    const resolvedRelease = resolveGitCommitForRelease(
-      manifest.git?.repoUrl || getReleaseRepoUrl(manifest),
-      requestedRelease,
-    );
-    const currentUser = detectCurrentUser();
+    if (fs.existsSync(path.join(sourceRoot, "package-lock.json"))) {
+      runCommandSync(npm, ["ci", "--no-fund", "--no-audit"], {
+        cwd: sourceRoot,
+        env: buildEnv,
+      });
+    } else {
+      runCommandSync(npm, ["install", "--no-fund", "--no-audit"], {
+        cwd: sourceRoot,
+        env: buildEnv,
+      });
+    }
+    runCommandSync(npm, ["run", "build"], { cwd: sourceRoot, env: buildEnv });
 
-    updateNote(
-      i18n.buildUpdateTargetText({
-        currentUser,
-        targetUser: parsed.targetUser,
-        installDir,
-        source: parsed.hasSavedInstall ? "launcher metadata" : "default target",
-        ownerHome: os.homedir(),
-      }),
-      i18n.updateTargetsTitle,
-    );
-    updateNote(
-      i18n.buildUpdatePlanText({
-        currentUser,
-        targetUser: parsed.targetUser,
-        installDir,
-        source: parsed.hasSavedInstall ? "launcher metadata" : "default target",
-        ownerHome: os.homedir(),
-        sourceLabel: resolvedRelease.sourceLabel,
-      }),
-      i18n.updatePlanTitle,
-    );
-
-    await runUpdateProgress(
-      "Fetching update source",
-      () => {
-        if (curl) {
-          runLoggedUpdateCommandSync(
-            curl,
-            ["-fsSL", resolvedRelease.archiveUrl, "-o", archivePath],
-            "Fetching update source",
-            logFile,
-          );
-        } else if (wget) {
-          runLoggedUpdateCommandSync(
-            wget,
-            ["-qO", archivePath, resolvedRelease.archiveUrl],
-            "Fetching update source",
-            logFile,
-          );
-        } else {
-          throw new Error("rin_missing_required_tool:curl_or_wget");
-        }
-      },
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-    await runUpdateProgress(
-      "Preparing update source",
-      () =>
-        runLoggedUpdateCommandSync(
-          tar,
-          ["-xzf", archivePath, "-C", sourceRoot, "--strip-components=1"],
-          "Preparing update source",
-          logFile,
-        ),
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-
-    await runUpdateProgress(
-      "Installing update dependencies",
-      () => {
-        if (fs.existsSync(path.join(sourceRoot, "package-lock.json"))) {
-          runLoggedUpdateCommandSync(
-            npm,
-            ["ci", "--no-fund", "--no-audit"],
-            "Installing update dependencies",
-            logFile,
-            { cwd: sourceRoot, env: buildEnv },
-          );
-        } else {
-          runLoggedUpdateCommandSync(
-            npm,
-            ["install", "--no-fund", "--no-audit"],
-            "Installing update dependencies",
-            logFile,
-            { cwd: sourceRoot, env: buildEnv },
-          );
-        }
-      },
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-    await runUpdateProgress(
-      "Building update runtime",
-      () =>
-        runLoggedUpdateCommandSync(
-          npm,
-          ["run", "build"],
-          "Building update runtime",
-          logFile,
-          { cwd: sourceRoot, env: buildEnv },
-        ),
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-
-    const result = await runUpdateProgress(
-      i18n.refreshingInstalledTargetMessage,
-      () =>
-        finalizeCoreUpdate({
-          currentUser,
-          targetUser: parsed.targetUser,
-          installDir,
-          sourceRoot,
-          release: resolvedRelease,
-        }),
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-
-    updateNote(
-      i18n.buildUpdatedTargetText({
-        installDir,
-        writtenPaths: [
-          result.publishedRuntime.currentLink,
-          result.publishedRuntime.releaseRoot,
-          result.installedDocsDir,
-          ...(Array.isArray(result.installedDocs?.pi)
-            ? result.installedDocs.pi
-            : []),
-        ].filter(Boolean) as string[],
-        prunedReleaseCount: result.prunedReleases.removed.length,
-      }),
-      i18n.writtenPathsTitle,
-    );
-    updateNote(
-      i18n.buildAfterUpdateText({
-        serviceHint:
-          "rin update refreshes the core runtime only; launchers and installer files are unchanged.",
-        daemonReady: Boolean(result.daemonReady),
-        userSuffix:
-          currentUser === parsed.targetUser ? "" : ` -u ${parsed.targetUser}`,
-      }),
-      i18n.afterInitTitle,
+    runCommandSync(
+      process.execPath,
+      [path.join(sourceRoot, "dist", "app", "rin-install", "main.js")],
+      { env: installerEnv, cwd: sourceRoot },
     );
   } finally {
     try {

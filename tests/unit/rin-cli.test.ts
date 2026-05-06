@@ -48,16 +48,17 @@ test("version subcommand prints package version without launching Rin", () => {
   assert.equal(parsed.releaseVersion, "1.2.3");
 });
 
-test("rin update output uses installer-style presentation helpers", () => {
+test("rin update delegates final update UI to rin-install update mode", () => {
   const source = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin", "shared.ts"),
     "utf8",
   );
 
-  assert.match(source, /renderInstallerNote/);
-  assert.match(source, /runUpdateProgress/);
-  assert.match(source, /buildUpdatePlanText/);
-  assert.match(source, /buildUpdatedTargetText/);
+  assert.match(source, /RIN_INSTALL_MODE: "update"/);
+  assert.match(source, /RIN_UPDATE_TARGET_USER/);
+  assert.match(source, /RIN_UPDATE_INSTALL_DIR/);
+  assert.match(source, /rin-install/);
+  assert.doesNotMatch(source, /finalizeCoreUpdate/);
   assert.equal(source.includes("rin update:"), false);
 });
 
