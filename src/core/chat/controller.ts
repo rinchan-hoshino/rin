@@ -15,28 +15,19 @@ import { normalizeSessionRef } from "../session/ref.js";
 import {
   chatStatePath,
   findBot,
-  isPrivateChat,
   parseChatKey,
   readJsonFile,
   writeJsonFile,
 } from "./support.js";
 import {
-  CHAT_WORKING_NOTICE_TEXT,
   ChatState,
   SavedAttachment,
   markProcessedChatMessage,
   safeString,
 } from "./chat-helpers.js";
-import {
-  clearWorkingReaction as clearWorkingReactionTick,
-  restorePromptParts,
-  rotateWorkingReaction,
-  sendOutboxPayload,
-  sendTyping,
-} from "./transport.js";
+import { restorePromptParts, sendOutboxPayload } from "./transport.js";
 import { isTransientChatRuntimeError } from "./runtime-errors.js";
 
-const WORKING_REACTION_FRAME_INTERVAL_MS = 4_000;
 const INTERIM_PREFIX = "··· ";
 
 type ChatTurnMeta = {
@@ -73,34 +64,32 @@ function buildActiveVoiceAcknowledgementPrompt(commandName: string) {
   return promptByCommand[commandName] || "";
 }
 
-function hasWorkingTypingCapability(
-  bot: any,
-  parsed: { platform: string; chatId: string },
-) {
-  if (parsed.platform === "onebot") return false;
-  return Boolean(
-    typeof bot?.internal?.sendChatAction === "function" ||
-    typeof bot?.internal?.sendTyping === "function",
-  );
+type WorkingIndicatorKind = "polling" | "marker";
+
+type WorkingIndicator = {
+  type?: string;
+  kind?: string;
+  name?: string;
+  tick?: (context: Record<string, any>) => Promise<unknown> | unknown;
+  end?: (context: Record<string, any>) => Promise<unknown> | unknown;
+  start?: (context: Record<string, any>) => Promise<unknown> | unknown;
+  onTick?: (context: Record<string, any>) => Promise<unknown> | unknown;
+  onEnd?: (context: Record<string, any>) => Promise<unknown> | unknown;
+  onStart?: (context: Record<string, any>) => Promise<unknown> | unknown;
+};
+
+function workingIndicatorKind(indicator: WorkingIndicator) {
+  const kind = safeString(indicator?.type || indicator?.kind).trim();
+  return kind === "polling" || kind === "marker" ? kind : "";
 }
 
-function workingIndicatorMode(bot: any) {
-  const mode = safeString(bot?.workingIndicator?.mode).trim();
-  return ["polling", "marker", "none"].includes(mode) ? mode : "";
-}
-
-function hasWorkingReactionCapability(
-  bot: any,
-  parsed: { platform: string; chatId: string },
-) {
-  if (parsed.platform === "onebot" && isPrivateChat(parsed)) return false;
-  if (parsed.platform === "qq" && !parsed.chatId.startsWith("channel:")) {
-    return false;
-  }
-  return Boolean(
-    typeof bot?.internal?.setMessageReaction === "function" ||
-    typeof bot?.createReaction === "function" ||
-    typeof bot?.internal?.createReaction === "function",
+function normalizeWorkingIndicators(value: unknown): WorkingIndicator[] {
+  const raw = Array.isArray(value) ? value : [];
+  return raw.filter(
+    (indicator): indicator is WorkingIndicator =>
+      indicator &&
+      typeof indicator === "object" &&
+      Boolean(workingIndicatorKind(indicator as WorkingIndicator)),
   );
 }
 
@@ -143,6 +132,8 @@ export class ChatController {
   workingReactionEmoji = "";
   workingReactionTick = 0;
   lastWorkingReactionAt = 0;
+  activeWorkingIndicators: WorkingIndicator[] = [];
+  workingIndicatorTick = 0;
   currentTurn: ChatTurnMeta | null = null;
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatTextDelivery | null = null;
@@ -327,73 +318,96 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
   }
 
-  async clearWorkingReaction() {
-    const messageId = this.currentIncomingMessageId();
-    const emoji = safeString(this.workingReactionEmoji).trim();
-    this.workingReactionEmoji = "";
-    this.workingReactionTick = 0;
-    this.lastWorkingReactionAt = 0;
-    if (!messageId || !emoji) return false;
-    return await clearWorkingReactionTick(
-      this.app,
-      this.chatKey,
-      messageId,
-      emoji,
-    );
-  }
-
-  private getWorkingIndicatorPolicy() {
+  private workingIndicatorContext(extra: Record<string, any> = {}) {
     const parsed = parseChatKey(this.chatKey);
-    if (!parsed) {
-      return { typing: false, reaction: false, marker: false, notice: false };
-    }
-    const bot = findBot(this.app, parsed.platform, parsed.botId);
-    const mode = workingIndicatorMode(bot);
-    if (mode === "none") {
-      return { typing: false, reaction: false, marker: false, notice: false };
-    }
-    const typing = hasWorkingTypingCapability(bot, parsed);
-    const reaction = hasWorkingReactionCapability(bot, parsed);
-    if (mode === "marker") {
-      return {
-        typing: false,
-        reaction: false,
-        marker: reaction,
-        notice: false,
-      };
-    }
     return {
-      typing,
-      reaction,
-      marker: false,
-      notice: false,
+      chatKey: this.chatKey,
+      platform: parsed?.platform || "",
+      botId: parsed?.botId || "",
+      chatId: parsed?.chatId || "",
+      messageId: this.currentIncomingMessageId() || undefined,
+      replyToMessageId: this.currentReplyToMessageId() || undefined,
+      tick: this.workingIndicatorTick,
+      ...extra,
     };
   }
 
-  private shouldRefreshWorkingReaction() {
-    return (
-      !safeString(this.workingReactionEmoji).trim() ||
-      Date.now() - this.lastWorkingReactionAt >=
-        WORKING_REACTION_FRAME_INTERVAL_MS
+  private getWorkingIndicators() {
+    const parsed = parseChatKey(this.chatKey);
+    if (!parsed) return [];
+    const bot = findBot(this.app, parsed.platform, parsed.botId);
+    const context = this.workingIndicatorContext({
+      platform: parsed.platform,
+      botId: parsed.botId,
+      chatId: parsed.chatId,
+    });
+    const value =
+      typeof bot?.getWorkingIndicators === "function"
+        ? bot.getWorkingIndicators(context)
+        : bot?.workingIndicators;
+    return normalizeWorkingIndicators(value);
+  }
+
+  private callWorkingIndicator(
+    indicator: WorkingIndicator,
+    eventName: "start" | "tick" | "end",
+    context: Record<string, any>,
+  ) {
+    const handler =
+      eventName === "start"
+        ? indicator.start || indicator.onStart
+        : eventName === "tick"
+          ? indicator.tick || indicator.onTick
+          : indicator.end || indicator.onEnd;
+    if (typeof handler !== "function") return Promise.resolve(false);
+    return Promise.resolve(handler.call(indicator, context));
+  }
+
+  async clearWorkingReaction() {
+    const indicators = this.activeWorkingIndicators.length
+      ? this.activeWorkingIndicators
+      : this.getWorkingIndicators();
+    this.activeWorkingIndicators = [];
+    this.workingReactionEmoji = "";
+    this.workingReactionTick = 0;
+    this.lastWorkingReactionAt = 0;
+    this.workingIndicatorTick = 0;
+    const context = this.workingIndicatorContext({ event: "end" });
+    const results = await Promise.all(
+      indicators.map((indicator) =>
+        this.callWorkingIndicator(indicator, "end", context).catch(() => false),
+      ),
     );
+    return results.some(Boolean);
+  }
+
+  private getWorkingIndicatorPolicy() {
+    const indicators = this.getWorkingIndicators();
+    return {
+      polling: indicators.some(
+        (indicator) => workingIndicatorKind(indicator) === "polling",
+      ),
+      marker: indicators.some(
+        (indicator) => workingIndicatorKind(indicator) === "marker",
+      ),
+    };
   }
 
   private async startWorkingMarker() {
     if (!this.deliveryEnabled) return false;
-    const policy = this.getWorkingIndicatorPolicy();
-    const messageId = this.currentIncomingMessageId();
-    if (!policy.marker || !messageId || this.workingReactionEmoji) return false;
-    const nextEmoji = await rotateWorkingReaction(
-      this.app,
-      this.chatKey,
-      messageId,
-      0,
-      "",
+    const indicators = this.getWorkingIndicators();
+    this.activeWorkingIndicators = indicators;
+    const context = this.workingIndicatorContext({ event: "start" });
+    const results = await Promise.all(
+      indicators
+        .filter((indicator) => workingIndicatorKind(indicator) === "marker")
+        .map((indicator) =>
+          this.callWorkingIndicator(indicator, "start", context).catch(
+            () => false,
+          ),
+        ),
     );
-    if (!nextEmoji) return false;
-    this.workingReactionEmoji = nextEmoji;
-    this.lastWorkingReactionAt = Date.now();
-    return true;
+    return results.some(Boolean);
   }
 
   private async beginVisibleProcessingTurn(input: {
@@ -410,42 +424,12 @@ export class ChatController {
     ]);
   }
 
-  private async sendWorkingNotice() {
-    if (!this.deliveryEnabled) return false;
-    const currentTurn = this.currentTurn;
-    if (!currentTurn || currentTurn.workingNoticeSent) return false;
-    currentTurn.workingNoticeSent = true;
-    const replyToMessageId = this.currentReplyToMessageId() || undefined;
-    try {
-      await sendOutboxPayload(
-        this.app,
-        this.agentDir,
-        {
-          type: "text_delivery",
-          chatKey: this.chatKey,
-          text: CHAT_WORKING_NOTICE_TEXT,
-          replyToMessageId,
-          createdAt: new Date().toISOString(),
-        },
-        this.h,
-      );
-    } catch (error) {
-      if (this.currentTurn === currentTurn) {
-        currentTurn.workingNoticeSent = false;
-      }
-      throw error;
-    }
-    return true;
-  }
-
   private buildStatusText() {
     const lines = [`Status: ${this.frontendPhase}`, `Chat: ${this.chatKey}`];
     const policy = this.getWorkingIndicatorPolicy();
     const indicators = [
-      policy.typing ? "typing" : "",
-      policy.reaction ? "reaction" : "",
+      policy.polling ? "polling" : "",
       policy.marker ? "marker" : "",
-      policy.notice ? "notice" : "",
     ].filter(Boolean);
     lines.push(`Indicators: ${indicators.join(", ") || "none"}`);
 
@@ -501,34 +485,25 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
       return false;
     }
-    const policy = this.getWorkingIndicatorPolicy();
-    let sent = false;
-    if (policy.typing) {
-      sent = (await sendTyping(this.app, this.chatKey, this.h)) || sent;
-    }
-    const messageId = this.currentIncomingMessageId();
-    if (policy.reaction && messageId && this.shouldRefreshWorkingReaction()) {
-      const previousEmoji = this.workingReactionEmoji;
-      const nextEmoji = await rotateWorkingReaction(
-        this.app,
-        this.chatKey,
-        messageId,
-        this.workingReactionTick,
-        previousEmoji,
-      );
-      if (nextEmoji) {
-        sent = true;
-        this.workingReactionEmoji = nextEmoji;
-        this.lastWorkingReactionAt = Date.now();
-        if (nextEmoji !== previousEmoji) {
-          this.workingReactionTick += 1;
-        }
-      }
-    }
-    if (policy.notice) {
-      sent = (await this.sendWorkingNotice().catch(() => false)) || sent;
-    }
-    return sent;
+    const indicators = this.activeWorkingIndicators.length
+      ? this.activeWorkingIndicators
+      : this.getWorkingIndicators();
+    this.activeWorkingIndicators = indicators;
+    const context = this.workingIndicatorContext({
+      event: "tick",
+      tick: this.workingIndicatorTick,
+    });
+    const results = await Promise.all(
+      indicators
+        .filter((indicator) => workingIndicatorKind(indicator) === "polling")
+        .map((indicator) =>
+          this.callWorkingIndicator(indicator, "tick", context).catch(
+            () => false,
+          ),
+        ),
+    );
+    this.workingIndicatorTick += 1;
+    return results.some(Boolean);
   }
 
   private async runExclusiveTurn<T>(run: () => Promise<T>) {

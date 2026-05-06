@@ -2,6 +2,7 @@ import path from "node:path";
 
 import WebSocket from "ws";
 
+import { getWorkingReactionFrame } from "../chat/transport.js";
 import {
   compactObject,
   createPrefixedLogger,
@@ -31,6 +32,76 @@ const SLACK_REACTION_NAMES: Record<string, string> = {
   "🤔": "thinking_face",
   "🔥": "fire",
 };
+
+function createPollingWorkingIndicator(platform: string, getBot: () => any) {
+  const reactions = new Map<string, string>();
+  return {
+    type: "polling",
+    async tick(context: any) {
+      const bot = getBot();
+      const chatId = safeString(context?.chatId).trim();
+      if (!chatId) return false;
+      let sent = false;
+      if (typeof bot?.internal?.sendChatAction === "function") {
+        await bot.internal.sendChatAction({
+          chat_id: chatId,
+          action: "typing",
+        });
+        sent = true;
+      } else if (typeof bot?.internal?.sendTyping === "function") {
+        await bot.internal.sendTyping(chatId);
+        sent = true;
+      }
+      const messageId = safeString(context?.messageId).trim();
+      const createReaction =
+        typeof bot?.createReaction === "function"
+          ? bot.createReaction.bind(bot)
+          : typeof bot?.internal?.createReaction === "function"
+            ? bot.internal.createReaction.bind(bot.internal)
+            : null;
+      if (messageId && createReaction) {
+        const key = `${chatId}:${messageId}`;
+        const previousEmoji = reactions.get(key) || "";
+        const nextEmoji = getWorkingReactionFrame(
+          platform,
+          Number(context?.tick || 0),
+        );
+        if (nextEmoji && previousEmoji !== nextEmoji) {
+          await createReaction(chatId, messageId, nextEmoji);
+          reactions.set(key, nextEmoji);
+          sent = true;
+        }
+      }
+      return sent;
+    },
+    async end(context: any) {
+      const bot = getBot();
+      const chatId = safeString(context?.chatId).trim();
+      const messageId = safeString(context?.messageId).trim();
+      if (!chatId || !messageId) return false;
+      const key = `${chatId}:${messageId}`;
+      const emoji = reactions.get(key) || "";
+      reactions.delete(key);
+      if (!emoji) return false;
+      const deleteReaction =
+        typeof bot?.deleteReaction === "function"
+          ? bot.deleteReaction.bind(bot)
+          : typeof bot?.internal?.deleteOwnReaction === "function"
+            ? bot.internal.deleteOwnReaction.bind(bot.internal)
+            : typeof bot?.internal?.deleteReaction === "function"
+              ? bot.internal.deleteReaction.bind(bot.internal)
+              : null;
+      if (!deleteReaction) return false;
+      await deleteReaction(
+        chatId,
+        messageId,
+        emoji,
+        safeString(bot?.selfId).trim() || undefined,
+      );
+      return true;
+    },
+  };
+}
 
 const LARK_REACTION_TYPES: Record<string, string> = {
   "🤔": "THINKING",
@@ -140,6 +211,9 @@ export class DiscordAdapter {
       platform: "discord",
       selfId: "",
       status: 0,
+      workingIndicators: [
+        createPollingWorkingIndicator("discord", () => this.bot),
+      ],
       user: {},
       internal,
       sendMessage: async (chatId: string, content: any) =>
@@ -434,6 +508,9 @@ export class SlackAdapter {
       platform: "slack",
       selfId: "",
       status: 0,
+      workingIndicators: [
+        createPollingWorkingIndicator("slack", () => this.bot),
+      ],
       user: {},
       internal,
       sendMessage: async (chatId: string, content: any) =>
@@ -786,6 +863,7 @@ export class QQAdapter {
       platform: "qq",
       selfId: "",
       status: 0,
+      workingIndicators: [createPollingWorkingIndicator("qq", () => this.bot)],
       user: {},
       internal,
       sendMessage: async (chatId: string, content: any) =>
@@ -1119,6 +1197,9 @@ export class LarkAdapter {
       platform: "lark",
       selfId: "",
       status: 0,
+      workingIndicators: [
+        createPollingWorkingIndicator("lark", () => this.bot),
+      ],
       user: {},
       internal,
       sendMessage: async (chatId: string, content: any) =>
@@ -1395,6 +1476,9 @@ export class MinecraftAdapter {
       platform: "minecraft",
       selfId: safeString(config?.selfId).trim() || "minecraft",
       status: 0,
+      workingIndicators: [
+        createPollingWorkingIndicator("minecraft", () => this.bot),
+      ],
       user: {},
       internal,
       sendMessage: async (chatId: string, content: any) =>

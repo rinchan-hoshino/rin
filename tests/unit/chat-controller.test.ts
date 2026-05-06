@@ -59,6 +59,46 @@ async function createController(chatKey = "telegram/1:2") {
   return controller;
 }
 
+function testPollingIndicator(actions = [], reactions = [], selfId = "1") {
+  let emoji = "";
+  return {
+    type: "polling",
+    async tick({ chatId, messageId, tick }) {
+      actions.push({ chat_id: chatId, action: "typing" });
+      if (messageId) {
+        emoji = Number(tick || 0) % 2 ? "🔥" : "🤔";
+        reactions.push(["create", chatId, messageId, emoji]);
+      }
+      return true;
+    },
+    async end({ chatId, messageId }) {
+      if (!messageId || !emoji) return false;
+      reactions.push(["delete", chatId, messageId, emoji, selfId]);
+      emoji = "";
+      return true;
+    },
+  };
+}
+
+function testReactionPollingIndicator(reactions = [], selfId = "1") {
+  let emoji = "";
+  return {
+    type: "polling",
+    async tick({ chatId, messageId, tick }) {
+      if (!messageId) return false;
+      emoji = Number(tick || 0) % 2 ? "🔥" : "🤔";
+      reactions.push(["create", chatId, messageId, emoji]);
+      return true;
+    },
+    async end({ chatId, messageId }) {
+      if (!messageId || !emoji) return false;
+      reactions.push(["delete", chatId, messageId, emoji, selfId]);
+      emoji = "";
+      return true;
+    },
+  };
+}
+
 function emitRpcTurnComplete(controller, options, finalText, result) {
   controller.handleClientEvent({
     type: "ui",
@@ -554,6 +594,7 @@ test("chat controller starts working indicators for chat commands", async () => 
         {
           platform: "telegram",
           selfId: "1",
+          workingIndicators: [testPollingIndicator(actions, reactions)],
           async createReaction(chatId, messageId, emoji) {
             reactions.push(["create", chatId, messageId, emoji]);
           },
@@ -645,6 +686,7 @@ test("chat controller moves working indicators to the steering message", async (
       {
         platform: "telegram",
         selfId: "1",
+        workingIndicators: [testPollingIndicator(actions, reactions)],
         async createReaction(chatId, messageId, emoji) {
           reactions.push(["create", chatId, messageId, emoji]);
         },
@@ -863,6 +905,7 @@ test("chat controller polls typing and rotating reactions while a turn is active
       {
         platform: "telegram",
         selfId: "1",
+        workingIndicators: [testPollingIndicator(actions, reactions)],
         async createReaction(chatId, messageId, emoji) {
           reactions.push(["create", chatId, messageId, emoji]);
         },
@@ -895,7 +938,10 @@ test("chat controller polls typing and rotating reactions while a turn is active
     { chat_id: "2", action: "typing" },
     { chat_id: "2", action: "typing" },
   ]);
-  assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
+  assert.deepEqual(reactions, [
+    ["create", "2", "m1", "🤔"],
+    ["create", "2", "m1", "🔥"],
+  ]);
 });
 
 test("chat controller uses adapter reaction capability for lark working indicators", async () => {
@@ -907,6 +953,7 @@ test("chat controller uses adapter reaction capability for lark working indicato
       {
         platform: "lark",
         selfId: "bot-1",
+        workingIndicators: [testReactionPollingIndicator(reactions, "bot-1")],
         async createReaction(chatId, messageId, emoji) {
           reactions.push(["create", chatId, messageId, emoji]);
         },
@@ -940,6 +987,16 @@ test("chat controller uses discord typing and reaction capabilities together", a
       {
         platform: "discord",
         selfId: "bot-1",
+        workingIndicators: [
+          {
+            type: "polling",
+            async tick({ chatId, messageId }) {
+              actions.push(["typing", chatId]);
+              reactions.push(["create", chatId, messageId, "🤔"]);
+              return true;
+            },
+          },
+        ],
         internal: {
           async sendTyping(chatId) {
             actions.push(["typing", chatId]);
@@ -1643,6 +1700,7 @@ test("chat controller does not keep typing from stale currentTurn metadata alone
       {
         platform: "telegram",
         selfId: "1",
+        workingIndicators: [testPollingIndicator(actions, reactions)],
         async createReaction(chatId, messageId, emoji) {
           reactions.push(["create", chatId, messageId, emoji]);
         },
@@ -1676,6 +1734,7 @@ test("chat controller clears the working reaction before dropping processing sta
       {
         platform: "telegram",
         selfId: "1",
+        workingIndicators: [testReactionPollingIndicator(reactions)],
         async deleteReaction(chatId, messageId, emoji, userId) {
           reactions.push(["delete", chatId, messageId, emoji, userId]);
         },
@@ -1690,6 +1749,15 @@ test("chat controller clears the working reaction before dropping processing sta
     incomingMessageId: "m-finished",
     workingNoticeSent: false,
   };
+  controller.activeWorkingIndicators = [
+    {
+      type: "polling",
+      async end({ chatId, messageId }) {
+        reactions.push(["delete", chatId, messageId, "🤔", "1"]);
+        return true;
+      },
+    },
+  ];
   controller.workingReactionEmoji = "🤔";
   controller.workingReactionTick = 1;
   controller.lastWorkingReactionAt = Date.now();

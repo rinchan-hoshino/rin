@@ -4,6 +4,7 @@ import path from "node:path";
 
 import WebSocket from "ws";
 
+import { getWorkingReactionFrame } from "../chat/transport.js";
 import { enqueueChatInboxItem } from "../chat/inbox.js";
 import { getChatId, pickMessageId } from "../chat/chat-helpers.js";
 import {
@@ -202,6 +203,7 @@ class TelegramAdapter {
   private running = false;
   private pollPromise: Promise<void> | null = null;
   private nextOffset = 0;
+  private readonly workingReactions = new Map<string, string>();
   readonly bot: any;
 
   constructor(
@@ -234,6 +236,14 @@ class TelegramAdapter {
       username: "",
       name: "",
       user: {},
+      workingIndicators: [
+        {
+          type: "polling",
+          tick: async (context: any) =>
+            await this.tickWorkingIndicator(context),
+          end: async (context: any) => await this.endWorkingIndicator(context),
+        },
+      ],
       internal: new Proxy(
         {
           callApi: (method: string, payload?: any) =>
@@ -786,6 +796,36 @@ class TelegramAdapter {
     return delivered;
   }
 
+  async tickWorkingIndicator(context: any) {
+    const chatId = safeString(context?.chatId).trim();
+    if (!chatId) return false;
+    await this.callApi("sendChatAction", { chat_id: chatId, action: "typing" });
+    const messageId = safeString(context?.messageId).trim();
+    if (!messageId) return true;
+    const key = `${chatId}:${messageId}`;
+    const previousEmoji = this.workingReactions.get(key) || "";
+    const nextEmoji = getWorkingReactionFrame(
+      "telegram",
+      Number(context?.tick || 0),
+    );
+    if (!nextEmoji || previousEmoji === nextEmoji) return true;
+    await this.createReaction(chatId, messageId, nextEmoji);
+    this.workingReactions.set(key, nextEmoji);
+    return true;
+  }
+
+  async endWorkingIndicator(context: any) {
+    const chatId = safeString(context?.chatId).trim();
+    const messageId = safeString(context?.messageId).trim();
+    if (!chatId || !messageId) return false;
+    const key = `${chatId}:${messageId}`;
+    const emoji = this.workingReactions.get(key) || "";
+    this.workingReactions.delete(key);
+    if (!emoji) return false;
+    await this.deleteReaction(chatId, messageId, emoji);
+    return true;
+  }
+
   async createReaction(chatId: string, messageId: string, emoji: string) {
     await this.callApi("setMessageReaction", {
       chat_id: chatId,
@@ -905,6 +945,7 @@ class OneBotAdapter {
   private loopPromise: Promise<void> | null = null;
   private stopped = false;
   private nextEchoId = 1;
+  private readonly workingReactions = new Map<string, string>();
   private readonly pending = new Map<
     string,
     {
@@ -930,6 +971,8 @@ class OneBotAdapter {
       platform: "onebot",
       selfId: safeString(config?.selfId).trim(),
       status: 0,
+      getWorkingIndicators: (context: any) =>
+        this.getWorkingIndicators(context),
       internal: new Proxy(
         {
           callAction: (action: string, params?: any) =>
@@ -1303,6 +1346,72 @@ class OneBotAdapter {
     const messageId = safeString(data?.message_id || data).trim();
     if (!messageId) throw new Error("onebot_send_message_empty_result");
     return [messageId];
+  }
+
+  getWorkingIndicators(context: any) {
+    const chatId = safeString(context?.chatId).trim();
+    return [
+      {
+        type: "polling",
+        tick: async (tickContext: any) =>
+          chatId.startsWith("private:")
+            ? await this.tickPrivateWorkingNotice(tickContext)
+            : await this.tickGroupWorkingReaction(tickContext),
+        end: async (endContext: any) =>
+          chatId.startsWith("private:")
+            ? false
+            : await this.endGroupWorkingReaction(endContext),
+      },
+    ];
+  }
+
+  async tickPrivateWorkingNotice(context: any) {
+    if (Number(context?.tick || 0) !== 0) return false;
+    const chatId = safeString(context?.chatId).trim();
+    if (!chatId.startsWith("private:")) return false;
+    const targetId = Number(chatId.replace(/^private:/, "").trim());
+    if (!Number.isFinite(targetId) || targetId <= 0) return false;
+    const replyToMessageId = safeString(
+      context?.replyToMessageId || context?.messageId,
+    ).trim();
+    const reply = replyToMessageId
+      ? `[CQ:reply,id=${escapeOneBotText(replyToMessageId)}]`
+      : "";
+    await this.callAction("send_private_msg", {
+      user_id: targetId,
+      message: `${reply}${escapeOneBotText("Working...")}`,
+      auto_escape: false,
+    });
+    return true;
+  }
+
+  async tickGroupWorkingReaction(context: any) {
+    const chatId = safeString(context?.chatId).trim();
+    const messageId = safeString(context?.messageId).trim();
+    if (!isOneBotGroupChatId(chatId) || !messageId) return false;
+    const key = `${chatId}:${messageId}`;
+    const previousEmoji = this.workingReactions.get(key) || "";
+    const nextEmoji = getWorkingReactionFrame(
+      "onebot",
+      Number(context?.tick || 0),
+    );
+    if (!nextEmoji || previousEmoji === nextEmoji) return true;
+    if (previousEmoji)
+      await this.deleteReaction(chatId, messageId, previousEmoji);
+    await this.createReaction(chatId, messageId, nextEmoji);
+    this.workingReactions.set(key, nextEmoji);
+    return true;
+  }
+
+  async endGroupWorkingReaction(context: any) {
+    const chatId = safeString(context?.chatId).trim();
+    const messageId = safeString(context?.messageId).trim();
+    const key = `${chatId}:${messageId}`;
+    const emoji = this.workingReactions.get(key) || "";
+    this.workingReactions.delete(key);
+    if (!isOneBotGroupChatId(chatId) || !messageId || !emoji) return false;
+    await this.deleteReaction(chatId, messageId, emoji);
+    return true;
   }
 
   async createReaction(chatId: string, messageId: string, emoji: string) {
