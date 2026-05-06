@@ -1471,7 +1471,7 @@ test("chat controller does not emit growing final-answer prefixes as interim rep
   ]);
 });
 
-test("chat controller uses a fixed Working notice policy for onebot private chats", async () => {
+test("chat controller uses no implicit Working notice for onebot private chats", async () => {
   const controller = await createController("onebot/1:private:2");
   const deliveries = [];
   controller.sendWorkingNotice = async function () {
@@ -1492,12 +1492,10 @@ test("chat controller uses a fixed Working notice policy for onebot private chat
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
 
-  assert.equal(await controller.pollTyping(), true);
   assert.equal(await controller.pollTyping(), false);
-  assert.equal(controller.currentTurn.workingNoticeSent, true);
-  assert.deepEqual(deliveries, [
-    { replyToMessageId: "m1", text: "Working..." },
-  ]);
+  assert.equal(await controller.pollTyping(), false);
+  assert.equal(controller.currentTurn.workingNoticeSent, false);
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller treats a stale working frontend phase as a new onebot private prompt", async () => {
@@ -1550,20 +1548,15 @@ test("chat controller treats a stale working frontend phase as a new onebot priv
 
   assert.equal(result.finalText, "ok");
   assert.deepEqual(promptCalls, [{ streamingBehavior: undefined }]);
-  assert.equal(deliveries.length, 2);
+  assert.equal(deliveries.length, 1);
   assert.equal(deliveries[0].chatId, "private:2");
   assert.deepEqual(deliveries[0].content, [
-    { type: "quote", attrs: { id: "m-new-onebot" } },
-    { type: "text", attrs: { content: "Working..." } },
-  ]);
-  assert.equal(deliveries[1].chatId, "private:2");
-  assert.deepEqual(deliveries[1].content, [
     { type: "quote", attrs: { id: "m-new-onebot" } },
     { type: "text", attrs: { content: "ok" } },
   ]);
 });
 
-test("chat controller sends only one onebot Working notice when polls overlap", async () => {
+test("chat controller sends no onebot Working notice when polls overlap", async () => {
   const controller = await createController("onebot/1:private:2");
   const deliveries = [];
   let releaseDelivery;
@@ -1595,13 +1588,13 @@ test("chat controller sends only one onebot Working notice when polls overlap", 
   const secondPoll = controller.pollTyping();
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries.length, 0);
   releaseDelivery();
-  assert.deepEqual(await Promise.all([firstPoll, secondPoll]), [true, false]);
-  assert.equal(controller.currentTurn.workingNoticeSent, true);
+  assert.deepEqual(await Promise.all([firstPoll, secondPoll]), [false, false]);
+  assert.equal(controller.currentTurn.workingNoticeSent, false);
 });
 
-test("chat controller uses a Working notice for onebot private chats despite dynamic internal actions", async () => {
+test("chat controller ignores dynamic onebot private working actions without explicit marker", async () => {
   const controller = await createController("onebot/1:private:2");
   const deliveries = [];
   const internalActions = [];
@@ -1636,17 +1629,9 @@ test("chat controller uses a Working notice for onebot private chats despite dyn
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
 
-  assert.equal(await controller.pollTyping(), true);
+  assert.equal(await controller.pollTyping(), false);
   assert.deepEqual(internalActions, []);
-  assert.deepEqual(deliveries, [
-    {
-      chatId: "private:2",
-      content: [
-        { type: "quote", attrs: { id: "m-private" } },
-        { type: "text", attrs: { content: "Working..." } },
-      ],
-    },
-  ]);
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller does not keep typing from stale currentTurn metadata alone", async () => {
@@ -2241,7 +2226,7 @@ test("chat controller queues follow-up after an assistant reply is committed", a
   ]);
   assert.deepEqual(
     deliveries.map((delivery) => delivery.content?.[1]?.attrs?.content),
-    ["Working...", "first answer", "Working...", "second answer"],
+    ["first answer", "second answer"],
   );
 });
 

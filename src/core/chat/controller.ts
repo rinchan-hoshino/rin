@@ -36,7 +36,7 @@ import {
 } from "./transport.js";
 import { isTransientChatRuntimeError } from "./runtime-errors.js";
 
-const WORKING_REACTION_FRAME_INTERVAL_MS = 30_000;
+const WORKING_REACTION_FRAME_INTERVAL_MS = 4_000;
 const INTERIM_PREFIX = "··· ";
 
 type ChatTurnMeta = {
@@ -82,6 +82,11 @@ function hasWorkingTypingCapability(
     typeof bot?.internal?.sendChatAction === "function" ||
     typeof bot?.internal?.sendTyping === "function",
   );
+}
+
+function workingIndicatorMode(bot: any) {
+  const mode = safeString(bot?.workingIndicator?.mode).trim();
+  return ["polling", "marker", "none"].includes(mode) ? mode : "";
 }
 
 function hasWorkingReactionCapability(
@@ -340,15 +345,28 @@ export class ChatController {
   private getWorkingIndicatorPolicy() {
     const parsed = parseChatKey(this.chatKey);
     if (!parsed) {
-      return { typing: false, reaction: false, notice: false };
+      return { typing: false, reaction: false, marker: false, notice: false };
     }
     const bot = findBot(this.app, parsed.platform, parsed.botId);
+    const mode = workingIndicatorMode(bot);
+    if (mode === "none") {
+      return { typing: false, reaction: false, marker: false, notice: false };
+    }
     const typing = hasWorkingTypingCapability(bot, parsed);
     const reaction = hasWorkingReactionCapability(bot, parsed);
+    if (mode === "marker") {
+      return {
+        typing: false,
+        reaction: false,
+        marker: reaction,
+        notice: false,
+      };
+    }
     return {
       typing,
       reaction,
-      notice: !typing && !reaction,
+      marker: false,
+      notice: false,
     };
   }
 
@@ -360,14 +378,36 @@ export class ChatController {
     );
   }
 
+  private async startWorkingMarker() {
+    if (!this.deliveryEnabled) return false;
+    const policy = this.getWorkingIndicatorPolicy();
+    const messageId = this.currentIncomingMessageId();
+    if (!policy.marker || !messageId || this.workingReactionEmoji) return false;
+    const nextEmoji = await rotateWorkingReaction(
+      this.app,
+      this.chatKey,
+      messageId,
+      0,
+      "",
+    );
+    if (!nextEmoji) return false;
+    this.workingReactionEmoji = nextEmoji;
+    this.lastWorkingReactionAt = Date.now();
+    return true;
+  }
+
   private async beginVisibleProcessingTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
   }) {
     this.setCurrentTurn(input);
     this.awaitingTurnSettle = true;
+    const marker = this.startWorkingMarker().catch(() => false);
     const poll = this.pollTyping().catch(() => false);
-    await Promise.race([poll, new Promise((resolve) => setImmediate(resolve))]);
+    await Promise.race([
+      Promise.all([marker, poll]),
+      new Promise((resolve) => setImmediate(resolve)),
+    ]);
   }
 
   private async sendWorkingNotice() {
@@ -404,6 +444,7 @@ export class ChatController {
     const indicators = [
       policy.typing ? "typing" : "",
       policy.reaction ? "reaction" : "",
+      policy.marker ? "marker" : "",
       policy.notice ? "notice" : "",
     ].filter(Boolean);
     lines.push(`Indicators: ${indicators.join(", ") || "none"}`);
