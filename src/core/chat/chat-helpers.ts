@@ -47,6 +47,7 @@ export type ChatState = {
 };
 
 export const CHAT_WORKING_NOTICE_TEXT = "Working...";
+const CHAT_ASSISTANT_INTERIM_PREFIX = "··· ";
 
 export type ChatPromptRestoreInput = {
   text: string;
@@ -256,16 +257,52 @@ function isSubstantiveAssistantChatText(text: unknown) {
   return Boolean(value && value !== CHAT_WORKING_NOTICE_TEXT);
 }
 
+function isAssistantInterimChatText(text: unknown) {
+  return safeString(text).trim().startsWith(CHAT_ASSISTANT_INTERIM_PREFIX);
+}
+
+function hasDeliveredAssistantReplyForMessageMatching(
+  agentDir: string,
+  chatKey: string,
+  messageId: string,
+  options: { includeInterim: boolean },
+) {
+  return listChatMessagesByReplyTo(agentDir, chatKey, messageId).some(
+    (item) => {
+      if (item.role !== "assistant") return false;
+      const text = item.text || item.rawContent;
+      if (!isSubstantiveAssistantChatText(text)) return false;
+      if (!options.includeInterim && isAssistantInterimChatText(text)) {
+        return false;
+      }
+      return Boolean(safeString(item.processedAt).trim());
+    },
+  );
+}
+
 export function hasDeliveredAssistantReplyForMessage(
   agentDir: string,
   chatKey: string,
   messageId: string,
 ) {
-  return listChatMessagesByReplyTo(agentDir, chatKey, messageId).some(
-    (item) =>
-      item.role === "assistant" &&
-      isSubstantiveAssistantChatText(item.text || item.rawContent) &&
-      Boolean(safeString(item.processedAt).trim()),
+  return hasDeliveredAssistantReplyForMessageMatching(
+    agentDir,
+    chatKey,
+    messageId,
+    { includeInterim: true },
+  );
+}
+
+export function hasDeliveredFinalAssistantReplyForMessage(
+  agentDir: string,
+  chatKey: string,
+  messageId: string,
+) {
+  return hasDeliveredAssistantReplyForMessageMatching(
+    agentDir,
+    chatKey,
+    messageId,
+    { includeInterim: false },
   );
 }
 

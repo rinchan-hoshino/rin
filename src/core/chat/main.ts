@@ -42,6 +42,7 @@ import {
   pickUserId,
   prependQuoteTextToPromptBody,
   safeString,
+  hasDeliveredFinalAssistantReplyForMessage,
   hasInboundChatMessageReplyBoundary,
   isReplyToLatestAssistantMessage,
 } from "./chat-helpers.js";
@@ -595,7 +596,7 @@ export async function startChatBridge(
       if (
         !transientFailure &&
         messageId &&
-        !hasInboundChatMessageReplyBoundary(
+        !hasDeliveredFinalAssistantReplyForMessage(
           runtime.agentDir,
           decision.chatKey,
           messageId,

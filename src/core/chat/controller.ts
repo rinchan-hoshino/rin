@@ -770,7 +770,7 @@ export class ChatController {
         },
         this.h,
       );
-      this.markProcessedMessage(incomingMessageId, false);
+      this.markAcceptedMessage(incomingMessageId);
       return true;
     } catch {
       return false;

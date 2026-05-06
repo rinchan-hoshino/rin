@@ -1344,7 +1344,8 @@ test("chat controller treats delivered interim assistant text as an inbound repl
     "m-interim-boundary",
   );
   const assistant = getChatMessage(controller.agentDir, chatKey, "assistant-1");
-  assert.ok(inbound?.processedAt);
+  assert.ok(inbound?.acceptedAt);
+  assert.equal(inbound?.processedAt, undefined);
   assert.equal(inbound?.sessionFile, "interim-boundary-chat.jsonl");
   assert.equal(assistant?.role, "assistant");
   assert.equal(assistant?.replyToMessageId, "m-interim-boundary");

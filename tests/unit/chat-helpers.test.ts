@@ -17,6 +17,10 @@ const helpers = await import(
 const textUtils = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "text-utils.js")).href
 );
+const messageStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
+    .href
+);
 
 async function withTempDir(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-test-"));
@@ -190,6 +194,65 @@ test("chat chat helpers synthesize text elements only when upstream omitted elem
     }),
     [{ type: "text", attrs: { content: "check /tmp/demo.log" } }],
   );
+});
+
+test("chat chat helpers distinguish interim replies from final replies", async () => {
+  await withTempDir(async (agentDir) => {
+    const chatKey = "telegram/1:2";
+    const base = {
+      chatKey,
+      platform: "telegram",
+      botId: "1",
+      chatId: "2",
+      chatType: "private",
+      receivedAt: new Date().toISOString(),
+    };
+    messageStore.saveChatMessage(agentDir, {
+      ...base,
+      messageId: "m-user",
+      role: "user",
+      text: "please check",
+    });
+    messageStore.saveChatMessage(agentDir, {
+      ...base,
+      messageId: "m-interim",
+      role: "assistant",
+      replyToMessageId: "m-user",
+      text: "··· I will check",
+      processedAt: new Date().toISOString(),
+    });
+
+    assert.equal(
+      helpers.hasDeliveredAssistantReplyForMessage(agentDir, chatKey, "m-user"),
+      true,
+    );
+    assert.equal(
+      helpers.hasDeliveredFinalAssistantReplyForMessage(
+        agentDir,
+        chatKey,
+        "m-user",
+      ),
+      false,
+    );
+
+    messageStore.saveChatMessage(agentDir, {
+      ...base,
+      messageId: "m-final",
+      role: "assistant",
+      replyToMessageId: "m-user",
+      text: "Done",
+      processedAt: new Date().toISOString(),
+    });
+
+    assert.equal(
+      helpers.hasDeliveredFinalAssistantReplyForMessage(
+        agentDir,
+        chatKey,
+        "m-user",
+      ),
+      true,
+    );
+  });
 });
 
 test("chat chat helpers persist outbound image parts", async () => {
