@@ -330,6 +330,67 @@ test("runBuiltinCommand lists available models before selection", async () => {
   assert.equal(empty.text, "No models available.");
 });
 
+test("runBuiltinCommand handles OAuth login and logout slash commands", async () => {
+  const calls = [];
+  const runtime = {
+    session: {
+      modelRegistry: {
+        refresh: () => calls.push(["refresh"]),
+        authStorage: {
+          getOAuthProviders: () => [
+            { id: "openai", name: "OpenAI" },
+            { id: "anthropic", name: "Anthropic" },
+          ],
+          get: (providerId) =>
+            providerId === "openai" ? { type: "oauth" } : undefined,
+          login: async (providerId, callbacks) => {
+            calls.push(["login", providerId]);
+            callbacks.onAuth?.({ url: "https://example.com/login" });
+            callbacks.onProgress?.("Waiting for login...");
+          },
+          logout: (providerId) => calls.push(["logout", providerId]),
+        },
+      },
+    },
+  };
+
+  const listed = await workerHelpers.runBuiltinCommand(runtime, "/login", {
+    SessionManager: { list: async () => [] },
+  });
+  assert.match(String(listed.text || ""), /OAuth providers:/);
+  assert.match(String(listed.text || ""), /openai — OpenAI \(oauth\)/);
+  assert.match(String(listed.text || ""), /Usage: \/login <provider>/);
+
+  const loggedIn = await workerHelpers.runBuiltinCommand(
+    runtime,
+    "/login openai",
+    { SessionManager: { list: async () => [] } },
+  );
+  assert.match(String(loggedIn.text || ""), /https:\/\/example\.com\/login/);
+  assert.match(String(loggedIn.text || ""), /Login complete: openai/);
+
+  const loggedOut = await workerHelpers.runBuiltinCommand(
+    runtime,
+    "/logout openai",
+    { SessionManager: { list: async () => [] } },
+  );
+  assert.equal(loggedOut.text, "Logged out: openai");
+
+  const missing = await workerHelpers.runBuiltinCommand(
+    runtime,
+    "/login missing",
+    { SessionManager: { list: async () => [] } },
+  );
+  assert.equal(missing.text, "OAuth provider not found: missing");
+
+  assert.deepEqual(calls, [
+    ["login", "openai"],
+    ["refresh"],
+    ["logout", "openai"],
+    ["refresh"],
+  ]);
+});
+
 test("runBuiltinCommand uses runtime for session replacement commands", async () => {
   const calls = [];
   const runtime = {

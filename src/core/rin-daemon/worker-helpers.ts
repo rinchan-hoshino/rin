@@ -314,6 +314,38 @@ function formatModelList(models: any[]) {
   );
 }
 
+function getOAuthProviders(session: any) {
+  const providers = session?.modelRegistry?.authStorage?.getOAuthProviders?.();
+  return Array.isArray(providers) ? providers : [];
+}
+
+function formatOAuthProvider(provider: any, authStorage: any) {
+  const id = String(provider?.id || "").trim();
+  const name = String(provider?.name || id).trim();
+  const credential = authStorage?.get?.(id);
+  const suffix = credential?.type ? ` (${credential.type})` : "";
+  return name && name !== id ? `${id} — ${name}${suffix}` : `${id}${suffix}`;
+}
+
+function formatOAuthProviderList(session: any) {
+  const authStorage = session?.modelRegistry?.authStorage;
+  return formatSectionList(
+    "OAuth providers:",
+    getOAuthProviders(session)
+      .slice(0, 50)
+      .map((provider) => formatOAuthProvider(provider, authStorage))
+      .filter(Boolean),
+    "No OAuth providers available.",
+  );
+}
+
+function findOAuthProvider(session: any, targetId: string) {
+  const nextTargetId = String(targetId || "").trim();
+  return getOAuthProviders(session).find(
+    (provider: any) => String(provider?.id || "").trim() === nextTargetId,
+  );
+}
+
 export function formatSessionStats(stats: any) {
   return [
     formatLabelValueLine("Session ID", String(stats?.sessionId || "")),
@@ -418,6 +450,50 @@ export async function runBuiltinCommand(
       return handledText(
         `Model set to: ${formatModelRef(match)}${thinkingLevel ? ` (${thinkingLevel})` : ""}`,
       );
+    }
+    case "login": {
+      const [providerId = ""] = args;
+      const nextProviderId = String(providerId || "").trim();
+      if (!nextProviderId) {
+        return handledText(
+          `${formatOAuthProviderList(session)}\nUsage: /login <provider>`,
+        );
+      }
+      if (!findOAuthProvider(session, nextProviderId)) {
+        return handledText(`OAuth provider not found: ${nextProviderId}`);
+      }
+      const messages: string[] = [];
+      await session.modelRegistry.authStorage.login(nextProviderId, {
+        onAuth: (info: any) => {
+          const url = String(info?.url || "").trim();
+          if (url) messages.push(`Open this URL to continue login:\n${url}`);
+          const instructions = String(info?.instructions || "").trim();
+          if (instructions) messages.push(instructions);
+        },
+        onProgress: (message: string) => {
+          const text = String(message || "").trim();
+          if (text) messages.push(text);
+        },
+      });
+      session.modelRegistry.refresh?.();
+      return handledText(
+        [...messages, `Login complete: ${nextProviderId}`].join("\n"),
+      );
+    }
+    case "logout": {
+      const [providerId = ""] = args;
+      const nextProviderId = String(providerId || "").trim();
+      if (!nextProviderId) {
+        return handledText(
+          `${formatOAuthProviderList(session)}\nUsage: /logout <provider>`,
+        );
+      }
+      if (!findOAuthProvider(session, nextProviderId)) {
+        return handledText(`OAuth provider not found: ${nextProviderId}`);
+      }
+      session.modelRegistry.authStorage.logout(nextProviderId);
+      session.modelRegistry.refresh?.();
+      return handledText(`Logged out: ${nextProviderId}`);
     }
     default:
       return { handled: false };
