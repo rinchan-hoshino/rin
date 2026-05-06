@@ -23,6 +23,7 @@ import {
   normalizeNode,
   prepareOutboundNodes,
   readBinaryFromNode,
+  renderMarkdownFromNodes,
   renderPlainTextFromNodes,
   renderTelegramHtmlFromNodes,
   safeString,
@@ -97,6 +98,112 @@ function parseOneBotReplyQuote(data: Record<string, any>) {
     safeString(data?.id || data?.message_id || "").trim() || undefined;
   if (!messageId) return undefined;
   return { messageId };
+}
+
+function pickOneBotForwardId(data: Record<string, any>) {
+  return safeString(data?.id || data?.resid || data?.file || "").trim();
+}
+
+function oneBotForwardNodeAuthor(data: Record<string, any>) {
+  const userId = safeString(
+    data?.user_id || data?.uin || data?.qq || "",
+  ).trim();
+  const nickname = safeString(
+    data?.nickname || data?.name || data?.nick || data?.sender?.nickname || "",
+  ).trim();
+  if (nickname && userId) return `${nickname}(${userId})`;
+  return nickname || userId || "unknown";
+}
+
+function oneBotForwardNodeText(content: unknown): string {
+  const segments = parseOneBotSegments(content);
+  return renderMarkdownFromNodes(
+    segments.map((segment) => {
+      const type = safeString(segment.type).toLowerCase();
+      const data =
+        segment.data && typeof segment.data === "object" ? segment.data : {};
+      if (type === "text")
+        return normalizeNode("text", { content: data?.text });
+      if (type === "at") {
+        const id = safeString(data?.qq || data?.id || "").trim();
+        return normalizeNode("at", {
+          id,
+          name: safeString(data?.name).trim() || id,
+        });
+      }
+      if (type === "image" || type === "img") {
+        return normalizeNode("image", {
+          src: safeString(data?.url || data?.file).trim(),
+          name: safeString(data?.file).trim() || undefined,
+        });
+      }
+      if (
+        [
+          "file",
+          "video",
+          "record",
+          "audio",
+          "voice",
+          "sticker",
+          "face",
+          "mface",
+        ].includes(type)
+      ) {
+        const nodeType =
+          type === "record" || type === "voice"
+            ? "audio"
+            : type === "face" || type === "mface"
+              ? "sticker"
+              : type;
+        return normalizeNode(nodeType, {
+          src: safeString(data?.url || data?.file).trim() || undefined,
+          id: safeString(data?.id || data?.qq).trim() || undefined,
+          name:
+            safeString(data?.name || data?.file || data?.text).trim() ||
+            undefined,
+        });
+      }
+      if (type === "forward") {
+        const id = pickOneBotForwardId(data);
+        return normalizeNode("text", {
+          content: id ? `[merged forward:${id}]` : "[merged forward]",
+        });
+      }
+      return normalizeNode("text", {
+        content: renderPlainTextFromNodes([normalizeNode(type, data)]),
+      });
+    }),
+  );
+}
+
+function oneBotForwardMessages(value: unknown): any[] {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    const record = value as any;
+    if (Array.isArray(record.messages)) return record.messages;
+    if (Array.isArray(record.data?.messages)) return record.data.messages;
+    if (Array.isArray(record.content)) return record.content;
+    if (Array.isArray(record.data?.content)) return record.data.content;
+  }
+  return [];
+}
+
+export function renderOneBotForwardContent(value: unknown) {
+  const lines: string[] = [];
+  for (const item of oneBotForwardMessages(value)) {
+    const data = item?.data && typeof item.data === "object" ? item.data : item;
+    const text = oneBotForwardNodeText(
+      data?.content ?? data?.message ?? data?.raw_message ?? "",
+    );
+    const author = oneBotForwardNodeAuthor(data || {});
+    if (!text && author === "unknown") continue;
+    lines.push(
+      text
+        ? `${author}: ${text.replace(/\n/g, "\n  ")}`
+        : `${author}: [empty message]`,
+    );
+  }
+  return lines.length ? `[merged forward]\n${lines.join("\n")}` : "";
 }
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096;
@@ -1559,27 +1666,36 @@ class OneBotAdapter {
     const messages = this.pickOneBotForwardMessages(data, response);
     const children: any[] = [];
     for (const message of messages) {
+      const data =
+        message?.data && typeof message.data === "object"
+          ? message.data
+          : message;
       const sender =
-        message?.sender && typeof message.sender === "object"
-          ? message.sender
-          : {};
+        data?.sender && typeof data.sender === "object" ? data.sender : {};
+      const userId = safeString(
+        sender?.user_id || data?.user_id || data?.uin || data?.qq || "",
+      ).trim();
+      const nickname = safeString(
+        sender?.card ||
+          sender?.nickname ||
+          sender?.nick ||
+          sender?.name ||
+          data?.nickname ||
+          data?.name ||
+          data?.nick ||
+          "",
+      ).trim();
       const name =
-        safeString(
-          sender?.card ||
-            sender?.nickname ||
-            sender?.nick ||
-            sender?.name ||
-            message?.nickname ||
-            message?.user_id ||
-            "",
-        ).trim() || "unknown";
+        nickname && userId
+          ? `${nickname}(${userId})`
+          : nickname || userId || "unknown";
       const nodes = this.normalizeInboundSegmentNodes(
-        message?.content ?? message?.message ?? message?.raw_message ?? "",
+        data?.content ?? data?.message ?? data?.raw_message ?? "",
       );
-      const body = renderPlainTextFromNodes(nodes).trim();
+      const body = renderMarkdownFromNodes(nodes).trim();
       children.push(
         normalizeNode("text", {
-          content: `${name}: ${body || "[unsupported message]"}\n`,
+          content: `${name}: ${body.replace(/\n/g, "\n  ") || "[unsupported message]"}\n`,
         }),
       );
     }
@@ -1685,6 +1801,7 @@ class OneBotAdapter {
       if (type === "forward") {
         elements.push(await this.buildOneBotForwardNode(data));
         hasSemanticForward = true;
+        continue;
       }
     }
     const renderedContent = renderPlainTextFromNodes(elements);

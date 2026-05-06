@@ -187,6 +187,102 @@ test("telegram adapter sends sticker media without dropping following text", asy
   });
 });
 
+test("onebot adapter renders merged-forward records as readable text", async () => {
+  const rendered = runtime.renderOneBotForwardContent({
+    messages: [
+      {
+        type: "node",
+        data: {
+          user_id: "1001",
+          nickname: "Alice",
+          content: [
+            { type: "text", data: { text: "hello " } },
+            { type: "image", data: { url: "https://example.com/a.png" } },
+          ],
+        },
+      },
+      {
+        type: "node",
+        data: {
+          user_id: "1002",
+          nickname: "Bob",
+          content: "[CQ:at,qq=1001] received",
+        },
+      },
+    ],
+  });
+
+  assert.equal(
+    rendered,
+    [
+      "[merged forward]",
+      "Alice(1001): hello",
+      "  [image: https://example.com/a.png](https://example.com/a.png)",
+      "Bob(1002): [@1001](at:1001) received",
+    ].join("\n"),
+  );
+});
+
+test("onebot inbound merged-forward segments are fetched and stored in session text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { selfId: "1", url: "ws://127.0.0.1:9" },
+    });
+    const adapter = [...app.adapters][0];
+    adapter.callAction = async (action: string, params: any) => {
+      assert.equal(action, "get_forward_msg");
+      assert.deepEqual(params, { id: "forward-1" });
+      return {
+        messages: [
+          {
+            type: "node",
+            data: {
+              user_id: "1001",
+              nickname: "Alice",
+              content: "first message",
+            },
+          },
+          {
+            type: "node",
+            data: {
+              user_id: "1002",
+              nickname: "Bob",
+              content: [{ type: "text", data: { text: "second message" } }],
+            },
+          },
+        ],
+      };
+    };
+
+    const session = await adapter.buildSession({
+      post_type: "message",
+      message_type: "group",
+      self_id: 1,
+      group_id: 2000,
+      user_id: 1000,
+      message_id: 42,
+      sender: { nickname: "Sender" },
+      message: [
+        { type: "text", data: { text: "please read " } },
+        { type: "forward", data: { id: "forward-1" } },
+      ],
+    });
+
+    assert.equal(session.elements[1]?.type, "forward");
+    assert.equal(session.elements[1]?.attrs?.id, "forward-1");
+    assert.equal(
+      session.content,
+      [
+        "please read [forward: forward-1]",
+        "Alice(1001): first message",
+        "Bob(1002): second message",
+      ].join("\n"),
+    );
+  });
+});
+
 test("onebot adapter degrades markdown formatting instead of exposing raw markdown", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
