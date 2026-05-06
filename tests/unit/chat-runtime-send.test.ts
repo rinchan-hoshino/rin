@@ -362,6 +362,79 @@ test("lark adapter sends text and structured at as native markdown rich text", a
   });
 });
 
+test("discord working indicator replaces the previous reaction frame", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    adapter.fetchMessage = async () => ({
+      react: async (emoji: string) => {
+        calls.push(["create", emoji]);
+      },
+      reactions: {
+        cache: {
+          find: (predicate: any) =>
+            predicate({ emoji: { name: "🤔" } })
+              ? {
+                  users: {
+                    remove: async (userId: string) => {
+                      calls.push(["delete", userId]);
+                    },
+                  },
+                }
+              : null,
+        },
+      },
+    });
+
+    const [indicator] = app.bots[0].workingIndicators;
+    await indicator.tick({ chatId: "C1", messageId: "m1", tick: 0 });
+    await indicator.tick({ chatId: "C1", messageId: "m1", tick: 1 });
+
+    assert.deepEqual(calls, [
+      ["create", "🤔"],
+      ["delete", ""],
+      ["create", "🔥"],
+    ]);
+  });
+});
+
+test("slack working indicator replaces the previous reaction frame", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { token: "xapp", botToken: "xoxb" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    adapter.web = {
+      reactions: {
+        add: async (payload: any) => {
+          calls.push(["create", payload.name]);
+        },
+        remove: async (payload: any) => {
+          calls.push(["delete", payload.name]);
+        },
+      },
+    };
+
+    const [indicator] = app.bots[0].workingIndicators;
+    await indicator.tick({ chatId: "C1", messageId: "1.1", tick: 0 });
+    await indicator.tick({ chatId: "C1", messageId: "1.1", tick: 1 });
+
+    assert.deepEqual(calls, [
+      ["create", "thinking_face"],
+      ["delete", "thinking_face"],
+      ["create", "fire"],
+    ]);
+  });
+});
+
 test("lark working indicator replaces the previous reaction frame", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
