@@ -61,23 +61,9 @@ function currentRuntimeModeLabel() {
   return undefined;
 }
 
-function renderLineWithRuntimeMode(line: string, width: number) {
+function renderLineWithRuntimeMode(line: string, _width: number) {
   const label = currentRuntimeModeLabel();
-  if (!label || width <= 0) return line;
-
-  const indicator = dim(label);
-  const indicatorWidth = visibleWidth(indicator);
-  if (indicatorWidth >= width) {
-    return truncateToWidth(indicator, width, dim("..."));
-  }
-
-  const minGap = 2;
-  const leftWidth = Math.max(0, width - indicatorWidth - minGap);
-  const left = truncateToWidth(line, leftWidth, dim("..."));
-  const gap = " ".repeat(
-    Math.max(minGap, width - visibleWidth(left) - indicatorWidth),
-  );
-  return `${left}${gap}${indicator}`;
+  return label ? `${line}  ${dim(label)}` : line;
 }
 
 function extractUserTextFromEvent(event: any) {

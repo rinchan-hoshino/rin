@@ -99,7 +99,7 @@ test("update overrides replace startup update path and skip settings changelog s
   );
 });
 
-test("footer shows runtime mode at the bottom right", async () => {
+test("footer appends runtime mode to the rendered footer line", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -135,13 +135,19 @@ test("footer shows runtime mode at the bottom right", async () => {
     assert.match(lines.at(-1), /syncing/);
     assert.match(lines.at(-1), /daemon/);
     assert.doesNotMatch(lines.at(-1), /mode:|rpc|std/);
-    assert.equal(piTuiModule.visibleWidth(lines.at(-1)), 60);
+
+    session.state.model.id = "gpt-5.1-codex-max-2026-04-30";
+    session.state.thinkingLevel = "high";
+    footerData.getExtensionStatuses = () => new Map();
+    lines = footer.render(80);
+    assert.match(lines.at(-1), /gpt-5\.1-codex-max-2026-04-30/);
+    assert.match(lines.at(-1), /high/);
+    assert.match(lines.at(-1), /daemon/);
 
     process.env.RIN_TUI_RUNTIME_ROLE = "maintenance-tui";
     lines = footer.render(60);
     assert.match(lines.at(-1), /maint/);
     assert.doesNotMatch(lines.at(-1), /mode:|rpc|std/);
-    assert.equal(piTuiModule.visibleWidth(lines.at(-1)), 60);
   } finally {
     if (originalRole === undefined) {
       delete process.env.RIN_TUI_RUNTIME_ROLE;
