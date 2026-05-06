@@ -7,11 +7,11 @@ import {
   confirm,
   intro,
   isCancel,
-  note,
   outro,
   select,
   text,
 } from "@clack/prompts";
+import chalk from "chalk";
 
 import {
   runFinalizeInstallPlanInChild,
@@ -23,6 +23,7 @@ import {
   buildInstallPlanText,
   buildInstallSafetyBoundaryText,
   buildPostInstallInitExitText,
+  renderInstallerNote,
   wrapInstallerNoteText,
   describeInstallDirState,
   promptChatSetup,
@@ -70,6 +71,17 @@ function summarizeDirState(dir: string) {
   } catch {
     return { exists: false, entryCount: 0, sample: [] as string[] };
   }
+}
+
+function note(message?: string, title?: string) {
+  process.stdout.write(
+    `${renderInstallerNote(String(message || ""), String(title || ""), {
+      border: chalk.gray,
+      body: chalk.dim,
+      symbol: chalk.green,
+      title: chalk.reset,
+    })}\n`,
+  );
 }
 
 async function launchInstallerInitTui(options: {

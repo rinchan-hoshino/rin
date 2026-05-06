@@ -1,4 +1,5 @@
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 import { promptChatBridgeSetup } from "../chat-bridge/setup.js";
 import {
@@ -624,6 +625,7 @@ function characterDisplayWidth(char: string) {
   const codePoint = char.codePointAt(0) || 0;
   if (codePoint === 0) return 0;
   if (codePoint < 0x20 || (codePoint >= 0x7f && codePoint < 0xa0)) return 0;
+  if (codePoint >= 0x300 && codePoint <= 0x36f) return 0;
   if (
     (codePoint >= 0x1100 && codePoint <= 0x115f) ||
     codePoint === 0x2329 ||
@@ -634,17 +636,24 @@ function characterDisplayWidth(char: string) {
     (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
     (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
     (codePoint >= 0xff00 && codePoint <= 0xff60) ||
-    (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+    (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+    (codePoint >= 0x1f300 && codePoint <= 0x1faff)
   ) {
     return 2;
   }
   return 1;
 }
 
-function textDisplayWidth(text: string) {
+export function installerTextDisplayWidth(text: string) {
   let width = 0;
-  for (const char of text) width += characterDisplayWidth(char);
+  for (const char of stripVTControlCharacters(String(text || ""))) {
+    width += characterDisplayWidth(char);
+  }
   return width;
+}
+
+function textDisplayWidth(text: string) {
+  return installerTextDisplayWidth(text);
 }
 
 function wrapInstallerLine(line: string, maxWidth: number) {
@@ -683,6 +692,43 @@ export function buildPlainInstallerSection(title: string, body: string) {
   return [header, ...lines.map((line) => (line ? `  ${line}` : ""))]
     .filter((line, index) => index === 0 || line !== "")
     .join("\n");
+}
+
+export function renderInstallerNote(
+  body = "",
+  title = "",
+  styles: {
+    border?: (value: string) => string;
+    body?: (value: string) => string;
+    symbol?: (value: string) => string;
+    title?: (value: string) => string;
+  } = {},
+) {
+  const border = styles.border || ((value: string) => value);
+  const bodyStyle = styles.body || ((value: string) => value);
+  const symbol = styles.symbol || ((value: string) => value);
+  const titleStyle = styles.title || ((value: string) => value);
+  const rawTitle = String(title || "");
+  const titleWidth = installerTextDisplayWidth(rawTitle);
+  const rows = `\n${String(body || "")}\n`.split("\n");
+  const contentWidth = rows.reduce(
+    (max, line) => Math.max(max, installerTextDisplayWidth(line)),
+    0,
+  );
+  const boxWidth = Math.max(contentWidth, titleWidth) + 2;
+  const titleRule = "─".repeat(Math.max(boxWidth - titleWidth - 1, 1));
+  const content = rows.map((line) => {
+    const padding = " ".repeat(
+      Math.max(boxWidth - installerTextDisplayWidth(line), 0),
+    );
+    return `${border("│")}  ${bodyStyle(line)}${padding}${border("│")}`;
+  });
+  return [
+    border("│"),
+    `${symbol("◇")}  ${titleStyle(rawTitle)} ${border(`${titleRule}╮`)}`,
+    ...content,
+    border(`├${"─".repeat(boxWidth + 2)}╯`),
+  ].join("\n");
 }
 
 function pathListIncludesDir(pathList: string, dir: string) {
