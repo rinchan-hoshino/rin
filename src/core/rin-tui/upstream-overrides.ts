@@ -12,7 +12,6 @@ import {
   Text,
   TUI_KEYBINDINGS,
   truncateToWidth,
-  visibleWidth,
 } from "@mariozechner/pi-tui";
 
 import {
@@ -61,9 +60,25 @@ function currentRuntimeModeLabel() {
   return undefined;
 }
 
-function renderLineWithRuntimeMode(line: string, _width: number) {
+function renderWithRuntimeModeModelLabel(
+  footer: any,
+  render: (width: number) => unknown,
+  width: number,
+) {
   const label = currentRuntimeModeLabel();
-  return label ? `${line}  ${dim(label)}` : line;
+  const state = footer?.session?.state;
+  const model = state?.model;
+  if (!label || !model || typeof model.id !== "string") {
+    return render.call(footer, width);
+  }
+
+  const originalModel = state.model;
+  state.model = { ...model, id: `${model.id} ${label}` };
+  try {
+    return render.call(footer, width);
+  } finally {
+    state.model = originalModel;
+  }
 }
 
 function extractUserTextFromEvent(event: any) {
@@ -426,7 +441,11 @@ export async function applyRinTuiOverrides() {
   const originalRender = footerProto?.render;
   if (typeof originalRender === "function") {
     footerProto.render = function renderWithoutCwd(width: number) {
-      const lines = originalRender.call(this, width);
+      const lines = renderWithRuntimeModeModelLabel(
+        this,
+        originalRender,
+        width,
+      );
       if (!Array.isArray(lines) || lines.length === 0) return lines;
 
       const sessionName = this?.session?.sessionManager?.getSessionName?.();
@@ -439,13 +458,6 @@ export async function applyRinTuiOverrides() {
       if (statsLine) nextLines.push(statsLine);
       for (const line of lines.slice(2)) {
         if (line) nextLines.push(line);
-      }
-      if (nextLines.length > 0) {
-        const lastIndex = nextLines.length - 1;
-        nextLines[lastIndex] = renderLineWithRuntimeMode(
-          nextLines[lastIndex],
-          width,
-        );
       }
       return nextLines;
     };

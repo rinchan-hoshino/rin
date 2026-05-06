@@ -99,7 +99,7 @@ test("update overrides replace startup update path and skip settings changelog s
   );
 });
 
-test("footer appends runtime mode to the rendered footer line", async () => {
+test("footer appends runtime mode to the model label before rendering", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -133,8 +133,11 @@ test("footer appends runtime mode to the rendered footer line", async () => {
     process.env.RIN_TUI_RUNTIME_ROLE = "rpc-frontend";
     let lines = footer.render(60);
     assert.match(lines.at(-1), /syncing/);
-    assert.match(lines.at(-1), /daemon/);
-    assert.doesNotMatch(lines.at(-1), /mode:|rpc|std/);
+    assert.match(lines[0], /daemon/);
+    assert.doesNotMatch(lines[0], /mode:|rpc|std/);
+    for (const line of lines) {
+      assert.ok(piTuiModule.visibleWidth(line) <= 60);
+    }
 
     session.state.model.id = "gpt-5.1-codex-max-2026-04-30";
     session.state.thinkingLevel = "high";
@@ -143,11 +146,15 @@ test("footer appends runtime mode to the rendered footer line", async () => {
     assert.match(lines.at(-1), /gpt-5\.1-codex-max-2026-04-30/);
     assert.match(lines.at(-1), /high/);
     assert.match(lines.at(-1), /daemon/);
+    assert.ok(piTuiModule.visibleWidth(lines.at(-1)) <= 80);
 
     process.env.RIN_TUI_RUNTIME_ROLE = "maintenance-tui";
     lines = footer.render(60);
-    assert.match(lines.at(-1), /maint/);
-    assert.doesNotMatch(lines.at(-1), /mode:|rpc|std/);
+    assert.match(lines[0], /maint/);
+    assert.doesNotMatch(lines[0], /mode:|rpc|std/);
+    for (const line of lines) {
+      assert.ok(piTuiModule.visibleWidth(line) <= 60);
+    }
   } finally {
     if (originalRole === undefined) {
       delete process.env.RIN_TUI_RUNTIME_ROLE;
