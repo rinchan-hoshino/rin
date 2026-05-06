@@ -20,12 +20,45 @@ export function createModelRegistry(client: RpcFrontendClient) {
       return [...state.allModels];
     },
     getAvailable() {
-      return [...state.availableModels];
+      const merged = new Map(
+        state.availableModels.map((model) => [
+          `${model?.provider || ""}/${model?.id || ""}`,
+          model,
+        ]),
+      );
+      for (const model of state.allModels) {
+        if (!model?.provider || !model?.id) continue;
+        if (!authStorage.get(model.provider)) continue;
+        merged.set(`${model.provider}/${model.id}`, model);
+      }
+      return [...merged.values()];
     },
     find(provider: string, modelId: string) {
       return state.allModels.find(
         (model) => model.provider === provider && model.id === modelId,
       );
+    },
+    getProviderDisplayName(provider: string) {
+      const providerId = String(provider || "").trim();
+      if (!providerId) return providerId;
+      const oauthProvider = authStorage
+        .getOAuthProviders()
+        .find((entry) => entry.id === providerId);
+      const namedModel = state.allModels.find(
+        (model) =>
+          model?.provider === providerId &&
+          typeof model?.providerName === "string" &&
+          model.providerName.trim(),
+      );
+      return (
+        oauthProvider?.name || namedModel?.providerName?.trim() || providerId
+      );
+    },
+    getProviderAuthStatus(provider: string) {
+      const credential = authStorage.get(provider);
+      return credential?.type
+        ? { configured: true, source: credential.type }
+        : { configured: false };
     },
     isUsingOAuth(model: any) {
       return authStorage.get(model?.provider)?.type === "oauth";

@@ -41,6 +41,10 @@ function normalizeCredentialSummary(value: any): OAuthCredentialSummary {
   return type ? { type } : undefined;
 }
 
+function normalizeApiKey(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 async function sendIgnoredClientCommand(
   client: RpcFrontendClient,
   payload: RinRpcCommand,
@@ -55,6 +59,8 @@ function restoreCredential(
 ) {
   if (typeof previous !== "undefined") {
     credentials[providerId] = previous;
+  } else {
+    delete credentials[providerId];
   }
 }
 
@@ -220,6 +226,29 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       const data: any =
         response && response.success === true ? response.data : null;
       applyState(data);
+    },
+    set(providerId: string, credential: any) {
+      const nextProviderId = normalizeProviderId(providerId);
+      const apiKey = normalizeApiKey(credential?.key);
+      if (!nextProviderId || !apiKey) return;
+      const previous = state.credentials[nextProviderId];
+      state.credentials[nextProviderId] = { type: "api_key" };
+      void client
+        .send({
+          type: "oauth_set_api_key",
+          providerId: nextProviderId,
+          key: apiKey,
+        })
+        .then((response: any) => {
+          if (response?.success === true) {
+            applyState(response.data);
+            return;
+          }
+          restoreCredential(state.credentials, nextProviderId, previous);
+        })
+        .catch(() => {
+          restoreCredential(state.credentials, nextProviderId, previous);
+        });
     },
     logout(providerId: string) {
       const nextProviderId = normalizeProviderId(providerId);

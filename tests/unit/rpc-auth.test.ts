@@ -150,6 +150,34 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   ]);
 });
 
+test("rpc auth proxy stores API keys through the daemon", async () => {
+  const sent = [];
+  const auth = createAuthStorageProxy({
+    send(payload) {
+      sent.push(payload);
+      if (payload.type === "oauth_set_api_key") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            credentials: { openai: { type: "api_key" } },
+            providers: [],
+          },
+        });
+      }
+      return Promise.resolve({ success: true, data: {} });
+    },
+  });
+
+  auth.set(" openai ", { type: "api_key", key: " sk-test " });
+  assert.deepEqual(auth.get("openai"), { type: "api_key" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(sent, [
+    { type: "oauth_set_api_key", providerId: "openai", key: "sk-test" },
+  ]);
+  assert.deepEqual(auth.get("openai"), { type: "api_key" });
+});
+
 test("rpc auth proxy rolls back failed logout and cancels aborted logins", async () => {
   const sent = [];
   const auth = createAuthStorageProxy({

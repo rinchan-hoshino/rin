@@ -1147,6 +1147,18 @@ export async function runCustomRpcMode(
         finishLogin(loginId);
         return done(id, type);
       }
+      case "oauth_set_api_key": {
+        const providerId = String(command.providerId || "").trim();
+        const key = String(command.key || "").trim();
+        if (!providerId) throw new Error("providerId is required");
+        if (!key) throw new Error("key is required");
+        session.modelRegistry.authStorage.set(providerId, {
+          type: "api_key",
+          key,
+        });
+        session.modelRegistry.refresh();
+        return done(id, type, getOAuthState(session));
+      }
       case "oauth_logout": {
         const providerId = String(command.providerId || "").trim();
         if (!providerId) throw new Error("providerId is required");

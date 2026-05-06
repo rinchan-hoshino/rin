@@ -287,6 +287,15 @@ test("rpc model registry exposes all models for login provider selection", async
   assert.deepEqual(registry.getAll(), allModels);
   assert.deepEqual(registry.getAvailable(), availableModels);
   assert.deepEqual(registry.find("anthropic", "claude-sonnet"), allModels[1]);
+  registry.authStorage.applyState({
+    credentials: { anthropic: { type: "api_key" } },
+    providers: [],
+  });
+  assert.deepEqual(registry.getAvailable(), [...availableModels, allModels[1]]);
+  assert.equal(registry.getProviderDisplayName("anthropic"), "anthropic");
+  assert.deepEqual(registry.getProviderAuthStatus("openai"), {
+    configured: false,
+  });
   assert.deepEqual(sent, [
     "get_all_models",
     "get_available_models",

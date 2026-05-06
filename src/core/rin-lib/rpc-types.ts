@@ -64,6 +64,7 @@ export type RinRpcCommandType =
   | "oauth_login_start"
   | "oauth_login_respond"
   | "oauth_login_cancel"
+  | "oauth_set_api_key"
   | "oauth_logout"
   | "reload"
   | "terminate_session";

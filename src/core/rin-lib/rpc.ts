@@ -90,6 +90,7 @@ const SESSION_SCOPED_COMMAND_NAMES = [
   "oauth_login_start",
   "oauth_login_respond",
   "oauth_login_cancel",
+  "oauth_set_api_key",
   "oauth_logout",
   "reload",
 ] as const;
