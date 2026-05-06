@@ -81,6 +81,17 @@ export async function startUpdater(deps: {
     target.targetUser;
 
   note(
+    i18n.buildUpdateTargetText({
+      currentUser,
+      targetUser,
+      installDir,
+      source: target.source,
+      ownerHome: target.ownerHome,
+    }),
+    i18n.updateTargetsTitle,
+  );
+
+  note(
     i18n.buildUpdatePlanText({
       currentUser,
       targetUser,
@@ -112,6 +123,11 @@ export async function startUpdater(deps: {
       ...(deps.release ? { release: deps.release } : {}),
     } satisfies FinalizeInstallOptions,
     i18n.publishingUpdateMessage,
+    {
+      writeStatus(message) {
+        note(message, i18n.updatingTargetTitle);
+      },
+    },
   );
 
   const {
@@ -127,6 +143,7 @@ export async function startUpdater(deps: {
 
   note(
     i18n.buildUpdatedTargetText({
+      installDir,
       writtenPaths: [
         written.launcherPath,
         written.rinPath,
@@ -144,11 +161,13 @@ export async function startUpdater(deps: {
             serviceLabel: installedService.label,
           }
         : {}),
-      serviceHint,
-      daemonReady,
-      userSuffix,
     }),
-    i18n.updatedTargetTitle,
+    i18n.writtenPathsTitle,
+  );
+
+  note(
+    i18n.buildAfterUpdateText({ serviceHint, daemonReady, userSuffix }),
+    i18n.afterInitTitle,
   );
 
   outro(

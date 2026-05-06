@@ -378,9 +378,7 @@ test("createInstallerI18n exposes localized post-install and update copy", () =>
   assert.equal(zh.updaterIntroTitle, "Rin \u66f4\u65b0\u5668");
   assert.ok(
     zh
-      .buildUpdatedTargetText({
-        writtenPaths: ["/home/bob/.rin/bin/rin"],
-        prunedReleaseCount: 1,
+      .buildAfterUpdateText({
         serviceHint: "systemd",
         daemonReady: true,
         userSuffix: " -u bob",
@@ -424,8 +422,10 @@ test("update mode reuses installer's language prompt and note renderer", () => {
   assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
   assert.match(updaterSource, /renderInstallerNote/);
   assert.match(updaterSource, /wrapInstallerNoteText/);
+  assert.match(updaterSource, /i18n\.buildUpdateTargetText/);
   assert.match(updaterSource, /i18n\.buildUpdatePlanText/);
   assert.match(updaterSource, /i18n\.buildUpdatedTargetText/);
+  assert.match(updaterSource, /i18n\.buildAfterUpdateText/);
   assert.match(
     updaterSource,
     /const promptConfirm = deps\.confirm \|\| confirm/,

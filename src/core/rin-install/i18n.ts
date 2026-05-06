@@ -206,6 +206,7 @@ type InstallerDisplayCopy = {
   updaterIntroTitle: string;
   updateTargetsTitle: string;
   updatePlanTitle: string;
+  updatingTargetTitle: string;
   updatedTargetTitle: string;
   chooseUpdateTargetMessage: string;
   noUpdateTargetsText: string;
@@ -213,6 +214,13 @@ type InstallerDisplayCopy = {
   updaterFinishedWithoutWritingChanges: string;
   publishUpdateConfirmMessage: string;
   publishingUpdateMessage: string;
+  buildUpdateTargetText: (options: {
+    currentUser: string;
+    targetUser: string;
+    installDir: string;
+    source: string;
+    ownerHome: string;
+  }) => string;
   buildUpdatePlanText: (options: {
     currentUser: string;
     targetUser: string;
@@ -222,10 +230,13 @@ type InstallerDisplayCopy = {
     sourceLabel: string;
   }) => string;
   buildUpdatedTargetText: (options: {
+    installDir: string;
     writtenPaths: string[];
     prunedReleaseCount: number;
     serviceKind?: string;
     serviceLabel?: string;
+  }) => string;
+  buildAfterUpdateText: (options: {
     serviceHint: string;
     daemonReady: boolean;
     userSuffix: string;
@@ -532,6 +543,7 @@ const INSTALLER_DISPLAY_COPY = {
     updaterIntroTitle: "Rin Updater",
     updateTargetsTitle: "Update targets",
     updatePlanTitle: "Update plan",
+    updatingTargetTitle: "Applying update",
     updatedTargetTitle: "Updated target",
     chooseUpdateTargetMessage: "Choose an installed Rin target to update.",
     noUpdateTargetsText:
@@ -543,6 +555,15 @@ const INSTALLER_DISPLAY_COPY = {
       "Publish the latest built runtime to this installed target now?",
     publishingUpdateMessage:
       "Publishing runtime and refreshing the installed target...",
+    buildUpdateTargetText(options) {
+      return [
+        `Current user: ${options.currentUser}`,
+        `Selected daemon user: ${options.targetUser}`,
+        `${this.targetInstallDirLabel}: ${options.installDir}`,
+        `Discovered from: ${options.source}`,
+        `Owner home: ${options.ownerHome}`,
+      ].join("\n");
+    },
     buildUpdatePlanText(options) {
       return [
         `Current user: ${options.currentUser}`,
@@ -562,6 +583,7 @@ const INSTALLER_DISPLAY_COPY = {
     },
     buildUpdatedTargetText(options) {
       return [
+        `${this.targetInstallDirLabel}: ${options.installDir}`,
         ...options.writtenPaths.map(
           (item) => `${this.writtenPathLabel}: ${item}`,
         ),
@@ -569,7 +591,12 @@ const INSTALLER_DISPLAY_COPY = {
         options.serviceKind && options.serviceLabel
           ? `${options.serviceKind} ${this.serviceLabelLabel}: ${options.serviceLabel}`
           : "",
-        "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    },
+    buildAfterUpdateText(options) {
+      return [
         `Service/platform note: ${options.serviceHint}`,
         `Daemon started now: ${options.daemonReady ? "yes" : "no"}`,
         "",
@@ -577,9 +604,7 @@ const INSTALLER_DISPLAY_COPY = {
         `- doctor: rin doctor${options.userSuffix}`,
         `- open Rin: rin${options.userSuffix}`,
         "- if RPC mode fails, run `rin doctor` or reopen Rin to enter temporary maintenance mode",
-      ]
-        .filter(Boolean)
-        .join("\n");
+      ].join("\n");
     },
     updaterOutroUpdated(targetUser, installDir, daemonReady, userSuffix) {
       return `Updater refreshed ${targetUser} at ${installDir}. ${daemonReady ? `Open with rin${userSuffix}.` : `Use rin start${userSuffix} if you need to start the daemon manually.`}`;
@@ -910,6 +935,7 @@ const INSTALLER_DISPLAY_COPY = {
     updaterIntroTitle: "Rin 更新器",
     updateTargetsTitle: "更新目标",
     updatePlanTitle: "更新计划",
+    updatingTargetTitle: "正在应用更新",
     updatedTargetTitle: "已更新目标",
     chooseUpdateTargetMessage: "选择要更新的已安装 Rin 目标。",
     noUpdateTargetsText: "当前系统上未发现已安装的 Rin 守护进程目标。",
@@ -917,6 +943,15 @@ const INSTALLER_DISPLAY_COPY = {
     updaterFinishedWithoutWritingChanges: "更新器结束，未写入变更。",
     publishUpdateConfirmMessage: "现在将最新构建的运行时发布到此目标吗？",
     publishingUpdateMessage: "正在发布运行时并刷新已安装目标……",
+    buildUpdateTargetText(options) {
+      return [
+        `当前用户: ${options.currentUser}`,
+        `选中的守护进程用户: ${options.targetUser}`,
+        `${this.targetInstallDirLabel}: ${options.installDir}`,
+        `发现来源: ${options.source}`,
+        `Owner home: ${options.ownerHome}`,
+      ].join("\n");
+    },
     buildUpdatePlanText(options) {
       return [
         `当前用户: ${options.currentUser}`,
@@ -936,6 +971,7 @@ const INSTALLER_DISPLAY_COPY = {
     },
     buildUpdatedTargetText(options) {
       return [
+        `${this.targetInstallDirLabel}: ${options.installDir}`,
         ...options.writtenPaths.map(
           (item) => `${this.writtenPathLabel}: ${item}`,
         ),
@@ -943,7 +979,12 @@ const INSTALLER_DISPLAY_COPY = {
         options.serviceKind && options.serviceLabel
           ? `${options.serviceKind} ${this.serviceLabelLabel}: ${options.serviceLabel}`
           : "",
-        "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    },
+    buildAfterUpdateText(options) {
+      return [
         `服务/平台提示: ${options.serviceHint}`,
         `守护进程已立即启动: ${options.daemonReady ? "是" : "否"}`,
         "",
@@ -951,9 +992,7 @@ const INSTALLER_DISPLAY_COPY = {
         `- 诊断: rin doctor${options.userSuffix}`,
         `- 打开 Rin: rin${options.userSuffix}`,
         "- 如果 RPC 模式失败，请运行 `rin doctor` 或重新打开 Rin 进入临时维护模式",
-      ]
-        .filter(Boolean)
-        .join("\n");
+      ].join("\n");
     },
     updaterOutroUpdated(targetUser, installDir, daemonReady, userSuffix) {
       return `更新器已刷新 ${targetUser} 位于 ${installDir} 的安装。${daemonReady ? `请用 rin${userSuffix} 打开。` : `如需手动启动守护进程，请使用 rin start${userSuffix}。`}`;
