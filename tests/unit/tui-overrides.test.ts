@@ -51,6 +51,13 @@ const settingsManagerWithoutTerminalProgress = {
   },
 };
 
+test("Rin defaults multiline input to Ctrl+J instead of Shift+Enter", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const keybindings = piTuiModule.getKeybindings();
+  assert.deepEqual(keybindings.getKeys("tui.input.newLine"), ["ctrl+j"]);
+});
+
 test("terminal title override shows only session name", async () => {
   await overrides.applyRinTuiOverrides();
 
