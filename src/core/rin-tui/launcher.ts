@@ -31,6 +31,18 @@ type StartTuiOptions = {
   resourceOptions?: Partial<TuiResourceOptions>;
   argv?: string[];
 };
+
+type TuiStartupTerminal = {
+  isTTY?: boolean;
+  write?(value: string): unknown;
+};
+
+export function clearVisibleTerminalForTuiStartup(
+  stdout: TuiStartupTerminal = process.stdout,
+) {
+  if (!stdout.isTTY || typeof stdout.write !== "function") return;
+  stdout.write("\x1b[2J\x1b[H");
+}
 const RPC_TUI_STARTUP_CONNECT_ERROR_RE =
   /\bconnect (?:ENOENT|ECONNREFUSED|ECONNRESET|EPIPE)\b/;
 const RPC_TUI_STARTUP_TRANSIENT_ERROR_RE =
@@ -205,7 +217,7 @@ async function startStdTui(
     (sessionRuntime as any)?.session?.settingsManager,
     interactiveOptions,
   );
-  console.log();
+  clearVisibleTerminalForTuiStartup();
   await runInteractiveMode(sessionRuntime, interactiveOptions);
 }
 
@@ -221,6 +233,7 @@ async function startRpcTui(
   try {
     await rpcSession.prepareForInteractiveStartup();
     runtimeHost = createRpcRuntimeHost(rpcSession);
+    clearVisibleTerminalForTuiStartup();
     interactiveMode = new InteractiveMode(
       runtimeHost as any,
       interactiveOptions,

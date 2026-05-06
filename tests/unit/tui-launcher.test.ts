@@ -122,6 +122,26 @@ test("tui launcher restores terminal state for crash exits", () => {
   ]);
 });
 
+test("tui launcher clears the visible viewport before taking over the terminal", () => {
+  const writes: string[] = [];
+  launcher.clearVisibleTerminalForTuiStartup({
+    isTTY: true,
+    write(value: string) {
+      writes.push(value);
+      return true;
+    },
+  });
+  launcher.clearVisibleTerminalForTuiStartup({
+    isTTY: false,
+    write(value: string) {
+      writes.push(value);
+      return true;
+    },
+  });
+
+  assert.deepEqual(writes, ["\x1b[2J\x1b[H"]);
+});
+
 test("tui launcher maps init mode to hidden onboarding guidance", () => {
   const parsed = cliOptions.parseTuiCliOptions(["--init"]);
 
