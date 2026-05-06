@@ -191,6 +191,45 @@ test("applyMidTurnCompaction compacts before a provider call and injects continu
   );
 });
 
+test("applyMidTurnCompaction defaults to a 50 percent threshold", async () => {
+  let compactCalls = 0;
+  const sourceMessages = [
+    {
+      role: "user",
+      content: [{ type: "text", text: "x".repeat(220) }],
+    },
+  ];
+
+  const agent = {
+    state: { messages: [...sourceMessages] },
+    async streamFn() {
+      return { fake: true };
+    },
+  };
+
+  const session = {
+    model: { provider: "openai", id: "gpt-test", contextWindow: 100 },
+    agent,
+    async _runAutoCompaction(reason, willRetry) {
+      compactCalls += 1;
+      assert.equal(reason, "threshold");
+      assert.equal(willRetry, false);
+      agent.state.messages = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "compacted" }],
+        },
+      ];
+    },
+  };
+
+  await runtimeMod.applyMidTurnCompaction(session);
+  const transformed = await agent.transformContext(sourceMessages, undefined);
+
+  assert.equal(compactCalls, 1);
+  assert.equal(transformed[0].content[0].text, "compacted");
+});
+
 test("applyMidTurnCompaction ignores provider-shaped reasoning payload inflation", async () => {
   let compactCalls = 0;
   const sourceMessages = [

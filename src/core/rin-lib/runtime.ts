@@ -494,7 +494,7 @@ const DISABLE_END_TURN_THRESHOLD_KEY = Symbol.for(
   "rin.disableEndTurnThresholdCompaction",
 );
 const RETRYABLE_PROVIDER_ERRORS_KEY = Symbol.for("rin.retryableProviderErrors");
-const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 88;
+const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 50;
 const MID_TURN_CONTINUATION_BLOCK = [
   "Context compacted; treat this as a routine internal checkpoint.",
   "Resume the current task immediately from its current state.",
