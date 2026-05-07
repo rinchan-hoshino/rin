@@ -142,7 +142,7 @@ export async function startUpdater(deps: {
           installDir,
           sourceRoot: deps.repoRootFromHere(),
           language: i18n.language,
-          allowDaemonNotReady: true,
+          daemonReadyTimeoutMs: 30_000,
           ...(deps.release ? { release: deps.release } : {}),
         } satisfies FinalizeInstallOptions,
         i18n.refreshingInstalledTargetMessage,

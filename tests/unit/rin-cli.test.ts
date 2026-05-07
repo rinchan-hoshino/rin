@@ -65,7 +65,7 @@ test("rin update delegates final update UI to rin-install update mode", () => {
   assert.equal(source.includes("rin update:"), false);
 });
 
-test("rin updater publishes core updates even when daemon readiness is slow", () => {
+test("rin updater waits longer for daemon readiness than first install", () => {
   const updaterSource = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "updater.ts"),
     "utf8",
@@ -75,9 +75,9 @@ test("rin updater publishes core updates even when daemon readiness is slow", ()
     "utf8",
   );
 
-  assert.match(updaterSource, /allowDaemonNotReady:\s*true/);
-  assert.match(finalizeSource, /if \(!options\.allowDaemonNotReady\)/);
-  assert.match(finalizeSource, /The update was published/);
+  assert.match(updaterSource, /daemonReadyTimeoutMs:\s*30_000/);
+  assert.match(finalizeSource, /daemonReadyTimeoutMs/);
+  assert.doesNotMatch(finalizeSource, /allowDaemonNotReady/);
 });
 
 test("cli help omits removed run command and exposes Pi-style non-interactive flags", () => {

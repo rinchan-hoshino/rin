@@ -213,24 +213,20 @@ async function applyInstalledRuntime(
     }
   }
 
+  const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
+    ? Math.max(0, Number(options.daemonReadyTimeoutMs))
+    : 5000;
   const daemonReady = installedService
     ? await waitForSocket(
         daemonSocketPathForUser(targetUser, serviceDeps),
-        5000,
+        daemonReadyTimeoutMs,
         targetUser,
       )
     : false;
-  let serviceHintSuffix = "";
   if (!daemonReady && installServiceNow && installedService) {
-    const failureDetails = collectDaemonFailureDetails(targetUser, installDir, {
-      findSystemUser,
-      targetHomeForUser,
-    });
-    if (!options.allowDaemonNotReady) {
-      throw new Error(`${options.daemonFailureCode}\n${failureDetails}`);
-    }
-    serviceHintSuffix =
-      " The update was published, but the daemon did not become ready before the installer timeout; use rin doctor or rin start if it is still unavailable.";
+    throw new Error(
+      `${options.daemonFailureCode}\n${collectDaemonFailureDetails(targetUser, installDir, { findSystemUser, targetHomeForUser })}`,
+    );
   }
 
   return {
@@ -247,7 +243,7 @@ async function applyInstalledRuntime(
     daemonReady,
     ownership,
     serviceHint:
-      (process.platform === "darwin"
+      process.platform === "darwin"
         ? installServiceNow
           ? "A macOS launchd LaunchAgent will be installed and started for this daemon."
           : "You skipped launchd installation for now; start the daemon explicitly when needed."
@@ -257,8 +253,7 @@ async function applyInstalledRuntime(
             : "You skipped dedicated Linux service installation for now; start the daemon explicitly when needed."
           : process.platform === "win32"
             ? "A Windows Startup launcher will be installed for this daemon."
-            : "No dedicated service was installed; the installer will not start the daemon for you.") +
-      serviceHintSuffix,
+            : "No dedicated service was installed; the installer will not start the daemon for you.",
   };
 }
 
