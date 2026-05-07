@@ -55,7 +55,7 @@ function formatChallengeHelp(response: any): string {
   return [
     `Challenge help: ${providers} returned an anti-bot/captcha page to Rin's runtime, so the search tool cannot solve it inside the current request.`,
     "User action: wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, use direct URL fetch if you already know the page, or configure a trusted search backend/API instead of the direct engine.",
-    "SearXNG reduces this risk by centralizing engine-specific request shapes, rate limiting, optional proxy/instance rotation, and fallbacks; its Google engine also uses a mobile Google-app-like user agent. It still cannot magically bypass a captcha once the upstream search engine challenges that egress IP.",
+    "SearXNG reduces this risk by centralizing engine-specific request shapes, rate limiting, and optional proxy/instance rotation; its Google engine also uses a mobile Google-app-like user agent, while its DuckDuckGo engine uses an HTML form POST with browser navigation headers. It still cannot magically bypass a captcha once the upstream search engine challenges that egress IP.",
   ].join("\n");
 }
 

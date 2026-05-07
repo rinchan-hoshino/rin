@@ -155,7 +155,7 @@ Rin provides live web search and direct URL fetching through `web_search`. As an
 
 If search fails with `google_challenge_required` or `duckduckgo_challenge_required`, the upstream search engine returned an anti-bot/captcha page to the Rin runtime's network path. The user cannot clear that challenge by solving a captcha in their personal browser unless Rin is using the same browser/session/network. Practical recovery is to wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, fetch a known URL directly, or use a trusted search backend/API instead of the challenged direct engine.
 
-SearXNG reduces this failure rate rather than magically bypassing challenges: it centralizes per-engine request shapes, rate limits, optional proxy/instance rotation, and fallbacks. Its Google engine also uses mobile/Google-app-shaped request headers/user agents so Google is more likely to return server-rendered results. If the upstream engine challenges the SearXNG egress IP, SearXNG must still back off, rotate, fall back, or report the challenge.
+SearXNG reduces this failure rate rather than magically bypassing challenges: it centralizes per-engine request shapes, rate limits, and optional proxy/instance rotation. Its Google engine uses mobile/Google-app-shaped request headers/user agents so Google is more likely to return server-rendered results. Its DuckDuckGo engine uses the no-JS HTML form POST flow with browser navigation headers instead of a bare lite GET. If the upstream engine challenges the egress IP, the request must still back off, rotate the egress path, or report the challenge.
 
 ## Runtime activity status
 
