@@ -665,7 +665,7 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the manual at ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to consolidate existing self-improvement documents.`,
+      `Follow the manual at ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to optimize, consolidate, and correct existing self-improvement documents.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
     assert.doesNotMatch(sleep.target.prompt, /## Basic concepts/);

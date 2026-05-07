@@ -260,7 +260,7 @@ function createBuiltInSelfImproveSleepConsolidationTask(
     "docs",
     "self-improve-memory-maintenance.md",
   );
-  const prompt = `Follow the manual at ${manualPath} to consolidate existing self-improvement documents.`;
+  const prompt = `Follow the manual at ${manualPath} to optimize, consolidate, and correct existing self-improvement documents.`;
   const task: CronTaskRecord = {
     id: "builtin_self_improve_sleep_consolidation_daily",
     builtIn: true,
