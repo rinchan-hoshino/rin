@@ -141,6 +141,7 @@ export async function startUpdater(deps: {
           targetUser,
           installDir,
           sourceRoot: deps.repoRootFromHere(),
+          language: i18n.language,
           ...(deps.release ? { release: deps.release } : {}),
         } satisfies FinalizeInstallOptions,
         i18n.refreshingInstalledTargetMessage,
