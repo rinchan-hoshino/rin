@@ -1135,9 +1135,9 @@ export class ChatController {
         if (transientSessionFailure) {
           delete this.state.sessionFile;
           this.driver.dispose();
-        } else if (errorSession.sessionFile) {
+        } else if (errorSession.sessionFile && errorMessage) {
           await this.deliverAssistantReply({
-            text: errorMessage || "chat_bridge_turn_failed",
+            text: errorMessage,
             replyToMessageId: input.replyToMessageId,
             incomingMessageId: input.incomingMessageId,
             sessionFile: errorSessionFile || this.currentSessionFile(),

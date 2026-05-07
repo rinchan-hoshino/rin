@@ -42,8 +42,8 @@ import {
   pickUserId,
   prependQuoteTextToPromptBody,
   safeString,
-  hasDeliveredFinalAssistantReplyForMessage,
   hasInboundChatMessageReplyBoundary,
+  isInboundChatMessageProcessed,
   isReplyToLatestAssistantMessage,
 } from "./chat-helpers.js";
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
@@ -595,8 +595,9 @@ export async function startChatBridge(
       );
       if (
         !transientFailure &&
+        errorMessage &&
         messageId &&
-        !hasDeliveredFinalAssistantReplyForMessage(
+        !isInboundChatMessageProcessed(
           runtime.agentDir,
           decision.chatKey,
           messageId,
@@ -609,7 +610,7 @@ export async function startChatBridge(
             type: "text_delivery",
             createdAt: new Date().toISOString(),
             chatKey: decision.chatKey,
-            text: errorMessage || "chat_bridge_turn_failed",
+            text: errorMessage,
             replyToMessageId: messageId || undefined,
             sessionFile: linkedSessionFile || undefined,
           },

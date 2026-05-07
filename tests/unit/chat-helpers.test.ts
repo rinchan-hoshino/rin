@@ -196,7 +196,7 @@ test("chat chat helpers synthesize text elements only when upstream omitted elem
   );
 });
 
-test("chat chat helpers distinguish interim replies from final replies", async () => {
+test("chat chat helpers treat any delivered assistant text as a replay boundary", async () => {
   await withTempDir(async (agentDir) => {
     const chatKey = "telegram/1:2";
     const base = {
@@ -215,41 +215,15 @@ test("chat chat helpers distinguish interim replies from final replies", async (
     });
     messageStore.saveChatMessage(agentDir, {
       ...base,
-      messageId: "m-interim",
+      messageId: "m-assistant",
       role: "assistant",
       replyToMessageId: "m-user",
-      text: "··· I will check",
+      text: "I will check",
       processedAt: new Date().toISOString(),
     });
 
     assert.equal(
       helpers.hasDeliveredAssistantReplyForMessage(agentDir, chatKey, "m-user"),
-      true,
-    );
-    assert.equal(
-      helpers.hasDeliveredFinalAssistantReplyForMessage(
-        agentDir,
-        chatKey,
-        "m-user",
-      ),
-      false,
-    );
-
-    messageStore.saveChatMessage(agentDir, {
-      ...base,
-      messageId: "m-final",
-      role: "assistant",
-      replyToMessageId: "m-user",
-      text: "Done",
-      processedAt: new Date().toISOString(),
-    });
-
-    assert.equal(
-      helpers.hasDeliveredFinalAssistantReplyForMessage(
-        agentDir,
-        chatKey,
-        "m-user",
-      ),
       true,
     );
   });
