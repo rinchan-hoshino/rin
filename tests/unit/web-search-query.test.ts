@@ -157,6 +157,8 @@ test("web search maps freshness to direct provider query parameters", async () =
     assert.equal(calls.length, 3);
     const googleUrl = new URL(calls[0]);
     assert.equal(googleUrl.searchParams.get("tbs"), "qdr:w");
+    assert.equal(googleUrl.searchParams.has("num"), false);
+    assert.equal(googleUrl.searchParams.has("gl"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -273,8 +275,45 @@ test("web search requests Google with SearXNG-style mobile user agent", async ()
     assert.equal(result.engine, "google");
     assert.equal(result.results[0].url, "https://example.com/google-result");
     assert.equal(calls.length, 1);
-    assert.equal(new URL(calls[0].url).hostname, "www.google.com");
+    const googleUrl = new URL(calls[0].url);
+    assert.equal(googleUrl.hostname, "www.google.com");
+    assert.equal(googleUrl.searchParams.get("hl"), "en-US");
+    assert.equal(googleUrl.searchParams.has("lr"), false);
+    assert.equal(googleUrl.searchParams.has("cr"), false);
+    assert.equal(googleUrl.searchParams.has("num"), false);
+    assert.equal(googleUrl.searchParams.has("gl"), false);
     assert.match(calls[0].headers["User-Agent"], /NSTNWV$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search localizes Google with SearXNG-style domain and country params", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+  globalThis.fetch = (async (url: any, init: any) => {
+    calls.push({ url: String(url), headers: init.headers });
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => googleGsaFixture,
+    };
+  }) as typeof fetch;
+  try {
+    const result = await query.searchWeb({
+      q: "rinchanai",
+      limit: 1,
+      language: "zh-CN",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.engine, "google");
+    const googleUrl = new URL(calls[0].url);
+    assert.equal(googleUrl.hostname, "www.google.com.hk");
+    assert.equal(googleUrl.searchParams.get("hl"), "zh-CN");
+    assert.equal(googleUrl.searchParams.get("lr"), "lang_zh-CN");
+    assert.equal(googleUrl.searchParams.get("cr"), "countryCN");
+    assert.equal(calls[0].headers.Referer, "https://www.google.com.hk/");
   } finally {
     globalThis.fetch = originalFetch;
   }

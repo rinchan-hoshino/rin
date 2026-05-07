@@ -5,8 +5,24 @@ const USER_AGENT =
 // user-agent with the NSTNWV marker. In current Google HTML this avoids the
 // JavaScript-only SG_REL shell returned to generic bot/desktop user-agents and
 // exposes the server-rendered <a data-ved> result cards that the engine parses.
+// Keep the Google request close to SearXNG's low-noise shape: localized
+// supported domain + hl/lr/cr, utf8 encoding, filter=0, CONSENT cookie, Accept
+// */*, and no ineffective num/gl parameters.
 const GOOGLE_GSA_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 10; HUAWEI P30 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36 NSTNWV";
+const GOOGLE_SUPPORTED_DOMAINS: Record<string, string> = {
+  AU: "www.google.com.au",
+  CA: "www.google.ca",
+  CN: "www.google.com.hk",
+  DE: "www.google.de",
+  ES: "www.google.es",
+  FR: "www.google.fr",
+  GB: "www.google.co.uk",
+  HK: "www.google.com.hk",
+  JP: "www.google.co.jp",
+  TW: "www.google.com.tw",
+  US: "www.google.com",
+};
 // SearXNG's DuckDuckGo engine avoids the lite GET flow and emulates the
 // no-JS HTML form submission with a stable browser user-agent, Sec-Fetch
 // navigation headers, form data, and matching cookies. DDG's bot blocker uses
@@ -297,29 +313,37 @@ function parseLocale(
 function mapGoogleLanguage(language: string) {
   const locale = parseLocale(language);
   if (!locale) {
-    return { hl: "en-US", lr: "", gl: "" };
+    return { hl: "en-US", lr: "", country: "" };
   }
 
   if (locale.lang === "zh") {
     if (locale.region === "TW" || locale.region === "HK") {
-      return { hl: `zh-${locale.region}`, lr: "lang_zh-TW", gl: locale.region };
+      return {
+        hl: `zh-${locale.region}`,
+        lr: "lang_zh-TW",
+        country: locale.region,
+      };
     }
-    return { hl: "zh-CN", lr: "lang_zh-CN", gl: locale.region || "CN" };
+    return { hl: "zh-CN", lr: "lang_zh-CN", country: locale.region || "CN" };
   }
 
   if (locale.lang === "en") {
     return {
       hl: locale.region ? `en-${locale.region}` : "en-US",
       lr: "lang_en",
-      gl: locale.region,
+      country: locale.region,
     };
   }
 
   return {
     hl: locale.region ? `${locale.lang}-${locale.region}` : locale.lang,
     lr: `lang_${locale.lang}`,
-    gl: locale.region,
+    country: locale.region,
   };
+}
+
+function googleSubdomain(country: string): string {
+  return GOOGLE_SUPPORTED_DOMAINS[country.toUpperCase()] || "www.google.com";
 }
 
 function mapFreshness(freshness: string | undefined): string {
@@ -338,16 +362,16 @@ function setFreshnessSearchParam(
 }
 
 function buildGoogleUrl(request: NormalizedWebSearchRequest): string {
-  const url = new URL("https://www.google.com/search");
   const language = mapGoogleLanguage(request.language);
+  const url = new URL(`https://${googleSubdomain(language.country)}/search`);
   url.searchParams.set("q", buildSearchQuery(request));
   url.searchParams.set("hl", language.hl);
   url.searchParams.set("ie", "utf8");
   url.searchParams.set("oe", "utf8");
   url.searchParams.set("filter", "0");
-  url.searchParams.set("num", String(Math.max(request.limit, 10)));
   if (language.lr) url.searchParams.set("lr", language.lr);
-  if (language.gl) url.searchParams.set("gl", language.gl);
+  if (language.country)
+    url.searchParams.set("cr", `country${language.country}`);
   setFreshnessSearchParam(
     url,
     request.freshness,
@@ -672,13 +696,14 @@ export function parseDuckDuckGoLiteResults(
 }
 
 async function fetchGoogleHtml(request: NormalizedWebSearchRequest) {
+  const url = buildGoogleUrl(request);
   try {
-    const html = await fetchText(buildGoogleUrl(request), {
+    const html = await fetchText(url, {
       headers: {
         Accept: "*/*",
         "Accept-Language": buildAcceptLanguage(request.language),
         Cookie: "CONSENT=YES+",
-        Referer: "https://www.google.com/",
+        Referer: new URL(url).origin + "/",
         "User-Agent": GOOGLE_GSA_USER_AGENT,
       },
     });
