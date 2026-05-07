@@ -225,6 +225,20 @@ function stripClearScrollback(data: string) {
     : data;
 }
 
+function redrawCurrentSessionHistoryAfterRpcResync(instance: any) {
+  instance.chatContainer?.clear?.();
+  instance.pendingMessagesContainer?.clear?.();
+  instance.compactionQueuedMessages = [];
+  instance.streamingComponent = undefined;
+  instance.streamingMessage = undefined;
+  instance.pendingTools?.clear?.();
+  const context = instance.sessionManager.buildSessionContext();
+  instance.renderSessionContext(context, {
+    updateFooter: true,
+    populateHistory: true,
+  });
+}
+
 function showRinUpdateNotification(instance: any, newVersion: string) {
   const text = [
     `Rin update available: ${newVersion}`,
@@ -643,7 +657,7 @@ export async function applyRinTuiOverrides() {
         if (typeof this.handleRuntimeSessionChange === "function") {
           await this.handleRuntimeSessionChange();
         }
-        this.renderCurrentSessionState();
+        redrawCurrentSessionHistoryAfterRpcResync(this);
         syncRpcPiLoader(this);
         this.ui.requestRender();
         return;
