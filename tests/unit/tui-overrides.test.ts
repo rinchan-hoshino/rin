@@ -235,6 +235,7 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
       terminal: { setProgress() {} },
     },
     footer: { invalidate() {} },
+    pendingTools: { clear() {} },
     retryCountdown: undefined,
     retryLoader: undefined,
     loadingAnimation: undefined,
