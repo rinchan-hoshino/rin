@@ -1,12 +1,24 @@
 import {
   currentInstalledReleaseName,
+  ensureDir,
   listInstalledReleaseEntries,
-  rollbackInstalledRuntime,
+  pruneInstalledReleases,
+  readInstallerJson,
+  runPrivileged,
+  switchInstalledCurrentRelease,
+  writeJsonFile,
+  writeJsonFileWithPrivilege,
 } from "../rin-install/fs-utils.js";
+import {
+  installedReleaseRoot,
+  installerManifestPaths,
+} from "../rin-install/paths.js";
+import { reconcileInstallerManifest } from "../rin-install/persist.js";
 import {
   describeOwnership,
   findSystemUser,
   shouldUseElevatedWrite,
+  targetHomeForUser,
 } from "../rin-install/users.js";
 
 import { runRestart } from "./control.js";
@@ -57,26 +69,85 @@ export function runVersions(parsed: ParsedArgs) {
   }
 }
 
+function readRollbackReleaseRecord(
+  installDir: string,
+  targetUser: string,
+  elevated: boolean,
+) {
+  const manifestPaths = installerManifestPaths(
+    installDir,
+    targetHomeForUser(targetUser),
+  );
+  for (const filePath of manifestPaths.recoveryPaths) {
+    const manifest = readInstallerJson<any>(filePath, null, elevated);
+    const previousRelease = manifest?.previousRelease;
+    const name = String(previousRelease?.name || "").trim();
+    if (name) return previousRelease;
+  }
+  return undefined;
+}
+
 export async function runRollback(parsed: ParsedArgs) {
   const installDir = resolveInstallDirForTarget(parsed);
   const elevated = shouldUseElevatedInstallAccess(
     parsed.targetUser,
     installDir,
   );
-  const result = rollbackInstalledRuntime(
+  const currentName = currentInstalledReleaseName(installDir, elevated);
+  const rollbackRecord = readRollbackReleaseRecord(
     installDir,
+    parsed.targetUser,
+    elevated,
+  );
+  const rollbackName = String(rollbackRecord?.name || "").trim();
+  if (!rollbackName) throw new Error("rin_rollback_no_previous_release");
+  if (rollbackName === currentName) {
+    throw new Error(`rin_rollback_target_is_current:${rollbackName}`);
+  }
+
+  const switched = switchInstalledCurrentRelease(
+    installDir,
+    rollbackName,
     parsed.targetUser,
     elevated,
     { findSystemUser },
   );
+  const prunedReleases = pruneInstalledReleases(
+    installDir,
+    3,
+    switched.releaseRoot,
+    elevated,
+  );
+  reconcileInstallerManifest(
+    {
+      targetUser: parsed.targetUser,
+      installDir,
+      release: rollbackRecord?.release,
+      currentReleaseName: rollbackName,
+      currentReleaseRoot: switched.releaseRoot,
+      previousReleaseName: currentName,
+      previousReleaseRoot: currentName
+        ? installedReleaseRoot(installDir, currentName)
+        : undefined,
+      elevated,
+    },
+    {
+      findSystemUser,
+      ensureDir,
+      readInstallerJson,
+      writeJsonFileWithPrivilege,
+      writeJsonFile,
+      runPrivileged,
+    },
+  );
 
   console.log(
-    `rin rollback: switched ${result.previousReleaseName || "current"} -> ${result.releaseName}`,
+    `rin rollback: switched ${currentName || "current"} -> ${rollbackName}`,
   );
-  console.log(`rin rollback: current = ${result.currentLink}`);
-  console.log(`rin rollback: release = ${result.releaseRoot}`);
+  console.log(`rin rollback: current = ${switched.currentLink}`);
+  console.log(`rin rollback: release = ${switched.releaseRoot}`);
   console.log(
-    `rin rollback: pruned old releases = ${result.prunedReleases.removed.length}`,
+    `rin rollback: pruned old releases = ${prunedReleases.removed.length}`,
   );
   await runRestart(parsed);
 }

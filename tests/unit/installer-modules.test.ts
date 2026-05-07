@@ -387,6 +387,64 @@ test("persist reconcileInstallerManifest persists release metadata when provided
   });
 });
 
+test("persist reconcileInstallerManifest records current and previous release rollback metadata", async () => {
+  await withTempDir(async (dir) => {
+    const installDir = path.join(dir, "srv", "rin-demo");
+    const ownerHome = path.join(dir, "home", "demo");
+    const writes = [];
+
+    const release = {
+      channel: "stable" as const,
+      version: "1.3.0",
+      branch: "stable",
+      ref: "1.3.0",
+      sourceLabel: "stable version 1.3.0",
+      archiveUrl: "https://example.com/release-1.3.0.tgz",
+    };
+    const options = {
+      targetUser: "demo",
+      installDir,
+      release,
+      currentReleaseName: "1.3.0",
+      currentReleaseRoot: path.join(installDir, "app", "releases", "1.3.0"),
+      previousReleaseName: "1.2.0",
+      previousReleaseRoot: path.join(installDir, "app", "releases", "1.2.0"),
+      elevated: false,
+    };
+    const deps = {
+      findSystemUser: () => ({ name: "demo", gid: 1000, home: ownerHome }),
+      ensureDir: async () => {},
+      readInstallerJson: (_filePath, fallback) =>
+        fallback === null
+          ? writes.at(-1)?.value || {
+              release: {
+                channel: "stable",
+                version: "1.2.0",
+                branch: "stable",
+                ref: "1.2.0",
+                sourceLabel: "stable version 1.2.0",
+                archiveUrl: "https://example.com/release-1.2.0.tgz",
+              },
+            }
+          : fallback,
+      writeJsonFileWithPrivilege: () => {},
+      writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
+      runPrivileged: () => {},
+    };
+
+    persist.reconcileInstallerManifest(options, deps);
+    persist.reconcileInstallerManifest(options, deps);
+
+    assert.equal(writes.length, 4);
+    for (const entry of writes) {
+      assert.equal(entry.value.currentRelease.name, "1.3.0");
+      assert.equal(entry.value.currentRelease.release.version, "1.3.0");
+      assert.equal(entry.value.previousRelease.name, "1.2.0");
+      assert.equal(entry.value.previousRelease.release.version, "1.2.0");
+    }
+  });
+});
+
 test("persist reconcileInstallerManifest skips malformed recovery candidates before reusing a prior manifest", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");

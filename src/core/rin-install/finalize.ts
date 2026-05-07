@@ -1,6 +1,7 @@
 import { type FinalizeInstallOptions } from "./apply-plan.js";
 import {
   launcherMetadataPathForUser,
+  currentInstalledReleaseName,
   ensureDir,
   publishInstalledRuntime,
   pruneInstalledReleases,
@@ -12,7 +13,7 @@ import {
   writeJsonFileWithPrivilege,
   writeLaunchersForUser,
 } from "./fs-utils.js";
-import { defaultInstallDirForHome } from "./paths.js";
+import { defaultInstallDirForHome, installedReleaseRoot } from "./paths.js";
 import {
   normalizeInstalledChatSettings,
   persistInstallerOutputs,
@@ -67,6 +68,10 @@ async function applyInstalledRuntime(
   const useElevatedService = installServiceNow && targetUser !== currentUser;
   const serviceDeps = { findSystemUser, targetHomeForUser };
 
+  const previousReleaseName = currentInstalledReleaseName(
+    installDir,
+    useElevatedWrite,
+  );
   const publishedRuntime = publishInstalledRuntime(
     sourceRoot,
     installDir,
@@ -74,6 +79,9 @@ async function applyInstalledRuntime(
     useElevatedWrite,
     { findSystemUser, release },
   );
+  const currentReleaseName = publishedRuntime.releaseRoot
+    ? publishedRuntime.releaseRoot.split(/[\\/]/).pop() || ""
+    : "";
   const installedDocs = syncInstalledDocs(
     sourceRoot,
     installDir,
@@ -97,6 +105,12 @@ async function applyInstalledRuntime(
       language,
       chatConfig,
       release,
+      currentReleaseName,
+      currentReleaseRoot: publishedRuntime.releaseRoot,
+      previousReleaseName,
+      previousReleaseRoot: previousReleaseName
+        ? installedReleaseRoot(installDir, previousReleaseName)
+        : undefined,
       elevated: useElevatedWrite,
     },
     {
@@ -136,6 +150,12 @@ async function applyInstalledRuntime(
           chatConfig,
           authData,
           release,
+          currentReleaseName,
+          currentReleaseRoot: publishedRuntime.releaseRoot,
+          previousReleaseName,
+          previousReleaseRoot: previousReleaseName
+            ? installedReleaseRoot(installDir, previousReleaseName)
+            : undefined,
           elevated: useElevatedWrite,
         },
         {

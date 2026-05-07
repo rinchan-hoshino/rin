@@ -54,6 +54,7 @@ Useful locations:
 - macOS launch agent: `~/Library/LaunchAgents/com.rin.daemon.*.plist`
 
 These files are the main way to audit `installDir` and `targetUser` or repair an installation whose launchers are missing.
+They also record installed-runtime release state: `currentRelease` describes the active `app/releases/...` entry, and `previousRelease` is the authoritative `rin rollback` target.
 Service files expose the runtime directory through `RIN_DIR`, and once `installDir` is known the next stop should be `<installDir>/installer.json`.
 
 ## Installed update path

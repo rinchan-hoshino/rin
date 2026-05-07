@@ -367,34 +367,6 @@ async function seedRuntimeReleases(
   return releasesRoot;
 }
 
-test("rollbackInstalledRuntime switches current to the newest previous release", async () => {
-  const tempRoot = await makeRuntimeSource();
-  const installDir = await fs.mkdtemp(
-    path.join(tempBaseDir, "rin-install-dst-"),
-  );
-  const releasesRoot = await seedRuntimeReleases(
-    installDir,
-    ["1.0.0", "1.1.0", "1.2.0", "1.3.0"],
-    "1.3.0",
-  );
-
-  const result = fsUtils.rollbackInstalledRuntime(installDir, "rin", false, {
-    findSystemUser: () => null,
-  });
-
-  assert.equal(result.previousReleaseName, "1.3.0");
-  assert.equal(result.releaseName, "1.2.0");
-  assert.equal(
-    await fs.realpath(path.join(installDir, "app", "current")),
-    path.join(releasesRoot, "1.2.0"),
-  );
-  assert.deepEqual(
-    fsUtils.listInstalledReleaseNames(installDir, false).sort(),
-    ["1.1.0", "1.2.0", "1.3.0"],
-  );
-  await fs.rm(tempRoot, { recursive: true, force: true });
-});
-
 test("pruneInstalledReleases keeps current plus newest releases within the limit", async () => {
   const installDir = await fs.mkdtemp(
     path.join(tempBaseDir, "rin-install-dst-"),

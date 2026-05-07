@@ -410,6 +410,27 @@ function normalizeInstalledReleaseInfo(
   };
 }
 
+function isInstalledReleaseRecord(value: any) {
+  return isJsonRecord(value) && typeof value.name === "string";
+}
+
+function buildInstalledReleaseRecord(options: {
+  name?: string;
+  root?: string;
+  release?: InstalledReleaseInfo;
+}) {
+  const name = String(options.name || "").trim();
+  if (!name) return undefined;
+  const release = normalizeInstalledReleaseInfo(options.release);
+  return {
+    name,
+    ...(String(options.root || "").trim()
+      ? { path: String(options.root || "").trim() }
+      : {}),
+    ...(release ? { release } : {}),
+  };
+}
+
 export function reconcileInstallerManifest(
   options: {
     targetUser: string;
@@ -420,6 +441,10 @@ export function reconcileInstallerManifest(
     language?: string;
     chatConfig?: any;
     release?: InstalledReleaseInfo;
+    currentReleaseName?: string;
+    currentReleaseRoot?: string;
+    previousReleaseName?: string;
+    previousReleaseRoot?: string;
     elevated?: boolean;
   },
   deps: {
@@ -471,6 +496,34 @@ export function reconcileInstallerManifest(
   manifestJson.installDir = options.installDir;
   applyInstalledDefaults(manifestJson, options);
   const normalizedRelease = normalizeInstalledReleaseInfo(options.release);
+  const priorCurrentRelease = isInstalledReleaseRecord(
+    manifestJson.currentRelease,
+  )
+    ? manifestJson.currentRelease
+    : undefined;
+  const priorPreviousRelease = isInstalledReleaseRecord(
+    manifestJson.previousRelease,
+  )
+    ? manifestJson.previousRelease
+    : undefined;
+  const previousReleaseName = String(options.previousReleaseName || "").trim();
+  const previousReleaseMetadata = previousReleaseName
+    ? priorCurrentRelease?.name === previousReleaseName
+      ? priorCurrentRelease.release
+      : priorPreviousRelease?.name === previousReleaseName
+        ? priorPreviousRelease.release
+        : manifestJson.release
+    : undefined;
+  const previousRelease = buildInstalledReleaseRecord({
+    name: options.previousReleaseName,
+    root: options.previousReleaseRoot,
+    release: previousReleaseMetadata,
+  });
+  const currentRelease = buildInstalledReleaseRecord({
+    name: options.currentReleaseName,
+    root: options.currentReleaseRoot,
+    release: normalizedRelease,
+  });
   if (normalizedRelease) {
     manifestJson.release = {
       channel: normalizedRelease.channel,
@@ -481,6 +534,15 @@ export function reconcileInstallerManifest(
       archiveUrl: normalizedRelease.archiveUrl,
       installedAt: normalizedRelease.installedAt || new Date().toISOString(),
     };
+  }
+  if (currentRelease) manifestJson.currentRelease = currentRelease;
+  if (
+    previousRelease &&
+    previousRelease.name !== String(currentRelease?.name || "")
+  ) {
+    manifestJson.previousRelease = previousRelease;
+  } else if (!currentRelease && priorCurrentRelease) {
+    manifestJson.currentRelease = priorCurrentRelease;
   }
   manifestJson.updatedAt = new Date().toISOString();
 
@@ -553,6 +615,10 @@ export async function persistInstallerOutputs(
     chatConfig: any;
     authData: any;
     release?: InstalledReleaseInfo;
+    currentReleaseName?: string;
+    currentReleaseRoot?: string;
+    previousReleaseName?: string;
+    previousReleaseRoot?: string;
     elevated?: boolean;
   },
   deps: {
@@ -634,6 +700,10 @@ export async function persistInstallerOutputs(
       language,
       chatConfig: normalizeChatConfigRoot(options.chatConfig) || {},
       release: options.release,
+      currentReleaseName: options.currentReleaseName,
+      currentReleaseRoot: options.currentReleaseRoot,
+      previousReleaseName: options.previousReleaseName,
+      previousReleaseRoot: options.previousReleaseRoot,
       elevated: options.elevated,
     },
     deps,

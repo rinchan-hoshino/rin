@@ -28,6 +28,11 @@ Release-channel default:
 - `rin update --git <name>` targets that branch or ref directly
 - `--branch` / `--version` remain supported as explicit selectors for direct stable/git resolution when needed
 
+Rollback entrypoint:
+
+- `rin rollback` switches the installed runtime to the `previousRelease` recorded in `installer.json`, updates the manifest so another rollback can switch back, and restarts the daemon.
+- If no `previousRelease` is recorded, treat that as missing rollback metadata instead of guessing from ad-hoc `current.old` files.
+
 When `rin` is confirmed missing on an account that should have it, repair the launcher rather than teaching agents to find and execute runtime entry files manually. Use the target manifest or managed service files only for audit and repair.
 
 Important implications:

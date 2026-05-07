@@ -771,40 +771,6 @@ export function switchInstalledCurrentRelease(
   return { releaseRoot: targetRoot, currentLink };
 }
 
-export function rollbackInstalledRuntime(
-  installDir: string,
-  targetUser: string,
-  elevated = false,
-  deps: { findSystemUser: (user: string) => any },
-) {
-  const currentName = currentInstalledReleaseName(installDir, elevated);
-  const entries = listInstalledReleaseEntries(installDir, elevated)
-    .filter((entry) => entry.name && entry.name !== currentName)
-    .sort(releaseEntrySortNewestFirst);
-  const target = entries[0];
-  if (!target) throw new Error("rin_rollback_no_previous_release");
-  const switched = switchInstalledCurrentRelease(
-    installDir,
-    target.name,
-    targetUser,
-    elevated,
-    deps,
-  );
-  const prunedReleases = pruneInstalledReleases(
-    installDir,
-    3,
-    switched.releaseRoot,
-    elevated,
-  );
-  return {
-    previousReleaseName: currentName,
-    releaseName: target.name,
-    releaseRoot: switched.releaseRoot,
-    currentLink: switched.currentLink,
-    prunedReleases,
-  };
-}
-
 export function pruneInstalledReleases(
   installDir: string,
   keepCount: number,
