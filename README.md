@@ -5,7 +5,15 @@
 > **Your personal AI assistant, living on your computer.**<br>
 > Rin remembers what matters, helps with real tasks, and gets better as you use it.
 
-Rin is a local, general-purpose AI assistant with memory, tools, scheduling, UI entry points, and chat bridges built in. It is also built with Rin: the project uses its own assistant to plan, edit, review, translate, and maintain this repository.
+Rin is a local, general-purpose AI assistant with memory, tools, scheduling, UI entry points, and chat bridges built in. It can help with documents, web research, files, reminders, code, connected services, and repeated workflows — while sharing one assistant state across terminal, desktop, automation, and chat.
+
+| What matters             | What Rin provides                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| Global memory            | Useful facts, preferences, and lessons can survive beyond a single chat session.      |
+| Learns from repeated use | Corrections and successful workflows can become compact instructions and skills.      |
+| Local background runtime | Different interfaces connect to one assistant instead of isolated chat windows.       |
+| Ready-to-use product     | Memory, scheduling, tools, chat bridges, and UI paths are provided out of the box.    |
+| Self-bootstrapped        | Rin is used to build Rin, making this repository a live test of the assistant itself. |
 
 > [!WARNING]
 > Rin is still young. Treat everyday use as experimental: you may meet rough edges, missing documentation, unstable behavior, token/API cost, or occasional breaking changes.
@@ -57,46 +65,13 @@ Install from PowerShell or Windows Terminal. Node.js and npm must be available f
 
 On Windows, the interactive installer opens the GUI installer by default. After installation, `rin` opens the desktop GUI by default, and Rin also writes GUI launchers plus a user-scoped Startup launcher for the background runtime.
 
-## Basic usage
-
-```bash
-rin            # open Rin
-rin -p "..."   # run a one-shot assistant turn
-rin doctor     # inspect health and configuration
-```
-
-## Capabilities
-
-Rin is designed for everyday assistant work, not only coding:
-
-- remember durable facts, preferences, projects, and recurring instructions
-- summarize, rewrite, and organize documents
-- search the web for current information
-- inspect and manage files
-- create reminders and scheduled tasks
-- keep long-term notes from repeated work
-- help with code and repositories
-- operate connected services or local commands under your supervision
-- respond through the terminal, desktop app, automation, or connected chat apps as the same assistant
-
-## Key features
-
-| Feature                  | What it means                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------------- |
-| Global memory            | Useful facts and lessons can survive beyond a single chat session.                    |
-| Learns from repeated use | Corrections and successful workflows can become compact instructions and skills.      |
-| Local background runtime | Different interfaces can connect to one assistant state instead of isolated windows.  |
-| Ready-to-use product     | Memory, scheduling, tools, chat bridges, and UI paths are provided out of the box.    |
-| Self-bootstrapped        | Rin is used to build Rin, so the repository is a live test of the assistant workflow. |
-
 ## Safety and cost
 
 Rin can keep context, write memory, run scheduled work, search the web, and call models repeatedly. This may consume more model tokens, API quota, or subscription capacity than a one-off chat.
 
 Use supervision for important actions. Do not let Rin perform irreversible or sensitive work unless you understand the risk and can review or roll back the result.
 
-<details>
-<summary>Technical direction</summary>
+## Technical direction
 
 Rin is built on Pi and keeps Pi's KISS-first spirit:
 
@@ -107,8 +82,6 @@ Rin is built on Pi and keeps Pi's KISS-first spirit:
 - prefer transparent local state over remote platform lock-in
 
 Rin is not trying to be a heavy agent framework. It is trying to be a practical everyday assistant that can remember, act, and improve while staying inspectable.
-
-</details>
 
 ## Documentation
 
