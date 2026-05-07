@@ -446,6 +446,8 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.match(updateModeBlock, /readInstalledUpdateLanguage/);
   assert.match(mainSource, /installSettingsPath/);
   assert.match(mainSource, /installerManifestPaths/);
+  assert.match(mainSource, /launcherMetadataCandidatesForHome/);
+  assert.match(mainSource, /currentUser: updateCurrentUser/);
   assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
   assert.match(updaterSource, /renderInstallerNote/);
   assert.match(updaterSource, /wrapInstallerNoteText/);
@@ -455,6 +457,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.match(updaterSource, /i18n\.buildUpdatePlanText/);
   assert.match(updaterSource, /i18n\.buildUpdatedTargetText/);
   assert.match(updaterSource, /i18n\.buildAfterUpdateText/);
+  assert.match(updaterSource, /language: i18n\.language/);
   assert.match(
     updaterSource,
     /const promptConfirm = deps\.confirm \|\| confirm/,

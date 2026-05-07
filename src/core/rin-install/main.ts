@@ -46,6 +46,7 @@ import {
   defaultInstallDirForHome,
   installSettingsPath,
   installerManifestPaths,
+  launcherMetadataCandidatesForHome,
 } from "./paths.js";
 import { startUpdater } from "./updater.js";
 import { runInstallerProgress } from "./progress.js";
@@ -91,11 +92,17 @@ function note(message?: string, title?: string) {
   );
 }
 
-function readInstalledUpdateLanguage(targetUser: string, installDir: string) {
-  const ownerHome = targetHomeForUser(targetUser);
+function readInstalledUpdateLanguage(options: {
+  currentUser: string;
+  targetUser: string;
+  installDir: string;
+}) {
+  const ownerHome = targetHomeForUser(options.targetUser);
+  const currentHome = targetHomeForUser(options.currentUser);
   const candidates = [
-    installSettingsPath(installDir),
-    ...installerManifestPaths(installDir, ownerHome).recoveryPaths,
+    installSettingsPath(options.installDir),
+    ...installerManifestPaths(options.installDir, ownerHome).recoveryPaths,
+    ...launcherMetadataCandidatesForHome(currentHome),
   ];
   for (const candidate of candidates) {
     const language = normalizeLanguageTag(
@@ -153,15 +160,18 @@ export async function startInstaller() {
       .trim()
       .toLowerCase() === "update"
   ) {
+    const updateCurrentUser = detectCurrentUser();
     const updateTargetUser = String(
-      process.env.RIN_UPDATE_TARGET_USER || detectCurrentUser(),
+      process.env.RIN_UPDATE_TARGET_USER || updateCurrentUser,
     ).trim();
     const updateTargetHome = targetHomeForUser(updateTargetUser);
-    const selectedLanguage = readInstalledUpdateLanguage(
-      updateTargetUser,
-      String(process.env.RIN_UPDATE_INSTALL_DIR || "").trim() ||
+    const selectedLanguage = readInstalledUpdateLanguage({
+      currentUser: updateCurrentUser,
+      targetUser: updateTargetUser,
+      installDir:
+        String(process.env.RIN_UPDATE_INSTALL_DIR || "").trim() ||
         defaultInstallDirForHome(updateTargetHome),
-    );
+    });
     process.env.RIN_INSTALL_LANGUAGE = selectedLanguage;
     const i18n = createInstallerI18n(selectedLanguage);
     const localizedConfirm: typeof confirm = (options) =>
@@ -171,7 +181,7 @@ export async function startInstaller() {
         ...options,
       });
     await startUpdater({
-      detectCurrentUser,
+      detectCurrentUser: () => updateCurrentUser,
       repoRootFromHere,
       ensureNotCancelled,
       release: releaseInfoFromEnv(),
