@@ -80,6 +80,26 @@ const openAiDocsDuckDuckGoLiteFixture = `
   </tr>
 </table>`;
 
+const duckDuckGoHtmlFixture = `
+<div id="links">
+  <div class="result results_links_deep web-result">
+    <h2 class="result__title">
+      <a class="result__a" href="https://github.com/rinchanai/rin">GitHub - rinchanai/rin</a>
+    </h2>
+    <a class="result__snippet" href="https://github.com/rinchanai/rin">Rin personal workspace mirror managed by <b>RinChan</b>.</a>
+  </div>
+</div>`;
+
+const openAiDocsDuckDuckGoHtmlFixture = `
+<div id="links">
+  <div class="result results_links_deep web-result">
+    <h2 class="result__title">
+      <a class="result__a" href="https://platform.openai.com/docs/guides/prompt-caching">OpenAI Platform</a>
+    </h2>
+    <a class="result__snippet" href="https://platform.openai.com/docs/guides/prompt-caching">Prompt caching documentation for OpenAI API requests.</a>
+  </div>
+</div>`;
+
 test("web search query helpers normalize request", () => {
   const req = query.normalizeSearchRequest({
     q: "  hello ",
@@ -136,9 +156,9 @@ test("web search maps freshness to direct provider query parameters", async () =
     assert.equal(result.ok, false);
     assert.equal(calls.length, 3);
     const googleUrl = new URL(calls[0]);
-    const duckDuckGoUrl = new URL(calls.at(-1));
     assert.equal(googleUrl.searchParams.get("tbs"), "qdr:w");
-    assert.equal(duckDuckGoUrl.searchParams.get("df"), "w");
+    assert.equal(googleUrl.searchParams.has("num"), false);
+    assert.equal(googleUrl.searchParams.has("gl"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -164,17 +184,28 @@ test("google parser extracts direct results", () => {
   assert.equal(rows[0].domain, "github.com");
 });
 
-test("duckduckgo lite parser extracts direct results", () => {
-  const rows = query.parseDuckDuckGoLiteResults(duckDuckGoLiteFixture, 5);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].engine, "duckduckgo");
-  assert.equal(rows[0].url, "https://github.com/rinchanai/rin");
-  assert.equal(rows[0].title, "GitHub - rinchanai/rin");
+test("duckduckgo parser extracts lite and html direct results", () => {
+  const liteRows = query.parseDuckDuckGoLiteResults(duckDuckGoLiteFixture, 5);
+  assert.equal(liteRows.length, 1);
+  assert.equal(liteRows[0].engine, "duckduckgo");
+  assert.equal(liteRows[0].url, "https://github.com/rinchanai/rin");
+  assert.equal(liteRows[0].title, "GitHub - rinchanai/rin");
   assert.equal(
-    rows[0].snippet,
+    liteRows[0].snippet,
     "Rin personal workspace mirror managed by RinChan.",
   );
-  assert.equal(rows[0].domain, "github.com");
+  assert.equal(liteRows[0].domain, "github.com");
+
+  const htmlRows = query.parseDuckDuckGoLiteResults(duckDuckGoHtmlFixture, 5);
+  assert.equal(htmlRows.length, 1);
+  assert.equal(htmlRows[0].engine, "duckduckgo");
+  assert.equal(htmlRows[0].url, "https://github.com/rinchanai/rin");
+  assert.equal(htmlRows[0].title, "GitHub - rinchanai/rin");
+  assert.equal(
+    htmlRows[0].snippet,
+    "Rin personal workspace mirror managed by RinChan.",
+  );
+  assert.equal(htmlRows[0].domain, "github.com");
 });
 
 test("web search service reports direct provider runtime status", () => {
@@ -188,7 +219,7 @@ test("web search service reports direct provider runtime status", () => {
 
 test("web search uses google results first and fills gaps from duckduckgo", async () => {
   const originalFetch = globalThis.fetch;
-  const responses = [googleFixture, openAiDocsDuckDuckGoLiteFixture];
+  const responses = [googleFixture, openAiDocsDuckDuckGoHtmlFixture];
   globalThis.fetch = (async () => ({
     ok: true,
     status: 200,
@@ -244,23 +275,60 @@ test("web search requests Google with SearXNG-style mobile user agent", async ()
     assert.equal(result.engine, "google");
     assert.equal(result.results[0].url, "https://example.com/google-result");
     assert.equal(calls.length, 1);
-    assert.equal(new URL(calls[0].url).hostname, "www.google.com");
+    const googleUrl = new URL(calls[0].url);
+    assert.equal(googleUrl.hostname, "www.google.com");
+    assert.equal(googleUrl.searchParams.get("hl"), "en-US");
+    assert.equal(googleUrl.searchParams.has("lr"), false);
+    assert.equal(googleUrl.searchParams.has("cr"), false);
+    assert.equal(googleUrl.searchParams.has("num"), false);
+    assert.equal(googleUrl.searchParams.has("gl"), false);
     assert.match(calls[0].headers["User-Agent"], /NSTNWV$/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("duckduckgo provider uses the lite endpoint directly", async () => {
+test("web search localizes Google with SearXNG-style domain and country params", async () => {
   const originalFetch = globalThis.fetch;
-  const calls: string[] = [];
+  const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+  globalThis.fetch = (async (url: any, init: any) => {
+    calls.push({ url: String(url), headers: init.headers });
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => googleGsaFixture,
+    };
+  }) as typeof fetch;
+  try {
+    const result = await query.searchWeb({
+      q: "rinchanai",
+      limit: 1,
+      language: "zh-CN",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.engine, "google");
+    const googleUrl = new URL(calls[0].url);
+    assert.equal(googleUrl.hostname, "www.google.com.hk");
+    assert.equal(googleUrl.searchParams.get("hl"), "zh-CN");
+    assert.equal(googleUrl.searchParams.get("lr"), "lang_zh-CN");
+    assert.equal(googleUrl.searchParams.get("cr"), "countryCN");
+    assert.equal(calls[0].headers.Referer, "https://www.google.com.hk/");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("duckduckgo provider uses SearXNG-style html form request", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init: any }> = [];
   const responses = [
     "<html><body>No Google results</body></html>",
     "<html><body>No Google results again</body></html>",
-    duckDuckGoLiteFixture,
+    duckDuckGoHtmlFixture,
   ];
-  globalThis.fetch = (async (url: any) => {
-    calls.push(String(url));
+  globalThis.fetch = (async (url: any, init: any) => {
+    calls.push({ url: String(url), init });
     return {
       ok: true,
       status: 200,
@@ -269,18 +337,33 @@ test("duckduckgo provider uses the lite endpoint directly", async () => {
     };
   }) as typeof fetch;
   try {
-    const result = await query.searchWeb({ q: "rinchanai", limit: 1 });
+    const result = await query.searchWeb({
+      q: "rinchanai",
+      limit: 1,
+      freshness: "week",
+      language: "en-US",
+    });
     assert.equal(result.ok, true);
     assert.equal(result.engine, "duckduckgo");
     assert.equal(result.results[0].url, "https://github.com/rinchanai/rin");
-    assert.equal(
-      calls.some((url) => url.includes("html.duckduckgo.com")),
-      false,
+    const duckDuckGoCall = calls.find((call) =>
+      call.url.includes("html.duckduckgo.com/html/"),
     );
+    assert.ok(duckDuckGoCall);
+    assert.equal(duckDuckGoCall.init.method, "POST");
+    assert.equal(duckDuckGoCall.init.headers["Sec-Fetch-Mode"], "navigate");
     assert.equal(
-      calls.some((url) => url.includes("lite.duckduckgo.com")),
+      duckDuckGoCall.init.headers.Referer,
+      "https://html.duckduckgo.com/",
+    );
+    assert.match(duckDuckGoCall.init.headers["User-Agent"], /Chrome/);
+    assert.equal(duckDuckGoCall.init.headers.Cookie, "kl=us-en; df=w");
+    assert.equal(
+      String(duckDuckGoCall.init.body).includes("q=rinchanai"),
       true,
     );
+    assert.equal(String(duckDuckGoCall.init.body).includes("kl=us-en"), true);
+    assert.equal(String(duckDuckGoCall.init.body).includes("df=w"), true);
     assert.deepEqual(result.attempts, [
       { engine: "google", ok: true, results: 0 },
       { engine: "duckduckgo", ok: true, results: 1 },
@@ -295,7 +378,7 @@ test("web search tries duckduckgo when google has no results", async () => {
   const responses = [
     "<html><body>No Google results</body></html>",
     "<html><body>No Google results again</body></html>",
-    openAiDocsDuckDuckGoLiteFixture,
+    openAiDocsDuckDuckGoHtmlFixture,
   ];
   globalThis.fetch = (async () => ({
     ok: true,
@@ -328,7 +411,7 @@ test("web search applies embedded site operators after provider search", async (
   const responses = [
     "<html><body>No Google results</body></html>",
     "<html><body>No Google results again</body></html>",
-    openAiDocsDuckDuckGoLiteFixture,
+    openAiDocsDuckDuckGoHtmlFixture,
   ];
   globalThis.fetch = (async () => ({
     ok: true,
@@ -425,7 +508,7 @@ test("web search provider attempts expose fetch failure details", async () => {
     assert.match(result.attempts?.[0].error || "", /UND_ERR_CONNECT_TIMEOUT/);
     assert.match(
       result.attempts?.[1].error || "",
-      /lite\.duckduckgo\.com\/lite\//,
+      /html\.duckduckgo\.com\/html\//,
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -454,6 +537,39 @@ test("web search tool output includes provider attempts on failure", async () =>
     assert.equal(result.details.attempts.length, 2);
     assert.match(result.details.userText, /Web search failed:/);
     assert.match(result.details.userText, /attempts:/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search tool output explains challenge recovery and SearXNG behavior", async () => {
+  const originalFetch = globalThis.fetch;
+  const registeredTool = webSearchIndex
+    .default()
+    .tools.find((tool: any) => tool.name === "web_search");
+
+  const responses = [
+    "<html><body><h1>CAPTCHA</h1><p>automated queries detected</p></body></html>",
+    "<html><body><form id='challenge-form'>DuckDuckGo robot check</form></body></html>",
+  ];
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => responses.shift() || "",
+  })) as typeof fetch;
+  try {
+    const result = await registeredTool.execute("call-demo", {
+      q: "rinchanai",
+      limit: 1,
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /google_challenge_required/);
+    assert.match(result.content[0].text, /duckduckgo_challenge_required/);
+    assert.match(result.content[0].text, /User action:/);
+    assert.match(result.content[0].text, /SearXNG reduces this risk/);
+    assert.match(result.details.userText, /Challenge help:/);
+    assert.match(result.details.userText, /runtime egress network/);
   } finally {
     globalThis.fetch = originalFetch;
   }

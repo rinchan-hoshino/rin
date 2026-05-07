@@ -158,6 +158,10 @@ Rin provides live web search and direct URL fetching through `web_search`. As an
 - when `q` is an HTTP(S) URL, `web_search` gets that page directly, uses a Chrome-like user agent, and extracts readable markdown/text from HTML with Readability-style extraction
 - use URL mode when the user already gave you a specific URL and discovery is not needed
 
+If search fails with `google_challenge_required` or `duckduckgo_challenge_required`, the upstream search engine returned an anti-bot/captcha page to the Rin runtime's network path. The user cannot clear that challenge by solving a captcha in their personal browser unless Rin is using the same browser/session/network. Practical recovery is to wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, fetch a known URL directly, or use a trusted search backend/API instead of the challenged direct engine.
+
+SearXNG reduces this failure rate rather than magically bypassing challenges: it centralizes per-engine request shapes, rate limits, and optional proxy/instance rotation. Its Google engine uses a localized supported Google domain, `hl`/`lr`/`cr` locale parameters, `CONSENT=YES+`, `Accept: */*`, utf8 encoding, and a mobile Google-app-shaped user-agent so Google is more likely to return server-rendered results. Its DuckDuckGo engine uses the no-JS HTML form POST flow with browser navigation headers instead of a bare lite GET. If the upstream engine challenges the egress IP, the request must still back off, rotate the egress path, or report the challenge.
+
 ## Runtime activity status
 
 Rin exposes live daemon activity for workers and scheduled tasks.
