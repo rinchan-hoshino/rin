@@ -458,3 +458,36 @@ test("web search tool output includes provider attempts on failure", async () =>
     globalThis.fetch = originalFetch;
   }
 });
+
+test("web search tool output explains challenge recovery and SearXNG behavior", async () => {
+  const originalFetch = globalThis.fetch;
+  const registeredTool = webSearchIndex
+    .default()
+    .tools.find((tool: any) => tool.name === "web_search");
+
+  const responses = [
+    "<html><body><h1>CAPTCHA</h1><p>automated queries detected</p></body></html>",
+    "<html><body><form id='challenge-form'>DuckDuckGo robot check</form></body></html>",
+  ];
+  globalThis.fetch = (async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => responses.shift() || "",
+  })) as typeof fetch;
+  try {
+    const result = await registeredTool.execute("call-demo", {
+      q: "rinchanai",
+      limit: 1,
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /google_challenge_required/);
+    assert.match(result.content[0].text, /duckduckgo_challenge_required/);
+    assert.match(result.content[0].text, /User action:/);
+    assert.match(result.content[0].text, /SearXNG reduces this risk/);
+    assert.match(result.details.userText, /Challenge help:/);
+    assert.match(result.details.userText, /runtime egress network/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
