@@ -2,32 +2,77 @@
 
 # Rin
 
-Rin is a daemon-style local AI assistant built on Pi.
-It is terminal-first, keeps a small customizable core, and ships with a practical default toolset.
+Rin is your personal AI assistant, designed to live right on your computer.
 
-> [!WARNING]
-> Rin is still a work in progress.
-> Expect rough edges, unstable behavior, and occasional breaking changes.
-> Agentic workflows can also consume noticeable model tokens and cost depending on how you use them.
+If you're familiar with AI tools like ChatGPT, Rin takes it a step further. It's an assistant that remembers important details across conversations, learns your preferences, and helps with real tasks efficiently, so you don't have to start over every time.
 
-## Why Rin
+Rin isn't just an idea; it's a real-world demonstration of what it can do. The entire Rin project is developed by Rin itself—meaning Rin acts as the continuous assistant that plans, edits, reviews, translates, and maintains its own development.
 
-- Built on Pi and shaped into a daemon agent you can keep around for daily work.
-- Small core by design: easier to understand, customize, and maintain.
-- Practical built-ins for file work, memory, scheduled tasks, web search, and chat bridging.
-- One product entrypoint: `rin`.
-- KISS-first direction instead of a sprawling extension-first surface.
+## Why Rin exists
 
-## What Rin is good for
+Have you ever found yourself repeating the same information to an AI in every new chat? Most AI conversations are easy to start, but also easy to lose.
 
-Rin is for people who want a local assistant they can actually keep using.
+You explain your preferences, your projects, your tools, and your habits. Then you open a new chat and explain them again. Rin tries to make that relationship less disposable.
 
-- Ask in plain language.
-- Inspect and modify files.
-- Keep useful long-term memory.
-- Run reminders and recurring tasks.
-- Look up fresh information on the web.
-- Bridge the same assistant into chat platforms.
+Rin addresses this by offering a simple, core promise:
+
+- keep the same assistant across sessions
+- remember useful long-term facts globally
+- improve with regular use, so you don't need to write complex instructions every time
+- connect to local files, web information, schedules, and various chat applications
+- stay understandable enough that you can inspect and control it
+
+## What you can use Rin for
+
+You talk to Rin in plain language. Rin can then use the tools available on your machine and in your configured accounts.
+
+Here are some examples of what Rin can do:
+
+- remember preferences, names, projects, and recurring instructions
+- summarize or rewrite documents
+- inspect and organize files
+- search the web for current information
+- create reminders and recurring tasks
+- keep useful notes from repeated work
+- help you manage your computer or other services, always under your supervision
+- respond through a command-line interface (CLI), a graphical user interface (GUI), or connected chat apps, always as the same assistant
+
+Rin is meant to be a general assistant, not only a coding tool. Coding and repository work are just one kind of task it can help with.
+
+## What makes Rin different
+
+### Ready to use
+
+Rin comes as a complete product you can start with a single command: `rin`. You won't need to build your own system for memory, scheduling, or connecting to chats.
+
+### Global memory
+
+Rin can keep durable facts and reusable experience outside a single conversation. New sessions can start with more of the context that matters.
+
+### Implicit self-improvement
+
+Rin can turn repeated practice into reusable instructions and skills. You shouldn't need to become an expert at writing prompts just to teach your assistant how you work.
+
+### A long-running local assistant
+
+Rin runs continuously in the background, so your assistant isn't limited to a single open window. Various ways to interact with Rin (like different apps or interfaces) can all connect to the same assistant.
+
+### Self-bootstrapped development
+
+Rin is maintained with Rin. The project is a practical test of its own design: the assistant that the product provides is also used to build, review, translate, and improve the product.
+
+## How Rin thinks about technology
+
+For those interested in the technical design, Rin is built with these core principles:
+
+- keep the system as simple as possible
+- clearly show the tools available and the information being used
+- allow the AI model to make decisions when appropriate
+- avoid rigid, pre-set ways of working that only fix problems with poor instructions
+- ensure the product doesn't rely on specific "tricks" or a single AI model
+- prioritize transparent, locally managed data over systems that lock you into a remote platform
+
+**Note for Developers:** Rin aims to be a practical daily assistant rather than a complex agent platform or a research tool. It's designed to be efficient, providing the AI with useful tools and memory while focusing on long-term, everyday functionality.
 
 ## Quick start
 
@@ -37,6 +82,11 @@ Install with one command, no clone required:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh | sh
+```
+
+Other release channels:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh | sh -s -- --beta
 curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh | sh -s -- --nightly
 curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh | sh -s -- --git
@@ -44,14 +94,17 @@ curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh 
 curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh | sh -s -- --git deadbeef
 ```
 
-The public bootstrap branch now only carries the install and update entry wrappers. Stable installs and updates hand off to the published npm package, while `--beta`, `--nightly`, and `--git` continue to resolve through the bootstrap manifest and GitHub refs.
-
 ### Windows
 
-Install from PowerShell or Windows Terminal with Node.js and npm available, no clone required:
+To install on Windows from PowerShell or Windows Terminal, ensure you have Node.js and npm installed (these are technical prerequisites, often used for web development), then run this command—no need to download the repository first:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.ps1)))
+```
+
+Other release channels:
+
+```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.ps1))) --beta
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.ps1))) --nightly
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.ps1))) --git
@@ -59,13 +112,13 @@ Install from PowerShell or Windows Terminal with Node.js and npm available, no c
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.ps1))) --git deadbeef
 ```
 
-The Windows PowerShell bootstrap follows the same release-channel contract as `install.sh`: stable launches the published npm installer, while `--beta`, `--nightly`, and `--git` download the selected source archive, build it locally, and run its installer without cloning the repository.
+On Windows, the interactive installer opens the GUI installer by default. It walks through language, target user, install directory, provider/model/auth, plan review, and final apply. If Windows asks for permission to make system changes, the GUI will show a simple command you can run in your terminal to complete the process, rather than asking for administrator passwords directly within the GUI.
 
-On Windows, the interactive installer opens the GUI installer by default. It walks through language, target user, install directory, provider/model/auth, plan review, and final apply. If protected writes need confirmation, the GUI shows a one-line terminal handoff command instead of asking for privileged credentials inside the window.
+After installation, Windows gets a GUI-first setup: the default `rin` launch opens the desktop GUI, and the installer writes direct GUI launchers plus a user-scoped Startup launcher for the background runtime. Use `rin gui` explicitly if you want to open the GUI from a terminal, or `rin-install --tui` / `rin-install --no-gui` if you need the terminal installer.
 
-After installation, Windows gets a GUI-first setup: the default `rin` launch opens the desktop GUI, and the installer writes direct GUI launchers plus a user-scoped Startup launcher for the daemon. Use `rin gui` explicitly if you want to open the GUI from a terminal, or `rin-install --tui` / `rin-install --no-gui` if you need the terminal installer.
+### From an existing checkout
 
-If you already have the repo locally, the bundled `install.sh` and `install.ps1` wrappers run the same release-selection flow:
+If you already have the repo locally, the bundled install wrappers run the same release-selection flow:
 
 ```bash
 ./install.sh              # stable release (default)
@@ -98,18 +151,26 @@ rin doctor
 rin status --watch  # live worker and scheduled-task activity
 ```
 
-### Deployment scenarios
+## Current status, safety, and costs
+
+Rin is actively developed and still early. Expect rough edges, unstable behavior, missing documentation, and occasional breaking changes.
+
+Because Rin can keep context, write memory, run scheduled work, search the web, and call models repeatedly, it can use more tokens, API quota, or subscription capacity than a normal one-off chat.
+
+Use supervision for important work. Do not let Rin perform irreversible, sensitive, or production-critical actions unless you understand the risk and can review or roll back the result.
+
+## Deployment scenarios
 
 The installer is still a local installer, but several deployment shapes are already practical as wrappers around the same Linux/macOS/Windows entry points. The target environment still needs the normal Rin prerequisites, including Node.js and npm:
 
-| Scenario                    | Feasibility                                             | Notes                                                                                                                                                                                    |
-| --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local or cross-user install | Supported today                                         | The interactive installer can target the current account or another local user, then writes that user's launchers and daemon service.                                                    |
-| SSH install                 | Feasible today                                          | Run the bootstrap command over SSH on the remote host. A dedicated `rin install --ssh` wrapper could improve discovery and error reporting later.                                        |
-| Containerized install       | Feasible with a headless Linux image                    | Use a persistent volume for the Rin home/install directory and run the daemon or CLI inside the container. GUI launchers and host user services do not apply inside the container.       |
-| Virtual machine install     | Supported through the normal OS installer               | Install Rin inside the guest OS exactly like a physical machine. VM snapshots make rollback easier, but Rin still manages only the guest environment.                                    |
-| NAS install                 | Feasible when the NAS can run Node.js or containers     | Prefer the normal Linux path on open NAS systems, or the container pattern on appliance-style NAS devices. Vendor package managers and restricted shells may need device-specific notes. |
-| Cloud host install          | Supported through SSH or cloud-init style bootstrapping | Treat the cloud VM as a remote Linux host. Persist `.rin` data on durable disk and configure daemon startup according to the host OS.                                                    |
+| Scenario                    | Feasibility                                             | Notes                                                                                                                                                                                          |
+| --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local or cross-user install | Supported today                                         | The interactive installer can target the current account or another local user, then writes that user's launchers and background service.                                                      |
+| SSH install                 | Feasible today                                          | Run the bootstrap command over SSH on the remote host. A dedicated `rin install --ssh` wrapper could improve discovery and error reporting later.                                              |
+| Containerized install       | Feasible with a headless Linux image                    | Use a persistent volume for the Rin home/install directory and run the background runtime or CLI inside the container. GUI launchers and host user services do not apply inside the container. |
+| Virtual machine install     | Supported through the normal OS installer               | Install Rin inside the guest OS exactly like a physical machine. VM snapshots make rollback easier, but Rin still manages only the guest environment.                                          |
+| NAS install                 | Feasible when the NAS can run Node.js or containers     | Prefer the normal Linux path on open NAS systems, or the container pattern on appliance-style NAS devices. Vendor package managers and restricted shells may need device-specific notes.       |
+| Cloud host install          | Supported through SSH or cloud-init style bootstrapping | Treat the cloud VM as a remote Linux host. Persist `.rin` data on durable disk and configure background startup according to the host OS.                                                      |
 
 These are deployment scenarios, not separate release channels. Stable, beta, nightly, and git selection keep using the same install/update contract above.
 
@@ -117,12 +178,13 @@ These are deployment scenarios, not separate release channels. Stable, beta, nig
 
 Rin includes a focused default stack:
 
-- file and shell tools
 - long-term memory
 - scheduled tasks and reminders
 - live web search
+- file and shell tools
 - chat bridge support
-- Pi-style non-interactive `rin -p` / `rin --mode json` for delegated, scriptable agent turns
+- GUI, TUI, CLI, and RPC-style access paths
+- non-interactive `rin -p` / `rin --mode json` for delegated or scriptable assistant turns
 
 ## Updating Rin
 
@@ -137,8 +199,7 @@ rin update --git main
 rin update --git deadbeef
 ```
 
-If `rin` is confirmed missing on the current account, treat that as “this is not the launcher-owning user”.
-In that case, recover the real target install through the installed metadata:
+If `rin` is confirmed missing on the current account, treat that as “this is not the launcher-owning user”. Recover the real target install through the installed metadata:
 
 - `<targetHome>/.rin/installer.json`
 - Linux: `~/.config/systemd/user/rin-daemon*.service`
@@ -150,9 +211,7 @@ Then invoke the stable installed runtime entry directly:
 node <installDir>/app/current/dist/app/rin/main.js update -u <targetUser>
 ```
 
-This is the canonical update path for the installed runtime.
-It refreshes the core runtime and installed docs.
-It does not replace the user-scoped CLI launcher or installer.
+This is the canonical update path for the installed runtime. It refreshes the core runtime and installed docs. It does not replace the user-scoped CLI launcher or installer.
 
 Important release-channel rule:
 
@@ -171,11 +230,13 @@ rin doctor     # inspect health and configuration
 rin status     # show live worker and scheduled-task activity
 rin target     # list and select deployment targets
 rin --target x # run Rin against a configured target environment
-rin start      # start the daemon
-rin stop       # stop the daemon
-rin restart    # restart the daemon
+rin start      # start the background runtime
+rin stop       # stop the background runtime
+rin restart    # restart the background runtime
 rin update     # update the installed Rin core runtime
 ```
+
+Normally, use `rin`. `rin --std` is a troubleshooting fallback for foreground recovery or debugging when the default RPC path is not working.
 
 ## Documentation
 
@@ -191,8 +252,6 @@ If you are changing Rin itself, start with [`docs/developer/README.md`](docs/dev
 
 ## Project status
 
-Rin is actively evolving.
-The current direction is a cleaner core, stronger daemon reliability, and better day-to-day usefulness without losing simplicity.
+Rin is moving toward a cleaner core, stronger reliability, better install and update flows, and a more useful everyday assistant experience.
 
-If you want a fully settled surface, it is still early.
-If you want a small, understandable, hackable daemon agent that is already useful, that is what Rin is trying to be.
+It is still early. If you want a finished, fully settled product, Rin is not there yet. If you want to try a local AI assistant that remembers, improves, and is already being used to build itself, that is what Rin is trying to become.
