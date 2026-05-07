@@ -2,21 +2,25 @@
 
 # Rin
 
-**Rin is a personal AI assistant that lives on your computer, remembers what matters, and gets better through daily use.**
+> **Your personal AI assistant, living on your computer.**<br>
+> Rin remembers what matters, helps with real tasks, and gets better as you use it.
 
-It is not just another chat window. Rin keeps one assistant identity across sessions, can use local tools when you allow it, and can keep useful experience as memory or reusable skills.
+Rin is not just another chat window. It is one assistant you can keep around: local, inspectable, connected to your tools when you allow it, and able to carry useful memory across sessions.
 
-Rin is also built with Rin. The project uses its own assistant to plan, edit, review, translate, and maintain the repository, so self-bootstrapping is part of the product test rather than a slogan.
+> [!NOTE]
+> Rin is also built with Rin. The project uses its own assistant to plan, edit, review, translate, and maintain this repository, so self-improvement is tested in the product itself.
 
-## Why try Rin
+## ✨ Why try Rin
 
-- **Start quickly:** install it, run `rin`, and use plain language.
-- **Stop repeating yourself:** Rin can remember durable facts, preferences, projects, and recurring instructions across conversations.
-- **Let practice accumulate:** repeated work can become reusable memory, prompts, and skills without requiring you to design an agent system yourself.
-- **Keep it local and inspectable:** Rin runs on your machine and exposes the tools, files, and configuration it uses.
-- **Use one assistant in many places:** the same assistant can be reached from the terminal, GUI, automation, or connected chat apps.
+| You want...                           | Rin is designed to...                                            |
+| ------------------------------------- | ---------------------------------------------------------------- |
+| fewer repeated explanations           | remember durable facts, preferences, projects, and instructions  |
+| an assistant that improves over time  | turn repeated corrections and workflows into memory and skills   |
+| something usable without building one | ship memory, scheduling, tools, chat bridges, and UI paths       |
+| control over what it touches          | run locally and show the tools, files, and configuration it uses |
+| one assistant in many places          | connect terminal, desktop app, automation, and chat apps         |
 
-## What Rin can help with
+## 🧰 What Rin can help with
 
 Rin is a general-purpose assistant. Depending on what you configure, it can:
 
@@ -29,7 +33,7 @@ Rin is a general-purpose assistant. Depending on what you configure, it can:
 - operate connected services or local commands under your supervision
 - respond through the terminal, desktop app, automation, or connected chat apps as the same assistant
 
-## What makes Rin different
+## 🌱 What makes Rin different
 
 ### Global memory
 
@@ -47,15 +51,19 @@ Rin is designed as an assistant you keep around, not a tab you discard. Its back
 
 Rin is maintained with Rin. This repository is a live demonstration that the assistant can help improve the assistant itself.
 
-## Current status
+## ⚠️ Current status
 
-Rin is early-stage software. Expect rough edges, missing documentation, unstable behavior, and occasional breaking changes.
+> [!WARNING]
+> Rin is still young. Most everyday use should be treated as experimental: you may meet rough edges, missing documentation, unstable behavior, or occasional breaking changes.
 
-Rin may also use more model tokens, API quota, or subscription capacity than a one-off chat because it can keep context, write memory, run scheduled work, search the web, and call models repeatedly.
+Rin may use more model tokens, API quota, or subscription capacity than a one-off chat because it can keep context, write memory, run scheduled work, search the web, and call models repeatedly.
 
 Use supervision for important actions. Do not let Rin perform irreversible or sensitive work unless you understand the risk and can review or roll back the result.
 
-## Install
+## 🚀 Install
+
+> [!TIP]
+> Most users should start with the stable install command below. Pre-release and git channels are available in the folded sections.
 
 ### Linux and macOS
 
@@ -119,7 +127,7 @@ On Windows, the interactive installer opens the GUI installer by default. After 
 .\install.ps1 --git deadbeef
 ```
 
-## Basic commands
+## ⌨️ Basic commands
 
 ```bash
 rin            # open Rin
@@ -132,7 +140,8 @@ rin update     # update the installed Rin runtime
 rin -p "..."   # run a non-interactive assistant turn
 ```
 
-## Technical direction
+<details>
+<summary>🧭 For technical readers</summary>
 
 Rin is built on Pi and keeps Pi's KISS-first spirit:
 
@@ -144,7 +153,9 @@ Rin is built on Pi and keeps Pi's KISS-first spirit:
 
 Rin is not trying to be a heavy agent framework. It is trying to be a practical everyday assistant that can remember, act, and improve while staying inspectable.
 
-## Updating
+</details>
+
+## 🔄 Updating
 
 For a normal installed Rin update, use:
 
@@ -161,7 +172,7 @@ Stable is the default for install and update. `--beta` selects the current weekl
 
 Avoid treating repo-local workflows like `git pull`, ad-hoc rebuilds, or rerunning `install.sh` as the default way to update an already installed Rin.
 
-## Documentation
+## 📚 Documentation
 
 This README is the public user overview. Translations live in `readme/README.*.md` and should stay aligned with this English version.
 

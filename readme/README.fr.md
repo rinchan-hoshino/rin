@@ -2,21 +2,25 @@
 
 # Rin
 
-**Rin est un assistant IA personnel qui vit sur votre ordinateur, se souvient de ce qui compte et s'améliore avec l'usage quotidien.**
+> **Votre assistant IA personnel, vivant sur votre ordinateur.**<br>
+> Rin se souvient de ce qui compte, aide sur de vraies tâches et s'améliore avec l'usage quotidien.
 
-Ce n'est pas une simple fenêtre de chat de plus. Rin garde la même identité d'assistant entre les sessions, peut utiliser des outils locaux lorsque vous l'autorisez, et peut conserver l'expérience utile sous forme de mémoire ou de compétences réutilisables.
+Ce n'est pas une simple fenêtre de chat de plus. Rin est un assistant que vous pouvez garder près de vous : local, inspectable, connecté à vos outils quand vous l'autorisez, et capable de transporter une mémoire utile entre les sessions.
 
-Rin est aussi construit avec Rin. Le projet utilise son propre assistant pour planifier, éditer, relire, traduire et maintenir le dépôt ; l'auto-amorçage fait donc partie du test produit, pas seulement du discours.
+> [!NOTE]
+> Rin est aussi construit avec Rin. Le projet utilise son propre assistant pour planifier, éditer, relire, traduire et maintenir ce dépôt ; l'amélioration de soi est donc testée dans le produit lui-même.
 
-## Pourquoi essayer Rin
+## ✨ Pourquoi essayer Rin
 
-- **Démarrage rapide :** installez-le, lancez `rin`, puis parlez en langage naturel.
-- **Arrêtez de vous répéter :** Rin peut mémoriser des faits durables, des préférences, des projets et des consignes récurrentes entre les conversations.
-- **Faites accumuler l'expérience :** le travail répété peut devenir de la mémoire, des prompts et des compétences réutilisables sans que vous ayez à concevoir vous-même un système d'agents.
-- **Gardez-le local et inspectable :** Rin s'exécute sur votre machine et expose les outils, fichiers et configurations qu'il utilise.
-- **Un assistant, plusieurs accès :** le même assistant peut être utilisé depuis le terminal, la GUI, l'automatisation ou des applications de chat connectées.
+| Vous voulez...                           | Rin est conçu pour...                                           |
+| ---------------------------------------- | --------------------------------------------------------------- |
+| répéter moins d'explications             | mémoriser faits, préférences, projets et consignes              |
+| un assistant qui progresse avec le temps | transformer corrections et workflows réussis en mémoire         |
+| quelque chose d'utile sans tout créer    | fournir mémoire, planification, outils, chat bridges et UI      |
+| contrôler ce qu'il touche                | s'exécuter localement et montrer outils, fichiers et config     |
+| un assistant accessible partout          | connecter terminal, application de bureau, automatisation, chat |
 
-## Ce que Rin peut aider à faire
+## 🧰 Ce que Rin peut aider à faire
 
 Rin est un assistant généraliste. Selon votre configuration, il peut :
 
@@ -29,7 +33,7 @@ Rin est un assistant généraliste. Selon votre configuration, il peut :
 - exécuter des commandes locales ou agir sur des services connectés sous votre supervision
 - répondre depuis le terminal, l'application de bureau, des automatisations ou des chats connectés comme le même assistant
 
-## Ce qui rend Rin différent
+## 🌱 Ce qui rend Rin différent
 
 ### Mémoire globale
 
@@ -47,15 +51,19 @@ Rin est conçu comme un assistant que l'on garde avec soi, pas comme un onglet j
 
 Rin est maintenu avec Rin. Ce dépôt est une démonstration vivante : l'assistant peut aider à améliorer l'assistant lui-même.
 
-## État actuel
+## ⚠️ État actuel
 
-Rin est encore un logiciel jeune. Attendez-vous à des zones rugueuses, une documentation incomplète, des comportements instables et parfois des changements incompatibles.
+> [!WARNING]
+> Rin est encore jeune. Considérez l'usage quotidien comme expérimental : vous pouvez rencontrer des zones rugueuses, une documentation incomplète, des comportements instables ou parfois des changements incompatibles.
 
 Rin peut aussi consommer plus de tokens de modèle, de quota d'API ou de capacité d'abonnement qu'un chat ponctuel, car il peut garder du contexte, écrire de la mémoire, exécuter des tâches planifiées, chercher sur le web et appeler des modèles à répétition.
 
 Gardez la supervision pour les actions importantes. Ne laissez pas Rin effectuer des actions irréversibles ou sensibles sauf si vous comprenez le risque et pouvez vérifier ou annuler le résultat.
 
-## Installation
+## 🚀 Installation
+
+> [!TIP]
+> La plupart des utilisateurs devraient commencer par la commande stable ci-dessous. Les canaux préversion et git sont dans les sections pliées.
 
 ### Linux et macOS
 
@@ -119,7 +127,7 @@ Sous Windows, l'installateur interactif ouvre par défaut l'installateur GUI. Ap
 .\install.ps1 --git deadbeef
 ```
 
-## Commandes de base
+## ⌨️ Commandes de base
 
 ```bash
 rin            # ouvrir Rin
@@ -132,7 +140,8 @@ rin update     # mettre à jour le runtime Rin installé
 rin -p "..."   # lancer un tour d'assistant non interactif
 ```
 
-## Direction technique
+<details>
+<summary>🧭 Pour les lecteurs techniques</summary>
 
 Rin est construit sur Pi et conserve son esprit KISS :
 
@@ -144,7 +153,9 @@ Rin est construit sur Pi et conserve son esprit KISS :
 
 Rin ne cherche pas à devenir un framework d'agents lourd. Il cherche à être un assistant quotidien pratique, capable de se souvenir, d'agir et de s'améliorer tout en restant inspectable.
 
-## Mise à jour
+</details>
+
+## 🔄 Mise à jour
 
 Pour mettre à jour une installation normale de Rin, utilisez :
 
@@ -161,7 +172,7 @@ Stable est le choix par défaut pour l'installation et la mise à jour. `--beta`
 
 Évitez de traiter les workflows locaux du dépôt comme `git pull`, les reconstructions improvisées ou la relance de `install.sh` comme méthode par défaut pour mettre à jour une installation Rin existante.
 
-## Documentation
+## 📚 Documentation
 
 Ce README est la vue d'ensemble publique pour les utilisateurs. Les traductions se trouvent dans `readme/README.*.md` et doivent rester alignées avec cette version anglaise.
 
