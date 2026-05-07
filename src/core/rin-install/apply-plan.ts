@@ -21,6 +21,7 @@ export type FinalizeInstallOptions = {
   authData?: any;
   sourceRoot?: string;
   release?: InstalledReleaseInfo;
+  allowDaemonNotReady?: boolean;
 };
 
 export function writeFinalizeInstallPlanFile(
