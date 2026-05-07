@@ -175,6 +175,43 @@ test("session fork compat falls back to full entries when the requested branch i
   ]);
 });
 
+test("session fork compat can mark temporary cache-equivalent forks to skip routine compaction", () => {
+  class FallbackSessionManager {
+    static open() {
+      return {
+        getHeader: () => ({ id: "source-session-id", version: 3 }),
+        getSessionId: () => "source-session-id",
+        getBranch: () => [{ id: "u1" }],
+      };
+    }
+
+    constructor(cwd, sessionDir, sessionFile, persisted) {
+      this.cwd = cwd;
+      this.sessionDir = sessionDir;
+      this.sessionFile = sessionFile;
+      this.persisted = persisted;
+    }
+  }
+
+  const fork = sessionFork.forkSessionManagerCompat(
+    FallbackSessionManager,
+    "/tmp/source.jsonl",
+    "/tmp/cwd",
+    "/tmp/sessions",
+    {
+      persist: false,
+      preserveSourceSessionId: true,
+      disableRoutineCompaction: true,
+    },
+  );
+
+  assert.equal(fork.getSessionId?.() || fork.sessionId, "source-session-id");
+  assert.equal(
+    fork[sessionFork.EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY],
+    true,
+  );
+});
+
 test("session fork compat can preserve source session id for temporary cache-equivalent forks", () => {
   class FallbackSessionManager {
     constructor(cwd, sessionDir, _unused, persisted) {

@@ -12,6 +12,9 @@ const runtimeMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"))
     .href
 );
+const sessionForkMod = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "session", "fork.js")).href
+);
 
 function waitForTimers() {
   return new Promise((resolve) => setTimeout(resolve, 30));
@@ -274,6 +277,38 @@ test("applyMidTurnCompaction ignores provider-shaped reasoning payload inflation
   };
 
   runtimeMod.applyMidTurnCompaction(session, 88);
+  const transformed = await agent.transformContext(sourceMessages, undefined);
+  assert.equal(compactCalls, 0);
+  assert.equal(transformed, sourceMessages);
+});
+
+test("applyMidTurnCompaction skips routine compaction for marked temporary forks", async () => {
+  let compactCalls = 0;
+  const sourceMessages = [
+    {
+      role: "user",
+      content: [{ type: "text", text: "x".repeat(400) }],
+    },
+  ];
+
+  const agent = {
+    state: { messages: [...sourceMessages] },
+    async streamFn() {
+      return { fake: true };
+    },
+  };
+
+  const session = {
+    [sessionForkMod.EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY]: true,
+    autoCompactionEnabled: true,
+    model: { provider: "openai", id: "gpt-test", contextWindow: 100 },
+    agent,
+    async _runAutoCompaction() {
+      compactCalls += 1;
+    },
+  };
+
+  runtimeMod.applyMidTurnCompaction(session, 50);
   const transformed = await agent.transformContext(sourceMessages, undefined);
   assert.equal(compactCalls, 0);
   assert.equal(transformed, sourceMessages);

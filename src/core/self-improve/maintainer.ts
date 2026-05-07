@@ -30,10 +30,6 @@ type ExtensionCtxLike = {
   model?: Model<any> | null;
 };
 
-const MAINTENANCE_FORK_COMPACTION_GUARD_KEY = Symbol.for(
-  "rin.selfImproveMaintenanceForkCompactionGuard",
-);
-
 type MaintenanceChangedFile = {
   path: string;
   change: "created" | "updated" | "deleted";
@@ -146,36 +142,12 @@ async function createForkedSessionManager(options: {
         // provider cache key while still preventing maintenance messages from
         // being written back to the source transcript.
         preserveSourceSessionId: true,
+        // Memory-maintenance forks are background extraction turns. They should
+        // not spend an extra model turn on ordinary threshold-based compaction;
+        // only provider-error/context-overflow recovery should compact.
+        disableRoutineCompaction: true,
       },
     ),
-  };
-}
-
-export function disableRoutineCompactionForMaintenanceFork(session: any) {
-  if (!session || typeof session !== "object") return;
-  // Memory-maintenance forks are background extraction turns. They should not
-  // spend an extra model turn on ordinary threshold-based compaction; only the
-  // runtime's provider-error/context-overflow recovery path should compact when
-  // the request would otherwise fail.
-  session.autoCompactionEnabled = false;
-
-  if ((session as any)[MAINTENANCE_FORK_COMPACTION_GUARD_KEY]) return;
-  const originalRunAutoCompaction =
-    typeof session._runAutoCompaction === "function"
-      ? session._runAutoCompaction.bind(session)
-      : null;
-  if (!originalRunAutoCompaction) return;
-
-  session._runAutoCompaction = async function guardedRunAutoCompaction(
-    reason: unknown,
-    ...args: any[]
-  ) {
-    if (safeString(reason).trim() !== "overflow") return undefined;
-    return await originalRunAutoCompaction(reason, ...args);
-  };
-
-  (session as any)[MAINTENANCE_FORK_COMPACTION_GUARD_KEY] = {
-    originalRunAutoCompaction,
   };
 }
 
@@ -199,7 +171,6 @@ async function runForkedSessionPrompt(options: {
     // session's model options so provider prefix caching matches a normal
     // appended turn on the same conversation.
   });
-  disableRoutineCompactionForMaintenanceFork(session);
   try {
     await session.prompt(options.prompt, {
       expandPromptTemplates: false,

@@ -10,19 +10,31 @@ function normalizeLeafId(value: unknown) {
   return leafId || undefined;
 }
 
+export const EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY = Symbol.for(
+  "rin.ephemeralFork.disableRoutineCompaction",
+);
+
 type ForkSessionOptions = {
   persist?: boolean;
   leafId?: string;
   preserveSourceSessionId?: boolean;
+  disableRoutineCompaction?: boolean;
 };
 
 function normalizeForkOptions(options: ForkSessionOptions = {}) {
-  return {
+  const normalized: ForkSessionOptions & {
+    persist: boolean;
+    preserveSourceSessionId: boolean;
+  } = {
     ...options,
     leafId: normalizeLeafId(options.leafId),
     persist: options.persist !== false,
     preserveSourceSessionId: options.preserveSourceSessionId === true,
   };
+  if (options.disableRoutineCompaction === true) {
+    normalized.disableRoutineCompaction = true;
+  }
+  return normalized;
 }
 
 function getForkCapabilities(SessionManager: any): ForkCapabilities {
@@ -49,6 +61,7 @@ function createEphemeralForkManager(
   sessionDir: string | undefined,
   leafId: string | undefined,
   preserveSourceSessionId: boolean,
+  disableRoutineCompaction: boolean,
 ) {
   if (
     typeof SessionManager?.open !== "function" ||
@@ -85,6 +98,9 @@ function createEphemeralForkManager(
   manager.sessionId = forkSessionId;
   manager.sessionFile = undefined;
   manager.flushed = false;
+  if (disableRoutineCompaction) {
+    manager[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY] = true;
+  }
   manager._buildIndex?.();
   return manager;
 }
@@ -104,8 +120,15 @@ export function forkSessionManagerCompat(
       "session_fork_unsupported:preserve_source_session_id_persisted",
     );
   }
+  if (normalizedOptions.disableRoutineCompaction && normalizedOptions.persist) {
+    throw new Error("session_fork_unsupported:disable_compaction_persisted");
+  }
 
-  if (capabilities.optionAware && !normalizedOptions.preserveSourceSessionId) {
+  if (
+    capabilities.optionAware &&
+    !normalizedOptions.preserveSourceSessionId &&
+    !normalizedOptions.disableRoutineCompaction
+  ) {
     return SessionManager.forkFrom(
       sourcePath,
       targetCwd,
@@ -128,5 +151,6 @@ export function forkSessionManagerCompat(
     sessionDir,
     normalizedOptions.leafId,
     normalizedOptions.preserveSourceSessionId,
+    normalizedOptions.disableRoutineCompaction === true,
   );
 }

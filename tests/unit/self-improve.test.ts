@@ -67,27 +67,6 @@ function selfImproveRoot(root) {
   return selfImprovePaths.resolveSelfImproveRoot(root);
 }
 
-test("memory maintenance forks disable routine auto compaction", async () => {
-  const reasons = [];
-  const session = {
-    autoCompactionEnabled: true,
-    async _runAutoCompaction(reason) {
-      reasons.push(reason);
-      return `compacted:${reason}`;
-    },
-  };
-
-  maintainer.disableRoutineCompactionForMaintenanceFork(session);
-
-  assert.equal(session.autoCompactionEnabled, false);
-  assert.equal(await session._runAutoCompaction("threshold", false), undefined);
-  assert.equal(
-    await session._runAutoCompaction("overflow", true),
-    "compacted:overflow",
-  );
-  assert.deepEqual(reasons, ["overflow"]);
-});
-
 test("self-improve paths resolve under the agent root", () => {
   const root = "/tmp/rin-agent";
   const selfImproveDir = path.join(root, "self_improve");

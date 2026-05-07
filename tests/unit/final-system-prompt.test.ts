@@ -288,6 +288,57 @@ test("stored system prompt blocks participate in frozen prompts", async (t) => {
   await runtime.dispose();
 });
 
+test("temporary cache-equivalent forks disable routine auto compaction through runtime setup", async (t) => {
+  const cwd = makeTempDir(t, "rin-temp-fork-cwd-");
+  const agentDir = makeTempDir(t, "rin-temp-fork-agent-");
+  fs.mkdirSync(path.join(agentDir, "self_improve", "prompts"), {
+    recursive: true,
+  });
+
+  const sourceRuntime = await runtimeMod.createConfiguredAgentSession({
+    cwd,
+    agentDir,
+  });
+  const sessionFile = sourceRuntime.session.sessionFile;
+  sourceRuntime.session.sessionManager.appendMessage({
+    role: "assistant",
+    content: [],
+    provider: "test",
+    model: "test",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: {} },
+    stopReason: "end_turn",
+    timestamp: Date.now(),
+  });
+  await sourceRuntime.runtime.dispose();
+
+  const forkManager = sessionForkMod.forkSessionManagerCompat(
+    SessionManager,
+    sessionFile,
+    cwd,
+    undefined,
+    {
+      persist: false,
+      preserveSourceSessionId: true,
+      disableRoutineCompaction: true,
+    },
+  );
+  const forkRuntime = await runtimeMod.createConfiguredAgentSession({
+    cwd,
+    agentDir,
+    sessionManager: forkManager,
+  });
+
+  assert.equal(forkRuntime.session.sessionFile, undefined);
+  assert.equal(forkRuntime.session.sessionId, sourceRuntime.session.sessionId);
+  assert.equal(
+    forkRuntime.session[
+      sessionForkMod.EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY
+    ],
+    true,
+  );
+  await forkRuntime.runtime.dispose();
+});
+
 test("forked sessions restore the source persisted system prompt", async (t) => {
   const cwd = makeTempDir(t, "rin-fork-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-fork-prompt-agent-");

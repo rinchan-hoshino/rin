@@ -38,6 +38,7 @@ import {
   createRinCapabilitySet,
 } from "./capability-session.js";
 import { compileSelfImproveSync } from "../self-improve/store.js";
+import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
@@ -664,6 +665,9 @@ export function applyMidTurnCompaction(
       : messages;
 
     if (inPreflight) return transformed;
+    if (session?.[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY]) {
+      return transformed;
+    }
     if (session?.autoCompactionEnabled === false) return transformed;
     const contextWindow = Number(session.model?.contextWindow || 0);
     if (contextWindow <= 0) return transformed;
@@ -913,6 +917,9 @@ export async function createConfiguredAgentSession(
       customTools: rinCapabilities.getToolDefinitions(),
     });
     sessionRef.current = result.session;
+    if (sessionManager?.[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY]) {
+      result.session[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY] = true;
+    }
 
     await attachRinCapabilitiesToSession(result.session, {
       capabilitySet: rinCapabilities,
