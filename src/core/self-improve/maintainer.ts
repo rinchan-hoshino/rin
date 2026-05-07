@@ -24,7 +24,12 @@ import {
 } from "../memory/transcripts.js";
 import { nowIso, safeString } from "./core/utils.js";
 import { resolveAgentDir } from "./lib.js";
-import { selfImprovePromptsDir, selfImproveSkillsDir } from "./paths.js";
+import {
+  selfImproveEventMemorySkillsDir,
+  selfImproveMemoryIndexSkillsDir,
+  selfImprovePromptsDir,
+  selfImproveSkillsDir,
+} from "./paths.js";
 
 type ExtensionCtxLike = {
   model?: Model<any> | null;
@@ -55,6 +60,8 @@ async function captureManagedArtifactSnapshot(agentDir: string) {
   const paths = [
     ...(await collectManagedFiles(selfImprovePromptsDir(root))),
     ...(await collectManagedFiles(selfImproveSkillsDir(root))),
+    ...(await collectManagedFiles(selfImproveMemoryIndexSkillsDir(root))),
+    ...(await collectManagedFiles(selfImproveEventMemorySkillsDir(root))),
   ].sort();
   const snapshot = new Map<string, string>();
   for (const filePath of paths) {

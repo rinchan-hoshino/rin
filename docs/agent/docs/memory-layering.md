@@ -58,15 +58,15 @@ When reviewing a conversation or adding durable memory, classify the material be
 
 1. **Every-turn identity or doctrine invariant?** Put the shortest useful version in the smallest fitting prompt baseline slot.
 2. **Reusable workflow, multi-step policy, durable fact, reference material, or concept?** Create or update a skill.
-3. **Original event, evidence, chronology, or historical context?** Leave it in transcript memory; create or update a memory-index skill only when a compact time/keyword index would help retrieve it later.
-4. **Temporary task state?** Keep it in the active session, current work files, or a short-lived transient-task-state artifact; remove it after it stops guiding current work.
+3. **Original event, evidence, chronology, or historical context?** Leave it in transcript memory; create or update a memory-index skill under `self_improve/memory_index_skills` only when a compact time/keyword index would help retrieve it later.
+4. **Temporary task state?** Keep it in the active session, current work files, or a short-lived event-memory skill under `self_improve/event_memory_skills`; remove it after it stops guiding current work.
 
 Promotion should be selective. These decisions are deliberate consolidation work, not automatic background promotion:
 
 - Score attention/emotion salience from the current work, with explicit owner corrections and strong negative feedback treated as high-salience signals.
 - Score repetition across observations as a stability signal.
 - Link each candidate to existing prompt lines, skills, or transcript indexes before deciding whether to add, merge, correct, supersede, or discard it.
-- Encode by memory type: procedure/reflex -> workflow skill; knowledge/concept/fact -> knowledge skill; event pointer -> memory-index skill; temporary active goal -> transient-task-state artifact or work file.
+- Encode by memory type: procedure/reflex -> workflow skill; knowledge/concept/fact -> knowledge skill; event pointer -> memory-index skill; temporary active goal -> short-term event-memory skill or work file.
 - Prefer present-tense target behavior over historical explanations.
 - Remove stale or superseded prompt lines when a better skill or fact replaces them.
 
@@ -78,7 +78,7 @@ Skills must not become one file per fact. Keep the visible skill index small by 
 2. Skill frontmatter aliases/tags and clear headings act as second-level keyword handles.
 3. Detailed facts, examples, emotional-reflex rules, and transcript pointers stay inside the matched skill body.
 4. Memory-index skills group event pointers by time and keyword instead of creating a separate skill for every episode.
-5. Transient task-state artifacts are short-lived and should be merged, promoted, or deleted during sleep-style consolidation; they should not become permanent skill-index entries by default.
+5. Short-term event-memory skills are short-lived and should be merged, promoted, or deleted during sleep-style consolidation; they should not become permanent skill-index entries by default.
 
 This keeps system prompt skill metadata compact while still allowing deeper recall after a relevant skill is selected.
 

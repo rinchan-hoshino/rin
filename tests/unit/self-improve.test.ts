@@ -71,6 +71,8 @@ test("self-improve paths resolve under the agent root", () => {
   const root = "/tmp/rin-agent";
   const selfImproveDir = path.join(root, "self_improve");
   const stateDir = path.join(selfImproveDir, "state");
+  const memoryIndexSkillsDir = path.join(selfImproveDir, "memory_index_skills");
+  const eventMemorySkillsDir = path.join(selfImproveDir, "event_memory_skills");
 
   assert.equal(selfImproveRoot(root), selfImproveDir);
   assert.equal(
@@ -80,6 +82,14 @@ test("self-improve paths resolve under the agent root", () => {
   assert.equal(
     selfImprovePaths.selfImproveSkillsDir(root),
     path.join(selfImproveDir, "skills"),
+  );
+  assert.equal(
+    selfImprovePaths.selfImproveMemoryIndexSkillsDir(root),
+    memoryIndexSkillsDir,
+  );
+  assert.equal(
+    selfImprovePaths.selfImproveEventMemorySkillsDir(root),
+    eventMemorySkillsDir,
   );
   assert.equal(selfImprovePaths.selfImproveStateDir(root), stateDir);
   assert.equal(

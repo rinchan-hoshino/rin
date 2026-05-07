@@ -5,6 +5,8 @@ import { resolveAgentDir } from "./agent-dir.js";
 export const SELF_IMPROVE_DIR = "self_improve";
 export const SELF_IMPROVE_PROMPTS_DIR = "prompts";
 export const SELF_IMPROVE_SKILLS_DIR = "skills";
+export const SELF_IMPROVE_MEMORY_INDEX_SKILLS_DIR = "memory_index_skills";
+export const SELF_IMPROVE_EVENT_MEMORY_SKILLS_DIR = "event_memory_skills";
 export const SELF_IMPROVE_STATE_DIR = "state";
 export const INIT_STATE_FILE = "init-state.json";
 export const MAINTENANCE_QUEUE_FILE = "maintenance-queue.json";
@@ -37,6 +39,20 @@ export function selfImprovePromptsDir(agentDirOverride = ""): string {
 
 export function selfImproveSkillsDir(agentDirOverride = ""): string {
   return resolveSelfImprovePath(agentDirOverride, SELF_IMPROVE_SKILLS_DIR);
+}
+
+export function selfImproveMemoryIndexSkillsDir(agentDirOverride = ""): string {
+  return resolveSelfImprovePath(
+    agentDirOverride,
+    SELF_IMPROVE_MEMORY_INDEX_SKILLS_DIR,
+  );
+}
+
+export function selfImproveEventMemorySkillsDir(agentDirOverride = ""): string {
+  return resolveSelfImprovePath(
+    agentDirOverride,
+    SELF_IMPROVE_EVENT_MEMORY_SKILLS_DIR,
+  );
 }
 
 export function selfImproveStateDir(agentDirOverride = ""): string {

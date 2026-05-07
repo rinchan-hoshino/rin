@@ -14,9 +14,16 @@
 
 - Self improve skills are reusable skill documents loaded only when relevant. Location: `<agentDir>/self_improve/skills`.
 - Self improve skills follow the agent standard Skills specification.
-- Self improve skills include several fixed types:
-  - Memory-index skills: record key events and their original memory files for quick indexing.
-  - Temporary task notes: record very short-term memories for quick recall.
+
+### Memory-index skills
+
+- Memory-index skills are skill documents that compactly point to key events and their original memory files for quick indexing. Location: `<agentDir>/self_improve/memory_index_skills`.
+- Use them for event lookup handles, chronology, keywords, topic/person/project, and why the original evidence may matter. Do not copy long raw excerpts.
+
+### Short-term event-memory skills
+
+- Short-term event-memory skills are very temporary skill documents for active task impressions and quick recall. Location: `<agentDir>/self_improve/event_memory_skills`.
+- Clean these skills frequently: merge useful repeated observations into prompts, ordinary skills, or memory-index skills, and delete stale active-task state.
 
 ## Document writing rules
 
@@ -24,9 +31,9 @@
 - Prefer target-state wording over historical explanations.
 - Prefer direct behavior and concrete examples over abstract labels.
 - Prompt baselines: prompt slot content is a full revised canonical replacement, not an append-only patch. Rewrite the slot into its best current compact form by revising, polishing, compressing, merging, moving, or deleting existing lines as needed. Use one concise, information-dense line per topic. Keep only durable behavior needed in almost every turn, and respect the current slot limits.
-- Skills: when one topic needs steps, branching logic, examples, references, domain facts, operating knowledge, or several related lines, put it in a skill. Follow the skill-creator skill guidance when creating or updating skills. Prefer updating an existing relevant skill over creating a new one. Create a new skill only when the trigger is reusable and no existing skill is a good home. Use composite skills with headings and bundled references instead of one skill per fact. Skills are indexed into the system prompt, so control their count; use layered indexes to keep outer entries compact when needed. Also:
-  - Memory-index skills: for key events, record the date, keywords, topic/person/project, why it matters, and original memory file in an index document, but do not copy long raw excerpts.
-  - Temporary task notes: record very short-term events when useful for preserving impressions; clean them frequently so they stay fresh.
+- Skills: when one topic needs steps, branching logic, examples, references, domain facts, operating knowledge, or several related lines, put it in a skill. Follow the skill-creator skill guidance when creating or updating skills. Prefer updating an existing relevant skill over creating a new one. Create a new skill only when the trigger is reusable and no existing skill is a good home. Use composite skills with headings and bundled references instead of one skill per fact. Skills are indexed into the system prompt, so control their count; use layered indexes to keep outer entries compact when needed.
+- Memory-index skills: for key events, record the date, keywords, topic/person/project, why it matters, and original memory file in a skill document under `<agentDir>/self_improve/memory_index_skills`, but do not copy long raw excerpts.
+- Short-term event-memory skills: record very short-term events under `<agentDir>/self_improve/event_memory_skills` only when useful for preserving active-task impressions; clean them frequently so they stay fresh.
 
 ## Distillation steps
 
@@ -40,9 +47,9 @@
 ## Destination rules
 
 - Prompt baseline: use when the content affects almost every future response and cannot be better handled by a skill. Require emotion 2+ or repetition 2+.
-- Skill: use for reusable procedures, workflows, checklists, playbooks, references, durable knowledge, examples, indexes, and operating knowledge. Require attention 2+, emotion 2+, or repetition 2+.
-- Memory-index skill: use when future lookup by time, keyword, person, project, failure, or decision may need exact event evidence. Prefer updating a composite index skill.
-- Temporary task note: use only for active, very short-term state.
+- Skill: use for reusable procedures, workflows, checklists, playbooks, references, durable knowledge, examples, and operating knowledge. Require attention 2+, emotion 2+, or repetition 2+.
+- Memory-index skill: use when future lookup by time, keyword, person, project, failure, or decision may need exact event evidence. Prefer updating a composite skill under `<agentDir>/self_improve/memory_index_skills`.
+- Short-term event-memory skill: use only for active, very short-term state, and write it under `<agentDir>/self_improve/event_memory_skills`.
 - No durable write: use when all scores are low, the item is one-off, or the original memory already covers it well enough.
 
 ## Final output format

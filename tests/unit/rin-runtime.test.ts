@@ -24,6 +24,8 @@ test("getManagedSkillPaths includes agent memory skills and builtin skills", () 
   const paths = runtimeMod.getManagedSkillPaths("/tmp/rin-home");
   assert.deepEqual(paths, [
     "/tmp/rin-home/self_improve/skills",
+    "/tmp/rin-home/self_improve/memory_index_skills",
+    "/tmp/rin-home/self_improve/event_memory_skills",
     "/tmp/rin-home/docs/rin/builtin-skills",
   ]);
 });
