@@ -127,8 +127,12 @@ export default function cronModule(): RinCapabilityDefinition {
         name: "task_control",
         label: "Task Control",
         description: "Pause or resume a scheduled task.",
-        promptSnippet: "Pause or resume a scheduled task.",
-        promptGuidelines: [],
+        promptSnippet:
+          "Pause or resume a scheduled task by id. For creating, inspecting, updating, completing, or deleting scheduled tasks, read ~/.rin/docs/rin/docs/scheduled-tasks.md and use the daemon RPC workflow.",
+        promptGuidelines: [
+          "When the user asks to create, inspect, update, complete, delete, or otherwise operate scheduled tasks beyond pause/resume, read ~/.rin/docs/rin/docs/scheduled-tasks.md before acting.",
+          "After changing a scheduled task, verify daemon-visible state with the scheduled-task workflow rather than only editing files.",
+        ],
         parameters: taskControlSchema,
         execute: async (_toolCallId, params) =>
           await executeTaskControl(params),

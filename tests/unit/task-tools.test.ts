@@ -102,6 +102,11 @@ test("task capability exposes only task_control", () => {
     ["task_control"],
   );
   const tool = getTaskTool("task_control");
+  assert.match(tool.promptSnippet, /scheduled-tasks\.md/);
+  assert.match(
+    tool.promptGuidelines.join("\n"),
+    /create, inspect, update, complete, delete/,
+  );
   assert.equal(tool.parameters.properties.taskId.type, "string");
   assert.deepEqual(
     tool.parameters.properties.action.anyOf.map((item) => item.const),
