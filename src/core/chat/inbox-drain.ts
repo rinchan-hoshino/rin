@@ -7,6 +7,7 @@ import {
   readChatInboxItem,
   requeueChatInboxFile,
   restoreChatInboxFile,
+  restoreProcessingChatInboxFiles,
 } from "./inbox.js";
 import { safeString } from "../text-utils.js";
 
@@ -67,9 +68,18 @@ export function createChatInboxDrain(deps: {
   getController: (chatKey: string) => ChatController;
   isInboundMessageProcessed: (chatKey: string, messageId: string) => boolean;
   enqueueClaimedInboxItem: (job: ClaimedChatInboxJob) => void;
+  processingStaleMs?: number;
   logger?: { warn?: (...args: any[]) => void };
 }) {
   const drainChatInboxOnce = async () => {
+    const restored = restoreProcessingChatInboxFiles(deps.agentDir, {
+      staleMs: deps.processingStaleMs,
+    });
+    if (restored.length) {
+      deps.logger?.warn?.(
+        `chat inbox restored stale processing items count=${restored.length}`,
+      );
+    }
     for (const filePath of listPendingChatInboxFiles(deps.agentDir)) {
       let claimedPath = "";
       try {

@@ -53,6 +53,7 @@ import {
   type ChatInboxItem,
   restoreChatInboxSession,
   restoreProcessingChatInboxFiles,
+  touchChatInboxFile,
 } from "./inbox.js";
 import {
   type ClaimedChatInboxJob,
@@ -101,6 +102,8 @@ const RIN_CHAT_SETTINGS_PATH_ENV = "RIN_CHAT_SETTINGS_PATH";
 const LEGACY_RIN_KOISHI_SETTINGS_PATH_ENV = "RIN_KOISHI_SETTINGS_PATH";
 const TYPING_POLL_INTERVAL_MS = 4000;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
+const CHAT_INBOX_PROCESSING_STALE_MS = 10 * 60 * 1000;
+const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = Math.max(
   1_000,
   Number(process.env.RIN_DETACHED_CONTROLLER_SLEEP_IDLE_MS || 60_000),
@@ -658,6 +661,15 @@ export async function startChatBridge(
     job: ClaimedChatInboxJob,
     run: () => Promise<ChatInboxJobResult | undefined>,
   ) => {
+    const heartbeat = setInterval(() => {
+      try {
+        touchChatInboxFile(job.claimedPath, job.envelope);
+      } catch (error) {
+        logger.warn(
+          `chat inbox heartbeat failed chatKey=${job.envelope.chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,
+        );
+      }
+    }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
       const result = await run();
       finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
@@ -670,6 +682,8 @@ export async function startChatBridge(
         job,
         (error as any)?.message || error,
       );
+    } finally {
+      clearInterval(heartbeat);
     }
   };
 
@@ -787,6 +801,7 @@ export async function startChatBridge(
     isInboundMessageProcessed,
     enqueueClaimedInboxItem: (job) =>
       chatKeyWorkers.enqueue(job.envelope.chatKey, job),
+    processingStaleMs: CHAT_INBOX_PROCESSING_STALE_MS,
     logger,
   });
 

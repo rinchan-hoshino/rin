@@ -174,6 +174,46 @@ test("chat inbox restores stranded processing envelopes back to pending on start
   assert.ok(claimedPath.endsWith(`${restoredItem.itemId}.json`));
 });
 
+test("chat inbox keeps fresh processing envelopes until they become stale", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const session = {
+    platform: "telegram",
+    selfId: "1",
+    channelId: "2",
+    userId: "3",
+    messageId: "m-fresh-processing",
+    timestamp: Date.now(),
+    content: "still running",
+    stripped: { content: "still running" },
+  };
+  const elements = [{ type: "text", attrs: { content: "still running" } }];
+
+  inbox.enqueueChatInboxItem(agentDir, {
+    chatKey: "telegram/1:2",
+    messageId: "m-fresh-processing",
+    session,
+    elements,
+  });
+  const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
+  const claimedPath = inbox.claimChatInboxFile(agentDir, pendingPath);
+  const claimed = inbox.readChatInboxItem(claimedPath);
+
+  const fresh = inbox.restoreProcessingChatInboxFiles(agentDir, {
+    staleMs: 60_000,
+    nowMs: Date.parse(claimed.updatedAt) + 30_000,
+  });
+  assert.equal(fresh.length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
+
+  const stale = inbox.restoreProcessingChatInboxFiles(agentDir, {
+    staleMs: 60_000,
+    nowMs: Date.parse(claimed.updatedAt) + 61_000,
+  });
+  assert.equal(stale.length, 1);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
+});
+
 test("chat inbox does not restore stranded items after an assistant reply was delivered", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const chatKey = "telegram/1:2";

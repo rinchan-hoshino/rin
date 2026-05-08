@@ -245,6 +245,13 @@ export function completeChatInboxFile(filePath: string) {
   removeFileIfExists(filePath);
 }
 
+export function touchChatInboxFile(filePath: string, item: ChatInboxItem) {
+  writeChatInboxItem(filePath, {
+    ...item,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export function restoreChatInboxFile(
   agentDir: string,
   filePath: string,
@@ -287,13 +294,24 @@ export function failChatInboxFile(
   );
 }
 
-export function restoreProcessingChatInboxFiles(agentDir: string) {
+export function restoreProcessingChatInboxFiles(
+  agentDir: string,
+  options: { staleMs?: number; nowMs?: number } = {},
+) {
   const restored: Array<{ itemId: string; filePath: string }> = [];
+  const staleMs = Number(options.staleMs || 0);
+  const nowMs = Number(options.nowMs || Date.now());
   for (const filePath of listProcessingChatInboxFiles(agentDir)) {
     const item = readChatInboxItem(filePath);
     if (!item) {
       completeChatInboxFile(filePath);
       continue;
+    }
+    if (staleMs > 0) {
+      const updatedAtMs = Date.parse(safeString(item.updatedAt || ""));
+      if (Number.isFinite(updatedAtMs) && nowMs - updatedAtMs < staleMs) {
+        continue;
+      }
     }
     if (
       hasInboundChatMessageReplyBoundary(agentDir, item.chatKey, item.messageId)
