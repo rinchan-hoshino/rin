@@ -13,6 +13,7 @@ export type PromptContextMeta = {
   replyToMessageId?: string;
   taskId?: string;
   taskName?: string;
+  runtimeMetadata?: Record<string, unknown>;
   attachedFiles?: Array<{ name?: string; path?: string }>;
 };
 
@@ -44,6 +45,23 @@ function describeSenderTrust(identity: unknown) {
   return "other chat user";
 }
 
+function appendRuntimeMetadata(
+  lines: string[],
+  meta: PromptContextMeta,
+  prefix = "",
+) {
+  const entries =
+    meta.runtimeMetadata && typeof meta.runtimeMetadata === "object"
+      ? Object.entries(meta.runtimeMetadata)
+      : [];
+  for (const [rawKey, rawValue] of entries) {
+    const key = safeString(rawKey).replace(/\s+/g, " ").trim();
+    const value = safeString(rawValue).replace(/\s+/g, " ").trim();
+    if (!key || !value) continue;
+    lines.push(`${prefix}${key}: ${value}`);
+  }
+}
+
 export function isPromptContextFormatted(body: string) {
   return /^time: .+\n(?:[\s\S]*\n)?---\n/.test(safeString(body));
 }
@@ -57,6 +75,7 @@ export function formatPromptContextSystemPromptBlock(
   const chatName = safeString(meta.chatName).trim();
   if (chatKey) lines.push(`- chatKey: ${chatKey}`);
   if (chatName) lines.push(`- chat name: ${chatName}`);
+  appendRuntimeMetadata(lines, meta, "- ");
   lines.push(
     "- runtime note: header lines above `---` are runtime metadata for this message, not user-authored text.",
   );
@@ -87,6 +106,7 @@ export function formatPromptContext(
     const chatType = safeString(meta.chatType).trim();
     if (chatKey) lines.push(`chatKey: ${chatKey}`);
     if (chatName) lines.push(`chat name: ${chatName}`);
+    appendRuntimeMetadata(lines, meta);
     if (chatType) lines.push(`chat type: ${chatType}`);
     const taskId = safeString(meta.taskId).trim();
     const taskName = safeString(meta.taskName).trim();

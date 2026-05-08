@@ -13,6 +13,35 @@ const promptContextMod = await import(
   ).href
 );
 
+test("chat prompt context keeps adapter-provided runtime metadata in the ordinary chat header", () => {
+  const meta = {
+    source: "chat-bridge",
+    chatKey: "example:private:repo#issue/361",
+    chatName: "Example Issue #361",
+    runtimeMetadata: {
+      "source repo": "owner/project",
+      "source target": "issue #361",
+      "source url": "https://example.invalid/owner/project/issues/361",
+      "source event": "issue_comment",
+    },
+  };
+  const promptText = promptContextMod.formatPromptContext(meta, "owner comment");
+  const systemBlock =
+    promptContextMod.formatPromptContextSystemPromptBlock(meta);
+
+  assert.ok(promptText.includes("source repo: owner/project"));
+  assert.ok(promptText.includes("source target: issue #361"));
+  assert.ok(
+    promptText.includes(
+      "source url: https://example.invalid/owner/project/issues/361",
+    ),
+  );
+  assert.ok(promptText.includes("source event: issue_comment"));
+  assert.ok(systemBlock.includes("- source repo: owner/project"));
+  assert.ok(systemBlock.includes("- source target: issue #361"));
+  assert.ok(promptText.endsWith("---\nowner comment"));
+});
+
 test("scheduled chat-bound prompt context keeps chat and task metadata in the prompt header", () => {
   const meta = {
     source: "chat-bridge",

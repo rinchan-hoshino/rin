@@ -454,6 +454,10 @@ export async function startChatBridge(
       nickname: pickSenderNickname(session),
       groupNickname: pickSenderGroupNickname(session) || undefined,
       identity: trust,
+      runtimeMetadata:
+        session?.runtimeMetadata && typeof session.runtimeMetadata === "object"
+          ? session.runtimeMetadata
+          : undefined,
       replyToMessageId: promptReplyToMessageId || undefined,
     };
 
@@ -588,6 +592,10 @@ export async function startChatBridge(
         safeString(session?.platform || "").trim(),
         pickUserId(session),
       ),
+      runtimeMetadata:
+        session?.runtimeMetadata && typeof session.runtimeMetadata === "object"
+          ? session.runtimeMetadata
+          : undefined,
       replyToMessageId: promptReplyToMessageId || undefined,
       attachedFiles: attachments
         .filter((item) => item?.kind === "file")
