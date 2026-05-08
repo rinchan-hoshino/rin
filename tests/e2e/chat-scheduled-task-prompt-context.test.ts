@@ -25,7 +25,10 @@ test("chat prompt context keeps adapter-provided runtime metadata in the ordinar
       "source event": "issue_comment",
     },
   };
-  const promptText = promptContextMod.formatPromptContext(meta, "owner comment");
+  const promptText = promptContextMod.formatPromptContext(
+    meta,
+    "owner comment",
+  );
   const systemBlock =
     promptContextMod.formatPromptContextSystemPromptBlock(meta);
 

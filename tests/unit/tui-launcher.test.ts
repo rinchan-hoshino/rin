@@ -202,6 +202,13 @@ test("tui launcher leaves unrelated startup errors unchanged", () => {
   assert.equal(launcher.formatTuiStartupError(new Error("boom")), "boom");
 });
 
+test("tui launcher hides internal startup error markers", () => {
+  assert.equal(
+    launcher.formatTuiStartupError(new Error("rin_request_failed")),
+    "Rin hit an internal error. Please retry, or check the logs for details.",
+  );
+});
+
 test("tui launcher treats daemon status as the rpc startup health check", async () => {
   const runtimeDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-tui-launcher-"),

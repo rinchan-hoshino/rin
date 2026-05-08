@@ -11,6 +11,10 @@ import {
 } from "../rin-lib/runtime.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
+import {
+  formatRuntimeErrorForUser,
+  rawErrorMessage,
+} from "../rin-lib/user-facing-errors.js";
 import type { RpcFrontendClient } from "./frontend-surface.js";
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
@@ -1316,7 +1320,7 @@ export class RpcInteractiveSession {
     try {
       await sendOperation();
     } catch (error: any) {
-      const message = String(error?.message || error || "");
+      const message = rawErrorMessage(error);
       if (/rin_tui_not_connected|rin_disconnected/.test(message)) {
         if (tracksTurn) {
           this.activeTurn = null;
@@ -1329,7 +1333,7 @@ export class RpcInteractiveSession {
         this.activeTurn = null;
         this.syncStreamingState();
       }
-      throw error;
+      throw new Error(formatRuntimeErrorForUser(error), { cause: error });
     }
   }
 
@@ -1530,7 +1534,7 @@ export class RpcInteractiveSession {
     try {
       response = await send();
     } catch (error: any) {
-      const message = String(error?.message || error || "");
+      const message = rawErrorMessage(error);
       if (
         sessionScoped &&
         /rin_tui_not_connected|rin_disconnected|rin_session_recovering/.test(
@@ -1542,11 +1546,13 @@ export class RpcInteractiveSession {
         await this.waitForDaemonAvailable();
         response = await send();
       } else {
-        throw error;
+        throw new Error(formatRuntimeErrorForUser(error), { cause: error });
       }
     }
     if (!response || response.success !== true) {
-      throw new Error(String(response?.error || "rin_request_failed"));
+      throw new Error(
+        formatRuntimeErrorForUser(response?.error || "rin_request_failed"),
+      );
     }
     return response.data;
   }
