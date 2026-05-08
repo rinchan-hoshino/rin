@@ -596,6 +596,50 @@ test("cron chat-bound agent task delivery records session binding", async () => 
   }
 });
 
+test("built-in self-improve cron task writes maintenance history", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const task = {
+    id: "builtin_self_improve_sleep_consolidation_daily",
+    session: { mode: "none" },
+    trigger: { expression: "43 3 * * *", timezone: "local" },
+    target: {
+      kind: "agent_prompt",
+      prompt:
+        "Follow the manual at /tmp/rin/docs/rin/docs/self-improve-memory-maintenance.md to optimize memory.",
+    },
+    runCount: 4,
+    lastStartedAt: "2026-05-08T09:33:09.353Z",
+  };
+  try {
+    await execMod.executeCronTask(task, {
+      agentDir,
+      chat: {
+        runTurn: async () => ({ finalText: "maintenance done" }),
+      },
+    });
+    const historyPath = path.join(
+      agentDir,
+      "self_improve",
+      "state",
+      "maintenance-history.jsonl",
+    );
+    const rows = (await fs.readFile(historyPath, "utf8"))
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].kind, "self_improve_review");
+    assert.equal(rows[0].status, "completed");
+    assert.equal(
+      rows[0].trigger,
+      "cron:builtin_self_improve_sleep_consolidation_daily",
+    );
+    assert.equal(rows[0].outputPreview, "maintenance done");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron scheduler terminates dedicated sessions when tasks stop", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const terminations = [];

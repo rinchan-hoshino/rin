@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -14,6 +14,7 @@ import {
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
+import { maintenanceHistoryPath } from "../self-improve/paths.js";
 import type { CronTaskRecord } from "./cron.js";
 
 type CronChatCapability = {
@@ -169,6 +170,50 @@ function buildCronTaskPromptContext(task: CronTaskRecord) {
   };
 }
 
+function isSelfImproveExtractionTask(task: CronTaskRecord) {
+  if (task.id === "builtin_self_improve_sleep_consolidation_daily") return true;
+  if (task.target.kind !== "agent_prompt") return false;
+  const prompt = [task.target.prompt, task.target.continuationPrompt]
+    .map((value) => String(value || ""))
+    .join("\n");
+  return prompt.includes("self-improve-memory-maintenance.md");
+}
+
+async function appendCronMaintenanceHistoryRecord(
+  agentDir: string,
+  task: CronTaskRecord,
+  record: {
+    status: "completed" | "failed";
+    startedAt?: string;
+    finishedAt: string;
+    outputPreview?: string;
+    error?: string;
+    sessionFile?: string;
+  },
+) {
+  if (!isSelfImproveExtractionTask(task)) return;
+  const filePath = maintenanceHistoryPath(agentDir);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await appendFile(
+    filePath,
+    `${JSON.stringify({
+      id: `${task.id}:${task.runCount}`,
+      kind: "self_improve_review",
+      status: record.status,
+      trigger: `cron:${task.id}`,
+      sessionFile: record.sessionFile,
+      startedAt: record.startedAt,
+      finishedAt: record.finishedAt,
+      attempts: 1,
+      outputPreview: record.outputPreview
+        ? summarizeText(record.outputPreview, 800)
+        : undefined,
+      error: record.error,
+    })}\n`,
+    "utf8",
+  );
+}
+
 export async function executeCronAgentTask(
   task: CronTaskRecord,
   options: {
@@ -256,12 +301,25 @@ export async function executeCronTask(
   },
 ) {
   const runId = cronTaskRunId(task);
+  const startedAt = task.lastStartedAt || nowIso();
+  let maintenanceHistoryRecord:
+    | {
+        status: "completed" | "failed";
+        outputPreview?: string;
+        error?: string;
+        sessionFile?: string;
+      }
+    | undefined;
   try {
     if (task.target.kind === "shell_command") {
       const text = await executeCronShellTask(task, {
         agentDir: options.agentDir,
       });
       task.lastResultText = text;
+      maintenanceHistoryRecord = {
+        status: "completed",
+        outputPreview: text,
+      };
       if (task.chatKey && text) {
         await sendChatText(options, {
           chatKey: task.chatKey,
@@ -273,6 +331,11 @@ export async function executeCronTask(
     } else {
       const result = await executeCronAgentTask(task, { ...options, runId });
       task.lastResultText = result.text;
+      maintenanceHistoryRecord = {
+        status: "completed",
+        outputPreview: result.text,
+        sessionFile: result.sessionFile,
+      };
       if (task.chatKey && result.text) {
         await sendChatText(options, {
           chatKey: task.chatKey,
@@ -287,9 +350,20 @@ export async function executeCronTask(
     task.lastError = String(
       error?.message || error || "cron_task_failed",
     ).trim();
+    maintenanceHistoryRecord = {
+      status: "failed",
+      error: task.lastError,
+    };
   } finally {
     task.lastFinishedAt = nowIso();
     task.updatedAt = nowIso();
+    if (maintenanceHistoryRecord) {
+      await appendCronMaintenanceHistoryRecord(options.agentDir, task, {
+        ...maintenanceHistoryRecord,
+        startedAt,
+        finishedAt: task.lastFinishedAt,
+      }).catch(() => {});
+    }
     if (
       !task.completedAt &&
       !task.trigger.expression &&
