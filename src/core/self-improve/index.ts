@@ -3,6 +3,7 @@ import type {
   RinCapabilityOptions,
 } from "../rin-lib/capability-types.js";
 import { existsSync, readFileSync } from "fs";
+import { extractMessageText } from "../message-content.js";
 
 import {
   enqueueMemoryMaintenanceJob,
@@ -15,30 +16,28 @@ import {
 } from "./lib.js";
 import { readSessionMetadata } from "../session/metadata.js";
 
-const DEFAULT_SELF_IMPROVE_REVIEW_EVERY_TURNS = 5;
+const DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES = 8;
 const reviewStateBySession = new Map<
   string,
-  { userTurns: number; lastQueuedTurn: number }
+  { finalMessages: number; lastQueuedMessage: number }
 >();
 
 function normalizeReviewEveryTurns(value: unknown) {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return DEFAULT_SELF_IMPROVE_REVIEW_EVERY_TURNS;
+  if (!Number.isFinite(parsed))
+    return DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES;
   const whole = Math.floor(parsed);
-  return whole > 0 ? whole : DEFAULT_SELF_IMPROVE_REVIEW_EVERY_TURNS;
+  return whole > 0 ? whole : DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES;
 }
 
 export function readSelfImproveReviewEveryTurns(agentDir: string) {
   const root = String(agentDir || "").trim();
-  if (!root) return DEFAULT_SELF_IMPROVE_REVIEW_EVERY_TURNS;
+  if (!root) return DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES;
   try {
     const settings = JSON.parse(readFileSync(`${root}/settings.json`, "utf8"));
-    return normalizeReviewEveryTurns(
-      settings?.selfImprove?.reviewEveryTurns ??
-        settings?.selfImprove?.review?.everyTurns,
-    );
+    return normalizeReviewEveryTurns(settings?.selfImprove?.reviewEveryTurns);
   } catch {
-    return DEFAULT_SELF_IMPROVE_REVIEW_EVERY_TURNS;
+    return DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES;
   }
 }
 
@@ -52,11 +51,16 @@ function getSessionReviewState(sessionId: string) {
   const key = String(sessionId || "").trim();
   if (!key) return null;
   const current = reviewStateBySession.get(key) || {
-    userTurns: 0,
-    lastQueuedTurn: 0,
+    finalMessages: 0,
+    lastQueuedMessage: 0,
   };
   reviewStateBySession.set(key, current);
   return current;
+}
+
+function isAgentFinalMessage(message: any) {
+  if (String(message?.role || "").trim() !== "assistant") return false;
+  return Boolean(extractMessageText(message?.content, { trim: true }));
 }
 
 async function processSelfImproveReview(
@@ -117,29 +121,23 @@ export default function selfImproveModule(
     hooks: {
       message_end: [
         async (event, ctx) => {
-          const role = String(event?.message?.role || "").trim();
           const meta = sessionMeta(ctx);
           const state = getSessionReviewState(meta.sessionId);
           if (!state || !meta.sessionFile || !meta.sessionPersisted) return;
+          if (!isAgentFinalMessage(event?.message)) return;
 
-          if (role === "user") {
-            state.userTurns += 1;
-            return;
-          }
-
+          state.finalMessages += 1;
           if (
-            role === "assistant" &&
-            state.userTurns > 0 &&
-            state.userTurns - state.lastQueuedTurn >=
-              readSelfImproveReviewEveryTurns(String(ctx?.agentDir || ""))
+            state.finalMessages - state.lastQueuedMessage >=
+            readSelfImproveReviewEveryTurns(String(ctx?.agentDir || ""))
           ) {
             await processSelfImproveReview(ctx, {
               sessionFile: meta.sessionFile,
               leafId: meta.leafId,
               trigger: "self_improve:periodic_review",
-              snapshotKey: `review:${state.userTurns}`,
+              snapshotKey: `review:${state.finalMessages}`,
             });
-            state.lastQueuedTurn = state.userTurns;
+            state.lastQueuedMessage = state.finalMessages;
           }
         },
       ],

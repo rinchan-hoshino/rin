@@ -59,6 +59,14 @@ function queuePath(root) {
   return selfImprovePaths.maintenanceQueuePath(root);
 }
 
+function assistantFinal(text = "done") {
+  return { role: "assistant", content: [{ type: "text", text }] };
+}
+
+function assistantToolOnly() {
+  return { role: "assistant", content: [{ type: "toolCall", name: "bash" }] };
+}
+
 function historyPath(root) {
   return selfImprovePaths.maintenanceHistoryPath(root);
 }
@@ -219,16 +227,16 @@ test("automatic self-improve handlers queue managed task sessions", async () => 
       },
     };
 
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 8; i += 1) {
       await messageEnd({ message: { role: "user" } }, ctx);
-      await messageEnd({ message: { role: "assistant" } }, ctx);
+      await messageEnd({ message: assistantFinal() }, ctx);
     }
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 1);
     assert.equal(queue[0].kind, "self_improve_review");
     assert.equal(queue[0].sessionFile, managedSessionFile);
-    assert.equal(queue[0].snapshotKey, "review:5");
+    assert.equal(queue[0].snapshotKey, "review:8");
   });
 });
 
@@ -261,12 +269,132 @@ test("automatic self-improve review interval is configurable", async () => {
 
     for (let i = 0; i < 3; i += 1) {
       await messageEnd({ message: { role: "user" } }, ctx);
-      await messageEnd({ message: { role: "assistant" } }, ctx);
+      await messageEnd({ message: assistantFinal() }, ctx);
     }
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 1);
     assert.equal(queue[0].snapshotKey, "review:3");
+  });
+});
+
+test("automatic self-improve review counts agent final messages, not user turns", async () => {
+  await withTempRoot(async (root) => {
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const sessionFile = path.join(
+      root,
+      "sessions",
+      "final-message-count.jsonl",
+    );
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "final-message-count-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-final-message-count",
+        isPersisted: () => true,
+      },
+    };
+
+    for (let i = 0; i < 8; i += 1) {
+      await messageEnd({ message: { role: "user" } }, ctx);
+    }
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+
+    for (let i = 0; i < 8; i += 1) {
+      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
+    }
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:8");
+  });
+});
+
+test("automatic self-improve review ignores assistant tool-call-only messages", async () => {
+  await withTempRoot(async (root) => {
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const sessionFile = path.join(root, "sessions", "tool-only-ignored.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "tool-only-ignored-review-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-tool-only-ignored",
+        isPersisted: () => true,
+      },
+    };
+
+    for (let i = 0; i < 12; i += 1) {
+      await messageEnd({ message: assistantToolOnly() }, ctx);
+    }
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+
+    for (let i = 0; i < 8; i += 1) {
+      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
+    }
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:8");
+  });
+});
+
+test("automatic self-improve review ignores the never-shipped nested interval path", async () => {
+  await withTempRoot(async (root) => {
+    await fs.writeFile(
+      path.join(root, "settings.json"),
+      JSON.stringify({ selfImprove: { review: { everyTurns: 3 } } }),
+      "utf8",
+    );
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const sessionFile = path.join(root, "sessions", "nested-ignored.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "nested-ignored-review-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-nested-ignored",
+        isPersisted: () => true,
+      },
+    };
+
+    for (let i = 0; i < 3; i += 1) {
+      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
+    }
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+
+    for (let i = 0; i < 5; i += 1) {
+      await messageEnd({ message: assistantFinal(`done ${i + 4}`) }, ctx);
+    }
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:8");
   });
 });
 
@@ -309,9 +437,9 @@ test("automatic self-improve handlers require persisted sessions", async () => {
       },
     };
 
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 8; i += 1) {
       await messageEnd({ message: { role: "user" } }, ctx);
-      await messageEnd({ message: { role: "assistant" } }, ctx);
+      await messageEnd({ message: assistantFinal() }, ctx);
     }
     await shutdown({}, ctx);
 

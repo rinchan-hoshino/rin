@@ -52,7 +52,7 @@ Rin separates memory into always-on prompt baselines, skills, and transcript arc
 - agent-managed skills live under `~/.rin/self_improve/skills` and should hold reusable procedures, checklists, examples, playbooks, knowledge, concepts, and compact memory indexes
 - `search_memory` is for archived session history recall when original context, evidence, or cross-session continuity matters
 - memory recall summarizes matched sessions with the active model at fixed `low` thinking
-- periodic memory review runs every `selfImprove.reviewEveryTurns` user turns and defaults to `5`; review also runs before compaction and on session shutdown; a hidden built-in nightly task performs sleep-style self-improve consolidation
+- periodic memory review runs every `selfImprove.reviewEveryTurns` real agent final messages and defaults to `8`; user steering inputs and assistant tool-call-only/interim messages do not count; review also runs before compaction and on session shutdown; a hidden built-in nightly task performs sleep-style self-improve consolidation
 - not all self-improve content is injected into the prompt automatically
 - read `docs/memory-layering.md` when deciding whether material belongs in prompt baselines, skills, transcript memory, or short-lived transient task state
 
