@@ -68,9 +68,10 @@ If the user asks to initialize Rin, restart initial setup, or set long-term assi
 
 Rin provides scheduled task support. As an agent, you should know that:
 
-- you can create one-time, interval, and cron-style tasks through documented configuration or SDK workflows
+- you can create one-time, interval, and cron-style tasks through the daemon RPC workflow documented in `~/.rin/docs/rin/docs/scheduled-tasks.md`
 - it is suitable for reminders, periodic checks, delayed follow-ups, and background automation
-- use `task_control` only to pause or resume an existing task; create, update, delete, and inspect tasks through the documented workflow instead of a model tool
+- use `task_control` only to pause or resume an existing task when the id is known; create, update, delete, and inspect tasks through `scheduled-tasks.md` instead of expecting separate model tools
+- after changing a task, re-read daemon-visible state and verify `enabled`, `nextRunAt`, trigger, session mode, target kind, and chat binding match the request
 
 ## Chat bridge
 

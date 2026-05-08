@@ -24,8 +24,8 @@ Most of these capabilities are registered directly by Rin core rather than being
 - `subagent`
   - provides `run_subagent` and `list_models`
 - `task`
-  - provides `task_control` for pausing or resuming existing scheduled tasks
-  - task creation, updates, deletion, and inspection are documented workflows rather than agent tools
+  - provides `task_control` for pausing or resuming existing scheduled tasks when the task id is known
+  - task creation, updates, deletion, and inspection are documented daemon RPC workflows rather than agent tools; read `~/.rin/docs/rin/docs/scheduled-tasks.md` before operating scheduled tasks
 - `chat`
   - provides `/chat` for official adapter setup inside the TUI
   - chat sending, stored-message lookup, log inspection, and identity updates are documented SDK/file workflows rather than agent tools
