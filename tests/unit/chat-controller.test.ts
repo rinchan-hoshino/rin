@@ -2399,7 +2399,7 @@ test("chat controller fails fast when prompt submission is queued offline instea
   );
 });
 
-test("chat controller releases a stale bound session after transient prompt timeout", async () => {
+test("chat controller preserves a bound session after transient prompt timeout", async () => {
   const controller = await createController("telegram/1:2");
   await fs.mkdir(path.join(controller.agentDir, "sessions"), {
     recursive: true,
@@ -2445,8 +2445,88 @@ test("chat controller releases a stale bound session after transient prompt time
     /rin_timeout:prompt/,
   );
 
-  assert.equal(controller.state.sessionFile, undefined);
+  assert.equal(controller.state.sessionFile, "stale-chat.jsonl");
+  const persistedState = JSON.parse(
+    await fs.readFile(controller.statePath, "utf8"),
+  );
+  assert.equal(persistedState.sessionFile, "stale-chat.jsonl");
   assert.equal(disposed, 1);
+});
+
+test("chat controller preserves a bound session when recovery target is missing", async () => {
+  const controller = await createController("telegram/1:2");
+  delete controller.connect;
+  controller.state.sessionFile = "missing-chat.jsonl";
+  controller.saveState();
+  const attempts = [];
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    queuedOfflineOps: [],
+    syncPendingCount() {},
+    emitFrontendStatus() {},
+    sessionManager: {
+      getSessionFile: () => "",
+      getSessionId: () => "session-current",
+      getSessionName: () => controller.chatKey,
+    },
+    switchSession: async (sessionFile) => {
+      attempts.push(sessionFile);
+      throw new Error("session_file_missing");
+    },
+  };
+
+  await assert.rejects(
+    controller.connect({ restoreSession: true }),
+    /session_file_missing/,
+  );
+
+  assert.equal(controller.state.sessionFile, "missing-chat.jsonl");
+  const persistedState = JSON.parse(
+    await fs.readFile(controller.statePath, "utf8"),
+  );
+  assert.equal(persistedState.sessionFile, "missing-chat.jsonl");
+  assert.equal(attempts.length, 1);
+  assert.equal(
+    attempts[0],
+    path.join(controller.agentDir, "sessions", "missing-chat.jsonl"),
+  );
+});
+
+test("chat controller preserves a bound session when explicit resume target is missing", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.state.sessionFile = "existing-binding.jsonl";
+  controller.saveState();
+
+  const result = await controller.resumeSessionFile(
+    path.join(controller.agentDir, "sessions", "missing-explicit.jsonl"),
+  );
+
+  assert.equal(result.changed, false);
+  assert.equal(controller.state.sessionFile, "existing-binding.jsonl");
+  const persistedState = JSON.parse(
+    await fs.readFile(controller.statePath, "utf8"),
+  );
+  assert.equal(persistedState.sessionFile, "existing-binding.jsonl");
+});
+
+test("chat controller terminate does not clear the durable chat binding", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.state.sessionFile = "terminating-chat.jsonl";
+  controller.saveState();
+  let disposed = 0;
+  controller.driver.dispose = () => {
+    disposed += 1;
+  };
+
+  await controller.terminateSession();
+
+  assert.equal(disposed, 1);
+  assert.equal(controller.state.sessionFile, "terminating-chat.jsonl");
+  const persistedState = JSON.parse(
+    await fs.readFile(controller.statePath, "utf8"),
+  );
+  assert.equal(persistedState.sessionFile, "terminating-chat.jsonl");
 });
 
 test("chat controller does not let presentation polling block prompt submission", async () => {

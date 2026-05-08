@@ -114,7 +114,7 @@ function summarizePromptText(text: string, limit = 80) {
   return `${value.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
 }
 
-function shouldReleaseStoredSessionOnTransientTurnError(
+function shouldResetDriverOnTransientTurnError(
   error: unknown,
   options: {
     wantedSessionFile?: string;
@@ -627,11 +627,7 @@ export class ChatController {
       this.agentDir,
       this.state.sessionFile,
     );
-    if (!wanted) return "";
-    if (fs.existsSync(wanted)) return wanted;
-    delete this.state.sessionFile;
-    this.saveState();
-    return "";
+    return wanted || "";
   }
 
   private managedSessionLeafForFreshChat() {
@@ -782,8 +778,6 @@ export class ChatController {
     const wanted = this.getRecoverableSessionFile();
     if (wanted) await this.connect({ restoreSession: true });
     this.driver.dispose();
-    delete this.state.sessionFile;
-    this.saveState();
   }
 
   async sleepIfIdle() {
@@ -803,8 +797,6 @@ export class ChatController {
       };
     }
     if (!fs.existsSync(wanted)) {
-      delete this.state.sessionFile;
-      this.saveState();
       return {
         changed: false,
         sessionId: this.currentSessionId() || undefined,
@@ -1123,26 +1115,29 @@ export class ChatController {
           };
         }
         const errorSession = normalizeSessionRef(error as any);
-        const errorSessionFile = this.updateStoredSessionFile(
-          errorSession.sessionFile,
-          this.driver.currentSessionFile(),
-        );
-        const transientSessionFailure =
-          shouldReleaseStoredSessionOnTransientTurnError(error, {
+        const transientSessionFailure = shouldResetDriverOnTransientTurnError(
+          error,
+          {
             wantedSessionFile,
             restoreSessionFile,
-          });
+          },
+        );
         if (transientSessionFailure) {
-          delete this.state.sessionFile;
           this.driver.dispose();
-        } else if (errorSession.sessionFile && errorMessage) {
-          await this.deliverAssistantReply({
-            text: errorMessage,
-            replyToMessageId: input.replyToMessageId,
-            incomingMessageId: input.incomingMessageId,
-            sessionFile: errorSessionFile || this.currentSessionFile(),
-            clearProcessing: true,
-          });
+        } else {
+          const errorSessionFile = this.updateStoredSessionFile(
+            errorSession.sessionFile,
+            this.driver.currentSessionFile(),
+          );
+          if (errorSession.sessionFile && errorMessage) {
+            await this.deliverAssistantReply({
+              text: errorMessage,
+              replyToMessageId: input.replyToMessageId,
+              incomingMessageId: input.incomingMessageId,
+              sessionFile: errorSessionFile || this.currentSessionFile(),
+              clearProcessing: true,
+            });
+          }
         }
         await this.clearWorkingReactionFor(input.incomingMessageId);
         this.clearCurrentTurnFor(input.incomingMessageId);
