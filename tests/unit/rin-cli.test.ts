@@ -48,6 +48,15 @@ test("version subcommand prints package version without launching Rin", () => {
   assert.equal(parsed.releaseVersion, "1.2.3");
 });
 
+test("rin update --yes enables non-interactive updater confirmation", () => {
+  const parsed = shared.resolveParsedArgs("update", { yes: true }, [
+    "update",
+    "--yes",
+  ]);
+
+  assert.equal(parsed.updateAssumeYes, true);
+});
+
 test("rin update delegates final update UI to rin-install update mode", () => {
   const source = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin", "shared.ts"),
@@ -57,6 +66,7 @@ test("rin update delegates final update UI to rin-install update mode", () => {
   assert.match(source, /RIN_INSTALL_MODE: "update"/);
   assert.match(source, /RIN_UPDATE_TARGET_USER/);
   assert.match(source, /RIN_UPDATE_INSTALL_DIR/);
+  assert.match(source, /RIN_UPDATE_ASSUME_YES/);
   assert.match(source, /rin-install/);
   assert.match(source, /runInstallerProgress/);
   assert.match(source, /runLoggedUpdateCommandSync/);
@@ -90,6 +100,7 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.match(output, /--print/);
   assert.match(output, /--mode <mode>/);
   assert.match(output, /--chat-key <chatKey>/);
+  assert.match(output, /--yes/);
   assert.doesNotMatch(output, /--bind-chat-session/);
   assert.doesNotMatch(output, /\n\s+run\s+Run one non-interactive Rin turn/);
   assert.doesNotMatch(output, /--sessions\b/);
