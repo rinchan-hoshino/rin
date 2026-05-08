@@ -127,6 +127,7 @@ test("footer appends runtime mode to the model label before rendering", async ()
     let lines = footer.render(60);
     assert.match(lines.at(-1), /syncing/);
     assert.match(lines[0], /daemon/);
+    assert.match(lines[0], /medium/);
     assert.doesNotMatch(lines[0], /mode:|rpc|std/);
     for (const line of lines) {
       assert.ok(piTuiModule.visibleWidth(line) <= 60);
@@ -137,13 +138,14 @@ test("footer appends runtime mode to the model label before rendering", async ()
     footerData.getExtensionStatuses = () => new Map();
     lines = footer.render(80);
     assert.match(lines.at(-1), /gpt-5\.1-codex-max-2026-04-30/);
-    assert.match(lines.at(-1), /high/);
-    assert.match(lines.at(-1), /daemon/);
+    assert.match(lines.at(-1), /high • daemon/);
     assert.ok(piTuiModule.visibleWidth(lines.at(-1)) <= 80);
 
+    session.state.model.id = "gpt-demo";
+    session.state.thinkingLevel = "medium";
     process.env.RIN_TUI_RUNTIME_ROLE = "maintenance-tui";
     lines = footer.render(60);
-    assert.match(lines[0], /maint/);
+    assert.match(lines[0], /medium • maint/);
     assert.doesNotMatch(lines[0], /mode:|rpc|std/);
     for (const line of lines) {
       assert.ok(piTuiModule.visibleWidth(line) <= 60);

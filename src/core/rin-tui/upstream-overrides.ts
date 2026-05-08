@@ -59,6 +59,14 @@ function currentRuntimeModeLabel() {
   return undefined;
 }
 
+function appendRuntimeModeToThinkingLevel(
+  thinkingLevel: unknown,
+  label: string,
+) {
+  const value = String(thinkingLevel || "off").trim() || "off";
+  return value === "off" ? `thinking off • ${label}` : `${value} • ${label}`;
+}
+
 function renderWithRuntimeModeModelLabel(
   footer: any,
   render: (width: number) => unknown,
@@ -72,11 +80,21 @@ function renderWithRuntimeModeModelLabel(
   }
 
   const originalModel = state.model;
-  state.model = { ...model, id: `${model.id} ${label}` };
+  const originalThinkingLevel = state.thinkingLevel;
+  if (model.reasoning) {
+    state.thinkingLevel = appendRuntimeModeToThinkingLevel(
+      state.thinkingLevel,
+      label,
+    );
+  } else {
+    state.model = { ...model, id: `${model.id} ${label}` };
+  }
+
   try {
     return render.call(footer, width);
   } finally {
     state.model = originalModel;
+    state.thinkingLevel = originalThinkingLevel;
   }
 }
 
