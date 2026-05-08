@@ -114,9 +114,11 @@ function buildRinDocsBlock(agentDir: string) {
     `- Additional Rin docs: ${rinDocsRoot}`,
     `- Main Pi documentation: ${path.join(piRoot, "README.md")}`,
     `- Additional Pi docs: ${path.join(piRoot, "docs")}`,
-    "- Read documentation whenever the task needs details about the runtime this agent is currently running in, including operations, configuration, behavior, capabilities, layout, or other agent-operated details.",
-    "- Rin is built on top of Pi. Use Pi docs as the base reference, then apply Rin docs as overrides or additions where Rin differs.",
-    `- Topic map: execution environment (docs/execution-environment.md), Rin overrides (docs/pi-overrides.md), runtime layout (docs/runtime-layout.md), builtin capabilities (docs/builtin-extensions.md), capabilities (docs/capabilities.md), scheduled tasks (docs/scheduled-tasks.md), chat bridge workflows (docs/chat-bridge.md), non-interactive CLI (docs/non-interactive-cli.md); Pi examples (${path.join(piRoot, "examples")}: extensions, custom tools, SDK), extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md)`,
+    "- Read Rin docs when the task needs runtime operations, configuration, behavior, capabilities, layout, or other agent-operated details.",
+    "- Start with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md; then use the relevant Rin topic doc.",
+    "- Common Rin routes: scheduled tasks/reminders -> docs/scheduled-tasks.md; chat bridge -> docs/chat-bridge.md; non-interactive CLI -> docs/non-interactive-cli.md; runtime layout/update -> docs/runtime-layout.md and docs/capabilities.md.",
+    "- For topics not covered by Rin docs, use Pi README.md and docs/ as the base reference. Rin docs override Pi docs where they differ.",
+    `- Upstream Pi examples live at ${path.join(piRoot, "examples")}.`,
   ].join("\n");
 }
 

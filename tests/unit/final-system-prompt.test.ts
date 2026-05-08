@@ -79,6 +79,19 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     ),
   );
 
+  assert.ok(baseSystemPrompt.includes("Rin and Pi documentation:"));
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Start with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "scheduled tasks/reminders -> docs/scheduled-tasks.md",
+    ),
+  );
+  assert.equal(baseSystemPrompt.includes("- Topic map:"), false);
+
   assert.ok(
     finalSystemPrompt.includes(
       "As the assistant, you must fulfill the user's requests.",

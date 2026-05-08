@@ -1,14 +1,27 @@
 # Scheduled Tasks
 
-Rin scheduled tasks are daemon-owned background jobs. Use them when the user asks for a reminder, delayed follow-up, periodic check, cron job, or recurring agent automation.
+Rin scheduled tasks are daemon-owned background jobs. Use them for reminders, delayed follow-ups, periodic checks, cron jobs, and recurring agent automation.
 
-### Workflow
+## Quick path
 
-- Use `rin status` or `rin status --json` for a redacted activity overview.
-- Use daemon RPC for create, inspect, update, complete, pause, resume, or delete operations.
-- Do not edit `~/.rin/data/cron/tasks.json` while the daemon is running unless you are doing offline recovery; the running daemon is authoritative.
+1. Identify the operation: create, inspect, update, run now, complete, pause, resume, or delete.
+2. Use Rin scheduled tasks instead of systemd timers for user reminders and agent automation.
+3. Use `rin status` or `rin status --json` for a redacted activity overview.
+4. Use daemon RPC for create, inspect, update, run now, complete, pause, resume, or delete operations.
+5. After any change, re-read daemon-visible state and verify the fields in the checklist below.
 
-### Task shape
+Do not edit `~/.rin/data/cron/tasks.json` while the daemon is running unless you are doing offline recovery; the running daemon is authoritative.
+
+## Required verification
+
+After changing tasks:
+
+1. Re-read the task with `cron_get_task` or list tasks with `cron_list_tasks`.
+2. Check `rin status --json` when liveness or next-run timing matters.
+3. Confirm `enabled`, `nextRunAt`, `trigger`, `session.mode`, `thinkingLevel`, `target.kind`, and `chatKey` match the user's request.
+4. For pause/delete/complete operations, verify progress stopped if there was an active run; status alone may show only scheduler state, not a spawned worker that already started.
+
+## Task shape reference
 
 A task record has these main fields:
 
@@ -206,12 +219,3 @@ Run now, pause, resume, complete, or delete:
 ```
 
 `cron_run_task` manually starts the existing task record through the scheduler path, including built-in tasks; it does not clone the task or change its definition.
-
-### Verification checklist
-
-After changing tasks:
-
-1. Re-read the task with `cron_get_task` or list tasks with `cron_list_tasks`.
-2. Check `rin status --json` when liveness or next-run timing matters.
-3. Confirm `enabled`, `nextRunAt`, `trigger`, `session.mode`, `thinkingLevel`, `target.kind`, and `chatKey` match the user's request.
-4. For pause/delete/complete operations, verify progress stopped if there was an active run; status alone may show only scheduler state, not a spawned worker that already started.
