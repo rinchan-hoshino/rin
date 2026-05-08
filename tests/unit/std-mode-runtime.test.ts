@@ -129,8 +129,8 @@ test("std configured session registration does not require daemon-only tools to 
 
   try {
     const session = runtime.session;
-    assert.ok(session.getToolDefinition("task_control"));
     for (const name of [
+      "task_control",
       "fetch",
       "get_task",
       "save_task",

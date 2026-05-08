@@ -69,16 +69,28 @@ async function main() {
       }),
       handleLocalCommand: async (command) => {
         const type = String(command?.type || "").trim();
-        if (type === "chat_bridge_eval") {
+        if (type === "chat_send") {
           return {
             success: true,
-            data: await chatBridge.evalBridge(command?.payload || {}),
+            data: await chatBridge.send(command?.payload || {}),
           };
         }
         if (type === "chat_run_turn") {
           return {
             success: true,
             data: await chatBridge.runTurn(command?.payload || {}),
+          };
+        }
+        if (type === "chat_terminate_turn") {
+          return {
+            success: true,
+            data: await chatBridge.terminateTurn(command?.payload || {}),
+          };
+        }
+        if (type === "chat_bridge_eval") {
+          return {
+            success: true,
+            data: await chatBridge.evalBridge(command?.payload || {}),
           };
         }
         return undefined;

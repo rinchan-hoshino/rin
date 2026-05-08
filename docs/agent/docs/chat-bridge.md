@@ -18,9 +18,41 @@ The built-in direct runtime currently includes:
 
 - Use `/chat` in the TUI to configure official built-in adapters.
 - Use adapter configuration under `settings.json -> chat` for scripted setup of built-in adapters.
-- Use the chat runtime/adapter SDK from a script when you need live platform actions such as sending, replying, reacting, moderation, or platform API lookup.
+- Use the agent SDK for daemon-backed chat operations that agents commonly need: send an outbox payload, run a detached chat turn, terminate a detached turn, or execute chat-bridge helper code.
+- Use the chat runtime/adapter SDK from a script when you need lower-level live platform actions such as replying, reacting, moderation, or platform API lookup.
 - Read the local message store directly when you only need already stored chat context.
 - Update saved identity/trust data through the documented identity store or SDK path instead of a model tool.
+
+Agent SDK examples:
+
+```js
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const rinAppDir =
+  process.env.RIN_APP_DIR ||
+  path.join(process.env.HOME, ".rin", "app", "current");
+const sdkUrl = pathToFileURL(
+  path.join(rinAppDir, "src", "core", "rin-agent-sdk", "index.ts"),
+).href;
+const { createRinAgentSdk } = await import(sdkUrl);
+
+const rin = createRinAgentSdk();
+
+await rin.chat.send({
+  chatKey: "telegram/123456:7890",
+  text: "Ready.",
+});
+
+await rin.chat.runTurn({
+  chatKey: "telegram/123456:7890",
+  text: "Summarize the last status update for this room.",
+  controllerKey: `agent-${Date.now()}`,
+  deliveryEnabled: true,
+  affectChatBinding: false,
+  disposeAfterTurn: true,
+});
+```
 
 ## Rich message parts
 
