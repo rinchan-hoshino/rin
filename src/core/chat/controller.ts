@@ -76,7 +76,7 @@ function buildActiveVoiceAcknowledgementPrompt(commandName: string) {
     new: "Briefly greet me.",
     compact: "Briefly tell me everything is settled.",
     reload: "Briefly tell me you are ready.",
-    abort: "Briefly tell me the current operation was aborted.",
+    abort: "Briefly acknowledge the abort request.",
   };
   return promptByCommand[commandName] || "";
 }
@@ -299,14 +299,6 @@ export class ChatController {
       safeString(input.incomingMessageId || "").trim() || undefined;
     const nextReplyToMessageId =
       safeString(input.replyToMessageId || "").trim() || undefined;
-    const previousIncomingMessageId = this.currentIncomingMessageId();
-    if (
-      previousIncomingMessageId &&
-      nextIncomingMessageId &&
-      previousIncomingMessageId !== nextIncomingMessageId
-    ) {
-      void this.clearWorkingReaction().catch(() => {});
-    }
     this.currentTurn = {
       startedAt: Date.now(),
       incomingMessageId: nextIncomingMessageId,
@@ -433,6 +425,17 @@ export class ChatController {
     incomingMessageId?: string;
     replyToMessageId?: string;
   }) {
+    const previousIncomingMessageId = this.currentIncomingMessageId();
+    const nextIncomingMessageId = safeString(
+      input.incomingMessageId || "",
+    ).trim();
+    if (
+      previousIncomingMessageId &&
+      nextIncomingMessageId &&
+      previousIncomingMessageId !== nextIncomingMessageId
+    ) {
+      await this.clearWorkingReaction().catch(() => {});
+    }
     this.setCurrentTurn(input);
     this.awaitingTurnSettle = true;
     const marker = this.startWorkingMarker().catch(() => false);
