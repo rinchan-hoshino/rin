@@ -1,95 +1,70 @@
 # Agent-facing Capabilities
 
-This document summarizes only the capabilities and conventions an agent needs as a Rin user.
+Use this page as a quick entrypoint for Rin runtime capabilities. Follow the system prompt for standing identity, doctrine, and response style; this document only describes runtime facts and where to read next.
 
-## Run modes
+## Quick reference
 
-- `rin` normally prefers daemon + RPC TUI mode
-- if the daemon goes offline temporarily, Rin tries to resume the interrupted session when it returns
-- keep `rin` as the normal recommendation in guidance
-- Rin automatically enters temporary maintenance mode only when the daemon is unavailable
+- **Run Rin:** recommend `rin`. It normally uses daemon + RPC TUI mode and falls back to temporary maintenance mode only when the daemon is unavailable.
+- **Update Rin:** use `rin update --yes` for non-interactive automation, or `rin update` when a human can confirm the plan. If PATH is missing the launcher, try `~/.local/bin/rin update --yes`; if the launcher is absent, repair the installation instead of running release files directly.
+- **Rollback:** use `rin rollback`; missing `previousRelease` metadata is a repair problem, not a reason to guess from old symlinks.
+- **Memory:** prompt baselines stay compact; reusable procedures and facts belong in skills; archived sessions are searched with `search_memory`. Read `docs/memory-layering.md` before changing memory content.
+- **Non-interactive work:** use `rin -p` or `rin --mode json` only after reading `docs/non-interactive-cli.md`.
+- **Initialization:** if the user asks to initialize or reset preferences, read `docs/initialization.md`.
+- **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, and recurring agent automation. Read `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, completing, pausing, resuming, or deleting them.
+- **Chat bridge:** chat sender identity comes from the platform, not the shell user. Read `docs/chat-bridge.md` for SDK/file workflows and rich content behavior.
+- **Optional browser/computer tools:** disabled unless `settings.json -> extensions` includes `rin:browser-use` or `rin:computer-use`.
+- **Web search:** use `web_search` proactively for fresh or version-sensitive facts; direct URL mode fetches a known page.
+- **Status and usage:** use `rin status` / `rin status --json` for daemon activity and `rin usage` for token telemetry.
+- **Stable docs:** prefer `~/.rin/docs/rin/`, `~/.rin/docs/pi/`, and `~/.rin/docs/release/` over versioned release paths.
 
-## Self-update behavior
+## Update and rollback details
 
-Rin installs a `rin` launcher for both the current installer user and the selected daemon target user when those accounts differ.
+Rin installs a `rin` launcher for both the installer user and the selected daemon target user when those accounts differ. Keep `rin update` as the normal update entrypoint:
 
-As an agent, use the `rin` command as the normal update entrypoint:
+1. Run `rin update --yes` for non-interactive automation, or `rin update` when a human can confirm the plan.
+2. If PATH does not include the launcher, run `~/.local/bin/rin update --yes` for non-interactive automation.
+3. If the launcher is missing, audit the installed metadata in `docs/runtime-layout.md` and repair the launcher.
 
-1. run `rin update --yes` for non-interactive automation, or `rin update` when a human can confirm the plan
-2. if PATH does not include the launcher, run `~/.local/bin/rin update --yes` for non-interactive automation
-3. if the launcher is missing, treat that as an installation repair issue and audit the installed metadata described in `~/.rin/docs/rin/docs/runtime-layout.md`
+Release-channel defaults:
 
-Release-channel default:
+- `rin update`: stable release channel
+- `rin update --beta`: current weekly beta candidate
+- `rin update --nightly`: current nightly build pinned from `main`
+- `rin update --git`: `main`
+- `rin update --git <name>`: named branch or ref
+- `--branch` / `--version`: explicit stable/git selectors when needed
+- `--yes`: skips the final update confirmation prompt; use it only after the target user and install directory are known
 
-- plain `rin update` targets the stable release channel
-- `rin update --beta` targets the current weekly beta candidate
-- `rin update --nightly` targets the current nightly build pinned from `main`
-- `rin update --git` targets `main`
-- `rin update --git <name>` targets that branch or ref directly
-- `--branch` / `--version` remain supported as explicit selectors for direct stable/git resolution when needed
-- `--yes` skips the final update confirmation prompt; use it only after the target user and install directory are known
+`rin rollback` switches to the `previousRelease` recorded in `installer.json`, updates the manifest so another rollback can switch back, and restarts the daemon. If no `previousRelease` is recorded, treat that as missing rollback metadata instead of guessing from ad-hoc `current.old` files.
 
-Rollback entrypoint:
+Keep installed-runtime maintenance separate from repo-checkout maintenance. Updating a source checkout is not the same as updating the installed runtime under `~/.rin/`.
 
-- `rin rollback` switches the installed runtime to the `previousRelease` recorded in `installer.json`, updates the manifest so another rollback can switch back, and restarts the daemon.
-- If no `previousRelease` is recorded, treat that as missing rollback metadata instead of guessing from ad-hoc `current.old` files.
+## Memory and self-improve details
 
-When `rin` is confirmed missing on an account that should have it, repair the launcher rather than teaching agents to find and execute runtime entry files manually. Use the target manifest or managed service files only for audit and repair.
+- Always-on baselines live under `~/.rin/self_improve/prompts` and should stay compact.
+- Agent-managed skills live under `~/.rin/self_improve/skills` and should hold reusable procedures, playbooks, examples, domain facts, and compact indexes.
+- `search_memory` recalls archived session history when original wording, evidence, or cross-session continuity matters.
+- Memory recall summarizes matched sessions with the active model at fixed `low` thinking.
+- Periodic memory review runs every `selfImprove.reviewEveryTurns` real agent final messages and defaults to `8`; review also runs before compaction and on session shutdown.
+- A hidden built-in nightly task performs sleep-style self-improve consolidation.
+- Not all self-improve content is injected into the prompt automatically.
 
-Important implications:
+## Chat bridge details
 
-- keep `rin update` as the canonical workflow for updating an installed Rin runtime
-- reason in terms of installed runtime path, target user, launcher ownership, and permissions when repairing launcher state
-- prefer the stable `app/current/` path only for read-only audit or emergency repair, not for normal agent-facing instructions
-- treat `install.sh` as installation/bootstrap rather than the normal update path
-- keep repo-checkout maintenance and installed-runtime maintenance as separate workflows; updating a repo checkout is not the same thing as updating the installed Rin runtime under `~/.rin/...`
+Rin's direct built-in chat bridge currently includes Telegram, OneBot, QQ, Feishu / Lark, Discord, Slack, and Minecraft / QueQiao.
 
-## Memory and self-improve
+Key points for agents:
 
-Rin separates memory into always-on prompt baselines, skills, and transcript archives. As an agent, you should know that:
+- The prompt may include `chatKey`, chat name, sender identity, and related context.
+- Chat rich content uses Markdown extensions such as native mentions, quotes, images, files, video, audio, and stickers.
+- Native mentions require exact platform user ids; raw `@name` text is plain visible text.
+- Chat sending, stored-message lookup, log inspection, and identity updates are SDK/file workflows rather than model tools.
+- `/chat` configures official adapters in the TUI and enters platform selection directly.
+- Official adapter setup should use the minimum runnable fields, prefer polling/socket modes when supported, avoid webhook-only setup when possible, and include direct official links for required values.
 
-- always-on baselines live under `~/.rin/self_improve/prompts` and should stay compact
-- prompt baselines focus on stable identity, user identity, and standing doctrine; durable facts and knowledge are consolidated through skills and transcript memory
-- agent-managed skills live under `~/.rin/self_improve/skills` and should hold reusable procedures, checklists, examples, playbooks, knowledge, concepts, and compact memory indexes
-- `search_memory` is for archived session history recall when original context, evidence, or cross-session continuity matters
-- memory recall summarizes matched sessions with the active model at fixed `low` thinking
-- periodic memory review runs every `selfImprove.reviewEveryTurns` real agent final messages and defaults to `8`; user steering inputs and assistant tool-call-only/interim messages do not count; review also runs before compaction and on session shutdown; a hidden built-in nightly task performs sleep-style self-improve consolidation
-- not all self-improve content is injected into the prompt automatically
-- read `docs/memory-layering.md` when deciding whether material belongs in prompt baselines, skills, transcript memory, or short-lived transient task state
+## Optional bundled Pi extensions
 
-## Non-interactive CLI
-
-Use Pi-style `rin -p` or `rin --mode json` for isolated, scriptable one-shot agent turns from `bash`, including optional model/thinking selection and `--chat-key` delivery. Read `~/.rin/docs/rin/docs/non-interactive-cli.md` before building automation around it.
-
-## Initialization mode
-
-If the user asks to initialize Rin, restart initial setup, or set long-term assistant preferences, read `~/.rin/docs/rin/docs/initialization.md` and follow its guidance.
-
-## Scheduled tasks
-
-Rin scheduled tasks are daemon-owned background jobs for reminders, delayed follow-ups, periodic checks, cron jobs, and recurring agent automation.
-
-Read `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, completing, pausing, resuming, or deleting scheduled tasks. That document is the single operational reference for daemon RPC commands, task shape, session rules, and verification.
-
-## Chat bridge
-
-Rin can bridge chat platforms through a framework-neutral chat bridge layer. The direct built-in runtime currently includes Telegram, OneBot, QQ, Feishu / Lark, Discord, Slack, and Minecraft / QueQiao. As an agent, you should know that:
-
-- the sender in a chat bridge conversation is not the local shell user; it is the chat-platform sender
-- the prompt may include `chatKey`, chat name, sender identity, and related context
-- chat rich content is written with Markdown, including native rich objects such as at, quote, image, file, video, audio, and sticker syntax
-- native mentions require exact platform user ids; raw `@name` text is visible text only
-- chat platform actions, stored-message lookup, log inspection, and identity updates are SDK/file workflows rather than model tools
-- read `~/.rin/docs/rin/docs/chat-bridge.md` for SDK/runtime objects, examples, built-in adapter notes, and stored chat paths
-- `/chat` is the TUI command for configuring the built-in official adapters
-- `/chat` goes directly into platform selection in the TUI; the installer keeps the separate yes/no gate
-- official adapter setup should prefer the minimum runnable fields, default to polling / socket modes when the adapter supports them, avoid webhook-only setup when possible, and include direct official links for required values
-
-## Rin extension switches
-
-Rin ships optional browser/computer control as normal Pi extension packages under the installed app. They are not core Rin capabilities; they are "built in" only because the installer includes their code. If `extensions` is missing or `[]`, both tools are off.
-
-Example installed `settings.json`:
+Rin ships optional browser/computer control as normal Pi extension packages under the installed app. They are packaged with Rin but stay off until enabled:
 
 ```json
 {
@@ -97,7 +72,7 @@ Example installed `settings.json`:
 }
 ```
 
-Optional bundled-extension configuration follows Rin's extension-file convention. Rin does not create these files by default; create them only when overriding the open-box behavior:
+Optional config files are only for non-default behavior:
 
 ```jsonc
 // ~/.rin/extensions/rin-browser-use.json
@@ -118,15 +93,17 @@ Optional bundled-extension configuration follows Rin's extension-file convention
 }
 ```
 
-Notes for the agent:
+Notes:
 
-- `rin:browser-use` registers `browser_use` and always drives the external `agent-browser` CLI; if no command is configured, it uses `agent-browser` from `PATH`, then falls back to the latest npm package through `npx -y agent-browser`
-- `rin:computer-use` registers `computer_use`; if no adapter command is configured, it uses platform backends for Windows, Linux, or macOS
-- use Pi resource filters with the Rin alias, for example `!rin:browser-use`, to disable a previously enabled bundled resource
-- for non-technical users, enable the aliases in `settings.json` directly and avoid creating optional config files unless a non-default adapter, command, timeout, or install policy is actually required
-- for `computer_use`, let the agent inspect the OS and install the smallest necessary native backend tool when needed; do not build or expect a curated adapter marketplace
+- `rin:browser-use` registers `browser_use`, drives the external `agent-browser` CLI, uses `agent-browser` from PATH by default, then falls back to `npx -y agent-browser`.
+- `rin:computer-use` registers `computer_use` and uses platform backends for Windows, Linux, or macOS by default.
+- Use Pi resource filters such as `!rin:browser-use` to disable a previously enabled bundled resource.
+- For non-technical users, edit `settings.json` directly and avoid optional config files unless a non-default command, adapter, timeout, or install policy is required.
+- After changing extension settings, restart or reload Rin so resources are reloaded.
 
-Daemon worker extensions are configured separately because they are daemon-process background providers, not session tools:
+## Daemon worker extensions
+
+Daemon worker extensions are configured under `settings.json -> rinExtensions.daemonWorkers`. They are trusted Node.js packages loaded by the daemon process for long-running async work. They are not Pi extensions and do not run in std mode.
 
 ```json
 {
@@ -143,52 +120,28 @@ Daemon worker extensions are configured separately because they are daemon-proce
 }
 ```
 
-- only configure trusted daemon worker package names and versions
-- `daemonWorkers` are packages loaded by the daemon process for long-running async work; they are not Pi extensions and do not run in std mode
-- daemon worker packages may be installed or updated with npm under `~/.rin/data/daemon-runtime` during daemon startup
-- after editing `settings.json`, restart Rin so the daemon reloads daemon workers
+Use only trusted package names and versions. Packages may be installed or updated under `~/.rin/data/daemon-runtime` during daemon startup; restart Rin after editing daemon worker settings.
 
-## Web search
+## Web search details
 
-Rin provides live web search and direct URL fetching through `web_search`. As an agent, you should know that:
+Use fresh web search for latest, time-sensitive, version-sensitive, or otherwise changeable information. When `q` is an HTTP(S) URL, `web_search` fetches that page directly with a browser-like user agent and extracts readable content.
 
-- for latest, time-sensitive, version-sensitive, or potentially changed information, you should search proactively
-- use fresh search results as the primary source for those questions, with memory as supporting context
-- when `q` is an HTTP(S) URL, `web_search` gets that page directly, uses a Chrome-like user agent, and extracts readable markdown/text from HTML with Readability-style extraction
-- use URL mode when the user already gave you a specific URL and discovery is not needed
+If search fails with `google_challenge_required` or `duckduckgo_challenge_required`, the upstream engine challenged the Rin runtime's network path. Practical recovery is to wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, fetch a known URL directly, or use a trusted search backend/API.
 
-If search fails with `google_challenge_required` or `duckduckgo_challenge_required`, the upstream search engine returned an anti-bot/captcha page to the Rin runtime's network path. The user cannot clear that challenge by solving a captcha in their personal browser unless Rin is using the same browser/session/network. Practical recovery is to wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, fetch a known URL directly, or use a trusted search backend/API instead of the challenged direct engine.
+SearXNG reduces challenge frequency with engine-specific request shaping and rate limiting, but it does not bypass an upstream challenge on a blocked egress IP.
 
-SearXNG reduces this failure rate rather than magically bypassing challenges: it centralizes per-engine request shapes, rate limits, and optional proxy/instance rotation. Its Google engine uses a localized supported Google domain, `hl`/`lr`/`cr` locale parameters, `CONSENT=YES+`, `Accept: */*`, utf8 encoding, and a mobile Google-app-shaped user-agent so Google is more likely to return server-rendered results. Its DuckDuckGo engine uses the no-JS HTML form POST flow with browser navigation headers instead of a bare lite GET. If the upstream engine challenges the egress IP, the request must still back off, rotate the egress path, or report the challenge.
+## Runtime status and token usage
 
-## Runtime activity status
-
-Rin exposes live daemon activity for workers and scheduled tasks.
-
-As an agent, you should know that:
-
-- `rin status` prints a current worker and cron/scheduled-task snapshot
-- `rin status --watch` refreshes the snapshot as a live terminal view
-- `rin status --json` returns the raw `daemon_activity` RPC payload for custom frontends or external tooling
-- RPC clients can call `daemon_activity` directly to get the same real-time worker and cron state without scraping terminal output
-- `daemon_activity` includes a top-level `schemaVersion` and redacts scheduled task prompt/command bodies from the cron snapshot
-
-## Token usage telemetry
-
-Rin records detailed token telemetry for runtime events and assistant usage.
-
-As an agent, you should know that:
-
-- telemetry is stored under `~/.rin/data/token-usage/usage.db`
-- it tracks session, event, model, source, tool, and capability metadata alongside token counts
-- `rin usage` shows a charted text dashboard, current configured provider accounts/quotas when available, and grouped queries over the recorded dimensions
+- `rin status`: current worker and scheduled-task snapshot
+- `rin status --watch`: live refreshing view
+- `rin status --json`: raw `daemon_activity` RPC payload
+- RPC clients can call `daemon_activity` directly for the same real-time state
+- `daemon_activity` includes a top-level `schemaVersion` and redacts scheduled task prompt/command bodies
+- Token telemetry is stored under `~/.rin/data/token-usage/usage.db`
+- `rin usage` shows a text dashboard, configured provider account/quota data when available, and grouped usage queries
 
 ## Stable documentation paths
 
-Rin installs docs into stable locations:
-
 - `~/.rin/docs/rin/`: Rin-specific agent docs
-- `~/.rin/docs/pi/`: installed copies of upstream Pi docs
+- `~/.rin/docs/pi/`: installed upstream Pi docs
 - `~/.rin/docs/release/`: release-note metadata used by `/changelog`
-
-Prefer these stable paths over specific `app/releases/<timestamp>/...` paths.

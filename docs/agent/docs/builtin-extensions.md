@@ -1,7 +1,13 @@
 # Builtin Capabilities
 
-This document describes the extra capabilities Rin gives the agent.
-Most of these capabilities are registered directly by Rin core rather than being force-loaded through the app layer as builtin extensions.
+This document helps agents distinguish Rin core capabilities from optional Pi extensions. For general usage guidance, start with `docs/capabilities.md`; use this page when you need to know whether a tool is core, optional, or daemon-only.
+
+## Quick reference
+
+- Core Rin capabilities are available through native product code when their tools are present in the live tool list.
+- Optional browser/computer tools are packaged with Rin but remain off until `settings.json -> extensions` enables their `rin:` aliases.
+- Daemon worker extensions run inside the daemon process and are not Pi session tools.
+- The current tool list and system prompt remain authoritative for a specific turn.
 
 ## Default extra capabilities
 
@@ -35,7 +41,7 @@ Most of these capabilities are registered directly by Rin core rather than being
 
 ## Bundled optional Pi extensions
 
-Rin ships optional browser/computer control as normal Pi extension packages under the installed app, not as core Rin capabilities. They are "built in" only in the packaging sense: the code is included with the Rin installation, but the tools stay off until the user enables those extension resources.
+Rin ships optional browser/computer control as normal Pi extension packages under the installed app, not as core Rin capabilities. They are "built in" only in the packaging sense: the code is included with the Rin installation, but the tools stay off until enabled.
 
 Installed settings can use Rin aliases instead of installation-specific paths:
 
@@ -89,7 +95,7 @@ Use Pi resource filters with the alias to disable entries from a broader extensi
 
 If `extensions` is missing or `[]`, both optional tools are off.
 
-### Agent guidance for enabling bundled browser/computer control
+### Enabling bundled browser/computer control
 
 When a non-technical user asks to enable browser or computer control, edit their Rin `settings.json` rather than generating optional config files:
 
@@ -104,7 +110,7 @@ Keep the change minimal:
 - preserve existing `extensions` entries and append the needed `rin:` aliases if absent
 - do not create `~/.rin/extensions/rin-browser-use.json` or `~/.rin/extensions/rin-computer-use.json` unless the user needs a non-default command, adapter, timeout, or install policy
 - for `browser_use`, prefer the default path: use `agent-browser` from `PATH`, otherwise let the extension invoke latest `agent-browser` through `npx -y agent-browser`
-- for `computer_use`, let the agent inspect the host OS and install the smallest suitable native tool only when needed, such as `xdotool`/screenshot tools on Linux or `cliclick` on macOS; there is no adapter marketplace or curated adapter list to maintain
+- for `computer_use`, inspect the host OS and install the smallest suitable native tool only when needed, such as `xdotool`/screenshot tools on Linux or `cliclick` on macOS; there is no adapter marketplace or curated adapter list to maintain
 - after changing extension settings, restart or reload the Rin session/daemon as appropriate so Pi resources are reloaded
 
 ## Daemon worker extensions
