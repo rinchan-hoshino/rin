@@ -738,6 +738,38 @@ test("cron scheduler protects built-in tasks from public mutation", async () => 
   }
 });
 
+test("cron scheduler can manually run an existing built-in task", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    scheduler.start();
+    const taskId = "builtin_memory_index_repair_daily";
+    const started = scheduler.runTaskNow(taskId);
+    assert.equal(started.id, taskId);
+    assert.equal(started.runCount, 1);
+    assert.equal(started.running, true);
+    assert.ok(started.lastStartedAt);
+
+    for (let i = 0; i < 50; i += 1) {
+      if (!scheduler.getTask(taskId, { includeBuiltIn: true })?.running) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    const finished = scheduler.getTask(taskId, { includeBuiltIn: true });
+    assert.equal(finished?.runCount, 1);
+    assert.equal(finished?.running, false);
+    assert.ok(finished?.lastFinishedAt);
+    assert.match(String(finished?.lastError || ""), /Command:/);
+    assert.throws(
+      () => scheduler.pauseTask(taskId),
+      /cron_builtin_task_protected:builtin_memory_index_repair_daily/,
+    );
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron scheduler derives running from live execution without persisting it", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "cron", "tasks.json");

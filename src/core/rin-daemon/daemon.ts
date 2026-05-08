@@ -261,6 +261,11 @@ export async function startDaemon(
         task: cronScheduler.resumeTask(taskIdFromCommand(command)),
       },
     }),
+    cron_run_task: (command) => ({
+      data: {
+        task: cronScheduler.runTaskNow(taskIdFromCommand(command)),
+      },
+    }),
   };
 
   const selfHandleCommand = async (

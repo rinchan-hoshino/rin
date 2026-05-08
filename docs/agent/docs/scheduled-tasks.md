@@ -195,14 +195,17 @@ Update an existing task with `cron_upsert_task` and the same `task.id`. Include 
 }
 ```
 
-Pause, resume, complete, or delete:
+Run now, pause, resume, complete, or delete:
 
 ```json
+{ "id": "run_1", "type": "cron_run_task", "taskId": "cron_daily_brief" }
 { "id": "pause_1", "type": "cron_pause_task", "taskId": "cron_daily_brief" }
 { "id": "resume_1", "type": "cron_resume_task", "taskId": "cron_daily_brief" }
 { "id": "complete_1", "type": "cron_complete_task", "taskId": "cron_daily_brief", "reason": "completed_by_agent" }
 { "id": "delete_1", "type": "cron_delete_task", "taskId": "cron_daily_brief" }
 ```
+
+`cron_run_task` manually starts the existing task record through the scheduler path, including built-in tasks; it does not clone the task or change its definition.
 
 ### Verification checklist
 

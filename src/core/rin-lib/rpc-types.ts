@@ -54,6 +54,7 @@ export type RinRpcCommandType =
   | "cron_upsert_task"
   | "cron_delete_task"
   | "cron_complete_task"
+  | "cron_run_task"
   | "cron_pause_task"
   | "cron_resume_task"
   | "new_session"

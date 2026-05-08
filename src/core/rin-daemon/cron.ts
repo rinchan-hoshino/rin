@@ -523,6 +523,31 @@ export class CronScheduler {
     return this.publicTask(task);
   }
 
+  runTaskNow(taskId: string) {
+    const task = this.tasks.get(taskId);
+    if (!task) throw new Error(`cron_task_not_found:${taskId}`);
+    if (task.completedAt) throw new Error(`cron_task_completed:${taskId}`);
+    if (this.activeExecutions.has(taskId)) {
+      throw new Error(`cron_task_already_running:${taskId}`);
+    }
+
+    this.activeExecutions.set(task.id, { startedAt: Date.now() });
+    task.lastStartedAt = nowIso();
+    task.runCount += 1;
+    task.lastError = undefined;
+    task.updatedAt = nowIso();
+    if (task.trigger.intervalMs) {
+      task.nextRunAt = computeNextRunAt(task, Date.now());
+    } else if (task.trigger.expression) {
+      task.nextRunAt = nextCronAt(task.trigger.expression, Date.now());
+    } else {
+      task.nextRunAt = undefined;
+    }
+    this.save();
+    void this.executeTask(task).catch(() => {});
+    return this.publicTask(task);
+  }
+
   private load() {
     const file = cronTasksPath(this.options.agentDir);
     const rows = readJsonFile<CronTaskRecord[]>(file, []);
@@ -645,20 +670,7 @@ export class CronScheduler {
             Date.parse(String(b.nextRunAt || b.createdAt)),
         );
       for (const task of due) {
-        this.activeExecutions.set(task.id, { startedAt: Date.now() });
-        task.lastStartedAt = nowIso();
-        task.runCount += 1;
-        task.lastError = undefined;
-        task.updatedAt = nowIso();
-        if (task.trigger.intervalMs) {
-          task.nextRunAt = computeNextRunAt(task, Date.now());
-        } else if (task.trigger.expression) {
-          task.nextRunAt = nextCronAt(task.trigger.expression, Date.now());
-        } else {
-          task.nextRunAt = undefined;
-        }
-        this.save();
-        void this.executeTask(task).catch(() => {});
+        this.runTaskNow(task.id);
       }
     } finally {
       this.dispatching = false;
