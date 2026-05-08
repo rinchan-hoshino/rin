@@ -19,9 +19,10 @@ function readAgentDoc(relativePath: string) {
 test("agent docs expose scheduled task operation workflow", () => {
   const readme = readAgentDoc("README.md");
   const capabilities = readAgentDoc("docs/capabilities.md");
+  const scheduledTasks = readAgentDoc("docs/scheduled-tasks.md");
 
-  assert.doesNotMatch(readme, /docs\/scheduled-tasks\.md/);
-  assert.match(capabilities, /## Scheduled tasks/);
+  assert.match(readme, /docs\/scheduled-tasks\.md/);
+  assert.match(capabilities, /~\/\.rin\/docs\/rin\/docs\/scheduled-tasks\.md/);
 
   for (const command of [
     "cron_list_tasks",
@@ -32,9 +33,10 @@ test("agent docs expose scheduled task operation workflow", () => {
     "cron_pause_task",
     "cron_resume_task",
   ]) {
-    assert.match(capabilities, new RegExp(command));
+    assert.match(scheduledTasks, new RegExp(command));
+    assert.doesNotMatch(capabilities, new RegExp(command));
   }
 
-  assert.match(capabilities, /`session\.mode: "dedicated"`/);
-  assert.match(capabilities, /Re-read the task with `cron_get_task`/);
+  assert.match(scheduledTasks, /`session\.mode: "dedicated"`/);
+  assert.match(scheduledTasks, /Re-read the task with `cron_get_task`/);
 });
