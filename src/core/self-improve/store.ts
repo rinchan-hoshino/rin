@@ -22,8 +22,6 @@ import { normalizePromptListContent } from "./processing.js";
 import { normalizeList, nowIso, safeString, slugify } from "./core/utils.js";
 import {
   resolveSelfImproveRoot,
-  selfImproveEventMemorySkillsDir,
-  selfImproveMemoryIndexSkillsDir,
   selfImprovePromptsDir,
   selfImproveSkillsDir,
   selfImproveStateDir,
@@ -40,8 +38,6 @@ export async function ensureSelfImproveLayout(
     [
       selfImprovePromptsDir(rootOverride),
       selfImproveSkillsDir(rootOverride),
-      selfImproveMemoryIndexSkillsDir(rootOverride),
-      selfImproveEventMemorySkillsDir(rootOverride),
       selfImproveStateDir(rootOverride),
     ].map((dir) => fs.mkdir(dir, { recursive: true })),
   );

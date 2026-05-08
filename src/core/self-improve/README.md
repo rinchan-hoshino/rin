@@ -10,14 +10,12 @@ This module owns:
 
 - always-on prompt baselines under `~/.rin/self_improve/prompts`
 - agent-managed reusable skills under `~/.rin/self_improve/skills`
-- memory-index skills under `~/.rin/self_improve/memory_index_skills`
-- short-term event-memory skills under `~/.rin/self_improve/event_memory_skills`
 - onboarding for resident self-improve prompts
 - periodic, pre-compaction, and session-shutdown self-improve review, with periodic review defaulting to every 5 user turns and configurable via `settings.json -> selfImprove.reviewEveryTurns`
 
 It does not own session-history recall. That belongs to the `memory` module.
 
-In the layered memory model, self-improve owns compact control memory and procedural/cortical memory: prompt baselines for stable every-turn identity and doctrine, ordinary skills for reusable workflows, knowledge, concepts, and durable facts, memory-index skills for compact event lookup, and short-term event-memory skills that maintenance can merge or discard.
+In the layered memory model, self-improve owns compact control memory and procedural/cortical memory: prompt baselines for stable every-turn identity and doctrine, and skills for reusable workflows, knowledge, concepts, durable facts, and compact memory indexes that should be loaded only when relevant.
 
 ## Prompt slots
 

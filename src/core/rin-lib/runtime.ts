@@ -145,8 +145,6 @@ export function getManagedSkillPaths(agentDir: string): string[] {
     String(agentDir || "").trim() || resolveRuntimeProfile().agentDir;
   return [
     path.join(root, "self_improve", "skills"),
-    path.join(root, "self_improve", "memory_index_skills"),
-    path.join(root, "self_improve", "event_memory_skills"),
     path.join(root, "docs", "rin", "builtin-skills"),
   ];
 }
