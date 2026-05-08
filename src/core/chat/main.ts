@@ -85,7 +85,10 @@ import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
-import { isTransientChatRuntimeError } from "./runtime-errors.js";
+import {
+  formatChatRuntimeErrorForUser,
+  isTransientChatRuntimeError,
+} from "./runtime-errors.js";
 
 function createLogger(name: string) {
   const prefix = `[${name}]`;
@@ -613,7 +616,7 @@ export async function startChatBridge(
             type: "text_delivery",
             createdAt: new Date().toISOString(),
             chatKey: decision.chatKey,
-            text: errorMessage,
+            text: formatChatRuntimeErrorForUser(errorMessage),
             replyToMessageId: messageId || undefined,
             sessionFile: linkedSessionFile || undefined,
           },

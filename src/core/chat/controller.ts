@@ -32,7 +32,10 @@ import {
   safeString,
 } from "./chat-helpers.js";
 import { restorePromptParts, sendOutboxPayload } from "./transport.js";
-import { isTransientChatRuntimeError } from "./runtime-errors.js";
+import {
+  formatChatRuntimeErrorForUser,
+  isTransientChatRuntimeError,
+} from "./runtime-errors.js";
 
 const INTERIM_PREFIX = "··· ";
 const WORKING_REACTION_INTERVAL_MS = 30_000;
@@ -945,7 +948,7 @@ export class ChatController {
         const errorMessage =
           safeString(error?.message || error).trim() || "chat_command_failed";
         await this.deliverAssistantReply({
-          text: errorMessage,
+          text: formatChatRuntimeErrorForUser(errorMessage),
           replyToMessageId: replyToMessageId || undefined,
           incomingMessageId,
           clearProcessing: true,
@@ -1131,7 +1134,7 @@ export class ChatController {
           );
           if (errorSession.sessionFile && errorMessage) {
             await this.deliverAssistantReply({
-              text: errorMessage,
+              text: formatChatRuntimeErrorForUser(errorMessage),
               replyToMessageId: input.replyToMessageId,
               incomingMessageId: input.incomingMessageId,
               sessionFile: errorSessionFile || this.currentSessionFile(),
