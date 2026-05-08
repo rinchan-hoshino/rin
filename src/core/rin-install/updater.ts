@@ -33,6 +33,14 @@ function note(message?: string, title?: string) {
   process.stdout.write(`${renderUpdaterNote(message, title)}\n`);
 }
 
+function shouldAssumeYes() {
+  return ["1", "true", "yes", "y"].includes(
+    String(process.env.RIN_UPDATE_ASSUME_YES || "")
+      .trim()
+      .toLowerCase(),
+  );
+}
+
 async function selectUpdateTarget(
   ensureNotCancelled: <T>(value: T | symbol) => T,
   promptSelect: typeof select,
@@ -121,12 +129,14 @@ export async function startUpdater(deps: {
     i18n.updatePlanTitle,
   );
 
-  const shouldProceed = deps.ensureNotCancelled(
-    await promptConfirm({
-      message: i18n.publishUpdateConfirmMessage,
-      initialValue: true,
-    }),
-  );
+  const shouldProceed = shouldAssumeYes()
+    ? true
+    : deps.ensureNotCancelled(
+        await promptConfirm({
+          message: i18n.publishUpdateConfirmMessage,
+          initialValue: true,
+        }),
+      );
   if (!shouldProceed) {
     outro(i18n.updaterFinishedWithoutWritingChanges);
     return;

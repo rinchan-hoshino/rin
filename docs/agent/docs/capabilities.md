@@ -15,8 +15,8 @@ Rin installs a `rin` launcher for both the current installer user and the select
 
 As an agent, use the `rin` command as the normal update entrypoint:
 
-1. run `rin update`
-2. if PATH does not include the launcher, run `~/.local/bin/rin update`
+1. run `rin update --yes` for non-interactive automation, or `rin update` when a human can confirm the plan
+2. if PATH does not include the launcher, run `~/.local/bin/rin update --yes` for non-interactive automation
 3. if the launcher is missing, treat that as an installation repair issue and audit the installed metadata described in `~/.rin/docs/rin/docs/runtime-layout.md`
 
 Release-channel default:
@@ -27,6 +27,7 @@ Release-channel default:
 - `rin update --git` targets `main`
 - `rin update --git <name>` targets that branch or ref directly
 - `--branch` / `--version` remain supported as explicit selectors for direct stable/git resolution when needed
+- `--yes` skips the final update confirmation prompt; use it only after the target user and install directory are known
 
 Rollback entrypoint:
 

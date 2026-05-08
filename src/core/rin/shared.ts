@@ -69,6 +69,7 @@ export type ParsedArgs = {
   releaseChannel: ReleaseChannel;
   releaseBranch: string;
   releaseVersion: string;
+  updateAssumeYes: boolean;
 };
 
 type InstallConfig = {
@@ -580,6 +581,7 @@ export function resolveParsedArgs(
       safeString(installConfig.defaultInstallDir).trim(),
     ),
     ...resolveParsedReleaseArgs(command, options, rawArgv),
+    updateAssumeYes: command === "update" && Boolean(options.yes),
   };
 }
 
@@ -607,6 +609,7 @@ export async function runUpdate(parsed: ParsedArgs) {
     RIN_RELEASE_REF: resolvedRelease.ref,
     RIN_RELEASE_SOURCE_LABEL: resolvedRelease.sourceLabel,
     RIN_RELEASE_ARCHIVE_URL: resolvedRelease.archiveUrl,
+    RIN_UPDATE_ASSUME_YES: parsed.updateAssumeYes ? "1" : "",
   };
 
   if (resolvedRelease.channel === "stable") {

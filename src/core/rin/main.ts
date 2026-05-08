@@ -72,6 +72,7 @@ function createCli() {
     .option("--git", "Use the git release channel")
     .option("--branch <name>", "Explicit git branch selector")
     .option("--version <value>", "Explicit stable version or git ref selector")
+    .option("--yes", "Update mode: run without confirmation prompts")
     .option("-p, --print", "Non-interactive mode: process prompt and exit")
     .option("--mode <mode>", "Output mode: text (default) or json")
     .option("--provider <name>", "Provider name for non-interactive mode")

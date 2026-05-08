@@ -452,6 +452,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.match(updaterSource, /renderInstallerNote/);
   assert.match(updaterSource, /wrapInstallerNoteText/);
   assert.match(updaterSource, /RIN_UPDATE_TARGET_USER/);
+  assert.match(updaterSource, /RIN_UPDATE_ASSUME_YES/);
   assert.match(updaterSource, /selectUpdateTarget/);
   assert.match(updaterSource, /i18n\.buildUpdateTargetText/);
   assert.match(updaterSource, /i18n\.buildUpdatePlanText/);
@@ -462,6 +463,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
     updaterSource,
     /const promptConfirm = deps\.confirm \|\| confirm/,
   );
+  assert.match(updaterSource, /shouldAssumeYes\(\)/);
 });
 
 test("promptProviderSetup reuses complete existing provider config", async () => {
