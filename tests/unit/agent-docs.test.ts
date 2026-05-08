@@ -19,10 +19,30 @@ function readAgentDoc(relativePath: string) {
 test("agent docs expose scheduled task operation workflow", () => {
   const readme = readAgentDoc("README.md");
   const capabilities = readAgentDoc("docs/capabilities.md");
+  const builtinCapabilities = readAgentDoc("docs/builtin-extensions.md");
   const scheduledTasks = readAgentDoc("docs/scheduled-tasks.md");
+  const agentSdk = readAgentDoc("docs/agent-sdk.md");
 
+  assert.match(readme, /docs\/agent-sdk\.md/);
   assert.match(readme, /docs\/scheduled-tasks\.md/);
-  assert.match(capabilities, /~\/\.rin\/docs\/rin\/docs\/scheduled-tasks\.md/);
+  assert.match(capabilities, /agent-sdk\.md/);
+  assert.match(capabilities, /scheduled-tasks\.md/);
+  assert.match(builtinCapabilities, /agent-sdk\.md/);
+  assert.match(builtinCapabilities, /scheduled-tasks\.md/);
+
+  for (const helper of [
+    "rin.tasks.list",
+    "rin.tasks.get",
+    "rin.tasks.upsert",
+    "rin.tasks.delete",
+    "rin.tasks.complete",
+    "rin.tasks.pause",
+    "rin.tasks.resume",
+    "rin.tasks.run",
+  ]) {
+    assert.match(scheduledTasks, new RegExp(helper.replace(/\./g, "\\.")));
+    assert.match(agentSdk, new RegExp(helper.replace(/\./g, "\\.")));
+  }
 
   for (const command of [
     "cron_list_tasks",
@@ -34,10 +54,13 @@ test("agent docs expose scheduled task operation workflow", () => {
     "cron_pause_task",
     "cron_resume_task",
   ]) {
-    assert.match(scheduledTasks, new RegExp(command));
     assert.doesNotMatch(capabilities, new RegExp(command));
   }
 
+  assert.match(agentSdk, /"src", "core", "rin-agent-sdk", "index\.ts"/);
   assert.match(scheduledTasks, /`session\.mode: "dedicated"`/);
-  assert.match(scheduledTasks, /Re-read the task with `cron_get_task`/);
+  assert.match(
+    scheduledTasks,
+    /After changing or starting a task, re-read daemon-visible state/,
+  );
 });

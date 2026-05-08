@@ -121,7 +121,6 @@ const TOOL_CALL_PREFIXES: Record<string, string> = {
   search_memory: "🧠",
   save_prompts: "📌",
   generate_codex_image: "image",
-  task_control: "task",
 };
 
 export function getToolCallDisplayPrefix(toolName: unknown) {

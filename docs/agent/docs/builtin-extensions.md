@@ -30,10 +30,11 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
 - `subagent`
   - provides `run_subagent` and `list_models`
 - `task`
-  - provides `task_control` for pausing or resuming existing scheduled tasks
+  - scheduled task operations are documented local SDK workflows rather than agent tools
+  - read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before operating scheduled tasks
 - `chat`
   - provides `/chat` for official adapter setup inside the TUI
-  - chat sending, stored-message lookup, log inspection, and identity updates are documented SDK/file workflows rather than agent tools
+  - chat sending, chat turn control, stored-message lookup, log inspection, and identity updates are documented SDK/file workflows rather than agent tools
   - `/chat` enters platform selection directly, keeps installer-only opt-in confirmation, prefers the minimum runnable fields, defaults to polling / socket modes when supported, and includes direct official links for required values
 - `token-usage`
   - records detailed token telemetry under `~/.rin/data/token-usage/usage.db`
@@ -120,9 +121,4 @@ Keep the change minimal:
 - may install or update configured npm packages under `~/.rin/data/daemon-runtime` during daemon startup
 - do not run in std/maintenance mode
 
-## Usage note
-
-Default capabilities are core Rin functions.
-They live in their owning product domains such as `src/core/chat/`, `src/core/memory/`, `src/core/self-improve/`, `src/core/rin-lib/`, `src/core/chat-bridge/`, and `src/core/rin-tui/`; they are assembled by native product code, not by a generic extension runtime.
-
-The optional browser/computer tools are different: they live under `extensions/` as external Pi extension packages and are loaded by Pi's extension runtime only when enabled.
+Configure daemon workers only when the user intentionally wants a background extension such as an external event bridge. Keep the normal chat adapters under `settings.json -> chat`, not daemon workers.

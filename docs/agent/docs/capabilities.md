@@ -10,7 +10,7 @@ Use this page as a quick entrypoint for Rin runtime capabilities. Follow the sys
 - **Memory:** prompt baselines stay compact; reusable procedures and facts belong in skills; archived sessions are searched with `search_memory`. Read `docs/memory-layering.md` before changing memory content.
 - **Non-interactive work:** use `rin -p` or `rin --mode json` only after reading `docs/non-interactive-cli.md`.
 - **Initialization:** if the user asks to initialize or reset preferences, read `docs/initialization.md`.
-- **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, and recurring agent automation. Read `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, completing, pausing, resuming, or deleting them.
+- **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, manual run-now starts, and recurring agent automation. Read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, running, completing, pausing, resuming, or deleting them.
 - **Chat bridge:** chat sender identity comes from the platform, not the shell user. Read `docs/chat-bridge.md` for SDK/file workflows and rich content behavior.
 - **Optional browser/computer tools:** disabled unless `settings.json -> extensions` includes `rin:browser-use` or `rin:computer-use`.
 - **Web search:** use `web_search` proactively for fresh or version-sensitive facts; direct URL mode fetches a known page.

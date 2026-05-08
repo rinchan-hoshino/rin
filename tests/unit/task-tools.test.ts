@@ -4,33 +4,11 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
-const taskIndex = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "task", "index.js")).href
-);
+import taskCapability from "../../src/core/task/index.ts";
+import { createRinAgentSdk } from "../../src/core/rin-agent-sdk/index.ts";
 
 function getTaskTools() {
-  return taskIndex.default().tools || [];
-}
-
-function getTaskTool(name) {
-  const tool = getTaskTools().find((entry) => entry.name === name);
-  assert.ok(tool);
-  return tool;
-}
-
-function restoreEnvValue(name, value) {
-  if (value === undefined) {
-    delete process.env[name];
-    return;
-  }
-  process.env[name] = value;
+  return taskCapability().tools || [];
 }
 
 async function listen(server, socketPath) {
@@ -49,9 +27,9 @@ async function closeServer(server) {
   await new Promise((resolve) => server.close(() => resolve()));
 }
 
-async function withTaskDaemon(dataForPayload, run) {
+async function withDaemon(dataForPayload, run) {
   const runtimeDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-task-runtime-"),
+    path.join(os.tmpdir(), "rin-agent-sdk-runtime-"),
   );
   const socketDir = path.join(runtimeDir, "rin-daemon");
   const socketPath = path.join(socketDir, "daemon.sock");
@@ -83,34 +61,24 @@ async function withTaskDaemon(dataForPayload, run) {
     });
   });
 
-  const previousSocketPath = process.env.RIN_DAEMON_SOCKET_PATH;
-
   try {
     await listen(server, socketPath);
-    restoreEnvValue("RIN_DAEMON_SOCKET_PATH", socketPath);
-    await run({ requests, runtimeDir, socketPath });
+    await run({ requests, socketPath });
   } finally {
-    restoreEnvValue("RIN_DAEMON_SOCKET_PATH", previousSocketPath);
     await closeServer(server);
     await fs.rm(runtimeDir, { recursive: true, force: true });
   }
 }
 
-test("task capability exposes only task_control", () => {
+test("task capability no longer exposes model task tools", () => {
   assert.deepEqual(
     getTaskTools().map((tool) => tool.name),
-    ["task_control"],
-  );
-  const tool = getTaskTool("task_control");
-  assert.equal(tool.parameters.properties.taskId.type, "string");
-  assert.deepEqual(
-    tool.parameters.properties.action.anyOf.map((item) => item.const),
-    ["pause", "resume"],
+    [],
   );
 });
 
-test("task_control maps pause and resume to daemon task commands", async () => {
-  await withTaskDaemon(
+test("agent SDK maps task helpers to daemon task commands", async () => {
+  await withDaemon(
     (payload) => ({
       task: {
         id: payload.taskId,
@@ -118,35 +86,71 @@ test("task_control maps pause and resume to daemon task commands", async () => {
         enabled: payload.type === "cron_resume_task",
       },
     }),
-    async ({ requests }) => {
-      const tool = getTaskTool("task_control");
-      const paused = await tool.execute(
-        "tool-pause",
-        { action: "pause", taskId: "cron_demo" },
-        undefined,
-        undefined,
-        {},
-      );
-      const resumed = await tool.execute(
-        "tool-resume",
-        { action: "resume", taskId: "cron_demo" },
-        undefined,
-        undefined,
-        {},
-      );
+    async ({ requests, socketPath }) => {
+      const rin = createRinAgentSdk({ socketPath });
+      const paused = await rin.tasks.pause("cron_demo");
+      const resumed = await rin.tasks.resume("cron_demo");
+      await rin.tasks.run("cron_demo");
+      await rin.tasks.get("cron_demo");
+      await rin.tasks.list();
+      await rin.tasks.upsert({ id: "cron_demo" });
+      await rin.tasks.complete("cron_demo", "done");
+      await rin.tasks.delete("cron_demo");
 
       assert.deepEqual(
         requests.map((request) => request.type),
-        ["cron_pause_task", "cron_resume_task"],
+        [
+          "cron_pause_task",
+          "cron_resume_task",
+          "cron_run_task",
+          "cron_get_task",
+          "cron_list_tasks",
+          "cron_upsert_task",
+          "cron_complete_task",
+          "cron_delete_task",
+        ],
       );
-      assert.match(
-        String(paused.content?.[0]?.text || ""),
-        /Paused task: cron_demo \(Demo Task\)/,
+      assert.equal(paused.task.id, "cron_demo");
+      assert.equal(paused.task.enabled, false);
+      assert.equal(resumed.task.enabled, true);
+    },
+  );
+});
+
+test("agent SDK maps chat helpers to daemon chat commands", async () => {
+  await withDaemon(
+    (payload) => {
+      if (payload.type === "chat_send") return { delivered: true };
+      if (payload.type === "chat_run_turn") return { finalText: "ok" };
+      if (payload.type === "chat_terminate_turn") return { terminated: true };
+      return { ok: true };
+    },
+    async ({ requests, socketPath }) => {
+      const rin = createRinAgentSdk({ socketPath });
+      await rin.chat.send({ chatKey: "telegram/1:2", text: "hello" });
+      const turn = await rin.chat.runTurn({
+        chatKey: "telegram/1:2",
+        text: "reply",
+        controllerKey: "agent-test",
+      });
+      const terminated = await rin.chat.terminateTurn("agent-test");
+      await rin.chat.evalBridge({ code: "return 1;" });
+
+      assert.deepEqual(
+        requests.map((request) => request.type),
+        [
+          "chat_send",
+          "chat_run_turn",
+          "chat_terminate_turn",
+          "chat_bridge_eval",
+        ],
       );
-      assert.match(
-        String(resumed.content?.[0]?.text || ""),
-        /Resumed task: cron_demo \(Demo Task\)/,
-      );
+      assert.deepEqual(requests[0].payload, {
+        chatKey: "telegram/1:2",
+        text: "hello",
+      });
+      assert.equal(turn.finalText, "ok");
+      assert.equal(terminated.terminated, true);
     },
   );
 });
