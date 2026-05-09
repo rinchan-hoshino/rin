@@ -370,12 +370,16 @@ export class RinFrontendTurnDriver {
         (item: any) => item?.provider === provider && item?.id === modelId,
       );
       if (!model) throw new Error(`frontend_model_not_found:${modelRef}`);
-      await this.client.setModel(provider, modelId);
+      await this.client.setModel(provider, modelId, {
+        persistSettings: false,
+      });
     }
 
     const thinkingLevel = safeString(options.thinkingLevel || "").trim();
     if (thinkingLevel) {
-      await this.client.setThinkingLevel(thinkingLevel);
+      await this.client.setThinkingLevel(thinkingLevel, {
+        persistSettings: false,
+      });
       this.frontendState.thinkingLevel = thinkingLevel;
     }
   }

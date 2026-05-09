@@ -19,6 +19,14 @@ import {
 } from "./worker-helpers.js";
 
 const TURN_HEARTBEAT_INTERVAL_MS = 2_000;
+const THINKING_LEVEL_ORDER = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+];
 
 type PendingExtensionUiRequest = {
   resolve: (response: any) => void;
@@ -55,6 +63,89 @@ function appendInterruptedToolResults(
     }
   }
   return true;
+}
+
+function clampSessionThinkingLevel(session: any, level: string) {
+  const availableLevels = Array.isArray(session?.getAvailableThinkingLevels?.())
+    ? session
+        .getAvailableThinkingLevels()
+        .map((item: unknown) => safeString(item).trim())
+    : [];
+  if (availableLevels.includes(level)) return level;
+  if (!availableLevels.length) return level;
+  const requestedIndex = THINKING_LEVEL_ORDER.indexOf(level);
+  if (requestedIndex < 0) return availableLevels[0];
+  for (let i = requestedIndex; i < THINKING_LEVEL_ORDER.length; i += 1) {
+    if (availableLevels.includes(THINKING_LEVEL_ORDER[i])) {
+      return THINKING_LEVEL_ORDER[i];
+    }
+  }
+  for (let i = requestedIndex - 1; i >= 0; i -= 1) {
+    if (availableLevels.includes(THINKING_LEVEL_ORDER[i])) {
+      return THINKING_LEVEL_ORDER[i];
+    }
+  }
+  return availableLevels[0];
+}
+
+function setSessionThinkingLevel(
+  session: any,
+  level: string,
+  options: { persistSettings?: boolean } = {},
+) {
+  if (options.persistSettings !== false) {
+    return session.setThinkingLevel(level);
+  }
+  const requested = safeString(level).trim();
+  if (!session?.agent?.state || !requested) {
+    return session.setThinkingLevel(level);
+  }
+  const effectiveLevel = clampSessionThinkingLevel(session, requested);
+  const previousLevel = session.agent.state.thinkingLevel;
+  session.agent.state.thinkingLevel = effectiveLevel;
+  if (effectiveLevel !== previousLevel) {
+    session.sessionManager?.appendThinkingLevelChange?.(effectiveLevel);
+    session._emit?.({ type: "thinking_level_changed", level: effectiveLevel });
+  }
+  return { level: effectiveLevel };
+}
+
+async function setSessionModel(
+  session: any,
+  model: any,
+  options: { persistSettings?: boolean } = {},
+) {
+  if (options.persistSettings !== false) {
+    await session.setModel(model);
+    return model;
+  }
+  if (!session?.agent?.state) {
+    await session.setModel(model);
+    return model;
+  }
+  if (
+    typeof session.modelRegistry?.hasConfiguredAuth === "function" &&
+    !session.modelRegistry.hasConfiguredAuth(model)
+  ) {
+    throw new Error(`No API key for ${model.provider}/${model.id}`);
+  }
+  const previousModel = session.model;
+  const thinkingLevel = safeString(session.thinkingLevel).trim() || "medium";
+  session.agent.state.model = model;
+  session.sessionManager?.appendModelChange?.(model.provider, model.id);
+  setSessionThinkingLevel(session, thinkingLevel, { persistSettings: false });
+  if (
+    previousModel?.provider !== model.provider ||
+    previousModel?.id !== model.id
+  ) {
+    await session._extensionRunner?.emit?.({
+      type: "model_select",
+      model,
+      previousModel,
+      source: "set",
+    });
+  }
+  return model;
 }
 
 async function resumeInterruptedTurn(
@@ -839,7 +930,12 @@ export async function runCustomRpcMode(
           ),
         );
       case "set_thinking_level":
-        return run(id, type, () => session.setThinkingLevel(command.level));
+        return run(id, type, () =>
+          setSessionThinkingLevel(session, safeString(command.level).trim(), {
+            persistSettings:
+              command.persistSettings === false ? false : undefined,
+          }),
+        );
       case "cycle_thinking_level":
         return run(
           id,
@@ -1074,7 +1170,10 @@ export async function runCustomRpcMode(
           throw new Error(
             `Model not found: ${command.provider}/${command.modelId}`,
           );
-        await session.setModel(model);
+        await setSessionModel(session, model, {
+          persistSettings:
+            command.persistSettings === false ? false : undefined,
+        });
         return done(id, type, model);
       }
       case "rename_session": {

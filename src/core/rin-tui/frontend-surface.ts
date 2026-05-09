@@ -110,8 +110,15 @@ export interface RpcFrontendClient extends InteractiveFrontendSurface {
   getState(): Promise<Record<string, unknown>>;
   runCommand(commandLine: string): Promise<unknown>;
   newSession(options?: RinNewSessionOptions): Promise<RinNewSessionResult>;
-  setModel(provider: string, modelId: string): Promise<unknown>;
-  setThinkingLevel(level: string): Promise<unknown>;
+  setModel(
+    provider: string,
+    modelId: string,
+    options?: { persistSettings?: boolean },
+  ): Promise<unknown>;
+  setThinkingLevel(
+    level: string,
+    options?: { persistSettings?: boolean },
+  ): Promise<unknown>;
   respondExtensionUi(response: RinExtensionUiResponse): Promise<void>;
 }
 
