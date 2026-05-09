@@ -96,8 +96,9 @@ function readInstalledUpdateLanguage(options: {
   currentUser: string;
   targetUser: string;
   installDir: string;
+  ownerHome?: string;
 }) {
-  const ownerHome = targetHomeForUser(options.targetUser);
+  const ownerHome = options.ownerHome || targetHomeForUser(options.targetUser);
   const currentHome = targetHomeForUser(options.currentUser);
   const candidates = [
     installSettingsPath(options.installDir),
@@ -188,6 +189,7 @@ export async function startInstaller() {
       select,
       confirm: localizedConfirm,
       i18n,
+      readInstalledUpdateLanguage,
     });
     return;
   }

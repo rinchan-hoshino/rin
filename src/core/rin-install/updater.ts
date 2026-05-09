@@ -73,14 +73,20 @@ export async function startUpdater(deps: {
   select?: typeof select;
   confirm?: typeof confirm;
   i18n?: InstallerI18n;
+  readInstalledUpdateLanguage?: (target: {
+    currentUser: string;
+    targetUser: string;
+    installDir: string;
+    ownerHome: string;
+  }) => string;
 }) {
   const currentUser = deps.detectCurrentUser();
   const promptSelect = deps.select || select;
   const promptConfirm = deps.confirm || confirm;
-  const i18n =
+  const initialI18n =
     deps.i18n || createInstallerI18n(process.env.RIN_INSTALL_LANGUAGE || "en");
 
-  intro(i18n.updaterIntroTitle);
+  intro(initialI18n.updaterIntroTitle);
 
   const requestedInstallDir = String(
     process.env.RIN_UPDATE_INSTALL_DIR || "",
@@ -96,15 +102,28 @@ export async function startUpdater(deps: {
           ownerHome: targetHomeForUser(requestedTargetUser),
           source: "launcher" as const,
         }
-      : await selectUpdateTarget(deps.ensureNotCancelled, promptSelect, i18n);
+      : await selectUpdateTarget(
+          deps.ensureNotCancelled,
+          promptSelect,
+          initialI18n,
+        );
   if (!target) {
-    note(i18n.noUpdateTargetsText, i18n.updateTargetsTitle);
-    outro(i18n.updaterNothingUpdated);
+    note(initialI18n.noUpdateTargetsText, initialI18n.updateTargetsTitle);
+    outro(initialI18n.updaterNothingUpdated);
     return;
   }
 
   const installDir = target.installDir;
   const targetUser = target.targetUser;
+  const selectedLanguage = deps.readInstalledUpdateLanguage?.({
+    currentUser,
+    targetUser,
+    installDir,
+    ownerHome: target.ownerHome,
+  });
+  const i18n = selectedLanguage
+    ? createInstallerI18n(selectedLanguage)
+    : initialI18n;
 
   note(
     i18n.buildUpdateTargetText({
