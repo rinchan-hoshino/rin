@@ -83,9 +83,11 @@ function createFrontendClient() {
     async listModels() {
       return [];
     },
-    async setModel() {},
-    async setThinkingLevel(level: string) {
-      calls.push({ type: "setThinkingLevel", level });
+    async setModel(provider: string, modelId: string, options: any = {}) {
+      calls.push({ type: "setModel", provider, modelId, options });
+    },
+    async setThinkingLevel(level: string, options: any = {}) {
+      calls.push({ type: "setThinkingLevel", level, options });
     },
     async request(command: any) {
       calls.push({ type: "request", command });
@@ -165,6 +167,47 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   assert.deepEqual(client.calls[1].options.promptContext, {
     source: "chat-bridge",
     chatKey: "telegram/1:2",
+  });
+});
+
+test("frontend SDK turn driver applies turn-scoped model without persisting defaults", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.listModels = async () => [
+    { provider: "openai-codex", id: "gpt-5.5", label: "GPT-5.5" },
+  ];
+
+  const result = await driver.runTurn({
+    text: "hello",
+    model: "openai-codex/gpt-5.5",
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  const modelCall = client.calls.find((call: any) => call.type === "setModel");
+  assert.deepEqual(modelCall, {
+    type: "setModel",
+    provider: "openai-codex",
+    modelId: "gpt-5.5",
+    options: { persistSettings: false },
+  });
+});
+
+test("frontend SDK turn driver applies turn-scoped thinking without persisting defaults", async () => {
+  const driver = createDriver();
+
+  const result = await driver.runTurn({
+    text: "hello",
+    thinkingLevel: "low",
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  const thinkingCall = (driver as any).testClient.calls.find(
+    (call: any) => call.type === "setThinkingLevel",
+  );
+  assert.deepEqual(thinkingCall, {
+    type: "setThinkingLevel",
+    level: "low",
+    options: { persistSettings: false },
   });
 });
 

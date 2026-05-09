@@ -248,12 +248,28 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     });
   }
 
-  async setModel(provider: string, modelId: string) {
-    return await this.request({ type: "set_model", provider, modelId });
+  async setModel(
+    provider: string,
+    modelId: string,
+    options: { persistSettings?: boolean } = {},
+  ) {
+    return await this.request({
+      type: "set_model",
+      provider,
+      modelId,
+      ...(options.persistSettings === false ? { persistSettings: false } : {}),
+    });
   }
 
-  async setThinkingLevel(level: string) {
-    return await this.request({ type: "set_thinking_level", level });
+  async setThinkingLevel(
+    level: string,
+    options: { persistSettings?: boolean } = {},
+  ) {
+    return await this.request({
+      type: "set_thinking_level",
+      level,
+      ...(options.persistSettings === false ? { persistSettings: false } : {}),
+    });
   }
 
   async respondExtensionUi(response: RinExtensionUiResponse) {
