@@ -115,7 +115,6 @@ export function formatPromptContext(
     const hasSenderContext = Boolean(
       safeString(meta.userId).trim() ||
       safeString(meta.nickname).trim() ||
-      safeString(meta.groupNickname).trim() ||
       safeString(meta.identity).trim(),
     );
     if (hasSenderContext) {
@@ -125,10 +124,6 @@ export function formatPromptContext(
       lines.push(
         `sender nickname: ${safeString(meta.nickname).trim() || "unknown"}`,
       );
-      const groupNickname = safeString(meta.groupNickname).trim();
-      if (safeString(meta.chatType).trim() === "group") {
-        lines.push(`sender group nickname: ${groupNickname || "unknown"}`);
-      }
       lines.push(`sender trust: ${describeSenderTrust(meta.identity)}`);
     }
     if (safeString(meta.replyToMessageId).trim()) {

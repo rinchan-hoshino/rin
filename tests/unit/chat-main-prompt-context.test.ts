@@ -213,6 +213,7 @@ test("chat controller passes sender metadata through the frontend prompt context
     const seen = JSON.parse(rows.at(-1) || "[]");
     assert.equal(seen.length, 1);
     assert.ok(String(seen[0].text).includes("sender nickname: AccountNick"));
+    assert.ok(!String(seen[0].text).includes("sender group nickname:"));
     assert.ok(String(seen[0].text).endsWith("---\nmy name is?"));
     assert.deepEqual(seen[0].promptContext, {
       source: "chat-bridge",
