@@ -231,6 +231,40 @@ test("message content helpers keep tool-call name priority and blank-name filter
   );
 });
 
+test("message content helpers classify assistant finals with chat-compatible tool-call rules", () => {
+  assert.equal(
+    messageContent.extractAssistantFinalText({
+      role: "assistant",
+      content: [{ type: "text", text: " done " }],
+    }),
+    "done",
+  );
+  assert.equal(
+    messageContent.isAssistantFinalMessage({
+      role: "assistant",
+      content: [{ type: "text", text: " done " }],
+    }),
+    true,
+  );
+  assert.equal(
+    messageContent.isAssistantFinalMessage({
+      role: "assistant",
+      content: [
+        { type: "text", text: "I will check" },
+        { type: "toolCall", name: "read" },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    messageContent.isAssistantFinalMessage({
+      role: "user",
+      content: [{ type: "text", text: "user text" }],
+    }),
+    false,
+  );
+});
+
 test("message content helpers resolve only explicit existing file URLs", async () => {
   await withTempDir(async (dir) => {
     const first = path.join(dir, "first.txt");

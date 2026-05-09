@@ -63,8 +63,34 @@ function assistantFinal(text = "done") {
   return { role: "assistant", content: [{ type: "text", text }] };
 }
 
-function assistantToolOnly() {
-  return { role: "assistant", content: [{ type: "toolCall", name: "bash" }] };
+function assistantToolMessage(text = "I will check") {
+  return {
+    role: "assistant",
+    content: [
+      { type: "text", text },
+      { type: "toolCall", name: "bash" },
+    ],
+  };
+}
+
+async function writeSessionWithAssistantFinals(sessionFile, count) {
+  const entries = [];
+  let parentId = null;
+  for (let i = 0; i < count; i += 1) {
+    const id = `assistant-${i + 1}`;
+    entries.push({
+      type: "message",
+      id,
+      parentId,
+      message: assistantFinal(`done ${i + 1}`),
+    });
+    parentId = id;
+  }
+  await fs.writeFile(
+    sessionFile,
+    `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    "utf8",
+  );
 }
 
 function historyPath(root) {
@@ -319,7 +345,7 @@ test("automatic self-improve review counts agent final messages, not user turns"
   });
 });
 
-test("automatic self-improve review ignores assistant tool-call-only messages", async () => {
+test("automatic self-improve review reuses chat final-message detection for tool-call messages", async () => {
   await withTempRoot(async (root) => {
     const definition = selfImproveIndex.default({
       sendMessage() {},
@@ -328,21 +354,28 @@ test("automatic self-improve review ignores assistant tool-call-only messages", 
       },
     });
     const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(root, "sessions", "tool-only-ignored.jsonl");
+    const sessionFile = path.join(
+      root,
+      "sessions",
+      "tool-message-ignored.jsonl",
+    );
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
       sessionManager: {
-        getSessionId: () => "tool-only-ignored-review-session-test",
+        getSessionId: () => "tool-message-ignored-review-session-test",
         getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-tool-only-ignored",
+        getLeafId: () => "leaf-tool-message-ignored",
         isPersisted: () => true,
       },
     };
 
     for (let i = 0; i < 12; i += 1) {
-      await messageEnd({ message: assistantToolOnly() }, ctx);
+      await messageEnd(
+        { message: assistantToolMessage(`checking ${i + 1}`) },
+        ctx,
+      );
     }
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
 
@@ -353,6 +386,52 @@ test("automatic self-improve review ignores assistant tool-call-only messages", 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 1);
     assert.equal(queue[0].snapshotKey, "review:8");
+  });
+});
+
+test("automatic self-improve review resumes from persisted session count after restart", async () => {
+  await withTempRoot(async (root) => {
+    const sessionFile = path.join(root, "sessions", "persisted-count.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await writeSessionWithAssistantFinals(sessionFile, 9);
+
+    const createContext = (sessionId, leafId) => ({
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => sessionId,
+        getSessionFile: () => sessionFile,
+        getLeafId: () => leafId,
+        isPersisted: () => true,
+      },
+    });
+
+    const firstDefinition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    await firstDefinition.hooks.message_end[0](
+      { message: assistantFinal("done 9") },
+      createContext("persisted-count-session-test", "assistant-9"),
+    );
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+
+    await writeSessionWithAssistantFinals(sessionFile, 16);
+    const restartedDefinition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    await restartedDefinition.hooks.message_end[0](
+      { message: assistantFinal("done 16") },
+      createContext("persisted-count-session-test-restarted", "assistant-16"),
+    );
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:16");
   });
 });
 

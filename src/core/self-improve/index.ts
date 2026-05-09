@@ -3,7 +3,7 @@ import type {
   RinCapabilityOptions,
 } from "../rin-lib/capability-types.js";
 import { existsSync, readFileSync } from "fs";
-import { extractMessageText } from "../message-content.js";
+import { isAssistantFinalMessage } from "../message-content.js";
 
 import {
   enqueueMemoryMaintenanceJob,
@@ -19,7 +19,7 @@ import { readSessionMetadata } from "../session/metadata.js";
 const DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES = 8;
 const reviewStateBySession = new Map<
   string,
-  { finalMessages: number; lastQueuedMessage: number }
+  { finalMessages: number; lastQueuedMessage: number; initialized: boolean }
 >();
 
 function normalizeReviewEveryTurns(value: unknown) {
@@ -53,14 +53,71 @@ function getSessionReviewState(sessionId: string) {
   const current = reviewStateBySession.get(key) || {
     finalMessages: 0,
     lastQueuedMessage: 0,
+    initialized: false,
   };
   reviewStateBySession.set(key, current);
   return current;
 }
 
-function isAgentFinalMessage(message: any) {
-  if (String(message?.role || "").trim() !== "assistant") return false;
-  return Boolean(extractMessageText(message?.content, { trim: true }));
+function normalizeEntryId(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || undefined;
+}
+
+function countFinalMessagesInSessionFile(sessionFile: string, leafId?: string) {
+  const filePath = String(sessionFile || "").trim();
+  if (!filePath || !existsSync(filePath)) return 0;
+  try {
+    const entries: any[] = [];
+    const entryById = new Map<string, any>();
+    for (const line of readFileSync(filePath, "utf8").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const entry = JSON.parse(trimmed);
+      entries.push(entry);
+      const id = normalizeEntryId(entry?.id);
+      if (id) entryById.set(id, entry);
+    }
+
+    const targetId = normalizeEntryId(leafId);
+    if (targetId && entryById.has(targetId)) {
+      let count = 0;
+      const visited = new Set<string>();
+      let currentId: string | undefined = targetId;
+      while (currentId && !visited.has(currentId)) {
+        visited.add(currentId);
+        const entry = entryById.get(currentId);
+        if (!entry) break;
+        if (
+          entry?.type === "message" &&
+          isAssistantFinalMessage(entry.message)
+        ) {
+          count += 1;
+        }
+        currentId = normalizeEntryId(entry?.parentId);
+      }
+      return count;
+    }
+
+    return entries.filter(
+      (entry) =>
+        entry?.type === "message" && isAssistantFinalMessage(entry.message),
+    ).length;
+  } catch {
+    return 0;
+  }
+}
+
+function resolveFinalMessageCount(
+  state: { finalMessages: number; lastQueuedMessage: number },
+  meta: ReturnType<typeof sessionMeta>,
+) {
+  const persistedCount = countFinalMessagesInSessionFile(
+    meta.sessionFile,
+    meta.leafId,
+  );
+  if (persistedCount > 0) return persistedCount;
+  return state.finalMessages + 1;
 }
 
 async function processSelfImproveReview(
@@ -125,13 +182,20 @@ export default function selfImproveModule(
           const meta = sessionMeta(ctx);
           const state = getSessionReviewState(meta.sessionId);
           if (!state || !meta.sessionFile || !meta.sessionPersisted) return;
-          if (!isAgentFinalMessage(event?.message)) return;
+          if (!isAssistantFinalMessage(event?.message)) return;
 
-          state.finalMessages += 1;
-          if (
-            state.finalMessages - state.lastQueuedMessage >=
-            readSelfImproveReviewEveryTurns(String(ctx?.agentDir || ""))
-          ) {
+          const interval = readSelfImproveReviewEveryTurns(
+            String(ctx?.agentDir || ""),
+          );
+          const finalMessages = resolveFinalMessageCount(state, meta);
+          state.finalMessages = Math.max(state.finalMessages, finalMessages);
+          if (!state.initialized) {
+            state.lastQueuedMessage =
+              Math.floor(Math.max(0, state.finalMessages - 1) / interval) *
+              interval;
+            state.initialized = true;
+          }
+          if (state.finalMessages - state.lastQueuedMessage >= interval) {
             await processSelfImproveReview(ctx, {
               sessionFile: meta.sessionFile,
               leafId: meta.leafId,

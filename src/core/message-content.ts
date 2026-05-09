@@ -190,6 +190,21 @@ export function countToolCalls(content: any) {
   return extractToolCallParts(content).length;
 }
 
+export function extractAssistantFinalText(message: any) {
+  if (String(message?.role || "").trim() !== "assistant") return "";
+  if (countToolCalls(message?.content) > 0) return "";
+  return safeString(
+    extractMessageText(message?.content, {
+      includeThinking: false,
+      trim: true,
+    }),
+  ).trim();
+}
+
+export function isAssistantFinalMessage(message: any) {
+  return Boolean(extractAssistantFinalText(message));
+}
+
 export function extractImageParts(content: any) {
   return mapMessagePartsByType(content, "image", (part) => {
     const data = safeString(part.data || "");

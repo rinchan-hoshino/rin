@@ -1,6 +1,6 @@
 import { normalizeSessionRef } from "../session/ref.js";
 import {
-  countToolCalls,
+  extractAssistantFinalText,
   extractMessageText,
   extractTextBeforeFirstToolCall,
 } from "../message-content.js";
@@ -167,8 +167,9 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
           if (payload?.message?.role !== "assistant") return [];
           const text = assistantText(payload.message);
           if (text) latestAssistantText = text;
-          if (countToolCalls(payload.message?.content) <= 0) {
-            return text ? [{ type: "assistant_final", text }] : [];
+          const finalText = extractAssistantFinalText(payload.message);
+          if (finalText) {
+            return [{ type: "assistant_final", text: finalText }];
           }
           const interim = takeInterim(assistantInterimText(payload.message));
           return interim ? [interim] : [];
