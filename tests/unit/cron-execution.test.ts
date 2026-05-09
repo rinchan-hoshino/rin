@@ -728,7 +728,7 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the maintenance requirements in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to improve the entire self-improve memory library under ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Inventory all skill directories before selecting edits, prioritize duplicated or over-split ordinary skill clusters over isolated wording fixes, then optimize, consolidate, correct, merge, move, delete, and prune every discovered class of improvement across the library in one cohesive pass. Report the inventory scope and high-impact clusters considered.`,
+      `Follow the maintenance requirements in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to improve the entire self-improve memory library under ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Inventory all skill directories before selecting edits, then optimize, consolidate, correct, merge, move, delete, and prune every discovered class of improvement across the library in one cohesive pass.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
     assert.match(
@@ -746,15 +746,7 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     );
     assert.match(
       sleep.target.prompt,
-      /prioritize duplicated or over-split ordinary skill clusters/,
-    );
-    assert.match(
-      sleep.target.prompt,
       /every discovered class of improvement across the library/,
-    );
-    assert.match(
-      sleep.target.prompt,
-      /Report the inventory scope and high-impact clusters considered/,
     );
     assert.doesNotMatch(
       sleep.target.prompt,

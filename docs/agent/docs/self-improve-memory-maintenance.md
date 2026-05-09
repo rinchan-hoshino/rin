@@ -43,12 +43,11 @@ Start from the existing library.
 1. Read current prompt slots.
 2. Inventory all skill directories by name, description, and role before selecting edits.
 3. Inspect the reachable files needed to judge duplicate, misplaced, stale, verbose, narrow, or overlapping material.
-4. Rank cleanup targets by library impact, prioritizing duplicated or over-split skill clusters over isolated wording fixes.
-5. Apply each discovered class of cleanup across the library, not only to the first obvious file.
-6. Merge, move, rewrite, delete, or prune existing material.
-7. Add new material only when it improves future routing, decisions, execution, or recall.
+4. Apply each discovered class of cleanup across the library, not only to the first obvious file.
+5. Merge, move, rewrite, delete, or prune existing material.
+6. Add new material only when it improves future routing, decisions, execution, or recall.
 
-A useful review may only clean existing memory. A broad review should not spend the pass only editing maintenance instructions when ordinary skill clusters visibly need consolidation.
+A useful review may only clean existing memory.
 
 ## Distillation workflow
 
@@ -88,7 +87,6 @@ Use this checklist in every review. When one item is found, scan for the same pa
 
 - prompt slots that need updates after repeated behavioral feedback;
 - overlapping skills that should merge or become a single canonical skill with only intentional aliases left;
-- clusters of same-project or same-domain skills that can become one workflow skill plus intentional aliases;
 - broad skills that need clearer structure;
 - narrow skills that belong inside a larger workflow;
 - content filed under the wrong skill;
@@ -101,8 +99,7 @@ Use this checklist in every review. When one item is found, scan for the same pa
 
 Report durable memory changes only:
 
-- inventory scope and the high-impact clusters considered;
 - changed memory files with one short reason each;
 - merged, moved, deleted, or pruned memory items;
 - cleanup performed when no new memory was added, or that no durable memory file changes were warranted;
-- skipped memory clusters needing owner confirmation, fresher evidence, or a larger dedicated pass.
+- skipped memory items needing owner confirmation or fresher evidence.
