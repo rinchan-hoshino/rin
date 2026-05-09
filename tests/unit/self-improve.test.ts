@@ -484,7 +484,7 @@ test("self-improve review prompt delegates shared maintenance rules", () => {
   );
   assert.equal(
     prompt,
-    "Follow the maintenance requirements in /tmp/rin-agent/docs/rin/docs/self-improve-memory-maintenance.md to improve the entire current self-improve memory library under /tmp/rin-agent/self_improve using the conversation above as evidence: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Inventory all skill directories before selecting edits, then optimize, consolidate, correct, merge, move, delete, and prune every discovered class of improvement across the library in one cohesive pass.",
+    "Follow the maintenance requirements in /tmp/rin-agent/docs/rin/docs/self-improve-memory-maintenance.md to improve the entire current self-improve memory library under /tmp/rin-agent/self_improve using the conversation above as evidence: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.",
   );
   assert.doesNotMatch(prompt, /^- Trigger:/m);
   assert.doesNotMatch(prompt, /## Basic concepts/);
@@ -497,15 +497,7 @@ test("self-improve review prompt delegates shared maintenance rules", () => {
   assert.match(prompt, /memory-index skills/);
   assert.match(prompt, /short-term memory skills/);
   assert.match(prompt, /merge, move, delete, and prune/);
-  assert.match(
-    prompt,
-    /Inventory all skill directories before selecting edits/,
-  );
-  assert.match(
-    prompt,
-    /every discovered class of improvement across the library/,
-  );
-  assert.doesNotMatch(prompt, /all reachable improvement points/);
+  assert.match(prompt, /all reachable improvement points in one cohesive pass/);
   assert.doesNotMatch(prompt, /read-only guidance/);
 });
 

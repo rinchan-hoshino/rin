@@ -30,7 +30,7 @@ Location: an index directory under `<agentDir>/self_improve/skills`
 
 Use memory-index skills for lookup and provenance when the source evidence matters later. Record compact entries with date, keywords, topic, why it matters, and the original memory/source path. Keep entries short and searchable; do not duplicate procedural guidance already stored in an ordinary skill.
 
-### Short-term memory skills
+### Short-term event-memory skills
 
 Location: a short-term memory directory under `<agentDir>/self_improve/skills`
 
@@ -41,11 +41,10 @@ Use short-term memory skills for active temporary continuity, fresh state, and s
 Start from the existing library.
 
 1. Read current prompt slots.
-2. Inventory all skill directories by name, description, and role before selecting edits.
-3. Inspect the reachable files needed to judge duplicate, misplaced, stale, verbose, narrow, or overlapping material.
-4. Apply each discovered class of cleanup across the library, not only to the first obvious file.
-5. Merge, move, rewrite, delete, or prune existing material.
-6. Add new material only when it improves future routing, decisions, execution, or recall.
+2. Inspect relevant reusable skills, memory-index skills, and short-term memory skills.
+3. Find repeated, misplaced, stale, verbose, narrow, or overlapping material.
+4. Merge, move, rewrite, delete, or prune existing material.
+5. Add new material only when it improves future routing, decisions, execution, or recall.
 
 A useful review may only clean existing memory.
 
@@ -83,7 +82,7 @@ When several related lessons appear together, make one composite skill with head
 
 ## Consolidation checklist
 
-Use this checklist in every review. When one item is found, scan for the same pattern across the library before finishing:
+Use this checklist in every review:
 
 - prompt slots that need updates after repeated behavioral feedback;
 - overlapping skills that should merge or become a single canonical skill with only intentional aliases left;
