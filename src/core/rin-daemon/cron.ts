@@ -678,7 +678,7 @@ export class CronScheduler {
   }
 
   private terminateTaskSession(task: CronTaskRecord | undefined) {
-    if (!task || task.session.mode !== "dedicated") return;
+    if (!task || task.id.startsWith("builtin_self_improve_")) return;
     void this.options.chat
       ?.terminateTurn?.({ controllerKey: task.id })
       .catch(() => {});

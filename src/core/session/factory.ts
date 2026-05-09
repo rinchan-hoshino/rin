@@ -15,6 +15,7 @@ export async function openBoundSession(options: {
   cwd: string;
   agentDir: string;
   additionalExtensionPaths?: string[];
+  disabledRinCapabilities?: string[];
   sessionFile?: string;
   sessionManager?: any;
   thinkingLevel?: any;
@@ -31,6 +32,7 @@ export async function openBoundSession(options: {
     cwd: options.cwd,
     agentDir: options.agentDir,
     additionalExtensionPaths: options.additionalExtensionPaths ?? [],
+    disabledRinCapabilities: options.disabledRinCapabilities,
     sessionManager,
     thinkingLevel: options.thinkingLevel,
   });

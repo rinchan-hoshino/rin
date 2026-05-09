@@ -640,7 +640,7 @@ test("built-in self-improve cron task writes maintenance history", async () => {
   }
 });
 
-test("cron scheduler terminates dedicated sessions when tasks stop", async () => {
+test("cron scheduler terminates task sessions when tasks stop", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const terminations = [];
   const scheduler = new cronMod.CronScheduler({
@@ -658,9 +658,28 @@ test("cron scheduler terminates dedicated sessions when tasks stop", async () =>
       session: { mode: "dedicated" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
+    scheduler.upsertTask({
+      id: "cron_unbound_stop_me",
+      trigger: { intervalMs: 60_000 },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+    scheduler.upsertTask({
+      id: "cron_none_complete_me",
+      trigger: { intervalMs: 60_000 },
+      session: { mode: "none" },
+      target: { kind: "shell_command", command: "printf hello" },
+    });
     scheduler.pauseTask("cron_stop_me");
     scheduler.deleteTask("cron_stop_me");
-    assert.deepEqual(terminations, ["cron_stop_me", "cron_stop_me"]);
+    scheduler.pauseTask("cron_unbound_stop_me");
+    scheduler.completeTask("cron_none_complete_me", "done");
+    assert.deepEqual(terminations, [
+      "cron_stop_me",
+      "cron_stop_me",
+      "cron_unbound_stop_me",
+      "cron_none_complete_me",
+    ]);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

@@ -166,6 +166,7 @@ async function runForkedSessionPrompt(options: {
     cwd: fork.cwd,
     agentDir: options.agentDir,
     additionalExtensionPaths: options.additionalExtensionPaths,
+    disabledRinCapabilities: ["self_improve"],
     sessionManager: fork.sessionManager,
     // Do not override thinkingLevel here. The fork must inherit the source
     // session's model options so provider prefix caching matches a normal

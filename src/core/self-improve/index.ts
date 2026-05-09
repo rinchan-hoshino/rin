@@ -117,6 +117,7 @@ export default function selfImproveModule(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition {
   return {
+    name: "self_improve",
     tools: [],
     hooks: {
       message_end: [
