@@ -273,6 +273,61 @@ test("chat inbox does not restore stranded items after an assistant reply was de
   assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
 });
 
+test("chat inbox does not restore an older processing item after a later /new boundary", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const chatKey = "onebot/1:private:2";
+  const session = {
+    platform: "onebot",
+    selfId: "1",
+    channelId: "private:2",
+    userId: "2",
+    messageId: "m-partial-command",
+    timestamp: Date.parse("2026-05-09T03:22:19.000Z"),
+    content: "/ne",
+    stripped: { content: "/ne" },
+  };
+  const elements = [{ type: "text", attrs: { content: "/ne" } }];
+
+  inbox.enqueueChatInboxItem(agentDir, {
+    chatKey,
+    messageId: "m-partial-command",
+    session,
+    elements,
+  });
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "onebot",
+    botId: "1",
+    chatId: "private:2",
+    chatType: "private",
+    messageId: "m-partial-command",
+    role: "user",
+    receivedAt: "2026-05-09T03:22:19.000Z",
+    text: "/ne",
+  });
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "onebot",
+    botId: "1",
+    chatId: "private:2",
+    chatType: "private",
+    messageId: "m-new",
+    role: "user",
+    receivedAt: "2026-05-09T03:22:20.000Z",
+    acceptedAt: "2026-05-09T03:22:21.000Z",
+    processedAt: "2026-05-09T03:22:21.000Z",
+    text: "/new",
+  });
+  const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
+  inbox.claimChatInboxFile(agentDir, pendingPath);
+
+  const restored = inbox.restoreProcessingChatInboxFiles(agentDir);
+
+  assert.equal(restored.length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+});
+
 test("chat inbox restores stranded items after only a working notice", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const chatKey = "onebot/1:private:2";

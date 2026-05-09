@@ -285,6 +285,38 @@ export function isInboundChatMessageProcessed(
   );
 }
 
+function commandNameFromStoredText(text: unknown) {
+  const value = safeString(text).trim();
+  if (!value.startsWith("/")) return "";
+  const name = value.slice(1).split(/\s+/, 1)[0]?.trim().toLowerCase() || "";
+  return /^[a-z][a-z0-9_-]*$/.test(name) ? name : "";
+}
+
+export function hasLaterNewSessionBoundary(
+  agentDir: string,
+  chatKey: string,
+  messageId: string,
+) {
+  const nextChatKey = safeString(chatKey).trim();
+  const nextMessageId = safeString(messageId).trim();
+  if (!nextChatKey || !nextMessageId) return false;
+  const original = findChatMessageByChatAndId(
+    agentDir,
+    nextChatKey,
+    nextMessageId,
+  );
+  const originalTime = chatMessageSortTime(original);
+  if (!original || !originalTime) return false;
+  return listChatMessages(agentDir).some((item) => {
+    if (item.chatKey !== nextChatKey) return false;
+    if (item.role !== "user") return false;
+    if (safeString(item.messageId).trim() === nextMessageId) return false;
+    if (!safeString(item.processedAt).trim()) return false;
+    if (compareChatMessageOrder(original, item) >= 0) return false;
+    return commandNameFromStoredText(item.text || item.rawContent) === "new";
+  });
+}
+
 export function hasInboundChatMessageReplyBoundary(
   agentDir: string,
   chatKey: string,
@@ -292,7 +324,8 @@ export function hasInboundChatMessageReplyBoundary(
 ) {
   return (
     isInboundChatMessageProcessed(agentDir, chatKey, messageId) ||
-    hasDeliveredAssistantReplyForMessage(agentDir, chatKey, messageId)
+    hasDeliveredAssistantReplyForMessage(agentDir, chatKey, messageId) ||
+    hasLaterNewSessionBoundary(agentDir, chatKey, messageId)
   );
 }
 
