@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 import { normalizeSessionRef } from "../session/ref.js";
 

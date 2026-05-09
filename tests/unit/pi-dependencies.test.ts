@@ -9,10 +9,10 @@ const rootDir = path.resolve(
 );
 
 const piDependencyNames = [
-  "@mariozechner/pi-agent-core",
-  "@mariozechner/pi-ai",
-  "@mariozechner/pi-coding-agent",
-  "@mariozechner/pi-tui",
+  "@earendil-works/pi-agent-core",
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-tui",
 ];
 
 function readJson(relativePath: string) {
@@ -26,7 +26,7 @@ function normalizeVersionSpec(value: unknown) {
 function currentPiVersion() {
   const packageJson = readJson("package.json");
   const expectedVersion = normalizeVersionSpec(
-    packageJson.dependencies?.["@mariozechner/pi-coding-agent"],
+    packageJson.dependencies?.["@earendil-works/pi-coding-agent"],
   );
   assert.match(expectedVersion, /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?$/);
   return expectedVersion;
@@ -58,7 +58,7 @@ test("Pi upstream mirror metadata follows the package version", () => {
   const upstreamMeta = readJson("upstream/pi/_upstream.json");
   const expectedVersion = currentPiVersion();
 
-  assert.equal(upstreamMeta.packageName, "@mariozechner/pi-coding-agent");
+  assert.equal(upstreamMeta.packageName, "@earendil-works/pi-coding-agent");
   assert.equal(upstreamMeta.packageVersion, expectedVersion);
   assert.equal(upstreamMeta.ref, `v${expectedVersion}`);
   assert.deepEqual(upstreamMeta.paths, [

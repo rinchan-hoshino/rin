@@ -1,8 +1,8 @@
 import type { RinCapabilityDefinition } from "../rin-lib/capability-types.js";
 
 import { Type } from "typebox";
-import { type TruncationResult } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { type TruncationResult } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 
 import {
   buildUserFacingTextResult,

@@ -2,8 +2,8 @@ import type {
   AgentEvent,
   AgentMessage,
   ThinkingLevel,
-} from "@mariozechner/pi-agent-core";
-import { buildSessionContext } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-agent-core";
+import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 
 import {
   getRuntimeSessionDir,

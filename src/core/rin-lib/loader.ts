@@ -1,4 +1,4 @@
-import * as PiCodingAgent from "@mariozechner/pi-coding-agent";
+import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 
 import * as Changelog from "./changelog.js";
 

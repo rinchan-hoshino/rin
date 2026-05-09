@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import {
   DefaultResourceLoader,
   SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),

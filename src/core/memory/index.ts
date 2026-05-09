@@ -2,11 +2,11 @@ import type {
   RinCapabilityDefinition,
   RinCapabilityOptions,
 } from "../rin-lib/capability-types.js";
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { Text } from "@mariozechner/pi-tui";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-import { type TruncationResult } from "@mariozechner/pi-coding-agent";
+import { type TruncationResult } from "@earendil-works/pi-coding-agent";
 import {
   buildUserFacingTextResult,
   formatHiddenResultsNotice,

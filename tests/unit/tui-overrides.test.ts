@@ -19,7 +19,7 @@ const loaderModule = await import(
     path.join(
       rootDir,
       "node_modules",
-      "@mariozechner",
+      "@earendil-works",
       "pi-tui",
       "dist",
       "components",
@@ -27,14 +27,14 @@ const loaderModule = await import(
     ),
   ).href
 );
-const piTuiModule = await import("@mariozechner/pi-tui");
-const codingAgentModule = await import("@mariozechner/pi-coding-agent");
+const piTuiModule = await import("@earendil-works/pi-tui");
+const codingAgentModule = await import("@earendil-works/pi-coding-agent");
 const themeModule = await import(
   pathToFileURL(
     path.join(
       rootDir,
       "node_modules",
-      "@mariozechner",
+      "@earendil-works",
       "pi-coding-agent",
       "dist",
       "modes",

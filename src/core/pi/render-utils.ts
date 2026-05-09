@@ -8,7 +8,7 @@ import {
   truncateHead,
   truncateToVisualLines,
   type TruncationResult,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   Container,
   Text,
@@ -16,7 +16,7 @@ import {
   getImageDimensions,
   imageFallback,
   truncateToWidth,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 
 function sanitizeBinaryOutput(str: string): string {

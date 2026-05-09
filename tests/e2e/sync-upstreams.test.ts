@@ -122,7 +122,7 @@ function writeSyncWorkspace(workspace: string, packageVersion: string) {
     JSON.stringify(
       {
         dependencies: {
-          "@mariozechner/pi-coding-agent": `^${packageVersion}`,
+          "@earendil-works/pi-coding-agent": `^${packageVersion}`,
         },
       },
       null,

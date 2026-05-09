@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.74.0] - 2026-05-07
+
+### Changed
+
+- Updated repository links and package references for the move to `earendil-works/pi-mono` and `@earendil-works/*` package scopes.
+
 ## [0.73.1] - 2026-05-07
 
 ### New Features

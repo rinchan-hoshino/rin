@@ -42,4 +42,4 @@ export type {
   ProviderModelConfig,
   RegisteredCommand,
   ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";

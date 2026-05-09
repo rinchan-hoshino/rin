@@ -20,7 +20,7 @@ const runtimeMod = await import(
 const sessionForkMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "session", "fork.js")).href
 );
-const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 
 function makeTempDir(t: TestContext, prefix: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));

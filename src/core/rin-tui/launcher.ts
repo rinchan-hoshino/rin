@@ -1,7 +1,7 @@
 import {
   InteractiveMode,
   type InteractiveModeOptions,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import {
   applyRuntimeProfileEnvironment,

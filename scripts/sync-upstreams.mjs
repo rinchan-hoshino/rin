@@ -78,11 +78,11 @@ function replacePath(sourcePath, destPath) {
 
 const packageJson = readJson(packageJsonPath, {});
 const piPackageVersion = normalizeVersion(
-  packageJson?.dependencies?.["@mariozechner/pi-coding-agent"],
+  packageJson?.dependencies?.["@earendil-works/pi-coding-agent"],
 );
 if (!piPackageVersion) {
   throw new Error(
-    "Unable to determine @mariozechner/pi-coding-agent version from package.json",
+    "Unable to determine @earendil-works/pi-coding-agent version from package.json",
   );
 }
 
@@ -92,7 +92,7 @@ const mirrors = {
     sourceSubdir: "packages/coding-agent",
     defaultRef: `v${piPackageVersion}`,
     destRoot: path.join(repoRoot, "upstream", "pi"),
-    packageName: "@mariozechner/pi-coding-agent",
+    packageName: "@earendil-works/pi-coding-agent",
     packageVersion: piPackageVersion,
     paths: ["README.md", "CHANGELOG.md", "docs", "examples"],
   },

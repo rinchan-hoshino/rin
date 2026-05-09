@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
-import { isContextOverflow } from "@mariozechner/pi-ai";
+import { isContextOverflow } from "@earendil-works/pi-ai";
 
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import { estimateContextTokens } from "../rin-tui/session-helpers.js";

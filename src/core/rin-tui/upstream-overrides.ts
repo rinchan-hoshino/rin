@@ -4,14 +4,14 @@ import {
   InteractiveMode,
   SessionManager,
   SessionSelectorComponent,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   Markdown,
   ProcessTerminal,
   Spacer,
   Text,
   truncateToWidth,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 import {
   checkForNewRinVersion,
