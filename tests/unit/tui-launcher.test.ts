@@ -202,10 +202,10 @@ test("tui launcher leaves unrelated startup errors unchanged", () => {
   assert.equal(launcher.formatTuiStartupError(new Error("boom")), "boom");
 });
 
-test("tui launcher hides internal startup error markers", () => {
+test("tui launcher makes internal startup error markers readable without hiding the raw marker", () => {
   assert.equal(
     launcher.formatTuiStartupError(new Error("rin_request_failed")),
-    "Rin hit an internal error. Please retry, or check the logs for details.",
+    "rin request failed",
   );
 });
 

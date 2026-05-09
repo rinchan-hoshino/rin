@@ -11,13 +11,13 @@ test("runtime error formatter keeps human messages", () => {
   );
 });
 
-test("runtime error formatter hides internal marker messages", () => {
+test("runtime error formatter makes internal marker messages readable", () => {
   assert.equal(
     formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
-    "Rin hit an internal error. Please retry, or check the logs for details.",
+    "rpc turn final output missing",
   );
   assert.equal(
     formatRuntimeErrorForUser("frontend_model_not_found:openai/missing"),
-    "Rin hit an internal error. Please retry, or check the logs for details.",
+    "frontend model not found: openai/missing",
   );
 });

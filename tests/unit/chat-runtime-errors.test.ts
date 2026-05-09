@@ -22,10 +22,10 @@ test("chat runtime treats frontend turn disposal as transient", () => {
   );
 });
 
-test("chat runtime hides internal marker errors from users", () => {
+test("chat runtime makes internal marker errors readable without hiding the raw marker", () => {
   assert.equal(
     formatChatRuntimeErrorForUser("frontend_model_not_found:openai/missing"),
-    "Rin hit an internal error. Please retry, or check the logs for details.",
+    "frontend model not found: openai/missing",
   );
   assert.equal(
     formatChatRuntimeErrorForUser("prompt is too long"),
