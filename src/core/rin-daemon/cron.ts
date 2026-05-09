@@ -260,7 +260,7 @@ function createBuiltInSelfImproveSleepConsolidationTask(
     "docs",
     "self-improve-memory-maintenance.md",
   );
-  const prompt = `Follow the maintenance requirements in ${manualPath} to improve the entire self-improve memory library under ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Inventory all skill directories before selecting edits, then optimize, consolidate, correct, merge, move, delete, and prune every discovered class of improvement across the library in one cohesive pass.`;
+  const prompt = `Follow the maintenance requirements in ${manualPath} to improve the entire self-improve memory library under ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Inventory all skill directories before selecting edits, prioritize duplicated or over-split ordinary skill clusters over isolated wording fixes, then optimize, consolidate, correct, merge, move, delete, and prune every discovered class of improvement across the library in one cohesive pass. Report the inventory scope and high-impact clusters considered.`;
   const task: CronTaskRecord = {
     id: "builtin_self_improve_sleep_consolidation_daily",
     builtIn: true,
