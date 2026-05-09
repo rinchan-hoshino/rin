@@ -1,52 +1,104 @@
 # Self-improve memory maintenance manual
 
-## Basic concepts
+## Purpose
 
-### Self improve prompts
+Use this manual to improve the existing self-improve memory library: prompt baselines, reusable skills, memory-index skills, and short-term memory skills.
 
-- Self improve prompts are always-on baselines loaded into future turns. Location: `<agentDir>/self_improve/prompts`.
-- Self improve prompts have these three active slots:
-  - `agent_profile` stores agent role information and language style; limit 8 lines.
-  - `user_profile` stores basic user information; limit 4 lines.
-  - `core_doctrine` stores durable methodology, worldview, and values; limit 32 lines.
+Each review starts from the current library, consolidates what already exists, and stores only future-useful conclusions. The maintenance target is `<agentDir>/self_improve`; product docs, bundled docs, and upstream skill sources are outside this review target.
 
-### Self improve skills
+## Memory surfaces
 
-- Self improve skills are reusable skill documents loaded only when relevant. Location: `<agentDir>/self_improve/skills`.
-- Self improve skills follow the agent standard Skills specification.
-- Self improve skills include two directory-managed memory types:
-  - Memory-index skills: record key events and their original memory files for quick indexing; manage them as skill documents in the memory-index skill area.
-  - Short-term event-memory skills: record very short-term memories for quick recall; manage them as skill documents in the event-memory skill area.
+### Prompt baselines
 
-## Document writing rules
+Location: `<agentDir>/self_improve/prompts/*.md`
 
-- Always follow the prompt-engineer skill guidance.
-- Prefer target-state wording over historical explanations.
-- Prefer direct behavior and concrete examples over abstract labels.
-- Prompt baselines: prompt slot content is a full revised canonical replacement, not an append-only patch. Rewrite the slot into its best current compact form by revising, polishing, compressing, merging, moving, or deleting existing lines as needed. Use one concise, information-dense line per topic. Keep only durable behavior needed in almost every turn, and respect the current slot limits.
-- Skills: when one topic needs steps, branching logic, examples, references, domain facts, operating knowledge, or several related lines, put it in a skill. Follow the skill-creator skill guidance when creating or updating skills. Prefer updating an existing relevant skill over creating a new one. Create a new skill only when the trigger is reusable and no existing skill is a good home. Use composite skills with headings and bundled references instead of one skill per fact. Skills are indexed into the system prompt, so control their count; use layered indexes to keep outer entries compact when needed. Also:
-  - Memory-index skills: for key events, record the date, keywords, topic/person/project, why it matters, and original memory file in a directory-managed index skill, but do not copy long raw excerpts.
-  - Short-term event-memory skills: record very short-term events in their directory-managed skill area only when useful for preserving impressions; clean them frequently so they stay fresh.
+- `agent_profile.md`: stable agent role, voice, behavior style, and standing expectations; limit 8 lines.
+- `user_profile.md`: basic user information; limit 4 lines.
+- `core_doctrine.md`: durable methodology, worldview, values, and decision rules; limit 32 lines.
 
-## Distillation steps
+Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic.
 
-1. Inspect existing prompt baselines and relevant skills before writing. For prompt baseline updates, read the current slot first. Read enough existing material to avoid duplicates and choose the right destination.
-2. Extract as many candidate memories as possible from the available evidence, then discard low-signal details early to keep the attention budget high.
-3. Score each candidate on three 0-3 dimensions: attention (centrality to the task), emotion (correction, risk, preference, or blocker strength), and repetition (confirmed or repeated in current evidence or existing memory).
-4. Link each candidate to old knowledge: update an existing prompt line, skill, or index; supersede stale material; or discard it.
-5. Choose a destination using the rules below. If a candidate fits multiple destinations, choose the least resident option that still preserves future behavior.
-6. Edit by merging, compressing, correcting, moving, or deleting material. Delete only when a point is clearly obsolete, duplicated after merge, or contradicted by newer accepted guidance.
+### Reusable skills
 
-## Destination rules
+Location: `<agentDir>/self_improve/skills`
 
-- Prompt baseline: use when the content affects almost every future response and cannot be better handled by a skill. Require emotion 2+ or repetition 2+.
-- Skill: use for reusable procedures, workflows, checklists, playbooks, references, durable knowledge, examples, indexes, and operating knowledge. Require attention 2+, emotion 2+, or repetition 2+.
-- Memory-index skill: use when future lookup by time, keyword, person, project, failure, or decision may need exact event evidence. Manage it through the dedicated memory-index skill area.
-- Short-term event-memory skill: use only for active, very short-term state. Manage it through the dedicated event-memory skill area.
-- No durable write: use when all scores are low, the item is one-off, or the original memory already covers it well enough.
+Use ordinary skills for reusable workflows, procedures, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow. Put related lessons into the closest matching skill with clear headings.
 
-## Final output format
+### Memory-index skills
 
-- List changed files and one short reason per file.
-- If nothing changed, say why.
-- List skipped or risky items that need owner confirmation or fresher evidence.
+Location: an index directory under `<agentDir>/self_improve/skills`
+
+Use memory-index skills for lookup and provenance when the source evidence matters later. Record compact entries with date, keywords, topic, why it matters, and the original memory/source path. Keep entries short and searchable; do not duplicate procedural guidance already stored in an ordinary skill.
+
+### Short-term event-memory skills
+
+Location: a short-term memory directory under `<agentDir>/self_improve/skills`
+
+Use short-term memory skills for active temporary continuity, fresh state, and short-lived impressions. Review them during maintenance and prune stale entries instead of promoting stale task state into prompts or reusable skills.
+
+## Review posture
+
+Start from the existing library.
+
+1. Read current prompt slots.
+2. Inspect relevant reusable skills, memory-index skills, and short-term memory skills.
+3. Find repeated, misplaced, stale, verbose, narrow, or overlapping material.
+4. Merge, move, rewrite, delete, or prune existing material.
+5. Add new material only when it improves future routing, decisions, execution, or recall.
+
+A useful review may only clean existing memory.
+
+## Distillation workflow
+
+1. Extract candidate lessons from the available evidence.
+2. Score each candidate quickly:
+   - attention: affects future behavior;
+   - emotion: strong correction, risk, preference, or blocker;
+   - repetition: repeated in evidence or confirmed by existing memory.
+3. Choose the smallest correct destination:
+   - prompt slot: applies across most future turns;
+   - existing reusable skill: fits a recurring workflow or domain;
+   - memory-index skill: future lookup or provenance matters;
+   - short-term memory skill: active temporary continuity;
+   - no write: low-signal, one-off, stale, speculative, or already covered.
+4. Rewrite the destination compactly.
+5. Validate skill frontmatter after editing skills.
+
+## Skill organization
+
+Follow the skill-creator skill when creating or editing skills. Follow the prompt-engineer skill when writing prompts, descriptions, docs, and reusable instructions.
+
+Prefer broad reusable workflows over narrow fragments. Keep, merge, move, delete, or turn skills into intentional aliases according to their current value.
+
+Create a new ordinary skill only when:
+
+- the trigger is reusable;
+- the scope covers a workflow, domain, or playbook;
+- existing skills do not provide a clean home.
+
+Keep an ordinary skill only when it still has a distinct recurring trigger and enough reusable workflow, reference, or troubleshooting value to justify a separate file.
+
+When several related lessons appear together, make one composite skill with headings. Move or delete narrow fragments instead of preserving them as standalone skills.
+
+## Consolidation checklist
+
+Use this checklist in every review:
+
+- prompt slots that need updates after repeated behavioral feedback;
+- overlapping skills that should merge or become a single canonical skill with only intentional aliases left;
+- broad skills that need clearer structure;
+- narrow skills that belong inside a larger workflow;
+- content filed under the wrong skill;
+- stale short-term memories;
+- missing memory-index entries for important lookup evidence;
+- verbose historical wording that can become compact guidance;
+- path, filename, or terminology drift between the manual, prompt slots, and skill files.
+
+## Final output
+
+Report durable memory changes only:
+
+- changed memory files with one short reason each;
+- merged, moved, deleted, or pruned memory items;
+- cleanup performed when no new memory was added, or that no durable memory file changes were warranted;
+- skipped memory items needing owner confirmation or fresher evidence.

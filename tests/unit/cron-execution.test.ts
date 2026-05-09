@@ -728,9 +728,23 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the manual at ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to optimize, consolidate, and correct existing self-improvement documents.`,
+      `Follow the maintenance requirements in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to improve the entire self-improve memory library under ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
+    assert.match(
+      sleep.target.prompt,
+      /improve the entire self-improve memory library/,
+    );
+    assert.match(sleep.target.prompt, /prompt baselines/);
+    assert.match(sleep.target.prompt, /reusable skills/);
+    assert.match(sleep.target.prompt, /memory-index skills/);
+    assert.match(sleep.target.prompt, /short-term memory skills/);
+    assert.match(sleep.target.prompt, /merge, move, delete, and prune/);
+    assert.match(
+      sleep.target.prompt,
+      /all reachable improvement points in one cohesive pass/,
+    );
+    assert.doesNotMatch(sleep.target.prompt, /read-only guidance/);
     assert.doesNotMatch(sleep.target.prompt, /## Basic concepts/);
   } finally {
     scheduler.stop();

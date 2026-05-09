@@ -484,13 +484,21 @@ test("self-improve review prompt delegates shared maintenance rules", () => {
   );
   assert.equal(
     prompt,
-    "Follow the manual at /tmp/rin-agent/docs/rin/docs/self-improve-memory-maintenance.md to perform the self-improve review for the conversation above.",
+    "Follow the maintenance requirements in /tmp/rin-agent/docs/rin/docs/self-improve-memory-maintenance.md to improve the entire current self-improve memory library under /tmp/rin-agent/self_improve using the conversation above as evidence: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.",
   );
   assert.doesNotMatch(prompt, /^- Trigger:/m);
   assert.doesNotMatch(prompt, /## Basic concepts/);
   assert.doesNotMatch(prompt, /## Document writing rules/);
   assert.doesNotMatch(prompt, /## Destination rules/);
   assert.doesNotMatch(prompt, /core_facts/);
+  assert.match(prompt, /entire current self-improve memory library/);
+  assert.match(prompt, /prompt baselines/);
+  assert.match(prompt, /reusable skills/);
+  assert.match(prompt, /memory-index skills/);
+  assert.match(prompt, /short-term memory skills/);
+  assert.match(prompt, /merge, move, delete, and prune/);
+  assert.match(prompt, /all reachable improvement points in one cohesive pass/);
+  assert.doesNotMatch(prompt, /read-only guidance/);
 });
 
 test("automatic self-improve handlers require persisted sessions", async () => {
