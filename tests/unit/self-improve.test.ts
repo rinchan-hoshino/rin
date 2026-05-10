@@ -266,6 +266,72 @@ test("automatic self-improve handlers queue managed task sessions", async () => 
   });
 });
 
+test("compaction self-improve review runs before routine threshold compaction", async () => {
+  await withTempRoot(async (root) => {
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    const beforeCompact = definition.hooks.session_before_compact[0];
+    const sessionFile = path.join(root, "sessions", "threshold-compact.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "threshold-compact-review-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-threshold-compact",
+        isPersisted: () => true,
+      },
+    };
+
+    await beforeCompact(
+      { type: "session_before_compact", reason: "threshold" },
+      ctx,
+    );
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].kind, "self_improve_review");
+    assert.equal(queue[0].trigger, "self_improve:session_compaction_review");
+    assert.equal(queue[0].snapshotKey, "compact:leaf-threshold-compact");
+  });
+});
+
+test("compaction self-improve review skips overflow recovery compaction", async () => {
+  await withTempRoot(async (root) => {
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    const beforeCompact = definition.hooks.session_before_compact[0];
+    const sessionFile = path.join(root, "sessions", "overflow-compact.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "overflow-compact-review-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-overflow-compact",
+        isPersisted: () => true,
+      },
+    };
+
+    await beforeCompact(
+      { type: "session_before_compact", reason: "overflow" },
+      ctx,
+    );
+
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+  });
+});
+
 test("automatic self-improve review interval is configurable", async () => {
   await withTempRoot(async (root) => {
     await fs.writeFile(

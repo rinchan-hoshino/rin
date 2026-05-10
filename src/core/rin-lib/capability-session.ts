@@ -426,7 +426,17 @@ function subscribeRinCapabilityEvents(
     const type = String(event?.type || "");
     if (!type || type === "input" || type === "before_agent_start") return;
     if (!capabilitySet.hasHandlers(type)) return;
-    void capabilitySet.emit(event).catch(() => {});
+    const eventWithRinMetadata =
+      type === "session_before_compact" &&
+      event &&
+      typeof event === "object" &&
+      !event.reason
+        ? {
+            ...event,
+            reason: String(session.__rinCurrentCompactionReason || "").trim(),
+          }
+        : event;
+    void capabilitySet.emit(eventWithRinMetadata).catch(() => {});
   });
 }
 

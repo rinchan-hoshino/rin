@@ -207,9 +207,10 @@ export default function selfImproveModule(
         },
       ],
       session_before_compact: [
-        async (_event, ctx) => {
+        async (event, ctx) => {
           const meta = sessionMeta(ctx);
           if (!meta.sessionFile || !meta.sessionPersisted) return;
+          if (String(event?.reason || "").trim() === "overflow") return;
           await processSelfImproveReview(ctx, {
             sessionFile: meta.sessionFile,
             leafId: meta.leafId,

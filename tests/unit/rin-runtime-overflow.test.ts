@@ -67,6 +67,21 @@ test("Rin overflow compaction patch compacts and retries WebSocket 1009", async 
   assert.equal(session._overflowRecoveryAttempted, true);
 });
 
+test("Rin tracks current auto-compaction reason while compaction runs", async () => {
+  const seen: string[] = [];
+  const session: any = {
+    _runAutoCompaction: async () => {
+      seen.push(session.__rinCurrentCompactionReason);
+    },
+  };
+
+  runtimeMod.applyRinCompactionReasonTracking(session);
+  await session._runAutoCompaction("overflow", true);
+
+  assert.deepEqual(seen, ["overflow"]);
+  assert.equal(session.__rinCurrentCompactionReason, undefined);
+});
+
 test("Rin retry patch treats generic WebSocket failures as retryable", () => {
   const session: any = {
     _isRetryableError: () => false,

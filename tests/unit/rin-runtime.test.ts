@@ -194,12 +194,12 @@ test("applyMidTurnCompaction compacts before a provider call and injects continu
   );
 });
 
-test("applyMidTurnCompaction defaults to a 50 percent threshold", async () => {
+test("applyMidTurnCompaction defaults to an 88 percent threshold", async () => {
   let compactCalls = 0;
   const sourceMessages = [
     {
       role: "user",
-      content: [{ type: "text", text: "x".repeat(220) }],
+      content: [{ type: "text", text: "x".repeat(360) }],
     },
   ];
 

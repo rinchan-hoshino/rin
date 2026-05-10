@@ -517,7 +517,10 @@ const DISABLE_END_TURN_THRESHOLD_KEY = Symbol.for(
   "rin.disableEndTurnThresholdCompaction",
 );
 const RETRYABLE_PROVIDER_ERRORS_KEY = Symbol.for("rin.retryableProviderErrors");
-const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 50;
+const COMPACTION_REASON_TRACKING_KEY = Symbol.for(
+  "rin.compactionReasonTracking",
+);
+const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 88;
 const MID_TURN_CONTINUATION_BLOCK = COMPACTION_CONTINUATION_BLOCK;
 
 function mutateMessageArray(target: any[], source: any[]) {
@@ -558,6 +561,32 @@ function buildMidTurnLlmContext(
     messages,
     tools,
   }));
+}
+
+export function applyRinCompactionReasonTracking(session: any) {
+  if (!session || typeof session !== "object") return;
+  if ((session as any)[COMPACTION_REASON_TRACKING_KEY]) return;
+  const original =
+    typeof session._runAutoCompaction === "function"
+      ? session._runAutoCompaction.bind(session)
+      : null;
+  if (!original) return;
+
+  session._runAutoCompaction = async function patchedRunAutoCompaction(
+    reason: string,
+    ...args: any[]
+  ) {
+    const previous = session.__rinCurrentCompactionReason;
+    session.__rinCurrentCompactionReason = String(reason || "").trim();
+    try {
+      return await original(reason, ...args);
+    } finally {
+      if (previous === undefined) delete session.__rinCurrentCompactionReason;
+      else session.__rinCurrentCompactionReason = previous;
+    }
+  };
+
+  (session as any)[COMPACTION_REASON_TRACKING_KEY] = { original };
 }
 
 export function applyOverflowContinuationPrompt(session: any) {
@@ -922,6 +951,8 @@ export async function createConfiguredAgentSession(
     if (sessionManager?.[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY]) {
       result.session[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY] = true;
     }
+
+    applyRinCompactionReasonTracking(result.session);
 
     await attachRinCapabilitiesToSession(result.session, {
       capabilitySet: rinCapabilities,
