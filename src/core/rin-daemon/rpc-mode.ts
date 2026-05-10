@@ -889,6 +889,13 @@ export async function runCustomRpcMode(
         await runtime.dispose();
         output(done(id, type, { shutdown: true }));
         return process.exit(0);
+      case "sleep_session":
+        try {
+          await session.abort();
+        } catch {}
+        session.dispose();
+        output(done(id, type, { sleeping: true }));
+        return process.exit(0);
       case "attach_session":
         return done(
           id,

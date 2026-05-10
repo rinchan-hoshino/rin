@@ -151,7 +151,22 @@ export class WorkerPool {
     }
   }
 
-  destroyWorker(worker: WorkerHandle) {
+  sleepWorkerGracefully(worker: WorkerHandle) {
+    if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
+    worker.gracefulShutdownRequested = true;
+    try {
+      worker.child.stdin.write(
+        `${JSON.stringify({ type: "sleep_session" })}\n`,
+      );
+    } catch {
+      this.destroyWorker(worker, { signal: "SIGKILL" });
+    }
+  }
+
+  destroyWorker(
+    worker: WorkerHandle,
+    options: { signal?: NodeJS.Signals } = {},
+  ) {
     if (!this.workers.has(worker)) return;
     worker.gracefulShutdownRequested = true;
     this.workers.delete(worker);
@@ -192,7 +207,7 @@ export class WorkerPool {
       worker.child.stderr.destroy();
     } catch {}
     try {
-      worker.child.kill("SIGTERM");
+      worker.child.kill(options.signal || "SIGTERM");
     } catch {}
   }
 
@@ -718,7 +733,7 @@ export class WorkerPool {
     }
     worker.idleSince ??= Date.now();
     if (Date.now() - worker.idleSince >= this.gcIdleMs) {
-      this.destroyWorker(worker);
+      this.sleepWorkerGracefully(worker);
     }
   }
 

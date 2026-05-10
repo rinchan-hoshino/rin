@@ -534,7 +534,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
   });
 });
 
-test("session shutdown updates summaries without triggering self-improve review", async () => {
+test("real session shutdown triggers review and summary maintenance", async () => {
   await withTempRoot(async (root) => {
     const definition = selfImproveIndex.default({
       sendMessage() {},
@@ -559,9 +559,11 @@ test("session shutdown updates summaries without triggering self-improve review"
     await shutdown({}, ctx);
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].kind, "session_summary");
-    assert.equal(queue[0].trigger, "session_summary:session_shutdown");
+    assert.equal(queue.length, 2);
+    assert.equal(queue[0].kind, "self_improve_review");
+    assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
+    assert.equal(queue[1].kind, "session_summary");
+    assert.equal(queue[1].trigger, "session_summary:session_shutdown");
   });
 });
 

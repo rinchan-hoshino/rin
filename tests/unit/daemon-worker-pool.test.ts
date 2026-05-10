@@ -296,6 +296,7 @@ process.stdin.on('data', (chunk) => {
     buffer = buffer.slice(idx + 1);
     if (!line.trim()) continue;
     const command = JSON.parse(line);
+    if (command.type === 'sleep_session') process.exit(0);
     setTimeout(() => {
       process.stdout.write(JSON.stringify({
         id: command.id,
@@ -378,12 +379,13 @@ test("attached worker stays alive across detached-worker sweeps", async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("detached idle worker exits after grace period via reaper", async () => {
+test("detached idle worker sleeps instead of terminating the session", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");
+  const commandPath = path.join(dir, "commands.jsonl");
   await fs.writeFile(
     workerPath,
-    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+    `import fs from "node:fs";\nlet buffer = "";\nprocess.on("SIGTERM", () => {\n  fs.appendFileSync(${JSON.stringify(commandPath)}, JSON.stringify({ signal: "SIGTERM" }) + "\\n");\n  process.exit(0);\n});\nprocess.stdin.on("data", (chunk) => {\n  buffer += String(chunk);\n  let index;\n  while ((index = buffer.indexOf("\\n")) >= 0) {\n    const line = buffer.slice(0, index).trim();\n    buffer = buffer.slice(index + 1);\n    if (!line) continue;\n    const command = JSON.parse(line);\n    fs.appendFileSync(${JSON.stringify(commandPath)}, JSON.stringify({ type: command.type }) + "\\n");\n    if (command.type === "get_state") {\n      process.stdout.write(JSON.stringify({ id: command.id, type: "response", command: command.type, success: true, data: {} }) + "\\n");\n    }\n    if (command.type === "sleep_session") process.exit(0);\n  }\n});\nprocess.stdin.resume();\nsetInterval(() => {}, 1000);\n`,
   );
 
   const connection = {
@@ -407,6 +409,14 @@ test("detached idle worker exits after grace period via reaper", async () => {
 
   assert.equal(worker.idleSince !== null, true);
   assert.equal(pool.getStatusSnapshot().workerCount, 0);
+  const commands = (await fs.readFile(commandPath, "utf8"))
+    .trim()
+    .split(/\n+/)
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    commands.map((command) => command.type || command.signal),
+    ["get_state", "sleep_session"],
+  );
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
