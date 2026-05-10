@@ -11,7 +11,7 @@ This module owns:
 - always-on prompt baselines under `~/.rin/self_improve/prompts`
 - agent-managed reusable skills under `~/.rin/self_improve/skills`
 - onboarding for resident self-improve prompts
-- periodic, pre-compaction, and session-shutdown self-improve review, with periodic review defaulting to every 8 real agent final messages and configurable via `settings.json -> selfImprove.reviewEveryTurns`; user steering inputs and assistant tool-call-only/interim messages do not count
+- periodic and pre-compaction self-improve review, with periodic review defaulting to every 8 real agent final messages and configurable via `settings.json -> selfImprove.reviewEveryTurns`; user steering inputs and assistant tool-call-only/interim messages do not count
 
 It does not own session-history recall. That belongs to the `memory` module.
 

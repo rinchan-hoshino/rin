@@ -225,11 +225,6 @@ export default function selfImproveModule(
             if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
             return;
           }
-          await processSelfImproveReview(ctx, {
-            sessionFile: meta.sessionFile,
-            leafId: meta.leafId,
-            trigger: "self_improve:session_shutdown_review",
-          });
           await processSessionSummaryUpdate(ctx, {
             sessionFile: meta.sessionFile,
             leafId: meta.leafId,

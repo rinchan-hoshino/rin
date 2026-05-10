@@ -48,7 +48,7 @@ Transcript archives are the source for episodic recall. They can inform consolid
 
 ## Consolidation triggers
 
-Rin runs memory review during fixed-round periodic maintenance, before session compaction, and at session shutdown. The periodic threshold is counted from real agent final messages, is configurable with `settings.json -> selfImprove.reviewEveryTurns`, and defaults to `8`; user steering inputs and assistant tool-call-only/interim messages do not count.
+Rin runs memory review during fixed-round periodic maintenance and before session compaction. Session shutdown updates session summaries but does not trigger an extra self-improve review. The periodic threshold is counted from real agent final messages, is configurable with `settings.json -> selfImprove.reviewEveryTurns`, and defaults to `8`; user steering inputs and assistant tool-call-only/interim messages do not count.
 
 Daily sleep-style consolidation should use the same rules as a scheduled maintenance pass: revisit short-term memory, merge repeated observations, refresh indexes, and demote or delete stale material rather than adding more resident prompt text.
 

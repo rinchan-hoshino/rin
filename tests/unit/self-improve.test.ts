@@ -534,6 +534,37 @@ test("automatic self-improve handlers require persisted sessions", async () => {
   });
 });
 
+test("session shutdown updates summaries without triggering self-improve review", async () => {
+  await withTempRoot(async (root) => {
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    const shutdown = definition.hooks.session_shutdown[0];
+    const sessionFile = path.join(root, "sessions", "shutdown-summary.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "persisted-shutdown-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-shutdown-summary",
+        isPersisted: () => true,
+      },
+    };
+
+    await shutdown({}, ctx);
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].kind, "session_summary");
+    assert.equal(queue[0].trigger, "session_summary:session_shutdown");
+  });
+});
+
 test("self-improve module does not expose save_prompts as a user-facing tool", () => {
   const tools =
     selfImproveIndex.default({
