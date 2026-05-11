@@ -198,7 +198,7 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-test("daemon routes session listing through the warm empty worker", async () => {
+test("daemon serves initial state and session listing locally without spawning a worker", async () => {
   const agentDir = await makeTempDir("rin-daemon-list-sessions-");
   const socketPath = path.join(agentDir, "daemon.sock");
   const workerPath = path.join(agentDir, "fake-worker.js");
@@ -209,7 +209,6 @@ test("daemon routes session listing through the warm empty worker", async () => 
 const fs = require("node:fs");
 const process = require("node:process");
 const logPath = ${JSON.stringify(logPath)};
-function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
 let buffer = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -222,15 +221,7 @@ process.stdin.on("data", (chunk) => {
     if (!line.trim()) continue;
     const command = JSON.parse(line);
     fs.appendFileSync(logPath, command.type + "\\n");
-    if (command.type === "get_state") {
-      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionId: "", isStreaming: false, isCompacting: false } });
-      continue;
-    }
-    if (command.type === "list_sessions") {
-      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessions: [{ id: "session-1", path: "/tmp/session-1.jsonl", firstMessage: "hello", modified: "2026-04-18T00:00:00.000Z", messageCount: 1, allMessagesText: "hello" }] } });
-      continue;
-    }
-    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+    process.stdout.write(JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, data: {} }) + "\\n");
   }
 });
 `,
@@ -245,13 +236,18 @@ process.stdin.on("data", (chunk) => {
       const listed = await client.request({ id: "2", type: "list_sessions" });
 
       assert.equal(state.success, true);
+      assert.equal(state.data?.sessionId, "");
+      assert.equal(state.data?.turnActive, false);
       assert.equal(listed.success, true);
-      assert.equal(listed.data?.sessions?.[0]?.id, "session-1");
-      assert.equal(listed.data?.sessions?.[0]?.cwd, undefined);
-      assert.deepEqual(
-        (await fs.readFile(logPath, "utf8")).trim().split("\n"),
-        ["get_state", "list_sessions"],
-      );
+      assert.equal(Array.isArray(listed.data?.sessions), true);
+
+      let workerLog = "";
+      try {
+        workerLog = await fs.readFile(logPath, "utf8");
+      } catch {
+        // ignore
+      }
+      assert.equal(workerLog.trim(), "");
     });
   } finally {
     try {
@@ -563,6 +559,7 @@ test("daemon auto-resumes interrupted session logs on startup without frontend h
   const agentDir = await makeTempDir("rin-daemon-resume-");
   const socketPath = path.join(agentDir, "daemon.sock");
   const workerPath = path.join(agentDir, "fake-worker.js");
+  const logPath = path.join(agentDir, "commands.log");
   const sessionFile = path.join(agentDir, "sessions", "active-session.jsonl");
   await fs.mkdir(path.dirname(sessionFile), { recursive: true });
   await fs.writeFile(
@@ -578,15 +575,20 @@ test("daemon auto-resumes interrupted session logs on startup without frontend h
   await fs.writeFile(
     workerPath,
     `
+const fs = require("node:fs");
 const process = require("node:process");
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
 function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+function log(type) { fs.appendFileSync(logPath, type + "\\n"); }
 let buffer = "";
 let switched = false;
 async function handle(command) {
+  log(command.type);
   if (command.type === "switch_session") {
     await new Promise((resolve) => setTimeout(resolve, 100));
     switched = true;
-    send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false } });
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false, sessionFile, sessionId: "active-session" } });
     return;
   }
   if (command.type === "resume_interrupted_turn") {
@@ -628,6 +630,10 @@ process.stdin.on("data", (chunk) => {
     assert.equal(workers[0].sessionFile, sessionFile);
     assert.equal(workers[0].attachedConnections, 0);
     assert.equal(workers[0].isStreaming, true);
+    assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
+      "switch_session",
+      "resume_interrupted_turn",
+    ]);
   } finally {
     try {
       daemon.kill("SIGKILL");
