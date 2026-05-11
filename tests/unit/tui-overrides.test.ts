@@ -45,6 +45,8 @@ const themeModule = await import(
   ).href
 );
 
+const ESC = "\u001b";
+
 const settingsManagerWithoutTerminalProgress = {
   getShowTerminalProgress() {
     return false;
@@ -259,6 +261,13 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
   assert.ok(startupStatus);
   assert.equal(instance.loadingAnimation, undefined);
   assert.equal(startupStatus.intervalId, undefined);
+  const startupLines = startupStatus.render(40);
+  assert.equal(startupLines.length, 2);
+  assert.equal(piTuiModule.visibleWidth(startupLines[0]), 40);
+  assert.equal(piTuiModule.visibleWidth(startupLines[1]), 40);
+  assert.match(startupLines[1], /Starting\.\.\./);
+  assert.equal(startupLines[1].includes(`${ESC}[2m`), false);
+  assert.equal(startupLines[1].startsWith(`${ESC}[0m `), true);
   assert.equal(additions, 1);
   assert.ok(renders >= 1);
 
@@ -270,6 +279,10 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
   });
   assert.equal(instance.statusContainer.child, startupStatus);
   assert.equal(startupStatus.intervalId, undefined);
+  const connectingLines = startupStatus.render(40);
+  assert.match(connectingLines[1], /Connecting\.\.\./);
+  assert.equal(connectingLines[1].includes(`${ESC}[2m`), false);
+  assert.equal(connectingLines[1].startsWith(`${ESC}[0m `), true);
   assert.equal(additions, 1);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {

@@ -126,7 +126,24 @@ function stopRpcTransportStatusComponent(instance: any) {
 }
 
 function formatRpcTransportStatusLabel(label: string) {
-  return dim(`${label}...`);
+  return `${ANSI_RESET} ${label}...`;
+}
+
+class RpcTransportStatusComponent extends Text {
+  constructor(label: string) {
+    super(formatRpcTransportStatusLabel(label), 0, 0);
+  }
+
+  setStatusLabel(label: string) {
+    this.setText(formatRpcTransportStatusLabel(label));
+  }
+
+  override render(width: number) {
+    return [
+      `${ANSI_RESET}${" ".repeat(Math.max(0, width))}`,
+      ...super.render(width),
+    ];
+  }
 }
 
 function showRpcTransportStatus(instance: any, event: any) {
@@ -140,10 +157,10 @@ function showRpcTransportStatus(instance: any, event: any) {
   const label = String(event?.label || phase || "Starting");
   let component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
   if (!component) {
-    component = new Text(formatRpcTransportStatusLabel(label), 1, 0);
+    component = new RpcTransportStatusComponent(label);
     instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = component;
   } else {
-    component.setText(formatRpcTransportStatusLabel(label));
+    component.setStatusLabel(label);
   }
   if (!statusContainerHasChild(instance, component)) {
     instance.statusContainer.clear();
