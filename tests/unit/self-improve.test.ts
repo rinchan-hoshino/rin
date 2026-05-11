@@ -266,12 +266,28 @@ test("automatic self-improve handlers queue managed task sessions", async () => 
   });
 });
 
-test("compaction self-improve review runs before routine threshold compaction", async () => {
+test("compaction self-improve review completes synchronously before routine threshold compaction", async () => {
   await withTempRoot(async (root) => {
+    const calls = [];
+    const promptPath = path.join(
+      selfImproveRoot(root),
+      "prompts",
+      "agent_profile.md",
+    );
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
         return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push({
+          trigger: job.trigger,
+          snapshotKey: job.snapshotKey,
+          leafId: job.leafId,
+        });
+        await fs.mkdir(path.dirname(promptPath), { recursive: true });
+        await fs.writeFile(promptPath, "sync compaction prompt\n", "utf8");
+        return { status: "completed" };
       },
     });
     const beforeCompact = definition.hooks.session_before_compact[0];
@@ -293,11 +309,18 @@ test("compaction self-improve review runs before routine threshold compaction", 
       ctx,
     );
 
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].kind, "self_improve_review");
-    assert.equal(queue[0].trigger, "self_improve:session_compaction_review");
-    assert.equal(queue[0].snapshotKey, "compact:leaf-threshold-compact");
+    assert.deepEqual(calls, [
+      {
+        trigger: "self_improve:session_compaction_review",
+        snapshotKey: "compact:leaf-threshold-compact",
+        leafId: "leaf-threshold-compact",
+      },
+    ]);
+    assert.equal(
+      await fs.readFile(promptPath, "utf8"),
+      "sync compaction prompt\n",
+    );
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
 
@@ -779,6 +802,36 @@ test("queued maintenance drops invalid session jobs into history instead of bloc
 test("queued maintenance ignores blank agent dir inputs", async () => {
   const result = await asyncJobs.processQueuedMemoryJobs("   ");
   assert.deepEqual(result, { skipped: "no-agent-dir" });
+});
+
+test("synchronous memory maintenance records terminal result without queueing", async () => {
+  await withTempRoot(async (root) => {
+    const sessionFile = path.join(root, "empty-session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+
+    const result = await asyncJobs.runMemoryMaintenanceJobNow({
+      agentDir: root,
+      sessionFile,
+      trigger: "self_improve:session_compaction_review",
+      snapshotKey: "compact:leaf-sync",
+    });
+
+    assert.equal(result.status, "failed");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    const history = (await fs.readFile(historyPath(root), "utf8"))
+      .trim()
+      .split(/\r?\n/g)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.equal(history.length, 1);
+    assert.equal(history[0].kind, "self_improve_review");
+    assert.equal(history[0].status, "failed");
+    assert.equal(history[0].snapshotKey, "compact:leaf-sync");
+    assert.match(
+      String(history[0].error || ""),
+      /maintenance_job_invalid_session_file:/,
+    );
+  });
 });
 
 test("compaction snapshot jobs stay distinct for the same session", async () => {

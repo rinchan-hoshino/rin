@@ -115,9 +115,9 @@ function defaultTrigger(_kind: MaintenanceJob["kind"]) {
   return "self_improve:review";
 }
 
-async function enqueueMaintenanceJob(
+function createMaintenanceJob(
   input: Omit<MaintenanceJob, "id" | "createdAt" | "updatedAt">,
-) {
+): MaintenanceJob {
   const agentDir = resolveAgentDir(input.agentDir);
   const sessionFile = resolveSessionFile(input.sessionFile);
   const kind: MaintenanceJob["kind"] = "self_improve_review";
@@ -128,40 +128,43 @@ async function enqueueMaintenanceJob(
     throw new Error("maintenance_job_invalid_input");
   }
 
-  const jobs = await loadQueue(agentDir);
-  const existing = jobs.find((job) =>
-    sameJob(job, { kind, agentDir, sessionFile, snapshotKey }),
-  );
   const updatedAt = nowIso();
-  if (existing) {
-    existing.updatedAt = updatedAt;
-    existing.kind = kind;
-    existing.trigger = trigger;
-    existing.leafId = leafId || undefined;
-    existing.snapshotKey = snapshotKey || undefined;
-    existing.additionalExtensionPaths = normalizeAdditionalExtensionPaths(
+  return {
+    id: `maintenance_job_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    createdAt: updatedAt,
+    updatedAt,
+    agentDir,
+    sessionFile,
+    leafId: leafId || undefined,
+    trigger,
+    snapshotKey: snapshotKey || undefined,
+    additionalExtensionPaths: normalizeAdditionalExtensionPaths(
       input.additionalExtensionPaths,
-    );
+    ),
+  };
+}
+
+async function enqueueMaintenanceJob(
+  input: Omit<MaintenanceJob, "id" | "createdAt" | "updatedAt">,
+) {
+  const nextJob = createMaintenanceJob(input);
+  const jobs = await loadQueue(nextJob.agentDir);
+  const existing = jobs.find((job) => sameJob(job, nextJob));
+  if (existing) {
+    existing.updatedAt = nextJob.updatedAt;
+    existing.kind = nextJob.kind;
+    existing.trigger = nextJob.trigger;
+    existing.leafId = nextJob.leafId;
+    existing.snapshotKey = nextJob.snapshotKey;
+    existing.additionalExtensionPaths = nextJob.additionalExtensionPaths;
     existing.attempts = undefined;
     existing.lastError = undefined;
     existing.lastAttemptAt = undefined;
   } else {
-    jobs.push({
-      id: `maintenance_job_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      kind,
-      createdAt: updatedAt,
-      updatedAt,
-      agentDir,
-      sessionFile,
-      leafId: leafId || undefined,
-      trigger,
-      snapshotKey: snapshotKey || undefined,
-      additionalExtensionPaths: normalizeAdditionalExtensionPaths(
-        input.additionalExtensionPaths,
-      ),
-    });
+    jobs.push(nextJob);
   }
-  await saveQueue(agentDir, jobs);
+  await saveQueue(nextJob.agentDir, jobs);
 }
 
 export async function enqueueMemoryMaintenanceJob(
@@ -225,6 +228,23 @@ async function releaseWorkerLock(
   } catch {}
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireWorkerLockWithWait(
+  agentDir: string,
+  timeoutMs = 30 * 60 * 1000,
+) {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  while (true) {
+    const handle = await acquireWorkerLock(agentDir);
+    if (handle) return handle;
+    if (Date.now() >= deadline) return null;
+    await delay(250);
+  }
+}
+
 async function replaceMatchingJob(
   agentDir: string,
   target: MaintenanceJob,
@@ -237,7 +257,10 @@ async function replaceMatchingJob(
 }
 
 async function removeMatchingJobs(agentDir: string, target: MaintenanceJob) {
-  await replaceMatchingJob(agentDir, target);
+  const jobs = await loadQueue(agentDir);
+  const remaining = jobs.filter((job) => !sameJob(job, target));
+  if (remaining.length === jobs.length) return;
+  await saveQueue(agentDir, remaining);
 }
 
 function normalizeChangedFiles(value: unknown): MaintenanceChangedFile[] {
@@ -318,6 +341,66 @@ async function processJob(job: MaintenanceJob) {
     trigger: job.trigger,
     additionalExtensionPaths: job.additionalExtensionPaths,
   });
+}
+
+export async function runMemoryMaintenanceJobNow(
+  input: Omit<MaintenanceJob, "id" | "createdAt" | "updatedAt" | "kind">,
+) {
+  const job = createMaintenanceJob({
+    ...input,
+    kind: "self_improve_review",
+  });
+  const handle = await acquireWorkerLockWithWait(job.agentDir);
+  if (!handle) {
+    return { status: "skipped", skipped: "locked" };
+  }
+
+  const startedAt = nowIso();
+  try {
+    await removeMatchingJobs(job.agentDir, job);
+    try {
+      const result = await processJob(job);
+      const finishedAt = nowIso();
+      await appendHistoryRecord(job.agentDir, {
+        id: job.id,
+        kind: job.kind,
+        status: "completed",
+        trigger: job.trigger,
+        sessionFile: job.sessionFile,
+        leafId: job.leafId,
+        snapshotKey: job.snapshotKey,
+        startedAt,
+        finishedAt,
+        attempts: 1,
+        skipped: safeString((result as any)?.skipped).trim() || undefined,
+        outputPreview:
+          truncateText(
+            (result as any)?.output || (result as any)?.sessionSummary,
+          ) || undefined,
+        changedFiles: normalizeChangedFiles((result as any)?.changedFiles),
+      });
+      return { status: "completed", result };
+    } catch (error: unknown) {
+      const finishedAt = nowIso();
+      const message = normalizeErrorMessage(error);
+      await appendHistoryRecord(job.agentDir, {
+        id: job.id,
+        kind: job.kind,
+        status: "failed",
+        trigger: job.trigger,
+        sessionFile: job.sessionFile,
+        leafId: job.leafId,
+        snapshotKey: job.snapshotKey,
+        startedAt,
+        finishedAt,
+        attempts: 1,
+        error: message,
+      });
+      return { status: "failed", error: message };
+    }
+  } finally {
+    await releaseWorkerLock(job.agentDir, handle);
+  }
 }
 
 export async function processQueuedMemoryJobs(agentDir: string) {
