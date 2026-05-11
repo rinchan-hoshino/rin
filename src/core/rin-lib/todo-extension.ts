@@ -33,6 +33,16 @@ const TodoParams: any = Type.Object({
   id: Type.Optional(Type.Number({ description: "Todo ID (for toggle)." })),
 });
 
+function normalizeTodoId(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value)) return value;
+  if (typeof value !== "string") return undefined;
+
+  const normalized = value.trim().replace(/^#/, "");
+  if (!/^\d+$/.test(normalized)) return undefined;
+  const id = Number(normalized);
+  return Number.isSafeInteger(id) ? id : undefined;
+}
+
 class TodoListComponent {
   private todos: Todo[];
   private theme: Theme;
@@ -218,13 +228,25 @@ export default function todoExtension(pi: ExtensionAPI) {
               details: snapshot("toggle", "id required"),
             };
           }
-          const todo = todos.find((item) => item.id === params.id);
+          const id = normalizeTodoId(params.id);
+          if (id === undefined) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: "Error: id must be a todo number for toggle",
+                },
+              ],
+              details: snapshot("toggle", "id must be a todo number"),
+            };
+          }
+          const todo = todos.find((item) => item.id === id);
           if (!todo) {
             return {
               content: [
-                { type: "text" as const, text: `Todo #${params.id} not found` },
+                { type: "text" as const, text: `Todo #${id} not found` },
               ],
-              details: snapshot("toggle", `#${params.id} not found`),
+              details: snapshot("toggle", `#${id} not found`),
             };
           }
           todo.done = !todo.done;

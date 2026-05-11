@@ -161,11 +161,22 @@ test("built-in todo loads from configured runtime without extension paths", asyn
         undefined,
         { cwd: agentDir },
       );
+      const toggledFromStringId = await todoTool.execute(
+        "tool-call-3",
+        { action: "toggle", id: "1" },
+        undefined,
+        undefined,
+        { cwd: agentDir },
+      );
 
       assert.match(added.content[0].text, /Added todo #1/);
       assert.match(toggled.content[0].text, /completed/);
       assert.deepEqual(toggled.details.todos, [
         { id: 1, text: "Wire todo extension", done: true },
+      ]);
+      assert.match(toggledFromStringId.content[0].text, /uncompleted/);
+      assert.deepEqual(toggledFromStringId.details.todos, [
+        { id: 1, text: "Wire todo extension", done: false },
       ]);
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});
