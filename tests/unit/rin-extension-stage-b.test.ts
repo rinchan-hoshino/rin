@@ -132,6 +132,78 @@ test("stage B browser and computer use extensions stay disabled by default", asy
   }
 });
 
+test("built-in todo loads from configured runtime without extension paths", async () => {
+  const originalCwd = process.cwd();
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-builtin-todo-"),
+  );
+  try {
+    await writeJson(path.join(agentDir, "settings.json"), {});
+    const configured = await runtime.createConfiguredAgentSession({
+      cwd: agentDir,
+      agentDir,
+    });
+    try {
+      const todoTool = configured.session.getToolDefinition("todo");
+      assert.ok(todoTool);
+
+      const added = await todoTool.execute(
+        "tool-call-1",
+        { action: "add", text: "Wire todo extension" },
+        undefined,
+        undefined,
+        { cwd: agentDir },
+      );
+      const toggled = await todoTool.execute(
+        "tool-call-2",
+        { action: "toggle", id: 1 },
+        undefined,
+        undefined,
+        { cwd: agentDir },
+      );
+
+      assert.match(added.content[0].text, /Added todo #1/);
+      assert.match(toggled.content[0].text, /completed/);
+      assert.deepEqual(toggled.details.todos, [
+        { id: 1, text: "Wire todo extension", done: true },
+      ]);
+    } finally {
+      await configured.runtime?.dispose?.().catch?.(() => {});
+    }
+  } finally {
+    process.chdir(originalCwd);
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("built-in todo honors no-extensions and native filters", async () => {
+  const originalCwd = process.cwd();
+  for (const scenario of [
+    { settings: {}, options: { noExtensions: true } },
+    { settings: { extensions: ["!rin:todo"] }, options: {} },
+  ]) {
+    const agentDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "rin-builtin-todo-off-"),
+    );
+    try {
+      await writeJson(path.join(agentDir, "settings.json"), scenario.settings);
+      const configured = await runtime.createConfiguredAgentSession({
+        cwd: agentDir,
+        agentDir,
+        ...scenario.options,
+      });
+      try {
+        assert.equal(configured.session.getToolDefinition("todo"), undefined);
+      } finally {
+        await configured.runtime?.dispose?.().catch?.(() => {});
+      }
+    } finally {
+      process.chdir(originalCwd);
+      await fs.rm(agentDir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("stage B browser and computer use load as external Pi extensions and honor native filters", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
   try {

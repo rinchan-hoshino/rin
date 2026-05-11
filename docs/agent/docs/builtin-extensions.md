@@ -5,6 +5,7 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
 ## Quick reference
 
 - Core Rin capabilities are available through native product code when their tools are present in the live tool list.
+- The built-in `rin:todo` Pi-style extension is enabled by default and registers the `todo` tool plus `/todos` command.
 - Optional browser/computer tools are packaged with Rin but remain off until `settings.json -> extensions` enables their `rin:` aliases.
 - Daemon worker extensions run inside the daemon process and are not Pi session tools.
 - The current tool list and system prompt remain authoritative for a specific turn.
@@ -40,9 +41,27 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
   - records detailed token telemetry under `~/.rin/data/token-usage/usage.db`
   - powers the charted `rin usage` text dashboard, grouped usage queries, and best-effort configured provider account/quota display
 
+## Built-in Pi-style extensions
+
+Rin can register selected Pi extension factories directly from core code.
+
+- `rin:todo`
+  - enabled by default
+  - registers the built-in `todo` extension factory without resolving an installed extension path
+  - registers `todo` for branch-aware task checklists and `/todos` for the interactive TUI view
+  - stores state in session tool result details, so forks and session branches reconstruct the matching todo list
+
+Use a native Pi resource filter to disable the default todo extension when needed:
+
+```json
+{
+  "extensions": ["!rin:todo"]
+}
+```
+
 ## Bundled optional Pi extensions
 
-Rin ships optional browser/computer control as normal Pi extension packages under the installed app, not as core Rin capabilities. They are "built in" only in the packaging sense: the code is included with the Rin installation, but the tools stay off until enabled.
+Rin ships optional browser/computer control as normal Pi extension packages under the installed app. They are "built in" only in the packaging sense: the code is included with the Rin installation, but the tools stay off until enabled.
 
 Installed settings can use Rin aliases instead of installation-specific paths:
 
@@ -94,7 +113,7 @@ Use Pi resource filters with the alias to disable entries from a broader extensi
 }
 ```
 
-If `extensions` is missing or `[]`, both optional tools are off.
+If `extensions` is missing or `[]`, `todo` stays on by default and both optional browser/computer tools are off.
 
 ### Enabling bundled browser/computer control
 

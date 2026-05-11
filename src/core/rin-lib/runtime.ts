@@ -5,6 +5,7 @@ import { isContextOverflow } from "@earendil-works/pi-ai";
 
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import { estimateContextTokens } from "../rin-tui/session-helpers.js";
+import todoExtension from "./todo-extension.js";
 import {
   buildConfiguredLanguageSystemPrompt,
   readConfiguredLanguageFromSettings,
@@ -1108,6 +1109,25 @@ export function applyRinSettingsDefaults(settingsManager: any) {
   }
 }
 
+function isBuiltinTodoDisabled(settingsManager: any) {
+  const entries =
+    typeof settingsManager?.getExtensionPaths === "function"
+      ? settingsManager.getExtensionPaths()
+      : [];
+  return (Array.isArray(entries) ? entries : []).some((entry) => {
+    const text = String(entry ?? "").trim();
+    return text === "!rin:todo" || text === "-rin:todo";
+  });
+}
+
+function getBuiltinExtensionFactories(
+  settingsManager: any,
+  noExtensions?: boolean,
+) {
+  if (noExtensions || isBuiltinTodoDisabled(settingsManager)) return [];
+  return [todoExtension];
+}
+
 export async function createConfiguredAgentSession(
   options: {
     cwd?: string;
@@ -1190,6 +1210,10 @@ export async function createConfiguredAgentSession(
         noContextFiles: options.noContextFiles,
         systemPrompt: options.systemPrompt,
         appendSystemPrompt: options.appendSystemPrompt,
+        extensionFactories: getBuiltinExtensionFactories(
+          settingsManager,
+          options.noExtensions,
+        ),
       },
       extensionFlagValues: options.extensionFlagValues,
     });
