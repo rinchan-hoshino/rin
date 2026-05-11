@@ -42,6 +42,7 @@ import {
 } from "../session/ref.js";
 import { listContinuableInterruptedTurnSessionFiles } from "../session/turn-state.js";
 import { RinDaemonExtensionManager } from "./extensions.js";
+import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 
 function writeLine(socket: RpcSocketLike, payload: unknown) {
@@ -89,6 +90,7 @@ export async function startDaemon(
     onShutdown?: () => Promise<void> | void;
     registerLocalFrontendConnector?: (connector: RpcSocketConnector) => void;
     daemonExtensionManager?: RinDaemonExtensionManager;
+    instanceLock?: DaemonInstanceLock;
   } = {},
 ) {
   const socketPath =
@@ -102,6 +104,12 @@ export async function startDaemon(
     path.join(path.dirname(new URL(import.meta.url).pathname), "worker.js");
   const runtime = resolveRuntimeProfile();
   applyRuntimeProfileEnvironment(runtime);
+  const instanceLock =
+    options.instanceLock ||
+    (await acquireDaemonInstanceLock(runtime.agentDir, { socketPath }));
+  process.once("exit", () => {
+    void instanceLock.release();
+  });
   const sessionManagerModulePromise = loadRinSessionManagerModule();
   const workerPool = new WorkerPool({
     workerPath,
@@ -638,6 +646,7 @@ export async function startDaemon(
     }
     await workerPool.shutdown(shutdownGraceMs);
     await Promise.resolve(options.onShutdown?.()).catch(() => {});
+    await instanceLock.release().catch(() => {});
     process.exit(0);
   };
 
