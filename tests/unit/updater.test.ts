@@ -71,7 +71,7 @@ test("startUpdater only persists language when an installed language exists", as
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
       ensureNotCancelled: (value: unknown) => value,
-      i18n: installerI18n.createInstallerI18n("en-US"),
+      i18n: installerI18n.createInstallerI18n("en_US"),
       readInstalledUpdateLanguage: () => "",
       async runFinalizeInstallPlanInChild(options: any) {
         capturedOptions = options;
@@ -93,14 +93,14 @@ test("startUpdater carries the persisted language through update", async () => {
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
       ensureNotCancelled: (value: unknown) => value,
-      i18n: installerI18n.createInstallerI18n("en-US"),
-      readInstalledUpdateLanguage: () => "zh-CN",
+      i18n: installerI18n.createInstallerI18n("en_US"),
+      readInstalledUpdateLanguage: () => "zh_CN",
       async runFinalizeInstallPlanInChild(options: any) {
         capturedOptions = options;
         return fakeUpdateResult();
       },
     });
 
-    assert.equal(capturedOptions.language, "zh-CN");
+    assert.equal(capturedOptions.language, "zh_CN");
   });
 });

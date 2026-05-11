@@ -250,7 +250,7 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
       provider: "openai",
       modelId: "gpt-test",
       thinkingLevel: "off",
-      language: "en-US",
+      language: "en_US",
       setDefaultTarget: true,
       chatConfig: {},
       authData: { openai: { type: "api_key", key: "test-key" } },

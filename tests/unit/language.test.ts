@@ -22,21 +22,21 @@ async function withTempDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
-test("language helpers canonicalize regioned tags and reject invalid input", () => {
-  assert.equal(language.canonicalizeLanguageTag(" en "), "en-US");
-  assert.equal(language.canonicalizeLanguageTag(" en_US.UTF-8 "), "en-US");
-  assert.equal(language.canonicalizeLanguageTag(" zh_hans_cn "), "zh-Hans-CN");
-  assert.equal(language.canonicalizeLanguageTag(" zh-Hans-cn "), "zh-Hans-CN");
+test("language helpers canonicalize regioned tags to locale codes and reject invalid input", () => {
+  assert.equal(language.canonicalizeLanguageTag(" en "), "en_US");
+  assert.equal(language.canonicalizeLanguageTag(" en_US.UTF-8 "), "en_US");
+  assert.equal(language.canonicalizeLanguageTag(" zh_hans_cn "), "zh_Hans_CN");
+  assert.equal(language.canonicalizeLanguageTag(" zh-Hans-cn "), "zh_Hans_CN");
   assert.equal(language.canonicalizeLanguageTag("nope nope"), "");
-  assert.equal(language.normalizeLanguageTag("", "en"), "en-US");
+  assert.equal(language.normalizeLanguageTag("", "en"), "en_US");
 });
 
 test("resolveInstallerDisplayLanguage treats all zh locales as Chinese", () => {
-  assert.equal(language.resolveInstallerDisplayLanguage("zh"), "zh-CN");
-  assert.equal(language.resolveInstallerDisplayLanguage("zh-TW"), "zh-CN");
-  assert.equal(language.resolveInstallerDisplayLanguage("zh-Hans-CN"), "zh-CN");
-  assert.equal(language.resolveInstallerDisplayLanguage("ja"), "en");
-  assert.equal(language.resolveInstallerDisplayLanguage("nope nope"), "en");
+  assert.equal(language.resolveInstallerDisplayLanguage("zh"), "zh_CN");
+  assert.equal(language.resolveInstallerDisplayLanguage("zh_TW"), "zh_CN");
+  assert.equal(language.resolveInstallerDisplayLanguage("zh-Hans-CN"), "zh_CN");
+  assert.equal(language.resolveInstallerDisplayLanguage("ja"), "en_US");
+  assert.equal(language.resolveInstallerDisplayLanguage("nope nope"), "en_US");
 });
 
 test("detectLocalLanguageTag prefers LC_ALL then LC_MESSAGES then LANG", () => {
@@ -48,16 +48,16 @@ test("detectLocalLanguageTag prefers LC_ALL then LC_MESSAGES then LANG", () => {
     process.env.LANG = "fr_CA.UTF-8";
     process.env.LC_MESSAGES = "zh_CN.UTF-8:zh";
     process.env.LC_ALL = "ja_JP.UTF-8";
-    assert.equal(language.detectLocalLanguageTag("en"), "ja-JP");
+    assert.equal(language.detectLocalLanguageTag("en"), "ja_JP");
 
     delete process.env.LC_ALL;
-    assert.equal(language.detectLocalLanguageTag("en"), "zh-CN");
+    assert.equal(language.detectLocalLanguageTag("en"), "zh_CN");
 
     delete process.env.LC_MESSAGES;
-    assert.equal(language.detectLocalLanguageTag("en"), "fr-CA");
+    assert.equal(language.detectLocalLanguageTag("en"), "fr_CA");
 
     process.env.LANG = "bad tag";
-    assert.equal(language.detectLocalLanguageTag("en"), "en-US");
+    assert.equal(language.detectLocalLanguageTag("en"), "en_US");
   } finally {
     if (originalLang == null) delete process.env.LANG;
     else process.env.LANG = originalLang;
@@ -76,13 +76,13 @@ test("configured language helpers read settings and build prompt text", async ()
     );
     assert.equal(
       language.readConfiguredLanguageFromSettings(agentDir),
-      "zh-Hans-CN",
+      "zh_Hans_CN",
     );
     assert.equal(
       language.buildConfiguredLanguageSystemPrompt(" zh-Hans-CN "),
       [
         "Configured runtime defaults:",
-        "- Preferred language: zh-Hans-CN",
+        "- Preferred language: zh_Hans_CN",
         "- Unless the user explicitly asks otherwise, default to this language for replies, onboarding, and other user-facing text.",
       ].join("\n"),
     );

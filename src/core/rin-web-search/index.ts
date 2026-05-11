@@ -231,7 +231,7 @@ export default function webSearchModule(): RinCapabilityDefinition {
           ),
           language: Type.Optional(
             Type.String({
-              description: "Optional language hint such as `zh-CN` or `en-US`.",
+              description: "Optional language hint such as `zh_CN` or `en_US`.",
             }),
           ),
         }),

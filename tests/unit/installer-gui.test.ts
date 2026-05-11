@@ -71,7 +71,7 @@ test("installer GUI args expose no browser server switches", () => {
 
 test("installer GUI plan reuses installer plan text and escapes the HTML shell", () => {
   const plan = gui.buildGuiInstallerPlan({
-    language: "zh-CN",
+    language: "zh_CN",
     currentUser: "alice",
     targetUser: "bob",
     installDir: "/home/bob/.rin",
@@ -81,7 +81,7 @@ test("installer GUI plan reuses installer plan text and escapes the HTML shell",
     authAvailable: true,
     setDefaultTarget: false,
   });
-  assert.equal(plan.language, "zh-CN");
+  assert.equal(plan.language, "zh_CN");
   assert.equal(plan.targetUser, "bob");
   assert.equal(plan.provider, "github-copilot");
   assert.equal(plan.modelId, "gpt-5.1");
@@ -133,7 +133,7 @@ test("installer GUI saves API key provider auth for desktop install", () => {
 test("installer GUI builds final apply options from auth-ready selections", () => {
   const finalPlan = gui.buildGuiInstallerFinalizePlan(
     {
-      language: "en-US",
+      language: "en_US",
       currentUser: "alice",
       targetUser: "alice",
       installDir: "/home/alice/.rin",

@@ -1,24 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export type InstallerDisplayLanguage = "en" | "zh-CN";
+export type InstallerDisplayLanguage = "en_US" | "zh_CN";
 
-export const DEFAULT_LANGUAGE_TAG = "en-US";
+export const DEFAULT_LANGUAGE_TAG = "en_US";
 
 const LANGUAGE_ENV_KEYS = ["LC_ALL", "LC_MESSAGES", "LANG"] as const;
 
 const LANGUAGE_ONLY_DEFAULTS: Record<string, string> = {
-  ar: "ar-SA",
-  de: "de-DE",
+  ar: "ar_SA",
+  de: "de_DE",
   en: DEFAULT_LANGUAGE_TAG,
-  es: "es-ES",
-  fr: "fr-FR",
-  hi: "hi-IN",
-  ja: "ja-JP",
-  ko: "ko-KR",
-  pt: "pt-BR",
-  ru: "ru-RU",
-  zh: "zh-CN",
+  es: "es_ES",
+  fr: "fr_FR",
+  hi: "hi_IN",
+  ja: "ja_JP",
+  ko: "ko_KR",
+  pt: "pt_BR",
+  ru: "ru_RU",
+  zh: "zh_CN",
 };
 
 function normalizeLanguageInput(value: unknown) {
@@ -28,9 +28,13 @@ function normalizeLanguageInput(value: unknown) {
     .replace(/_/g, "-");
 }
 
+function toLocaleCode(languageTag: string) {
+  return languageTag.replace(/-/g, "_");
+}
+
 function expandLanguageOnlyTag(languageTag: string) {
   const normalized = languageTag.toLowerCase();
-  return LANGUAGE_ONLY_DEFAULTS[normalized] || languageTag;
+  return LANGUAGE_ONLY_DEFAULTS[normalized] || toLocaleCode(languageTag);
 }
 
 export function canonicalizeLanguageTag(value: unknown) {
@@ -52,7 +56,7 @@ export function normalizeLanguageTag(
 
 function isChineseLanguageTag(value: unknown) {
   const language = normalizeLanguageTag(value, "").toLowerCase();
-  return language === "zh" || language.startsWith("zh-");
+  return language === "zh" || language.startsWith("zh_");
 }
 
 function normalizeLocaleEnvLanguageTag(value: unknown) {
@@ -62,7 +66,7 @@ function normalizeLocaleEnvLanguageTag(value: unknown) {
 export function resolveInstallerDisplayLanguage(
   value: unknown,
 ): InstallerDisplayLanguage {
-  return isChineseLanguageTag(value) ? "zh-CN" : "en";
+  return isChineseLanguageTag(value) ? "zh_CN" : "en_US";
 }
 
 export function detectLocalLanguageTag(fallback = DEFAULT_LANGUAGE_TAG) {

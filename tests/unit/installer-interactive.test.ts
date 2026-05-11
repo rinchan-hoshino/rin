@@ -109,14 +109,14 @@ test("installer interactive helpers describe dir state and plan text", () => {
       chatDescription: "telegram",
       chatDetail: "\u804a\u5929\u63a5\u5165\u6a21\u5f0f\uff1apolling",
     },
-    installerI18n.createInstallerI18n("zh-CN"),
+    installerI18n.createInstallerI18n("zh_CN"),
   );
   assert.ok(zhPlan.includes("\u804a\u5929\u63a5\u5165: telegram"));
   assert.ok(zhPlan.includes("\u804a\u5929\u6388\u6743\uff1a"));
   assert.ok(!zhPlan.includes("Chat bridge"));
 
   const zhSafety = interactive.buildInstallSafetyBoundaryText(
-    installerI18n.createInstallerI18n("zh-CN"),
+    installerI18n.createInstallerI18n("zh_CN"),
   );
   assert.ok(zhSafety.includes("\u804a\u5929\u63a5\u5165\u89e6\u53d1"));
   assert.ok(!zhSafety.includes("chat-bridge"));
@@ -233,7 +233,7 @@ test("promptDefaultTargetUser returns the installer choice", async () => {
   assert.equal(result, false);
 });
 
-test("promptInstallerLanguage supports custom BCP 47 tags", async () => {
+test("promptInstallerLanguage supports custom locale codes", async () => {
   const result = await installerI18n.promptInstallerLanguage({
     ensureNotCancelled(value) {
       return value;
@@ -246,7 +246,7 @@ test("promptInstallerLanguage supports custom BCP 47 tags", async () => {
     },
   });
 
-  assert.equal(result, "zh-Hans-CN");
+  assert.equal(result, "zh_Hans_CN");
 });
 
 test("promptInstallerLanguage uses English-only copy for non-Chinese locales", async () => {
@@ -273,20 +273,20 @@ test("promptInstallerLanguage uses English-only copy for non-Chinese locales", a
       },
     });
 
-    assert.equal(result, "fr-CA");
+    assert.equal(result, "fr_CA");
     assert.equal(seen.select.message, "Choose installer language");
-    assert.equal(seen.select.options[0].hint, "en-US · detected");
+    assert.equal(seen.select.options[0].hint, "en_US · detected");
     assert.deepEqual(seen.select.options.at(-1), {
       value: "custom",
       label: "Other",
-      hint: "Enter any BCP 47 language tag",
+      hint: "Enter any locale code",
     });
-    assert.equal(seen.text.message, "Enter language tag (BCP 47)");
-    assert.equal(seen.text.placeholder, "en-US");
-    assert.equal(seen.text.defaultValue, "en-US");
+    assert.equal(seen.text.message, "Enter locale code");
+    assert.equal(seen.text.placeholder, "en_US");
+    assert.equal(seen.text.defaultValue, "en_US");
     assert.equal(
       seen.text.validate("nope nope"),
-      "Use a valid BCP 47 language tag",
+      "Use a valid locale code such as en_US",
     );
   } finally {
     if (originalLang == null) delete process.env.LANG;
@@ -314,7 +314,7 @@ test("promptInstallerLanguage localizes the picker copy for Chinese locales", as
       },
       async select(options) {
         selectOptions = options;
-        return "en-US";
+        return "en_US";
       },
       async text() {
         throw new Error(
@@ -323,19 +323,19 @@ test("promptInstallerLanguage localizes the picker copy for Chinese locales", as
       },
     });
 
-    assert.equal(result, "en-US");
+    assert.equal(result, "en_US");
     assert.equal(
       selectOptions.message,
       "\u9009\u62e9\u5b89\u88c5\u5668\u8bed\u8a00",
     );
     assert.equal(
-      selectOptions.options.find((option) => option.value === "zh-CN")?.hint,
-      "zh-CN \xb7 \u5df2\u68c0\u6d4b",
+      selectOptions.options.find((option) => option.value === "zh_CN")?.hint,
+      "zh_CN \xb7 \u5df2\u68c0\u6d4b",
     );
     assert.equal(selectOptions.options.at(-1)?.label, "\u5176\u4ed6");
     assert.equal(
       selectOptions.options.at(-1)?.hint,
-      "\u8f93\u5165\u4efb\u610f BCP 47 \u8bed\u8a00\u6807\u7b7e",
+      "\u8f93\u5165\u4efb\u610f\u533a\u57df\u8bed\u8a00\u4ee3\u7801",
     );
   } finally {
     if (originalLang == null) delete process.env.LANG;
@@ -348,8 +348,8 @@ test("promptInstallerLanguage localizes the picker copy for Chinese locales", as
 });
 
 test("createInstallerI18n exposes localized post-install and update copy", () => {
-  const en = installerI18n.createInstallerI18n("en-US");
-  const zh = installerI18n.createInstallerI18n("zh-CN");
+  const en = installerI18n.createInstallerI18n("en_US");
+  const zh = installerI18n.createInstallerI18n("zh_CN");
 
   assert.equal(en.targetInstallDirLabel, "Target install dir");
   assert.equal(en.writtenPathLabel, "Written");

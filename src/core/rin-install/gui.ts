@@ -208,7 +208,7 @@ export function buildGuiInstallerPlan(input: GuiInstallerPlanInput = {}) {
       authAvailable,
       chatDescription: i18n.chatDisabledDescription,
       chatDetail: "",
-      language,
+      language: i18n.language,
       setDefaultTarget,
     },
     i18n,
@@ -333,8 +333,8 @@ export function buildGuiInstallerHtml() {
         <div class="grid">
           <label>Language
             <select name="language">
-              <option value="en-US">English</option>
-              <option value="zh-CN">简体中文</option>
+              <option value="en_US">English</option>
+              <option value="zh_CN">简体中文</option>
             </select>
           </label>
           <label>Target user

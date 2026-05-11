@@ -16,18 +16,18 @@ type InstallerLanguagePromptApi = {
 
 const LANGUAGE_OPTIONS = [
   { value: DEFAULT_LANGUAGE_TAG, label: "English", hint: DEFAULT_LANGUAGE_TAG },
-  { value: "zh-CN", label: "简体中文", hint: "zh-CN" },
-  { value: "zh-TW", label: "繁體中文", hint: "zh-TW" },
-  { value: "ja-JP", label: "日本語", hint: "ja-JP" },
-  { value: "ko-KR", label: "한국어", hint: "ko-KR" },
-  { value: "fr-FR", label: "Français", hint: "fr-FR" },
-  { value: "es-ES", label: "Español", hint: "es-ES" },
-  { value: "de-DE", label: "Deutsch", hint: "de-DE" },
-  { value: "pt-BR", label: "Português (Brasil)", hint: "pt-BR" },
-  { value: "ru-RU", label: "Русский", hint: "ru-RU" },
-  { value: "ar-SA", label: "العربية", hint: "ar-SA" },
-  { value: "hi-IN", label: "हिन्दी", hint: "hi-IN" },
-  { value: "custom", label: "Other", hint: "Enter any BCP 47 language tag" },
+  { value: "zh_CN", label: "简体中文", hint: "zh_CN" },
+  { value: "zh_TW", label: "繁體中文", hint: "zh_TW" },
+  { value: "ja_JP", label: "日本語", hint: "ja_JP" },
+  { value: "ko_KR", label: "한국어", hint: "ko_KR" },
+  { value: "fr_FR", label: "Français", hint: "fr_FR" },
+  { value: "es_ES", label: "Español", hint: "es_ES" },
+  { value: "de_DE", label: "Deutsch", hint: "de_DE" },
+  { value: "pt_BR", label: "Português (Brasil)", hint: "pt_BR" },
+  { value: "ru_RU", label: "Русский", hint: "ru_RU" },
+  { value: "ar_SA", label: "العربية", hint: "ar_SA" },
+  { value: "hi_IN", label: "हिन्दी", hint: "hi_IN" },
+  { value: "custom", label: "Other", hint: "Enter any locale code" },
 ] as const;
 
 type InstallerLanguagePromptCopy = {
@@ -304,14 +304,14 @@ function formatOpenLinks(links?: string | string[]) {
 }
 
 const INSTALLER_DISPLAY_COPY = {
-  en: {
+  en_US: {
     languagePrompt: {
       chooseMessage: "Choose installer language",
       detectedSuffix: "detected",
       customLabel: "Other",
-      customHint: "Enter any BCP 47 language tag",
-      textMessage: "Enter language tag (BCP 47)",
-      invalidLanguageTag: "Use a valid BCP 47 language tag",
+      customHint: "Enter any locale code",
+      textMessage: "Enter locale code",
+      invalidLanguageTag: "Use a valid locale code such as en_US",
     },
     chatCommandDescriptions: {
       help: "Show available commands",
@@ -715,14 +715,14 @@ const INSTALLER_DISPLAY_COPY = {
       `Enter the API key or token for ${providerName}.`,
     tokenRequired: "A token is required.",
   },
-  "zh-CN": {
+  zh_CN: {
     languagePrompt: {
       chooseMessage: "选择安装器语言",
       detectedSuffix: "已检测",
       customLabel: "其他",
-      customHint: "输入任意 BCP 47 语言标签",
-      textMessage: "输入语言标签（BCP 47）",
-      invalidLanguageTag: "请输入有效的 BCP 47 语言标签",
+      customHint: "输入任意区域语言代码",
+      textMessage: "输入区域语言代码",
+      invalidLanguageTag: "请输入有效的区域语言代码，例如 zh_CN",
     },
     chatCommandDescriptions: {
       help: "显示可用命令",
@@ -1155,7 +1155,7 @@ export function createRinI18n(languageTag = DEFAULT_LANGUAGE_TAG) {
   return {
     language,
     displayLanguage,
-    isChinese: displayLanguage === "zh-CN",
+    isChinese: displayLanguage === "zh_CN",
     ...copy,
   };
 }

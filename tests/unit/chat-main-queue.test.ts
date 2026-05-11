@@ -21,7 +21,7 @@ test("chat main consumes inbound localized help messages through the inbox path 
   try {
     await fs.writeFile(
       path.join(agentDir, "settings.json"),
-      JSON.stringify({ language: "zh-CN" }) + "\n",
+      JSON.stringify({ language: "zh_CN" }) + "\n",
       "utf8",
     );
 
