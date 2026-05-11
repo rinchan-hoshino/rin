@@ -12,6 +12,7 @@ import { stringifyJson } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 import { loadFirstValidCandidate } from "./candidate-loader.js";
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
+import { getManagedChatSessionDir } from "../session/managed-paths.js";
 import {
   defaultHomeForUser,
   installAuthPath,
@@ -149,6 +150,7 @@ function moveInstalledPathIfNeeded(
 }
 
 const CHAT_STATE_SESSION_FILE_MIGRATION_ID = "chat-state-session-file-v1";
+const CHAT_SESSION_MANAGED_FILE_MIGRATION_ID = "chat-session-managed-file-v1";
 
 type InstallStateRewriteResult = {
   id: string;
@@ -281,6 +283,138 @@ function rewriteInstalledChatStateSessionFileKeys(
   };
 }
 
+function chatSessionManagedFileMigrationMarkerPath(installDir: string) {
+  return path.join(
+    path.resolve(String(installDir || "").trim() || "."),
+    "data",
+    "migrations",
+    `${CHAT_SESSION_MANAGED_FILE_MIGRATION_ID}.json`,
+  );
+}
+
+function sessionFilePathForInstalledChatState(
+  installDir: string,
+  sessionFile: string,
+) {
+  const sessionsDir = path.join(path.resolve(installDir), "sessions");
+  const raw = safeString(sessionFile).trim();
+  if (!raw) return null;
+  const absolute = path.isAbsolute(raw)
+    ? path.resolve(raw)
+    : path.join(sessionsDir, raw);
+  const basename = path.basename(absolute);
+  if (!basename.endsWith(".jsonl")) return null;
+  if (absolute !== path.join(sessionsDir, basename)) return null;
+  return { sessionsDir, absolute, basename };
+}
+
+function pickAvailableManagedChatSessionPath(
+  managedDir: string,
+  basename: string,
+) {
+  const parsed = path.parse(basename);
+  let candidate = path.join(managedDir, basename);
+  let index = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(
+      managedDir,
+      `${parsed.name}-${index}${parsed.ext || ".jsonl"}`,
+    );
+    index += 1;
+  }
+  return candidate;
+}
+
+function migrateChatStateSessionFileToManaged(
+  installDir: string,
+  statePath: string,
+) {
+  const state = readJsonObject(statePath);
+  if (!state) return "";
+  const sessionFile = safeString(state.sessionFile).trim();
+  if (!sessionFile || sessionFile.startsWith("managed/")) return "";
+  const source = sessionFilePathForInstalledChatState(installDir, sessionFile);
+  if (!source) return "";
+
+  const managedDir = getManagedChatSessionDir(installDir);
+  const targetPath = pickAvailableManagedChatSessionPath(
+    managedDir,
+    source.basename,
+  );
+  if (!fs.existsSync(source.absolute)) return "";
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.renameSync(source.absolute, targetPath);
+
+  const nextState: Record<string, unknown> = { ...state };
+  nextState.sessionFile = path.relative(source.sessionsDir, targetPath);
+  writeJsonObject(statePath, nextState);
+  return targetPath;
+}
+
+function migrateInstalledChatSessionFilesToManaged(
+  installDir: string,
+): InstallStateRewriteResult {
+  const markerPath = chatSessionManagedFileMigrationMarkerPath(installDir);
+  const marker = readJsonObject(markerPath);
+  if (
+    marker &&
+    safeString(marker.id || marker.migrationId).trim() ===
+      CHAT_SESSION_MANAGED_FILE_MIGRATION_ID
+  ) {
+    return {
+      id: CHAT_SESSION_MANAGED_FILE_MIGRATION_ID,
+      markerPath,
+      alreadyApplied: true,
+      skipped: true,
+      scanned: 0,
+      migrated: 0,
+      migratedFiles: [],
+    };
+  }
+
+  const root = path.resolve(String(installDir || "").trim() || ".");
+  const statePaths = uniqueStatePaths(
+    listChatStateFiles(path.join(root, "data", "chats")).map(
+      (item) => item.statePath,
+    ),
+  );
+  const migratedFiles: string[] = [];
+  for (const statePath of statePaths) {
+    const migratedFile = migrateChatStateSessionFileToManaged(root, statePath);
+    if (migratedFile) migratedFiles.push(migratedFile);
+  }
+
+  const scanned = statePaths.length;
+  const migrated = migratedFiles.length;
+  if (migrated === 0) {
+    return {
+      id: CHAT_SESSION_MANAGED_FILE_MIGRATION_ID,
+      markerPath,
+      alreadyApplied: false,
+      skipped: true,
+      scanned,
+      migrated,
+      migratedFiles,
+    };
+  }
+
+  writeJsonObject(markerPath, {
+    id: CHAT_SESSION_MANAGED_FILE_MIGRATION_ID,
+    appliedAt: new Date().toISOString(),
+    scanned,
+    migrated,
+  });
+  return {
+    id: CHAT_SESSION_MANAGED_FILE_MIGRATION_ID,
+    markerPath,
+    alreadyApplied: false,
+    skipped: false,
+    scanned,
+    migrated,
+    migratedFiles,
+  };
+}
+
 export function applyInstallUpgradeMigrations(
   options: {
     installDir: string;
@@ -309,6 +443,7 @@ export function applyInstallUpgradeMigrations(
       deps,
     ),
     rewriteInstalledChatStateSessionFileKeys(options.installDir),
+    migrateInstalledChatSessionFilesToManaged(options.installDir),
   ];
 }
 

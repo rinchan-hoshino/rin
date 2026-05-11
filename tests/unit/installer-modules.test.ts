@@ -713,8 +713,23 @@ test("persist normalizeInstalledChatSettings applies install upgrade migrations"
         migrated: 0,
         migratedFiles: [],
       },
+      {
+        id: "chat-session-managed-file-v1",
+        markerPath: path.join(
+          dir,
+          "data",
+          "migrations",
+          "chat-session-managed-file-v1.json",
+        ),
+        alreadyApplied: false,
+        skipped: true,
+        scanned: 0,
+        migrated: 0,
+        migratedFiles: [],
+      },
     ]);
     await assert.rejects(fs.access(result.migrations[1].markerPath));
+    await assert.rejects(fs.access(result.migrations[2].markerPath));
   });
 });
 
@@ -774,7 +789,103 @@ test("persist normalizeInstalledChatSettings migrates previous chat state sessio
     assert.equal(result.migrations[1].skipped, false);
     assert.equal(result.migrations[1].scanned, 2);
     assert.equal(result.migrations[1].migrated, 2);
+    assert.equal(result.migrations[2].id, "chat-session-managed-file-v1");
+    assert.equal(result.migrations[2].skipped, true);
     await fs.access(result.migrations[1].markerPath);
+    await assert.rejects(fs.access(result.migrations[2].markerPath));
+  });
+});
+
+test("persist normalizeInstalledChatSettings moves chat-bound root sessions under managed chat", async () => {
+  await withTempDir(async (dir) => {
+    const chatStatePath = path.join(
+      dir,
+      "data",
+      "chats",
+      "telegram",
+      "1",
+      "2",
+      "state.json",
+    );
+    const managedStatePath = path.join(
+      dir,
+      "data",
+      "chats",
+      "telegram",
+      "1",
+      "3",
+      "state.json",
+    );
+    const rootSessionPath = path.join(dir, "sessions", "chat-root.jsonl");
+    const managedSessionPath = path.join(
+      dir,
+      "sessions",
+      "managed",
+      "chat",
+      "already.jsonl",
+    );
+    await fs.mkdir(path.dirname(chatStatePath), { recursive: true });
+    await fs.mkdir(path.dirname(managedStatePath), { recursive: true });
+    await fs.mkdir(path.dirname(rootSessionPath), { recursive: true });
+    await fs.mkdir(path.dirname(managedSessionPath), { recursive: true });
+    await fs.writeFile(rootSessionPath, "root session\n");
+    await fs.writeFile(managedSessionPath, "managed session\n");
+    await fs.writeFile(
+      chatStatePath,
+      JSON.stringify({
+        chatKey: "telegram/1:2",
+        sessionFile: "chat-root.jsonl",
+      }),
+    );
+    await fs.writeFile(
+      managedStatePath,
+      JSON.stringify({
+        chatKey: "telegram/1:3",
+        sessionFile: "managed/chat/already.jsonl",
+      }),
+    );
+
+    const result = persist.normalizeInstalledChatSettings(
+      {
+        targetUser: "demo",
+        installDir: dir,
+        elevated: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000 }),
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: () => {},
+        runPrivileged: () => {},
+      },
+    );
+
+    const targetSessionPath = path.join(
+      dir,
+      "sessions",
+      "managed",
+      "chat",
+      "chat-root.jsonl",
+    );
+    assert.deepEqual(JSON.parse(await fs.readFile(chatStatePath, "utf8")), {
+      chatKey: "telegram/1:2",
+      sessionFile: "managed/chat/chat-root.jsonl",
+    });
+    assert.deepEqual(JSON.parse(await fs.readFile(managedStatePath, "utf8")), {
+      chatKey: "telegram/1:3",
+      sessionFile: "managed/chat/already.jsonl",
+    });
+    assert.equal(
+      await fs.readFile(targetSessionPath, "utf8"),
+      "root session\n",
+    );
+    await assert.rejects(fs.access(rootSessionPath));
+    assert.equal(result.migrations[2].id, "chat-session-managed-file-v1");
+    assert.equal(result.migrations[2].skipped, false);
+    assert.equal(result.migrations[2].scanned, 2);
+    assert.equal(result.migrations[2].migrated, 1);
+    assert.deepEqual(result.migrations[2].migratedFiles, [targetSessionPath]);
+    await fs.access(result.migrations[2].markerPath);
   });
 });
 
@@ -904,8 +1015,23 @@ test("persist persistInstallerOutputs applies install upgrade migrations before 
         migrated: 0,
         migratedFiles: [],
       },
+      {
+        id: "chat-session-managed-file-v1",
+        markerPath: path.join(
+          dir,
+          "data",
+          "migrations",
+          "chat-session-managed-file-v1.json",
+        ),
+        alreadyApplied: false,
+        skipped: true,
+        scanned: 0,
+        migrated: 0,
+        migratedFiles: [],
+      },
     ]);
     await assert.rejects(fs.access(result.migrations[1].markerPath));
+    await assert.rejects(fs.access(result.migrations[2].markerPath));
   });
 });
 
