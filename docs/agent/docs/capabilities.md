@@ -57,6 +57,7 @@ Key points for agents:
 
 - The prompt may include `chatKey`, chat name, sender identity, and related context.
 - Chat rich content uses Markdown extensions such as native mentions, quotes, images, files, video, audio, and stickers.
+- Use rich content syntax when the user asks to mention/tag someone, quote or reply to a specific message, or send/attach media, files, or stickers; otherwise plain Markdown text is fine.
 - Native mentions require exact platform user ids; raw `@name` text is plain visible text.
 - Chat sending, stored-message lookup, log inspection, and identity updates are SDK/file workflows rather than model tools.
 - `/chat` configures official adapters in the TUI and enters platform selection directly.

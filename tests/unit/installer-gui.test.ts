@@ -133,7 +133,7 @@ test("installer GUI saves API key provider auth for desktop install", () => {
 test("installer GUI builds final apply options from auth-ready selections", () => {
   const finalPlan = gui.buildGuiInstallerFinalizePlan(
     {
-      language: "en",
+      language: "en-US",
       currentUser: "alice",
       targetUser: "alice",
       installDir: "/home/alice/.rin",

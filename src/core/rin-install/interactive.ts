@@ -2,6 +2,7 @@ import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { promptChatBridgeSetup } from "../chat-bridge/setup.js";
+import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import {
   defaultInstallDirForHome,
   installAuthPath,
@@ -624,7 +625,7 @@ export function buildInstallPlanText(
     authAvailable: options.authAvailable,
     chatDescription: options.chatDescription,
     chatDetail: options.chatDetail,
-    language: String(options.language || i18n.language || "en"),
+    language: String(options.language || i18n.language || DEFAULT_LANGUAGE_TAG),
     setDefaultTarget: options.setDefaultTarget !== false,
   });
 }

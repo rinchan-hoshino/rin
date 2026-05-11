@@ -22,11 +22,13 @@ async function withTempDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
-test("language helpers canonicalize valid tags and reject invalid input", () => {
-  assert.equal(language.canonicalizeLanguageTag(" zh_hans_cn "), "");
+test("language helpers canonicalize regioned tags and reject invalid input", () => {
+  assert.equal(language.canonicalizeLanguageTag(" en "), "en-US");
+  assert.equal(language.canonicalizeLanguageTag(" en_US.UTF-8 "), "en-US");
+  assert.equal(language.canonicalizeLanguageTag(" zh_hans_cn "), "zh-Hans-CN");
   assert.equal(language.canonicalizeLanguageTag(" zh-Hans-cn "), "zh-Hans-CN");
   assert.equal(language.canonicalizeLanguageTag("nope nope"), "");
-  assert.equal(language.normalizeLanguageTag("", "en"), "en");
+  assert.equal(language.normalizeLanguageTag("", "en"), "en-US");
 });
 
 test("resolveInstallerDisplayLanguage treats all zh locales as Chinese", () => {
@@ -55,7 +57,7 @@ test("detectLocalLanguageTag prefers LC_ALL then LC_MESSAGES then LANG", () => {
     assert.equal(language.detectLocalLanguageTag("en"), "fr-CA");
 
     process.env.LANG = "bad tag";
-    assert.equal(language.detectLocalLanguageTag("en"), "en");
+    assert.equal(language.detectLocalLanguageTag("en"), "en-US");
   } finally {
     if (originalLang == null) delete process.env.LANG;
     else process.env.LANG = originalLang;

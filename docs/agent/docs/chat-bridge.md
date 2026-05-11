@@ -63,6 +63,8 @@ Rin chat rich content uses structured parts or Markdown rich-object syntax. Supp
 - quote / reply by exact platform message id
 - image / file / video / audio / sticker by local path or URL
 
+Use rich content syntax when the user asks to mention/tag someone, quote or reply to a specific message, or send/attach media, files, or stickers; otherwise plain Markdown text is fine.
+
 Native mentions require exact platform user ids. Raw `@name` text is visible text only.
 
 ## Stored chat context

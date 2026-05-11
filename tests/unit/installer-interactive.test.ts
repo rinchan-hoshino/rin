@@ -275,7 +275,7 @@ test("promptInstallerLanguage uses English-only copy for non-Chinese locales", a
 
     assert.equal(result, "fr-CA");
     assert.equal(seen.select.message, "Choose installer language");
-    assert.equal(seen.select.options[0].hint, "en");
+    assert.equal(seen.select.options[0].hint, "en-US · detected");
     assert.deepEqual(seen.select.options.at(-1), {
       value: "custom",
       label: "Other",
@@ -314,7 +314,7 @@ test("promptInstallerLanguage localizes the picker copy for Chinese locales", as
       },
       async select(options) {
         selectOptions = options;
-        return "en";
+        return "en-US";
       },
       async text() {
         throw new Error(
@@ -323,7 +323,7 @@ test("promptInstallerLanguage localizes the picker copy for Chinese locales", as
       },
     });
 
-    assert.equal(result, "en");
+    assert.equal(result, "en-US");
     assert.equal(
       selectOptions.message,
       "\u9009\u62e9\u5b89\u88c5\u5668\u8bed\u8a00",
@@ -348,7 +348,7 @@ test("promptInstallerLanguage localizes the picker copy for Chinese locales", as
 });
 
 test("createInstallerI18n exposes localized post-install and update copy", () => {
-  const en = installerI18n.createInstallerI18n("en");
+  const en = installerI18n.createInstallerI18n("en-US");
   const zh = installerI18n.createInstallerI18n("zh-CN");
 
   assert.equal(en.targetInstallDirLabel, "Target install dir");
@@ -455,13 +455,16 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.match(updaterSource, /RIN_UPDATE_ASSUME_YES/);
   assert.match(updaterSource, /selectUpdateTarget/);
   assert.match(updaterSource, /readInstalledUpdateLanguage/);
-  assert.match(updaterSource, /createInstallerI18n\(selectedLanguage\)/);
+  assert.match(updaterSource, /createInstallerI18n\(updateLanguage\)/);
   assert.match(updaterSource, /initialI18n\.noUpdateTargetsText/);
   assert.match(updaterSource, /i18n\.buildUpdateTargetText/);
   assert.match(updaterSource, /i18n\.buildUpdatePlanText/);
   assert.match(updaterSource, /i18n\.buildUpdatedTargetText/);
   assert.match(updaterSource, /i18n\.buildAfterUpdateText/);
-  assert.match(updaterSource, /language: i18n\.language/);
+  assert.match(
+    updaterSource,
+    /updateLanguage \? \{ language: updateLanguage \} : \{\}/,
+  );
   assert.match(
     updaterSource,
     /const promptConfirm = deps\.confirm \|\| confirm/,

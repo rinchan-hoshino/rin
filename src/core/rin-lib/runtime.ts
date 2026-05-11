@@ -53,6 +53,7 @@ const DEFAULT_PI_GUIDELINES = [
 
 const RICH_CHAT_CONTENT_SYNTAX = [
   "Chat rich content Markdown syntax:",
+  "- Use this syntax when the user asks to mention/tag someone, quote or reply to a specific message, or send/attach images, files, video, audio, or stickers; otherwise plain Markdown text is fine.",
   "- Native at: [@name](at:<platform-user-id>). Raw @name text is plain text only.",
   "- Quote reply: [quote:<message-id>] drives the platform reply/quote target.",
   "- Image/file/video/audio/sticker: [image: name](url), [file: name](url), [video: name](url), [audio: name](url), [sticker: name](url).",

@@ -71,6 +71,11 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
   assert.ok(baseSystemPrompt.includes("Chat rich content Markdown syntax:"));
   assert.ok(
+    baseSystemPrompt.includes(
+      "Use this syntax when the user asks to mention/tag someone",
+    ),
+  );
+  assert.ok(
     baseSystemPrompt.includes("Native at: [@name](at:<platform-user-id>)"),
   );
   assert.ok(

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_LANGUAGE_TAG,
   detectLocalLanguageTag,
   normalizeLanguageTag,
   resolveInstallerDisplayLanguage,
@@ -14,18 +15,18 @@ type InstallerLanguagePromptApi = {
 };
 
 const LANGUAGE_OPTIONS = [
-  { value: "en", label: "English", hint: "en" },
+  { value: DEFAULT_LANGUAGE_TAG, label: "English", hint: DEFAULT_LANGUAGE_TAG },
   { value: "zh-CN", label: "简体中文", hint: "zh-CN" },
   { value: "zh-TW", label: "繁體中文", hint: "zh-TW" },
-  { value: "ja", label: "日本語", hint: "ja" },
-  { value: "ko", label: "한국어", hint: "ko" },
-  { value: "fr", label: "Français", hint: "fr" },
-  { value: "es", label: "Español", hint: "es" },
-  { value: "de", label: "Deutsch", hint: "de" },
+  { value: "ja-JP", label: "日本語", hint: "ja-JP" },
+  { value: "ko-KR", label: "한국어", hint: "ko-KR" },
+  { value: "fr-FR", label: "Français", hint: "fr-FR" },
+  { value: "es-ES", label: "Español", hint: "es-ES" },
+  { value: "de-DE", label: "Deutsch", hint: "de-DE" },
   { value: "pt-BR", label: "Português (Brasil)", hint: "pt-BR" },
-  { value: "ru", label: "Русский", hint: "ru" },
-  { value: "ar", label: "العربية", hint: "ar" },
-  { value: "hi", label: "हिन्दी", hint: "hi" },
+  { value: "ru-RU", label: "Русский", hint: "ru-RU" },
+  { value: "ar-SA", label: "العربية", hint: "ar-SA" },
+  { value: "hi-IN", label: "हिन्दी", hint: "hi-IN" },
   { value: "custom", label: "Other", hint: "Enter any BCP 47 language tag" },
 ] as const;
 
@@ -1108,7 +1109,7 @@ const INSTALLER_DISPLAY_COPY = {
 export async function promptInstallerLanguage(
   prompt: InstallerLanguagePromptApi,
 ) {
-  const detected = detectLocalLanguageTag("en");
+  const detected = detectLocalLanguageTag();
   const promptDisplayLanguage = resolveInstallerDisplayLanguage(detected);
   const copy = INSTALLER_DISPLAY_COPY[promptDisplayLanguage].languagePrompt;
   const selected = String(
@@ -1128,13 +1129,13 @@ export async function promptInstallerLanguage(
       }),
     ),
   ).trim();
-  if (selected !== "custom") return normalizeLanguageTag(selected, "en");
+  if (selected !== "custom") return normalizeLanguageTag(selected);
   return normalizeLanguageTag(
     prompt.ensureNotCancelled(
       await prompt.text({
         message: copy.textMessage,
-        placeholder: detected || "en",
-        defaultValue: detected || "en",
+        placeholder: detected || DEFAULT_LANGUAGE_TAG,
+        defaultValue: detected || DEFAULT_LANGUAGE_TAG,
         validate(value: string) {
           return normalizeLanguageTag(value, "")
             ? undefined
@@ -1142,12 +1143,12 @@ export async function promptInstallerLanguage(
         },
       }),
     ),
-    "en",
+    DEFAULT_LANGUAGE_TAG,
   );
 }
 
-export function createRinI18n(languageTag = "en") {
-  const language = normalizeLanguageTag(languageTag, "en");
+export function createRinI18n(languageTag = DEFAULT_LANGUAGE_TAG) {
+  const language = normalizeLanguageTag(languageTag);
   const displayLanguage = resolveInstallerDisplayLanguage(language);
   const copy = INSTALLER_DISPLAY_COPY[displayLanguage];
 
@@ -1159,6 +1160,6 @@ export function createRinI18n(languageTag = "en") {
   };
 }
 
-export function createInstallerI18n(languageTag = "en") {
+export function createInstallerI18n(languageTag = DEFAULT_LANGUAGE_TAG) {
   return createRinI18n(languageTag);
 }

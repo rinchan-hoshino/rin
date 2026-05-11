@@ -9,6 +9,7 @@ import {
   removeFileIfExists,
 } from "../platform/fs.js";
 import { createRinI18n } from "../i18n.js";
+import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { safeString } from "./chat-helpers.js";
 import { sendOutboxPayload } from "./transport.js";
 
@@ -28,7 +29,9 @@ const CHAT_COMMAND_NAMES = [
   "model",
 ] as const;
 
-export function getChatCommandRows(languageTag = "en"): ChatCommandRow[] {
+export function getChatCommandRows(
+  languageTag = DEFAULT_LANGUAGE_TAG,
+): ChatCommandRow[] {
   const descriptions = createRinI18n(languageTag).chatCommandDescriptions;
   return CHAT_COMMAND_NAMES.map((name) => ({
     name,

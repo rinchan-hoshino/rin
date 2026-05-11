@@ -6,6 +6,7 @@ import {
   type DesktopHostLaunch,
 } from "../rin-gui/host-launch.js";
 import { escapeHtml } from "../rin-gui/web-assets.js";
+import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { releaseInfoFromEnv } from "../rin-lib/release.js";
 import {
   buildFinalizeInstallPlanCommand,
@@ -180,7 +181,9 @@ export function saveGuiInstallerApiKeyAuth(
 }
 
 export function buildGuiInstallerPlan(input: GuiInstallerPlanInput = {}) {
-  const language = String(input.language || "en").trim() || "en";
+  const language =
+    String(input.language || DEFAULT_LANGUAGE_TAG).trim() ||
+    DEFAULT_LANGUAGE_TAG;
   const i18n = createInstallerI18n(language);
   const currentUser = String(input.currentUser || detectCurrentUser()).trim();
   const targetUser =
@@ -330,7 +333,7 @@ export function buildGuiInstallerHtml() {
         <div class="grid">
           <label>Language
             <select name="language">
-              <option value="en">English</option>
+              <option value="en-US">English</option>
               <option value="zh-CN">简体中文</option>
             </select>
           </label>

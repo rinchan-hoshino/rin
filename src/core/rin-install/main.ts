@@ -34,7 +34,11 @@ import {
 import { createInstallerI18n, promptInstallerLanguage } from "./i18n.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeInstallPlan } from "./finalize.js";
-import { detectLocalLanguageTag, normalizeLanguageTag } from "../language.js";
+import {
+  DEFAULT_LANGUAGE_TAG,
+  detectLocalLanguageTag,
+  normalizeLanguageTag,
+} from "../language.js";
 import { releaseInfoFromEnv } from "../rin-lib/release.js";
 import { runGuiInstaller, shouldStartGuiInstaller } from "./gui.js";
 import {
@@ -61,7 +65,9 @@ import {
 
 function ensureNotCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
-    const i18n = createInstallerI18n(process.env.RIN_INSTALL_LANGUAGE || "en");
+    const i18n = createInstallerI18n(
+      process.env.RIN_INSTALL_LANGUAGE || DEFAULT_LANGUAGE_TAG,
+    );
     cancel(i18n.installerCancelled);
     process.exit(1);
   }
@@ -112,10 +118,7 @@ function readInstalledUpdateLanguage(options: {
     );
     if (language) return language;
   }
-  return (
-    normalizeLanguageTag(process.env.RIN_INSTALL_LANGUAGE, "") ||
-    detectLocalLanguageTag("en")
-  );
+  return "";
 }
 
 async function launchInstallerInitTui(options: {
@@ -173,8 +176,12 @@ export async function startInstaller() {
         String(process.env.RIN_UPDATE_INSTALL_DIR || "").trim() ||
         defaultInstallDirForHome(updateTargetHome),
     });
-    process.env.RIN_INSTALL_LANGUAGE = selectedLanguage;
-    const i18n = createInstallerI18n(selectedLanguage);
+    const displayLanguage =
+      selectedLanguage ||
+      normalizeLanguageTag(process.env.RIN_INSTALL_LANGUAGE, "") ||
+      detectLocalLanguageTag();
+    process.env.RIN_INSTALL_LANGUAGE = displayLanguage;
+    const i18n = createInstallerI18n(displayLanguage);
     const localizedConfirm: typeof confirm = (options) =>
       confirm({
         active: i18n.confirmActiveLabel,
