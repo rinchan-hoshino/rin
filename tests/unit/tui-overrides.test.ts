@@ -201,7 +201,7 @@ test("loader stop clears render interval", () => {
   assert.ok(renders >= 1);
 });
 
-test("rpc frontend startup statuses render as static text until Pi-owned working starts", async () => {
+test("rpc frontend startup statuses use a shared static loader until Pi-owned working starts", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -261,6 +261,10 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
   assert.ok(startupStatus);
   assert.equal(instance.loadingAnimation, undefined);
   assert.equal(startupStatus.intervalId, undefined);
+  assert.equal(startupStatus.message, "Starting...");
+  assert.equal(typeof startupStatus.stop, "function");
+  startupStatus.stop();
+  assert.equal(startupStatus.intervalId, undefined);
   const startupLines = startupStatus.render(40);
   assert.equal(startupLines.length, 2);
   assert.equal(piTuiModule.visibleWidth(startupLines[0]), 40);
@@ -279,10 +283,26 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
   });
   assert.equal(instance.statusContainer.child, startupStatus);
   assert.equal(startupStatus.intervalId, undefined);
+  assert.equal(startupStatus.message, "Connecting...");
   const connectingLines = startupStatus.render(40);
   assert.match(connectingLines[1], /Connecting\.\.\./);
   assert.equal(connectingLines[1].includes(`${ESC}[2m`), false);
   assert.equal(connectingLines[1].startsWith(`${ESC}[0m `), true);
+  assert.equal(additions, 1);
+
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_frontend_status",
+    phase: "sending",
+    label: "Sending",
+    connected: true,
+  });
+  assert.equal(instance.statusContainer.child, startupStatus);
+  assert.equal(startupStatus.intervalId, undefined);
+  assert.equal(startupStatus.message, "Sending...");
+  const sendingLines = startupStatus.render(40);
+  assert.match(sendingLines[1], /Sending\.\.\./);
+  assert.equal(sendingLines[1].includes(`${ESC}[2m`), false);
+  assert.equal(sendingLines[1].startsWith(`${ESC}[0m `), true);
   assert.equal(additions, 1);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
