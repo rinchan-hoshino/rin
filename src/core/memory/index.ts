@@ -18,9 +18,14 @@ import {
 
 import {
   appendTranscriptArchiveEntry,
+  extractTranscriptText,
   loadRecentTranscriptSessions,
   searchTranscriptArchive,
 } from "./transcripts.js";
+import {
+  searchExternalMemoryProviders,
+  writeExternalMemoryEntry,
+} from "./external.js";
 import { readSessionMetadata } from "../session/metadata.js";
 
 type MemoryToolDetails = {
@@ -55,34 +60,43 @@ const searchMemoryParams = Type.Object({
   ),
 });
 
-async function archiveMessageTranscript(message: any, ctx: any) {
-  if (!message || typeof message !== "object") return;
+function buildMemoryTranscriptInput(message: any, ctx: any) {
+  if (!message || typeof message !== "object") return null;
   const session = readSessionMetadata(ctx);
-  await appendTranscriptArchiveEntry(
-    {
-      id: String(message?.id || "").trim(),
-      timestamp:
-        String(message?.timestamp || "").trim() || new Date().toISOString(),
-      sessionId: session.sessionId,
-      sessionFile: session.sessionFile,
-      role: String(message?.role || "").trim(),
-      content: message?.content,
-      toolName: String(message?.toolName || "").trim(),
-      toolCallId: String(message?.toolCallId || "").trim(),
-      customType: String(message?.customType || "").trim(),
-      stopReason: String(message?.stopReason || "").trim(),
-      errorMessage: String(message?.errorMessage || "").trim(),
-      provider: String(message?.provider || "").trim(),
-      model: String(message?.model || "").trim(),
-      display:
-        typeof message?.display === "boolean" ? message.display : undefined,
-      command: message?.command,
-      output: message?.output,
-      summary: message?.summary,
-      text: String(message?.content || "").trim(),
-    },
-    String(ctx?.agentDir || "").trim(),
-  );
+  const input = {
+    id: String(message?.id || "").trim(),
+    timestamp:
+      String(message?.timestamp || "").trim() || new Date().toISOString(),
+    sessionId: session.sessionId,
+    sessionFile: session.sessionFile,
+    role: String(message?.role || "").trim(),
+    content: message?.content,
+    toolName: String(message?.toolName || "").trim(),
+    toolCallId: String(message?.toolCallId || "").trim(),
+    customType: String(message?.customType || "").trim(),
+    stopReason: String(message?.stopReason || "").trim(),
+    errorMessage: String(message?.errorMessage || "").trim(),
+    provider: String(message?.provider || "").trim(),
+    model: String(message?.model || "").trim(),
+    display:
+      typeof message?.display === "boolean" ? message.display : undefined,
+    command: message?.command,
+    output: message?.output,
+    summary: message?.summary,
+    text: "",
+  };
+  input.text = extractTranscriptText(input);
+  if (!input.role || !input.sessionFile || !input.text) return null;
+  return input;
+}
+
+async function archiveMessageTranscript(message: any, ctx: any) {
+  const input = buildMemoryTranscriptInput(message, ctx);
+  if (!input) return;
+  await Promise.allSettled([
+    appendTranscriptArchiveEntry(input, String(ctx?.agentDir || "").trim()),
+    writeExternalMemoryEntry(input),
+  ]);
 }
 
 function trimSnippet(value: string, max = 220): string {
@@ -95,12 +109,21 @@ function trimSnippet(value: string, max = 220): string {
 
 function resultSnippet(item: any): string {
   return trimSnippet(
-    String(item?.summary || item?.name || item?.description || "").trim(),
+    String(
+      item?.summary || item?.name || item?.description || item?.preview || "",
+    ).trim(),
   );
 }
 
 function resultLocation(item: any): string {
-  return String(item?.path || item?.sessionId || "").trim() || "Session";
+  const direct = String(
+    item?.path || item?.reference || item?.url || item?.sessionId || "",
+  ).trim();
+  if (direct) return direct;
+  const provider = String(item?.provider || "").trim();
+  const id = String(item?.id || item?.externalId || "").trim();
+  if (provider && id) return `${provider}:${id}`;
+  return id || "Memory";
 }
 
 function resultMessages(item: any): Array<any> {
@@ -214,6 +237,45 @@ function throwIfAborted(signal?: AbortSignal) {
   throw new Error("search_memory_aborted");
 }
 
+function resultTimestampMs(item: any): number {
+  const parsed = Date.parse(String(item?.timestamp || "").trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function resultScore(item: any): number {
+  const score = Number(item?.score);
+  return Number.isFinite(score) ? score : 0;
+}
+
+function mergeMemoryResults(
+  localResults: any[],
+  externalResults: any[],
+  options: { limit: number; mode: "search" | "recent" },
+) {
+  const rows = [
+    ...(Array.isArray(localResults) ? localResults : []),
+    ...(Array.isArray(externalResults) ? externalResults : []),
+  ];
+  const ordered = rows
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const primary =
+        options.mode === "recent"
+          ? resultTimestampMs(b.item) - resultTimestampMs(a.item)
+          : resultScore(b.item) - resultScore(a.item);
+      if (primary) return primary;
+      const timestampDiff =
+        resultTimestampMs(b.item) - resultTimestampMs(a.item);
+      if (timestampDiff) return timestampDiff;
+      return a.index - b.index;
+    });
+  const limit = Math.max(1, Number(options.limit || 8) || 8);
+  return {
+    results: ordered.slice(0, limit).map((row) => row.item),
+    totalResults: rows.length,
+  };
+}
+
 export async function executeSearchMemory(
   params: any,
   ctx: any,
@@ -242,10 +304,20 @@ export async function executeSearchMemory(
     );
 
     throwIfAborted(signal);
-    const results = query
+    const localResults = query
       ? await searchTranscriptArchive(query, normalizedParams, rootOverride)
       : await loadRecentTranscriptSessions(normalizedParams, rootOverride);
     throwIfAborted(signal);
+    const externalResults = await searchExternalMemoryProviders(
+      query,
+      normalizedParams,
+    );
+    throwIfAborted(signal);
+    const merged = mergeMemoryResults(localResults, externalResults, {
+      limit: normalizedParams.limit,
+      mode,
+    });
+    const results = merged.results;
 
     const response = {
       mode,
@@ -260,8 +332,8 @@ export async function executeSearchMemory(
       ? response.results
       : [];
     const details: MemoryToolDetails = {
-      hiddenCount: 0,
-      totalResults: visibleRows.length,
+      hiddenCount: Math.max(0, merged.totalResults - visibleRows.length),
+      totalResults: merged.totalResults,
       userText,
     };
 
@@ -325,7 +397,7 @@ function renderMemoryResult(
   theme: any,
   context: any,
 ) {
-  const state = context.state as MemoryRenderState;
+  const state = (context.state ||= {}) as MemoryRenderState;
   if (state.startedAt !== undefined && options.isPartial && !state.interval) {
     state.interval = setInterval(() => context.invalidate(), 1000);
   }

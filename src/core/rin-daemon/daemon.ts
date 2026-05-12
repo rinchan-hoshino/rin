@@ -231,6 +231,18 @@ export async function startDaemon(
     get_oauth_state: async () => ({
       data: await getCatalogOAuthState(catalogOptions),
     }),
+    memory_search_external: async (command) => ({
+      data: {
+        results: await daemonExtensionManager.searchMemoryProviders(
+          command.payload || {},
+        ),
+      },
+    }),
+    memory_write_external: async (command) => ({
+      data: await daemonExtensionManager.writeMemoryProviders(
+        command.payload || {},
+      ),
+    }),
   };
 
   const cronCommandHandlers: Partial<

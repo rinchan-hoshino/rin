@@ -15,6 +15,14 @@ import type {
   ChatRuntimeExternalAdapterEntry,
   ChatRuntimeExternalAdapterProvider,
 } from "../chat-runtime/index.js";
+import {
+  normalizeExternalMemoryLimit,
+  normalizeExternalMemoryResults,
+} from "../memory/external-results.js";
+import type {
+  ExternalMemoryResult,
+  TranscriptArchiveEntry,
+} from "../memory/transcript-types.js";
 import { ensureDir, stringifyJson } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 
@@ -22,6 +30,46 @@ export type RinDaemonExtensionLogger = {
   info?: (message: string) => void;
   warn?: (message: string) => void;
   error?: (message: string) => void;
+};
+
+export type RinDaemonMemorySearchRequest = {
+  readonly mode: "search" | "recent";
+  readonly query: string;
+  readonly limit: number;
+  readonly params: Record<string, any>;
+};
+
+export type RinDaemonMemoryProviderContext = {
+  readonly cwd: string;
+  readonly agentDir: string;
+  readonly dataDir: string;
+  readonly runtimeRoot: string;
+  readonly key: string;
+  readonly name: string;
+  readonly packageName: string;
+  readonly config: Record<string, any>;
+  readonly logger: RinDaemonExtensionLogger;
+};
+
+export type RinDaemonMemoryProvider = {
+  search?: (
+    request: RinDaemonMemorySearchRequest,
+    context: RinDaemonMemoryProviderContext,
+  ) =>
+    | Promise<ExternalMemoryResult[] | { results?: ExternalMemoryResult[] }>
+    | ExternalMemoryResult[]
+    | { results?: ExternalMemoryResult[] };
+  listRecent?: (
+    request: RinDaemonMemorySearchRequest,
+    context: RinDaemonMemoryProviderContext,
+  ) =>
+    | Promise<ExternalMemoryResult[] | { results?: ExternalMemoryResult[] }>
+    | ExternalMemoryResult[]
+    | { results?: ExternalMemoryResult[] };
+  write?: (
+    entry: TranscriptArchiveEntry,
+    context: RinDaemonMemoryProviderContext,
+  ) => Promise<void> | void;
 };
 
 export type RinDaemonExtensionContext = {
@@ -37,6 +85,14 @@ export type RinDaemonExtensionContext = {
   runAsync: (label: string, work: () => Promise<void> | void) => void;
   registerChatAdapter: (
     provider: ChatRuntimeExternalAdapterProvider,
+    options?: {
+      key?: string;
+      name?: string;
+      config?: Record<string, any>;
+    },
+  ) => void;
+  registerMemoryProvider: (
+    provider: RinDaemonMemoryProvider,
     options?: {
       key?: string;
       name?: string;
@@ -65,6 +121,15 @@ type RunningWorker = {
   controller: AbortController;
   stop?: () => Promise<void> | void;
   tasks: Set<Promise<void>>;
+};
+
+type RinDaemonMemoryProviderEntry = {
+  key: string;
+  name: string;
+  packageName: string;
+  config: Record<string, any>;
+  provider: RinDaemonMemoryProvider;
+  logger: RinDaemonExtensionLogger;
 };
 
 function buildRuntimePackage(dependencies: Record<string, string>) {
@@ -210,6 +275,7 @@ function createWorkerLogger(
 export class RinDaemonExtensionManager {
   private readonly workers: RunningWorker[] = [];
   private readonly chatAdapters: ChatRuntimeExternalAdapterEntry[] = [];
+  private readonly memoryProviders: RinDaemonMemoryProviderEntry[] = [];
 
   constructor(
     private readonly options: {
@@ -221,6 +287,7 @@ export class RinDaemonExtensionManager {
 
   async start() {
     this.chatAdapters.length = 0;
+    this.memoryProviders.length = 0;
     const entries = listRinDaemonWorkerConfigs(
       readRuntimeSettings(this.options.agentDir),
       { cwd: this.options.cwd },
@@ -287,6 +354,26 @@ export class RinDaemonExtensionManager {
               provider,
             });
           },
+          registerMemoryProvider: (provider, options = {}) => {
+            if (
+              !provider ||
+              (typeof provider.search !== "function" &&
+                typeof provider.listRecent !== "function" &&
+                typeof provider.write !== "function")
+            ) {
+              return;
+            }
+            const key = safeString(options.key).trim() || entry.name;
+            const name = safeString(options.name).trim() || key;
+            this.memoryProviders.push({
+              key,
+              name,
+              packageName: entry.packageName,
+              config: options.config || entry.config,
+              provider,
+              logger,
+            });
+          },
         };
         const result = await (provider.createDaemonWorker || provider.start)?.(
           context,
@@ -307,6 +394,97 @@ export class RinDaemonExtensionManager {
 
   getChatAdapterProviders() {
     return [...this.chatAdapters];
+  }
+
+  getMemoryProviderMetadata() {
+    return this.memoryProviders.map((entry) => ({
+      key: entry.key,
+      name: entry.name,
+      packageName: entry.packageName,
+    }));
+  }
+
+  private createMemoryProviderContext(
+    entry: RinDaemonMemoryProviderEntry,
+  ): RinDaemonMemoryProviderContext {
+    return {
+      cwd: this.options.cwd,
+      agentDir: this.options.agentDir,
+      dataDir: path.join(this.options.agentDir, "data"),
+      runtimeRoot: getRinDaemonRuntimeRoot(this.options.agentDir),
+      key: entry.key,
+      name: entry.name,
+      packageName: entry.packageName,
+      config: entry.config,
+      logger: entry.logger,
+    };
+  }
+
+  async searchMemoryProviders(params: Record<string, any> = {}) {
+    const query = safeString(params.query || "").trim();
+    const limit = normalizeExternalMemoryLimit(params.limit, 8);
+    const mode = query ? "search" : "recent";
+    const request: RinDaemonMemorySearchRequest = {
+      mode,
+      query,
+      limit,
+      params: { ...(params || {}), query, limit },
+    };
+    const groups = await Promise.all(
+      this.memoryProviders.map(async (entry) => {
+        const search =
+          mode === "recent" ? entry.provider.listRecent : entry.provider.search;
+        if (typeof search !== "function") return [];
+        try {
+          const result = await search.call(
+            entry.provider,
+            request,
+            this.createMemoryProviderContext(entry),
+          );
+          return normalizeExternalMemoryResults(result, {
+            provider: entry.key,
+            providerName: entry.name,
+            startScore: limit,
+          });
+        } catch (error: any) {
+          entry.logger.warn?.(
+            `memory provider search failed key=${entry.key} err=${safeString(
+              error?.message || error,
+            )}`,
+          );
+          return [];
+        }
+      }),
+    );
+    return groups.flat();
+  }
+
+  async writeMemoryProviders(entry: Record<string, any>) {
+    const text = safeString(entry?.text || "").trim();
+    const role = safeString(entry?.role || "").trim();
+    if (!text || !role) return { written: 0, providerCount: 0 };
+    const writableProviders = this.memoryProviders.filter(
+      (providerEntry) => typeof providerEntry.provider.write === "function",
+    );
+    let written = 0;
+    await Promise.all(
+      writableProviders.map(async (providerEntry) => {
+        try {
+          await providerEntry.provider.write?.(
+            entry as TranscriptArchiveEntry,
+            this.createMemoryProviderContext(providerEntry),
+          );
+          written += 1;
+        } catch (error: any) {
+          providerEntry.logger.warn?.(
+            `memory provider write failed key=${providerEntry.key} err=${safeString(
+              error?.message || error,
+            )}`,
+          );
+        }
+      }),
+    );
+    return { written, providerCount: writableProviders.length };
   }
 
   async stop(timeoutMs = 10_000) {

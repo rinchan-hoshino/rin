@@ -139,7 +139,7 @@ function summarizePart(part: unknown): string {
   return "";
 }
 
-function extractTranscriptText(input: Record<string, unknown>): string {
+export function extractTranscriptText(input: Record<string, unknown>): string {
   const role = safeString(input.role || "").trim();
   const content = input.content;
   if (typeof content === "string") return content.trim();

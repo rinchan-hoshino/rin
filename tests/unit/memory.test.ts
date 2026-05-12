@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -42,6 +43,53 @@ async function writeSessionFile(root, name, entries) {
     "utf8",
   );
   return filePath;
+}
+
+async function withJsonlDaemonSocket(handler, fn) {
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-daemon-"),
+  );
+  const socketPath = path.join(runtimeDir, "daemon.sock");
+  const previousSocketPath = process.env.RIN_DAEMON_SOCKET_PATH;
+  const server = net.createServer((socket) => {
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += String(chunk);
+      while (true) {
+        const idx = buffer.indexOf("\n");
+        if (idx < 0) break;
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        const payload = JSON.parse(line);
+        Promise.resolve(handler(payload)).then((data) => {
+          socket.write(
+            `${JSON.stringify({
+              type: "response",
+              id: payload.id,
+              command: payload.type,
+              success: true,
+              data,
+            })}\n`,
+          );
+        });
+      }
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => resolve());
+  });
+  process.env.RIN_DAEMON_SOCKET_PATH = socketPath;
+  try {
+    await fn(socketPath);
+  } finally {
+    if (previousSocketPath === undefined)
+      delete process.env.RIN_DAEMON_SOCKET_PATH;
+    else process.env.RIN_DAEMON_SOCKET_PATH = previousSocketPath;
+    await new Promise((resolve) => server.close(() => resolve()));
+    await fs.rm(runtimeDir, { recursive: true, force: true });
+  }
 }
 
 test("memory transcripts archive entries under memory/transcripts", async () => {
@@ -852,6 +900,97 @@ test("executeSearchMemory emits an initial status update before finishing", asyn
       'Searching archived sessions for "no hits yet"...',
     ]);
     assert.match(result.details.userText, /No memory results found\./);
+  });
+});
+
+test("search_memory includes external provider results without local transcript paths", async () => {
+  await withTempRoot(async (root) => {
+    const requests = [];
+    await withJsonlDaemonSocket(
+      (payload) => {
+        requests.push(payload);
+        if (payload.type === "memory_search_external") {
+          return {
+            results: [
+              {
+                sourceType: "external",
+                provider: "remote-memory",
+                id: "remote-hit-1",
+                name: "Remote memory hit",
+                reference: "mem://remote-hit-1",
+                summary:
+                  "Remote memory summary from a non-local original-text store.",
+                messages: [
+                  {
+                    line: 1,
+                    role: "memory",
+                    timestamp: "2026-05-11T06:00:00.000Z",
+                    text: "remote snippet only",
+                  },
+                ],
+              },
+            ],
+          };
+        }
+        return {};
+      },
+      async () => {
+        const result = await memoryExtensionModule.executeSearchMemory(
+          { query: "remote only marker", limit: 8 },
+          { agentDir: root, model: { provider: "test", id: "demo" } },
+          "medium",
+        );
+
+        assert.equal(requests.at(-1)?.type, "memory_search_external");
+        assert.equal(requests.at(-1)?.payload?.query, "remote only marker");
+        assert.match(result.content[0].text, /mem:\/\/remote-hit-1/);
+        assert.match(
+          result.details.userText,
+          /Remote memory summary from a non-local original-text store/,
+        );
+        assert.match(result.details.userText, /L1 memory: remote snippet only/);
+        assert.doesNotMatch(result.details.userText, /memory\/transcripts/);
+      },
+    );
+  });
+});
+
+test("memory message hook publishes transcript archive writes to external memory providers", async () => {
+  await withTempRoot(async (root) => {
+    const requests = [];
+    await withJsonlDaemonSocket(
+      (payload) => {
+        requests.push(payload);
+        return { written: 1 };
+      },
+      async () => {
+        const definition = memoryExtensionModule.default({
+          getThinkingLevel: () => "medium",
+        });
+        await definition.hooks.message_end[0](
+          {
+            message: {
+              id: "msg-remote-1",
+              timestamp: "2026-05-11T06:00:00.000Z",
+              role: "assistant",
+              content: [{ type: "text", text: "send this to remote memory" }],
+            },
+          },
+          {
+            agentDir: root,
+            sessionId: "session-remote",
+            sessionFile: "/tmp/session-remote.jsonl",
+          },
+        );
+
+        const writeRequest = requests.find(
+          (payload) => payload.type === "memory_write_external",
+        );
+        assert.ok(writeRequest);
+        assert.equal(writeRequest.payload.role, "assistant");
+        assert.equal(writeRequest.payload.text, "send this to remote memory");
+      },
+    );
   });
 });
 
