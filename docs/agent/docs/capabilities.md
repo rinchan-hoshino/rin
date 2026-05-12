@@ -126,9 +126,7 @@ Use only trusted package names and versions. Packages may be installed or update
 
 Use fresh web search for latest, time-sensitive, version-sensitive, or otherwise changeable information. When `q` is an HTTP(S) URL, `web_search` fetches that page directly with a browser-like user agent and extracts readable content.
 
-If search fails with `google_challenge_required` or `duckduckgo_challenge_required`, the upstream engine challenged the Rin runtime's network path. Practical recovery is to wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, fetch a known URL directly, or use a trusted search backend/API.
-
-SearXNG reduces challenge frequency with engine-specific request shaping and rate limiting, but it does not bypass an upstream challenge on a blocked egress IP.
+Direct web search currently uses Google only. If search fails with `google_challenge_required`, the upstream engine challenged the Rin runtime's network path. Practical recovery is to wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, fetch a known URL directly, or use a trusted search backend/API.
 
 ## Runtime status and token usage
 

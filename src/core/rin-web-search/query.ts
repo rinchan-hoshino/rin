@@ -23,13 +23,6 @@ const GOOGLE_SUPPORTED_DOMAINS: Record<string, string> = {
   TW: "www.google.com.tw",
   US: "www.google.com",
 };
-// SearXNG's DuckDuckGo engine avoids the lite GET flow and emulates the
-// no-JS HTML form submission with a stable browser user-agent, Sec-Fetch
-// navigation headers, form data, and matching cookies. DDG's bot blocker uses
-// the user-agent/IP reputation and may evaluate these browser-navigation
-// headers, so keep this request shape close to that real browser flow.
-const DUCKDUCKGO_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const SUPPORTED_FRESHNESS = ["day", "week", "month", "year"] as const;
 const FRESHNESS_QUERY_CODES: Record<WebSearchFreshness, string> = {
   day: "d",
@@ -38,7 +31,7 @@ const FRESHNESS_QUERY_CODES: Record<WebSearchFreshness, string> = {
   year: "y",
 };
 
-export const DIRECT_WEB_SEARCH_PROVIDERS = ["google", "duckduckgo"] as const;
+export const DIRECT_WEB_SEARCH_PROVIDERS = ["google"] as const;
 
 export type WebSearchFreshness = (typeof SUPPORTED_FRESHNESS)[number];
 
@@ -381,35 +374,6 @@ function buildGoogleUrl(request: NormalizedWebSearchRequest): string {
   return url.toString();
 }
 
-function duckDuckGoRegion(request: NormalizedWebSearchRequest): string {
-  const locale = parseLocale(request.language);
-  if (!locale?.region) return "wt-wt";
-  return `${locale.region.toLowerCase()}-${locale.lang}`;
-}
-
-function buildDuckDuckGoUrl(): string {
-  return "https://html.duckduckgo.com/html/";
-}
-
-function buildDuckDuckGoBody(
-  request: NormalizedWebSearchRequest,
-): URLSearchParams {
-  const body = new URLSearchParams();
-  body.set("q", buildSearchQuery(request));
-  body.set("b", "");
-  body.set("kl", duckDuckGoRegion(request));
-  const freshness = mapFreshness(request.freshness);
-  if (freshness) body.set("df", freshness);
-  return body;
-}
-
-function buildDuckDuckGoCookie(request: NormalizedWebSearchRequest): string {
-  const values = [`kl=${duckDuckGoRegion(request)}`];
-  const freshness = mapFreshness(request.freshness);
-  if (freshness) values.push(`df=${freshness}`);
-  return values.join("; ");
-}
-
 async function fetchText(
   url: string,
   {
@@ -590,22 +554,6 @@ function unwrapGoogleUrl(rawUrl: string): string {
   }
 }
 
-function unwrapDuckDuckGoUrl(rawUrl: string): string {
-  const value = decodeHtmlEntities(String(rawUrl || "").trim());
-  if (!value) return "";
-  try {
-    const url = new URL(
-      value.startsWith("//") ? `https:${value}` : value,
-      "https://duckduckgo.com",
-    );
-    const direct = url.searchParams.get("uddg");
-    if (direct) return decodeURIComponent(direct);
-    return url.toString();
-  } catch {
-    return value;
-  }
-}
-
 export function parseGoogleResults(html: string, limit = 8): WebSearchResult[] {
   const rows: WebSearchResult[] = [];
   const source = String(html || "");
@@ -646,52 +594,6 @@ export function parseGoogleResults(html: string, limit = 8): WebSearchResult[] {
     if (row) rows.push(row);
   }
 
-  return dedupeResults(rows, limit);
-}
-
-export function parseDuckDuckGoLiteResults(
-  html: string,
-  limit = 8,
-): WebSearchResult[] {
-  const rows: WebSearchResult[] = [];
-  const source = String(html || "");
-  const htmlPattern =
-    /<div\b[^>]*\bclass=['"][^'"]*web-result[^'"]*['"][^>]*>([\s\S]*?)(?=<div\b[^>]*\bclass=['"][^'"]*web-result[^'"]*['"]|<\/div>\s*<\/div>|$)/gi;
-  let htmlMatch: RegExpExecArray | null = null;
-  while ((htmlMatch = htmlPattern.exec(source))) {
-    const segment = htmlMatch[1] || "";
-    const titleMatch = segment.match(
-      /<h2\b[\s\S]*?<a\b([^>]*)>([\s\S]*?)<\/a>/i,
-    );
-    const snippetMatch = segment.match(
-      /<a\b[^>]*\bclass=['"][^'"]*result__snippet[^'"]*['"][^>]*>([\s\S]*?)<\/a>/i,
-    );
-    const row = buildResultRow(
-      unwrapDuckDuckGoUrl(extractHref(titleMatch?.[1] || "")),
-      stripHtml(titleMatch?.[2] || ""),
-      stripHtml(snippetMatch?.[1] || ""),
-      "duckduckgo",
-      rows.length + 1,
-    );
-    if (row) rows.push(row);
-  }
-
-  const litePattern =
-    /<a\b([^>]*\bclass=['"]result-link['"][^>]*)>([\s\S]*?)<\/a>([\s\S]*?)(?=<a\b[^>]*\bclass=['"]result-link['"]|$)/gi;
-  let liteMatch: RegExpExecArray | null = null;
-  while ((liteMatch = litePattern.exec(source))) {
-    const snippetMatch = liteMatch[3].match(
-      /<td[^>]*class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/i,
-    );
-    const row = buildResultRow(
-      unwrapDuckDuckGoUrl(extractHref(liteMatch[1] || "")),
-      stripHtml(liteMatch[2] || ""),
-      stripHtml(snippetMatch?.[1] || ""),
-      "duckduckgo",
-      rows.length + 1,
-    );
-    if (row) rows.push(row);
-  }
   return dedupeResults(rows, limit);
 }
 
@@ -742,34 +644,8 @@ async function searchGoogle(request: NormalizedWebSearchRequest) {
   return [];
 }
 
-async function searchDuckDuckGo(request: NormalizedWebSearchRequest) {
-  const html = await fetchText(buildDuckDuckGoUrl(), {
-    method: "POST",
-    body: buildDuckDuckGoBody(request),
-    headers: {
-      "Accept-Language": buildAcceptLanguage(request.language),
-      "Content-Type": "application/x-www-form-urlencoded",
-      Cookie: buildDuckDuckGoCookie(request),
-      Referer: "https://html.duckduckgo.com/",
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "same-origin",
-      "Sec-Fetch-User": "?1",
-      "User-Agent": DUCKDUCKGO_USER_AGENT,
-    },
-  });
-  if (isChallengePage(html)) {
-    throw new Error("duckduckgo_challenge_required");
-  }
-  return filterSearchResults(
-    parseDuckDuckGoLiteResults(html, request.limit),
-    request,
-  );
-}
-
 const DIRECT_PROVIDER_HANDLERS: DirectProvider[] = [
   { name: "google", search: searchGoogle },
-  { name: "duckduckgo", search: searchDuckDuckGo },
 ];
 
 export async function searchWeb(

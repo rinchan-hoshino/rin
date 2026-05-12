@@ -107,8 +107,8 @@ test("rin doctor renderers format daemon status details consistently", () => {
       runtime: {
         ready: true,
         mode: "direct",
-        providerCount: 2,
-        providers: ["google", "duckduckgo"],
+        providerCount: 1,
+        providers: ["google"],
       },
       instances: [
         {
@@ -123,10 +123,9 @@ test("rin doctor renderers format daemon status details consistently", () => {
     [
       "webSearchRuntimeReady=yes",
       "webSearchMode=direct",
-      "webSearchProviderCount=2",
+      "webSearchProviderCount=1",
       "webSearchInstanceCount=1",
       "webSearchProvider=google",
-      "webSearchProvider=duckduckgo",
       "webSearchInstance=primary pid=123 alive=yes port=8080 baseUrl=http://127.0.0.1:8080",
     ],
   );

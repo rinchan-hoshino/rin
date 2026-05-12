@@ -28,6 +28,69 @@ function closeServer(server: http.Server) {
   });
 }
 
+function deferred() {
+  let resolve = () => {};
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
+test("Rin backend serializes web_search execution without tool-side metadata", async () => {
+  const firstCanFinish = deferred();
+  const firstStarted = deferred();
+  const events: string[] = [];
+  const baseTool = {
+    name: "web_search",
+    label: "Web Search",
+    description: "Search or fetch web pages.",
+    execute: async (toolCallId: string) => {
+      events.push(`start:${toolCallId}`);
+      if (toolCallId === "first") {
+        firstStarted.resolve();
+        await firstCanFinish.promise;
+      }
+      events.push(`end:${toolCallId}`);
+      return { content: [], details: { toolCallId } };
+    },
+  };
+  const session: any = {
+    agent: { state: { tools: [baseTool] } },
+    setActiveToolsByName(toolNames: string[]) {
+      this.agent.state.tools = toolNames.includes("web_search")
+        ? [baseTool]
+        : [];
+    },
+    _refreshToolRegistry() {
+      this.agent.state.tools = [baseTool];
+    },
+  };
+
+  runtimeMod.applyRinBackendToolExecutionLocks(session);
+
+  const lockedTool = session.agent.state.tools[0];
+  assert.equal(lockedTool.executionMode, undefined);
+
+  const first = lockedTool.execute("first");
+  await firstStarted.promise;
+  const second = lockedTool.execute("second");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(events, ["start:first"]);
+
+  firstCanFinish.resolve();
+  await Promise.all([first, second]);
+  assert.deepEqual(events, [
+    "start:first",
+    "end:first",
+    "start:second",
+    "end:second",
+  ]);
+
+  session.setActiveToolsByName(["web_search"]);
+  assert.notEqual(session.agent.state.tools[0], baseTool);
+  assert.equal(session.agent.state.tools[0].executionMode, undefined);
+});
+
 test("std configured session keeps daemon-independent Rin tools usable without daemon", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-std-runtime-"));
   const agentDir = path.join(root, "agent");
