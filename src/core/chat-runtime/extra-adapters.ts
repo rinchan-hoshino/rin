@@ -1245,6 +1245,8 @@ export class LarkAdapter {
       internal,
       sendMessage: async (chatId: string, content: any) =>
         await this.sendMessage(chatId, content),
+      getGuildMemberCount: async (chatId: string) =>
+        await this.getGuildMemberCount(chatId),
       createReaction: async (
         chatId: string,
         messageId: string,
@@ -1584,6 +1586,25 @@ export class LarkAdapter {
       );
     }
     return resolved;
+  }
+
+  private async getGuildMemberCount(chatId: string) {
+    const nextChatId = safeString(chatId).trim();
+    if (!nextChatId) return 0;
+    const response = await this.client?.im?.chat?.get?.({
+      path: { chat_id: nextChatId },
+      params: { user_id_type: "open_id" },
+    });
+    const data =
+      response?.data && typeof response.data === "object"
+        ? response.data
+        : response && typeof response === "object"
+          ? response
+          : {};
+    const userCount = Number(data?.user_count ?? data?.userCount ?? 0);
+    const botCount = Number(data?.bot_count ?? data?.botCount ?? 1);
+    if (!Number.isFinite(userCount) || userCount <= 0) return 0;
+    return userCount + (Number.isFinite(botCount) ? botCount : 1);
   }
 
   async createReaction(_chatId: string, messageId: string, emoji: string) {

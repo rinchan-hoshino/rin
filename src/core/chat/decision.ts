@@ -34,6 +34,9 @@ async function getPrivateLikeGroupMemberCount(
 ) {
   const internal = session?.bot?.internal;
   try {
+    if (typeof session?.bot?.getGuildMemberCount === "function") {
+      return Number(await session.bot.getGuildMemberCount(chatId));
+    }
     if (
       platform === "telegram" &&
       typeof internal?.getChatMemberCount === "function"
@@ -43,6 +46,23 @@ async function getPrivateLikeGroupMemberCount(
     if (platform === "onebot" && typeof internal?.getGroupInfo === "function") {
       const info = await internal.getGroupInfo(chatId, true);
       return Number(info?.member_count ?? info?.memberCount ?? 0);
+    }
+    if (platform === "lark" && typeof internal?.getChat === "function") {
+      const response = await internal.getChat({
+        path: { chat_id: chatId },
+        params: { user_id_type: "open_id" },
+      });
+      const data =
+        response?.data && typeof response.data === "object"
+          ? response.data
+          : response && typeof response === "object"
+            ? response
+            : {};
+      const userCount = Number(data?.user_count ?? data?.userCount ?? 0);
+      const botCount = Number(data?.bot_count ?? data?.botCount ?? 1);
+      if (Number.isFinite(userCount) && userCount > 0) {
+        return userCount + (Number.isFinite(botCount) ? botCount : 1);
+      }
     }
   } catch {}
   return 0;

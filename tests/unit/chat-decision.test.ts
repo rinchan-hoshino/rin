@@ -16,6 +16,7 @@ const identity = {
   aliases: [
     { platform: "telegram", userId: "owner-1", personId: "owner" },
     { platform: "telegram", userId: "trusted-1", personId: "trusted" },
+    { platform: "lark", userId: "ou_owner", personId: "owner" },
   ],
   persons: {
     owner: { trust: "OWNER" },
@@ -106,6 +107,35 @@ test("chat decision treats two-member owner groups as private-like", async () =>
 
   assert.equal(result.allow, true);
   assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
+  assert.equal(result.trust, "OWNER");
+});
+
+test("chat decision treats Feishu owner-only groups as private-like", async () => {
+  const calls: string[] = [];
+  const result = await decision.shouldProcessText(
+    {
+      platform: "lark",
+      guildId: "oc_owner_only",
+      channelId: "oc_owner_only",
+      selfId: "ou_bot",
+      userId: "ou_owner",
+      bot: {
+        selfId: "ou_bot",
+        async getGuildMemberCount(chatId) {
+          calls.push(chatId);
+          return 2;
+        },
+      },
+      stripped: { content: "private note" },
+      elements: [{ type: "text", attrs: { content: "private note" } }],
+    },
+    [{ type: "text", attrs: { content: "private note" } }],
+    identity,
+  );
+
+  assert.deepEqual(calls, ["oc_owner_only"]);
+  assert.equal(result.allow, true);
+  assert.equal(result.chatKey, "lark:oc_owner_only");
   assert.equal(result.trust, "OWNER");
 });
 
