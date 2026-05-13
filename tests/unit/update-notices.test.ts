@@ -33,6 +33,34 @@ test("Rin update notices compare package versions with prerelease precedence", (
   assert.equal(notices.comparePackageVersions("invalid", "1.2.3"), 0);
 });
 
+test("current Rin version prefers installed release metadata outside source-root reads", async () => {
+  await withTempDir(async (dir) => {
+    const previousRinDir = process.env.RIN_DIR;
+    const previousReleaseVersion = process.env.RIN_RELEASE_VERSION;
+    try {
+      delete process.env.RIN_RELEASE_VERSION;
+      process.env.RIN_DIR = dir;
+      await fs.writeFile(
+        path.join(dir, "installer.json"),
+        JSON.stringify({
+          currentRelease: { release: { version: "abc123def456" } },
+        }),
+        "utf8",
+      );
+
+      assert.equal(notices.readInstalledRinReleaseVersion(dir), "abc123def456");
+      assert.equal(notices.getCurrentRinVersion(), "abc123def456");
+      assert.equal(notices.getCurrentRinVersion(rootDir), "0.0.0");
+    } finally {
+      if (previousRinDir === undefined) delete process.env.RIN_DIR;
+      else process.env.RIN_DIR = previousRinDir;
+      if (previousReleaseVersion === undefined)
+        delete process.env.RIN_RELEASE_VERSION;
+      else process.env.RIN_RELEASE_VERSION = previousReleaseVersion;
+    }
+  });
+});
+
 test("Rin update check uses Rin release manifest instead of Pi latest-version", async () => {
   const manifest = {
     stable: { version: "1.2.4" },
