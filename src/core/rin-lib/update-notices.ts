@@ -1,13 +1,17 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { getChangelogPath, parseChangelog } from "./changelog.js";
+import { resolveRuntimeProfile } from "./profile.js";
 import {
+  getReleaseRepoUrl,
+  type InstalledReleaseInfo,
   loadReleaseManifestForNetwork,
   ReleaseChannel,
   ReleaseManifest,
+  releaseInfoFromEnv,
   resolveReleaseRequest,
 } from "./release.js";
 
@@ -21,8 +25,17 @@ export type ParsedPackageVersion = {
 export type RinUpdateCheckOptions = {
   currentVersion?: string;
   channel?: ReleaseChannel;
+  currentRelease?: InstalledReleaseInfo;
   manifest?: ReleaseManifest;
+  runtimeDir?: string;
   sourceRoot?: string;
+};
+
+export type RinUpdateNotice = {
+  version: string;
+  channel: ReleaseChannel;
+  currentVersion: string;
+  command: string;
 };
 
 const RIN_RELEASE_CHANNELS: readonly ReleaseChannel[] = [
@@ -113,33 +126,79 @@ export function readRinPackageVersion(sourceRoot = moduleRootFromHere()) {
   }
 }
 
-function runtimeAgentDirFromEnv() {
-  return (
-    trim(process.env.RIN_DIR) ||
-    trim(process.env.PI_CODING_AGENT_DIR) ||
-    path.join(os.homedir(), ".rin")
-  );
+function isReleaseChannel(value: string): value is ReleaseChannel {
+  return (RIN_RELEASE_CHANNELS as readonly string[]).includes(value);
 }
 
-export function readInstalledRinReleaseVersion(
-  agentDir = runtimeAgentDirFromEnv(),
-): string | undefined {
+function normalizeInstalledReleaseInfo(
+  value: unknown,
+): InstalledReleaseInfo | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const channelText = trim(record.channel).toLowerCase();
+  const channel = isReleaseChannel(channelText) ? channelText : "stable";
+  const version = trim(record.version);
+  const branch = trim(record.branch);
+  const ref = trim(record.ref);
+  const sourceLabel = trim(record.sourceLabel);
+  const archiveUrl = trim(record.archiveUrl);
+  const installedAt = trim(record.installedAt);
+  if (!version && !branch && !ref && !sourceLabel && !archiveUrl) {
+    return undefined;
+  }
+  return {
+    channel,
+    version: version || ref || branch || "unknown",
+    branch: branch || (channel === "stable" ? "stable" : "main"),
+    ref: ref || branch || version || "main",
+    sourceLabel:
+      sourceLabel || `${channel} ${version || branch || ref || "unknown"}`,
+    archiveUrl,
+    ...(installedAt ? { installedAt } : {}),
+  };
+}
+
+export function readInstalledRinReleaseInfo(
+  runtimeDir = resolveRuntimeProfile().agentDir,
+): InstalledReleaseInfo | undefined {
   try {
-    const config = JSON.parse(
-      fs.readFileSync(path.join(agentDir, "installer.json"), "utf8"),
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(runtimeDir, "installer.json"), "utf8"),
+    ) as Record<string, unknown>;
+    return (
+      normalizeInstalledReleaseInfo(
+        (manifest.currentRelease as any)?.release,
+      ) || normalizeInstalledReleaseInfo(manifest.release)
     );
-    const version = trim(
-      config?.currentRelease?.release?.version || config?.release?.version,
-    );
-    return version || undefined;
   } catch {
     return undefined;
   }
 }
 
-export function getCurrentRinVersion(sourceRoot?: string) {
+function currentReleaseInfoForOptions(
+  options: RinUpdateCheckOptions = {},
+): InstalledReleaseInfo | undefined {
+  return (
+    options.currentRelease ||
+    releaseInfoFromEnv() ||
+    readInstalledRinReleaseInfo(options.runtimeDir)
+  );
+}
+
+export function readInstalledRinReleaseVersion(
+  agentDir = resolveRuntimeProfile().agentDir,
+): string | undefined {
+  return readInstalledRinReleaseInfo(agentDir)?.version;
+}
+
+export function getCurrentRinVersion(
+  sourceRoot?: string,
+  currentRelease?: InstalledReleaseInfo,
+) {
   const envVersion = trim(process.env.RIN_RELEASE_VERSION);
   if (envVersion) return envVersion;
+  const releaseVersion = trim(currentRelease?.version);
+  if (releaseVersion) return releaseVersion;
   if (!sourceRoot) {
     const installedVersion = readInstalledRinReleaseVersion();
     if (installedVersion) return installedVersion;
@@ -147,12 +206,9 @@ export function getCurrentRinVersion(sourceRoot?: string) {
   return readRinPackageVersion(sourceRoot);
 }
 
-function isReleaseChannel(value: string): value is ReleaseChannel {
-  return (RIN_RELEASE_CHANNELS as readonly string[]).includes(value);
-}
-
 export function inferRinReleaseChannel(
   version = getCurrentRinVersion(),
+  currentRelease?: InstalledReleaseInfo,
 ): ReleaseChannel {
   const envChannel = trim(process.env.RIN_RELEASE_CHANNEL).toLowerCase();
   if (isReleaseChannel(envChannel)) {
@@ -161,36 +217,129 @@ export function inferRinReleaseChannel(
   const normalizedVersion = trim(version).toLowerCase();
   if (normalizedVersion.includes("-nightly.")) return "nightly";
   if (normalizedVersion.includes("-beta.")) return "beta";
+  if (currentRelease?.channel) return currentRelease.channel;
   return "stable";
+}
+
+function currentUpdateContext(options: RinUpdateCheckOptions = {}) {
+  const currentRelease = currentReleaseInfoForOptions(options);
+  const currentVersion = trim(
+    options.currentVersion ||
+      getCurrentRinVersion(options.sourceRoot, currentRelease),
+  );
+  const channel =
+    options.channel || inferRinReleaseChannel(currentVersion, currentRelease);
+  return { currentRelease, currentVersion, channel };
+}
+
+export function rinUpdateCommandForChannel(
+  channel: ReleaseChannel,
+  currentRelease?: InstalledReleaseInfo,
+) {
+  if (channel === "beta") return "rin update --beta";
+  if (channel === "nightly") return "rin update --nightly";
+  if (channel === "git") {
+    const branch = trim(currentRelease?.branch);
+    return branch ? `rin update --git ${branch}` : "rin update --git";
+  }
+  return "rin update";
+}
+
+function isGitHash(value: unknown) {
+  return /^[0-9a-f]{7,40}$/i.test(trim(value));
+}
+
+function gitRefsMatch(a: unknown, b: unknown) {
+  const left = trim(a).toLowerCase();
+  const right = trim(b).toLowerCase();
+  if (!left || !right) return false;
+  return left === right || left.startsWith(right) || right.startsWith(left);
+}
+
+function shortGitRef(value: unknown) {
+  const text = trim(value);
+  return isGitHash(text) ? text.slice(0, 12) : text;
+}
+
+function latestGitRefForBranch(
+  manifest: ReleaseManifest,
+  currentRelease?: InstalledReleaseInfo,
+) {
+  if (!manifest.git) return undefined;
+  const branch = trim(
+    currentRelease?.branch || manifest.git.defaultBranch || "main",
+  );
+  if (!branch) return undefined;
+  const repoUrl = trim(manifest.git?.repoUrl) || getReleaseRepoUrl(manifest);
+  try {
+    const raw = execFileSync(
+      "git",
+      ["ls-remote", repoUrl, `refs/heads/${branch}`],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 10_000,
+      },
+    ).trim();
+    const hash = raw.split(/\s+/)[0] || "";
+    return isGitHash(hash) ? hash : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function latestRinVersionForChannel(
   options: RinUpdateCheckOptions = {},
 ) {
-  const currentVersion = trim(options.currentVersion || getCurrentRinVersion());
-  const channel = options.channel || inferRinReleaseChannel(currentVersion);
-  if (channel === "git") return undefined;
+  const { channel, currentRelease } = currentUpdateContext(options);
   const manifest =
     options.manifest ||
     (await loadReleaseManifestForNetwork(options.sourceRoot));
+  if (channel === "git") return latestGitRefForBranch(manifest, currentRelease);
   return resolveReleaseRequest(manifest, { channel }).version;
+}
+
+export async function checkForRinUpdateNotice(
+  options: RinUpdateCheckOptions = {},
+): Promise<RinUpdateNotice | undefined> {
+  if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
+  if (process.env.PI_OFFLINE || process.env.RIN_OFFLINE) return undefined;
+  const { currentRelease, currentVersion, channel } =
+    currentUpdateContext(options);
+  const latestVersion = await latestRinVersionForChannel({
+    ...options,
+    currentVersion,
+    channel,
+  });
+  if (channel === "git") {
+    const currentRef = currentRelease?.ref || currentVersion;
+    if (!latestVersion || gitRefsMatch(latestVersion, currentRef)) {
+      return undefined;
+    }
+    return {
+      version: shortGitRef(latestVersion),
+      channel,
+      currentVersion,
+      command: rinUpdateCommandForChannel(channel, currentRelease),
+    };
+  }
+  if (!parsePackageVersion(currentVersion)) return undefined;
+  if (!parsePackageVersion(latestVersion)) return undefined;
+  if (comparePackageVersions(latestVersion, currentVersion) <= 0) {
+    return undefined;
+  }
+  return {
+    version: latestVersion,
+    channel,
+    currentVersion,
+    command: rinUpdateCommandForChannel(channel, currentRelease),
+  };
 }
 
 export async function checkForNewRinVersion(
   options: RinUpdateCheckOptions = {},
 ) {
-  if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
-  if (process.env.PI_OFFLINE || process.env.RIN_OFFLINE) return undefined;
-  const currentVersion = trim(options.currentVersion || getCurrentRinVersion());
-  if (!parsePackageVersion(currentVersion)) return undefined;
-  const latestVersion = await latestRinVersionForChannel({
-    ...options,
-    currentVersion,
-  });
-  if (!parsePackageVersion(latestVersion)) return undefined;
-  return comparePackageVersions(latestVersion, currentVersion) > 0
-    ? latestVersion
-    : undefined;
+  return (await checkForRinUpdateNotice(options))?.version;
 }
 
 export function getRinChangelogUrl() {

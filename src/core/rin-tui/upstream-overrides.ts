@@ -16,10 +16,11 @@ import {
 } from "@earendil-works/pi-tui";
 
 import {
-  checkForNewRinVersion,
+  checkForRinUpdateNotice,
   getCurrentRinVersion,
   getRinChangelogUrl,
   readRinChangelogEntries,
+  type RinUpdateNotice,
 } from "../rin-lib/update-notices.js";
 import { extractMessageText } from "../message-content.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
@@ -53,48 +54,6 @@ const RPC_TRANSPORT_STATUS_PHASES = new Set([
 
 function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
-}
-
-function renderRinStartupHeaderText(
-  text: unknown,
-  version = getCurrentRinVersion(),
-) {
-  const versionLabel = `Rin v${String(version || "unknown").trim() || "unknown"}`;
-  return String(text || "")
-    .replace(/\bpi\s+v[0-9A-Za-z.+-]+/gi, versionLabel)
-    .replace(
-      /\bPi can explain its own features and look up its docs\./g,
-      "Rin can explain her own features and look up her docs.",
-    )
-    .replace(
-      /\bAsk it how to use or extend Pi\./g,
-      "Ask her how to use or extend Rin.",
-    );
-}
-
-export function applyRinStartupHeaderBranding(instance: any) {
-  const header = instance?.builtInHeader;
-  if (
-    !header ||
-    typeof header.getCollapsedText !== "function" ||
-    typeof header.getExpandedText !== "function"
-  ) {
-    return false;
-  }
-
-  const originalCollapsed = header.getCollapsedText;
-  const originalExpanded = header.getExpandedText;
-  header.getCollapsedText = () =>
-    renderRinStartupHeaderText(originalCollapsed.call(header));
-  header.getExpandedText = () =>
-    renderRinStartupHeaderText(originalExpanded.call(header));
-
-  if (typeof header.setExpanded === "function") {
-    header.setExpanded(Boolean(instance?.getStartupExpansionState?.()));
-  } else if (typeof header.setText === "function") {
-    header.setText(header.getCollapsedText());
-  }
-  return true;
 }
 
 function currentRuntimeModeLabel() {
@@ -309,10 +268,11 @@ function redrawCurrentSessionHistoryAfterRpcResync(instance: any) {
   });
 }
 
-function showRinUpdateNotification(instance: any, newVersion: string) {
+function showRinUpdateNotification(instance: any, notice: RinUpdateNotice) {
+  const channelPrefix = notice.channel === "stable" ? "" : `${notice.channel} `;
   const text = [
-    `Rin update available: ${newVersion}`,
-    "Run: rin update",
+    `Rin ${channelPrefix}update available: ${notice.version}`,
+    `Run: ${notice.command}`,
     `Changelog: ${getRinChangelogUrl()}`,
   ].join("\n");
   if (typeof instance?.showWarning === "function") {
@@ -326,13 +286,13 @@ function showRinUpdateNotification(instance: any, newVersion: string) {
 
 async function showRinUpdateNotificationWhenReady(instance: any) {
   try {
-    const newVersion = await checkForNewRinVersion();
-    if (!newVersion) return;
+    const notice = await checkForRinUpdateNotice();
+    if (!notice) return;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if (instance?.isInitialized) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    showRinUpdateNotification(instance, newVersion);
+    showRinUpdateNotification(instance, notice);
   } catch {
     // Update checks must never block the TUI.
   }
@@ -478,13 +438,26 @@ export function rewriteRinStartupHeaderText(
     next = next
       .split(`v${upstreamVersionText}`)
       .join(formatRinStartupVersionLabel(rinVersion));
+  } else {
+    next = next.replace(
+      /\brin\s+v[0-9A-Za-z.+-]+/i,
+      `Rin ${formatRinStartupVersionLabel(rinVersion)}`,
+    );
   }
-  return next;
+  return next
+    .replace(
+      /\bRin can explain its own features and look up its docs\./g,
+      "Rin can explain her own features and look up her docs.",
+    )
+    .replace(
+      /\bAsk it how to use or extend Rin\./g,
+      "Ask her how to use or extend Rin.",
+    );
 }
 
 export function applyRinStartupHeaderBranding(instance: any) {
   const header = instance?.builtInHeader;
-  if (!header || typeof header !== "object") return;
+  if (!header || typeof header !== "object") return false;
   const upstreamVersion = String(instance?.version || "").trim();
 
   if (
@@ -497,13 +470,20 @@ export function applyRinStartupHeaderBranding(instance: any) {
       rewriteRinStartupHeaderText(getCollapsedText(), upstreamVersion);
     header.getExpandedText = () =>
       rewriteRinStartupHeaderText(getExpandedText(), upstreamVersion);
-    header.setExpanded?.(Boolean(instance.getStartupExpansionState?.()));
-    return;
+    if (typeof header.setExpanded === "function") {
+      header.setExpanded(Boolean(instance.getStartupExpansionState?.()));
+    } else if (typeof header.setText === "function") {
+      header.setText(header.getCollapsedText());
+    }
+    return true;
   }
 
   if (typeof header.text === "string" && typeof header.setText === "function") {
     header.setText(rewriteRinStartupHeaderText(header.text, upstreamVersion));
+    return true;
   }
+
+  return false;
 }
 
 function createSessionSelectorLoaders(instance: any) {
@@ -580,14 +560,6 @@ export async function applyRinTuiOverrides() {
         if (line) nextLines.push(line);
       }
       return nextLines;
-    };
-  }
-
-  const originalInit = interactiveModeProto?.init;
-  if (typeof originalInit === "function") {
-    interactiveModeProto.init = async function initWithRinStartupBranding() {
-      await originalInit.call(this);
-      applyRinStartupHeaderBranding(this);
     };
   }
 
