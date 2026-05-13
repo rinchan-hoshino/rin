@@ -87,7 +87,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "scheduled tasks/reminders -> docs/scheduled-tasks.md",
+      "Scheduled tasks/reminders/cron jobs -> docs/scheduled-tasks.md",
     ),
   );
   assert.equal(baseSystemPrompt.includes("- Topic map:"), false);

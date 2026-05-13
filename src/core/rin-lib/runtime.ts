@@ -117,7 +117,7 @@ function buildRinDocsBlock(agentDir: string) {
     `- Additional Pi docs: ${path.join(piRoot, "docs")}`,
     "- Read Rin docs when the task needs runtime operations, configuration, behavior, capabilities, layout, or other agent-operated details.",
     "- Start with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md; then use the relevant Rin topic doc.",
-    "- Common Rin routes: scheduled tasks/reminders -> docs/scheduled-tasks.md; chat bridge -> docs/chat-bridge.md; non-interactive CLI -> docs/non-interactive-cli.md; runtime layout/update -> docs/runtime-layout.md and docs/capabilities.md.",
+    "- Common Rin routes: Scheduled tasks/reminders/cron jobs -> docs/scheduled-tasks.md; chat bridge -> docs/chat-bridge.md; non-interactive CLI -> docs/non-interactive-cli.md; runtime layout/update -> docs/runtime-layout.md and docs/capabilities.md.",
     "- For topics not covered by Rin docs, use Pi README.md and docs/ as the base reference. Rin docs override Pi docs where they differ.",
     `- Upstream Pi examples live at ${path.join(piRoot, "examples")}.`,
   ].join("\n");
