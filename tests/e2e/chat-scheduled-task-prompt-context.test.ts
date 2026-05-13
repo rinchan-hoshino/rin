@@ -13,7 +13,7 @@ const promptContextMod = await import(
   ).href
 );
 
-test("chat prompt context keeps adapter-provided runtime metadata in the ordinary chat header", () => {
+test("chat prompt context keeps adapter-provided runtime metadata in the system prompt block", () => {
   const meta = {
     source: "chat-bridge",
     chatKey: "example:private:repo#issue/361",
@@ -32,20 +32,23 @@ test("chat prompt context keeps adapter-provided runtime metadata in the ordinar
   const systemBlock =
     promptContextMod.formatPromptContextSystemPromptBlock(meta);
 
-  assert.ok(promptText.includes("source repo: owner/project"));
-  assert.ok(promptText.includes("source target: issue #361"));
-  assert.ok(
-    promptText.includes(
-      "source url: https://example.invalid/owner/project/issues/361",
-    ),
-  );
-  assert.ok(promptText.includes("source event: issue_comment"));
+  assert.equal(promptText, "owner comment");
   assert.ok(systemBlock.includes("- source repo: owner/project"));
   assert.ok(systemBlock.includes("- source target: issue #361"));
-  assert.ok(promptText.endsWith("---\nowner comment"));
+  assert.ok(
+    systemBlock.includes(
+      "- source url: https://example.invalid/owner/project/issues/361",
+    ),
+  );
+  assert.ok(systemBlock.includes("- source event: issue_comment"));
+  assert.ok(
+    systemBlock.includes(
+      "- runtime note: metadata in this Chat context block is not sender-authored message text.",
+    ),
+  );
 });
 
-test("scheduled chat-bound prompt context keeps chat and task metadata in the prompt header", () => {
+test("scheduled chat-bound prompt context keeps chat and task metadata in the system prompt block", () => {
   const meta = {
     source: "chat-bridge",
     chatKey: "telegram/demo:1",
@@ -59,20 +62,19 @@ test("scheduled chat-bound prompt context keeps chat and task metadata in the pr
   const systemBlock =
     promptContextMod.formatPromptContextSystemPromptBlock(meta);
 
-  assert.ok(promptText.includes("chatKey: telegram/demo:1"));
-  assert.equal(promptText.includes("chat trigger:"), false);
-  assert.ok(promptText.includes("task id: cron_demo"));
-  assert.equal(promptText.includes("task run id:"), false);
-  assert.equal(promptText.includes("task session mode:"), false);
+  assert.equal(promptText, "scheduled hello");
+  assert.equal(systemBlock.includes("chat trigger:"), false);
+  assert.equal(systemBlock.includes("task run id:"), false);
+  assert.equal(systemBlock.includes("task session mode:"), false);
   assert.ok(systemBlock.includes("- chatKey: telegram/demo:1"));
   assert.ok(systemBlock.includes("- task id: cron_demo"));
   assert.ok(systemBlock.includes("- task name: Demo Task"));
   assert.ok(
     systemBlock.includes(
-      "- runtime note: header lines above `---` are runtime metadata for this message, not user-authored text.",
+      "- runtime note: metadata in this Chat context block is not sender-authored message text.",
     ),
   );
   assert.equal(systemBlock.includes("sender user id:"), false);
   assert.equal(systemBlock.includes("sender nickname:"), false);
-  assert.ok(promptText.endsWith("---\nscheduled hello"));
+  assert.equal(promptText.includes("time:"), false);
 });

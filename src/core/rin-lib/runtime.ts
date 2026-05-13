@@ -40,6 +40,7 @@ import {
 import { compileSelfImproveSync } from "../self-improve/store.js";
 import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
+import { formatPromptContextSystemPromptBlock } from "../chat-bridge/prompt-context.js";
 
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 
@@ -442,6 +443,16 @@ export function ensureSessionBaseSystemPrompt(session: any): string {
   return next;
 }
 
+export function appendPromptContextSystemPrompt(
+  systemPrompt: string,
+  promptContext: unknown,
+) {
+  const block = formatPromptContextSystemPromptBlock(promptContext as any);
+  if (!block.trim()) return String(systemPrompt || "");
+  const base = String(systemPrompt || "").trimEnd();
+  return base ? `${base}\n\n${block}` : block;
+}
+
 function applyRinPromptBuilder(session: any) {
   if (!session || typeof session !== "object") return;
   const originalRebuild =
@@ -478,14 +489,18 @@ function applyRinPromptBuilder(session: any) {
   if (originalPrompt) {
     session.prompt = async (text: string, options?: any) => {
       const basePrompt = ensureSessionBaseSystemPrompt(session);
-      const nextPrompt = consumeCompactionContinuationSystemPrompt(
+      const continuationPrompt = consumeCompactionContinuationSystemPrompt(
         session,
         basePrompt,
       );
-      if (nextPrompt === basePrompt) {
+      const turnPrompt = appendPromptContextSystemPrompt(
+        continuationPrompt,
+        options?.promptContext,
+      );
+      if (turnPrompt === basePrompt) {
         return await originalPrompt(text, options);
       }
-      applySessionBaseSystemPrompt(session, nextPrompt);
+      applySessionBaseSystemPrompt(session, turnPrompt);
       try {
         return await originalPrompt(text, options);
       } finally {

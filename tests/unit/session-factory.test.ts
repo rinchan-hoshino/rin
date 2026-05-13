@@ -248,6 +248,47 @@ test("session listing helpers derive presentation and active state consistently"
   );
 });
 
+test("session listing hides chat-runtime sessions from manual resume lists", () => {
+  const visible = {
+    id: "visible",
+    path: "/home/rin/.rin/sessions/visible.jsonl",
+    firstMessage: "ordinary session",
+    modified: new Date("2026-05-13T00:00:00.000Z"),
+    messageCount: 1,
+    cwd: undefined,
+    allMessagesText: "ordinary session",
+  };
+  const legacyChat = {
+    id: "legacy-chat",
+    path: "/home/rin/.rin/sessions/legacy-chat.jsonl",
+    firstMessage: [
+      "time: 2026-05-13 16:21:52 +08:00",
+      "runtime metadata: header lines above --- are not user-authored text",
+      "chatKey: github:private:owner/repo#issue/395",
+      "---",
+      "updated",
+    ].join("\n"),
+    modified: new Date("2026-05-13T01:00:00.000Z"),
+    messageCount: 1,
+    cwd: undefined,
+    allMessagesText: "",
+  };
+  const managedChat = {
+    id: "managed-chat",
+    path: "/home/rin/.rin/sessions/managed/chat/managed-chat.jsonl",
+    firstMessage: "updated",
+    modified: new Date("2026-05-13T02:00:00.000Z"),
+    messageCount: 1,
+    cwd: undefined,
+    allMessagesText: "updated",
+  };
+
+  assert.deepEqual(
+    listing.normalizeBoundSessionList([visible, legacyChat, managedChat]),
+    [visible],
+  );
+});
+
 test("session listing normalization trims legacy values and preserves normalized items", () => {
   const normalized = listing.normalizeBoundSessionListItem({
     id: " session-1 ",
