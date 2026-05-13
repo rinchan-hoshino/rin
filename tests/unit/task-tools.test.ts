@@ -134,6 +134,9 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
         controllerKey: "agent-test",
       });
       const terminated = await rin.chat.terminateTurn("agent-test");
+      const terminatedChat = await rin.chat.terminateTurn({
+        chatKey: "github:private:rinchanai/rin-internal#issue/1",
+      });
       await rin.chat.evalBridge({ code: "return 1;" });
 
       assert.deepEqual(
@@ -142,6 +145,7 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
           "chat_send",
           "chat_run_turn",
           "chat_terminate_turn",
+          "chat_terminate_turn",
           "chat_bridge_eval",
         ],
       );
@@ -149,8 +153,13 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
         chatKey: "telegram/1:2",
         text: "hello",
       });
+      assert.deepEqual(requests[2].payload, { controllerKey: "agent-test" });
+      assert.deepEqual(requests[3].payload, {
+        chatKey: "github:private:rinchanai/rin-internal#issue/1",
+      });
       assert.equal(turn.finalText, "ok");
       assert.equal(terminated.terminated, true);
+      assert.equal(terminatedChat.terminated, true);
     },
   );
 });

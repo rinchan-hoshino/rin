@@ -281,7 +281,10 @@ export type ChatBridgeHandle = {
   getStatus: () => ChatBridgeStatus;
   send: (payload: ChatOutboxPayload) => Promise<{ delivered: true }>;
   runTurn: (payload: ChatBridgeTurnPayload) => Promise<any>;
-  terminateTurn: (payload: { controllerKey: string }) => Promise<any>;
+  terminateTurn: (payload: {
+    controllerKey?: string;
+    chatKey?: string;
+  }) => Promise<any>;
   evalBridge: (payload: ChatBridgeEvalPayload) => Promise<any>;
 };
 
@@ -918,15 +921,28 @@ export async function startChatBridge(
       }
     }
   };
-  const terminateTurn = async (payload: { controllerKey: string }) => {
+  const terminateTurn = async (payload: {
+    controllerKey?: string;
+    chatKey?: string;
+  }) => {
     const controllerKey = safeString(payload?.controllerKey).trim();
-    if (!controllerKey) throw new Error("chat_controller_key_required");
+    const chatKey = safeString(payload?.chatKey).trim();
+    if (!controllerKey && !chatKey)
+      throw new Error("chat_controller_key_required");
+    if (chatKey) {
+      const controller = controllers.get(chatKey);
+      if (!controller) return { terminated: false };
+      await controller.terminateSession().catch(() => {});
+      controller.dispose();
+      controllers.delete(chatKey);
+      return { terminated: true, chatKey };
+    }
     const controller = detachedControllers.get(controllerKey);
     if (!controller) return { terminated: false };
     await controller.terminateSession().catch(() => {});
     controller.dispose();
     detachedControllers.delete(controllerKey);
-    return { terminated: true };
+    return { terminated: true, controllerKey };
   };
   const evalBridge = async (payload: ChatBridgeEvalPayload) => {
     const startedAtMs = Date.now();

@@ -29,6 +29,13 @@ export type ChatSendOptions = {
   [key: string]: unknown;
 };
 
+export type ChatTerminateTurnOptions =
+  | string
+  | {
+      controllerKey?: string;
+      chatKey?: string;
+    };
+
 export type ChatBridgeEvalOptions = {
   code: string;
   currentChatKey?: string;
@@ -151,11 +158,19 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
           override,
         ),
       terminateTurn: async (
-        controllerKey: string,
+        target: ChatTerminateTurnOptions,
         override?: RinAgentSdkOptions,
       ) =>
-        await request<{ terminated: boolean }>(
-          { type: "chat_terminate_turn", payload: { controllerKey } },
+        await request<{
+          terminated: boolean;
+          chatKey?: string;
+          controllerKey?: string;
+        }>(
+          {
+            type: "chat_terminate_turn",
+            payload:
+              typeof target === "string" ? { controllerKey: target } : target,
+          },
           override,
         ),
       evalBridge: async (
