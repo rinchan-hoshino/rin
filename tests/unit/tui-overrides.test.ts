@@ -201,7 +201,7 @@ test("loader stop clears render interval", () => {
   assert.ok(renders >= 1);
 });
 
-test("rpc frontend startup statuses use a shared static loader until Pi-owned working starts", async () => {
+test("rpc frontend startup statuses use an animated loader until working starts", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -244,9 +244,18 @@ test("rpc frontend startup statuses use a shared static loader until Pi-owned wo
     retryLoader: undefined,
     loadingAnimation: undefined,
     workingVisible: true,
-    stopWorkingLoader() {},
+    stopWorkingLoader() {
+      this.loadingAnimation?.stop?.();
+      this.loadingAnimation = undefined;
+      this.statusContainer.clear();
+    },
     createWorkingLoader() {
-      return { stop() {} };
+      return new loaderModule.Loader(
+        this.ui,
+        (value) => value,
+        (value) => value,
+        "Working...",
+      );
     },
   };
 
@@ -261,7 +270,8 @@ test("rpc frontend startup statuses use a shared static loader until Pi-owned wo
   assert.ok(startupStatus);
   assert.equal(instance.loadingAnimation, undefined);
   assert.equal(startupStatus.constructor.name, "Loader");
-  assert.equal(startupStatus.intervalId, null);
+  assert.notEqual(startupStatus.intervalId, null);
+  assert.ok(startupStatus.frames.length > 1);
   assert.equal(startupStatus.message, "Starting...");
   assert.equal(typeof startupStatus.stop, "function");
   const startupLines = startupStatus.render(40);
@@ -270,7 +280,6 @@ test("rpc frontend startup statuses use a shared static loader until Pi-owned wo
   assert.equal(piTuiModule.visibleWidth(startupLines[0]), 0);
   assert.equal(piTuiModule.visibleWidth(startupLines[1]), 40);
   assert.match(startupLines[1], /Starting\.\.\./);
-  assert.equal(startupLines[1].includes(`${ESC}[2m`), true);
   assert.equal(additions, 1);
   assert.ok(renders >= 1);
 
@@ -281,12 +290,11 @@ test("rpc frontend startup statuses use a shared static loader until Pi-owned wo
     connected: true,
   });
   assert.equal(instance.statusContainer.child, startupStatus);
-  assert.equal(startupStatus.intervalId, null);
+  assert.notEqual(startupStatus.intervalId, null);
   assert.equal(startupStatus.message, "Connecting...");
   const connectingLines = startupStatus.render(40);
   assert.equal(connectingLines[0], "");
   assert.match(connectingLines[1], /Connecting\.\.\./);
-  assert.equal(connectingLines[1].includes(`${ESC}[2m`), true);
   assert.equal(additions, 1);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
@@ -296,12 +304,11 @@ test("rpc frontend startup statuses use a shared static loader until Pi-owned wo
     connected: true,
   });
   assert.equal(instance.statusContainer.child, startupStatus);
-  assert.equal(startupStatus.intervalId, null);
+  assert.notEqual(startupStatus.intervalId, null);
   assert.equal(startupStatus.message, "Sending...");
   const sendingLines = startupStatus.render(40);
   assert.equal(sendingLines[0], "");
   assert.match(sendingLines[1], /Sending\.\.\./);
-  assert.equal(sendingLines[1].includes(`${ESC}[2m`), true);
   assert.equal(additions, 1);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
@@ -310,20 +317,11 @@ test("rpc frontend startup statuses use a shared static loader until Pi-owned wo
     label: "Working",
     connected: true,
   });
+
   assert.equal(instance.loadingAnimation, undefined);
   assert.equal(instance.statusContainer.child, undefined);
-
-  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
-    type: "agent_start",
-  });
-
-  try {
-    assert.ok(instance.loadingAnimation);
-    assert.equal(instance.statusContainer.child, instance.loadingAnimation);
-    assert.ok(clears >= 1);
-  } finally {
-    instance.loadingAnimation?.stop();
-  }
+  assert.equal(startupStatus.intervalId, null);
+  assert.ok(clears >= 1);
 });
 
 test("rpc working status only reattaches an existing Pi-owned loader", async () => {
