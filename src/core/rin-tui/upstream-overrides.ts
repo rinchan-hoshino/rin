@@ -6,6 +6,7 @@ import {
   SessionSelectorComponent,
 } from "@earendil-works/pi-coding-agent";
 import {
+  Loader,
   Markdown,
   ProcessTerminal,
   Spacer,
@@ -119,38 +120,17 @@ function statusContainerHasChild(instance: any, child: any) {
 function stopRpcTransportStatusComponent(instance: any) {
   const component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
   if (!component) return;
+  component.stop?.();
   if (statusContainerHasChild(instance, component)) {
     instance.statusContainer.clear();
   }
   instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = undefined;
 }
 
-function formatStaticStatusLoaderText(message: string) {
-  return `${ANSI_RESET} ${message}`;
-}
-
-class StaticStatusLoader extends Text {
-  public intervalId = undefined;
-  public message: string;
-
-  constructor(message: string) {
-    super(formatStaticStatusLoaderText(message), 0, 0);
-    this.message = message;
-  }
-
-  setMessage(message: string) {
-    this.message = message;
-    this.setText(formatStaticStatusLoaderText(message));
-  }
-
-  stop() {}
-
-  override render(width: number) {
-    return [
-      `${ANSI_RESET}${" ".repeat(Math.max(0, width))}`,
-      ...super.render(width),
-    ];
-  }
+function createStaticStatusLoader(instance: any, message: string) {
+  return new Loader(instance.ui, (text: string) => text, dim, message, {
+    frames: [],
+  });
 }
 
 function formatRpcTransportStatusLabel(label: string) {
@@ -166,12 +146,13 @@ function showRpcTransportStatus(instance: any, event: any) {
   }
 
   const label = String(event?.label || phase || "Starting");
+  const message = formatRpcTransportStatusLabel(label);
   let component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
   if (!component) {
-    component = new StaticStatusLoader(formatRpcTransportStatusLabel(label));
+    component = createStaticStatusLoader(instance, message);
     instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = component;
   } else {
-    component.setMessage(formatRpcTransportStatusLabel(label));
+    component.setMessage(message);
   }
   if (!statusContainerHasChild(instance, component)) {
     instance.statusContainer.clear();
