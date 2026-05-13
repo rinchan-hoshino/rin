@@ -43,18 +43,6 @@ function appendRuntimeMetadata(
   }
 }
 
-export function isPromptContextFormatted(body: string) {
-  return /^time: .+\n(?:[\s\S]*\n)?---\n/.test(safeString(body));
-}
-
-export function stripPromptContextHeader(body: string) {
-  const text = safeString(body);
-  if (!isPromptContextFormatted(text)) return text;
-  const separator = "\n---\n";
-  const index = text.indexOf(separator);
-  return index >= 0 ? text.slice(index + separator.length) : text;
-}
-
 export function formatPromptContextSystemPromptBlock(
   meta: PromptContextMeta | null | undefined,
 ) {
@@ -120,7 +108,7 @@ export function formatPromptContext(
   body: string,
   _fallbackTimestamp = Date.now(),
 ) {
-  return stripPromptContextHeader(body);
+  return safeString(body);
 }
 
 export function injectPromptContextHeader(
@@ -129,7 +117,7 @@ export function injectPromptContextHeader(
   options: { fallbackTimestamp?: number } = {},
 ) {
   const text = safeString(body);
-  if (!meta || isPromptContextFormatted(text)) return text;
+  if (!meta) return text;
   return formatPromptContext(
     meta,
     text,
