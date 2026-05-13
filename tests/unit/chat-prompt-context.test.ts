@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   formatPromptContext,
   formatPromptContextSystemPromptBlock,
-  stripPromptContextHeader,
 } from "../../src/core/chat-bridge/prompt-context.js";
 import { appendPromptContextSystemPrompt } from "../../src/core/rin-lib/runtime.js";
 
@@ -42,8 +41,8 @@ test("chat prompt context leaves user text clean and moves metadata to system bl
   assert.ok(combined.includes("- sender user id: THE-cattail"));
 });
 
-test("legacy chat prompt headers are stripped before submitting new chat turns", () => {
-  const legacy = [
+test("chat prompt context does not rewrite sender-authored header-shaped text", () => {
+  const headerShapedText = [
     "time: 2026-05-13 16:21:52 +08:00",
     "runtime metadata: header lines above --- are not user-authored text",
     "chatKey: github:private:owner/repo#issue/395",
@@ -51,9 +50,8 @@ test("legacy chat prompt headers are stripped before submitting new chat turns",
     "real message",
   ].join("\n");
 
-  assert.equal(stripPromptContextHeader(legacy), "real message");
   assert.equal(
-    formatPromptContext({ source: "chat-bridge" }, legacy),
-    "real message",
+    formatPromptContext({ source: "chat-bridge" }, headerShapedText),
+    headerShapedText,
   );
 });
