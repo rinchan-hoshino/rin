@@ -17,6 +17,7 @@ import {
 
 import {
   checkForNewRinVersion,
+  getCurrentRinVersion,
   getRinChangelogUrl,
   readRinChangelogEntries,
 } from "../rin-lib/update-notices.js";
@@ -52,6 +53,48 @@ const RPC_TRANSPORT_STATUS_PHASES = new Set([
 
 function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
+}
+
+function renderRinStartupHeaderText(
+  text: unknown,
+  version = getCurrentRinVersion(),
+) {
+  const versionLabel = `Rin v${String(version || "unknown").trim() || "unknown"}`;
+  return String(text || "")
+    .replace(/\bpi\s+v[0-9A-Za-z.+-]+/gi, versionLabel)
+    .replace(
+      /\bPi can explain its own features and look up its docs\./g,
+      "Rin can explain her own features and look up her docs.",
+    )
+    .replace(
+      /\bAsk it how to use or extend Pi\./g,
+      "Ask her how to use or extend Rin.",
+    );
+}
+
+export function applyRinStartupHeaderBranding(instance: any) {
+  const header = instance?.builtInHeader;
+  if (
+    !header ||
+    typeof header.getCollapsedText !== "function" ||
+    typeof header.getExpandedText !== "function"
+  ) {
+    return false;
+  }
+
+  const originalCollapsed = header.getCollapsedText;
+  const originalExpanded = header.getExpandedText;
+  header.getCollapsedText = () =>
+    renderRinStartupHeaderText(originalCollapsed.call(header));
+  header.getExpandedText = () =>
+    renderRinStartupHeaderText(originalExpanded.call(header));
+
+  if (typeof header.setExpanded === "function") {
+    header.setExpanded(Boolean(instance?.getStartupExpansionState?.()));
+  } else if (typeof header.setText === "function") {
+    header.setText(header.getCollapsedText());
+  }
+  return true;
 }
 
 function currentRuntimeModeLabel() {
@@ -497,9 +540,17 @@ export async function applyRinTuiOverrides() {
       function updateTerminalTitleWithoutCwd() {
         const sessionName = this?.sessionManager?.getSessionName?.();
         this?.ui?.terminal?.setTitle?.(
-          sessionName ? `π - ${sessionName}` : "π",
+          sessionName ? `Rin - ${sessionName}` : "Rin",
         );
       };
+  }
+
+  const originalInit = interactiveModeProto?.init;
+  if (typeof originalInit === "function") {
+    interactiveModeProto.init = async function initWithRinStartupBranding() {
+      await originalInit.call(this);
+      applyRinStartupHeaderBranding(this);
+    };
   }
 
   const originalSetupEditorSubmitHandler =

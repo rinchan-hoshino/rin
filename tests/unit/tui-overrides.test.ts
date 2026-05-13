@@ -68,7 +68,52 @@ test("terminal title override shows only session name", async () => {
     },
   });
 
-  assert.equal(title, "π - demo");
+  assert.equal(title, "Rin - demo");
+});
+
+test("startup header override replaces upstream Pi branding with Rin", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const previousVersion = process.env.RIN_RELEASE_VERSION;
+  process.env.RIN_RELEASE_VERSION = "1.2.3";
+  const header = {
+    text: "",
+    getCollapsedText() {
+      return "pi v0.74.0\nshort help\n\nPi can explain its own features and look up its docs. Ask it how to use or extend Pi.";
+    },
+    getExpandedText() {
+      return "pi v0.74.0\nexpanded help\n\nPi can explain its own features and look up its docs. Ask it how to use or extend Pi.";
+    },
+    setText(value) {
+      this.text = value;
+    },
+    setExpanded(expanded) {
+      this.setText(expanded ? this.getExpandedText() : this.getCollapsedText());
+    },
+  };
+
+  try {
+    assert.equal(
+      overrides.applyRinStartupHeaderBranding({
+        builtInHeader: header,
+        getStartupExpansionState: () => false,
+      }),
+      true,
+    );
+
+    assert.match(header.text, /Rin v1\.2\.3/);
+    assert.match(header.text, /Rin can explain her own features/);
+    assert.match(header.text, /extend Rin/);
+    assert.doesNotMatch(header.text, /\bpi v0\.74\.0\b/i);
+    assert.doesNotMatch(header.text, /extend Pi/);
+    assert.match(
+      codingAgentModule.InteractiveMode.prototype.init.toString(),
+      /applyRinStartupHeaderBranding/,
+    );
+  } finally {
+    if (previousVersion === undefined) delete process.env.RIN_RELEASE_VERSION;
+    else process.env.RIN_RELEASE_VERSION = previousVersion;
+  }
 });
 
 test("update overrides replace startup update path and skip settings changelog state", async () => {
