@@ -114,7 +114,7 @@ test("buildFinalAppSystemPrompt injects configured language from settings", asyn
   const agentDir = makeTempDir(t, "rin-lang-prompt-agent-");
   fs.writeFileSync(
     path.join(agentDir, "settings.json"),
-    JSON.stringify({ language: "zh-CN" }, null, 2),
+    JSON.stringify({ language: "zh_CN" }, null, 2),
     "utf8",
   );
 
@@ -125,8 +125,8 @@ test("buildFinalAppSystemPrompt injects configured language from settings", asyn
     });
 
   assert.ok(baseSystemPrompt.includes("Configured runtime defaults:"));
-  assert.ok(baseSystemPrompt.includes("Preferred language: zh-CN"));
-  assert.ok(finalSystemPrompt.includes("Preferred language: zh-CN"));
+  assert.ok(baseSystemPrompt.includes("Preferred language: zh_CN"));
+  assert.ok(finalSystemPrompt.includes("Preferred language: zh_CN"));
 });
 
 test("buildFinalAppSystemPrompt injects a continuation prompt after automatic compaction", async () => {

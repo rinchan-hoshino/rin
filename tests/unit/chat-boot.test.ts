@@ -34,7 +34,7 @@ async function withTempDir(fn) {
 }
 
 test("chat boot localizes command descriptions for Chinese runtimes", () => {
-  const rows = boot.getChatCommandRows("zh-CN");
+  const rows = boot.getChatCommandRows("zh_CN");
   assert.deepEqual(
     rows.map((row) => row.description),
     [

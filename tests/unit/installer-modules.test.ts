@@ -562,7 +562,7 @@ test("persist reconcileInstallerManifest stores configured language in installer
         provider: "openai",
         modelId: "gpt",
         thinkingLevel: "medium",
-        language: "zh-CN",
+        language: "zh_CN",
         elevated: false,
       },
       {
@@ -580,7 +580,7 @@ test("persist reconcileInstallerManifest stores configured language in installer
     assert.equal(writes[0].value.defaultProvider, "openai");
     assert.equal(writes[0].value.defaultModel, "gpt");
     assert.equal(writes[0].value.defaultThinkingLevel, "medium");
-    assert.equal(writes[0].value.language, "zh-CN");
+    assert.equal(writes[0].value.language, "zh_CN");
   });
 });
 
@@ -631,7 +631,7 @@ test("persistInstallerOutputs stores configured language in settings", async () 
         provider: "openai",
         modelId: "gpt",
         thinkingLevel: "medium",
-        language: "zh-CN",
+        language: "zh_CN",
         chatConfig: {},
         authData: {},
         elevated: false,
@@ -668,7 +668,7 @@ test("persistInstallerOutputs stores configured language in settings", async () 
     assert.equal(settingsWrite.value.defaultProvider, "openai");
     assert.equal(settingsWrite.value.defaultModel, "gpt");
     assert.equal(settingsWrite.value.defaultThinkingLevel, "medium");
-    assert.equal(settingsWrite.value.language, "zh-CN");
+    assert.equal(settingsWrite.value.language, "zh_CN");
   });
 });
 

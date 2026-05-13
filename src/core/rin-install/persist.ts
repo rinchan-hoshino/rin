@@ -8,7 +8,7 @@ import {
   listDetachedControllerStateFiles,
 } from "../chat/support.js";
 import { isJsonRecord } from "../json-utils.js";
-import { normalizeLanguageTag } from "../language.js";
+import { DEFAULT_LANGUAGE_TAG, normalizeLanguageTag } from "../language.js";
 import { stringifyJson } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 import { loadFirstValidCandidate } from "./candidate-loader.js";
@@ -569,7 +569,7 @@ function normalizeChatConfigRoot(chatConfig: unknown) {
 function normalizeConfiguredLanguage(language: unknown) {
   const normalizedLanguage = String(language || "").trim();
   return normalizedLanguage
-    ? normalizeLanguageTag(normalizedLanguage, "en")
+    ? normalizeLanguageTag(normalizedLanguage, DEFAULT_LANGUAGE_TAG)
     : "";
 }
 

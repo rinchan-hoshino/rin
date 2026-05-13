@@ -1,4 +1,5 @@
 import {
+  DEFAULT_LANGUAGE_TAG,
   detectLocalLanguageTag,
   normalizeLanguageTag,
   resolveInstallerDisplayLanguage,
@@ -14,19 +15,19 @@ type InstallerLanguagePromptApi = {
 };
 
 const LANGUAGE_OPTIONS = [
-  { value: "en", label: "English", hint: "en" },
-  { value: "zh-CN", label: "简体中文", hint: "zh-CN" },
-  { value: "zh-TW", label: "繁體中文", hint: "zh-TW" },
-  { value: "ja", label: "日本語", hint: "ja" },
-  { value: "ko", label: "한국어", hint: "ko" },
-  { value: "fr", label: "Français", hint: "fr" },
-  { value: "es", label: "Español", hint: "es" },
-  { value: "de", label: "Deutsch", hint: "de" },
-  { value: "pt-BR", label: "Português (Brasil)", hint: "pt-BR" },
-  { value: "ru", label: "Русский", hint: "ru" },
-  { value: "ar", label: "العربية", hint: "ar" },
-  { value: "hi", label: "हिन्दी", hint: "hi" },
-  { value: "custom", label: "Other", hint: "Enter any BCP 47 language tag" },
+  { value: DEFAULT_LANGUAGE_TAG, label: "English", hint: DEFAULT_LANGUAGE_TAG },
+  { value: "zh_CN", label: "简体中文", hint: "zh_CN" },
+  { value: "zh_TW", label: "繁體中文", hint: "zh_TW" },
+  { value: "ja_JP", label: "日本語", hint: "ja_JP" },
+  { value: "ko_KR", label: "한국어", hint: "ko_KR" },
+  { value: "fr_FR", label: "Français", hint: "fr_FR" },
+  { value: "es_ES", label: "Español", hint: "es_ES" },
+  { value: "de_DE", label: "Deutsch", hint: "de_DE" },
+  { value: "pt_BR", label: "Português (Brasil)", hint: "pt_BR" },
+  { value: "ru_RU", label: "Русский", hint: "ru_RU" },
+  { value: "ar_SA", label: "العربية", hint: "ar_SA" },
+  { value: "hi_IN", label: "हिन्दी", hint: "hi_IN" },
+  { value: "custom", label: "Other", hint: "Enter any locale code" },
 ] as const;
 
 type InstallerLanguagePromptCopy = {
@@ -303,14 +304,14 @@ function formatOpenLinks(links?: string | string[]) {
 }
 
 const INSTALLER_DISPLAY_COPY = {
-  en: {
+  en_US: {
     languagePrompt: {
       chooseMessage: "Choose installer language",
       detectedSuffix: "detected",
       customLabel: "Other",
-      customHint: "Enter any BCP 47 language tag",
-      textMessage: "Enter language tag (BCP 47)",
-      invalidLanguageTag: "Use a valid BCP 47 language tag",
+      customHint: "Enter any locale code",
+      textMessage: "Enter locale code",
+      invalidLanguageTag: "Use a valid locale code such as en_US",
     },
     chatCommandDescriptions: {
       help: "Show available commands",
@@ -714,14 +715,14 @@ const INSTALLER_DISPLAY_COPY = {
       `Enter the API key or token for ${providerName}.`,
     tokenRequired: "A token is required.",
   },
-  "zh-CN": {
+  zh_CN: {
     languagePrompt: {
       chooseMessage: "选择安装器语言",
       detectedSuffix: "已检测",
       customLabel: "其他",
-      customHint: "输入任意 BCP 47 语言标签",
-      textMessage: "输入语言标签（BCP 47）",
-      invalidLanguageTag: "请输入有效的 BCP 47 语言标签",
+      customHint: "输入任意区域语言代码",
+      textMessage: "输入区域语言代码",
+      invalidLanguageTag: "请输入有效的区域语言代码，例如 zh_CN",
     },
     chatCommandDescriptions: {
       help: "显示可用命令",
@@ -1108,7 +1109,7 @@ const INSTALLER_DISPLAY_COPY = {
 export async function promptInstallerLanguage(
   prompt: InstallerLanguagePromptApi,
 ) {
-  const detected = detectLocalLanguageTag("en");
+  const detected = detectLocalLanguageTag();
   const promptDisplayLanguage = resolveInstallerDisplayLanguage(detected);
   const copy = INSTALLER_DISPLAY_COPY[promptDisplayLanguage].languagePrompt;
   const selected = String(
@@ -1128,13 +1129,13 @@ export async function promptInstallerLanguage(
       }),
     ),
   ).trim();
-  if (selected !== "custom") return normalizeLanguageTag(selected, "en");
+  if (selected !== "custom") return normalizeLanguageTag(selected);
   return normalizeLanguageTag(
     prompt.ensureNotCancelled(
       await prompt.text({
         message: copy.textMessage,
-        placeholder: detected || "en",
-        defaultValue: detected || "en",
+        placeholder: detected || DEFAULT_LANGUAGE_TAG,
+        defaultValue: detected || DEFAULT_LANGUAGE_TAG,
         validate(value: string) {
           return normalizeLanguageTag(value, "")
             ? undefined
@@ -1142,23 +1143,23 @@ export async function promptInstallerLanguage(
         },
       }),
     ),
-    "en",
+    DEFAULT_LANGUAGE_TAG,
   );
 }
 
-export function createRinI18n(languageTag = "en") {
-  const language = normalizeLanguageTag(languageTag, "en");
+export function createRinI18n(languageTag = DEFAULT_LANGUAGE_TAG) {
+  const language = normalizeLanguageTag(languageTag);
   const displayLanguage = resolveInstallerDisplayLanguage(language);
   const copy = INSTALLER_DISPLAY_COPY[displayLanguage];
 
   return {
     language,
     displayLanguage,
-    isChinese: displayLanguage === "zh-CN",
+    isChinese: displayLanguage === "zh_CN",
     ...copy,
   };
 }
 
-export function createInstallerI18n(languageTag = "en") {
+export function createInstallerI18n(languageTag = DEFAULT_LANGUAGE_TAG) {
   return createRinI18n(languageTag);
 }

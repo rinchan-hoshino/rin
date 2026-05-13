@@ -3,10 +3,11 @@ import chalk from "chalk";
 
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
 
+import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
 import { discoverInstalledTargets } from "./update-targets.js";
 import {
-  runFinalizeInstallPlanInChild,
+  runFinalizeInstallPlanInChild as runFinalizeInstallPlanInChildImpl,
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
 import { renderInstallerNote, wrapInstallerNoteText } from "./interactive.js";
@@ -79,12 +80,18 @@ export async function startUpdater(deps: {
     installDir: string;
     ownerHome: string;
   }) => string;
+  runFinalizeInstallPlanInChild?: typeof runFinalizeInstallPlanInChildImpl;
 }) {
   const currentUser = deps.detectCurrentUser();
   const promptSelect = deps.select || select;
   const promptConfirm = deps.confirm || confirm;
   const initialI18n =
-    deps.i18n || createInstallerI18n(process.env.RIN_INSTALL_LANGUAGE || "en");
+    deps.i18n ||
+    createInstallerI18n(
+      process.env.RIN_INSTALL_LANGUAGE || DEFAULT_LANGUAGE_TAG,
+    );
+  const runFinalizeInstallPlanInChild =
+    deps.runFinalizeInstallPlanInChild || runFinalizeInstallPlanInChildImpl;
 
   intro(initialI18n.updaterIntroTitle);
 
@@ -121,8 +128,9 @@ export async function startUpdater(deps: {
     installDir,
     ownerHome: target.ownerHome,
   });
-  const i18n = selectedLanguage
-    ? createInstallerI18n(selectedLanguage)
+  const updateLanguage = selectedLanguage || "";
+  const i18n = updateLanguage
+    ? createInstallerI18n(updateLanguage)
     : initialI18n;
 
   note(
@@ -170,7 +178,7 @@ export async function startUpdater(deps: {
           targetUser,
           installDir,
           sourceRoot: deps.repoRootFromHere(),
-          language: i18n.language,
+          ...(updateLanguage ? { language: updateLanguage } : {}),
           daemonReadyTimeoutMs: 30_000,
           ...(deps.release ? { release: deps.release } : {}),
         } satisfies FinalizeInstallOptions,
