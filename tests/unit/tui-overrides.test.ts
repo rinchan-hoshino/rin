@@ -436,8 +436,11 @@ test("local session selector reuses bound session helpers for canonicalized list
       instance,
     );
 
-    const headerText = selector.header.render(100).join("\n");
+    const headerLines = selector.header.render(100);
+    const headerText = headerLines.join("\n");
     assert.doesNotMatch(headerText, /Current|Folder|Directory/);
+    assert.equal(piTuiModule.visibleWidth(headerLines[0]), 100);
+    assert.ok(headerLines[0].endsWith(`Threaded${ESC}[39m`));
     selector.sessionList.setSessions([], false);
     assert.doesNotMatch(
       selector.sessionList.render(100).join("\n"),

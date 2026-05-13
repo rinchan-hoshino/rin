@@ -12,6 +12,7 @@ import {
   Spacer,
   Text,
   truncateToWidth,
+  visibleWidth,
 } from "@earendil-works/pi-tui";
 
 import {
@@ -356,6 +357,19 @@ function preserveScrollbackOnFullRedraw() {
   };
 }
 
+function padSessionSelectorHeaderStatus(line: string, width: number) {
+  const missing = width - visibleWidth(line);
+  if (missing <= 0) return line;
+
+  const markerIndexes = [line.indexOf("○"), line.indexOf("◉")].filter(
+    (index) => index >= 0,
+  );
+  const markerIndex = Math.min(...markerIndexes);
+  if (!Number.isFinite(markerIndex)) return line;
+
+  return `${line.slice(0, markerIndex)}${" ".repeat(missing)}${line.slice(markerIndex)}`;
+}
+
 function renderSessionSelectorHeaderWithoutCwdLabels(
   header: any,
   render: (width: number) => unknown,
@@ -363,16 +377,15 @@ function renderSessionSelectorHeaderWithoutCwdLabels(
 ) {
   const lines = render.call(header, width);
   if (!Array.isArray(lines)) return lines;
-  return lines.map((line) =>
-    typeof line === "string"
-      ? line
-          .replace(
-            /Resume Session \((?:Current Folder|All)\)/g,
-            "Resume Session",
-          )
-          .replace(/Current Folder/g, "Sessions")
-      : line,
-  );
+  return lines.map((line, index) => {
+    if (typeof line !== "string") return line;
+    const nextLine = line
+      .replace(/Resume Session \((?:Current Folder|All)\)/g, "Resume Session")
+      .replace(/Current Folder/g, "Sessions");
+    return index === 0
+      ? padSessionSelectorHeaderStatus(nextLine, width)
+      : nextLine;
+  });
 }
 
 function configureRootSessionSelectorPresentation(selector: any) {
