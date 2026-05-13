@@ -17,6 +17,7 @@ import {
 
 import {
   checkForNewRinVersion,
+  getCurrentRinVersion,
   getRinChangelogUrl,
   readRinChangelogEntries,
 } from "../rin-lib/update-notices.js";
@@ -414,6 +415,56 @@ function configureRootSessionSelectorPresentation(selector: any) {
   }
 }
 
+function formatRinStartupVersionLabel(version = getCurrentRinVersion()) {
+  const trimmed = String(version || "unknown").trim() || "unknown";
+  if (/^v\d+\.\d+\.\d+(?:[-+].*)?$/i.test(trimmed)) return trimmed;
+  if (/^\d+\.\d+\.\d+(?:[-+].*)?$/i.test(trimmed)) return `v${trimmed}`;
+  return trimmed;
+}
+
+export function rewriteRinStartupHeaderText(
+  text: string,
+  upstreamVersion?: string,
+  rinVersion = getCurrentRinVersion(),
+) {
+  let next = String(text || "")
+    .split("pi")
+    .join("rin")
+    .split("Pi")
+    .join("Rin");
+  const upstreamVersionText = String(upstreamVersion || "").trim();
+  if (upstreamVersionText) {
+    next = next
+      .split(`v${upstreamVersionText}`)
+      .join(formatRinStartupVersionLabel(rinVersion));
+  }
+  return next;
+}
+
+export function applyRinStartupHeaderBranding(instance: any) {
+  const header = instance?.builtInHeader;
+  if (!header || typeof header !== "object") return;
+  const upstreamVersion = String(instance?.version || "").trim();
+
+  if (
+    typeof header.getCollapsedText === "function" &&
+    typeof header.getExpandedText === "function"
+  ) {
+    const getCollapsedText = header.getCollapsedText.bind(header);
+    const getExpandedText = header.getExpandedText.bind(header);
+    header.getCollapsedText = () =>
+      rewriteRinStartupHeaderText(getCollapsedText(), upstreamVersion);
+    header.getExpandedText = () =>
+      rewriteRinStartupHeaderText(getExpandedText(), upstreamVersion);
+    header.setExpanded?.(Boolean(instance.getStartupExpansionState?.()));
+    return;
+  }
+
+  if (typeof header.text === "string" && typeof header.setText === "function") {
+    header.setText(rewriteRinStartupHeaderText(header.text, upstreamVersion));
+  }
+}
+
 function createSessionSelectorLoaders(instance: any) {
   if (!isRpcTransportControlled(instance)) {
     const loadSessions = () =>
@@ -488,6 +539,14 @@ export async function applyRinTuiOverrides() {
         if (line) nextLines.push(line);
       }
       return nextLines;
+    };
+  }
+
+  const originalInit = interactiveModeProto?.init;
+  if (typeof originalInit === "function") {
+    interactiveModeProto.init = async function initWithRinStartupBranding() {
+      await originalInit.call(this);
+      applyRinStartupHeaderBranding(this);
     };
   }
 

@@ -94,6 +94,47 @@ test("update overrides replace startup update path and skip settings changelog s
   );
 });
 
+test("startup header branding replaces upstream Pi name and version", async () => {
+  assert.equal(
+    overrides.rewriteRinStartupHeaderText(
+      `${ESC}[38;5;109mpi${ESC}[39m${ESC}[38;5;241m v0.74.0${ESC}[39m\nPi can explain Pi.`,
+      "0.74.0",
+      "0.2.0-nightly.20260512+dc82e36",
+    ),
+    `${ESC}[38;5;109mrin${ESC}[39m${ESC}[38;5;241m v0.2.0-nightly.20260512+dc82e36${ESC}[39m\nRin can explain Rin.`,
+  );
+
+  let currentText = "";
+  const previousReleaseVersion = process.env.RIN_RELEASE_VERSION;
+  try {
+    process.env.RIN_RELEASE_VERSION = "0.3.0";
+    const header = {
+      getCollapsedText: () => "pi v0.74.0\nPi can help.",
+      getExpandedText: () => "pi v0.74.0\nExpanded Pi help.",
+      setExpanded(expanded) {
+        currentText = expanded
+          ? this.getExpandedText()
+          : this.getCollapsedText();
+      },
+    };
+    overrides.applyRinStartupHeaderBranding({
+      builtInHeader: header,
+      version: "0.74.0",
+      getStartupExpansionState: () => true,
+    });
+  } finally {
+    if (previousReleaseVersion === undefined)
+      delete process.env.RIN_RELEASE_VERSION;
+    else process.env.RIN_RELEASE_VERSION = previousReleaseVersion;
+  }
+
+  assert.equal(currentText, "rin v0.3.0\nExpanded Rin help.");
+  assert.match(
+    String(codingAgentModule.InteractiveMode.prototype.init),
+    /applyRinStartupHeaderBranding/,
+  );
+});
+
 test("footer appends runtime mode to the model label before rendering", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);

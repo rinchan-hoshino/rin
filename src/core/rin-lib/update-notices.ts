@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -112,9 +113,37 @@ export function readRinPackageVersion(sourceRoot = moduleRootFromHere()) {
   }
 }
 
+function runtimeAgentDirFromEnv() {
+  return (
+    trim(process.env.RIN_DIR) ||
+    trim(process.env.PI_CODING_AGENT_DIR) ||
+    path.join(os.homedir(), ".rin")
+  );
+}
+
+export function readInstalledRinReleaseVersion(
+  agentDir = runtimeAgentDirFromEnv(),
+): string | undefined {
+  try {
+    const config = JSON.parse(
+      fs.readFileSync(path.join(agentDir, "installer.json"), "utf8"),
+    );
+    const version = trim(
+      config?.currentRelease?.release?.version || config?.release?.version,
+    );
+    return version || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function getCurrentRinVersion(sourceRoot?: string) {
   const envVersion = trim(process.env.RIN_RELEASE_VERSION);
-  if (parsePackageVersion(envVersion)) return envVersion;
+  if (envVersion) return envVersion;
+  if (!sourceRoot) {
+    const installedVersion = readInstalledRinReleaseVersion();
+    if (installedVersion) return installedVersion;
+  }
   return readRinPackageVersion(sourceRoot);
 }
 
