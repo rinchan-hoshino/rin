@@ -32,7 +32,8 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 - `docs/self-improve-memory-maintenance.md`: shared requirements for self-improve review and consolidation prompts.
 - `docs/agent-sdk.md`: local SDK helpers for daemon-backed task and chat operations that agents should not perform through raw RPC payloads.
 - `docs/scheduled-tasks.md`: scheduled task creation, inspection, update, deletion, and verification workflows.
-- `docs/chat-bridge.md`: chat bridge SDK/configuration workflows, stored chat paths, rich content notes, and adapter notes.
+- `docs/chat-bridge.md`: chat bridge SDK/configuration workflows, stored chat paths, and adapter notes.
+- `docs/chat-rich-content.md`: native mention, quote, attachment, and fallback syntax for rich chat replies.
 
 ## Reading order
 

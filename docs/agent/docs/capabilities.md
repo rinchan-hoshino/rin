@@ -56,8 +56,7 @@ Rin's direct built-in chat bridge currently includes Telegram, OneBot, QQ, Feish
 Key points for agents:
 
 - The prompt may include `chatKey`, chat name, sender identity, and related context.
-- Chat rich content uses Markdown extensions such as native mentions, quotes, images, files, video, audio, and stickers.
-- Native mentions require exact platform user ids; raw `@name` text is plain visible text.
+- Chat rich content syntax lives in `docs/chat-rich-content.md`; use it for native mentions, quotes, attachments, and fallback behavior.
 - Chat sending, stored-message lookup, log inspection, and identity updates are SDK/file workflows rather than model tools.
 - `/chat` configures official adapters in the TUI and enters platform selection directly.
 - Official adapter setup should use the minimum runnable fields, prefer polling/socket modes when supported, avoid webhook-only setup when possible, and include direct official links for required values.
