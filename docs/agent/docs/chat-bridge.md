@@ -56,7 +56,7 @@ await rin.chat.runTurn({
 
 ## Rich message parts
 
-Use `docs/chat-rich-content.md` for native mention, quote, attachment, and fallback syntax.
+Use `docs/rich-text-output-format.md` for native mention, quote, attachment, and fallback syntax.
 
 ## Stored chat context
 

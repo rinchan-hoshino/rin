@@ -69,10 +69,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("- search_memory:"));
   assert.equal(baseSystemPrompt.includes("- save_prompts:"), false);
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
-  assert.equal(
-    baseSystemPrompt.includes("Chat rich content Markdown syntax:"),
-    false,
-  );
+  assert.equal(baseSystemPrompt.includes("Markdown rich-object syntax"), false);
   assert.equal(
     baseSystemPrompt.includes("Native at: [@name](at:<platform-user-id>)"),
     false,
@@ -89,10 +86,9 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "scheduled tasks/reminders/cron jobs -> docs/scheduled-tasks.md",
     ),
   );
-  assert.ok(baseSystemPrompt.includes("Important chat output route:"));
   assert.ok(
     baseSystemPrompt.includes(
-      "read docs/chat-rich-content.md before writing the reply",
+      "rich text output format -> docs/rich-text-output-format.md",
     ),
   );
   assert.equal(baseSystemPrompt.includes("- Topic map:"), false);

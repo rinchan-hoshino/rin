@@ -11,7 +11,7 @@ Use this page as a quick entrypoint for Rin runtime capabilities. Follow the sys
 - **Non-interactive work:** use `rin -p` or `rin --mode json` only after reading `docs/non-interactive-cli.md`.
 - **Initialization:** if the user asks to initialize or reset preferences, read `docs/initialization.md`.
 - **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, manual run-now starts, and recurring agent automation. Read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, running, completing, pausing, resuming, or deleting them.
-- **Chat bridge:** chat sender identity comes from the platform, not the shell user. Read `docs/chat-bridge.md` for SDK/file workflows and rich content behavior.
+- **Chat bridge:** chat sender identity comes from the platform, not the shell user. Read `docs/chat-bridge.md` for SDK/file workflows and adapter behavior; read `docs/rich-text-output-format.md` for native output objects.
 - **Optional browser/computer tools:** disabled unless `settings.json -> extensions` includes `rin:browser-use` or `rin:computer-use`.
 - **Web search:** use `web_search` proactively for fresh or version-sensitive facts; direct URL mode fetches a known page.
 - **Status and usage:** use `rin status` / `rin status --json` for daemon activity and `rin usage` for token telemetry.
@@ -56,7 +56,7 @@ Rin's direct built-in chat bridge currently includes Telegram, OneBot, QQ, Feish
 Key points for agents:
 
 - The prompt may include `chatKey`, chat name, sender identity, and related context.
-- Chat rich content syntax lives in `docs/chat-rich-content.md`; use it for native mentions, quotes, attachments, and fallback behavior.
+- Rich text output format lives in `docs/rich-text-output-format.md`; use it for native mentions, quotes, attachments, and fallback behavior.
 - Chat sending, stored-message lookup, log inspection, and identity updates are SDK/file workflows rather than model tools.
 - `/chat` configures official adapters in the TUI and enters platform selection directly.
 - Official adapter setup should use the minimum runnable fields, prefer polling/socket modes when supported, avoid webhook-only setup when possible, and include direct official links for required values.

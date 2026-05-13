@@ -33,7 +33,7 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 - `docs/agent-sdk.md`: local SDK helpers for daemon-backed task and chat operations that agents should not perform through raw RPC payloads.
 - `docs/scheduled-tasks.md`: scheduled task creation, inspection, update, deletion, and verification workflows.
 - `docs/chat-bridge.md`: chat bridge SDK/configuration workflows, stored chat paths, and adapter notes.
-- `docs/chat-rich-content.md`: native mention, quote, attachment, and fallback syntax for rich chat replies.
+- `docs/rich-text-output-format.md`: native mention, quote, attachment, and fallback syntax for rich outputs.
 
 ## Reading order
 
