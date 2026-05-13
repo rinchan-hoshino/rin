@@ -52,15 +52,7 @@ type IndexedEntryInsertValues = [
   string,
 ];
 
-type IndexedEntryFtsValues = [
-  string,
-  string,
-  string,
-  string,
-  string,
-  string,
-  string,
-];
+type IndexedEntryFtsValues = [string, string, string, string, string, string];
 
 type TranscriptSearchWriteStatements = {
   selectArchiveRowKeys: Statement;
@@ -80,7 +72,7 @@ const transcriptSearchWriteStatementCache = new WeakMap<
   TranscriptSearchWriteStatements
 >();
 
-const SEARCH_DB_SCHEMA_VERSION = 3;
+const SEARCH_DB_SCHEMA_VERSION = 4;
 const DEFAULT_RESULT_LIMIT = 8;
 const RAW_SEARCH_LIMIT = 50;
 
@@ -200,7 +192,6 @@ function initializeTranscriptSearchDb(db: Database, busyTimeoutMs = 5000) {
     CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts_token USING fts5(
       row_key UNINDEXED,
       session_id,
-      session_file,
       role,
       tool_name,
       custom_type,
@@ -211,7 +202,6 @@ function initializeTranscriptSearchDb(db: Database, busyTimeoutMs = 5000) {
     CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts_trigram USING fts5(
       row_key UNINDEXED,
       session_id,
-      session_file,
       role,
       tool_name,
       custom_type,
@@ -351,15 +341,15 @@ function getTranscriptSearchWriteStatements(
     insertToken: db.prepare(
       `
       INSERT INTO entries_fts_token(
-        row_key, session_id, session_file, role, tool_name, custom_type, text
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        row_key, session_id, role, tool_name, custom_type, text
+      ) VALUES (?, ?, ?, ?, ?, ?)
     `,
     ),
     insertTrigram: db.prepare(
       `
       INSERT INTO entries_fts_trigram(
-        row_key, session_id, session_file, role, tool_name, custom_type, text
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        row_key, session_id, role, tool_name, custom_type, text
+      ) VALUES (?, ?, ?, ?, ?, ?)
     `,
     ),
     upsertFileState: db.prepare(
@@ -388,7 +378,6 @@ function buildIndexedEntryValues(item: IndexedTranscriptEntry): {
   const ftsValues: IndexedEntryFtsValues = [
     item.rowKey,
     sessionId,
-    sessionFile,
     role,
     toolName,
     customType,
@@ -753,7 +742,7 @@ function queryExactCandidates(
   const rows = db
     .prepare(
       `
-      SELECT row_key, text, preview, tool_name, session_id, session_file, custom_type
+      SELECT row_key, text, preview, tool_name, session_id, custom_type
       FROM entries
       WHERE lower(text) LIKE lower(?) ESCAPE '\\'
          OR lower(preview) LIKE lower(?) ESCAPE '\\'
@@ -761,18 +750,16 @@ function queryExactCandidates(
          OR lower(tool_name) LIKE lower(?) ESCAPE '\\'
          OR lower(custom_type) LIKE lower(?) ESCAPE '\\'
          OR lower(session_id) LIKE lower(?) ESCAPE '\\'
-         OR lower(session_file) LIKE lower(?) ESCAPE '\\'
       ORDER BY timestamp_ms DESC
       LIMIT ?
     `,
     )
-    .all(like, like, like, like, like, like, like, rawHitLimit) as Array<{
+    .all(like, like, like, like, like, like, rawHitLimit) as Array<{
     row_key: string;
     text: string;
     preview: string;
     tool_name: string;
     session_id: string;
-    session_file: string;
     custom_type: string;
   }>;
   rows.forEach((row, index) => {
@@ -783,7 +770,6 @@ function queryExactCandidates(
         row.preview,
         row.tool_name,
         row.session_id,
-        row.session_file,
         row.custom_type,
       ].join(" "),
     );

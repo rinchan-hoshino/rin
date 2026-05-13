@@ -153,6 +153,42 @@ test("memory search returns session-level archived transcript matches and create
   });
 });
 
+test("memory search does not match session file paths", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-04-04T11:11:11.000Z",
+        sessionId: "chat-session-opaque-id",
+        sessionFile:
+          "/home/rin/.rin/sessions/2026-05-13T06-14-31-561Z_019e1ff8-fb89-710d-931e-a3e01347c315.jsonl",
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Discussed the public mirror sync repair and validation plan.",
+          },
+        ],
+      },
+      root,
+    );
+
+    const byContent = await transcripts.searchTranscriptArchive(
+      "public mirror sync repair",
+      { limit: 8 },
+      root,
+    );
+    assert.equal(byContent.length, 1);
+    assert.equal(byContent[0].sessionId, "chat-session-opaque-id");
+
+    const bySessionFile = await transcripts.searchTranscriptArchive(
+      "019e1ff8-fb89-710d-931e-a3e01347c315",
+      { limit: 8 },
+      root,
+    );
+    assert.deepEqual(bySessionFile, []);
+  });
+});
+
 test("memory search index stays in sync when an archived session file grows", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
