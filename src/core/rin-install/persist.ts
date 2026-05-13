@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { normalizeStoredChatSettings } from "../chat/settings.js";
@@ -88,24 +89,159 @@ type InstallPathMoveResult = {
   skipped: boolean;
 };
 
-function installerPathExists(
-  filePath: string,
-  elevated: boolean,
-  runPrivileged: (command: string, args: string[]) => void,
+type InstallMigrationCommandDeps = {
+  runPrivileged: (command: string, args: string[]) => void;
+  runCommandAsUser?: (
+    targetUser: string,
+    command: string,
+    args: string[],
+  ) => void;
+  captureCommandAsUser?: (
+    targetUser: string,
+    command: string,
+    args: string[],
+  ) => string;
+};
+
+type InstallMigrationOptions = {
+  targetUser: string;
+  elevated?: boolean;
+};
+
+type InstallMigrationFileOps = {
+  pathExists: (filePath: string) => boolean;
+  readJsonObject: (filePath: string) => Record<string, unknown> | null;
+  writeJsonObject: (filePath: string, value: unknown) => void;
+  ensureDir: (dirPath: string) => void;
+  rename: (fromPath: string, toPath: string) => void;
+};
+
+function parseJsonObject(text: string) {
+  const parsed = JSON.parse(text);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : null;
+}
+
+function runMigrationCommandAsTargetUser(
+  options: InstallMigrationOptions,
+  deps: InstallMigrationCommandDeps,
+  command: string,
+  args: string[],
 ) {
-  try {
-    fs.accessSync(filePath);
-    return true;
-  } catch (error: any) {
-    const code = String(error?.code || "");
-    if ((code === "EACCES" || code === "EPERM") && elevated) {
-      try {
-        runPrivileged("test", ["-e", filePath]);
-        return true;
-      } catch {}
-    }
-    return false;
+  if (!deps.runCommandAsUser) {
+    throw new Error("Install migration requires target-user command support.");
   }
+  deps.runCommandAsUser(options.targetUser, command, args);
+}
+
+function writeTextFileAsTargetUser(
+  filePath: string,
+  value: string,
+  options: InstallMigrationOptions,
+  deps: InstallMigrationCommandDeps,
+  mode = 0o600,
+) {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-install-migration-write-"),
+  );
+  const tempFile = path.join(tempDir, "payload");
+  try {
+    fs.chmodSync(tempDir, 0o755);
+    fs.writeFileSync(tempFile, value, "utf8");
+    fs.chmodSync(tempFile, 0o644);
+    runMigrationCommandAsTargetUser(options, deps, "mkdir", [
+      "-p",
+      path.dirname(filePath),
+    ]);
+    runMigrationCommandAsTargetUser(options, deps, "install", [
+      "-m",
+      mode.toString(8),
+      tempFile,
+      filePath,
+    ]);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function createInstallMigrationFileOps(
+  options: InstallMigrationOptions,
+  deps: InstallMigrationCommandDeps,
+): InstallMigrationFileOps {
+  const elevated = Boolean(options.elevated);
+  return {
+    pathExists(filePath: string) {
+      try {
+        fs.accessSync(filePath);
+        return true;
+      } catch (error: any) {
+        const code = String(error?.code || "");
+        if ((code === "EACCES" || code === "EPERM") && elevated) {
+          try {
+            runMigrationCommandAsTargetUser(options, deps, "test", [
+              "-e",
+              filePath,
+            ]);
+            return true;
+          } catch {}
+        }
+        return false;
+      }
+    },
+    readJsonObject(filePath: string) {
+      try {
+        return parseJsonObject(fs.readFileSync(filePath, "utf8"));
+      } catch (error: any) {
+        const code = String(error?.code || "");
+        if (
+          (code === "EACCES" || code === "EPERM") &&
+          elevated &&
+          deps.captureCommandAsUser
+        ) {
+          try {
+            return parseJsonObject(
+              deps.captureCommandAsUser(options.targetUser, "cat", [filePath]),
+            );
+          } catch {}
+        }
+        return null;
+      }
+    },
+    writeJsonObject(filePath: string, value: unknown) {
+      if (elevated) {
+        writeTextFileAsTargetUser(
+          filePath,
+          stringifyJson(value),
+          options,
+          deps,
+        );
+        return;
+      }
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, stringifyJson(value), "utf8");
+    },
+    ensureDir(dirPath: string) {
+      if (elevated) {
+        runMigrationCommandAsTargetUser(options, deps, "mkdir", [
+          "-p",
+          dirPath,
+        ]);
+        return;
+      }
+      fs.mkdirSync(dirPath, { recursive: true });
+    },
+    rename(fromPath: string, toPath: string) {
+      if (elevated) {
+        runMigrationCommandAsTargetUser(options, deps, "mv", [
+          fromPath,
+          toPath,
+        ]);
+        return;
+      }
+      fs.renameSync(fromPath, toPath);
+    },
+  };
 }
 
 function moveInstalledPathIfNeeded(
@@ -114,38 +250,18 @@ function moveInstalledPathIfNeeded(
     fromPath: string;
     toPath: string;
   },
-  options: {
-    elevated?: boolean;
-  },
-  deps: {
-    runPrivileged: (command: string, args: string[]) => void;
-  },
+  fileOps: InstallMigrationFileOps,
 ): InstallPathMoveResult {
-  const elevated = Boolean(options.elevated);
-  const hasSource = installerPathExists(
-    move.fromPath,
-    elevated,
-    deps.runPrivileged,
-  );
+  const hasSource = fileOps.pathExists(move.fromPath);
   if (!hasSource) {
     return { ...move, moved: false, skipped: false };
   }
-  const hasTarget = installerPathExists(
-    move.toPath,
-    elevated,
-    deps.runPrivileged,
-  );
+  const hasTarget = fileOps.pathExists(move.toPath);
   if (hasTarget) {
     return { ...move, moved: false, skipped: true };
   }
-  const parentDir = path.dirname(move.toPath);
-  if (elevated) {
-    deps.runPrivileged("mkdir", ["-p", parentDir]);
-    deps.runPrivileged("mv", [move.fromPath, move.toPath]);
-  } else {
-    fs.mkdirSync(parentDir, { recursive: true });
-    fs.renameSync(move.fromPath, move.toPath);
-  }
+  fileOps.ensureDir(path.dirname(move.toPath));
+  fileOps.rename(move.fromPath, move.toPath);
   return { ...move, moved: true, skipped: false };
 }
 
@@ -173,24 +289,11 @@ function uniqueStatePaths(paths: unknown[]) {
   );
 }
 
-function readJsonObject(filePath: string) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeJsonObject(filePath: string, value: unknown) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, stringifyJson(value), "utf8");
-}
-
-function rewriteChatStateSessionFileKey(statePath: string) {
-  const state = readJsonObject(statePath);
+function rewriteChatStateSessionFileKey(
+  statePath: string,
+  fileOps: InstallMigrationFileOps,
+) {
+  const state = fileOps.readJsonObject(statePath);
   if (!state) return false;
   if (!Object.prototype.hasOwnProperty.call(state, "piSessionFile")) {
     return false;
@@ -203,7 +306,7 @@ function rewriteChatStateSessionFileKey(statePath: string) {
     nextState.sessionFile = previousSessionFile;
   }
   delete nextState.piSessionFile;
-  writeJsonObject(statePath, nextState);
+  fileOps.writeJsonObject(statePath, nextState);
   return true;
 }
 
@@ -218,9 +321,10 @@ function chatStateSessionFileMigrationMarkerPath(installDir: string) {
 
 function rewriteInstalledChatStateSessionFileKeys(
   installDir: string,
+  fileOps: InstallMigrationFileOps,
 ): InstallStateRewriteResult {
   const markerPath = chatStateSessionFileMigrationMarkerPath(installDir);
-  const marker = readJsonObject(markerPath);
+  const marker = fileOps.readJsonObject(markerPath);
   if (
     marker &&
     safeString(marker.id || marker.migrationId).trim() ===
@@ -248,7 +352,7 @@ function rewriteInstalledChatStateSessionFileKeys(
   ]);
   const migratedFiles: string[] = [];
   for (const statePath of statePaths) {
-    if (!rewriteChatStateSessionFileKey(statePath)) continue;
+    if (!rewriteChatStateSessionFileKey(statePath, fileOps)) continue;
     migratedFiles.push(statePath);
   }
 
@@ -266,7 +370,7 @@ function rewriteInstalledChatStateSessionFileKeys(
     };
   }
 
-  writeJsonObject(markerPath, {
+  fileOps.writeJsonObject(markerPath, {
     id: CHAT_STATE_SESSION_FILE_MIGRATION_ID,
     appliedAt: new Date().toISOString(),
     scanned,
@@ -311,11 +415,12 @@ function sessionFilePathForInstalledChatState(
 function pickAvailableManagedChatSessionPath(
   managedDir: string,
   basename: string,
+  fileOps: InstallMigrationFileOps,
 ) {
   const parsed = path.parse(basename);
   let candidate = path.join(managedDir, basename);
   let index = 2;
-  while (fs.existsSync(candidate)) {
+  while (fileOps.pathExists(candidate)) {
     candidate = path.join(
       managedDir,
       `${parsed.name}-${index}${parsed.ext || ".jsonl"}`,
@@ -328,8 +433,9 @@ function pickAvailableManagedChatSessionPath(
 function migrateChatStateSessionFileToManaged(
   installDir: string,
   statePath: string,
+  fileOps: InstallMigrationFileOps,
 ) {
-  const state = readJsonObject(statePath);
+  const state = fileOps.readJsonObject(statePath);
   if (!state) return "";
   const sessionFile = safeString(state.sessionFile).trim();
   if (!sessionFile || sessionFile.startsWith("managed/")) return "";
@@ -340,22 +446,24 @@ function migrateChatStateSessionFileToManaged(
   const targetPath = pickAvailableManagedChatSessionPath(
     managedDir,
     source.basename,
+    fileOps,
   );
-  if (!fs.existsSync(source.absolute)) return "";
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.renameSync(source.absolute, targetPath);
+  if (!fileOps.pathExists(source.absolute)) return "";
+  fileOps.ensureDir(path.dirname(targetPath));
+  fileOps.rename(source.absolute, targetPath);
 
   const nextState: Record<string, unknown> = { ...state };
   nextState.sessionFile = path.relative(source.sessionsDir, targetPath);
-  writeJsonObject(statePath, nextState);
+  fileOps.writeJsonObject(statePath, nextState);
   return targetPath;
 }
 
 function migrateInstalledChatSessionFilesToManaged(
   installDir: string,
+  fileOps: InstallMigrationFileOps,
 ): InstallStateRewriteResult {
   const markerPath = chatSessionManagedFileMigrationMarkerPath(installDir);
-  const marker = readJsonObject(markerPath);
+  const marker = fileOps.readJsonObject(markerPath);
   if (
     marker &&
     safeString(marker.id || marker.migrationId).trim() ===
@@ -380,7 +488,11 @@ function migrateInstalledChatSessionFilesToManaged(
   );
   const migratedFiles: string[] = [];
   for (const statePath of statePaths) {
-    const migratedFile = migrateChatStateSessionFileToManaged(root, statePath);
+    const migratedFile = migrateChatStateSessionFileToManaged(
+      root,
+      statePath,
+      fileOps,
+    );
     if (migratedFile) migratedFiles.push(migratedFile);
   }
 
@@ -398,7 +510,7 @@ function migrateInstalledChatSessionFilesToManaged(
     };
   }
 
-  writeJsonObject(markerPath, {
+  fileOps.writeJsonObject(markerPath, {
     id: CHAT_SESSION_MANAGED_FILE_MIGRATION_ID,
     appliedAt: new Date().toISOString(),
     scanned,
@@ -417,13 +529,13 @@ function migrateInstalledChatSessionFilesToManaged(
 
 export function applyInstallUpgradeMigrations(
   options: {
+    targetUser: string;
     installDir: string;
     elevated?: boolean;
   },
-  deps: {
-    runPrivileged: (command: string, args: string[]) => void;
-  },
+  deps: InstallMigrationCommandDeps,
 ) {
+  const fileOps = createInstallMigrationFileOps(options, deps);
   return [
     moveInstalledPathIfNeeded(
       {
@@ -439,11 +551,10 @@ export function applyInstallUpgradeMigrations(
           CHAT_MESSAGE_STORE_DIRNAME,
         ),
       },
-      options,
-      deps,
+      fileOps,
     ),
-    rewriteInstalledChatStateSessionFileKeys(options.installDir),
-    migrateInstalledChatSessionFilesToManaged(options.installDir),
+    rewriteInstalledChatStateSessionFileKeys(options.installDir, fileOps),
+    migrateInstalledChatSessionFilesToManaged(options.installDir, fileOps),
   ];
 }
 
@@ -717,6 +828,16 @@ export function normalizeInstalledChatSettings(
     ) => void;
     writeJsonFile: (filePath: string, value: unknown) => void;
     runPrivileged: (command: string, args: string[]) => void;
+    runCommandAsUser?: (
+      targetUser: string,
+      command: string,
+      args: string[],
+    ) => void;
+    captureCommandAsUser?: (
+      targetUser: string,
+      command: string,
+      args: string[],
+    ) => string;
   },
 ) {
   const { ownerUser, ownerGroup } = resolveInstallOwner(
@@ -780,6 +901,16 @@ export async function persistInstallerOutputs(
     ) => any;
     reconcileInstallerManifest: typeof reconcileInstallerManifest;
     runPrivileged: (command: string, args: string[]) => void;
+    runCommandAsUser?: (
+      targetUser: string,
+      command: string,
+      args: string[],
+    ) => void;
+    captureCommandAsUser?: (
+      targetUser: string,
+      command: string,
+      args: string[],
+    ) => string;
   },
 ) {
   const { ownerUser, ownerGroup } = resolveInstallOwner(
