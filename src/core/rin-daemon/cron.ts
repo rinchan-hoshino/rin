@@ -322,7 +322,10 @@ export class CronScheduler {
       chat?: {
         send?: (payload: any) => Promise<any>;
         runTurn?: (payload: any) => Promise<any>;
-        terminateTurn?: (payload: { controllerKey: string }) => Promise<any>;
+        terminateTurn?: (payload: {
+          controllerKey?: string;
+          chatKey?: string;
+        }) => Promise<any>;
       };
     },
   ) {}

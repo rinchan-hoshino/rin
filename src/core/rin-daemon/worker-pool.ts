@@ -71,6 +71,26 @@ function createSwitchSessionCommand(sessionFile: string) {
   };
 }
 
+const RESUMABLE_COMMAND_TYPES = new Set([
+  "prompt",
+  "resume_interrupted_turn",
+  "steer",
+  "follow_up",
+  "compact",
+  "send_user_message",
+  "run_command",
+]);
+
+function hasResumableWorkerActivity(worker: WorkerHandle) {
+  if (worker.turnActive || worker.isStreaming || worker.isCompacting) {
+    return true;
+  }
+  for (const pending of worker.pendingResponses.values()) {
+    if (RESUMABLE_COMMAND_TYPES.has(pending.commandType)) return true;
+  }
+  return false;
+}
+
 export class WorkerPool {
   private workers = new Set<WorkerHandle>();
   private workersBySessionFile = new Map<string, WorkerHandle>();
@@ -424,7 +444,7 @@ export class WorkerPool {
       if (worker.gracefulShutdownRequested) continue;
       const selector = this.getWorkerSelector(worker);
       if (!selector.sessionFile) continue;
-      const resumeTurn = Boolean(worker.turnActive || worker.isCompacting);
+      const resumeTurn = hasResumableWorkerActivity(worker);
       const existing = restorable.get(selector.sessionFile);
       if (existing) {
         existing.resumeTurn ||= resumeTurn;
@@ -848,7 +868,7 @@ export class WorkerPool {
     liveConnections: Set<ConnectionState>,
     pending: PendingResponse[],
   ) {
-    const resumeTurn = Boolean(worker.turnActive || worker.isCompacting);
+    const resumeTurn = hasResumableWorkerActivity(worker);
     for (const connection of liveConnections) {
       this.rememberSessionSelection(connection, selector);
       writeLine(connection.socket, {

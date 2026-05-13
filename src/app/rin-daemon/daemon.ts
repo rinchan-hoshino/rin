@@ -9,8 +9,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { startChatBridge } from "../../core/chat/main.js";
+import { defaultDaemonSocketPath } from "../../core/rin-lib/common.js";
 import { startDaemon } from "../../core/rin-daemon/daemon.js";
 import { RinDaemonExtensionManager } from "../../core/rin-daemon/extensions.js";
+import {
+  acquireDaemonInstanceLock,
+  type DaemonInstanceLock,
+} from "../../core/rin-daemon/lock.js";
 import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
@@ -32,65 +37,101 @@ async function main() {
 
   const runtime = resolveRuntimeProfile();
   applyRuntimeProfileEnvironment(runtime);
-  const daemonExtensionManager = new RinDaemonExtensionManager({
-    cwd: runtime.cwd,
-    agentDir: runtime.agentDir,
-    logger: console,
-  });
-  await daemonExtensionManager.start();
 
-  const chatBridge = await startChatBridge({
-    hosted: true,
-    chatAdapterProviders: daemonExtensionManager.getChatAdapterProviders(),
-    frontendClientFactory: () =>
-      new RinDaemonFrontendClient({
-        socketPath: "inprocess://rin-daemon",
-        connectSocket: async () => (await localFrontendConnector)(),
-      }),
-  });
+  const daemonSocketPath = process.argv[2] || defaultDaemonSocketPath();
+  let daemonLock: DaemonInstanceLock | null = null;
+  let daemonExtensionManager: RinDaemonExtensionManager | null = null;
+  let chatBridge: Awaited<ReturnType<typeof startChatBridge>> | null = null;
+  let servicesPromise: Promise<
+    Awaited<ReturnType<typeof startChatBridge>>
+  > | null = null;
 
   const stopServices = async () => {
-    await chatBridge.stop().catch(() => {});
-    await daemonExtensionManager.stop().catch(() => {});
+    await chatBridge?.stop().catch(() => {});
+    await daemonExtensionManager?.stop().catch(() => {});
   };
 
   try {
+    daemonLock = await acquireDaemonInstanceLock(runtime.agentDir, {
+      socketPath: daemonSocketPath,
+    });
+
+    daemonExtensionManager = new RinDaemonExtensionManager({
+      cwd: runtime.cwd,
+      agentDir: runtime.agentDir,
+      logger: console,
+    });
+    servicesPromise = (async () => {
+      await daemonExtensionManager!.start();
+      chatBridge = await startChatBridge({
+        hosted: true,
+        chatAdapterProviders: daemonExtensionManager!.getChatAdapterProviders(),
+        frontendClientFactory: () =>
+          new RinDaemonFrontendClient({
+            socketPath: "inprocess://rin-daemon",
+            connectSocket: async () => (await localFrontendConnector)(),
+          }),
+      });
+      return chatBridge;
+    })();
+    void servicesPromise.catch(async (error) => {
+      console.error(
+        `rin_app_daemon_services_failed:${String(error?.message || error || "unknown")}`,
+      );
+      await stopServices().catch(() => {});
+      await daemonLock?.release().catch(() => {});
+      process.exit(1);
+    });
+    const getHostedChatBridge = async () => await servicesPromise!;
+
     await startDaemon({
       daemonExtensionManager,
+      instanceLock: daemonLock,
+      socketPath: daemonSocketPath,
       workerPath,
       chat: {
-        send: async (payload) => await chatBridge.send(payload),
-        runTurn: async (payload) => await chatBridge.runTurn(payload),
+        send: async (payload) =>
+          await (await getHostedChatBridge()).send(payload),
+        runTurn: async (payload) =>
+          await (await getHostedChatBridge()).runTurn(payload),
         terminateTurn: async (payload) =>
-          await chatBridge.terminateTurn(payload),
+          await (await getHostedChatBridge()).terminateTurn(payload),
       },
       getExtraStatus: () => ({
-        chat: chatBridge.getStatus(),
+        chat: chatBridge?.getStatus() || { status: "starting" },
       }),
       handleLocalCommand: async (command) => {
         const type = String(command?.type || "").trim();
         if (type === "chat_send") {
           return {
             success: true,
-            data: await chatBridge.send(command?.payload || {}),
+            data: await (
+              await getHostedChatBridge()
+            ).send(command?.payload || {}),
           };
         }
         if (type === "chat_run_turn") {
           return {
             success: true,
-            data: await chatBridge.runTurn(command?.payload || {}),
+            data: await (
+              await getHostedChatBridge()
+            ).runTurn(command?.payload || {}),
           };
         }
         if (type === "chat_terminate_turn") {
           return {
             success: true,
-            data: await chatBridge.terminateTurn(command?.payload || {}),
+            data: await (
+              await getHostedChatBridge()
+            ).terminateTurn(command?.payload || {}),
           };
         }
         if (type === "chat_bridge_eval") {
           return {
             success: true,
-            data: await chatBridge.evalBridge(command?.payload || {}),
+            data: await (
+              await getHostedChatBridge()
+            ).evalBridge(command?.payload || {}),
           };
         }
         return undefined;
@@ -103,6 +144,7 @@ async function main() {
     });
   } catch (error) {
     await stopServices().catch(() => {});
+    await daemonLock?.release().catch(() => {});
     throw error;
   }
 }

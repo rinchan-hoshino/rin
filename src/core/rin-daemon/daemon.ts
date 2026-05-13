@@ -27,7 +27,7 @@ import {
   resolveRuntimeProfile,
   getRuntimeSessionDir,
 } from "../rin-lib/runtime.js";
-import { renameBoundSession } from "../session/factory.js";
+import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 import { getWebSearchStatus } from "../rin-web-search/service.js";
 import { CronScheduler } from "./cron.js";
 import {
@@ -40,21 +40,22 @@ import {
   hasSessionRef as hasSessionSelector,
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
-import { listContinuableInterruptedTurnSessionFiles } from "../session/turn-state.js";
 import { RinDaemonExtensionManager } from "./extensions.js";
+import { listContinuableInterruptedTurnSessionFiles } from "../session/turn-state.js";
+import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 
 function writeLine(socket: RpcSocketLike, payload: unknown) {
   if (!socket.destroyed) socket.write(`${JSON.stringify(payload)}\n`);
 }
 
-function restartStatePath(agentDir: string) {
+function legacyRestartStatePath(agentDir: string) {
   return path.join(agentDir, "data", "restart.json");
 }
 
 function clearLegacyRestartState(agentDir: string) {
   try {
-    fs.rmSync(restartStatePath(agentDir), { force: true });
+    fs.rmSync(legacyRestartStatePath(agentDir), { force: true });
   } catch {}
 }
 
@@ -66,7 +67,10 @@ export async function startDaemon(
     chat?: {
       send?: (payload: any) => Promise<any>;
       runTurn?: (payload: any) => Promise<any>;
-      terminateTurn?: (payload: { controllerKey: string }) => Promise<any>;
+      terminateTurn?: (payload: {
+        controllerKey?: string;
+        chatKey?: string;
+      }) => Promise<any>;
     };
     getExtraStatus?:
       | (() => Promise<Record<string, unknown> | undefined>)
@@ -89,6 +93,7 @@ export async function startDaemon(
     onShutdown?: () => Promise<void> | void;
     registerLocalFrontendConnector?: (connector: RpcSocketConnector) => void;
     daemonExtensionManager?: RinDaemonExtensionManager;
+    instanceLock?: DaemonInstanceLock;
   } = {},
 ) {
   const socketPath =
@@ -102,7 +107,19 @@ export async function startDaemon(
     path.join(path.dirname(new URL(import.meta.url).pathname), "worker.js");
   const runtime = resolveRuntimeProfile();
   applyRuntimeProfileEnvironment(runtime);
-  const sessionManagerModulePromise = loadRinSessionManagerModule();
+  const instanceLock =
+    options.instanceLock ||
+    (await acquireDaemonInstanceLock(runtime.agentDir, { socketPath }));
+  process.once("exit", () => {
+    void instanceLock.release();
+  });
+  let sessionManagerModulePromise:
+    | ReturnType<typeof loadRinSessionManagerModule>
+    | undefined;
+  const getSessionManagerModule = () => {
+    sessionManagerModulePromise ??= loadRinSessionManagerModule();
+    return sessionManagerModulePromise;
+  };
   const workerPool = new WorkerPool({
     workerPath,
     cwd: runtime.cwd,
@@ -217,6 +234,18 @@ export async function startDaemon(
     get_oauth_state: async () => ({
       data: await getCatalogOAuthState(catalogOptions),
     }),
+    memory_search_external: async (command) => ({
+      data: {
+        results: await daemonExtensionManager.searchMemoryProviders(
+          command.payload || {},
+        ),
+      },
+    }),
+    memory_write_external: async (command) => ({
+      data: await daemonExtensionManager.writeMemoryProviders(
+        command.payload || {},
+      ),
+    }),
   };
 
   const cronCommandHandlers: Partial<
@@ -286,12 +315,10 @@ export async function startDaemon(
     }
 
     if (type === "get_state" && !selectorPresent && !selectedSessionPresent) {
-      const worker = workerPool.ensureAttachedWorker(
-        connection,
-        command.resourceOptions,
+      writeLine(
+        connection.socket,
+        response(id, type, true, emptySessionState()),
       );
-      workerPool.forwardToWorker(connection, worker, command);
-      workerPool.evictDetachedWorkers();
       return true;
     }
 
@@ -394,16 +421,17 @@ export async function startDaemon(
       return true;
     }
     if (type === "list_sessions") {
-      const worker = connection.attachedWorker;
-      if (!worker) {
-        writeLine(
-          connection.socket,
-          response(id, type, false, "rin_no_attached_session"),
-        );
-        return true;
-      }
-      workerPool.forwardToWorker(connection, worker, command);
-      workerPool.evictDetachedWorkers();
+      const { SessionManager } = await getSessionManagerModule();
+      writeLine(
+        connection.socket,
+        response(id, type, true, {
+          sessions: await listBoundSessions({
+            cwd: runtime.cwd,
+            agentDir: runtime.agentDir,
+            SessionManager,
+          }),
+        }),
+      );
       return true;
     }
     if (type === "detach_session") {
@@ -416,7 +444,7 @@ export async function startDaemon(
     }
     if (type === "rename_session") {
       try {
-        const { SessionManager } = await sessionManagerModulePromise;
+        const { SessionManager } = await getSessionManagerModule();
         await renameBoundSession(command, command.name, {
           SessionManager,
         });
@@ -612,7 +640,7 @@ export async function startDaemon(
   let shuttingDown = false;
   const shutdownGraceMs = Math.max(
     0,
-    Number(process.env.RIN_DAEMON_SHUTDOWN_GRACE_MS || 85_000),
+    Number(process.env.RIN_DAEMON_SHUTDOWN_GRACE_MS || 3_000),
   );
   const shutdown = async () => {
     if (shuttingDown) return;
@@ -638,6 +666,7 @@ export async function startDaemon(
     }
     await workerPool.shutdown(shutdownGraceMs);
     await Promise.resolve(options.onShutdown?.()).catch(() => {});
+    await instanceLock.release().catch(() => {});
     process.exit(0);
   };
 

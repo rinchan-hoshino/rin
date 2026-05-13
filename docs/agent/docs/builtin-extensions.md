@@ -120,5 +120,7 @@ Keep the change minimal:
 - run as trusted Node.js packages inside the daemon process for long-running async work
 - may install or update configured npm packages under `~/.rin/data/daemon-runtime` during daemon startup
 - do not run in std/maintenance mode
+- may register chat adapters with `ctx.registerChatAdapter(...)`
+- may register external memory providers with `ctx.registerMemoryProvider(...)`; providers can implement `search`, `listRecent`, and `write`, and can return remote `reference` or `url` values instead of local transcript paths
 
-Configure daemon workers only when the user intentionally wants a background extension such as an external event bridge. Keep the normal chat adapters under `settings.json -> chat`, not daemon workers.
+Configure daemon workers only when the user intentionally wants a background extension such as an external event bridge or a trusted memory backend. Keep the normal chat adapters under `settings.json -> chat`, not daemon workers.

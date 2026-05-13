@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -42,6 +43,53 @@ async function writeSessionFile(root, name, entries) {
     "utf8",
   );
   return filePath;
+}
+
+async function withJsonlDaemonSocket(handler, fn) {
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-daemon-"),
+  );
+  const socketPath = path.join(runtimeDir, "daemon.sock");
+  const previousSocketPath = process.env.RIN_DAEMON_SOCKET_PATH;
+  const server = net.createServer((socket) => {
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += String(chunk);
+      while (true) {
+        const idx = buffer.indexOf("\n");
+        if (idx < 0) break;
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        const payload = JSON.parse(line);
+        Promise.resolve(handler(payload)).then((data) => {
+          socket.write(
+            `${JSON.stringify({
+              type: "response",
+              id: payload.id,
+              command: payload.type,
+              success: true,
+              data,
+            })}\n`,
+          );
+        });
+      }
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => resolve());
+  });
+  process.env.RIN_DAEMON_SOCKET_PATH = socketPath;
+  try {
+    await fn(socketPath);
+  } finally {
+    if (previousSocketPath === undefined)
+      delete process.env.RIN_DAEMON_SOCKET_PATH;
+    else process.env.RIN_DAEMON_SOCKET_PATH = previousSocketPath;
+    await new Promise((resolve) => server.close(() => resolve()));
+    await fs.rm(runtimeDir, { recursive: true, force: true });
+  }
 }
 
 test("memory transcripts archive entries under memory/transcripts", async () => {
@@ -556,140 +604,26 @@ test("memory transcripts ignore transient in-memory sessions without a session f
   });
 });
 
-test("search_memory uses the stored transcript session summary instead of live summarization", async () => {
+test("memory transcripts reject legacy synthetic session summaries", async () => {
   await withTempRoot(async (root) => {
-    const sessionFile = await writeSessionFile(root, "summary-session.jsonl", [
+    const sessionFile = await writeSessionFile(root, "legacy-summary.jsonl", [
       {
         type: "session",
         version: 3,
-        id: "summary-session",
+        id: "legacy-summary",
         timestamp: "2026-04-08T09:00:00.000Z",
         cwd: "/tmp/project",
-      },
-      {
-        type: "session_info",
-        id: "name1",
-        parentId: null,
-        timestamp: "2026-04-08T09:01:00.000Z",
-        name: "telegram/1:2",
-      },
-      {
-        type: "message",
-        id: "msg1",
-        parentId: "name1",
-        timestamp: "2026-04-08T09:02:00.000Z",
-        message: {
-          role: "user",
-          content: [
-            { type: "text", text: "Can you fix the memory recall hang?" },
-          ],
-        },
       },
     ]);
 
     await transcripts.appendTranscriptArchiveEntry(
       {
-        timestamp: "2026-04-08T09:09:09.000Z",
-        sessionId: "summary-session",
-        sessionFile,
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "Refined the memory recall prompt and fixed the session resume hang.",
-          },
-        ],
-      },
-      root,
-    );
-    await transcripts.appendTranscriptArchiveEntry(
-      {
         timestamp: "2026-04-08T09:10:00.000Z",
-        sessionId: "summary-session",
+        sessionId: "legacy-summary",
         sessionFile,
         role: "sessionSummary",
         customType: "session_summary",
-        text: "Fixed memory recall hang and cached transcript summaries.",
-        display: false,
-      },
-      root,
-    );
-
-    const rows = await transcripts.searchTranscriptArchive(
-      "session resume hang",
-      { limit: 8 },
-      root,
-    );
-    assert.equal(
-      rows[0].summary,
-      "Fixed memory recall hang and cached transcript summaries.",
-    );
-    assert.equal(rows[0].name, "telegram/1:2");
-
-    const result = await memoryExtensionModule.executeSearchMemory(
-      { query: "session resume hang", limit: 8 },
-      { agentDir: root, model: { provider: "test", id: "demo" } },
-      "medium",
-    );
-    assert.match(
-      result.details.userText,
-      /Fixed memory recall hang and cached transcript summaries/,
-    );
-    assert.doesNotMatch(result.details.userText, /L\d+ sessionSummary/);
-  });
-});
-
-test("search_memory can retrieve sessions by stored session summary text", async () => {
-  await withTempRoot(async (root) => {
-    const sessionFile = await writeSessionFile(
-      root,
-      "display-only-summary-session.jsonl",
-      [
-        {
-          type: "session",
-          version: 3,
-          id: "display-only-summary-session",
-          timestamp: "2026-04-08T09:00:00.000Z",
-          cwd: "/tmp/project",
-        },
-        {
-          type: "message",
-          id: "msg1",
-          parentId: null,
-          timestamp: "2026-04-08T09:02:00.000Z",
-          message: {
-            role: "user",
-            content: [
-              { type: "text", text: "Need help checking a runtime regression" },
-            ],
-          },
-        },
-      ],
-    );
-
-    await transcripts.appendTranscriptArchiveEntry(
-      {
-        timestamp: "2026-04-08T09:09:09.000Z",
-        sessionId: "display-only-summary-session",
-        sessionFile,
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "Verified the transport path and identified the regression boundary.",
-          },
-        ],
-      },
-      root,
-    );
-    await transcripts.appendTranscriptArchiveEntry(
-      {
-        timestamp: "2026-04-08T09:10:00.000Z",
-        sessionId: "display-only-summary-session",
-        sessionFile,
-        role: "sessionSummary",
-        customType: "session_summary",
-        text: "zebra only appears in the stored display summary",
+        text: "zebra only appears in the synthetic summary",
         display: false,
       },
       root,
@@ -700,15 +634,11 @@ test("search_memory can retrieve sessions by stored session summary text", async
       { limit: 8 },
       root,
     );
-    assert.equal(rows.length, 1);
-    assert.equal(
-      rows[0].summary,
-      "zebra only appears in the stored display summary",
-    );
+    assert.equal(rows.length, 0);
   });
 });
 
-test("search_memory falls back to the first user message when no stored session summary exists", async () => {
+test("search_memory uses the first user message as the session display fallback", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = await writeSessionFile(root, "fallback-session.jsonl", [
       {
@@ -852,6 +782,97 @@ test("executeSearchMemory emits an initial status update before finishing", asyn
       'Searching archived sessions for "no hits yet"...',
     ]);
     assert.match(result.details.userText, /No memory results found\./);
+  });
+});
+
+test("search_memory includes external provider results without local transcript paths", async () => {
+  await withTempRoot(async (root) => {
+    const requests = [];
+    await withJsonlDaemonSocket(
+      (payload) => {
+        requests.push(payload);
+        if (payload.type === "memory_search_external") {
+          return {
+            results: [
+              {
+                sourceType: "external",
+                provider: "remote-memory",
+                id: "remote-hit-1",
+                name: "Remote memory hit",
+                reference: "mem://remote-hit-1",
+                summary:
+                  "Remote memory summary from a non-local original-text store.",
+                messages: [
+                  {
+                    line: 1,
+                    role: "memory",
+                    timestamp: "2026-05-11T06:00:00.000Z",
+                    text: "remote snippet only",
+                  },
+                ],
+              },
+            ],
+          };
+        }
+        return {};
+      },
+      async () => {
+        const result = await memoryExtensionModule.executeSearchMemory(
+          { query: "remote only marker", limit: 8 },
+          { agentDir: root, model: { provider: "test", id: "demo" } },
+          "medium",
+        );
+
+        assert.equal(requests.at(-1)?.type, "memory_search_external");
+        assert.equal(requests.at(-1)?.payload?.query, "remote only marker");
+        assert.match(result.content[0].text, /mem:\/\/remote-hit-1/);
+        assert.match(
+          result.details.userText,
+          /Remote memory summary from a non-local original-text store/,
+        );
+        assert.match(result.details.userText, /L1 memory: remote snippet only/);
+        assert.doesNotMatch(result.details.userText, /memory\/transcripts/);
+      },
+    );
+  });
+});
+
+test("memory message hook publishes transcript archive writes to external memory providers", async () => {
+  await withTempRoot(async (root) => {
+    const requests = [];
+    await withJsonlDaemonSocket(
+      (payload) => {
+        requests.push(payload);
+        return { written: 1 };
+      },
+      async () => {
+        const definition = memoryExtensionModule.default({
+          getThinkingLevel: () => "medium",
+        });
+        await definition.hooks.message_end[0](
+          {
+            message: {
+              id: "msg-remote-1",
+              timestamp: "2026-05-11T06:00:00.000Z",
+              role: "assistant",
+              content: [{ type: "text", text: "send this to remote memory" }],
+            },
+          },
+          {
+            agentDir: root,
+            sessionId: "session-remote",
+            sessionFile: "/tmp/session-remote.jsonl",
+          },
+        );
+
+        const writeRequest = requests.find(
+          (payload) => payload.type === "memory_write_external",
+        );
+        assert.ok(writeRequest);
+        assert.equal(writeRequest.payload.role, "assistant");
+        assert.equal(writeRequest.payload.text, "send this to remote memory");
+      },
+    );
   });
 });
 

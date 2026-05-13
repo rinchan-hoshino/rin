@@ -20,7 +20,10 @@ import type { CronTaskRecord } from "./cron.js";
 type CronChatCapability = {
   send?: (payload: ChatOutboxPayload) => Promise<any>;
   runTurn?: (payload: any) => Promise<any>;
-  terminateTurn?: (payload: { controllerKey: string }) => Promise<any>;
+  terminateTurn?: (payload: {
+    controllerKey?: string;
+    chatKey?: string;
+  }) => Promise<any>;
 };
 
 export async function sendChatText(

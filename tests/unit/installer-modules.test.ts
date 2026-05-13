@@ -4,6 +4,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
@@ -383,6 +384,40 @@ test("persist reconcileInstallerManifest persists release metadata when provided
         archiveUrl: "https://example.com/release-1.3-beta.2.tgz",
         installedAt: "2026-04-20T10:00:00.000Z",
       });
+    }
+
+    const nightlyWrites = [];
+    persist.reconcileInstallerManifest(
+      {
+        targetUser: "demo",
+        installDir,
+        release: {
+          channel: "nightly",
+          version: "1.4.0-nightly.20260513+abc1234",
+          branch: "main",
+          ref: "abc1234",
+          sourceLabel: "nightly 1.4.0-nightly.20260513+abc1234",
+          archiveUrl: "https://example.com/nightly.tgz",
+        },
+        elevated: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000, home: ownerHome }),
+        ensureDir: async () => {},
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: (filePath, value) =>
+          nightlyWrites.push({ filePath, value }),
+        runPrivileged: () => {},
+      },
+    );
+
+    for (const entry of nightlyWrites) {
+      assert.equal(entry.value.release.channel, "nightly");
+      assert.equal(
+        entry.value.release.version,
+        "1.4.0-nightly.20260513+abc1234",
+      );
     }
   });
 });
@@ -886,6 +921,111 @@ test("persist normalizeInstalledChatSettings moves chat-bound root sessions unde
     assert.equal(result.migrations[2].migrated, 1);
     assert.deepEqual(result.migrations[2].migratedFiles, [targetSessionPath]);
     await fs.access(result.migrations[2].markerPath);
+  });
+});
+
+test("persist normalizeInstalledChatSettings runs elevated migrations as target user", async () => {
+  await withTempDir(async (dir) => {
+    const previousStoreDir = path.join(dir, "data", "koishi-message-store");
+    const currentStoreDir = path.join(dir, "data", "chat-message-store");
+    const chatStatePath = path.join(
+      dir,
+      "data",
+      "chats",
+      "telegram",
+      "1",
+      "2",
+      "state.json",
+    );
+    const rootSessionPath = path.join(dir, "sessions", "chat-root.jsonl");
+    await fs.mkdir(previousStoreDir, { recursive: true });
+    await fs.mkdir(path.dirname(chatStatePath), { recursive: true });
+    await fs.mkdir(path.dirname(rootSessionPath), { recursive: true });
+    await fs.writeFile(
+      path.join(previousStoreDir, "marker.txt"),
+      "old\n",
+      "utf8",
+    );
+    await fs.writeFile(rootSessionPath, "root session\n", "utf8");
+    await fs.writeFile(
+      chatStatePath,
+      JSON.stringify({
+        chatKey: "telegram/1:2",
+        piSessionFile: "chat-root.jsonl",
+      }),
+    );
+
+    const targetCalls = [];
+    const privilegedCalls = [];
+    const result = persist.normalizeInstalledChatSettings(
+      {
+        targetUser: "demo",
+        installDir: dir,
+        elevated: true,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000 }),
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: () => {},
+        runPrivileged: (command, args) =>
+          privilegedCalls.push({ command, args }),
+        runCommandAsUser: (targetUser, command, args) => {
+          targetCalls.push({ targetUser, command, args });
+          execFileSync(command, args);
+        },
+      },
+    );
+
+    const targetSessionPath = path.join(
+      dir,
+      "sessions",
+      "managed",
+      "chat",
+      "chat-root.jsonl",
+    );
+    assert.deepEqual(
+      new Set(targetCalls.map((call) => call.targetUser)),
+      new Set(["demo"]),
+    );
+    assert.deepEqual(privilegedCalls, []);
+    assert.ok(
+      targetCalls.some(
+        (call) =>
+          call.command === "mv" &&
+          call.args[0] === previousStoreDir &&
+          call.args[1] === currentStoreDir,
+      ),
+    );
+    assert.ok(
+      targetCalls.some(
+        (call) =>
+          call.command === "mv" &&
+          call.args[0] === rootSessionPath &&
+          call.args[1] === targetSessionPath,
+      ),
+    );
+    assert.ok(
+      targetCalls.some(
+        (call) =>
+          call.command === "install" && call.args.at(-1) === chatStatePath,
+      ),
+    );
+    assert.deepEqual(JSON.parse(await fs.readFile(chatStatePath, "utf8")), {
+      chatKey: "telegram/1:2",
+      sessionFile: "managed/chat/chat-root.jsonl",
+    });
+    assert.equal(
+      await fs.readFile(path.join(currentStoreDir, "marker.txt"), "utf8"),
+      "old\n",
+    );
+    assert.equal(
+      await fs.readFile(targetSessionPath, "utf8"),
+      "root session\n",
+    );
+    assert.equal(result.migrations[0].moved, true);
+    assert.equal(result.migrations[1].migrated, 1);
+    assert.equal(result.migrations[2].migrated, 1);
   });
 });
 

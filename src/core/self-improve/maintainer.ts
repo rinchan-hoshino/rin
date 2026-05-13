@@ -12,17 +12,7 @@ import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import { openBoundSession } from "../session/factory.js";
 import { forkSessionManagerCompat } from "../session/fork.js";
 import { readSessionMetadata } from "../session/metadata.js";
-import { normalizeSessionValue } from "../session/ref.js";
-import {
-  buildSessionRecallSummaryPrompt,
-  normalizeSessionSummaryText,
-} from "../session/summary.js";
-import {
-  appendTranscriptArchiveEntry,
-  getTranscriptArchivePath,
-  loadTranscriptSessionEntries,
-} from "../memory/transcripts.js";
-import { nowIso, safeString } from "./core/utils.js";
+import { safeString } from "./core/utils.js";
 import { resolveAgentDir } from "./lib.js";
 import { selfImprovePromptsDir, selfImproveSkillsDir } from "./paths.js";
 
@@ -189,90 +179,6 @@ async function runForkedSessionPrompt(options: {
   }
 }
 
-function isSessionSummaryEntry(entry: { role?: string; customType?: string }) {
-  return (
-    safeString(entry.role || "").trim() === "sessionSummary" ||
-    safeString(entry.customType || "").trim() === "session_summary"
-  );
-}
-
-async function storeSessionSummaryInTranscriptArchive(options: {
-  agentDir: string;
-  sessionFile: string;
-  summary: string;
-}) {
-  const normalizedAgentDir = normalizeSessionValue(options.agentDir);
-  const normalizedSessionFile = normalizeSessionValue(options.sessionFile);
-  const agentDir = normalizedAgentDir ? path.resolve(normalizedAgentDir) : "";
-  const sessionFile = normalizedSessionFile
-    ? path.resolve(normalizedSessionFile)
-    : "";
-  const summary = normalizeSessionSummaryText(options.summary);
-  if (!sessionFile || !summary) {
-    return { skipped: "empty-summary" };
-  }
-
-  const { SessionManager } = await loadRinSessionManagerModule();
-  const sessionManager = SessionManager.open(
-    sessionFile,
-    path.dirname(sessionFile),
-  );
-  const sessionInfo = readSessionMetadata(sessionManager);
-  const sessionId = sessionInfo.sessionId;
-  const existingEntries = await loadTranscriptSessionEntries(
-    {
-      sessionId: sessionId || undefined,
-      sessionFile,
-    },
-    agentDir,
-  ).catch(() => []);
-  const currentSummary = normalizeSessionSummaryText(
-    [...existingEntries].reverse().find((entry) => isSessionSummaryEntry(entry))
-      ?.text || "",
-  );
-  const timestamp = nowIso();
-  const archivePath = getTranscriptArchivePath(
-    {
-      timestamp,
-      sessionId,
-      sessionFile,
-    },
-    agentDir,
-  );
-  if (currentSummary && currentSummary === summary) {
-    return {
-      skipped: "unchanged",
-      sessionId: sessionId || undefined,
-      sessionSummary: currentSummary,
-      changedFiles: [] as MaintenanceChangedFile[],
-    };
-  }
-
-  await appendTranscriptArchiveEntry(
-    {
-      timestamp,
-      sessionId,
-      sessionFile,
-      role: "sessionSummary",
-      customType: "session_summary",
-      text: summary,
-      display: false,
-    },
-    agentDir,
-  );
-  return {
-    skipped: "",
-    sessionId: sessionId || undefined,
-    sessionSummary: summary,
-    changedFiles: [
-      {
-        path: archivePath,
-        change: currentSummary ? "updated" : "created",
-      },
-    ] as MaintenanceChangedFile[],
-  };
-}
-
 async function runForkedSessionSelfImproveReview(options: {
   agentDir: string;
   sessionFile: string;
@@ -329,41 +235,5 @@ export async function maintainMemory(
     sessionFile,
     leafId,
     trigger,
-  };
-}
-
-export async function maintainSessionSummary(
-  _ctx: ExtensionCtxLike & { sessionManager?: any },
-  opts: {
-    agentDir?: string;
-    sessionFile?: string;
-    leafId?: string;
-    trigger?: string;
-  } = {},
-) {
-  const session = readSessionMetadata(opts);
-  const sessionFile = session.sessionFile;
-  if (!sessionFile) return { skipped: "no-session-file" };
-  const agentDir = resolveAgentDir(opts.agentDir);
-  const leafId = session.leafId || undefined;
-  const trigger = safeString(opts.trigger || "session_summary:review").trim();
-  const output = await runForkedSessionPrompt({
-    agentDir,
-    sessionFile,
-    leafId,
-    prompt: buildSessionRecallSummaryPrompt(sessionFile),
-  });
-  const applied = await storeSessionSummaryInTranscriptArchive({
-    agentDir,
-    sessionFile,
-    summary: output,
-  });
-  return {
-    ...applied,
-    mode: "session",
-    sessionFile,
-    leafId,
-    trigger,
-    output,
   };
 }

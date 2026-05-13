@@ -6,11 +6,19 @@ Public tool:
 
 - `search_memory` — query past sessions, or leave `query` empty to browse recent sessions directly
 
+Extension API:
+
+- daemon worker extensions can call `ctx.registerMemoryProvider(provider, options)`
+- providers may implement `search`, `listRecent`, and `write`
+- `write` receives the same transcript archive entries produced by Rin's existing memory archival flow
+- provider results may use remote references such as `reference` or `url` instead of local transcript paths, so external systems do not need to expose local original-text storage
+
 ## Responsibilities
 
 This module owns:
 
 - transcript archiving under `~/.rin/memory/transcripts`
+- best-effort archive write and search fan-out to registered daemon memory providers
 - a persistent derived search index under `~/.rin/memory/search.db`, lazily synced from transcript archives
 - archived session records preserve full message history for recall, including assistant thinking text, tool calls, tool results, and other text-bearing message roles
 - recent-session previews favor actionable entries such as assistant steps, tool activity, commands, paths, and unresolved blockers instead of generic chatter

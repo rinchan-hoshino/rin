@@ -40,6 +40,7 @@ import {
 import { compileSelfImproveSync } from "../self-improve/store.js";
 import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
+import { formatPromptContextSystemPromptBlock } from "../chat-bridge/prompt-context.js";
 
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 
@@ -50,15 +51,6 @@ const DEFAULT_PI_GUIDELINES = [
   "When modifying files, prefer targeted edits and preserve existing style unless asked otherwise",
   "When using bash, explain meaningful findings instead of pasting excessive raw output",
 ];
-
-const RICH_CHAT_CONTENT_SYNTAX = [
-  "Chat rich content Markdown syntax:",
-  "- Use this syntax when the user asks to mention/tag someone, quote or reply to a specific message, or send/attach images, files, video, audio, or stickers; otherwise plain Markdown text is fine.",
-  "- Native at: [@name](at:<platform-user-id>). Raw @name text is plain text only.",
-  "- Quote reply: [quote:<message-id>] drives the platform reply/quote target.",
-  "- Image/file/video/audio/sticker: [image: name](url), [file: name](url), [video: name](url), [audio: name](url), [sticker: name](url).",
-  "- Unsupported rich objects degrade to readable plain text; supported rich objects are sent natively when possible.",
-].join("\n");
 
 export function createRinCapabilityDefinitions(
   options: RinCapabilityOptions,
@@ -117,7 +109,7 @@ function buildRinDocsBlock(agentDir: string) {
     `- Additional Pi docs: ${path.join(piRoot, "docs")}`,
     "- Read Rin docs when the task needs runtime operations, configuration, behavior, capabilities, layout, or other agent-operated details.",
     "- Start with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md; then use the relevant Rin topic doc.",
-    "- Common Rin routes: scheduled tasks/reminders -> docs/scheduled-tasks.md; chat bridge -> docs/chat-bridge.md; non-interactive CLI -> docs/non-interactive-cli.md; runtime layout/update -> docs/runtime-layout.md and docs/capabilities.md.",
+    "- Common Rin routes: scheduled tasks/reminders/cron jobs -> docs/scheduled-tasks.md; rich text output format -> docs/rich-text-output-format.md; chat bridge -> docs/chat-bridge.md; non-interactive CLI -> docs/non-interactive-cli.md; runtime layout/update -> docs/runtime-layout.md and docs/capabilities.md.",
     "- For topics not covered by Rin docs, use Pi README.md and docs/ as the base reference. Rin docs override Pi docs where they differ.",
     `- Upstream Pi examples live at ${path.join(piRoot, "examples")}.`,
   ].join("\n");
@@ -231,18 +223,11 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
       "Guidelines:",
       guidelines,
       "",
-      RICH_CHAT_CONTENT_SYNTAX,
-      "",
       docsBlock,
       configuredLanguageBlock ? `\n${configuredLanguageBlock}` : "",
     ].join("\n");
   } else {
-    prompt = [
-      prompt,
-      RICH_CHAT_CONTENT_SYNTAX,
-      docsBlock,
-      configuredLanguageBlock,
-    ]
+    prompt = [prompt, docsBlock, configuredLanguageBlock]
       .filter(Boolean)
       .join("\n\n");
   }
@@ -443,6 +428,16 @@ export function ensureSessionBaseSystemPrompt(session: any): string {
   return next;
 }
 
+export function appendPromptContextSystemPrompt(
+  systemPrompt: string,
+  promptContext: unknown,
+) {
+  const block = formatPromptContextSystemPromptBlock(promptContext as any);
+  if (!block.trim()) return String(systemPrompt || "");
+  const base = String(systemPrompt || "").trimEnd();
+  return base ? `${base}\n\n${block}` : block;
+}
+
 function applyRinPromptBuilder(session: any) {
   if (!session || typeof session !== "object") return;
   const originalRebuild =
@@ -479,14 +474,18 @@ function applyRinPromptBuilder(session: any) {
   if (originalPrompt) {
     session.prompt = async (text: string, options?: any) => {
       const basePrompt = ensureSessionBaseSystemPrompt(session);
-      const nextPrompt = consumeCompactionContinuationSystemPrompt(
+      const continuationPrompt = consumeCompactionContinuationSystemPrompt(
         session,
         basePrompt,
       );
-      if (nextPrompt === basePrompt) {
+      const turnPrompt = appendPromptContextSystemPrompt(
+        continuationPrompt,
+        options?.promptContext,
+      );
+      if (turnPrompt === basePrompt) {
         return await originalPrompt(text, options);
       }
-      applySessionBaseSystemPrompt(session, nextPrompt);
+      applySessionBaseSystemPrompt(session, turnPrompt);
       try {
         return await originalPrompt(text, options);
       } finally {
@@ -801,8 +800,128 @@ export {
   RIN_DIR_ENV,
 };
 
+const BACKEND_TOOL_EXECUTION_LOCKS_KEY = Symbol.for(
+  "rin.backendToolExecutionLocks",
+);
+const BACKEND_TOOL_LOCK_WRAPPED_KEY = Symbol.for(
+  "rin.backendToolExecutionLockWrapped",
+);
+const backendToolExecutionQueues = new Map<
+  string,
+  ReturnType<typeof createSerialExecutionQueue>
+>();
+
 function normalizeQueueMode(value: unknown, fallback: "all" | "one-at-a-time") {
   return value === "all" || value === "one-at-a-time" ? value : fallback;
+}
+
+function createSerialExecutionQueue() {
+  let tail: Promise<void> = Promise.resolve();
+  return async function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+    let release = () => {};
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const previous = tail;
+    tail = tail.then(
+      () => next,
+      () => next,
+    );
+    await previous.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  };
+}
+
+export function applyRinBackendToolExecutionLocks(
+  session: any,
+  toolNames = ["web_search"],
+) {
+  if (!session || typeof session !== "object") return;
+  const targetNames = new Set(
+    toolNames.map((name) => String(name || "").trim()).filter(Boolean),
+  );
+  if (!targetNames.size) return;
+
+  const existingState = session[BACKEND_TOOL_EXECUTION_LOCKS_KEY] as
+    | {
+        targetNames: Set<string>;
+        patched: boolean;
+      }
+    | undefined;
+  const state = existingState || {
+    targetNames: new Set<string>(),
+    patched: false,
+  };
+  for (const name of targetNames) state.targetNames.add(name);
+  session[BACKEND_TOOL_EXECUTION_LOCKS_KEY] = state;
+
+  const getQueue = (name: string) => {
+    let queue = backendToolExecutionQueues.get(name);
+    if (!queue) {
+      queue = createSerialExecutionQueue();
+      backendToolExecutionQueues.set(name, queue);
+    }
+    return queue;
+  };
+
+  const wrapTool = (tool: any) => {
+    const name = String(tool?.name || "").trim();
+    if (!name || !state.targetNames.has(name)) return tool;
+    if (tool?.[BACKEND_TOOL_LOCK_WRAPPED_KEY]) return tool;
+    if (typeof tool?.execute !== "function") return tool;
+    const runExclusive = getQueue(name);
+    return {
+      ...tool,
+      [BACKEND_TOOL_LOCK_WRAPPED_KEY]: true,
+      execute: (...args: any[]) =>
+        runExclusive(() => tool.execute.call(tool, ...args)),
+    };
+  };
+
+  const wrapActiveTools = () => {
+    const tools = session?.agent?.state?.tools;
+    if (!Array.isArray(tools)) return;
+    let changed = false;
+    const nextTools = tools.map((tool) => {
+      const nextTool = wrapTool(tool);
+      if (nextTool !== tool) changed = true;
+      return nextTool;
+    });
+    if (changed) session.agent.state.tools = nextTools;
+  };
+
+  if (!state.patched) {
+    const originalSetActiveToolsByName =
+      typeof session.setActiveToolsByName === "function"
+        ? session.setActiveToolsByName.bind(session)
+        : null;
+    if (originalSetActiveToolsByName) {
+      session.setActiveToolsByName = (...args: any[]) => {
+        const result = originalSetActiveToolsByName(...args);
+        wrapActiveTools();
+        return result;
+      };
+    }
+
+    const originalRefreshToolRegistry =
+      typeof session._refreshToolRegistry === "function"
+        ? session._refreshToolRegistry.bind(session)
+        : null;
+    if (originalRefreshToolRegistry) {
+      session._refreshToolRegistry = (...args: any[]) => {
+        const result = originalRefreshToolRegistry(...args);
+        wrapActiveTools();
+        return result;
+      };
+    }
+    state.patched = true;
+  }
+
+  wrapActiveTools();
 }
 
 export function applyRinSettingsDefaults(settingsManager: any) {
@@ -966,6 +1085,7 @@ export async function createConfiguredAgentSession(
       previousSessionFile:
         String(sessionStartEvent?.previousSessionFile || "") || undefined,
     });
+    applyRinBackendToolExecutionLocks(result.session);
     clearCompactionContinuationMarker(result.session);
 
     applyRinPromptBuilder(result.session);

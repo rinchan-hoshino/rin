@@ -69,19 +69,10 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("- search_memory:"));
   assert.equal(baseSystemPrompt.includes("- save_prompts:"), false);
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
-  assert.ok(baseSystemPrompt.includes("Chat rich content Markdown syntax:"));
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Use this syntax when the user asks to mention/tag someone",
-    ),
-  );
-  assert.ok(
+  assert.equal(baseSystemPrompt.includes("Markdown rich-object syntax"), false);
+  assert.equal(
     baseSystemPrompt.includes("Native at: [@name](at:<platform-user-id>)"),
-  );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Image/file/video/audio/sticker: [image: name](url)",
-    ),
+    false,
   );
 
   assert.ok(baseSystemPrompt.includes("Rin and Pi documentation:"));
@@ -92,7 +83,12 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "scheduled tasks/reminders -> docs/scheduled-tasks.md",
+      "scheduled tasks/reminders/cron jobs -> docs/scheduled-tasks.md",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "rich text output format -> docs/rich-text-output-format.md",
     ),
   );
   assert.equal(baseSystemPrompt.includes("- Topic map:"), false);

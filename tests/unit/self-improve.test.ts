@@ -600,7 +600,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
   });
 });
 
-test("real session shutdown triggers review and summary maintenance", async () => {
+test("real session shutdown triggers self-improve review maintenance", async () => {
   await withTempRoot(async (root) => {
     const definition = selfImproveIndex.default({
       sendMessage() {},
@@ -625,11 +625,9 @@ test("real session shutdown triggers review and summary maintenance", async () =
     await shutdown({}, ctx);
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 2);
+    assert.equal(queue.length, 1);
     assert.equal(queue[0].kind, "self_improve_review");
     assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
-    assert.equal(queue[1].kind, "session_summary");
-    assert.equal(queue[1].trigger, "session_summary:session_shutdown");
   });
 });
 
@@ -699,14 +697,10 @@ test("queued maintenance jobs use core self-improve trigger names by default", a
       agentDir: root,
       sessionFile: "/tmp/session-a.jsonl",
     });
-    await asyncJobs.enqueueSessionSummaryJob({
-      agentDir: root,
-      sessionFile: "/tmp/session-b.jsonl",
-    });
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
     assert.equal(queue[0].trigger, "self_improve:review");
-    assert.equal(queue[1].trigger, "session_summary:review");
   });
 });
 
@@ -785,28 +779,6 @@ test("queued maintenance drops invalid session jobs into history instead of bloc
 test("queued maintenance ignores blank agent dir inputs", async () => {
   const result = await asyncJobs.processQueuedMemoryJobs("   ");
   assert.deepEqual(result, { skipped: "no-agent-dir" });
-});
-
-test("session summary jobs stay distinct from self-improve review jobs", async () => {
-  await withTempRoot(async (root) => {
-    await asyncJobs.enqueueMemoryMaintenanceJob({
-      agentDir: root,
-      sessionFile: "/tmp/session-a.jsonl",
-      trigger: "review",
-    });
-    await asyncJobs.enqueueSessionSummaryJob({
-      agentDir: root,
-      sessionFile: "/tmp/session-a.jsonl",
-      trigger: "summary",
-    });
-
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 2);
-    assert.deepEqual(
-      queue.map((item) => item.kind),
-      ["self_improve_review", "session_summary"],
-    );
-  });
 });
 
 test("compaction snapshot jobs stay distinct for the same session", async () => {

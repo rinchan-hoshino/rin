@@ -7,7 +7,9 @@ import {
   pruneInstalledReleases,
   readInstallerJson,
   readJsonFile,
+  runCommandAsUser,
   runPrivileged,
+  captureCommandAsUser,
   syncInstalledDocs,
   writeJsonFile,
   writeJsonFileWithPrivilege,
@@ -174,6 +176,8 @@ async function applyInstalledRuntime(
             }),
           reconcileInstallerManifest,
           runPrivileged,
+          runCommandAsUser,
+          captureCommandAsUser,
         },
       )
     : normalizeInstalledChatSettings(
@@ -188,6 +192,8 @@ async function applyInstalledRuntime(
           writeJsonFileWithPrivilege,
           writeJsonFile,
           runPrivileged,
+          runCommandAsUser,
+          captureCommandAsUser,
         },
       );
 

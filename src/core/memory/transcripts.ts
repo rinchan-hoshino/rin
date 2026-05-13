@@ -1,6 +1,9 @@
 export type {
+  ExternalMemoryResult,
+  ExternalMemoryResultMessage,
   IndexedSessionBucket,
   IndexedTranscriptEntry,
+  MemorySearchResult,
   TranscriptArchiveEntry,
   TranscriptFileState,
   TranscriptResultMessage,
@@ -8,6 +11,7 @@ export type {
 } from "./transcript-types.js";
 
 export {
+  extractTranscriptText,
   getTranscriptArchivePath,
   loadTranscriptArchiveEntries,
   resolveTranscriptRoot,

@@ -39,32 +39,11 @@ function formatAttempts(response: any, options: { maxError?: number } = {}) {
   return ["attempts:", ...lines].join("\n");
 }
 
-function collectChallengeErrors(response: any): string[] {
-  const attempts = Array.isArray(response?.attempts) ? response.attempts : [];
-  return attempts
-    .map((attempt: any) => String(attempt?.error || ""))
-    .filter((error) => /(?:google|duckduckgo)_challenge_required/.test(error));
-}
-
-function formatChallengeHelp(response: any): string {
-  const errors = collectChallengeErrors(response);
-  if (!errors.length) return "";
-  const providers = [...new Set(errors.map((error) => error.split("_")[0]))]
-    .map((provider) => (provider === "duckduckgo" ? "DuckDuckGo" : "Google"))
-    .join("/");
-  return [
-    `Challenge help: ${providers} returned an anti-bot/captcha page to Rin's runtime, so the search tool cannot solve it inside the current request.`,
-    "User action: wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, use direct URL fetch if you already know the page, or configure a trusted search backend/API instead of the direct engine.",
-    "SearXNG reduces this risk by centralizing engine-specific request shapes, rate limiting, and optional proxy/instance rotation; its Google engine uses a localized supported domain, hl/lr/cr locale parameters, CONSENT=YES+, Accept: */*, utf8 encoding, and a mobile Google-app-like user agent, while its DuckDuckGo engine uses an HTML form POST with browser navigation headers. It still cannot magically bypass a captcha once the upstream search engine challenges that egress IP.",
-  ].join("\n");
-}
-
 function formatResults(response: any): string {
   if (!response?.ok) {
     return [
       `Web search failed: ${String(response?.error || "unknown_error")}`,
       formatAttempts(response),
-      formatChallengeHelp(response),
     ]
       .filter(Boolean)
       .join("\n");
@@ -88,7 +67,6 @@ function formatAgentResults(response: any): string {
       "web_search error",
       `error=${String(response?.error || "unknown_error")}`,
       formatAttempts(response, { maxError: 520 }),
-      formatChallengeHelp(response),
     ]
       .filter(Boolean)
       .join("\n");

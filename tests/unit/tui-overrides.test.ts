@@ -45,6 +45,8 @@ const themeModule = await import(
   ).href
 );
 
+const ESC = "\u001b";
+
 const settingsManagerWithoutTerminalProgress = {
   getShowTerminalProgress() {
     return false;
@@ -66,7 +68,52 @@ test("terminal title override shows only session name", async () => {
     },
   });
 
-  assert.equal(title, "π - demo");
+  assert.equal(title, "Rin - demo");
+});
+
+test("startup header override replaces upstream Pi branding with Rin", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const previousVersion = process.env.RIN_RELEASE_VERSION;
+  process.env.RIN_RELEASE_VERSION = "1.2.3";
+  const header = {
+    text: "",
+    getCollapsedText() {
+      return "pi v0.74.0\nshort help\n\nPi can explain its own features and look up its docs. Ask it how to use or extend Pi.";
+    },
+    getExpandedText() {
+      return "pi v0.74.0\nexpanded help\n\nPi can explain its own features and look up its docs. Ask it how to use or extend Pi.";
+    },
+    setText(value) {
+      this.text = value;
+    },
+    setExpanded(expanded) {
+      this.setText(expanded ? this.getExpandedText() : this.getCollapsedText());
+    },
+  };
+
+  try {
+    assert.equal(
+      overrides.applyRinStartupHeaderBranding({
+        builtInHeader: header,
+        getStartupExpansionState: () => false,
+      }),
+      true,
+    );
+
+    assert.match(header.text, /Rin v1\.2\.3/);
+    assert.match(header.text, /Rin can explain her own features/);
+    assert.match(header.text, /extend Rin/);
+    assert.doesNotMatch(header.text, /\bpi v0\.74\.0\b/i);
+    assert.doesNotMatch(header.text, /extend Pi/);
+    assert.match(
+      codingAgentModule.InteractiveMode.prototype.init.toString(),
+      /applyRinStartupHeaderBranding/,
+    );
+  } finally {
+    if (previousVersion === undefined) delete process.env.RIN_RELEASE_VERSION;
+    else process.env.RIN_RELEASE_VERSION = previousVersion;
+  }
 });
 
 test("update overrides replace startup update path and skip settings changelog state", async () => {
@@ -89,6 +136,47 @@ test("update overrides replace startup update path and skip settings changelog s
   assert.match(
     String(codingAgentModule.InteractiveMode.prototype.run),
     /showRinUpdateNotificationWhenReady/,
+  );
+});
+
+test("startup header branding replaces upstream Pi name and version", async () => {
+  assert.equal(
+    overrides.rewriteRinStartupHeaderText(
+      `${ESC}[38;5;109mpi${ESC}[39m${ESC}[38;5;241m v0.74.0${ESC}[39m\nPi can explain Pi.`,
+      "0.74.0",
+      "0.2.0-nightly.20260512+dc82e36",
+    ),
+    `${ESC}[38;5;109mrin${ESC}[39m${ESC}[38;5;241m v0.2.0-nightly.20260512+dc82e36${ESC}[39m\nRin can explain Rin.`,
+  );
+
+  let currentText = "";
+  const previousReleaseVersion = process.env.RIN_RELEASE_VERSION;
+  try {
+    process.env.RIN_RELEASE_VERSION = "0.3.0";
+    const header = {
+      getCollapsedText: () => "pi v0.74.0\nPi can help.",
+      getExpandedText: () => "pi v0.74.0\nExpanded Pi help.",
+      setExpanded(expanded) {
+        currentText = expanded
+          ? this.getExpandedText()
+          : this.getCollapsedText();
+      },
+    };
+    overrides.applyRinStartupHeaderBranding({
+      builtInHeader: header,
+      version: "0.74.0",
+      getStartupExpansionState: () => true,
+    });
+  } finally {
+    if (previousReleaseVersion === undefined)
+      delete process.env.RIN_RELEASE_VERSION;
+    else process.env.RIN_RELEASE_VERSION = previousReleaseVersion;
+  }
+
+  assert.equal(currentText, "rin v0.3.0\nExpanded Rin help.");
+  assert.match(
+    String(codingAgentModule.InteractiveMode.prototype.init),
+    /applyRinStartupHeaderBranding/,
   );
 });
 
@@ -199,7 +287,7 @@ test("loader stop clears render interval", () => {
   assert.ok(renders >= 1);
 });
 
-test("rpc frontend startup statuses render as static text until Pi-owned working starts", async () => {
+test("rpc frontend startup statuses use an animated loader until working starts", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -242,9 +330,18 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
     retryLoader: undefined,
     loadingAnimation: undefined,
     workingVisible: true,
-    stopWorkingLoader() {},
+    stopWorkingLoader() {
+      this.loadingAnimation?.stop?.();
+      this.loadingAnimation = undefined;
+      this.statusContainer.clear();
+    },
     createWorkingLoader() {
-      return { stop() {} };
+      return new loaderModule.Loader(
+        this.ui,
+        (value) => value,
+        (value) => value,
+        "Working...",
+      );
     },
   };
 
@@ -258,7 +355,17 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
   const startupStatus = instance.statusContainer.child;
   assert.ok(startupStatus);
   assert.equal(instance.loadingAnimation, undefined);
-  assert.equal(startupStatus.intervalId, undefined);
+  assert.equal(startupStatus.constructor.name, "Loader");
+  assert.notEqual(startupStatus.intervalId, null);
+  assert.ok(startupStatus.frames.length > 1);
+  assert.equal(startupStatus.message, "Starting...");
+  assert.equal(typeof startupStatus.stop, "function");
+  const startupLines = startupStatus.render(40);
+  assert.equal(startupLines.length, 2);
+  assert.equal(startupLines[0], "");
+  assert.equal(piTuiModule.visibleWidth(startupLines[0]), 0);
+  assert.equal(piTuiModule.visibleWidth(startupLines[1]), 40);
+  assert.match(startupLines[1], /Starting\.\.\./);
   assert.equal(additions, 1);
   assert.ok(renders >= 1);
 
@@ -269,7 +376,25 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
     connected: true,
   });
   assert.equal(instance.statusContainer.child, startupStatus);
-  assert.equal(startupStatus.intervalId, undefined);
+  assert.notEqual(startupStatus.intervalId, null);
+  assert.equal(startupStatus.message, "Connecting...");
+  const connectingLines = startupStatus.render(40);
+  assert.equal(connectingLines[0], "");
+  assert.match(connectingLines[1], /Connecting\.\.\./);
+  assert.equal(additions, 1);
+
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_frontend_status",
+    phase: "sending",
+    label: "Sending",
+    connected: true,
+  });
+  assert.equal(instance.statusContainer.child, startupStatus);
+  assert.notEqual(startupStatus.intervalId, null);
+  assert.equal(startupStatus.message, "Sending...");
+  const sendingLines = startupStatus.render(40);
+  assert.equal(sendingLines[0], "");
+  assert.match(sendingLines[1], /Sending\.\.\./);
   assert.equal(additions, 1);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
@@ -278,20 +403,11 @@ test("rpc frontend startup statuses render as static text until Pi-owned working
     label: "Working",
     connected: true,
   });
+
   assert.equal(instance.loadingAnimation, undefined);
   assert.equal(instance.statusContainer.child, undefined);
-
-  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
-    type: "agent_start",
-  });
-
-  try {
-    assert.ok(instance.loadingAnimation);
-    assert.equal(instance.statusContainer.child, instance.loadingAnimation);
-    assert.ok(clears >= 1);
-  } finally {
-    instance.loadingAnimation?.stop();
-  }
+  assert.equal(startupStatus.intervalId, null);
+  assert.ok(clears >= 1);
 });
 
 test("rpc working status only reattaches an existing Pi-owned loader", async () => {
@@ -404,8 +520,11 @@ test("local session selector reuses bound session helpers for canonicalized list
       instance,
     );
 
-    const headerText = selector.header.render(100).join("\n");
+    const headerLines = selector.header.render(100);
+    const headerText = headerLines.join("\n");
     assert.doesNotMatch(headerText, /Current|Folder|Directory/);
+    assert.equal(piTuiModule.visibleWidth(headerLines[0]), 100);
+    assert.ok(headerLines[0].endsWith(`Threaded${ESC}[39m`));
     selector.sessionList.setSessions([], false);
     assert.doesNotMatch(
       selector.sessionList.render(100).join("\n"),

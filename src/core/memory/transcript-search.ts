@@ -22,7 +22,7 @@ import {
   appendTranscriptArchiveRecord,
   buildResultMessage,
   collectTranscriptFiles,
-  isSessionSummaryEntry,
+  isLegacySyntheticSessionSummaryEntry,
   loadTranscriptArchiveFile,
   presentSessionResult,
   resolveTranscriptRoot,
@@ -80,7 +80,7 @@ const transcriptSearchWriteStatementCache = new WeakMap<
   TranscriptSearchWriteStatements
 >();
 
-const SEARCH_DB_SCHEMA_VERSION = 2;
+const SEARCH_DB_SCHEMA_VERSION = 3;
 const DEFAULT_RESULT_LIMIT = 8;
 const RAW_SEARCH_LIMIT = 50;
 
@@ -886,7 +886,7 @@ function aggregateSearchResults(
         line_number: row.line_number,
         archive_path: row.archive_path,
       });
-      if (entry && !isSessionSummaryEntry(entry)) {
+      if (entry && !isLegacySyntheticSessionSummaryEntry(entry)) {
         bucket.messages.push(buildResultMessage(entry));
       }
     }

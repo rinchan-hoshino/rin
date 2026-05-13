@@ -160,6 +160,15 @@ test("getRestorableSessionSelectors keeps live session workers and remembers tur
     { sessionFile: "/tmp/test-session.jsonl", resumeTurn: true },
   ]);
 
+  worker.turnActive = false;
+  worker.pendingResponses.set("prompt-1", {
+    id: "prompt-1",
+    commandType: "prompt",
+  });
+  assert.deepEqual(pool.getRestorableSessionSelectors(), [
+    { sessionFile: "/tmp/test-session.jsonl", resumeTurn: true },
+  ]);
+
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
 });

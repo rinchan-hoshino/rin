@@ -52,6 +52,8 @@ export type RinRpcCommandType =
   | "chat_run_turn"
   | "chat_terminate_turn"
   | "chat_bridge_eval"
+  | "memory_search_external"
+  | "memory_write_external"
   | "cron_list_tasks"
   | "cron_get_task"
   | "cron_upsert_task"

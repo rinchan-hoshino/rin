@@ -139,7 +139,7 @@ function summarizePart(part: unknown): string {
   return "";
 }
 
-function extractTranscriptText(input: Record<string, unknown>): string {
+export function extractTranscriptText(input: Record<string, unknown>): string {
   const role = safeString(input.role || "").trim();
   const content = input.content;
   if (typeof content === "string") return content.trim();
@@ -177,6 +177,7 @@ export async function appendTranscriptArchiveRecord(
 > {
   const role = safeString(input.role || "").trim();
   if (!role) return undefined;
+  if (isLegacySyntheticSessionSummaryEntry(input)) return undefined;
   const rawSessionFile = safeString(input.sessionFile || "").trim();
   if (!rawSessionFile) return undefined;
   const sessionFile = path.resolve(rawSessionFile);
@@ -246,7 +247,10 @@ export async function loadTranscriptArchiveFile(filePath: string) {
         return null;
       }
     })
-    .filter((entry): entry is TranscriptArchiveEntry => Boolean(entry?.text));
+    .filter(
+      (entry): entry is TranscriptArchiveEntry =>
+        Boolean(entry?.text) && !isLegacySyntheticSessionSummaryEntry(entry),
+    );
 }
 
 export async function collectTranscriptFiles(dir: string): Promise<string[]> {
@@ -280,16 +284,14 @@ function timestampValue(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function isSessionSummaryEntry(entry: TranscriptArchiveEntry) {
+export function isLegacySyntheticSessionSummaryEntry(input: {
+  role?: unknown;
+  customType?: unknown;
+}) {
   return (
-    safeString(entry.role || "").trim() === "sessionSummary" ||
-    safeString(entry.customType || "").trim() === "session_summary"
+    safeString(input.role || "").trim() === "sessionSummary" ||
+    safeString(input.customType || "").trim() === "session_summary"
   );
-}
-
-function contentTranscriptEntries(entries: TranscriptArchiveEntry[]) {
-  const filtered = entries.filter((entry) => !isSessionSummaryEntry(entry));
-  return filtered.length ? filtered : entries;
 }
 
 function compareEntriesByNewest(
@@ -301,14 +303,6 @@ function compareEntriesByNewest(
 
 function latestTranscriptEntry(entries: TranscriptArchiveEntry[]) {
   return [...entries].sort(compareEntriesByNewest)[0];
-}
-
-function latestStoredSessionSummary(entries: TranscriptArchiveEntry[]) {
-  return normalizeSessionNameDetail(
-    latestTranscriptEntry(entries.filter((item) => isSessionSummaryEntry(item)))
-      ?.text || "",
-    180,
-  );
 }
 
 export function transcriptPreviewText(entry: TranscriptArchiveEntry) {
@@ -404,16 +398,14 @@ export function presentSessionResult(
     messages?: TranscriptResultMessage[];
   } = {},
 ): TranscriptSessionResult {
-  const displayEntries = contentTranscriptEntries(entries);
-  const rankedDisplayEntries = rankSessionEntries(displayEntries);
+  const rankedDisplayEntries = rankSessionEntries(entries);
   const previewEntry = rankedDisplayEntries[0];
-  const latestEntry = latestTranscriptEntry(displayEntries);
+  const latestEntry = latestTranscriptEntry(entries);
   const preview = buildSessionPreviewFromRankedEntries(rankedDisplayEntries);
   const sessionName = resolveTranscriptSessionDisplayName(
     safeString(previewEntry?.sessionFile || "").trim(),
     preview,
   );
-  const storedSummary = latestStoredSessionSummary(entries);
   return {
     sourceType: "session",
     id:
@@ -433,7 +425,6 @@ export function presentSessionResult(
     timestamp: latestEntry?.timestamp || previewEntry.timestamp,
     description: trimText(preview, 160),
     preview,
-    summary: storedSummary || undefined,
     hitCount: extra.hitCount,
     messages:
       extra.messages && extra.messages.length

@@ -2,21 +2,28 @@ import {
   DynamicBorder,
   FooterComponent,
   InteractiveMode,
+  keyHint,
   SessionManager,
   SessionSelectorComponent,
 } from "@earendil-works/pi-coding-agent";
 import {
+  Loader,
   Markdown,
   ProcessTerminal,
   Spacer,
   Text,
   truncateToWidth,
+  visibleWidth,
 } from "@earendil-works/pi-tui";
 
+import { theme } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+
 import {
-  checkForNewRinVersion,
+  checkForRinUpdateNotice,
+  getCurrentRinVersion,
   getRinChangelogUrl,
   readRinChangelogEntries,
+  type RinUpdateNotice,
 } from "../rin-lib/update-notices.js";
 import { extractMessageText } from "../message-content.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
@@ -119,14 +126,24 @@ function statusContainerHasChild(instance: any, child: any) {
 function stopRpcTransportStatusComponent(instance: any) {
   const component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
   if (!component) return;
+  component.stop?.();
   if (statusContainerHasChild(instance, component)) {
     instance.statusContainer.clear();
   }
   instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = undefined;
 }
 
+function createRpcTransportStatusLoader(instance: any, message: string) {
+  const loader =
+    typeof instance?.createWorkingLoader === "function"
+      ? instance.createWorkingLoader()
+      : new Loader(instance.ui, (text: string) => text, dim, message);
+  loader.setMessage?.(message);
+  return loader;
+}
+
 function formatRpcTransportStatusLabel(label: string) {
-  return dim(`${label}...`);
+  return `${label}...`;
 }
 
 function showRpcTransportStatus(instance: any, event: any) {
@@ -138,12 +155,13 @@ function showRpcTransportStatus(instance: any, event: any) {
   }
 
   const label = String(event?.label || phase || "Starting");
+  const message = formatRpcTransportStatusLabel(label);
   let component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
   if (!component) {
-    component = new Text(formatRpcTransportStatusLabel(label), 1, 0);
+    component = createRpcTransportStatusLoader(instance, message);
     instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = component;
   } else {
-    component.setText(formatRpcTransportStatusLabel(label));
+    component.setMessage(message);
   }
   if (!statusContainerHasChild(instance, component)) {
     instance.statusContainer.clear();
@@ -153,10 +171,6 @@ function showRpcTransportStatus(instance: any, event: any) {
 }
 
 function reattachExistingPiLoader(instance: any) {
-  // RPC transport status is not allowed to create its own working animation.
-  // Pi's canonical agent/compaction/retry events own those loader lifetimes;
-  // this only restores an existing Pi-owned loader after another Pi event
-  // cleared the shared status container.
   stopRpcTransportStatusComponent(instance);
   if (!instance?.loadingAnimation) return;
   instance.statusContainer.clear();
@@ -257,10 +271,11 @@ function redrawCurrentSessionHistoryAfterRpcResync(instance: any) {
   });
 }
 
-function showRinUpdateNotification(instance: any, newVersion: string) {
+function showRinUpdateNotification(instance: any, notice: RinUpdateNotice) {
+  const channelPrefix = notice.channel === "stable" ? "" : `${notice.channel} `;
   const text = [
-    `Rin update available: ${newVersion}`,
-    "Run: rin update",
+    `Rin ${channelPrefix}update available: ${notice.version}`,
+    `Run: ${notice.command}`,
     `Changelog: ${getRinChangelogUrl()}`,
   ].join("\n");
   if (typeof instance?.showWarning === "function") {
@@ -274,13 +289,13 @@ function showRinUpdateNotification(instance: any, newVersion: string) {
 
 async function showRinUpdateNotificationWhenReady(instance: any) {
   try {
-    const newVersion = await checkForNewRinVersion();
-    if (!newVersion) return;
+    const notice = await checkForRinUpdateNotice();
+    if (!notice) return;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if (instance?.isInitialized) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    showRinUpdateNotification(instance, newVersion);
+    showRinUpdateNotification(instance, notice);
   } catch {
     // Update checks must never block the TUI.
   }
@@ -347,38 +362,85 @@ function preserveScrollbackOnFullRedraw() {
   };
 }
 
-function renderSessionSelectorHeaderWithoutCwdLabels(
-  header: any,
-  render: (width: number) => unknown,
-  width: number,
-) {
-  const lines = render.call(header, width);
-  if (!Array.isArray(lines)) return lines;
-  return lines.map((line) =>
-    typeof line === "string"
-      ? line
-          .replace(
-            /Resume Session \((?:Current Folder|All)\)/g,
-            "Resume Session",
-          )
-          .replace(/Current Folder/g, "Sessions")
-      : line,
+function renderRinSessionSelectorHeader(header: any, width: number) {
+  const title = "Resume Session";
+  const leftText = theme.bold(title);
+  const sortLabel =
+    header.sortMode === "threaded"
+      ? "Threaded"
+      : header.sortMode === "recent"
+        ? "Recent"
+        : "Fuzzy";
+  const sortText = theme.fg("muted", "Sort: ") + theme.fg("accent", sortLabel);
+  const nameLabel = header.nameFilter === "all" ? "All" : "Named";
+  const nameText = theme.fg("muted", "Name: ") + theme.fg("accent", nameLabel);
+  let scopeText;
+  if (header.loading) {
+    const progressText = header.loadProgress
+      ? `${header.loadProgress.loaded}/${header.loadProgress.total}`
+      : "...";
+    scopeText = `${theme.fg("muted", "○ Sessions | ")}${theme.fg("accent", `Loading ${progressText}`)}`;
+  } else if (header.scope === "current") {
+    scopeText = `${theme.fg("accent", "◉ Sessions")}${theme.fg("muted", " | ○ All")}`;
+  } else {
+    scopeText = `${theme.fg("muted", "○ Sessions | ")}${theme.fg("accent", "◉ All")}`;
+  }
+  const rightText = truncateToWidth(
+    `${scopeText}  ${nameText}  ${sortText}`,
+    width,
+    "",
   );
+  const availableLeft = Math.max(0, width - visibleWidth(rightText) - 1);
+  const left = truncateToWidth(leftText, availableLeft, "");
+  const spacing = Math.max(
+    0,
+    width - visibleWidth(left) - visibleWidth(rightText),
+  );
+
+  let hintLine1;
+  let hintLine2;
+  if (header.confirmingDeletePath !== null) {
+    const confirmHint = `Delete session? ${keyHint("tui.select.confirm", "confirm")} · ${keyHint("tui.select.cancel", "cancel")}`;
+    hintLine1 = theme.fg("error", truncateToWidth(confirmHint, width, "…"));
+    hintLine2 = "";
+  } else if (header.statusMessage) {
+    const color = header.statusMessage.type === "error" ? "error" : "accent";
+    hintLine1 = theme.fg(
+      color,
+      truncateToWidth(header.statusMessage.message, width, "…"),
+    );
+    hintLine2 = "";
+  } else {
+    const pathState = header.showPath ? "(on)" : "(off)";
+    const sep = theme.fg("muted", " · ");
+    const hint1 =
+      keyHint("tui.input.tab", "scope") +
+      sep +
+      theme.fg("muted", 're:<pattern> regex · "phrase" exact');
+    const hint2Parts = [
+      keyHint("app.session.toggleSort", "sort"),
+      keyHint("app.session.toggleNamedFilter", "named"),
+      keyHint("app.session.delete", "delete"),
+      keyHint("app.session.togglePath", `path ${pathState}`),
+    ];
+    if (header.showRenameHint) {
+      hint2Parts.push(keyHint("app.session.rename", "rename"));
+    }
+    const hint2 = hint2Parts.join(sep);
+    hintLine1 = truncateToWidth(hint1, width, "…");
+    hintLine2 = truncateToWidth(hint2, width, "…");
+  }
+  return [`${left}${" ".repeat(spacing)}${rightText}`, hintLine1, hintLine2];
 }
 
 function configureRootSessionSelectorPresentation(selector: any) {
   if (!selector || typeof selector !== "object") return;
 
   if (selector.header && typeof selector.header.render === "function") {
-    const originalRender = selector.header.render;
-    selector.header.render = function renderWithPiStyleWithoutCwdLabels(
+    selector.header.render = function renderWithRinSessionSelectorHeader(
       width: number,
     ) {
-      return renderSessionSelectorHeaderWithoutCwdLabels(
-        this,
-        originalRender,
-        width,
-      );
+      return renderRinSessionSelectorHeader(this, width);
     };
   }
 
@@ -390,6 +452,84 @@ function configureRootSessionSelectorPresentation(selector: any) {
     };
     sessionList.showCwd = true;
   }
+}
+
+function formatRinStartupVersionLabel(version = getCurrentRinVersion()) {
+  const trimmed = String(version || "unknown").trim() || "unknown";
+  if (/^v\d+\.\d+\.\d+(?:[-+].*)?$/i.test(trimmed)) return trimmed;
+  if (/^\d+\.\d+\.\d+(?:[-+].*)?$/i.test(trimmed)) return `v${trimmed}`;
+  return trimmed;
+}
+
+export function rewriteRinStartupHeaderText(
+  text: string,
+  upstreamVersion?: string,
+  rinVersion = getCurrentRinVersion(),
+) {
+  let next = String(text || "")
+    .replace(
+      /\bPi can explain its own features and look up its docs\./g,
+      "Rin can explain her own features and look up her docs.",
+    )
+    .replace(
+      /\bAsk it how to use or extend Pi\./g,
+      "Ask her how to use or extend Rin.",
+    )
+    .split("pi")
+    .join("rin")
+    .split("Pi")
+    .join("Rin");
+  const upstreamVersionText = String(upstreamVersion || "").trim();
+  if (upstreamVersionText) {
+    next = next
+      .split(`v${upstreamVersionText}`)
+      .join(formatRinStartupVersionLabel(rinVersion));
+  } else {
+    next = next.replace(
+      /\brin\s+v[0-9A-Za-z.+-]+/i,
+      `Rin ${formatRinStartupVersionLabel(rinVersion)}`,
+    );
+  }
+  return next
+    .replace(
+      /\bRin can explain its own features and look up its docs\./g,
+      "Rin can explain her own features and look up her docs.",
+    )
+    .replace(
+      /\bAsk it how to use or extend Rin\./g,
+      "Ask her how to use or extend Rin.",
+    );
+}
+
+export function applyRinStartupHeaderBranding(instance: any) {
+  const header = instance?.builtInHeader;
+  if (!header || typeof header !== "object") return false;
+  const upstreamVersion = String(instance?.version || "").trim();
+
+  if (
+    typeof header.getCollapsedText === "function" &&
+    typeof header.getExpandedText === "function"
+  ) {
+    const getCollapsedText = header.getCollapsedText.bind(header);
+    const getExpandedText = header.getExpandedText.bind(header);
+    header.getCollapsedText = () =>
+      rewriteRinStartupHeaderText(getCollapsedText(), upstreamVersion);
+    header.getExpandedText = () =>
+      rewriteRinStartupHeaderText(getExpandedText(), upstreamVersion);
+    if (typeof header.setExpanded === "function") {
+      header.setExpanded(Boolean(instance.getStartupExpansionState?.()));
+    } else if (typeof header.setText === "function") {
+      header.setText(header.getCollapsedText());
+    }
+    return true;
+  }
+
+  if (typeof header.text === "string" && typeof header.setText === "function") {
+    header.setText(rewriteRinStartupHeaderText(header.text, upstreamVersion));
+    return true;
+  }
+
+  return false;
 }
 
 function createSessionSelectorLoaders(instance: any) {
@@ -469,13 +609,21 @@ export async function applyRinTuiOverrides() {
     };
   }
 
+  const originalInit = interactiveModeProto?.init;
+  if (typeof originalInit === "function") {
+    interactiveModeProto.init = async function initWithRinStartupBranding() {
+      await originalInit.call(this);
+      applyRinStartupHeaderBranding(this);
+    };
+  }
+
   const originalUpdateTerminalTitle = interactiveModeProto?.updateTerminalTitle;
   if (typeof originalUpdateTerminalTitle === "function") {
     interactiveModeProto.updateTerminalTitle =
       function updateTerminalTitleWithoutCwd() {
         const sessionName = this?.sessionManager?.getSessionName?.();
         this?.ui?.terminal?.setTitle?.(
-          sessionName ? `π - ${sessionName}` : "π",
+          sessionName ? `Rin - ${sessionName}` : "Rin",
         );
       };
   }

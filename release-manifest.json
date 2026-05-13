@@ -44,9 +44,9 @@
     "promotionVersion": "0.1.0"
   },
   "nightly": {
-    "version": "0.2.0-nightly.20260510+ccf0f40",
-    "archiveUrl": "https://github.com/rinchanai/rin/archive/ccf0f40d1b5d37c7fa808350ddd26afb5b695f25.tar.gz",
-    "ref": "ccf0f40d1b5d37c7fa808350ddd26afb5b695f25",
+    "version": "0.2.0-nightly.20260512+dc82e36",
+    "archiveUrl": "https://github.com/rinchanai/rin/archive/dc82e36987c59559777c9eaa12834b8580f0554d.tar.gz",
+    "ref": "dc82e36987c59559777c9eaa12834b8580f0554d",
     "branch": "main"
   },
   "git": {

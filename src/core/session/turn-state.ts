@@ -3,36 +3,54 @@ import path from "node:path";
 
 import { safeString } from "../text-utils.js";
 
-function forEachSessionFileEntry(
-  sessionFile: string,
-  visitor: (entry: any) => void,
-): boolean {
+const LAST_ENTRY_SCAN_CHUNK_SIZE = 64 * 1024;
+
+function parseJsonLine(line: Buffer) {
+  const text = line.toString("utf8").trim();
+  if (!text) return undefined;
   try {
-    const text = fs.readFileSync(sessionFile, "utf8");
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      try {
-        visitor(JSON.parse(line));
-      } catch {
-        continue;
-      }
-    }
-    return true;
+    return JSON.parse(text);
   } catch {
-    return false;
+    return undefined;
   }
 }
 
 function readLastSessionFileEntry(sessionFile: string) {
-  let lastEntry: any;
-  if (
-    !forEachSessionFileEntry(sessionFile, (entry) => {
-      lastEntry = entry;
-    })
-  ) {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(sessionFile, "r");
+    const { size } = fs.fstatSync(fd);
+    let position = size;
+    let pending = Buffer.alloc(0);
+
+    while (position > 0) {
+      const readSize = Math.min(LAST_ENTRY_SCAN_CHUNK_SIZE, position);
+      position -= readSize;
+      const chunk = Buffer.allocUnsafe(readSize);
+      fs.readSync(fd, chunk, 0, readSize, position);
+      const data = pending.length ? Buffer.concat([chunk, pending]) : chunk;
+      let lineEnd = data.length;
+
+      for (let index = data.length - 1; index >= 0; index -= 1) {
+        if (data[index] !== 0x0a) continue;
+        const parsed = parseJsonLine(data.subarray(index + 1, lineEnd));
+        if (parsed) return parsed;
+        lineEnd = index;
+      }
+
+      pending = data.subarray(0, lineEnd);
+    }
+
+    return parseJsonLine(pending);
+  } catch {
     return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    }
   }
-  return lastEntry;
 }
 
 export function shouldContinueInterruptedTurn(sessionFile: string) {
