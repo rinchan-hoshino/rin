@@ -171,10 +171,13 @@ function stopRpcTransportStatusComponent(instance: any) {
   instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = undefined;
 }
 
-function createStaticStatusLoader(instance: any, message: string) {
-  return new Loader(instance.ui, (text: string) => text, dim, message, {
-    frames: [],
-  });
+function createRpcTransportStatusLoader(instance: any, message: string) {
+  const loader =
+    typeof instance?.createWorkingLoader === "function"
+      ? instance.createWorkingLoader()
+      : new Loader(instance.ui, (text: string) => text, dim, message);
+  loader.setMessage?.(message);
+  return loader;
 }
 
 function formatRpcTransportStatusLabel(label: string) {
@@ -193,7 +196,7 @@ function showRpcTransportStatus(instance: any, event: any) {
   const message = formatRpcTransportStatusLabel(label);
   let component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
   if (!component) {
-    component = createStaticStatusLoader(instance, message);
+    component = createRpcTransportStatusLoader(instance, message);
     instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = component;
   } else {
     component.setMessage(message);
@@ -206,10 +209,6 @@ function showRpcTransportStatus(instance: any, event: any) {
 }
 
 function reattachExistingPiLoader(instance: any) {
-  // RPC transport status is not allowed to create its own working animation.
-  // Pi's canonical agent/compaction/retry events own those loader lifetimes;
-  // this only restores an existing Pi-owned loader after another Pi event
-  // cleared the shared status container.
   stopRpcTransportStatusComponent(instance);
   if (!instance?.loadingAnimation) return;
   instance.statusContainer.clear();
