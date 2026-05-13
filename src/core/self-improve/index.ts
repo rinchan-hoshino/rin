@@ -7,6 +7,7 @@ import { isAssistantFinalMessage } from "../message-content.js";
 
 import {
   enqueueMemoryMaintenanceJob,
+  runMemoryMaintenanceJobNow,
   spawnQueuedMemoryWorker,
 } from "./async-jobs.js";
 import {
@@ -119,37 +120,64 @@ function resolveFinalMessageCount(
   return state.finalMessages + 1;
 }
 
-async function processSelfImproveReview(
-  ctx: any,
-  opts: {
-    sessionFile?: string;
-    leafId?: string;
-    trigger: string;
-    snapshotKey?: string;
-  },
-) {
+type MemoryMaintenanceJobNowRunner = typeof runMemoryMaintenanceJobNow;
+
+type SelfImproveModuleOptions = RinCapabilityOptions & {
+  runMemoryMaintenanceJobNow?: MemoryMaintenanceJobNowRunner;
+};
+
+type SelfImproveReviewOptions = {
+  sessionFile?: string;
+  leafId?: string;
+  trigger: string;
+  snapshotKey?: string;
+};
+
+function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
   const sessionFile = String(opts.sessionFile || "").trim();
   const agentDir = String(ctx?.agentDir || "").trim();
   if (!sessionFile || !agentDir) {
-    return;
+    return null;
   }
   if (shouldSkipAutomaticMaintenance(sessionFile)) {
-    return;
+    return null;
   }
   const meta = readSessionMetadata(opts);
-  await enqueueMemoryMaintenanceJob({
+  return {
     agentDir,
     sessionFile,
     leafId: meta.leafId || undefined,
     trigger: opts.trigger,
     snapshotKey: opts.snapshotKey,
-  });
-  spawnQueuedMemoryWorker(agentDir);
+  };
+}
+
+async function processSelfImproveReview(
+  ctx: any,
+  opts: SelfImproveReviewOptions,
+) {
+  const job = resolveReviewJob(ctx, opts);
+  if (!job) return;
+  await enqueueMemoryMaintenanceJob(job);
+  spawnQueuedMemoryWorker(job.agentDir);
+}
+
+async function processSelfImproveReviewNow(
+  ctx: any,
+  opts: SelfImproveReviewOptions,
+  runner: MemoryMaintenanceJobNowRunner,
+) {
+  const job = resolveReviewJob(ctx, opts);
+  if (!job) return;
+  await runner(job);
 }
 
 export default function selfImproveModule(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition {
+  const runMemoryMaintenanceNow =
+    (options as SelfImproveModuleOptions).runMemoryMaintenanceJobNow ||
+    runMemoryMaintenanceJobNow;
   return {
     name: "self_improve",
     tools: [],
@@ -188,12 +216,16 @@ export default function selfImproveModule(
           const meta = sessionMeta(ctx);
           if (!meta.sessionFile || !meta.sessionPersisted) return;
           if (String(event?.reason || "").trim() === "overflow") return;
-          await processSelfImproveReview(ctx, {
-            sessionFile: meta.sessionFile,
-            leafId: meta.leafId,
-            trigger: "self_improve:session_compaction_review",
-            snapshotKey: `compact:${meta.leafId || meta.sessionFile}`,
-          });
+          await processSelfImproveReviewNow(
+            ctx,
+            {
+              sessionFile: meta.sessionFile,
+              leafId: meta.leafId,
+              trigger: "self_improve:session_compaction_review",
+              snapshotKey: `compact:${meta.leafId || meta.sessionFile}`,
+            },
+            runMemoryMaintenanceNow,
+          );
         },
       ],
       session_shutdown: [
