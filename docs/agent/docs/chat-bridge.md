@@ -56,14 +56,7 @@ await rin.chat.runTurn({
 
 ## Rich message parts
 
-Rin chat rich content uses structured parts or Markdown rich-object syntax. Supported rich intents include:
-
-- text / markdown
-- native mention by exact platform user id
-- quote / reply by exact platform message id
-- image / file / video / audio / sticker by local path or URL
-
-Native mentions require exact platform user ids. Raw `@name` text is visible text only.
+Use `docs/rich-text-output-format.md` for native mention, quote, attachment, and fallback syntax.
 
 ## Stored chat context
 
