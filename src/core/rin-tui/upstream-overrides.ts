@@ -2,6 +2,7 @@ import {
   DynamicBorder,
   FooterComponent,
   InteractiveMode,
+  keyHint,
   SessionManager,
   SessionSelectorComponent,
 } from "@earendil-works/pi-coding-agent";
@@ -14,6 +15,8 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
+
+import { theme } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 
 import {
   checkForRinUpdateNotice,
@@ -359,50 +362,85 @@ function preserveScrollbackOnFullRedraw() {
   };
 }
 
-function padSessionSelectorHeaderStatus(line: string, width: number) {
-  const missing = width - visibleWidth(line);
-  if (missing <= 0) return line;
-
-  const markerIndexes = [line.indexOf("○"), line.indexOf("◉")].filter(
-    (index) => index >= 0,
+function renderRinSessionSelectorHeader(header: any, width: number) {
+  const title = "Resume Session";
+  const leftText = theme.bold(title);
+  const sortLabel =
+    header.sortMode === "threaded"
+      ? "Threaded"
+      : header.sortMode === "recent"
+        ? "Recent"
+        : "Fuzzy";
+  const sortText = theme.fg("muted", "Sort: ") + theme.fg("accent", sortLabel);
+  const nameLabel = header.nameFilter === "all" ? "All" : "Named";
+  const nameText = theme.fg("muted", "Name: ") + theme.fg("accent", nameLabel);
+  let scopeText;
+  if (header.loading) {
+    const progressText = header.loadProgress
+      ? `${header.loadProgress.loaded}/${header.loadProgress.total}`
+      : "...";
+    scopeText = `${theme.fg("muted", "○ Sessions | ")}${theme.fg("accent", `Loading ${progressText}`)}`;
+  } else if (header.scope === "current") {
+    scopeText = `${theme.fg("accent", "◉ Sessions")}${theme.fg("muted", " | ○ All")}`;
+  } else {
+    scopeText = `${theme.fg("muted", "○ Sessions | ")}${theme.fg("accent", "◉ All")}`;
+  }
+  const rightText = truncateToWidth(
+    `${scopeText}  ${nameText}  ${sortText}`,
+    width,
+    "",
   );
-  const markerIndex = Math.min(...markerIndexes);
-  if (!Number.isFinite(markerIndex)) return line;
+  const availableLeft = Math.max(0, width - visibleWidth(rightText) - 1);
+  const left = truncateToWidth(leftText, availableLeft, "");
+  const spacing = Math.max(
+    0,
+    width - visibleWidth(left) - visibleWidth(rightText),
+  );
 
-  return `${line.slice(0, markerIndex)}${" ".repeat(missing)}${line.slice(markerIndex)}`;
-}
-
-function renderSessionSelectorHeaderWithoutCwdLabels(
-  header: any,
-  render: (width: number) => unknown,
-  width: number,
-) {
-  const lines = render.call(header, width);
-  if (!Array.isArray(lines)) return lines;
-  return lines.map((line, index) => {
-    if (typeof line !== "string") return line;
-    const nextLine = line
-      .replace(/Resume Session \((?:Current Folder|All)\)/g, "Resume Session")
-      .replace(/Current Folder/g, "Sessions");
-    return index === 0
-      ? padSessionSelectorHeaderStatus(nextLine, width)
-      : nextLine;
-  });
+  let hintLine1;
+  let hintLine2;
+  if (header.confirmingDeletePath !== null) {
+    const confirmHint = `Delete session? ${keyHint("tui.select.confirm", "confirm")} · ${keyHint("tui.select.cancel", "cancel")}`;
+    hintLine1 = theme.fg("error", truncateToWidth(confirmHint, width, "…"));
+    hintLine2 = "";
+  } else if (header.statusMessage) {
+    const color = header.statusMessage.type === "error" ? "error" : "accent";
+    hintLine1 = theme.fg(
+      color,
+      truncateToWidth(header.statusMessage.message, width, "…"),
+    );
+    hintLine2 = "";
+  } else {
+    const pathState = header.showPath ? "(on)" : "(off)";
+    const sep = theme.fg("muted", " · ");
+    const hint1 =
+      keyHint("tui.input.tab", "scope") +
+      sep +
+      theme.fg("muted", 're:<pattern> regex · "phrase" exact');
+    const hint2Parts = [
+      keyHint("app.session.toggleSort", "sort"),
+      keyHint("app.session.toggleNamedFilter", "named"),
+      keyHint("app.session.delete", "delete"),
+      keyHint("app.session.togglePath", `path ${pathState}`),
+    ];
+    if (header.showRenameHint) {
+      hint2Parts.push(keyHint("app.session.rename", "rename"));
+    }
+    const hint2 = hint2Parts.join(sep);
+    hintLine1 = truncateToWidth(hint1, width, "…");
+    hintLine2 = truncateToWidth(hint2, width, "…");
+  }
+  return [`${left}${" ".repeat(spacing)}${rightText}`, hintLine1, hintLine2];
 }
 
 function configureRootSessionSelectorPresentation(selector: any) {
   if (!selector || typeof selector !== "object") return;
 
   if (selector.header && typeof selector.header.render === "function") {
-    const originalRender = selector.header.render;
-    selector.header.render = function renderWithPiStyleWithoutCwdLabels(
+    selector.header.render = function renderWithRinSessionSelectorHeader(
       width: number,
     ) {
-      return renderSessionSelectorHeaderWithoutCwdLabels(
-        this,
-        originalRender,
-        width,
-      );
+      return renderRinSessionSelectorHeader(this, width);
     };
   }
 
@@ -429,6 +467,14 @@ export function rewriteRinStartupHeaderText(
   rinVersion = getCurrentRinVersion(),
 ) {
   let next = String(text || "")
+    .replace(
+      /\bPi can explain its own features and look up its docs\./g,
+      "Rin can explain her own features and look up her docs.",
+    )
+    .replace(
+      /\bAsk it how to use or extend Pi\./g,
+      "Ask her how to use or extend Rin.",
+    )
     .split("pi")
     .join("rin")
     .split("Pi")
@@ -563,6 +609,14 @@ export async function applyRinTuiOverrides() {
     };
   }
 
+  const originalInit = interactiveModeProto?.init;
+  if (typeof originalInit === "function") {
+    interactiveModeProto.init = async function initWithRinStartupBranding() {
+      await originalInit.call(this);
+      applyRinStartupHeaderBranding(this);
+    };
+  }
+
   const originalUpdateTerminalTitle = interactiveModeProto?.updateTerminalTitle;
   if (typeof originalUpdateTerminalTitle === "function") {
     interactiveModeProto.updateTerminalTitle =
@@ -572,14 +626,6 @@ export async function applyRinTuiOverrides() {
           sessionName ? `Rin - ${sessionName}` : "Rin",
         );
       };
-  }
-
-  const originalInit = interactiveModeProto?.init;
-  if (typeof originalInit === "function") {
-    interactiveModeProto.init = async function initWithRinStartupBranding() {
-      await originalInit.call(this);
-      applyRinStartupHeaderBranding(this);
-    };
   }
 
   const originalSetupEditorSubmitHandler =
