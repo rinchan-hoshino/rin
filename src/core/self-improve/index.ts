@@ -7,7 +7,6 @@ import { isAssistantFinalMessage } from "../message-content.js";
 
 import {
   enqueueMemoryMaintenanceJob,
-  enqueueSessionSummaryJob,
   spawnQueuedMemoryWorker,
 } from "./async-jobs.js";
 import {
@@ -148,28 +147,6 @@ async function processSelfImproveReview(
   spawnQueuedMemoryWorker(agentDir);
 }
 
-async function processSessionSummaryUpdate(
-  ctx: any,
-  opts: { sessionFile?: string; leafId?: string; trigger: string },
-) {
-  const sessionFile = String(opts.sessionFile || "").trim();
-  const agentDir = String(ctx?.agentDir || "").trim();
-  if (!sessionFile || !agentDir) {
-    return;
-  }
-  if (shouldSkipAutomaticMaintenance(sessionFile)) {
-    return;
-  }
-  const meta = readSessionMetadata(opts);
-  await enqueueSessionSummaryJob({
-    agentDir,
-    sessionFile,
-    leafId: meta.leafId || undefined,
-    trigger: opts.trigger,
-  });
-  spawnQueuedMemoryWorker(agentDir);
-}
-
 export default function selfImproveModule(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition {
@@ -230,11 +207,6 @@ export default function selfImproveModule(
             sessionFile: meta.sessionFile,
             leafId: meta.leafId,
             trigger: "self_improve:session_shutdown_review",
-          });
-          await processSessionSummaryUpdate(ctx, {
-            sessionFile: meta.sessionFile,
-            leafId: meta.leafId,
-            trigger: "session_summary:session_shutdown",
           });
           if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
         },

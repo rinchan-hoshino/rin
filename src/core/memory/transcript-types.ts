@@ -39,7 +39,6 @@ export type TranscriptSessionResult = {
   description: string;
   preview: string;
   role: string;
-  summary?: string;
   hitCount?: number;
   messages?: TranscriptResultMessage[];
 };

@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { maintainMemory, maintainSessionSummary } from "./maintainer.js";
+import { maintainMemory } from "./maintainer.js";
 import {
   appendJsonLine,
   readJsonFile,
@@ -22,7 +22,7 @@ import {
 
 export type MaintenanceJob = {
   id: string;
-  kind: "self_improve_review" | "session_summary";
+  kind: "self_improve_review";
   createdAt: string;
   updatedAt: string;
   agentDir: string;
@@ -83,7 +83,12 @@ async function ensureStateDir(agentDir: string) {
 async function loadQueue(agentDir: string): Promise<MaintenanceJob[]> {
   const parsed = readJsonFile<unknown>(maintenanceQueuePath(agentDir), []);
   return Array.isArray(parsed)
-    ? parsed.filter((item) => item && typeof item === "object")
+    ? parsed.filter(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          safeString((item as any).kind).trim() !== "session_summary",
+      )
     : [];
 }
 
@@ -106,10 +111,8 @@ function sameJob(a: Partial<MaintenanceJob>, b: Partial<MaintenanceJob>) {
   return true;
 }
 
-function defaultTrigger(kind: MaintenanceJob["kind"]) {
-  return kind === "session_summary"
-    ? "session_summary:review"
-    : "self_improve:review";
+function defaultTrigger(_kind: MaintenanceJob["kind"]) {
+  return "self_improve:review";
 }
 
 async function enqueueMaintenanceJob(
@@ -117,10 +120,7 @@ async function enqueueMaintenanceJob(
 ) {
   const agentDir = resolveAgentDir(input.agentDir);
   const sessionFile = resolveSessionFile(input.sessionFile);
-  const kind =
-    safeString(input.kind).trim() === "session_summary"
-      ? "session_summary"
-      : "self_improve_review";
+  const kind: MaintenanceJob["kind"] = "self_improve_review";
   const trigger = safeString(input.trigger).trim() || defaultTrigger(kind);
   const snapshotKey = safeString(input.snapshotKey).trim();
   const leafId = safeString(input.leafId).trim();
@@ -170,15 +170,6 @@ export async function enqueueMemoryMaintenanceJob(
   await enqueueMaintenanceJob({
     ...input,
     kind: "self_improve_review",
-  });
-}
-
-export async function enqueueSessionSummaryJob(
-  input: Omit<MaintenanceJob, "id" | "createdAt" | "updatedAt" | "kind">,
-) {
-  await enqueueMaintenanceJob({
-    ...input,
-    kind: "session_summary",
   });
 }
 
@@ -320,14 +311,6 @@ async function processJob(job: MaintenanceJob) {
     throw new Error("maintenance_job_invalid_payload");
   }
   await assertUsableSessionFile(sessionFile);
-  if (job.kind === "session_summary") {
-    return await maintainSessionSummary({} as any, {
-      agentDir,
-      sessionFile,
-      leafId,
-      trigger: job.trigger,
-    });
-  }
   return await maintainMemory({} as any, {
     agentDir,
     sessionFile,
@@ -369,10 +352,7 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           finishedAt,
           attempts: Math.max(1, Number(job.attempts || 0) || 1),
           skipped: safeString((result as any)?.skipped).trim() || undefined,
-          outputPreview:
-            truncateText(
-              (result as any)?.output || (result as any)?.sessionSummary,
-            ) || undefined,
+          outputPreview: truncateText((result as any)?.output) || undefined,
           changedFiles: normalizeChangedFiles((result as any)?.changedFiles),
         });
         processed += 1;

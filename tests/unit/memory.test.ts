@@ -604,140 +604,26 @@ test("memory transcripts ignore transient in-memory sessions without a session f
   });
 });
 
-test("search_memory uses the stored transcript session summary instead of live summarization", async () => {
+test("memory transcripts reject legacy synthetic session summaries", async () => {
   await withTempRoot(async (root) => {
-    const sessionFile = await writeSessionFile(root, "summary-session.jsonl", [
+    const sessionFile = await writeSessionFile(root, "legacy-summary.jsonl", [
       {
         type: "session",
         version: 3,
-        id: "summary-session",
+        id: "legacy-summary",
         timestamp: "2026-04-08T09:00:00.000Z",
         cwd: "/tmp/project",
-      },
-      {
-        type: "session_info",
-        id: "name1",
-        parentId: null,
-        timestamp: "2026-04-08T09:01:00.000Z",
-        name: "telegram/1:2",
-      },
-      {
-        type: "message",
-        id: "msg1",
-        parentId: "name1",
-        timestamp: "2026-04-08T09:02:00.000Z",
-        message: {
-          role: "user",
-          content: [
-            { type: "text", text: "Can you fix the memory recall hang?" },
-          ],
-        },
       },
     ]);
 
     await transcripts.appendTranscriptArchiveEntry(
       {
-        timestamp: "2026-04-08T09:09:09.000Z",
-        sessionId: "summary-session",
-        sessionFile,
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "Refined the memory recall prompt and fixed the session resume hang.",
-          },
-        ],
-      },
-      root,
-    );
-    await transcripts.appendTranscriptArchiveEntry(
-      {
         timestamp: "2026-04-08T09:10:00.000Z",
-        sessionId: "summary-session",
+        sessionId: "legacy-summary",
         sessionFile,
         role: "sessionSummary",
         customType: "session_summary",
-        text: "Fixed memory recall hang and cached transcript summaries.",
-        display: false,
-      },
-      root,
-    );
-
-    const rows = await transcripts.searchTranscriptArchive(
-      "session resume hang",
-      { limit: 8 },
-      root,
-    );
-    assert.equal(
-      rows[0].summary,
-      "Fixed memory recall hang and cached transcript summaries.",
-    );
-    assert.equal(rows[0].name, "telegram/1:2");
-
-    const result = await memoryExtensionModule.executeSearchMemory(
-      { query: "session resume hang", limit: 8 },
-      { agentDir: root, model: { provider: "test", id: "demo" } },
-      "medium",
-    );
-    assert.match(
-      result.details.userText,
-      /Fixed memory recall hang and cached transcript summaries/,
-    );
-    assert.doesNotMatch(result.details.userText, /L\d+ sessionSummary/);
-  });
-});
-
-test("search_memory can retrieve sessions by stored session summary text", async () => {
-  await withTempRoot(async (root) => {
-    const sessionFile = await writeSessionFile(
-      root,
-      "display-only-summary-session.jsonl",
-      [
-        {
-          type: "session",
-          version: 3,
-          id: "display-only-summary-session",
-          timestamp: "2026-04-08T09:00:00.000Z",
-          cwd: "/tmp/project",
-        },
-        {
-          type: "message",
-          id: "msg1",
-          parentId: null,
-          timestamp: "2026-04-08T09:02:00.000Z",
-          message: {
-            role: "user",
-            content: [
-              { type: "text", text: "Need help checking a runtime regression" },
-            ],
-          },
-        },
-      ],
-    );
-
-    await transcripts.appendTranscriptArchiveEntry(
-      {
-        timestamp: "2026-04-08T09:09:09.000Z",
-        sessionId: "display-only-summary-session",
-        sessionFile,
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: "Verified the transport path and identified the regression boundary.",
-          },
-        ],
-      },
-      root,
-    );
-    await transcripts.appendTranscriptArchiveEntry(
-      {
-        timestamp: "2026-04-08T09:10:00.000Z",
-        sessionId: "display-only-summary-session",
-        sessionFile,
-        role: "sessionSummary",
-        customType: "session_summary",
-        text: "zebra only appears in the stored display summary",
+        text: "zebra only appears in the synthetic summary",
         display: false,
       },
       root,
@@ -748,15 +634,11 @@ test("search_memory can retrieve sessions by stored session summary text", async
       { limit: 8 },
       root,
     );
-    assert.equal(rows.length, 1);
-    assert.equal(
-      rows[0].summary,
-      "zebra only appears in the stored display summary",
-    );
+    assert.equal(rows.length, 0);
   });
 });
 
-test("search_memory falls back to the first user message when no stored session summary exists", async () => {
+test("search_memory uses the first user message as the session display fallback", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = await writeSessionFile(root, "fallback-session.jsonl", [
       {
