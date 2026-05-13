@@ -385,6 +385,40 @@ test("persist reconcileInstallerManifest persists release metadata when provided
         installedAt: "2026-04-20T10:00:00.000Z",
       });
     }
+
+    const nightlyWrites = [];
+    persist.reconcileInstallerManifest(
+      {
+        targetUser: "demo",
+        installDir,
+        release: {
+          channel: "nightly",
+          version: "1.4.0-nightly.20260513+abc1234",
+          branch: "main",
+          ref: "abc1234",
+          sourceLabel: "nightly 1.4.0-nightly.20260513+abc1234",
+          archiveUrl: "https://example.com/nightly.tgz",
+        },
+        elevated: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000, home: ownerHome }),
+        ensureDir: async () => {},
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: (filePath, value) =>
+          nightlyWrites.push({ filePath, value }),
+        runPrivileged: () => {},
+      },
+    );
+
+    for (const entry of nightlyWrites) {
+      assert.equal(entry.value.release.channel, "nightly");
+      assert.equal(
+        entry.value.release.version,
+        "1.4.0-nightly.20260513+abc1234",
+      );
+    }
   });
 });
 

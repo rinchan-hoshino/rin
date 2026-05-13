@@ -634,7 +634,9 @@ function normalizeInstalledReleaseInfo(
     .trim()
     .toLowerCase();
   const normalizedChannel =
-    channel === "beta" || channel === "git" ? channel : "stable";
+    channel === "beta" || channel === "nightly" || channel === "git"
+      ? channel
+      : "stable";
   const version = String(release.version || "").trim();
   const branch = String(release.branch || "").trim();
   const ref = String(release.ref || branch || version).trim();
