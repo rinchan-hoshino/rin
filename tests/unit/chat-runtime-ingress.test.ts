@@ -367,6 +367,46 @@ test("lark runtime reads merged forward messages into inbound text", async () =>
   assert.doesNotMatch(stored.routing?.text, /Merged and Forwarded Message/);
 });
 
+test("lark adapter reports Feishu group member count including the bot", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const app = runtime.createChatRuntimeApp(agentDir);
+  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+    dataDir: path.join(agentDir, "data"),
+    settings: {},
+    adapterEntries: [
+      {
+        key: "lark",
+        name: "Feishu",
+        config: { appId: "cli-test", appSecret: "secret" },
+      },
+    ],
+  });
+  const adapter = [...app.adapters][0];
+  const calls = [];
+  adapter.client = {
+    im: {
+      chat: {
+        get: async (options) => {
+          calls.push(options);
+          return { data: { user_count: "1", bot_count: "1" } };
+        },
+      },
+    },
+  };
+
+  const count = await adapter.bot.getGuildMemberCount("oc_owner_only");
+
+  assert.deepEqual(calls, [
+    {
+      path: { chat_id: "oc_owner_only" },
+      params: { user_id_type: "open_id" },
+    },
+  ]);
+  assert.equal(count, 2);
+});
+
 test("lark runtime downloads image message resources before inbox persistence", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
