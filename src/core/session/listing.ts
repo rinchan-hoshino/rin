@@ -186,6 +186,35 @@ function normalizeBoundSessionDetails(
   return createNormalizedBoundSessionDetails(item, source);
 }
 
+function hasLegacyChatPromptContextHeader(text: string) {
+  return (
+    /^time: .+\n(?:[\s\S]*\n)?---\n/.test(text) &&
+    /(?:^|\n)chatKey:\s*\S+/.test(text)
+  );
+}
+
+function isManagedChatSessionPath(sessionPath: string) {
+  const parts = path.resolve(sessionPath).split(path.sep);
+  for (let index = 0; index < parts.length - 2; index += 1) {
+    if (
+      parts[index] === "sessions" &&
+      parts[index + 1] === "managed" &&
+      parts[index + 2] === "chat"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isHiddenRuntimeSession(details: NormalizedBoundSessionDetails) {
+  return (
+    isManagedChatSessionPath(details.resolvedPath) ||
+    hasLegacyChatPromptContextHeader(details.item.firstMessage) ||
+    hasLegacyChatPromptContextHeader(details.item.allMessagesText)
+  );
+}
+
 function normalizeBoundSessionDetailsList(
   sessions: unknown,
 ): NormalizedBoundSessionDetails[] {
@@ -195,6 +224,7 @@ function normalizeBoundSessionDetailsList(
     .filter((details): details is NormalizedBoundSessionDetails =>
       Boolean(details),
     )
+    .filter((details) => !isHiddenRuntimeSession(details))
     .filter((details) => {
       if (seen.has(details.resolvedPath)) return false;
       seen.add(details.resolvedPath);
