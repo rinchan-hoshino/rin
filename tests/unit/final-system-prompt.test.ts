@@ -86,11 +86,14 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Scheduled tasks/reminders/cron jobs -> docs/scheduled-tasks.md",
+      "scheduled tasks/reminders/cron jobs -> docs/scheduled-tasks.md",
     ),
   );
+  assert.ok(baseSystemPrompt.includes("Important chat output route:"));
   assert.ok(
-    baseSystemPrompt.includes("rich chat content -> docs/chat-rich-content.md"),
+    baseSystemPrompt.includes(
+      "read docs/chat-rich-content.md before writing the reply",
+    ),
   );
   assert.equal(baseSystemPrompt.includes("- Topic map:"), false);
 
