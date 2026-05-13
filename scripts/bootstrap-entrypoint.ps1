@@ -127,7 +127,7 @@ function Say([string]$Message) {
 }
 
 function Invoke-WithSpinner([string]$Label, [scriptblock]$Action) {
-  $frames = @("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+  $frames = @("-", "|", "/", "|")
   $job = Start-Job -ScriptBlock $Action
   $index = 0
   try {
@@ -140,11 +140,11 @@ function Invoke-WithSpinner([string]$Label, [scriptblock]$Action) {
     }
     Receive-Job -Job $job -Wait -ErrorAction Stop | Out-Null
     if (-not [Console]::IsOutputRedirected) {
-      Write-Host ("`r✓ {0}        " -f $Label)
+      Write-Host ("`rOK {0}        " -f $Label)
     }
   } catch {
     if (-not [Console]::IsOutputRedirected) {
-      Write-Host ("`r✗ {0}        " -f $Label)
+      Write-Host ("`rERR {0}        " -f $Label)
     }
     throw
   } finally {
