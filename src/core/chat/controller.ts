@@ -14,10 +14,12 @@ import {
 } from "../chat-bridge/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import {
+  missingSessionFileError,
+  normalizeSessionRef,
   resolveStoredSessionFile,
+  sessionFileExists,
   toStoredSessionFile,
 } from "../session/ref.js";
-import { normalizeSessionRef } from "../session/ref.js";
 import {
   chatStatePath,
   findBot,
@@ -627,13 +629,21 @@ export class ChatController {
     }
   }
 
+  private resolveSessionFileForUse(sessionFile?: string) {
+    return (
+      resolveStoredSessionFile(this.agentDir, sessionFile) ||
+      safeString(sessionFile).trim()
+    );
+  }
+
   private getRecoverableSessionFile() {
     if (!this.affectChatBinding) return "";
-    const wanted = resolveStoredSessionFile(
-      this.agentDir,
-      this.state.sessionFile,
-    );
-    return wanted || "";
+    const wanted = this.resolveSessionFileForUse(this.state.sessionFile);
+    if (!wanted) return "";
+    if (sessionFileExists(wanted)) return wanted;
+    this.state.sessionFile = undefined;
+    this.saveState();
+    return "";
   }
 
   private managedSessionLeafForFreshChat() {
@@ -802,12 +812,7 @@ export class ChatController {
         sessionId: this.currentSessionId() || undefined,
       };
     }
-    if (!fs.existsSync(wanted)) {
-      return {
-        changed: false,
-        sessionId: this.currentSessionId() || undefined,
-      };
-    }
+    if (!sessionFileExists(wanted)) throw missingSessionFileError(wanted);
     const result = await this.driver.resumeSessionFile(wanted);
     this.updateStoredSessionFile(result?.sessionFile, wanted);
     this.saveState();
@@ -898,6 +903,10 @@ export class ChatController {
       );
     }
     const skipSessionRecovery = commandName === "new";
+    const explicitSessionFile = this.resolveSessionFileForUse(sessionFile);
+    if (explicitSessionFile && !sessionFileExists(explicitSessionFile)) {
+      throw missingSessionFileError(explicitSessionFile);
+    }
     const restoreSessionFile = skipSessionRecovery
       ? ""
       : this.getRecoverableSessionFile();
@@ -918,7 +927,7 @@ export class ChatController {
       let data: any = await this.driver.runCommand(commandLine, {
         skipSessionRecovery,
         restoreSessionFile,
-        sessionFile,
+        sessionFile: explicitSessionFile,
         managedSessionLeaf,
       });
       this.updateStoredSessionFile(
@@ -988,7 +997,12 @@ export class ChatController {
         incomingMessageId: input.incomingMessageId,
         replyToMessageId: input.replyToMessageId,
       });
-      const { sessionFile: wantedSessionFile } = normalizeSessionRef(input);
+      const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
+      const wantedSessionFile =
+        this.resolveSessionFileForUse(rawWantedSessionFile);
+      if (wantedSessionFile && !sessionFileExists(wantedSessionFile)) {
+        throw missingSessionFileError(wantedSessionFile);
+      }
       const restoreSessionFile =
         wantedSessionFile || this.getRecoverableSessionFile();
       const managedSessionLeaf =
@@ -1042,7 +1056,12 @@ export class ChatController {
     }
 
     return await this.runExclusiveTurn(async () => {
-      const { sessionFile: wantedSessionFile } = normalizeSessionRef(input);
+      const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
+      const wantedSessionFile =
+        this.resolveSessionFileForUse(rawWantedSessionFile);
+      if (wantedSessionFile && !sessionFileExists(wantedSessionFile)) {
+        throw missingSessionFileError(wantedSessionFile);
+      }
       const restoreSessionFile =
         wantedSessionFile || this.getRecoverableSessionFile();
       const managedSessionLeaf =

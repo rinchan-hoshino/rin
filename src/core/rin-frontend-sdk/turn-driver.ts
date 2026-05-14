@@ -1,5 +1,9 @@
+import {
+  missingSessionFileError,
+  normalizeSessionRef,
+  sessionFileExists,
+} from "../session/ref.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
-import { normalizeSessionRef } from "../session/ref.js";
 import { safeString } from "../text-utils.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
 import type {
@@ -331,6 +335,8 @@ export class RinFrontendTurnDriver {
   }
 
   async resumeSessionFile(sessionFile: string) {
+    if (!sessionFileExists(sessionFile))
+      throw missingSessionFileError(sessionFile);
     await this.connect();
     return await this.switchSessionIfNeeded(sessionFile);
   }
@@ -415,6 +421,8 @@ export class RinFrontendTurnDriver {
       };
     }
     if (sessionFile) {
+      if (!sessionFileExists(sessionFile))
+        throw missingSessionFileError(sessionFile);
       await this.switchSessionIfNeeded(sessionFile);
     }
     const ready = !skipSessionRecovery
@@ -488,6 +496,8 @@ export class RinFrontendTurnDriver {
     await this.connect({ restoreSessionFile });
     if (!this.client) throw new Error("frontend_session_not_connected");
     if (sessionFile) {
+      if (!sessionFileExists(sessionFile))
+        throw missingSessionFileError(sessionFile);
       await this.switchSessionIfNeeded(sessionFile);
     }
     const ready = await this.ensureSessionReady(

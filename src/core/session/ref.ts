@@ -1,4 +1,5 @@
 import path from "node:path";
+import fssync from "node:fs";
 
 import { getRuntimeSessionDir } from "../rin-lib/runtime.js";
 import { safeString } from "../text-utils.js";
@@ -98,6 +99,27 @@ export function requireSessionFile(
   const sessionFile = readSessionFile(value);
   if (sessionFile) return sessionFile;
   throw new Error(error);
+}
+
+export function sessionFileExists(sessionFile: unknown) {
+  const normalized = normalizeSessionValue(sessionFile);
+  return Boolean(normalized && fssync.existsSync(normalized));
+}
+
+export function missingSessionFileError(sessionFile: unknown) {
+  const normalized =
+    normalizeSessionValue(sessionFile) || "the selected session";
+  return new Error(
+    `Session record is missing or expired: ${normalized}. Start a new session instead.`,
+  );
+}
+
+export function requireExistingSessionFile(
+  value: SessionFileInput | null | undefined,
+): string {
+  const sessionFile = requireSessionFile(value);
+  if (sessionFileExists(sessionFile)) return sessionFile;
+  throw missingSessionFileError(sessionFile);
 }
 
 export function resolveSessionRef(

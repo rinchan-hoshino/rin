@@ -2504,56 +2504,39 @@ test("chat controller preserves a bound session after transient prompt timeout",
   assert.equal(disposed, 1);
 });
 
-test("chat controller preserves a bound session when recovery target is missing", async () => {
+test("chat controller clears a stale bound session so ordinary chat can start fresh", async () => {
   const controller = await createController("telegram/1:2");
   delete controller.connect;
   controller.state.sessionFile = "missing-chat.jsonl";
   controller.saveState();
   const attempts = [];
-  controller.session = {
-    isStreaming: false,
-    messages: [],
-    queuedOfflineOps: [],
-    syncPendingCount() {},
-    emitFrontendStatus() {},
-    sessionManager: {
-      getSessionFile: () => "",
-      getSessionId: () => "session-current",
-      getSessionName: () => controller.chatKey,
-    },
-    switchSession: async (sessionFile) => {
-      attempts.push(sessionFile);
-      throw new Error("session_file_missing");
-    },
+  controller.driver.connect = async ({ restoreSessionFile = "" } = {}) => {
+    attempts.push(restoreSessionFile);
   };
 
-  await assert.rejects(
-    controller.connect({ restoreSession: true }),
-    /session_file_missing/,
-  );
+  await controller.connect({ restoreSession: true });
 
-  assert.equal(controller.state.sessionFile, "missing-chat.jsonl");
+  assert.equal(controller.state.sessionFile, undefined);
   const persistedState = JSON.parse(
     await fs.readFile(controller.statePath, "utf8"),
   );
-  assert.equal(persistedState.sessionFile, "missing-chat.jsonl");
-  assert.equal(attempts.length, 1);
-  assert.equal(
-    attempts[0],
-    path.join(controller.agentDir, "sessions", "missing-chat.jsonl"),
-  );
+  assert.equal(persistedState.sessionFile, undefined);
+  assert.deepEqual(attempts, [""]);
 });
 
-test("chat controller preserves a bound session when explicit resume target is missing", async () => {
+test("chat controller reports an explicit missing resume target", async () => {
   const controller = await createController("telegram/1:2");
   controller.state.sessionFile = "existing-binding.jsonl";
   controller.saveState();
 
-  const result = await controller.resumeSessionFile(
-    path.join(controller.agentDir, "sessions", "missing-explicit.jsonl"),
+  await assert.rejects(
+    () =>
+      controller.resumeSessionFile(
+        path.join(controller.agentDir, "sessions", "missing-explicit.jsonl"),
+      ),
+    /Session record is missing or expired/,
   );
 
-  assert.equal(result.changed, false);
   assert.equal(controller.state.sessionFile, "existing-binding.jsonl");
   const persistedState = JSON.parse(
     await fs.readFile(controller.statePath, "utf8"),
@@ -2561,8 +2544,15 @@ test("chat controller preserves a bound session when explicit resume target is m
   assert.equal(persistedState.sessionFile, "existing-binding.jsonl");
 });
 
-test("chat controller terminate does not clear the durable chat binding", async () => {
+test("chat controller terminate does not clear an existing durable chat binding", async () => {
   const controller = await createController("telegram/1:2");
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "terminating-chat.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "{}\n", "utf8");
   controller.state.sessionFile = "terminating-chat.jsonl";
   controller.saveState();
   let disposed = 0;

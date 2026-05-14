@@ -170,6 +170,19 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   });
 });
 
+test("frontend SDK turn driver reports an explicit missing session target", async () => {
+  const driver = createDriver();
+
+  await assert.rejects(
+    () =>
+      driver.runTurn({
+        text: "hello",
+        sessionFile: "/tmp/missing-frontend-session.jsonl",
+      }),
+    /Session record is missing or expired/,
+  );
+});
+
 test("frontend SDK turn driver applies turn-scoped model without persisting defaults", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;

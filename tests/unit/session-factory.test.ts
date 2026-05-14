@@ -132,6 +132,18 @@ test("listBoundSessions normalizes legacy session metadata into canonical fields
   );
 });
 
+test("openBoundSession reports an explicit missing session file", async () => {
+  await assert.rejects(
+    () =>
+      factory.openBoundSession({
+        cwd: "/tmp/project",
+        agentDir: "/tmp/rin-agent",
+        sessionFile: "/tmp/missing-rin-session.jsonl",
+      }),
+    /Session record is missing or expired/,
+  );
+});
+
 test("renameBoundSession delegates to SessionManager.open once", async () => {
   const renamed = [];
   await factory.renameBoundSession(
