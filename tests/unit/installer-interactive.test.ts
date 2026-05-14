@@ -455,16 +455,14 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.match(updaterSource, /RIN_UPDATE_ASSUME_YES/);
   assert.match(updaterSource, /selectUpdateTarget/);
   assert.match(updaterSource, /readInstalledUpdateLanguage/);
-  assert.match(updaterSource, /createInstallerI18n\(updateLanguage\)/);
+  assert.match(updaterSource, /createInstallerI18n\(displayLanguage\)/);
   assert.match(updaterSource, /initialI18n\.noUpdateTargetsText/);
   assert.match(updaterSource, /i18n\.buildUpdateTargetText/);
   assert.match(updaterSource, /i18n\.buildUpdatePlanText/);
   assert.match(updaterSource, /i18n\.buildUpdatedTargetText/);
   assert.match(updaterSource, /i18n\.buildAfterUpdateText/);
-  assert.match(
-    updaterSource,
-    /updateLanguage \? \{ language: updateLanguage \} : \{\}/,
-  );
+  assert.doesNotMatch(updaterSource, /language: displayLanguage/);
+  assert.doesNotMatch(updaterSource, /language: updateLanguage/);
   assert.match(
     updaterSource,
     /const promptConfirm = deps\.confirm \|\| confirm/,

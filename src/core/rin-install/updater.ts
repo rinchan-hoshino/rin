@@ -128,9 +128,11 @@ export async function startUpdater(deps: {
     installDir,
     ownerHome: target.ownerHome,
   });
-  const updateLanguage = selectedLanguage || "";
-  const i18n = updateLanguage
-    ? createInstallerI18n(updateLanguage)
+  const displayLanguage = selectedLanguage || "";
+  // Core updates may use the installed language for UI, but they must not
+  // rewrite the user's language preference.
+  const i18n = displayLanguage
+    ? createInstallerI18n(displayLanguage)
     : initialI18n;
 
   note(
@@ -178,7 +180,6 @@ export async function startUpdater(deps: {
           targetUser,
           installDir,
           sourceRoot: deps.repoRootFromHere(),
-          ...(updateLanguage ? { language: updateLanguage } : {}),
           daemonReadyTimeoutMs: 30_000,
           ...(deps.release ? { release: deps.release } : {}),
         } satisfies FinalizeInstallOptions,

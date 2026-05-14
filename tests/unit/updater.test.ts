@@ -63,7 +63,7 @@ async function withUpdaterEnv(fn: () => Promise<void>) {
   }
 }
 
-test("startUpdater only persists language when an installed language exists", async () => {
+test("startUpdater does not write language during core updates", async () => {
   await withUpdaterEnv(async () => {
     let capturedOptions: any;
 
@@ -85,9 +85,11 @@ test("startUpdater only persists language when an installed language exists", as
   });
 });
 
-test("startUpdater carries the persisted language through update", async () => {
+test("startUpdater uses installed language for UI without rewriting settings", async () => {
   await withUpdaterEnv(async () => {
     let capturedOptions: any;
+    let confirmMessage = "";
+    process.env.RIN_UPDATE_ASSUME_YES = "";
 
     await updater.startUpdater({
       detectCurrentUser: () => "alice",
@@ -95,12 +97,20 @@ test("startUpdater carries the persisted language through update", async () => {
       ensureNotCancelled: (value: unknown) => value,
       i18n: installerI18n.createInstallerI18n("en_US"),
       readInstalledUpdateLanguage: () => "zh_CN",
+      async confirm(options: any) {
+        confirmMessage = String(options.message || "");
+        return true;
+      },
       async runFinalizeInstallPlanInChild(options: any) {
         capturedOptions = options;
         return fakeUpdateResult();
       },
     });
 
-    assert.equal(capturedOptions.language, "zh_CN");
+    assert.equal(Object.hasOwn(capturedOptions, "language"), false);
+    assert.equal(
+      confirmMessage,
+      installerI18n.createInstallerI18n("zh_CN").publishUpdateConfirmMessage,
+    );
   });
 });
