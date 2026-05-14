@@ -19,6 +19,10 @@ const cronMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "cron.js"))
     .href
 );
+const messageStoreMod = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
+    .href
+);
 
 test("cron execution resolves only existing dedicated session files", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
@@ -472,6 +476,245 @@ test("cron chat-bound no-session agent task preserves session file for quote res
     assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
     assert.equal(calls[0].systemPromptBlocks, undefined);
   } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron current-session instruction derives chat binding from session file metadata", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const sessionFile = path.join(
+    agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "current.jsonl",
+  );
+  const task = {
+    id: "cron_current_session",
+    name: "Current Session Follow-up",
+    session: { mode: "session_instruction", sessionFile },
+    model: "openai-codex/gpt-5.5",
+    thinkingLevel: "low",
+    target: {
+      kind: "agent_prompt",
+      prompt: "Ask for the review status.",
+    },
+  };
+  const calls = [];
+  try {
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "session", "utf8");
+    messageStoreMod.saveChatMessage(agentDir, {
+      chatKey: "telegram/demo:1",
+      platform: "telegram",
+      botId: "1",
+      chatId: "demo",
+      chatType: "private",
+      messageId: "m-bound",
+      role: "assistant",
+      receivedAt: new Date().toISOString(),
+      processedAt: new Date().toISOString(),
+      text: "previous reply",
+      sessionFile,
+    });
+
+    const result = await execMod.executeCronSessionInstructionTask(task, {
+      agentDir,
+      runId: "run-current-1",
+      chat: {
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return {
+            finalText: "asked",
+            sessionId: "s-current",
+            sessionFile,
+          };
+        },
+      },
+    });
+    assert.equal(result.text, "asked");
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      {
+        chatKey: calls[0].chatKey,
+        controllerKey: calls[0].controllerKey,
+        deliveryEnabled: calls[0].deliveryEnabled,
+        affectChatBinding: calls[0].affectChatBinding,
+        disposeAfterTurn: calls[0].disposeAfterTurn,
+        text: calls[0].text,
+        sessionFile: calls[0].sessionFile,
+        model: calls[0].model,
+        thinkingLevel: calls[0].thinkingLevel,
+      },
+      {
+        chatKey: "telegram/demo:1",
+        controllerKey: undefined,
+        deliveryEnabled: true,
+        affectChatBinding: true,
+        disposeAfterTurn: false,
+        text: "Ask for the review status.",
+        sessionFile,
+        model: "openai-codex/gpt-5.5",
+        thinkingLevel: "low",
+      },
+    );
+    assert.equal(calls[0].promptMeta?.source, "scheduled-task");
+    assert.equal(calls[0].promptMeta?.taskId, "cron_current_session");
+    assert.equal(calls[0].promptMeta?.taskName, "Current Session Follow-up");
+    assert.equal(calls[0].promptMeta?.scheduledTaskInitiator, "agent");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron current-session instruction relies on bound delivery without duplicate send", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const sessionFile = path.join(
+    agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "current.jsonl",
+  );
+  const calls = [];
+  const sent = [];
+  const task = {
+    id: "cron_bound_instruction",
+    session: { mode: "session_instruction", sessionFile },
+    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
+    target: {
+      kind: "agent_prompt",
+      prompt: "Continue in this session.",
+    },
+    runCount: 1,
+  };
+  try {
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "session", "utf8");
+    messageStoreMod.saveChatMessage(agentDir, {
+      chatKey: "telegram/demo:1",
+      platform: "telegram",
+      botId: "1",
+      chatId: "demo",
+      chatType: "private",
+      messageId: "m-bound",
+      role: "assistant",
+      receivedAt: new Date().toISOString(),
+      processedAt: new Date().toISOString(),
+      text: "previous reply",
+      sessionFile,
+    });
+
+    await execMod.executeCronTask(task, {
+      agentDir,
+      chat: {
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return {
+            finalText: "done",
+            sessionFile,
+          };
+        },
+        send: async (payload) => {
+          sent.push(payload);
+        },
+      },
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].chatKey, "telegram/demo:1");
+    assert.equal(calls[0].sessionFile, sessionFile);
+    assert.equal(sent.length, 0);
+    assert.equal(task.lastResultText, "done");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler validates current-session instruction bindings", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    assert.throws(
+      () =>
+        scheduler.upsertTask({
+          id: "cron_instruction_no_session",
+          trigger: { runAt: "2099-01-01T00:00:00.000Z" },
+          session: { mode: "session_instruction" },
+          target: {
+            kind: "agent_prompt",
+            prompt: "Continue here.",
+          },
+        }),
+      /cron_session_file_required/,
+    );
+    assert.throws(
+      () =>
+        scheduler.upsertTask({
+          id: "cron_instruction_chat_key",
+          chatKey: "telegram/demo:1",
+          trigger: { runAt: "2099-01-01T00:00:00.000Z" },
+          session: {
+            mode: "session_instruction",
+            sessionFile: "/tmp/session.jsonl",
+          },
+          target: {
+            kind: "agent_prompt",
+            prompt: "Continue here.",
+          },
+        }),
+      /cron_session_instruction_chat_key_forbidden/,
+    );
+    assert.throws(
+      () =>
+        scheduler.upsertTask({
+          id: "cron_instruction_shell",
+          trigger: { runAt: "2099-01-01T00:00:00.000Z" },
+          session: {
+            mode: "session_instruction",
+            sessionFile: "/tmp/session.jsonl",
+          },
+          target: {
+            kind: "shell_command",
+            command: "echo nope",
+          },
+        }),
+      /cron_session_instruction_requires_agent_prompt/,
+    );
+    assert.throws(
+      () =>
+        scheduler.upsertTask({
+          id: "cron_instruction_interval",
+          trigger: { intervalMs: 60_000 },
+          session: {
+            mode: "session_instruction",
+            sessionFile: "/tmp/session.jsonl",
+          },
+          target: {
+            kind: "agent_prompt",
+            prompt: "Continue here.",
+          },
+        }),
+      /cron_session_instruction_requires_once/,
+    );
+    const task = scheduler.upsertTask({
+      id: "cron_instruction_ok",
+      trigger: { runAt: "2099-01-01T00:00:00.000Z" },
+      session: {
+        mode: "session_instruction",
+        sessionFile: "/tmp/session.jsonl",
+      },
+      target: {
+        kind: "agent_prompt",
+        prompt: "Continue here.",
+      },
+    });
+    assert.equal(task.chatKey, undefined);
+    assert.equal(task.session.mode, "session_instruction");
+    assert.equal(task.session.sessionFile, "/tmp/session.jsonl");
+    assert.equal(task.target.kind, "agent_prompt");
+    assert.equal(task.target.prompt, "Continue here.");
+  } finally {
+    scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

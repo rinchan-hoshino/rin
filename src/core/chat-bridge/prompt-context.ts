@@ -13,6 +13,7 @@ export type PromptContextMeta = {
   replyToMessageId?: string;
   taskId?: string;
   taskName?: string;
+  scheduledTaskInitiator?: string;
   runtimeMetadata?: Record<string, unknown>;
   attachedFiles?: Array<{ name?: string; path?: string }>;
 };

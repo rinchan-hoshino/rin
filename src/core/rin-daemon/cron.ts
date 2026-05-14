@@ -51,6 +51,7 @@ export type CronTaskTermination = {
 
 export type CronTaskSessionBinding = {
   mode: ScheduledTaskSessionMode;
+  sessionFile?: string;
 };
 
 export type CronTaskThinkingLevel = AvailableThinkingLevel;
@@ -169,6 +170,12 @@ function normalizeTaskSession(session: CronTaskSessionBinding | undefined) {
     );
   }
   const normalizedSession: CronTaskSessionBinding = { mode: requestedMode };
+  if (requestedMode === "session_instruction") {
+    normalizedSession.sessionFile = requireNonEmptyString(
+      session?.sessionFile,
+      "cron_session_file_required",
+    );
+  }
   return { normalizedSession };
 }
 
@@ -404,8 +411,12 @@ export class CronScheduler {
     const normalizedTrigger = normalizeTaskTrigger(
       input.trigger ?? existing?.trigger,
     );
+    const rawSession = input.session ?? existing?.session;
     const { normalizedSession } = normalizeTaskSession(
-      input.session ?? existing?.session,
+      rawSession?.mode === "session_instruction" &&
+        !(rawSession as any).sessionFile
+        ? { ...rawSession, sessionFile: defaults.sessionFile }
+        : rawSession,
     );
     const session = normalizedSession;
     const model =
@@ -420,6 +431,16 @@ export class CronScheduler {
     const normalizedTarget = normalizeTaskTarget(
       input.target ?? existing?.target,
     );
+    if (session.mode === "session_instruction") {
+      if (chatKey)
+        throw new Error("cron_session_instruction_chat_key_forbidden");
+      if (normalizedTarget.kind !== "agent_prompt") {
+        throw new Error("cron_session_instruction_requires_agent_prompt");
+      }
+      if (normalizedTrigger.expression || normalizedTrigger.intervalMs) {
+        throw new Error("cron_session_instruction_requires_once");
+      }
+    }
     const { dedicatedSessionFile, dedicatedSessionPersistent } =
       resolveDedicatedSessionBinding({
         agentDir: this.options.agentDir,
@@ -564,7 +585,16 @@ export class CronScheduler {
       const normalizedMode = normalizeScheduledTaskSessionMode(
         (row.session as any)?.mode,
       );
-      row.session = { mode: normalizedMode || "none" };
+      row.session =
+        normalizedMode === "session_instruction"
+          ? {
+              mode: normalizedMode,
+              sessionFile: requireNonEmptyString(
+                (row.session as any)?.sessionFile,
+                "cron_session_file_required",
+              ),
+            }
+          : { mode: normalizedMode || "none" };
       row.trigger = normalizeTaskTrigger(row.trigger);
       if (row.session.mode === "dedicated") {
         row.dedicatedSessionPersistent = true;

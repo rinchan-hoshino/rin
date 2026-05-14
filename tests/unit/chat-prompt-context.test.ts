@@ -41,6 +41,18 @@ test("chat prompt context leaves user text clean and moves metadata to system bl
   assert.ok(combined.includes("- sender user id: THE-cattail"));
 });
 
+test("chat prompt context keeps scheduled-task-only metadata out of the system prompt", () => {
+  const systemBlock = formatPromptContextSystemPromptBlock({
+    source: "scheduled-task",
+    chatKey: "telegram/1:2",
+    taskId: "cron_current_session",
+    taskName: "Current Session Follow-up",
+    scheduledTaskInitiator: "agent",
+  });
+
+  assert.equal(systemBlock, "");
+});
+
 test("chat prompt context does not rewrite sender-authored header-shaped text", () => {
   const headerShapedText = [
     "time: 2026-05-13 16:21:52 +08:00",

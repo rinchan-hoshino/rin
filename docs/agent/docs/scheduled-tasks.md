@@ -44,7 +44,9 @@ type Task = {
     timezone?: "local";
   };
   termination?: { maxRuns?: number; stopAt?: string } | null;
-  session?: { mode: "none" | "dedicated" };
+  session?:
+    | { mode: "none" | "dedicated" }
+    | { mode: "session_instruction"; sessionFile: string };
   target:
     | { kind: "agent_prompt"; prompt: string; continuationPrompt?: string }
     | { kind: "shell_command"; command: string };
@@ -61,13 +63,15 @@ Session rules:
 
 - `session.mode: "none"` is default and best for reminders, shell checks, and independent prompts.
 - `session.mode: "dedicated"` keeps a stable managed session under `~/.rin/sessions/managed/task/<task-id>.jsonl`; use it only when future runs need prior context.
+- `session.mode: "session_instruction"` inserts the `agent_prompt` into the existing chat session identified by `session.sessionFile`.
 - Dedicated agent tasks use `target.prompt` for the first run and `target.continuationPrompt` for later runs when provided.
 
 Target rules:
 
-- `agent_prompt` runs an agent turn. Set `thinkingLevel` explicitly: `low` for simple reminders/checks, `medium` for summaries, `high` only for difficult code/review/repair tasks.
+- `agent_prompt` runs an agent turn. With `session.mode: "none"` or `"dedicated"`, it uses a task session; with `session.mode: "session_instruction"`, it inserts the prompt into the existing chat session.
+- `session_instruction` mode must be a one-time `runAt` task, must not set `chatKey`, and marks runtime prompt metadata as an agent-initiated scheduled task without adding task metadata to the system prompt.
 - `shell_command` runs a shell command and stores summarized output.
-- `chatKey` binds agent-task delivery to a chat bridge target when the task should reply there.
+- `chatKey` binds agent-task delivery to a chat bridge target when `agent_prompt` or `shell_command` should reply there.
 
 ## SDK operations
 
@@ -115,6 +119,26 @@ await rin.tasks.upsert({
       "Prepare today's brief using the current facts and send it to the configured chat.",
     continuationPrompt:
       "Prepare today's brief. Reuse prior task context only when it is still relevant.",
+  },
+});
+```
+
+Create a current-session instruction task:
+
+```js
+await rin.tasks.upsert({
+  id: "cron_follow_up_here",
+  name: "Follow up in this chat",
+  enabled: true,
+  trigger: { runAt: "2026-05-08T15:00:00+08:00" },
+  session: {
+    mode: "session_instruction",
+    sessionFile: "/home/rin/.rin/sessions/managed/chat/example.jsonl",
+  },
+  target: {
+    kind: "agent_prompt",
+    prompt:
+      "Continue this chat session and ask whether the pending review is done.",
   },
 });
 ```
