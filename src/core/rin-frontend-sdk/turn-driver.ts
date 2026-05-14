@@ -3,6 +3,10 @@ import {
   normalizeSessionRef,
   sessionFileExists,
 } from "../session/ref.js";
+import {
+  resolveChatCommandResponses,
+  type ChatCommandResponses,
+} from "../chat/command-responses.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
@@ -70,6 +74,7 @@ function sleep(ms: number) {
 export class RinFrontendTurnDriver {
   private readonly clientFactory: () => RinFrontendTurnClient;
   private readonly promptSource: string;
+  private readonly commandResponses: ChatCommandResponses;
   client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
@@ -93,9 +98,13 @@ export class RinFrontendTurnDriver {
   constructor(options: {
     clientFactory: () => RinFrontendTurnClient;
     promptSource?: string;
+    commandResponses?: Partial<ChatCommandResponses>;
   }) {
     this.clientFactory = options.clientFactory;
     this.promptSource = safeString(options.promptSource).trim() || "frontend";
+    this.commandResponses = resolveChatCommandResponses(
+      options.commandResponses,
+    );
   }
 
   subscribe(listener: (event: RinFrontendTurnDriverEvent) => void) {
@@ -404,7 +413,7 @@ export class RinFrontendTurnDriver {
     if (isAbortCommand(commandLine) && (this.liveTurn || this.isStreaming())) {
       return {
         handled: true,
-        text: "Aborted current operation.",
+        text: this.commandResponses.abort,
         ...this.interruptActiveTurnLikeTui(),
       };
     }
@@ -423,9 +432,10 @@ export class RinFrontendTurnDriver {
       await this.refreshFrontendState().catch(() => {});
       return {
         handled: true,
+        cancelled: Boolean(value?.cancelled),
         text: value?.cancelled
-          ? "Session switch cancelled."
-          : "Started a new session.",
+          ? this.commandResponses.newCancelled
+          : this.commandResponses.new,
         sessionId: this.currentSessionId() || undefined,
         sessionFile: this.currentSessionFile() || undefined,
       };

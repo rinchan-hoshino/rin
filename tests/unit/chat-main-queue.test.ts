@@ -711,11 +711,6 @@ test("chat main lets /abort bypass a same-chat turn waiting for backend admissio
         trusted: [],
       });
 
-      controllerMod.ChatController.prototype.runActiveVoiceAcknowledgement = async function (commandName) {
-        if (commandName !== "abort") throw new Error(commandName);
-        return "Active voice abort reply.";
-      };
-
       const promptTags = [];
       let abortCalls = 0;
       controllerMod.ChatController.prototype.connect = async function () {
@@ -740,24 +735,8 @@ test("chat main lets /abort bypass a same-chat turn waiting for backend admissio
               controller.session.isStreaming = false;
             },
           },
-          prompt: async (message, options = {}) => {
+          prompt: async (_message, options = {}) => {
             promptTags.push(options.requestTag || "");
-            if (message === "Briefly tell me the current operation was aborted.") {
-              controller.session.isStreaming = false;
-              await controller.handleClientEvent({
-                type: "ui",
-                payload: {
-                  type: "rpc_turn_event",
-                  event: "complete",
-                  requestTag: options.requestTag,
-                  finalText: "Active voice abort reply.",
-                  result: { messages: [{ type: "text", text: "Active voice abort reply." }] },
-                  sessionId: "abort-admission-session",
-                  sessionFile: "/tmp/abort-admission-chat.jsonl",
-                },
-              });
-              return;
-            }
             controller.session.isStreaming = true;
             await new Promise(() => {});
           },
@@ -805,14 +784,14 @@ test("chat main lets /abort bypass a same-chat turn waiting for backend admissio
         rows = storeMod
           .listChatMessages(agentDir)
           .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-        if (abortCalls > 0 && rows.some((item) => item.text === "Active voice abort reply.")) {
+        if (abortCalls > 0 && rows.some((item) => item.text === "Aborted current operation.")) {
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       if (
         abortCalls !== 1 ||
-        !rows.some((item) => item.text === "Active voice abort reply.")
+        !rows.some((item) => item.text === "Aborted current operation.")
       ) {
         throw new Error(JSON.stringify({ abortCalls, promptTags, rows }));
       }
