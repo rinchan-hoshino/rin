@@ -54,6 +54,7 @@ const SESSION_SCOPED_COMMAND_NAMES = [
   "get_resource_diagnostics",
   "get_command_argument_completions",
   "set_thinking_level",
+  "reset_model_options_from_settings",
   "cycle_thinking_level",
   "set_steering_mode",
   "set_follow_up_mode",

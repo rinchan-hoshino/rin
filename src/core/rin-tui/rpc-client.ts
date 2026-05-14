@@ -276,6 +276,10 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     });
   }
 
+  async resetModelOptionsFromSettings() {
+    return await this.request({ type: "reset_model_options_from_settings" });
+  }
+
   async respondExtensionUi(response: RinExtensionUiResponse) {
     await this.send(response);
   }

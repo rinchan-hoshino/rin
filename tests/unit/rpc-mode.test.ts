@@ -697,6 +697,159 @@ test(
 );
 
 test(
+  "rpc mode resets model options from settings without full session reload",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const appendedModels: string[] = [];
+    const appendedLevels: string[] = [];
+    const calls: string[] = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const targetModel = {
+        provider: "openai-codex",
+        id: "gpt-5.5",
+        reasoning: true,
+      };
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        get model() {
+          return this.agent.state.model;
+        },
+        get thinkingLevel() {
+          return this.agent.state.thinkingLevel;
+        },
+        agent: {
+          state: { model: null, thinkingLevel: "low" },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        settingsManager: {
+          settings: {},
+          reload: async () => {
+            calls.push("settings.reload");
+          },
+          getDefaultProvider: () => "openai-codex",
+          getDefaultModel: () => "gpt-5.5",
+          getDefaultThinkingLevel: () => "high",
+        },
+        modelRegistry: {
+          getAvailable: async () => [targetModel],
+          hasConfiguredAuth: () => true,
+        },
+        sessionManager: {
+          appendModelChange(provider: string, modelId: string) {
+            appendedModels.push(`${provider}/${modelId}`);
+          },
+          appendThinkingLevelChange(level: string) {
+            appendedLevels.push(level);
+          },
+          getEntries: () => [],
+          getTree: () => [],
+          getLeafId: () => null,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
+        messages: [],
+        prompt: async () => {},
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        getAvailableThinkingLevels: () => ["off", "low", "medium", "high"],
+        setModel: () => {
+          throw new Error("persistent model setter should not be called");
+        },
+        setThinkingLevel: () => {
+          throw new Error("persistent thinking setter should not be called");
+        },
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        reload: async () => {
+          throw new Error("full session reload should not be called");
+        },
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "reset_model_options_from_settings" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      assert.deepEqual(calls, ["settings.reload"]);
+      assert.equal(session.agent.state.model, targetModel);
+      assert.equal(session.agent.state.thinkingLevel, "high");
+      assert.deepEqual(appendedModels, ["openai-codex/gpt-5.5"]);
+      assert.deepEqual(appendedLevels, ["high"]);
+      const response = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .find((line) => line.type === "response" && line.id === "1");
+      assert.equal(response.success, true);
+      assert.deepEqual(response.data, {
+        model: targetModel,
+        thinkingLevel: "high",
+      });
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode applies non-persistent thinking level changes without calling the settings-backed setter",
   { concurrency: false },
   async () => {
