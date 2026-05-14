@@ -235,6 +235,18 @@ test("bootstrap scripts render progress without rin-install log prefixes", async
     const content = await fs.readFile(path.join(rootDir, scriptName), "utf8");
     assert.doesNotMatch(content, /\[rin-(?:install|update)\]/);
   }
+  for (const scriptName of [
+    "install.ps1",
+    "update.ps1",
+    "scripts/bootstrap-entrypoint.ps1",
+  ]) {
+    const bytes = await fs.readFile(path.join(rootDir, scriptName));
+    assert.equal(
+      bytes.every((byte) => byte < 0x80),
+      true,
+      `${scriptName} must stay ASCII-only so Windows PowerShell 5.1 can run the downloaded UTF-8-without-BOM file`,
+    );
+  }
   assert.match(
     await fs.readFile(
       path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
