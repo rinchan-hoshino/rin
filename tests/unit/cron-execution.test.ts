@@ -362,7 +362,7 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
   }
 });
 
-test("cron unbound no-session agent task disposes and removes its transient session file", async () => {
+test("cron unbound no-session agent task shuts down and preserves its session file for review", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const transientSessionFile = path.join(
     agentDir,
@@ -398,7 +398,10 @@ test("cron unbound no-session agent task disposes and removes its transient sess
     });
     assert.equal(result.text, "done");
     assert.equal(result.sessionFile, undefined);
-    await assert.rejects(fs.stat(transientSessionFile), /ENOENT/);
+    assert.equal(
+      await fs.readFile(transientSessionFile, "utf8"),
+      "temporary session",
+    );
     assert.equal(task.dedicatedSessionFile, undefined);
     assert.deepEqual(calls, [
       {
@@ -407,6 +410,7 @@ test("cron unbound no-session agent task disposes and removes its transient sess
         deliveryEnabled: false,
         affectChatBinding: false,
         disposeAfterTurn: true,
+        shutdownAfterTurn: true,
         text: "hello",
         sessionFile: undefined,
         managedSessionLeaf: "task",
@@ -461,6 +465,7 @@ test("cron chat-bound no-session agent task preserves session file for quote res
       "temporary session",
     );
     assert.equal(calls[0].promptMeta?.taskId, "cron_chat_bound");
+    assert.equal(calls[0].shutdownAfterTurn, true);
     assert.equal(calls[0].promptMeta?.taskName, "Chat Bound Task");
     assert.equal("triggerKind" in (calls[0].promptMeta || {}), false);
     assert.equal("taskRunId" in (calls[0].promptMeta || {}), false);

@@ -71,6 +71,9 @@ function createFrontendClient() {
       calls.push({ type: "runCommand", commandLine });
       return { handled: true, text: "command done", sessionFile };
     },
+    async terminateSession() {
+      calls.push({ type: "terminateSession" });
+    },
     async resumeSession(nextSessionFile: string) {
       calls.push({ type: "resumeSession", sessionFile: nextSessionFile });
       sessionFile = nextSessionFile;
@@ -180,6 +183,19 @@ test("frontend SDK turn driver reports an explicit missing session target", asyn
         sessionFile: "/tmp/missing-frontend-session.jsonl",
       }),
     /Session record is missing or expired/,
+  );
+});
+
+test("frontend SDK turn driver terminates the attached daemon session", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+
+  await driver.connect();
+  await (driver as any).terminateSession();
+
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "terminateSession"),
+    [{ type: "terminateSession" }],
   );
 });
 

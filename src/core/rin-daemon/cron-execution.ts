@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -143,25 +143,6 @@ export async function executeCronShellTask(
   });
 }
 
-function isSafeTransientSessionFile(agentDir: string, sessionFile?: string) {
-  const resolved = String(sessionFile || "").trim();
-  if (!resolved) return false;
-  const sessionsDir = path.resolve(agentDir, "sessions");
-  const absolute = path.resolve(resolved);
-  return (
-    absolute.startsWith(`${sessionsDir}${path.sep}`) &&
-    path.basename(absolute).endsWith(".jsonl")
-  );
-}
-
-async function removeTransientSessionFile(
-  agentDir: string,
-  sessionFile?: string,
-) {
-  if (!isSafeTransientSessionFile(agentDir, sessionFile)) return;
-  await rm(path.resolve(String(sessionFile)), { force: true }).catch(() => {});
-}
-
 function buildCronTaskPromptContext(task: CronTaskRecord) {
   const taskName = String(task.name || "").trim();
   return {
@@ -180,6 +161,13 @@ function isSelfImproveExtractionTask(task: CronTaskRecord) {
     .map((value) => String(value || ""))
     .join("\n");
   return prompt.includes("self-improve-memory-maintenance.md");
+}
+
+function shouldShutdownTaskSessionAfterRun(
+  task: CronTaskRecord,
+  sessionMode: string,
+) {
+  return sessionMode === "none" && !isSelfImproveExtractionTask(task);
 }
 
 async function appendCronMaintenanceHistoryRecord(
@@ -253,6 +241,7 @@ export async function executeCronAgentTask(
     deliveryEnabled: false,
     affectChatBinding: false,
     disposeAfterTurn: sessionMode === "none",
+    shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(task, sessionMode),
     text: prompt,
     sessionFile: sessionFile || dedicatedSessionFile,
     ...(sessionMode === "none"
@@ -271,9 +260,6 @@ export async function executeCronAgentTask(
   if (!finalText) throw new Error("cron_final_assistant_text_missing");
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
   const keepChatBoundSession = Boolean(task.chatKey && nextSessionFile);
-  if (sessionMode === "none" && !keepChatBoundSession) {
-    await removeTransientSessionFile(options.agentDir, nextSessionFile);
-  }
   if (sessionMode === "dedicated") {
     if (dedicatedSessionFile) {
       task.dedicatedSessionFile = dedicatedSessionFile;

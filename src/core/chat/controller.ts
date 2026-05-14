@@ -577,7 +577,6 @@ export class ChatController {
   }
 
   private updateStoredSessionFile(...candidates: unknown[]) {
-    if (!this.affectChatBinding) return undefined;
     const picked = this.pickStoredValue(...candidates, this.state.sessionFile);
     this.state.sessionFile = toStoredSessionFile(this.agentDir, picked);
     return this.state.sessionFile;
@@ -637,7 +636,6 @@ export class ChatController {
   }
 
   private getRecoverableSessionFile() {
-    if (!this.affectChatBinding) return "";
     const wanted = this.resolveSessionFileForUse(this.state.sessionFile);
     if (!wanted) return "";
     if (sessionFileExists(wanted)) return wanted;
@@ -793,6 +791,7 @@ export class ChatController {
     this.lastActivityAt = Date.now();
     const wanted = this.getRecoverableSessionFile();
     if (wanted) await this.connect({ restoreSession: true });
+    await this.driver.terminateSession();
     this.driver.dispose();
   }
 

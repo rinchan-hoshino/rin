@@ -39,6 +39,7 @@ export type RinFrontendTurnClient = RinFrontendClient & {
     restoreSessionFile?: string,
     managedSessionLeaf?: string,
   ) => Promise<Record<string, unknown>>;
+  terminateSession?: () => Promise<unknown>;
   consumeQueuedOfflineOperation?: (requestTag?: string) => boolean;
 };
 
@@ -139,6 +140,15 @@ export class RinFrontendTurnDriver {
     if (client?.disconnect) {
       void client.disconnect().catch(() => {});
     }
+  }
+
+  async terminateSession() {
+    if (!this.client?.isConnected()) return;
+    if (typeof this.client.terminateSession === "function") {
+      await this.client.terminateSession();
+      return;
+    }
+    await this.client.request({ type: "terminate_session" });
   }
 
   private async refreshFrontendState() {
