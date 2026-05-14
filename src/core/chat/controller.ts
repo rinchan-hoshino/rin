@@ -742,8 +742,8 @@ export class ChatController {
   }) {
     const bindSession = input.bindSession !== false && this.affectChatBinding;
     const text = this.stageAssistantDelivery({ ...input, bindSession });
-    this.markProcessedMessage(input.incomingMessageId, bindSession);
     await this.commitPendingDelivery(input.clearProcessing);
+    this.markProcessedMessage(input.incomingMessageId, bindSession);
     return text;
   }
 

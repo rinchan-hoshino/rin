@@ -1987,6 +1987,57 @@ test("chat controller delivers prompt turn errors through conversation binding",
   assert.equal(controller.state.sessionFile, "failed-turn-chat.jsonl");
 });
 
+test("chat controller leaves inbound unprocessed when final reply delivery fails", async () => {
+  const controller = await createController("telegram/1:2");
+  const chatKey = "telegram/1:2";
+  saveChatMessage(controller.agentDir, {
+    chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    chatType: "private",
+    messageId: "m-send-fail",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "hello",
+  });
+  controller.app.bots[0].sendMessage = async () => {
+    throw new Error("send failed");
+  };
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/send-fail-chat.jsonl",
+      getSessionId: () => "session-send-fail",
+      getSessionName: () => chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/send-fail-chat.jsonl",
+      sessionId: "session-send-fail",
+    }),
+    prompt: async (_text, options = {}) => {
+      await controller.handleSessionEvent({ type: "agent_start" });
+      emitRpcTurnComplete(controller, options, "final that cannot be sent");
+    },
+    switchSession: async () => {},
+  };
+
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-send-fail",
+      replyToMessageId: "m-send-fail",
+    }),
+    /send failed/,
+  );
+
+  const stored = getChatMessage(controller.agentDir, chatKey, "m-send-fail");
+  assert.ok(stored?.acceptedAt);
+  assert.equal(stored?.processedAt, undefined);
+});
+
 test("chat controller reuses an observed completed assistant message when rpc finalText is missing", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
