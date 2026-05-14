@@ -132,6 +132,38 @@ test("rpc prompt does not treat non-extension slash catalog entries as extension
   );
 });
 
+test("rpc frontend exposes local Rin capability renderers for tool cards", () => {
+  const session = new RpcInteractiveSession({
+    send() {
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+  });
+
+  for (const name of ["web_search", "search_memory"]) {
+    const tool = session.getToolDefinition(name);
+    assert.ok(tool, `${name} should be available in the RPC frontend`);
+    assert.equal(typeof tool.renderCall, "function");
+    assert.equal(typeof tool.renderResult, "function");
+  }
+
+  const rendered = session
+    .getToolDefinition("web_search")
+    .renderCall(
+      { q: "RAG retrieval augmented generation", limit: 5 },
+      { fg: (_kind, text) => String(text), bold: (text) => String(text) },
+      { state: {}, lastComponent: undefined },
+    )
+    .render(80)
+    .join("\n");
+  assert.match(rendered, /RAG retrieval augmented generation/);
+});
+
 test("rpc extension runner is a passive daemon catalog facade", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({

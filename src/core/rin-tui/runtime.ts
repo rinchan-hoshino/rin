@@ -6,6 +6,7 @@ import type {
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 
 import {
+  createRinCapabilityDefinitions,
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
@@ -341,6 +342,7 @@ export class RpcInteractiveSession {
   private waitForDaemonHintTimer: NodeJS.Timeout | null = null;
   private startupPending = true;
   private resourceSnapshot = emptyRpcResourceSnapshot();
+  private localToolDefinitions = new Map<string, any>();
   private sessionOperationPending = false;
   private recoveryPending = false;
   private clearQueuePromise: Promise<void> | null = null;
@@ -383,6 +385,7 @@ export class RpcInteractiveSession {
       if (!descriptor || typeof descriptor.value !== "function") continue;
       (this as any)[name] = descriptor.value.bind(this);
     }
+    this.localToolDefinitions = this.createLocalToolDefinitions();
     this.extensionRunner = this.createPassiveExtensionRunner();
     this.agent = new RemoteAgent(client);
     this.settingsManager = undefined;
@@ -944,8 +947,26 @@ export class RpcInteractiveSession {
     return getLastAssistantText(this.messages);
   }
 
-  getToolDefinition(_toolName: string) {
-    return undefined;
+  getToolDefinition(toolName: string) {
+    return this.localToolDefinitions.get(String(toolName || "").trim());
+  }
+
+  private createLocalToolDefinitions() {
+    const profile = getRuntimeProfile();
+    const definitions = createRinCapabilityDefinitions({
+      cwd: profile.cwd,
+      agentDir: profile.agentDir,
+      getThinkingLevel: () => this.thinkingLevel,
+      sendMessage: () => {},
+    });
+    const tools = new Map<string, any>();
+    for (const definition of definitions) {
+      for (const tool of definition?.tools || []) {
+        const name = String(tool?.name || "").trim();
+        if (name && !tools.has(name)) tools.set(name, tool);
+      }
+    }
+    return tools;
   }
 
   private createPassiveExtensionRunner() {
