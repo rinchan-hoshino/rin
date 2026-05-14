@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 
 import prettyMilliseconds from "pretty-ms";
@@ -13,6 +12,11 @@ import {
   type PromptContextMeta,
 } from "../chat-bridge/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
+import {
+  readChatCommandResponses,
+  resolveChatCommandResponses,
+  type ChatCommandResponses,
+} from "./command-responses.js";
 import {
   missingSessionFileError,
   normalizeSessionRef,
@@ -71,16 +75,6 @@ function formatPromptForChatContext(
   promptMeta?: PromptContextMeta,
 ) {
   return injectPromptContextHeader(promptMeta, text);
-}
-
-function buildActiveVoiceAcknowledgementPrompt(commandName: string) {
-  const promptByCommand: Record<string, string> = {
-    new: "Briefly greet me.",
-    compact: "Briefly tell me everything is settled.",
-    reload: "Briefly tell me you are ready.",
-    abort: "Briefly acknowledge the abort request.",
-  };
-  return promptByCommand[commandName] || "";
 }
 
 type WorkingIndicatorKind = "polling" | "marker";
@@ -160,6 +154,7 @@ export class ChatController {
   turnAbortRequested = false;
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
+  commandResponses?: ChatCommandResponses;
 
   constructor(
     app: any,
@@ -173,6 +168,7 @@ export class ChatController {
       statePath?: string;
       frontendClientFactory?: () => RinFrontendTurnClient;
       sleepAfterIdleMs?: number;
+      commandResponses?: Partial<ChatCommandResponses>;
     },
   ) {
     this.app = app;
@@ -187,11 +183,15 @@ export class ChatController {
     this.h = deps.h;
     this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
     this.frontendClientFactory = deps.frontendClientFactory;
+    this.commandResponses = deps.commandResponses
+      ? resolveChatCommandResponses(deps.commandResponses)
+      : undefined;
     if (!this.state.chatKey) this.state.chatKey = chatKey;
     this.driver = new RinFrontendTurnDriver({
       clientFactory:
         deps.frontendClientFactory || (() => new RinDaemonFrontendClient()),
       promptSource: "chat-bridge",
+      commandResponses: this.getCommandResponses(),
     });
     this.driver.subscribe((event) => {
       void this.handleFrontendEvent(event).catch(() => {});
@@ -568,6 +568,24 @@ export class ChatController {
     return resolveStoredSessionFile(this.agentDir, this.state.sessionFile);
   }
 
+  private getCommandResponses() {
+    return this.commandResponses || readChatCommandResponses(this.agentDir);
+  }
+
+  private localizeBuiltinCommandResult(commandName: string, data: any) {
+    const responses = this.getCommandResponses();
+    if (commandName === "abort") return { ...data, text: responses.abort };
+    if (commandName === "new") {
+      return {
+        ...data,
+        text: data?.cancelled ? responses.newCancelled : responses.new,
+      };
+    }
+    if (commandName === "compact") return { ...data, text: responses.compact };
+    if (commandName === "reload") return { ...data, text: responses.reload };
+    return data;
+  }
+
   private pickStoredValue(...candidates: unknown[]) {
     for (const candidate of candidates) {
       const value = safeString(candidate).trim();
@@ -580,53 +598,6 @@ export class ChatController {
     const picked = this.pickStoredValue(...candidates, this.state.sessionFile);
     this.state.sessionFile = toStoredSessionFile(this.agentDir, picked);
     return this.state.sessionFile;
-  }
-
-  private isSafeTransientSessionFile(sessionFile?: string) {
-    const resolved = safeString(sessionFile || "").trim();
-    if (!resolved) return false;
-    const sessionsDir = path.resolve(this.agentDir, "sessions");
-    const absolute = path.resolve(resolved);
-    return (
-      absolute.startsWith(`${sessionsDir}${path.sep}`) &&
-      path.basename(absolute).endsWith(".jsonl")
-    );
-  }
-
-  private removeTransientSessionFile(sessionFile?: string) {
-    if (!this.isSafeTransientSessionFile(sessionFile)) return;
-    try {
-      fs.rmSync(path.resolve(String(sessionFile)), { force: true });
-    } catch {}
-  }
-
-  private async runActiveVoiceAcknowledgement(
-    commandName: string,
-    promptMeta?: PromptContextMeta,
-  ) {
-    const prompt = buildActiveVoiceAcknowledgementPrompt(commandName);
-    if (!prompt) return undefined;
-    const driver = new RinFrontendTurnDriver({
-      clientFactory:
-        this.frontendClientFactory || (() => new RinDaemonFrontendClient()),
-      promptSource: "chat-bridge",
-    });
-    let sessionFile = "";
-    try {
-      const result = await driver.runTurn({
-        text: formatPromptForChatContext(prompt, promptMeta),
-        managedSessionLeaf: MANAGED_CHAT_SESSION_LEAF,
-        resetModelOptionsFromSettings: true,
-        promptContext: promptMeta,
-        source: "chat-bridge",
-      });
-      sessionFile = result.sessionFile || driver.currentSessionFile();
-      return result.finalText;
-    } finally {
-      sessionFile ||= driver.currentSessionFile();
-      driver.dispose();
-      this.removeTransientSessionFile(sessionFile);
-    }
   }
 
   private resolveSessionFileForUse(sessionFile?: string) {
@@ -858,19 +829,15 @@ export class ChatController {
       });
       try {
         this.turnAbortRequested = true;
-        let data: any = this.driver.interruptActiveTurnLikeTui();
+        const data: any = {
+          ...this.driver.interruptActiveTurnLikeTui(),
+          text: this.getCommandResponses().abort,
+        };
         this.updateStoredSessionFile(
           data?.sessionFile,
           this.driver.currentSessionFile(),
         );
         this.saveState();
-        const activeVoiceReply = await this.runActiveVoiceAcknowledgement(
-          commandName,
-          promptMeta,
-        );
-        if (activeVoiceReply) {
-          data = { ...data, text: activeVoiceReply };
-        }
         const text = safeString(data?.text || "").trim();
         if (!text) throw new Error("chat_command_text_missing");
         await this.deliverAssistantReply({
@@ -935,13 +902,7 @@ export class ChatController {
         this.driver.currentSessionFile(),
       );
       this.saveState();
-
-      const activeVoiceReply = hadActiveTurn
-        ? undefined
-        : await this.runActiveVoiceAcknowledgement(commandName, promptMeta);
-      if (activeVoiceReply) {
-        data = { ...data, text: activeVoiceReply };
-      }
+      data = this.localizeBuiltinCommandResult(commandName, data);
 
       const text = safeString(data?.text || "").trim();
       if (!text) throw new Error("chat_command_text_missing");

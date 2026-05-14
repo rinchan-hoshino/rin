@@ -54,6 +54,26 @@ await rin.chat.runTurn({
 });
 ```
 
+## Command acknowledgement text
+
+Rin does not ask the agent to write routine chat command acknowledgements such as `/new`, `/abort`, `/compact`, or `/reload`. These replies come from configuration so they are predictable and do not create temporary agent turns.
+
+If `~/.rin/chat-command-responses.json` is absent, Rin uses the built-in English replies. To customize them, create or edit that file:
+
+```json
+{
+  "abort": "Aborted current operation.",
+  "new": "Started a new session.",
+  "newCancelled": "Session switch cancelled.",
+  "compact": "Compacted session.",
+  "reload": "Reloaded extensions, prompts, skills, and themes."
+}
+```
+
+All fields are optional. Missing or blank fields fall back to the built-in English text.
+
+When a user asks to change these command replies, edit `~/.rin/chat-command-responses.json`. Do not put these replies in `settings.json`.
+
 ## Rich message parts
 
 Use `docs/rich-text-output-format.md` for native mention, quote, attachment, and fallback syntax.

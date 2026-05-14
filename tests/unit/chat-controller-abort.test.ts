@@ -113,10 +113,6 @@ test("chat controller settles an abort while prompt submission is still pending"
 
   let promptRequestTag = "";
   let abortCalled = false;
-  controller.runActiveVoiceAcknowledgement = async (commandName: string) => {
-    assert.equal(commandName, "abort");
-    return "Active voice abort reply.";
-  };
   controller.session = {
     isStreaming: false,
     sessionManager: {
@@ -162,7 +158,7 @@ test("chat controller settles an abort while prompt submission is still pending"
     sessionId: "session-pending-submit",
     sessionFile: "/tmp/pending-submit-chat.jsonl",
   });
-  assert.deepEqual(deliveries, ["Active voice abort reply."]);
+  assert.deepEqual(deliveries, ["Aborted current operation."]);
 });
 
 test("chat controller suppresses aborted turn errors and queues later text as a fresh prompt", async () => {
@@ -176,10 +172,6 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
   const promptCalls: Array<{ text: string; streamingBehavior: string }> = [];
   let firstRequestTag = "";
   let secondRequestTag = "";
-  controller.runActiveVoiceAcknowledgement = async (commandName: string) => {
-    assert.equal(commandName, "abort");
-    return "Active voice abort reply.";
-  };
   let tuiInterruptCalled = false;
   let sessionAbortCalled = false;
   let ensureSessionReadyCalls = 0;
@@ -277,5 +269,5 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
   ]);
   emitRpcTurnComplete(controller, secondRequestTag, "second done");
   assert.equal((await secondTurn).finalText, "second done");
-  assert.deepEqual(deliveries, ["Active voice abort reply.", "second done"]);
+  assert.deepEqual(deliveries, ["Aborted current operation.", "second done"]);
 });

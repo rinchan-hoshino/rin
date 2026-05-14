@@ -10,6 +10,7 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
+import { readChatCommandResponses } from "../chat/command-responses.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
@@ -785,17 +786,18 @@ export class RpcInteractiveSession {
 
   async runCommand(commandLine: string) {
     const trimmed = String(commandLine || "").trim();
+    const commandResponses = readChatCommandResponses(
+      getRuntimeProfile().agentDir,
+    );
     if (trimmed === "/abort") {
       await this.abort();
-      return { handled: true, text: "Aborted current operation." };
+      return { handled: true, text: commandResponses.abort };
     }
     if (trimmed === "/new") {
       const completed = await this.newSession();
       return {
         handled: true,
-        text: completed
-          ? "Started a new session."
-          : "Session switch cancelled.",
+        text: completed ? commandResponses.new : commandResponses.newCancelled,
       };
     }
     if (trimmed.startsWith("/resume ")) {
@@ -812,7 +814,7 @@ export class RpcInteractiveSession {
           handled: true,
           text: completed
             ? `Resumed session: ${String(match.id || "")}`
-            : "Session switch cancelled.",
+            : commandResponses.newCancelled,
         };
       }
     }

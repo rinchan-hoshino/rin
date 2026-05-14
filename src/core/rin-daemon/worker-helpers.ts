@@ -1,3 +1,4 @@
+import { readChatCommandResponses } from "../chat/command-responses.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
 import { listBoundSessions } from "../session/factory.js";
@@ -344,20 +345,23 @@ export async function runBuiltinCommand(
   if (!parsedCommand) return { handled: false };
 
   const { command, args, argsText } = parsedCommand;
+  const commandResponses = readChatCommandResponses(
+    String(runtime?.agentDir || ""),
+  );
   switch (command) {
     case "abort":
       await session.abort();
-      return handledText("Aborted current operation.");
+      return handledText(commandResponses.abort);
     case "new":
       await session.abort();
       await runtime.newSession();
-      return handledText("Started a new session.");
+      return handledText(commandResponses.new);
     case "compact":
       await session.compact(argsText || undefined);
-      return handledText("Compacted session.");
+      return handledText(commandResponses.compact);
     case "reload":
       await session.reload();
-      return handledText("Reloaded extensions, prompts, skills, and themes.");
+      return handledText(commandResponses.reload);
     case "session":
       return handledText(formatSessionStats(session.getSessionStats()));
     case "changelog": {

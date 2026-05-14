@@ -404,16 +404,11 @@ test("chat controller does not bind a transient default session before managed p
   );
 });
 
-test("chat controller skips recovery bootstrap and asks the active voice to acknowledge /new", async () => {
+test("chat controller skips recovery bootstrap and uses configured copy for /new", async () => {
   const controller = await createController();
   const calls = [];
   const prompts = [];
   const deliveries = [];
-  const activeVoiceCommands = [];
-  controller.runActiveVoiceAcknowledgement = async (commandName) => {
-    activeVoiceCommands.push(commandName);
-    return "Active voice new-session reply.";
-  };
   controller.commitPendingDelivery = async function () {
     deliveries.push(this.stagedDelivery?.text || "");
     this.stagedDelivery = null;
@@ -455,11 +450,7 @@ test("chat controller skips recovery bootstrap and asks the active voice to ackn
       },
       prompt: async (text, options = {}) => {
         prompts.push(text);
-        emitRpcTurnComplete(
-          controller,
-          options,
-          "Active voice new-session reply.",
-        );
+        emitRpcTurnComplete(controller, options, "unexpected temp reply");
       },
     };
   };
@@ -468,22 +459,16 @@ test("chat controller skips recovery bootstrap and asks the active voice to ackn
 
   assert.deepEqual(calls, ["connect:false", "newSession:chat"]);
   assert.deepEqual(prompts, []);
-  assert.deepEqual(activeVoiceCommands, ["new"]);
-  assert.deepEqual(deliveries, ["Active voice new-session reply."]);
+  assert.deepEqual(deliveries, ["Started a new session."]);
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
-test("chat controller passes command sender context to active voice acknowledgements", async () => {
+test("chat controller uses configured command response overrides", async () => {
   const controller = await createController();
-  const deliveries = [];
-  const seenContexts = [];
-  controller.runActiveVoiceAcknowledgement = async (
-    commandName,
-    promptMeta,
-  ) => {
-    seenContexts.push({ commandName, promptMeta });
-    return "Active voice contextual reply.";
+  controller.commandResponses = {
+    new: "\u5df2\u5f00\u59cb\u65b0\u4f1a\u8bdd\u3002",
   };
+  const deliveries = [];
   controller.commitPendingDelivery = async function () {
     deliveries.push(this.stagedDelivery?.text || "");
     this.stagedDelivery = null;
@@ -503,7 +488,7 @@ test("chat controller passes command sender context to active voice acknowledgem
         "sessions",
         "managed",
         options.managedSessionLeaf,
-        "created-contextual-command.jsonl",
+        "created-localized-command.jsonl",
       );
       return true;
     },
@@ -513,31 +498,9 @@ test("chat controller passes command sender context to active voice acknowledgem
     }),
   };
 
-  await controller.runCommand("/new", "m-new", "m-new", "", {
-    source: "chat-bridge",
-    chatKey: "telegram/1:2",
-    chatType: "group",
-    userId: "trusted-1",
-    nickname: "AccountNick",
-    groupNickname: "GroupCard",
-    identity: "TRUSTED",
-  });
+  await controller.runCommand("/new", "m-new", "m-new");
 
-  assert.deepEqual(seenContexts, [
-    {
-      commandName: "new",
-      promptMeta: {
-        source: "chat-bridge",
-        chatKey: "telegram/1:2",
-        chatType: "group",
-        userId: "trusted-1",
-        nickname: "AccountNick",
-        groupNickname: "GroupCard",
-        identity: "TRUSTED",
-      },
-    },
-  ]);
-  assert.deepEqual(deliveries, ["Active voice contextual reply."]);
+  assert.deepEqual(deliveries, ["\u5df2\u5f00\u59cb\u65b0\u4f1a\u8bdd\u3002"]);
 });
 
 test("chat controller starts /new immediately through the TUI new-session path", async () => {
@@ -695,24 +658,15 @@ test("chat controller keeps /status immediate during an active chat turn", async
   assert.equal((await firstTurn).finalText, "first done");
 });
 
-test("chat controller asks the active voice to acknowledge /compact and /reload", async () => {
-  for (const [command, resultText, activeVoiceText] of [
-    ["/compact", "Compacted session.", "Active voice compact reply."],
-    [
-      "/reload",
-      "Reloaded extensions, prompts, skills, and themes.",
-      "Active voice reload reply.",
-    ],
+test("chat controller uses configured command responses for /compact and /reload", async () => {
+  for (const [command, resultText] of [
+    ["/compact", "Compacted session."],
+    ["/reload", "Reloaded extensions, prompts, skills, and themes."],
   ]) {
     const controller = await createController();
     const calls = [];
     const prompts = [];
     const deliveries = [];
-    const activeVoiceCommands = [];
-    controller.runActiveVoiceAcknowledgement = async (commandName) => {
-      activeVoiceCommands.push(commandName);
-      return activeVoiceText;
-    };
     controller.commitPendingDelivery = async function () {
       deliveries.push(this.stagedDelivery?.text || "");
       this.stagedDelivery = null;
@@ -743,7 +697,7 @@ test("chat controller asks the active voice to acknowledge /compact and /reload"
       },
       prompt: async (text, options = {}) => {
         prompts.push(text);
-        emitRpcTurnComplete(controller, options, activeVoiceText);
+        emitRpcTurnComplete(controller, options, "unexpected temp reply");
       },
       switchSession: async () => {},
     };
@@ -752,8 +706,7 @@ test("chat controller asks the active voice to acknowledge /compact and /reload"
 
     assert.deepEqual(calls, ["ensureSessionReady", `runCommand:${command}`]);
     assert.deepEqual(prompts, []);
-    assert.deepEqual(activeVoiceCommands, [command.slice(1)]);
-    assert.deepEqual(deliveries, [activeVoiceText]);
+    assert.deepEqual(deliveries, [resultText]);
   }
 });
 
@@ -783,8 +736,6 @@ test("chat controller starts working indicators for chat commands", async () => 
         },
       ],
     };
-    controller.runActiveVoiceAcknowledgement = async () =>
-      `Voice reply for ${command}`;
     controller.commitPendingDelivery = async function (
       clearProcessing = false,
     ) {
@@ -841,7 +792,15 @@ test("chat controller starts working indicators for chat commands", async () => 
       ["create", "2", `m-${command.slice(1)}`, "🤔"],
       ["delete", "2", `m-${command.slice(1)}`, "🤔", "1"],
     ]);
-    assert.deepEqual(deliveries, [`Voice reply for ${command}`]);
+    assert.deepEqual(deliveries, [
+      command === "/new"
+        ? "Started a new session."
+        : command === "/abort"
+          ? "Aborted current operation."
+          : command === "/compact"
+            ? "Compacted session."
+            : "Reloaded extensions, prompts, skills, and themes.",
+    ]);
   }
 });
 

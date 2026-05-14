@@ -176,6 +176,25 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   });
 });
 
+test("frontend SDK turn driver uses configured built-in command responses", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    commandResponses: { new: "\u5df2\u5f00\u59cb\u65b0\u4f1a\u8bdd\u3002" },
+  });
+
+  const result = await driver.runCommand("/new", {
+    managedSessionLeaf: "chat",
+  });
+
+  assert.equal(result.text, "\u5df2\u5f00\u59cb\u65b0\u4f1a\u8bdd\u3002");
+  assert.deepEqual(client.calls[0], {
+    type: "newSession",
+    options: { managedSessionLeaf: "chat" },
+  });
+});
+
 test("frontend SDK turn driver reports an explicit missing session target", async () => {
   const driver = createDriver();
 

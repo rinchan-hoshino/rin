@@ -48,6 +48,7 @@ import {
 } from "./chat-helpers.js";
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { ChatController, loadChatSettings } from "./controller.js";
+import { readChatCommandResponses } from "./command-responses.js";
 import { appendChatLog } from "./chat-log.js";
 import {
   type ChatInboxItem,
@@ -353,9 +354,9 @@ export async function startChatBridge(
       void controller.housekeep().catch(() => {});
     }
   }, TYPING_POLL_INTERVAL_MS);
-  const commandRows = getChatCommandRows(
-    readConfiguredLanguageFromSettings(runtime.agentDir),
-  );
+  const chatLanguageTag = readConfiguredLanguageFromSettings(runtime.agentDir);
+  const commandRows = getChatCommandRows(chatLanguageTag);
+  const chatCommandResponses = readChatCommandResponses(runtime.agentDir);
   const frontendClientFactory = options.frontendClientFactory;
   const getIdentity = () => loadIdentity(dataDir);
   const getController = (chatKey: string) => {
@@ -365,6 +366,7 @@ export async function startChatBridge(
         logger,
         h,
         frontendClientFactory,
+        commandResponses: chatCommandResponses,
       });
       controllers.set(chatKey, controller);
     }
@@ -398,6 +400,7 @@ export async function startChatBridge(
         statePath,
         frontendClientFactory,
         sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
+        commandResponses: chatCommandResponses,
       });
       detachedControllers.set(controllerKey, controller);
       return controller;
