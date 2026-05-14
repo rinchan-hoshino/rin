@@ -241,6 +241,7 @@ export type ChatBridgeTurnPayload = {
   deliveryEnabled?: boolean;
   affectChatBinding?: boolean;
   disposeAfterTurn?: boolean;
+  shutdownAfterTurn?: boolean;
   text: string;
   sessionFile?: string;
   managedSessionLeaf?: string;
@@ -874,6 +875,7 @@ export async function startChatBridge(
     const deliveryEnabled = payload?.deliveryEnabled !== false;
     const affectChatBinding = payload?.affectChatBinding !== false;
     const disposeAfterTurn = payload?.disposeAfterTurn === true;
+    const shutdownAfterTurn = payload?.shutdownAfterTurn === true;
     if (!text) throw new Error("chat_text_required");
     const useBoundController = Boolean(
       chatKey &&
@@ -902,8 +904,16 @@ export async function startChatBridge(
         "prompt",
       );
     } finally {
-      if (!useBoundController && disposeAfterTurn) {
-        controller.dispose();
+      if (!useBoundController && (disposeAfterTurn || shutdownAfterTurn)) {
+        if (shutdownAfterTurn) {
+          await controller.terminateSession().catch((error: any) => {
+            logger.warn(
+              `chat detached turn shutdown failed controllerKey=${controllerKey} err=${safeString(error?.message || error)}`,
+            );
+          });
+        } else {
+          controller.dispose();
+        }
         detachedControllers.delete(controllerKey);
         try {
           fs.rmSync(

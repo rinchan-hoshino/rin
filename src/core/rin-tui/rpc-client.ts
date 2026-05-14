@@ -241,6 +241,10 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     return await this.request({ type: "run_command", commandLine });
   }
 
+  async terminateSession() {
+    return await this.request({ type: "terminate_session" });
+  }
+
   async newSession(options: Record<string, unknown> = {}) {
     return await this.request<Record<string, unknown>>({
       type: "new_session",

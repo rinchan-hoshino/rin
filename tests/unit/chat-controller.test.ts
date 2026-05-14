@@ -117,6 +117,52 @@ function emitRpcTurnComplete(controller, options, finalText, result) {
   });
 }
 
+test("chat controller terminates the frontend session before disposing", async () => {
+  const controller = await createController();
+  const calls = [];
+  controller.driver.terminateSession = async () => {
+    calls.push("terminateSession");
+  };
+  controller.driver.dispose = () => {
+    calls.push("dispose");
+  };
+
+  await controller.terminateSession();
+
+  assert.deepEqual(calls, ["terminateSession", "dispose"]);
+});
+
+test("detached chat controllers persist their session file for later termination", async () => {
+  const tempDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-controller-"),
+  );
+  try {
+    const dataDir = path.join(tempDir, "data");
+    const statePath = path.join(tempDir, "detached", "state.json");
+    await fs.mkdir(dataDir, { recursive: true });
+    const controller = new ChatController({}, dataDir, "cron:task", {
+      logger: { info() {}, warn() {} },
+      h: {
+        text(content) {
+          return { type: "text", attrs: { content } };
+        },
+      },
+      affectChatBinding: false,
+      statePath,
+    });
+
+    controller.updateStoredSessionFile(
+      path.join(tempDir, "sessions", "managed", "task", "cron_task.jsonl"),
+    );
+    controller.saveState();
+
+    const stored = JSON.parse(await fs.readFile(statePath, "utf8"));
+    assert.equal(stored.sessionFile, "managed/task/cron_task.jsonl");
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("chat controller bootstraps a fresh session before the first command", async () => {
   const controller = await createController();
   const calls = [];
