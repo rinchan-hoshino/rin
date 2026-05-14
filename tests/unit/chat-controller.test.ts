@@ -2384,6 +2384,7 @@ test("chat controller steers an already streaming session instead of waiting for
   const controller = await createController("telegram/1:2");
   const promptCalls = [];
 
+  controller.driver.frontendState = { isStreaming: true };
   controller.session = {
     isStreaming: true,
     sessionManager: {
@@ -2401,11 +2402,14 @@ test("chat controller steers an already streaming session instead of waiting for
     switchSession: async () => {},
   };
 
-  const result = await controller.runTurn({
-    text: "follow up",
-    attachments: [],
-    incomingMessageId: "m-steer",
-  });
+  const result = await controller.runTurn(
+    {
+      text: "follow up",
+      attachments: [],
+      incomingMessageId: "m-steer",
+    },
+    "steer",
+  );
 
   assert.deepEqual(promptCalls, [
     { text: "follow up", streamingBehavior: "steer" },

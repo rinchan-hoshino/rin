@@ -263,6 +263,85 @@ test("frontend SDK turn driver applies turn-scoped thinking without persisting d
   });
 });
 
+test("frontend SDK turn driver resolves an already submitted restored turn without resubmitting", async () => {
+  const client = createFrontendClient();
+  client.getMessages = async () => [
+    {
+      role: "user",
+      timestamp: 1778774583000,
+      content: "restored job",
+    },
+    {
+      role: "assistant",
+      timestamp: 1778774590000,
+      content: "already finished",
+    },
+  ];
+  client.prompt = async () => {
+    throw new Error("prompt_should_not_be_resubmitted");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "restored job",
+    restoreSessionFile: "/tmp/frontend-chat.jsonl",
+    promptContext: {
+      source: "chat-bridge",
+      chatKey: "telegram/1:2",
+      sentAt: 1778774580000,
+    },
+  });
+
+  assert.equal(result.finalText, "already finished");
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
+});
+
+test("frontend SDK turn driver follows an already active turn by default", async () => {
+  const client = createFrontendClient();
+  let streaming = true;
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: streaming,
+    turnActive: streaming,
+  });
+  client.prompt = async () => {
+    throw new Error("prompt_should_not_be_resubmitted");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const resultPromise = driver.runTurn({
+    text: "restored job",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+  setImmediate(() => {
+    streaming = false;
+    void emitRpcTurnComplete(
+      driver,
+      "previous-request-tag",
+      "recovered active final",
+      "/tmp/frontend-chat.jsonl",
+    );
+  });
+
+  const result = await resultPromise;
+
+  assert.equal(result.finalText, "recovered active final");
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
+});
+
 test("frontend SDK turn driver steers through native prompt streamingBehavior", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
@@ -281,6 +360,7 @@ test("frontend SDK turn driver steers through native prompt streamingBehavior", 
   const result = await driver.runTurn({
     text: "steer now",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+    streamingBehavior: "steer",
   });
 
   assert.equal(result.steered, true);

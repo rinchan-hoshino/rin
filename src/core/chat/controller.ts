@@ -28,6 +28,7 @@ import {
   writeJsonFile,
 } from "./support.js";
 import {
+  CHAT_INTERIM_REPLY_PREFIX,
   ChatState,
   SavedAttachment,
   markProcessedChatMessage,
@@ -39,7 +40,7 @@ import {
   isTransientChatRuntimeError,
 } from "./runtime-errors.js";
 
-const INTERIM_PREFIX = "··· ";
+const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
 const WORKING_REACTION_INTERVAL_MS = 30_000;
 
 type ChatTurnMeta = {
@@ -1025,6 +1026,7 @@ export class ChatController {
         resetModelOptionsFromSettings: true,
         promptContext: input.promptMeta,
         source: "chat-bridge",
+        streamingBehavior: "steer",
       });
       this.updateStoredSessionFile(
         result.sessionFile,

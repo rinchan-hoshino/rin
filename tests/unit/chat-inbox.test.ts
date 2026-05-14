@@ -214,7 +214,7 @@ test("chat inbox keeps fresh processing envelopes until they become stale", asyn
   assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
 });
 
-test("chat inbox does not restore stranded items after an assistant reply was delivered", async () => {
+test("chat inbox restores processing envelopes without inspecting delivered replies", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const chatKey = "telegram/1:2";
   const sessionFile = path.join(agentDir, "sessions", "chat.jsonl");
@@ -260,7 +260,7 @@ test("chat inbox does not restore stranded items after an assistant reply was de
     replyToMessageId: "m-delivered",
     receivedAt: new Date().toISOString(),
     processedAt: new Date().toISOString(),
-    text: "··· visible reply",
+    text: "visible reply",
     sessionFile,
   });
   const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
@@ -268,12 +268,71 @@ test("chat inbox does not restore stranded items after an assistant reply was de
 
   const restored = inbox.restoreProcessingChatInboxFiles(agentDir);
 
-  assert.equal(restored.length, 0);
+  assert.equal(restored.length, 1);
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
-  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
 });
 
-test("chat inbox does not restore an older processing item after a later /new boundary", async () => {
+test("chat inbox restores processing envelopes without inspecting interim replies", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const chatKey = "telegram/1:2";
+  const sessionFile = path.join(agentDir, "sessions", "chat.jsonl");
+  const session = {
+    platform: "telegram",
+    selfId: "1",
+    channelId: "2",
+    userId: "3",
+    messageId: "m-interim",
+    timestamp: Date.now(),
+    content: "hello again",
+    stripped: { content: "hello again" },
+  };
+  const elements = [{ type: "text", attrs: { content: "hello again" } }];
+
+  inbox.enqueueChatInboxItem(agentDir, {
+    chatKey,
+    messageId: "m-interim",
+    session,
+    elements,
+  });
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    chatType: "private",
+    messageId: "m-interim",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "hello again",
+    acceptedAt: new Date().toISOString(),
+    sessionFile,
+  });
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    chatType: "private",
+    messageId: "assistant-interim",
+    role: "assistant",
+    replyToMessageId: "m-interim",
+    receivedAt: new Date().toISOString(),
+    processedAt: new Date().toISOString(),
+    text: "··· visible interim",
+    sessionFile,
+  });
+  const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
+  inbox.claimChatInboxFile(agentDir, pendingPath);
+
+  const restored = inbox.restoreProcessingChatInboxFiles(agentDir);
+
+  assert.equal(restored.length, 1);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
+});
+
+test("chat inbox restores processing envelopes without inspecting later /new boundaries", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const chatKey = "onebot/1:private:2";
   const session = {
@@ -323,9 +382,9 @@ test("chat inbox does not restore an older processing item after a later /new bo
 
   const restored = inbox.restoreProcessingChatInboxFiles(agentDir);
 
-  assert.equal(restored.length, 0);
+  assert.equal(restored.length, 1);
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
-  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
 });
 
 test("chat inbox restores stranded items after only a working notice", async () => {
@@ -372,7 +431,7 @@ test("chat inbox restores stranded items after only a working notice", async () 
   assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
 });
 
-test("chat inbox treats previous working notice spelling as delivered text", async () => {
+test("chat inbox restores processing envelopes without inspecting previous working notices", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const chatKey = "onebot/1:private:2";
   const session = {
@@ -411,9 +470,9 @@ test("chat inbox treats previous working notice spelling as delivered text", asy
 
   const restored = inbox.restoreProcessingChatInboxFiles(agentDir);
 
-  assert.equal(restored.length, 0);
+  assert.equal(restored.length, 1);
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
-  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
 });
 
 test("chat inbox can claim, restore, and reschedule a queued envelope", async () => {
