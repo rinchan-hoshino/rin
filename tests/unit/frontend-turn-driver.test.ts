@@ -403,3 +403,41 @@ test("frontend SDK turn driver does not emit text-only assistant messages as int
   assert.equal(result.finalText, "Final answer");
   assert.deepEqual(interimTexts, []);
 });
+
+test("frontend SDK turn driver reconnects and resolves an interrupted prompt from session state", async () => {
+  const client = createFrontendClient();
+  const originalConnect = client.connect;
+  let connectCount = 0;
+  client.connect = async () => {
+    connectCount += 1;
+    await originalConnect.call(client);
+  };
+  let promptAttempted = false;
+  client.getMessages = async () =>
+    promptAttempted
+      ? [
+          { role: "user", content: "hello" },
+          { role: "assistant", content: "recovered final" },
+        ]
+      : [{ role: "user", content: "hello" }];
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    promptAttempted = true;
+    await client.disconnect();
+    throw new Error("rin_disconnected:req_1");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "recovered final");
+  assert.equal(result.sessionFile, "/tmp/frontend-chat.jsonl");
+  assert.equal(connectCount, 2);
+  assert.deepEqual(
+    client.calls.map((call: any) => call.type),
+    ["prompt"],
+  );
+});
