@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Use this manual to improve the existing self-improve memory library: prompt baselines, reusable skills, memory-index skills, and short-term memory skills.
+Use this manual to improve the existing self-improve memory library: prompt baselines and skills.
 
 Each review starts from the current library, consolidates what already exists, and stores only future-useful conclusions. The maintenance target is `<agentDir>/self_improve`; product docs, bundled docs, and upstream skill sources are outside this review target.
 
@@ -24,24 +24,21 @@ Location: `<agentDir>/self_improve/skills`
 
 Use ordinary skills for reusable workflows, procedures, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow. Put related lessons into the closest matching skill with clear headings.
 
-### Memory-index skills
+### Special memory skill layout
 
-Location: an index directory under `<agentDir>/self_improve/skills`
+Use these fixed destinations under `<agentDir>/self_improve/skills`:
 
-Use memory-index skills for lookup and provenance when the source evidence matters later. Record compact entries with date, keywords, topic, why it matters, and the original memory/source path. Keep entries short and searchable; do not duplicate procedural guidance already stored in an ordinary skill.
-
-### Short-term event-memory skills
-
-Location: a short-term memory directory under `<agentDir>/self_improve/skills`
-
-Use short-term memory skills for active temporary continuity, fresh state, and short-lived impressions. Review them during maintenance and prune stale entries instead of promoting stale task state into prompts or reusable skills.
+- `short-term-memory/SKILL.md`: the only short-term memory skill. It contains all active short-term event records.
+- `memory-index/SKILL.md`: the only discoverable memory-index entry skill. It routes to monthly index directories under `memory-index/YYYY-MM/`. Each monthly directory contains its own `SKILL.md` index file, and each monthly index entry points to one memory transaction file such as `memory-index/YYYY-MM/transactions/YYYY-MM-DD-topic.md`.
+- `people-and-relationships/SKILL.md`: semantic memory for named people, preferred titles and forms of address, and relationships. Update it whenever a memory item depends on who a person is, how they should be addressed, or how people relate.
+- `object-relationships/SKILL.md`: semantic memory for non-person entities and relationships among them. Update it whenever a memory item depends on what things are or how they relate.
 
 ## Review posture
 
 Start from the existing library.
 
 1. Read current prompt slots.
-2. Inspect relevant reusable skills, memory-index skills, and short-term memory skills.
+2. Inspect the relevant reusable skills and fixed memory skill destinations.
 3. Find repeated, misplaced, stale, verbose, narrow, or overlapping material.
 4. Merge, move, rewrite, delete, or prune existing material.
 5. Add new material only when it improves future routing, decisions, execution, or recall.
@@ -58,8 +55,10 @@ A useful review may only clean existing memory.
 3. Choose the smallest correct destination:
    - prompt slot: applies across most future turns;
    - existing reusable skill: fits a recurring workflow or domain;
-   - memory-index skill: future lookup or provenance matters;
-   - short-term memory skill: active temporary continuity;
+   - `memory-index`: future lookup, provenance, chronology, or transaction context matters;
+   - `short-term-memory`: active temporary continuity;
+   - `people-and-relationships`: person identity, address, or relationship context matters;
+   - `object-relationships`: non-person entity or relationship context matters;
    - no write: low-signal, one-off, stale, speculative, or already covered.
 4. Rewrite the destination compactly.
 5. Validate skill frontmatter after editing skills.
@@ -89,8 +88,10 @@ Use this checklist in every review:
 - broad skills that need clearer structure;
 - narrow skills that belong inside a larger workflow;
 - content filed under the wrong skill;
-- stale short-term memories;
-- missing memory-index entries for important lookup evidence;
+- stale entries inside `short-term-memory/SKILL.md`;
+- missing monthly `memory-index` entries or transaction pointers for important lookup evidence;
+- missing or stale `people-and-relationships` entries for person/title/relationship context;
+- missing or stale `object-relationships` entries for non-person entity or relationship context;
 - verbose historical wording that can become compact guidance;
 - path, filename, or terminology drift between the manual, prompt slots, and skill files.
 
