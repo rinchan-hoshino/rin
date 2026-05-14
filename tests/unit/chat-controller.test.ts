@@ -2041,6 +2041,63 @@ test("chat controller treats rpc completion as the canonical final reply for pro
   assert.equal(controller.state.sessionFile, "prompt-chat.jsonl");
 });
 
+test("chat controller sends a session-file prompt through conversation binding", async () => {
+  const controller = await createController("telegram/1:2");
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "scheduled.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "session", "utf8");
+  const switches = [];
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-scheduled",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-scheduled",
+    }),
+    prompt: async (_text, options = {}) => {
+      emitRpcTurnComplete(controller, options, "scheduled final", {
+        messages: [{ type: "text", text: "scheduled final" }],
+      });
+    },
+    switchSession: async (nextSessionFile) => {
+      switches.push(nextSessionFile);
+    },
+  };
+
+  const result = await controller.runTurn({
+    text: "scheduled instruction",
+    attachments: [],
+    sessionFile,
+    promptMeta: {
+      source: "scheduled-task",
+      scheduledTaskInitiator: "agent",
+      taskId: "cron_current_session",
+    },
+  });
+
+  assert.equal(result.finalText, "scheduled final");
+  assert.deepEqual(switches, [sessionFile]);
+  const delivered = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "m1",
+  );
+  assert.equal(delivered?.text, "scheduled final");
+  assert.equal(delivered?.sessionFile, "managed/chat/scheduled.jsonl");
+  assert.equal(controller.state.sessionFile, "managed/chat/scheduled.jsonl");
+});
+
 test("chat controller delivers prompt turn errors through conversation binding", async () => {
   const controller = await createController("telegram/1:2");
   const chatKey = "telegram/1:2";

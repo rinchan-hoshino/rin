@@ -3,7 +3,11 @@ export const SCHEDULED_TASK_TARGET_KINDS = [
   "shell_command",
 ] as const;
 
-export const SCHEDULED_TASK_SESSION_MODES = ["none", "dedicated"] as const;
+export const SCHEDULED_TASK_SESSION_MODES = [
+  "none",
+  "dedicated",
+  "session_instruction",
+] as const;
 
 export const SCHEDULED_TASK_MANAGE_ACTIONS = [
   "delete",

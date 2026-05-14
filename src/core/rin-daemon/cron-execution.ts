@@ -6,6 +6,7 @@ import path from "node:path";
 
 const HOME_DIR = os.homedir();
 
+import { listChatMessages } from "../chat/message-store.js";
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
 import {
   MANAGED_TASK_SESSION_LEAF,
@@ -15,6 +16,7 @@ import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
+import { resolveStoredSessionFile } from "../session/ref.js";
 import type { CronTaskRecord } from "./cron.js";
 
 type CronChatCapability = {
@@ -154,6 +156,55 @@ function buildCronTaskPromptContext(task: CronTaskRecord) {
   };
 }
 
+function buildCronSessionInstructionPromptContext(
+  task: CronTaskRecord,
+  chatKey: string,
+) {
+  const taskName = String(task.name || "").trim();
+  return {
+    source: "scheduled-task",
+    sentAt: Date.now(),
+    chatKey,
+    taskId: task.id,
+    taskName: taskName || undefined,
+    scheduledTaskInitiator: "agent",
+  };
+}
+
+function chatMessageTimestamp(record: any) {
+  return (
+    Date.parse(String(record?.processedAt || record?.receivedAt || "")) || 0
+  );
+}
+
+export function resolveCronSessionInstructionChatKey(
+  agentDir: string,
+  sessionFile: string,
+) {
+  const resolvedSessionFile = resolveStoredSessionFile(agentDir, sessionFile);
+  if (!resolvedSessionFile) throw new Error("cron_session_file_required");
+  if (!existsSync(resolvedSessionFile)) {
+    throw new Error("cron_session_file_not_found");
+  }
+  const matched = listChatMessages(agentDir)
+    .filter((record) => {
+      const recordSessionFile = resolveStoredSessionFile(
+        agentDir,
+        record?.sessionFile,
+      );
+      return (
+        recordSessionFile &&
+        path.resolve(recordSessionFile) === path.resolve(resolvedSessionFile) &&
+        String(record?.chatKey || "").trim()
+      );
+    })
+    .sort((a, b) => chatMessageTimestamp(b) - chatMessageTimestamp(a))[0];
+  const chatKey = String(matched?.chatKey || "").trim();
+  if (!chatKey)
+    throw new Error("cron_session_instruction_chat_binding_not_found");
+  return { chatKey, sessionFile: resolvedSessionFile };
+}
+
 function isSelfImproveExtractionTask(task: CronTaskRecord) {
   if (task.id === "builtin_self_improve_sleep_consolidation_daily") return true;
   if (task.target.kind !== "agent_prompt") return false;
@@ -281,6 +332,51 @@ export async function executeCronAgentTask(
   };
 }
 
+export async function executeCronSessionInstructionTask(
+  task: CronTaskRecord,
+  options: {
+    agentDir: string;
+    additionalExtensionPaths?: string[];
+    chat?: CronChatCapability;
+    runId?: string;
+  },
+) {
+  if ((task.session as any)?.mode !== "session_instruction") {
+    throw new Error("cron_invalid_session_instruction_task");
+  }
+  if (task.target.kind !== "agent_prompt") {
+    throw new Error("cron_session_instruction_requires_agent_prompt");
+  }
+  if (typeof options.chat?.runTurn !== "function") {
+    throw new Error("cron_chat_unavailable");
+  }
+  const instruction = String(task.target.prompt || "").trim();
+  if (!instruction) throw new Error("cron_prompt_required");
+  const { chatKey, sessionFile } = resolveCronSessionInstructionChatKey(
+    options.agentDir,
+    (task.session as any).sessionFile || "",
+  );
+  const result = await options.chat.runTurn({
+    chatKey,
+    deliveryEnabled: true,
+    affectChatBinding: true,
+    disposeAfterTurn: false,
+    text: instruction,
+    sessionFile,
+    ...(task.model ? { model: task.model } : {}),
+    ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
+    promptMeta: buildCronSessionInstructionPromptContext(task, chatKey),
+  });
+  const completion = resolveTurnCompletion(result);
+  const finalText = summarizeText(completion.finalText, 4000);
+  if (!finalText) throw new Error("cron_final_assistant_text_missing");
+  return {
+    text: finalText,
+    sessionId: String(result?.sessionId || "").trim() || undefined,
+    sessionFile: String(result?.sessionFile || "").trim() || undefined,
+  };
+}
+
 export async function executeCronTask(
   task: CronTaskRecord,
   options: {
@@ -317,6 +413,17 @@ export async function executeCronTask(
           text,
         }).catch(() => {});
       }
+    } else if ((task.session as any)?.mode === "session_instruction") {
+      const result = await executeCronSessionInstructionTask(task, {
+        ...options,
+        runId,
+      });
+      task.lastResultText = result.text;
+      maintenanceHistoryRecord = {
+        status: "completed",
+        outputPreview: result.text,
+        sessionFile: result.sessionFile,
+      };
     } else {
       const result = await executeCronAgentTask(task, { ...options, runId });
       task.lastResultText = result.text;

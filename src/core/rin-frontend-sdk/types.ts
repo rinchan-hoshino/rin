@@ -193,6 +193,7 @@ export type RinPromptContext = {
   replyToMessageId?: string;
   taskId?: string;
   taskName?: string;
+  scheduledTaskInitiator?: string;
   attachedFiles?: Array<{ name?: string; path?: string }>;
 };
 
