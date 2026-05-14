@@ -6,6 +6,7 @@ import {
 } from "../rin-lib/runtime.js";
 import { normalizeBoundSessionList } from "./listing.js";
 import {
+  requireExistingSessionFile,
   requireSessionFile,
   readSessionFile,
   type SessionFileInput,
@@ -26,7 +27,7 @@ export async function openBoundSession(options: {
   const sessionManager =
     options.sessionManager ||
     (sessionFile
-      ? SessionManager.open(sessionFile, sessionDir)
+      ? SessionManager.open(requireExistingSessionFile(sessionFile), sessionDir)
       : SessionManager.create(options.cwd, sessionDir));
   return await createConfiguredAgentSession({
     cwd: options.cwd,

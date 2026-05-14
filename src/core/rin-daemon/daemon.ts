@@ -42,6 +42,7 @@ import {
 } from "../session/ref.js";
 import { RinDaemonExtensionManager } from "./extensions.js";
 import { listContinuableInterruptedTurnSessionFiles } from "../session/turn-state.js";
+import { runDueSessionTtlMaintenance } from "../session/ttl.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 
@@ -141,6 +142,14 @@ export async function startDaemon(
     chat: options.chat,
   });
   cronScheduler.start();
+
+  setTimeout(() => {
+    void runDueSessionTtlMaintenance(runtime.agentDir).catch((error: any) => {
+      console.warn(
+        `session TTL maintenance failed: ${safeString(error?.message || error)}`,
+      );
+    });
+  }, 0).unref?.();
 
   const daemonExtensionManager =
     options.daemonExtensionManager ||
