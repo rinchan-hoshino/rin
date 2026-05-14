@@ -616,6 +616,7 @@ export class ChatController {
       const result = await driver.runTurn({
         text: formatPromptForChatContext(prompt, promptMeta),
         managedSessionLeaf: MANAGED_CHAT_SESSION_LEAF,
+        resetModelOptionsFromSettings: true,
         promptContext: promptMeta,
         source: "chat-bridge",
       });
@@ -1021,8 +1022,7 @@ export class ChatController {
         sessionFile: wantedSessionFile,
         restoreSessionFile,
         managedSessionLeaf,
-        model: input.model,
-        thinkingLevel: input.thinkingLevel,
+        resetModelOptionsFromSettings: true,
         promptContext: input.promptMeta,
         source: "chat-bridge",
       });
@@ -1085,8 +1085,7 @@ export class ChatController {
           sessionFile: wantedSessionFile,
           restoreSessionFile,
           managedSessionLeaf,
-          model: input.model,
-          thinkingLevel: input.thinkingLevel,
+          resetModelOptionsFromSettings: true,
           promptContext: input.promptMeta,
           source: "chat-bridge",
         });

@@ -148,6 +148,42 @@ async function setSessionModel(
   return model;
 }
 
+async function resetSessionModelOptionsFromSettings(session: any) {
+  if (typeof session?.settingsManager?.reload === "function") {
+    await session.settingsManager.reload();
+  }
+
+  const provider = safeString(
+    session?.settingsManager?.getDefaultProvider?.() ||
+      session?.settingsManager?.settings?.defaultProvider,
+  ).trim();
+  const modelId = safeString(
+    session?.settingsManager?.getDefaultModel?.() ||
+      session?.settingsManager?.settings?.defaultModel,
+  ).trim();
+  const thinkingLevel = safeString(
+    session?.settingsManager?.getDefaultThinkingLevel?.() ||
+      session?.settingsManager?.settings?.defaultThinkingLevel,
+  ).trim();
+
+  let model: any;
+  if (provider && modelId) {
+    const models = await session.modelRegistry.getAvailable();
+    model = models.find(
+      (item: any) => item?.provider === provider && item?.id === modelId,
+    );
+    if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
+    await setSessionModel(session, model, { persistSettings: false });
+  }
+  if (thinkingLevel) {
+    setSessionThinkingLevel(session, thinkingLevel, { persistSettings: false });
+  }
+  return {
+    model: model || session.model,
+    thinkingLevel: session.thinkingLevel,
+  };
+}
+
 async function resumeInterruptedTurn(
   session: any,
   options: { persistInterruptionMessage?: boolean } = {},
@@ -942,6 +978,10 @@ export async function runCustomRpcMode(
             persistSettings:
               command.persistSettings === false ? false : undefined,
           }),
+        );
+      case "reset_model_options_from_settings":
+        return run(id, type, () =>
+          resetSessionModelOptionsFromSettings(session),
         );
       case "cycle_thinking_level":
         return run(

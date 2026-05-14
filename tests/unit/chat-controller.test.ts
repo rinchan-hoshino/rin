@@ -277,6 +277,78 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller resets chat prompt sessions through the session settings reload path", async () => {
+  const controller = await createController();
+  const calls = [];
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  const restoredSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "stale.jsonl",
+  );
+  await fs.mkdir(path.dirname(restoredSessionFile), { recursive: true });
+  await fs.writeFile(restoredSessionFile, "");
+  controller.state.sessionFile = "managed/chat/stale.jsonl";
+
+  let currentSessionFile = restoredSessionFile;
+  let currentModel = "openai-codex/old";
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    thinkingLevel: "low",
+    resetModelOptionsFromSettings: async () => {
+      currentModel = "openai-codex/gpt-5.5";
+      controller.session.thinkingLevel = "high";
+      calls.push("resetModelOptionsFromSettings");
+    },
+    sessionManager: {
+      getSessionFile: () => currentSessionFile,
+      getSessionId: () => "session-settings",
+      getSessionName: () => controller.chatKey,
+    },
+    switchSession: async (sessionFile) => {
+      currentSessionFile = sessionFile;
+      calls.push(
+        `switchSession:${path.relative(controller.agentDir, sessionFile)}`,
+      );
+    },
+    ensureSessionReady: async () => {
+      calls.push("ensureSessionReady");
+      return {
+        sessionFile: currentSessionFile,
+        sessionId: "session-settings",
+      };
+    },
+    prompt: async (_text, options = {}) => {
+      calls.push(`prompt:${currentModel}:${controller.session.thinkingLevel}`);
+      emitRpcTurnComplete(controller, options, "settings prompt final");
+    },
+  };
+
+  const result = await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    model: "openai-codex/old",
+    thinkingLevel: "low",
+  });
+
+  assert.deepEqual(calls, [
+    "switchSession:sessions/managed/chat/stale.jsonl",
+    "ensureSessionReady",
+    "resetModelOptionsFromSettings",
+    "prompt:openai-codex/gpt-5.5:high",
+  ]);
+  assert.equal(result.finalText, "settings prompt final");
+  assert.deepEqual(deliveries, ["settings prompt final"]);
+});
+
 test("chat controller does not bind a transient default session before managed prompt creation", async () => {
   const controller = await createController();
   delete controller.connect;

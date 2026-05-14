@@ -107,6 +107,9 @@ function createSessionFrontendClient(controller) {
       if (controller.session) controller.session.thinkingLevel = level;
       return { level };
     },
+    async resetModelOptionsFromSettings() {
+      return await controller.session?.resetModelOptionsFromSettings?.();
+    },
     async respondExtensionUi() {},
     consumeQueuedOfflineOperation(requestTag) {
       const queued = controller.session?.queuedOfflineOps;

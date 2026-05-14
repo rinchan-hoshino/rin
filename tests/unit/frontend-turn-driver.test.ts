@@ -92,6 +92,9 @@ function createFrontendClient() {
     async setThinkingLevel(level: string, options: any = {}) {
       calls.push({ type: "setThinkingLevel", level, options });
     },
+    async resetModelOptionsFromSettings() {
+      calls.push({ type: "resetModelOptionsFromSettings" });
+    },
     async request(command: any) {
       calls.push({ type: "request", command });
       return {};
@@ -219,6 +222,26 @@ test("frontend SDK turn driver applies turn-scoped model without persisting defa
     modelId: "gpt-5.5",
     options: { persistSettings: false },
   });
+});
+
+test("frontend SDK turn driver can reset model options from settings before prompting", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+
+  const result = await driver.runTurn({
+    text: "hello",
+    resetModelOptionsFromSettings: true,
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  assert.deepEqual(
+    client.calls
+      .filter((call: any) =>
+        ["resetModelOptionsFromSettings", "prompt"].includes(call.type),
+      )
+      .map((call: any) => call.type),
+    ["resetModelOptionsFromSettings", "prompt"],
+  );
 });
 
 test("frontend SDK turn driver applies turn-scoped thinking without persisting defaults", async () => {

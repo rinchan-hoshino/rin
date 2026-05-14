@@ -235,5 +235,6 @@ export interface RinFrontendClient {
     level: string,
     options?: { persistSettings?: boolean },
   ): Promise<unknown>;
+  resetModelOptionsFromSettings(): Promise<unknown>;
   respondExtensionUi(response: RinExtensionUiResponse): Promise<void>;
 }

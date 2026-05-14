@@ -456,6 +456,12 @@ export class RinFrontendTurnDriver {
     };
   }
 
+  private async resetModelOptionsFromSettings() {
+    if (!this.client) throw new Error("frontend_session_not_connected");
+    await this.client.resetModelOptionsFromSettings();
+    await this.refreshFrontendState();
+  }
+
   private async applyTurnModelOptions(options: {
     model?: string;
     thinkingLevel?: string;
@@ -492,6 +498,7 @@ export class RinFrontendTurnDriver {
     managedSessionLeaf?: string;
     model?: string;
     thinkingLevel?: string;
+    resetModelOptionsFromSettings?: boolean;
     promptContext?: RinPromptContext;
     source?: string;
   }): Promise<RinFrontendTurnResult> {
@@ -514,6 +521,9 @@ export class RinFrontendTurnDriver {
       sessionFile || restoreSessionFile,
       managedSessionLeaf,
     );
+    if (input.resetModelOptionsFromSettings) {
+      await this.resetModelOptionsFromSettings();
+    }
     await this.applyTurnModelOptions({
       model: input.model,
       thinkingLevel: input.thinkingLevel,
