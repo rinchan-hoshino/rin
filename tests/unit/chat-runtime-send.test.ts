@@ -458,6 +458,54 @@ test("lark adapter sends text and structured at as native markdown rich text", a
   });
 });
 
+test("lark adapter sends quote nodes through the native reply endpoint", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(["create", payload]);
+            return { data: { message_id: "created" } };
+          },
+          reply: async (payload: any) => {
+            calls.push(["reply", payload]);
+            return { data: { message_id: "reply-1" } };
+          },
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("oc_1", [
+      h.quote("om-parent"),
+      h.text("follow up"),
+    ]);
+
+    assert.deepEqual(result, ["reply-1"]);
+    assert.deepEqual(calls, [
+      [
+        "reply",
+        {
+          path: { message_id: "om-parent" },
+          data: {
+            msg_type: "post",
+            content: JSON.stringify({
+              zh_cn: { content: [[{ tag: "md", text: "follow up" }]] },
+            }),
+          },
+        },
+      ],
+    ]);
+  });
+});
+
 test("discord working indicator replaces the previous reaction frame", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {

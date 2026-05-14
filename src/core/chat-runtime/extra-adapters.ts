@@ -1640,7 +1640,7 @@ export class LarkAdapter {
   }
 
   private async sendMessage(chatId: string, content: any) {
-    const { work } = prepareOutboundNodes(content);
+    const { work, replyToMessageId } = prepareOutboundNodes(content);
     const text = normalizeLarkMarkdownListBlocks(
       renderMarkdownFromNodes(work, {
         renderAt(attrs) {
@@ -1653,20 +1653,28 @@ export class LarkAdapter {
       }),
     );
     if (!text) throw new Error("lark_send_message_empty");
-    const result = await this.client.im.message.create({
-      params: {
-        receive_id_type: "chat_id",
-      },
-      data: {
-        receive_id: chatId,
-        msg_type: "post",
-        content: JSON.stringify({
-          zh_cn: {
-            content: [[{ tag: "md", text }]],
+    const data = {
+      msg_type: "post",
+      content: JSON.stringify({
+        zh_cn: {
+          content: [[{ tag: "md", text }]],
+        },
+      }),
+    };
+    const result = replyToMessageId
+      ? await this.client.im.message.reply({
+          path: { message_id: replyToMessageId },
+          data,
+        })
+      : await this.client.im.message.create({
+          params: {
+            receive_id_type: "chat_id",
           },
-        }),
-      },
-    });
+          data: {
+            receive_id: chatId,
+            ...data,
+          },
+        });
     return [
       safeString(result?.data?.message_id || result?.message_id || "").trim(),
     ].filter(Boolean);
