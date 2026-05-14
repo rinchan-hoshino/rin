@@ -367,6 +367,48 @@ test("lark runtime reads merged forward messages into inbound text", async () =>
   assert.doesNotMatch(stored.routing?.text, /Merged and Forwarded Message/);
 });
 
+test("lark runtime maps reply parent ids to canonical quote metadata", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const app = runtime.createChatRuntimeApp(agentDir);
+  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+    dataDir: path.join(agentDir, "data"),
+    settings: {},
+    adapterEntries: [
+      {
+        key: "lark",
+        name: "Feishu",
+        config: { appId: "cli-test", appSecret: "secret" },
+      },
+    ],
+  });
+  const adapter = [...app.adapters][0];
+  adapter.bot.selfId = "cli-test";
+  const seen = [];
+  app.on("message", (session) => seen.push(session));
+
+  await adapter.handleMessage({
+    sender: { sender_type: "user", sender_id: { open_id: "ou_sender" } },
+    message: {
+      message_id: "om-followup",
+      parent_id: "om-parent",
+      root_id: "om-parent",
+      message_type: "text",
+      chat_id: "oc_chat",
+      chat_type: "group",
+      create_time: "1713436800000",
+      content: JSON.stringify({ text: "continue" }),
+    },
+  });
+
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].quote, { messageId: "om-parent" });
+  const files = inbox.listPendingChatInboxFiles(agentDir);
+  const stored = inbox.readChatInboxItem(files[0]);
+  assert.equal(stored.routing?.replyToMessageId, "om-parent");
+});
+
 test("lark adapter reports Feishu group member count including the bot", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
