@@ -489,6 +489,38 @@ test("rpc interactive session keeps the daemon connection while a worker exits m
   ]);
 });
 
+test("rpc interactive session preserves native prompt payloads through the shared frontend SDK helper", async () => {
+  const calls = [];
+  const client = {
+    isConnected: () => true,
+    send: async (payload) => {
+      calls.push(payload);
+      return { success: true, data: {} };
+    },
+  };
+  const session = new RpcInteractiveSession(client);
+  session.ensureRemoteSession = async () => {};
+  session.rpcConnected = true;
+
+  await session.prompt("  hello  ", {
+    expandPromptTemplates: false,
+    images: [{ path: "/tmp/a.png" }],
+    source: "tui-test",
+    streamingBehavior: "followUp",
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    type: "prompt",
+    message: "  hello  ",
+    images: [{ path: "/tmp/a.png" }],
+    source: "tui-test",
+    streamingBehavior: "followUp",
+    requestTag: calls[0]?.requestTag,
+  });
+  assert.match(String(calls[0]?.requestTag || ""), /^rin-tui-/);
+});
+
 test("rpc interactive session attaches a request tag to prompt turns by default", async () => {
   const calls = [];
   const client = {

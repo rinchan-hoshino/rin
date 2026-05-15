@@ -16,6 +16,7 @@ import type {
   RinFrontendEvent,
   RinNewSessionResult,
   RinPromptContext,
+  RinPromptOptions,
   RinSessionState,
 } from "./types.js";
 
@@ -47,6 +48,29 @@ export type RinFrontendTurnClient = RinFrontendClient & {
   terminateSession?: () => Promise<unknown>;
   consumeQueuedOfflineOperation?: (requestTag?: string) => boolean;
 };
+
+export type RinFrontendPromptTurnInput = {
+  text: string;
+  images?: any[];
+  source?: string;
+  requestTag?: string;
+  streamingBehavior?: "steer" | "followUp";
+  promptContext?: RinPromptContext;
+};
+
+export async function submitNativeFrontendPromptTurn(
+  client: Pick<RinFrontendClient, "prompt">,
+  input: RinFrontendPromptTurnInput,
+): Promise<void> {
+  const promptOptions: RinPromptOptions = {
+    images: input.images,
+    streamingBehavior: input.streamingBehavior,
+    source: input.source,
+    requestTag: input.requestTag,
+  };
+  if (input.promptContext) promptOptions.promptContext = input.promptContext;
+  await client.prompt(input.text, promptOptions);
+}
 
 function isAgentAlreadyProcessingError(error: unknown) {
   return safeString((error as any)?.message || error).includes(
@@ -558,7 +582,7 @@ export class RinFrontendTurnDriver {
   private resolveExistingSubmittedTurnFromMessages(
     messages: unknown[],
     input: { text: string; sentAt?: number },
-  ): RinFrontendTurnResult | null {
+  ): RinFrontendTurnResult | { submitted: true } | null {
     const sentAt = Number(input.sentAt || 0);
     if (!Number.isFinite(sentAt) || sentAt <= 0) return null;
     const promptText = safeString(input.text).trim();
@@ -577,7 +601,7 @@ export class RinFrontendTurnDriver {
       messages: messages.slice(submittedIndex + 1),
     });
     const finalText = safeString(completion.finalText).trim();
-    if (!finalText) throw new Error("rpc_turn_final_output_missing");
+    if (!finalText) return { submitted: true };
     this.latestAssistantText = finalText;
     this.setFrontendPhase("idle");
     return {
@@ -586,6 +610,51 @@ export class RinFrontendTurnDriver {
       sessionId: this.currentSessionId() || undefined,
       sessionFile: this.currentSessionFile() || undefined,
     };
+  }
+
+  private async waitForExistingSubmittedTurn(
+    input: { text: string; sentAt?: number },
+    ready?: RinSessionState,
+  ) {
+    if (!this.client) throw new Error("frontend_session_not_connected");
+    this.resetAssistantSegmentTracking();
+    this.latestAssistantText = "";
+    const liveTurn = this.liveTurn || this.startLiveTurn("");
+    liveTurn.requestTag = "";
+    this.liveTurnRecoveryContext = {
+      sessionFile:
+        safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
+        undefined,
+      baselineMessages: [],
+    };
+    this.setFrontendPhase("working");
+    const deadline = Date.now() + 120_000;
+    while (this.liveTurn === liveTurn && Date.now() < deadline) {
+      const messages = await this.client.getMessages().catch(() => []);
+      if (Array.isArray(messages)) {
+        const recovered = this.resolveExistingSubmittedTurnFromMessages(
+          messages,
+          input,
+        );
+        if (recovered && !("submitted" in recovered)) {
+          liveTurn.resolve(recovered);
+          break;
+        }
+      }
+      await this.refreshFrontendState().catch(() => ({}));
+      const raced = await Promise.race([
+        liveTurn.promise.then((completion) => ({ completion })),
+        sleep(1000).then(() => ({})),
+      ]);
+      if ("completion" in raced)
+        return this.normalizeTurnCompletion(raced.completion);
+    }
+    if (this.liveTurn === liveTurn) {
+      const error = new Error("rpc_turn_final_output_missing");
+      this.failLiveTurn(error);
+      throw error;
+    }
+    return this.normalizeTurnCompletion(await liveTurn.promise);
   }
 
   private async followActiveTurn(ready?: RinSessionState) {
@@ -618,6 +687,79 @@ export class RinFrontendTurnDriver {
         return this.normalizeTurnCompletion(raced.completion);
     }
     return this.normalizeTurnCompletion(await liveTurn.promise);
+  }
+
+  async submitTurn(input: {
+    text: string;
+    images?: any[];
+    sessionFile?: string;
+    restoreSessionFile?: string;
+    managedSessionLeaf?: string;
+    model?: string;
+    thinkingLevel?: string;
+    resetModelOptionsFromSettings?: boolean;
+    promptContext?: RinPromptContext;
+    source?: string;
+    requestTag?: string;
+    streamingBehavior?: "steer" | "followUp";
+    assumeSessionReady?: boolean;
+  }): Promise<RinFrontendTurnResult> {
+    const promptSource = safeString(input.source).trim() || this.promptSource;
+    const sessionFile = safeString(input.sessionFile || "").trim();
+    const restoreSessionFile = safeString(
+      input.restoreSessionFile || "",
+    ).trim();
+    const managedSessionLeaf = safeString(
+      input.managedSessionLeaf || "",
+    ).trim();
+    let ready: RinSessionState | Record<string, unknown> = {};
+    if (input.assumeSessionReady) {
+      if (!this.client) this.client = this.clientFactory();
+      if (!this.client?.isConnected())
+        throw new Error("frontend_session_not_connected");
+      ready = {
+        sessionId: this.currentSessionId() || undefined,
+        sessionFile: this.currentSessionFile() || undefined,
+      };
+    } else {
+      await this.connect({ restoreSessionFile });
+      if (!this.client) throw new Error("frontend_session_not_connected");
+      if (sessionFile) {
+        if (!sessionFileExists(sessionFile))
+          throw missingSessionFileError(sessionFile);
+        await this.switchSessionIfNeeded(sessionFile);
+      }
+      ready = await this.ensureSessionReady(
+        sessionFile || restoreSessionFile,
+        managedSessionLeaf,
+      );
+    }
+    if (input.resetModelOptionsFromSettings) {
+      await this.resetModelOptionsFromSettings();
+    }
+    await this.applyTurnModelOptions({
+      model: input.model,
+      thinkingLevel: input.thinkingLevel,
+    });
+    const requestTag =
+      safeString(input.requestTag).trim() || this.createTurnRequestTag();
+    await submitNativeFrontendPromptTurn(this.client, {
+      text: input.text,
+      images: input.images,
+      source: safeString(input.source).trim() ? promptSource : input.source,
+      requestTag,
+      streamingBehavior: input.streamingBehavior,
+      promptContext: input.promptContext,
+    });
+    this.throwIfQueuedOffline(requestTag);
+    return {
+      sessionId:
+        safeString(ready?.sessionId || this.currentSessionId()).trim() ||
+        undefined,
+      sessionFile:
+        safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
+        undefined,
+    };
   }
 
   async runTurn(input: {
@@ -668,7 +810,8 @@ export class RinFrontendTurnDriver {
       }
       this.clearAssistantInterimState();
       const requestTag = this.createTurnRequestTag();
-      await this.client.prompt(text, {
+      await submitNativeFrontendPromptTurn(this.client, {
+        text,
         images,
         source: promptSource,
         streamingBehavior: "steer",
@@ -690,11 +833,19 @@ export class RinFrontendTurnDriver {
     if (input.streamingBehavior !== "steer") {
       const messages = await this.client.getMessages().catch(() => []);
       if (Array.isArray(messages)) {
-        const recovered = this.resolveExistingSubmittedTurnFromMessages(
+        const existing = this.resolveExistingSubmittedTurnFromMessages(
           messages,
           { text, sentAt: input.promptContext?.sentAt },
         );
-        if (recovered) return recovered;
+        if (existing) {
+          if ("submitted" in existing) {
+            return await this.waitForExistingSubmittedTurn(
+              { text, sentAt: input.promptContext?.sentAt },
+              ready,
+            );
+          }
+          return existing;
+        }
       }
     }
 
@@ -710,7 +861,8 @@ export class RinFrontendTurnDriver {
       baselineMessages: Array.isArray(baselineMessages) ? baselineMessages : [],
     };
     const promptSubmission = (async () => {
-      await this.client!.prompt(text, {
+      await submitNativeFrontendPromptTurn(this.client!, {
+        text,
         images,
         source: promptSource,
         requestTag,
@@ -745,7 +897,8 @@ export class RinFrontendTurnDriver {
         this.liveTurnRecoveryContext = null;
         this.clearAssistantInterimState();
         const steerRequestTag = this.createTurnRequestTag();
-        await this.client.prompt(text, {
+        await submitNativeFrontendPromptTurn(this.client, {
+          text,
           images,
           source: promptSource,
           streamingBehavior: "steer",
