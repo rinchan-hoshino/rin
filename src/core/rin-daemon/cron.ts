@@ -547,6 +547,31 @@ export class CronScheduler {
     return this.publicTask(task);
   }
 
+  rescheduleOneTimeTask(taskId: string, runAt: string) {
+    const task = this.tasks.get(taskId);
+    assertMutableTask(task);
+    if (!task) throw new Error(`cron_task_not_found:${taskId}`);
+    if (task.trigger.expression || task.trigger.intervalMs) {
+      throw new Error(`cron_task_not_once:${taskId}`);
+    }
+    const nextRunAt =
+      normalizeIso(runAt, "runAt") ||
+      failCronTaskValidation("cron_runAt_required");
+    const updatedTask: CronTaskRecord = {
+      ...task,
+      updatedAt: nowIso(),
+      enabled: true,
+      completedAt: undefined,
+      completionReason: undefined,
+      pausedAt: undefined,
+      trigger: { runAt: nextRunAt },
+      nextRunAt,
+    };
+    this.tasks.set(task.id, updatedTask);
+    this.save();
+    return this.publicTask(updatedTask);
+  }
+
   runTaskNow(taskId: string) {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);

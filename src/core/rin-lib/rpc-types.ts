@@ -63,6 +63,7 @@ export type RinRpcCommandType =
   | "cron_run_task"
   | "cron_pause_task"
   | "cron_resume_task"
+  | "cron_reschedule_once_task"
   | "new_session"
   | "switch_session"
   | "fork"

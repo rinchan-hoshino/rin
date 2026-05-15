@@ -1063,6 +1063,81 @@ test("cron scheduler protects built-in tasks from public mutation", async () => 
   }
 });
 
+test("cron scheduler can reschedule and activate a one-time task while it is running", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    scheduler.start();
+    const taskId = "cron_reschedule_once";
+    const original = scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-01-01T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "follow up" },
+    });
+    assert.equal(original.runCount, 0);
+
+    const runningTaskObject = scheduler.tasks.get(taskId);
+    assert.ok(runningTaskObject);
+    scheduler.activeExecutions.set(taskId, { startedAt: Date.now() });
+    runningTaskObject.runCount = 1;
+
+    const rescheduled = scheduler.rescheduleOneTimeTask(
+      taskId,
+      "2099-01-02T00:00:00.000Z",
+    );
+    assert.equal(rescheduled.enabled, true);
+    assert.equal(rescheduled.completedAt, undefined);
+    assert.equal(rescheduled.trigger.runAt, "2099-01-02T00:00:00.000Z");
+    assert.equal(rescheduled.nextRunAt, "2099-01-02T00:00:00.000Z");
+    assert.equal(rescheduled.runCount, 1);
+    assert.equal(rescheduled.running, true);
+
+    runningTaskObject.completedAt = new Date().toISOString();
+    runningTaskObject.completionReason = "once_completed";
+    runningTaskObject.enabled = false;
+    runningTaskObject.nextRunAt = undefined;
+    scheduler.activeExecutions.delete(taskId);
+    scheduler.save();
+
+    const afterFinish = scheduler.getTask(taskId);
+    assert.ok(afterFinish);
+    assert.equal(afterFinish.enabled, true);
+    assert.equal(afterFinish.completedAt, undefined);
+    assert.equal(afterFinish.completionReason, undefined);
+    assert.equal(afterFinish.nextRunAt, "2099-01-02T00:00:00.000Z");
+    assert.equal(afterFinish.runCount, 1);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler reschedule-once rejects recurring tasks", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    scheduler.start();
+    scheduler.upsertTask({
+      id: "cron_recurring",
+      trigger: { intervalMs: 60_000 },
+      session: { mode: "none" },
+      target: { kind: "shell_command", command: "echo ok" },
+    });
+    assert.throws(
+      () =>
+        scheduler.rescheduleOneTimeTask(
+          "cron_recurring",
+          "2099-01-02T00:00:00.000Z",
+        ),
+      /cron_task_not_once:cron_recurring/,
+    );
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron scheduler can manually run an existing built-in task", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });

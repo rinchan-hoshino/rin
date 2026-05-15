@@ -299,6 +299,14 @@ export async function startDaemon(
         task: cronScheduler.resumeTask(taskIdFromCommand(command)),
       },
     }),
+    cron_reschedule_once_task: (command) => ({
+      data: {
+        task: cronScheduler.rescheduleOneTimeTask(
+          taskIdFromCommand(command),
+          String(command.runAt || ""),
+        ),
+      },
+    }),
     cron_run_task: (command) => ({
       data: {
         task: cronScheduler.runTaskNow(taskIdFromCommand(command)),
