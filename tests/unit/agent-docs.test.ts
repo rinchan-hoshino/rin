@@ -38,6 +38,7 @@ test("agent docs expose scheduled task operation workflow", () => {
     "rin.tasks.complete",
     "rin.tasks.pause",
     "rin.tasks.resume",
+    "rin.tasks.rescheduleOnce",
     "rin.tasks.run",
   ]) {
     assert.match(scheduledTasks, new RegExp(helper.replace(/\./g, "\\.")));
@@ -53,6 +54,7 @@ test("agent docs expose scheduled task operation workflow", () => {
     "cron_run_task",
     "cron_pause_task",
     "cron_resume_task",
+    "cron_reschedule_once_task",
   ]) {
     assert.doesNotMatch(capabilities, new RegExp(command));
   }

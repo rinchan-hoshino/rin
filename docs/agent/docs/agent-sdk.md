@@ -38,13 +38,14 @@ const { task } = await rin.tasks.get("cron_example");
 await rin.tasks.upsert({ id: "cron_example", name: "Example", enabled: true });
 await rin.tasks.pause("cron_example");
 await rin.tasks.resume("cron_example");
+await rin.tasks.rescheduleOnce("cron_example", "2026-05-08T15:00:00+08:00");
 await rin.tasks.run("cron_example");
 await rin.tasks.control("pause", "cron_example");
 await rin.tasks.complete("cron_example", "finished");
 await rin.tasks.delete("cron_example");
 ```
 
-Use these helpers instead of constructing `cron_*` daemon RPC calls directly.
+Use these helpers instead of constructing `cron_*` daemon RPC calls directly. `rescheduleOnce` is only for one-time tasks; it sets the next `runAt`, clears completed/paused state, and enables the task.
 
 ## Chat operations
 

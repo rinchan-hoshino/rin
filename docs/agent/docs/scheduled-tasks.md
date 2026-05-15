@@ -4,9 +4,9 @@ Rin scheduled tasks are daemon-owned background jobs. Use them for reminders, de
 
 ## Quick path
 
-1. Identify the operation: create, inspect, update, run now, complete, pause, resume, or delete.
+1. Identify the operation: create, inspect, update, reschedule a one-time task, run now, complete, pause, resume, or delete.
 2. Use Rin scheduled tasks instead of systemd timers for user reminders and agent automation.
-3. Use the local agent SDK for scheduled-task create, inspect, update, complete, delete, pause, resume, and run-now operations.
+3. Use the local agent SDK for scheduled-task create, inspect, update, one-time reschedule, complete, delete, pause, resume, and run-now operations.
 4. Use `rin status` or `rin status --json` for a redacted activity overview.
 5. Do not construct raw daemon RPC payloads for normal task work.
 6. After changing or starting a task, re-read daemon-visible state and verify the fields in the checklist below.
@@ -181,6 +181,14 @@ await rin.tasks.resume("cron_daily_brief");
 ```
 
 `rin.tasks.run()` manually starts the existing task record through the scheduler path, including built-in tasks; it does not clone the task or change its definition.
+
+Reschedule and activate a one-time task:
+
+```js
+await rin.tasks.rescheduleOnce("cron_follow_up", "2026-05-08T15:00:00+08:00");
+```
+
+Use `rin.tasks.rescheduleOnce()` when a one-time task needs to set its own next `runAt` while it is executing, or when a completed/paused one-time task should run again. It updates `trigger.runAt`, sets `nextRunAt`, clears completed/paused state, and enables the task. It is only for one-time tasks; use `rin.tasks.upsert()` for recurring trigger changes.
 
 Complete or delete a task:
 

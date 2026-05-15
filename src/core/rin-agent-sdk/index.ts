@@ -137,6 +137,19 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
         await controlTask("pause", taskId, override),
       resume: async (taskId: string, override?: RinAgentSdkOptions) =>
         await controlTask("resume", taskId, override),
+      rescheduleOnce: async (
+        taskId: string,
+        runAt: string,
+        override?: RinAgentSdkOptions,
+      ) =>
+        await request<{ task?: unknown }>(
+          {
+            type: "cron_reschedule_once_task",
+            taskId: trimTaskId(taskId),
+            runAt,
+          },
+          override,
+        ),
       run: async (taskId: string, override?: RinAgentSdkOptions) =>
         await request<{ task?: unknown }>(
           { type: "cron_run_task", taskId: trimTaskId(taskId) },
