@@ -47,6 +47,7 @@ export type ChatState = {
 };
 
 export const CHAT_WORKING_NOTICE_TEXT = "Working...";
+export const CHAT_INTERIM_REPLY_PREFIX = "··· ";
 
 export type ChatPromptRestoreInput = {
   text: string;
@@ -253,7 +254,12 @@ export function isReplyToLatestAssistantMessage(
 
 function isSubstantiveAssistantChatText(text: unknown) {
   const value = safeString(text).trim();
-  return Boolean(value && value !== CHAT_WORKING_NOTICE_TEXT);
+  return Boolean(
+    value &&
+    value !== CHAT_WORKING_NOTICE_TEXT &&
+    value !== CHAT_INTERIM_REPLY_PREFIX.trim() &&
+    !value.startsWith(CHAT_INTERIM_REPLY_PREFIX),
+  );
 }
 
 export function hasDeliveredAssistantReplyForMessage(
