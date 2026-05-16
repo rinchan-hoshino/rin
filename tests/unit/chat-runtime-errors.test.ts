@@ -22,10 +22,14 @@ test("chat runtime treats frontend turn disposal as transient", () => {
   );
 });
 
-test("chat runtime makes internal marker errors readable without hiding the raw marker", () => {
+test("chat runtime maps internal marker errors to user-facing messages", () => {
+  assert.equal(
+    formatChatRuntimeErrorForUser("new_session_session_file_unsupported"),
+    "Could not start a new chat session because the command was bound to a replied message's old session. Retry /new; chat commands should not use replied-message sessions.",
+  );
   assert.equal(
     formatChatRuntimeErrorForUser("frontend_model_not_found:openai/missing"),
-    "frontend model not found: openai/missing",
+    "Model not found: openai/missing. Choose an available model in /model or settings.",
   );
   assert.equal(
     formatChatRuntimeErrorForUser("prompt is too long"),

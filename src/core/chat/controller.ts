@@ -818,7 +818,7 @@ export class ChatController {
     commandLine: string,
     replyToMessageId = "",
     incomingMessageId = "",
-    sessionFile = "",
+    _sessionFile = "",
     promptMeta?: PromptContextMeta,
   ) {
     const commandName = commandNameFromCommandLine(commandLine);
@@ -873,16 +873,13 @@ export class ChatController {
       );
     }
     const skipSessionRecovery = commandName === "new";
-    const explicitSessionFile = this.resolveSessionFileForUse(sessionFile);
-    if (explicitSessionFile && !sessionFileExists(explicitSessionFile)) {
-      throw missingSessionFileError(explicitSessionFile);
-    }
+    // Slash commands are controls; reply-bound session files belong to prompt turns only.
+    const explicitSessionFile = "";
     const restoreSessionFile = skipSessionRecovery
       ? ""
       : this.getRecoverableSessionFile();
-    const managedSessionLeaf = sessionFile
-      ? undefined
-      : commandName === "new"
+    const managedSessionLeaf =
+      commandName === "new"
         ? MANAGED_CHAT_SESSION_LEAF
         : !restoreSessionFile
           ? this.managedSessionLeafForFreshChat()

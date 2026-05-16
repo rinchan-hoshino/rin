@@ -433,20 +433,7 @@ export async function startChatBridge(
       safeString(session?.selfId || session?.bot?.selfId || "").trim(),
     );
     const messageId = pickMessageId(session);
-    const replyToMessageId = pickReplyToMessageId(session);
     if (!chatKey) return { retry: false };
-    const replySession = lookupReplySession(
-      runtime.agentDir,
-      chatKey,
-      replyToMessageId,
-    );
-    const promptReplyToMessageId = isReplyToLatestAssistantMessage(
-      runtime.agentDir,
-      chatKey,
-      replyToMessageId,
-    )
-      ? ""
-      : replyToMessageId;
     const promptMeta = {
       source: "chat-bridge",
       sentAt: Number.isFinite(Number(session?.timestamp))
@@ -465,7 +452,6 @@ export async function startChatBridge(
         session?.runtimeMetadata && typeof session.runtimeMetadata === "object"
           ? session.runtimeMetadata
           : undefined,
-      replyToMessageId: promptReplyToMessageId || undefined,
     };
 
     if (
@@ -493,7 +479,6 @@ export async function startChatBridge(
           chatKey,
           text: lines.join("\n"),
           replyToMessageId: messageId || undefined,
-          sessionFile: replySession?.sessionFile,
         },
         h,
       ).catch(() => {});
@@ -504,13 +489,7 @@ export async function startChatBridge(
 
     const text = `/${command.name}${command.argsText ? ` ${command.argsText}` : ""}`;
     try {
-      await controller.runCommand(
-        text,
-        messageId,
-        messageId,
-        replySession?.sessionFile || "",
-        promptMeta,
-      );
+      await controller.runCommand(text, messageId, messageId, "", promptMeta);
       return { retry: false };
     } catch (error) {
       logger.warn(
