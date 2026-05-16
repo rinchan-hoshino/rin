@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { isJsonRecord } from "../json-utils.js";
 import {
   findManagedSystemdJournalSnapshot,
   findManagedSystemdStatusSnapshot,
@@ -14,10 +15,8 @@ function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
-function asRecord(value: unknown) {
-  return value && typeof value === "object"
-    ? (value as Record<string, unknown>)
-    : undefined;
+function asRecord(value: unknown): Record<string, any> | undefined {
+  return isJsonRecord(value) ? value : undefined;
 }
 
 export function renderWebSearchDoctorLines(webSearchStatus: unknown) {
