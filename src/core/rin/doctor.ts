@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { isJsonRecord } from "../json-utils.js";
+import { asArray, isJsonRecord } from "../json-utils.js";
 import {
   findManagedSystemdJournalSnapshot,
   findManagedSystemdStatusSnapshot,
@@ -10,10 +10,6 @@ import {
   type ParsedArgs,
   type TargetExecutionContext,
 } from "./shared.js";
-
-function asArray(value: unknown) {
-  return Array.isArray(value) ? value : [];
-}
 
 function asRecord(value: unknown): Record<string, any> | undefined {
   return isJsonRecord(value) ? value : undefined;

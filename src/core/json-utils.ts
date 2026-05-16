@@ -13,3 +13,7 @@ export function cloneJsonIfObject<T>(value: T): T | undefined {
 export function isJsonRecord(value: unknown): value is Record<string, any> {
   return isObjectValue(value) && !Array.isArray(value);
 }
+
+export function asArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { asArray } from "../json-utils.js";
 import {
   applyRuntimeProfileEnvironment,
   createRinCapabilityDefinitions,
@@ -41,10 +42,11 @@ type CatalogContext = {
 };
 
 function normalizeAdditionalExtensionPaths(value: string[] | undefined) {
-  if (!Array.isArray(value)) return [];
   return [
     ...new Set(
-      value.map((entry) => String(entry || "").trim()).filter(Boolean),
+      asArray(value)
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean),
     ),
   ];
 }

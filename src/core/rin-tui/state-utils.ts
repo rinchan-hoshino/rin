@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
+import { asArray } from "../json-utils.js";
 import { normalizeSessionRef } from "../session/ref.js";
 
 function normalizeRpcText(value: unknown) {
@@ -130,7 +131,7 @@ function normalizeRpcTree(
     };
     output.push(normalizedNode);
 
-    const children = Array.isArray(node?.children) ? node.children : [];
+    const children = asArray(node?.children);
     for (let index = children.length - 1; index >= 0; index -= 1) {
       stack.push({ node: children[index], output: normalizedNode.children });
     }
@@ -195,7 +196,7 @@ export function applyRpcMessages(
   target: { messages: any[]; state: any },
   data: any,
 ) {
-  target.messages = Array.isArray(data?.messages) ? data.messages : [];
+  target.messages = asArray(data?.messages);
   target.state.messages = target.messages;
 }
 
@@ -210,14 +211,12 @@ export function applyRpcSessionTree(
   entriesData: any,
   treeData: any,
 ) {
-  target.entries = normalizeRpcEntries(
-    Array.isArray(entriesData?.entries) ? entriesData.entries : [],
-  );
+  target.entries = normalizeRpcEntries(asArray(entriesData?.entries));
   target.entryById = new Map(
     target.entries.map((entry: any) => [entry.id, entry]),
   );
   target.labelsById = new Map();
-  const snapshotTree = Array.isArray(treeData?.tree) ? treeData.tree : [];
+  const snapshotTree = asArray(treeData?.tree);
   target.tree = snapshotTree.length
     ? normalizeRpcTree(snapshotTree, target.entryById, target.labelsById)
     : buildRpcTreeFromEntries(target.entries, target.labelsById);

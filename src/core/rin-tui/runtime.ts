@@ -5,6 +5,7 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 
+import { asArray } from "../json-utils.js";
 import {
   createRinCapabilityDefinitions,
   getRuntimeSessionDir,
@@ -109,8 +110,8 @@ function emptyRpcResourceSnapshot(): RpcResourceSnapshot {
 
 function normalizeResourceSection(value: any, itemKey: string) {
   return {
-    [itemKey]: Array.isArray(value?.[itemKey]) ? value[itemKey] : [],
-    diagnostics: Array.isArray(value?.diagnostics) ? value.diagnostics : [],
+    [itemKey]: asArray(value?.[itemKey]),
+    diagnostics: asArray(value?.diagnostics),
   };
 }
 
@@ -129,28 +130,17 @@ function normalizeRpcResourceSnapshot(value: any): RpcResourceSnapshot {
       diagnostics: any[];
     },
     extensions: {
-      extensions: Array.isArray(value?.extensions?.extensions)
-        ? value.extensions.extensions
-        : [],
-      errors: Array.isArray(value?.extensions?.errors)
-        ? value.extensions.errors
-        : [],
-      diagnostics: Array.isArray(value?.extensions?.diagnostics)
-        ? value.extensions.diagnostics
-        : [],
-      commandDiagnostics: Array.isArray(value?.extensions?.commandDiagnostics)
-        ? value.extensions.commandDiagnostics
-        : [],
-      shortcutDiagnostics: Array.isArray(value?.extensions?.shortcutDiagnostics)
-        ? value.extensions.shortcutDiagnostics
-        : [],
+      extensions: asArray(value?.extensions?.extensions),
+      errors: asArray(value?.extensions?.errors),
+      diagnostics: asArray(value?.extensions?.diagnostics),
+      commandDiagnostics: asArray(value?.extensions?.commandDiagnostics),
+      shortcutDiagnostics: asArray(value?.extensions?.shortcutDiagnostics),
     },
   };
 }
 
 function normalizeQueuedMessages(value: any) {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
+  return asArray(value).flatMap((item) => {
     const text = String(item ?? "");
     return text ? [text] : [];
   });
@@ -742,13 +732,13 @@ export class RpcInteractiveSession {
 
   async getActiveTools() {
     const data = await this.call("get_active_tools");
-    this.activeToolsCache = Array.isArray(data?.tools) ? data.tools : [];
+    this.activeToolsCache = asArray(data?.tools);
     return this.activeToolsCache;
   }
 
   async getAllTools() {
     const data = await this.call("get_all_tools");
-    this.allToolsCache = Array.isArray(data?.tools) ? data.tools : [];
+    this.allToolsCache = asArray(data?.tools);
     return this.allToolsCache;
   }
 
@@ -762,7 +752,7 @@ export class RpcInteractiveSession {
 
   async refreshTools() {
     const data = await this.call("refresh_tools");
-    this.allToolsCache = Array.isArray(data?.tools) ? data.tools : [];
+    this.allToolsCache = asArray(data?.tools);
     return this.allToolsCache;
   }
 
@@ -1014,7 +1004,7 @@ export class RpcInteractiveSession {
           commandName: name,
           argumentPrefix,
         });
-        return Array.isArray(data?.items) ? data.items : null;
+        return Array.isArray(data?.items) ? asArray(data.items) : null;
       },
     };
   }
@@ -1502,7 +1492,7 @@ export class RpcInteractiveSession {
 
   private async refreshDaemonCommandCatalog() {
     const data = await this.call("get_commands");
-    this.commandCatalog = Array.isArray(data?.commands) ? data.commands : [];
+    this.commandCatalog = asArray(data?.commands);
     return this.commandCatalog;
   }
 
@@ -1645,7 +1635,7 @@ export class RpcInteractiveSession {
       this.leafId,
       this.entryById as any,
     );
-    this.messages = Array.isArray(context?.messages) ? context.messages : [];
+    this.messages = asArray(context?.messages);
     this.state.messages = this.messages;
   }
 

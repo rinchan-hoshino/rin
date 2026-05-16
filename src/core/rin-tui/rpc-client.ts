@@ -1,5 +1,6 @@
 import net from "node:net";
 
+import { asArray } from "../json-utils.js";
 import type {
   RpcSocketConnector,
   RpcSocketLike,
@@ -193,7 +194,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
       }));
     }
     const data = this.getData(await this.send({ type: "get_commands" }));
-    const commands = Array.isArray(data?.commands) ? data.commands : [];
+    const commands = asArray(data?.commands);
     return commands.map((command: any) => ({
       id: String(command.name || command.id || ""),
       name: String(command.name || ""),
@@ -216,7 +217,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
       commandName,
       argumentPrefix,
     });
-    const items = Array.isArray(data?.items) ? data.items : [];
+    const items = asArray(data?.items);
     return items.map((item: any, index: number) => ({
       id: String(item?.id || item?.value || item?.label || index),
       label: String(item?.label || item?.value || item?.id || ""),
@@ -234,7 +235,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
 
   async getMessages() {
     const data = await this.request<any>({ type: "get_messages" });
-    return Array.isArray(data?.messages) ? data.messages : [];
+    return asArray(data?.messages);
   }
 
   async runCommand(commandLine: string) {
@@ -312,7 +313,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     const data = this.getData(
       await this.send({ type: "get_available_models" }),
     );
-    const models = Array.isArray(data?.models) ? data.models : [];
+    const models = asArray(data?.models);
     return models.map((model: any) => ({
       id: String(model.id || ""),
       label: String(model.label || model.id || ""),

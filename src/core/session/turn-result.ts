@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { asArray } from "../json-utils.js";
 import {
   extractExistingFilePaths,
   extractImageParts,
@@ -47,7 +48,7 @@ function buildTextOnlyTurnResult(text: unknown): TurnResult {
 function normalizeTurnMessages(
   messages: TurnResultMessage[] | null | undefined,
 ) {
-  return Array.isArray(messages) ? messages.filter(Boolean) : [];
+  return asArray<TurnResultMessage>(messages).filter(Boolean);
 }
 
 function normalizeTurnResult(
@@ -124,9 +125,7 @@ function findLastAssistantMessage(messages: any[]) {
 }
 
 export function buildTurnResultFromMessages(messages: any[]): TurnResult {
-  const assistant = findLastAssistantMessage(
-    Array.isArray(messages) ? messages : [],
-  );
+  const assistant = findLastAssistantMessage(asArray(messages));
   if (!assistant) return { messages: [] };
 
   const text = extractMessageText(assistant.content, { trim: true });
