@@ -555,6 +555,43 @@ test("frontend SDK turn driver does not emit text-only assistant messages as int
   assert.deepEqual(interimTexts, []);
 });
 
+test("frontend SDK turn driver waits for an already submitted restored prompt instead of resubmitting", async () => {
+  const client = createFrontendClient();
+  let getMessagesCount = 0;
+  client.getMessages = async () => {
+    getMessagesCount += 1;
+    const messages = [{ role: "user", timestamp: 1001, content: "hello" }];
+    if (getMessagesCount >= 2) {
+      messages.push({
+        role: "assistant",
+        timestamp: 1002,
+        content: "restored final",
+      });
+    }
+    return messages;
+  };
+  client.prompt = async () => {
+    throw new Error("prompt_should_not_be_resubmitted");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "hello",
+    promptContext: { sentAt: 1000 },
+  });
+
+  assert.equal(result.finalText, "restored final");
+  assert.equal(result.sessionFile, "/tmp/frontend-chat.jsonl");
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
+  assert.equal(getMessagesCount, 2);
+});
+
 test("frontend SDK turn driver reconnects and resolves an interrupted prompt from session state", async () => {
   const client = createFrontendClient();
   const originalConnect = client.connect;

@@ -1969,6 +1969,13 @@ test("chat controller treats rpc completion as the canonical final reply for pro
       const during = getChatMessage(controller.agentDir, chatKey, "m-turn");
       assert.ok(during?.acceptedAt);
       assert.equal(during?.processedAt, undefined);
+      let persistedDuringTurn = {};
+      try {
+        persistedDuringTurn = JSON.parse(
+          await fs.readFile(controller.statePath, "utf8"),
+        );
+      } catch {}
+      assert.equal(persistedDuringTurn.sessionFile, "prompt-chat.jsonl");
       controller.session.messages = [
         {
           role: "assistant",

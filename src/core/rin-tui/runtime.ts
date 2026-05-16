@@ -17,6 +17,7 @@ import {
   formatRuntimeErrorForUser,
   rawErrorMessage,
 } from "../rin-lib/user-facing-errors.js";
+import { submitNativeFrontendPromptTurn } from "../rin-frontend-sdk/index.js";
 import type { RpcFrontendClient } from "./frontend-surface.js";
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
@@ -1331,6 +1332,23 @@ export class RpcInteractiveSession {
 
     const sendOperation = async () => {
       await this.ensureRemoteSession();
+      if (operation.mode === "prompt") {
+        await submitNativeFrontendPromptTurn(
+          {
+            prompt: async (text, options = {}) => {
+              await this.call("prompt", { message: text, ...options });
+            },
+          },
+          {
+            text: operation.message,
+            images: operation.images,
+            streamingBehavior: operation.streamingBehavior,
+            source: operation.source,
+            requestTag: operation.requestTag,
+          },
+        );
+        return;
+      }
       await this.call(operation.mode, {
         message: operation.message,
         images: operation.images,

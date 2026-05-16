@@ -628,8 +628,10 @@ export class ChatController {
     const acceptedAt = new Date().toISOString();
     const sessionFile = this.currentSessionFile();
     if (!sessionFile) return;
+    const storedSessionFile = this.updateStoredSessionFile(sessionFile);
+    this.saveState();
     markProcessedChatMessage(this.agentDir, this.chatKey, nextMessageId, {
-      sessionFile,
+      sessionFile: storedSessionFile || sessionFile,
       acceptedAt,
     });
   }
