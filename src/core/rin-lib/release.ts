@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 
 export type ReleaseChannel = "stable" | "beta" | "nightly" | "git";
@@ -411,6 +412,6 @@ export function releaseInfoFromEnv(): InstalledReleaseInfo | undefined {
       sourceLabel ||
       `${channel} ${firstReleaseValue(version, branch, ref, "unknown")}`,
     archiveUrl,
-    installedAt: new Date().toISOString(),
+    installedAt: nowIso(),
   };
 }

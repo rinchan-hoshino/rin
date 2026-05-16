@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { getRuntimeSessionDir } from "../rin-lib/profile.js";
+import { nowFileTimestamp } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 
 const HOME_DIR = os.homedir();
@@ -64,7 +65,7 @@ export function getManagedSessionFile(
   leaf: unknown,
   name: unknown = leaf,
 ) {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const timestamp = nowFileTimestamp();
   const basename = sanitizeManagedSessionBasename(name, "session").replace(
     /:/g,
     "_",

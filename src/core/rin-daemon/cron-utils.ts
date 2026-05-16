@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { safeString } from "../platform/process.js";
+export { nowIso } from "../time-utils.js";
 
 import type { CronTaskRecord, CronTaskTrigger } from "./cron.js";
 
@@ -86,10 +87,6 @@ export function normalizeIso(value: unknown, field: string) {
   const ts = Date.parse(text);
   if (!Number.isFinite(ts)) throw new Error(`cron_invalid_${field}`);
   return new Date(ts).toISOString();
-}
-
-export function nowIso() {
-  return new Date().toISOString();
 }
 
 export function cronRoot(agentDir: string) {

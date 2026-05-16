@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { ensureDir } from "../platform/fs.js";
+import { nowIso } from "../time-utils.js";
 import {
   createConnectedRpcSocketPair,
   type RpcSocketConnector,
@@ -485,7 +486,7 @@ export async function startDaemon(
       const cronStatus = cronScheduler.getStatusSnapshot();
       const activity = {
         schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
+        generatedAt: nowIso(),
         socketPath,
         ...workerStatus,
         cron: cronStatus,

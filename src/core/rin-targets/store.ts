@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 import { normalizeTargetName, type RinTargetRecord } from "./registry.js";
 
@@ -74,7 +75,7 @@ export function upsertTarget(
 ) {
   const name = normalizeTargetName(target.name);
   if (!name) throw new Error("rin_target_name_required");
-  const now = new Date().toISOString();
+  const now = nowIso();
   const store = readTargetStore(filePath);
   const existing = store.targets.find(
     (entry) => normalizeTargetName(entry.name) === name,

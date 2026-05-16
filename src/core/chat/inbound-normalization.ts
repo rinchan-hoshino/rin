@@ -7,6 +7,7 @@ import { composeChatKey } from "./support.js";
 import { normalizeMessageText } from "../message-content.js";
 import { renderChatNodesMarkdown } from "./rich-text.js";
 import { cloneJsonIfObject } from "../json-utils.js";
+import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 
 export type ChatInboxRouting = {
@@ -292,8 +293,7 @@ export function buildInboundStoredChatMessageInput(
   const messageId = pickMessageId(session);
   if (!chatKey || !messageId) return null;
   const userId = pickUserId(session);
-  const receivedAt =
-    safeString(options.receivedAt).trim() || new Date().toISOString();
+  const receivedAt = safeString(options.receivedAt).trim() || nowIso();
   const trust = safeString(options.trust).trim() || undefined;
   return {
     messageId,

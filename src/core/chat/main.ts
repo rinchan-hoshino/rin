@@ -8,6 +8,7 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
 import type { RinFrontendTurnClient } from "../rin-frontend-sdk/index.js";
+import { nowIso } from "../time-utils.js";
 import {
   executeChatBridgeCode,
   renderChatBridgeResult,
@@ -475,7 +476,7 @@ export async function startChatBridge(
         runtime.agentDir,
         {
           type: "text_delivery",
-          createdAt: new Date().toISOString(),
+          createdAt: nowIso(),
           chatKey,
           text: lines.join("\n"),
           replyToMessageId: messageId || undefined,
@@ -608,7 +609,7 @@ export async function startChatBridge(
           runtime.agentDir,
           {
             type: "text_delivery",
-            createdAt: new Date().toISOString(),
+            createdAt: nowIso(),
             chatKey: decision.chatKey,
             text: formatChatRuntimeErrorForUser(errorMessage),
             replyToMessageId: messageId || undefined,
@@ -815,7 +816,7 @@ export async function startChatBridge(
           trustOf,
         );
         const logEntry = buildInboundChatLogInput(session, elements, {
-          timestamp: new Date().toISOString(),
+          timestamp: nowIso(),
         });
         if (logEntry) {
           appendChatLog(runtime.agentDir, logEntry);
@@ -843,7 +844,7 @@ export async function startChatBridge(
     void syncTelegramCommands(app, logger, commandRows);
   });
 
-  const startedAt = new Date().toISOString();
+  const startedAt = nowIso();
   const send = async (payload: ChatOutboxPayload) => {
     await sendOutboxPayload(app, runtime.agentDir, payload, h);
     return { delivered: true as const };
@@ -962,7 +963,7 @@ export async function startChatBridge(
         filename: `${currentChatKey || "chat"}:${requestId || "bridge"}.ts`,
       });
       auditPath = appendChatBridgeAudit(runtime.agentDir, {
-        timestamp: new Date().toISOString(),
+        timestamp: nowIso(),
         ok: true,
         currentChatKey,
         requestId,
@@ -985,7 +986,7 @@ export async function startChatBridge(
       };
     } catch (error: any) {
       auditPath = appendChatBridgeAudit(runtime.agentDir, {
-        timestamp: new Date().toISOString(),
+        timestamp: nowIso(),
         ok: false,
         currentChatKey,
         requestId,

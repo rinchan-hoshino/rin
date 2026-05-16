@@ -10,6 +10,7 @@ import {
 import { isJsonRecord } from "../json-utils.js";
 import { DEFAULT_LANGUAGE_TAG, normalizeLanguageTag } from "../language.js";
 import { stringifyJson } from "../platform/fs.js";
+import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 import { loadFirstValidCandidate } from "./candidate-loader.js";
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
@@ -372,7 +373,7 @@ function rewriteInstalledChatStateSessionFileKeys(
 
   fileOps.writeJsonObject(markerPath, {
     id: CHAT_STATE_SESSION_FILE_MIGRATION_ID,
-    appliedAt: new Date().toISOString(),
+    appliedAt: nowIso(),
     scanned,
     migrated,
   });
@@ -512,7 +513,7 @@ function migrateInstalledChatSessionFilesToManaged(
 
   fileOps.writeJsonObject(markerPath, {
     id: CHAT_SESSION_MANAGED_FILE_MIGRATION_ID,
-    appliedAt: new Date().toISOString(),
+    appliedAt: nowIso(),
     scanned,
     migrated,
   });
@@ -780,7 +781,7 @@ export function reconcileInstallerManifest(
       ref: normalizedRelease.ref,
       sourceLabel: normalizedRelease.sourceLabel,
       archiveUrl: normalizedRelease.archiveUrl,
-      installedAt: normalizedRelease.installedAt || new Date().toISOString(),
+      installedAt: normalizedRelease.installedAt || nowIso(),
     };
   }
   if (currentRelease) manifestJson.currentRelease = currentRelease;
@@ -792,7 +793,7 @@ export function reconcileInstallerManifest(
   } else if (!currentRelease && priorCurrentRelease) {
     manifestJson.currentRelease = priorCurrentRelease;
   }
-  manifestJson.updatedAt = new Date().toISOString();
+  manifestJson.updatedAt = nowIso();
 
   for (const filePath of manifestPaths.writePaths) {
     writeInstallerJson(filePath, manifestJson, writeOptions, deps);
@@ -955,7 +956,7 @@ export async function persistInstallerOutputs(
     delete launcherJson.defaultTargetUser;
     delete launcherJson.defaultInstallDir;
   }
-  launcherJson.updatedAt = new Date().toISOString();
+  launcherJson.updatedAt = nowIso();
   launcherJson.installedBy = options.currentUser;
 
   const { manifestPath, locatorManifestPath } = deps.reconcileInstallerManifest(

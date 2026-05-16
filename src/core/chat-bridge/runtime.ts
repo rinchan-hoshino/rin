@@ -16,6 +16,7 @@ import { appendJsonLineSync } from "../platform/fs.js";
 import { sendOutboxPayload } from "../chat/transport.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { serializeBridgeValue } from "./eval.js";
+import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 
 function normalizeMessageParts(input: unknown): ChatMessagePart[] {
@@ -220,7 +221,7 @@ export function createChatBridgeRuntime(options: {
         options.agentDir,
         {
           type: "parts_delivery",
-          createdAt: new Date().toISOString(),
+          createdAt: nowIso(),
           requestId,
           chatKey,
           sessionId,

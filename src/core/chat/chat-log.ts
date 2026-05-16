@@ -7,6 +7,7 @@ import {
   type StoredChatMessage,
 } from "./message-store.js";
 import { inferChatType, parseChatKey } from "./support.js";
+import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 import { normalizeSessionRef } from "../session/ref.js";
 
@@ -44,9 +45,7 @@ function buildStoredMessageFromChatLogEntry(
   const role = normalizeStoredChatMessageRole(input.role);
   const text = safeString(input.text).trim();
   const messageId = safeString(input.messageId).trim();
-  const timestamp = safeString(
-    input.timestamp || new Date().toISOString(),
-  ).trim();
+  const timestamp = safeString(input.timestamp || nowIso()).trim();
   if (!role || !text || !messageId) return null;
   const session = normalizeSessionRef(input);
   return {

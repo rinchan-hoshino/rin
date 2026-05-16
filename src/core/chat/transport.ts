@@ -19,6 +19,7 @@ import {
   findChatMessageByChatAndId,
   saveChatMessage,
 } from "./message-store.js";
+import { nowIso } from "../time-utils.js";
 import type {
   ChatPromptRestoreInput,
   SavedAttachment,
@@ -368,7 +369,7 @@ export function recordDeliveredAssistantMessages(
           },
         )
       : {};
-  const now = new Date().toISOString();
+  const now = nowIso();
 
   for (const messageId of messageIds) {
     saveChatMessage(agentDir, {
@@ -414,7 +415,7 @@ function finalizeDeliveredAssistantOutput(
 
   if (logText) {
     appendChatLog(agentDir, {
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
       chatKey,
       role: "assistant",
       text: logText,
