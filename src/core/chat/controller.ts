@@ -12,6 +12,7 @@ import {
   type PromptContextMeta,
 } from "../chat-bridge/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
+import { nowIso } from "../time-utils.js";
 import {
   readChatCommandResponses,
   resolveChatCommandResponses,
@@ -510,7 +511,7 @@ export class ChatController {
         chatKey: this.chatKey,
         text,
         replyToMessageId: safeString(replyToMessageId).trim() || undefined,
-        createdAt: new Date().toISOString(),
+        createdAt: nowIso(),
       },
       this.h,
     );
@@ -638,7 +639,7 @@ export class ChatController {
     if (!this.affectChatBinding) return;
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return;
-    const acceptedAt = new Date().toISOString();
+    const acceptedAt = nowIso();
     const sessionFile = this.currentSessionFile();
     if (!sessionFile) return;
     const storedSessionFile = this.updateStoredSessionFile(sessionFile);
@@ -654,8 +655,8 @@ export class ChatController {
     if (!nextMessageId) return;
     markProcessedChatMessage(this.agentDir, this.chatKey, nextMessageId, {
       ...(bindSession ? { sessionFile: this.currentSessionFile() } : {}),
-      acceptedAt: new Date().toISOString(),
-      processedAt: new Date().toISOString(),
+      acceptedAt: nowIso(),
+      processedAt: nowIso(),
     });
   }
 
@@ -717,7 +718,7 @@ export class ChatController {
       this.agentDir,
       {
         ...pending,
-        createdAt: new Date().toISOString(),
+        createdAt: nowIso(),
       },
       this.h,
     );
@@ -755,7 +756,7 @@ export class ChatController {
         this.agentDir,
         {
           type: "text_delivery",
-          createdAt: new Date().toISOString(),
+          createdAt: nowIso(),
           chatKey: this.chatKey,
           text: `${INTERIM_PREFIX}${trimmed}`,
           replyToMessageId: replyToMessageId || undefined,

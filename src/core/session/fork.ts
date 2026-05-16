@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { asArray } from "../json-utils.js";
+import { nowIso } from "../time-utils.js";
 
 type ForkCapabilities = {
   legacy: boolean;
@@ -90,7 +91,7 @@ function createEphemeralForkManager(
       type: "session",
       version: Number(sourceHeader?.version || 3),
       id: forkSessionId,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(),
       cwd: targetCwd,
       parentSession: sourcePath,
     },

@@ -3,6 +3,7 @@ import fssync from "node:fs";
 import path from "node:path";
 
 import { appendJsonLine } from "../platform/fs.js";
+import { nowIso } from "../time-utils.js";
 import {
   normalizeSessionNameDetail,
   readSessionDisplayNameParts,
@@ -196,7 +197,7 @@ export async function appendTranscriptArchiveRecord(
           safeString(input.toolName || "").trim(),
         ].join("\n"),
       ).slice(0, 16),
-    timestamp: safeString(input.timestamp || new Date().toISOString()).trim(),
+    timestamp: safeString(input.timestamp || nowIso()).trim(),
     sessionId: safeString(input.sessionId || "").trim(),
     sessionFile,
     role,

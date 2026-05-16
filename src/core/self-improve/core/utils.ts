@@ -15,10 +15,7 @@ export {
   trimText,
   uniqueStrings,
 };
-
-export function nowIso(): string {
-  return new Date().toISOString();
-}
+export { nowIso } from "../../time-utils.js";
 
 export function normalizeList(value: unknown): string[] {
   if (Array.isArray(value)) return normalizeStringList(value);

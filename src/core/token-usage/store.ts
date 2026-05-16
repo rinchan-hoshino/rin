@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 
 import BetterSqlite3 from "better-sqlite3";
+import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 
 export type TokenTelemetryEvent = {
@@ -263,10 +264,6 @@ function normalizeInt(value: unknown): number {
 function normalizeOptionalInt(value: unknown): number | null {
   if (value == null || normalizeText(value) === "") return null;
   return Math.round(safeNumber(value));
-}
-
-function nowIso() {
-  return new Date().toISOString();
 }
 
 function normalizeMetadata(value: unknown): Record<string, unknown> | null {

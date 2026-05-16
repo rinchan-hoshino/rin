@@ -9,6 +9,7 @@ import {
   safeString,
 } from "./shared.js";
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
+import { nowIso } from "../time-utils.js";
 import type { TokenUsageQueryOptions } from "../token-usage/store.js";
 import {
   formatProviderModelLabel,
@@ -972,7 +973,7 @@ export function renderUsageReport(
   const recent = queryRecentMessageEvents(scope, 10);
 
   return [
-    `Rin usage @ ${formatTime(new Date().toISOString())}`,
+    `Rin usage @ ${formatTime(nowIso())}`,
     renderProviderQuotas(providerQuotas),
     "",
     summarizeOverview(overview),

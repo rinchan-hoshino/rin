@@ -11,6 +11,7 @@ import {
   writeJsonFile,
 } from "../platform/fs.js";
 import { pickPrivilegeCommand, shellQuote } from "../rin-lib/system.js";
+import { nowFileTimestamp } from "../time-utils.js";
 import {
   appConfigDirForHome,
   currentRuntimeRoot,
@@ -553,7 +554,7 @@ export function installedRuntimeReleaseId(
 }
 
 export function releaseIdNow() {
-  return new Date().toISOString().replace(/[:.]/g, "-").replace(/Z$/, "Z");
+  return nowFileTimestamp();
 }
 
 export function publishInstalledRuntime(

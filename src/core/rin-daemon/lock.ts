@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { ensureDir } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
+import { nowIso } from "../time-utils.js";
 
 const LOCK_DIR_NAME = "daemon.lock";
 const OWNER_FILE_NAME = "owner.json";
@@ -161,7 +162,7 @@ export async function acquireDaemonInstanceLock(
     pid: process.pid,
     processStartTime: currentProcessStartTime(),
     token,
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso(),
     agentDir,
     socketPath: options.socketPath,
     argv: process.argv.slice(0, 8),

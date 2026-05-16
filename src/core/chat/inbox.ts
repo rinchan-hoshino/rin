@@ -19,6 +19,7 @@ import {
   serializeChatInboxSession,
 } from "./inbound-normalization.js";
 import { readJsonFile } from "./support.js";
+import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 
 function hashKey(value: string) {
@@ -81,7 +82,7 @@ export function buildChatInboxItem(input: {
   const messageId = safeString(input.messageId).trim();
   if (!chatKey) throw new Error("chat_inbox_chatKey_required");
   if (!messageId) throw new Error("chat_inbox_messageId_required");
-  const now = new Date().toISOString();
+  const now = nowIso();
   return {
     version: 1 as const,
     itemId: hashKey(`${chatKey}\n${messageId}`),
@@ -153,7 +154,7 @@ function updateChatInboxItem(
   return {
     ...item,
     attemptCount: Number(item.attemptCount || 0) + 1,
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowIso(),
     ...patch,
   };
 }
@@ -250,7 +251,7 @@ export function completeChatInboxFile(filePath: string) {
 export function touchChatInboxFile(filePath: string, item: ChatInboxItem) {
   writeChatInboxItem(filePath, {
     ...item,
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowIso(),
   });
 }
 

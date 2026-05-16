@@ -6,6 +6,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
+import { nowIso } from "../time-utils.js";
 import { type TruncationResult } from "@earendil-works/pi-coding-agent";
 import {
   buildUserFacingTextResult,
@@ -65,8 +66,7 @@ function buildMemoryTranscriptInput(message: any, ctx: any) {
   const session = readSessionMetadata(ctx);
   const input = {
     id: String(message?.id || "").trim(),
-    timestamp:
-      String(message?.timestamp || "").trim() || new Date().toISOString(),
+    timestamp: String(message?.timestamp || "").trim() || nowIso(),
     sessionId: session.sessionId,
     sessionFile: session.sessionFile,
     role: String(message?.role || "").trim(),
