@@ -9,6 +9,7 @@ import {
   safeString,
 } from "./shared.js";
 import { sleep } from "../platform/process.js";
+import { formatReportTime, renderReportTable } from "./report-format.js";
 import {
   canConnectDaemonSocket,
   requestDaemonCommand,
@@ -129,60 +130,6 @@ function formatDuration(ms: unknown) {
   return `${hours}h${(minutes % 60).toString().padStart(2, "0")}m`;
 }
 
-function formatTime(value: unknown) {
-  const text = safeString(value).trim();
-  if (!text) return "-";
-  const timestamp = Date.parse(text);
-  if (Number.isNaN(timestamp)) return text;
-  return new Date(timestamp).toLocaleString();
-}
-
-function pad(value: string, width: number) {
-  if (value.length >= width) return value;
-  return `${value}${" ".repeat(width - value.length)}`;
-}
-
-function truncate(value: string, width: number) {
-  if (value.length <= width) return value;
-  if (width <= 1) return value.slice(0, width);
-  return `${value.slice(0, width - 1)}…`;
-}
-
-function renderTable(rows: Array<Record<string, string>>, columns: string[]) {
-  if (!rows.length) return "  (none)";
-  const widths = new Map<string, number>();
-  for (const column of columns) widths.set(column, column.length);
-  for (const row of rows) {
-    for (const column of columns) {
-      widths.set(
-        column,
-        Math.min(44, Math.max(widths.get(column) || 0, row[column].length)),
-      );
-    }
-  }
-  const header = columns
-    .map((column) => pad(column, widths.get(column) || column.length))
-    .join("  ");
-  const divider = columns
-    .map((column) => "-".repeat(widths.get(column) || column.length))
-    .join("  ");
-  const body = rows.map((row) =>
-    columns
-      .map((column) =>
-        pad(
-          truncate(row[column], widths.get(column) || column.length),
-          widths.get(column) || column.length,
-        ),
-      )
-      .join("  "),
-  );
-  return [
-    `  ${header}`,
-    `  ${divider}`,
-    ...body.map((line) => `  ${line}`),
-  ].join("\n");
-}
-
 function renderWorkerRows(workers: unknown[]) {
   return workers.map((worker) => {
     const value = asRecord(worker) ?? {};
@@ -216,7 +163,7 @@ function renderCronRows(tasks: unknown[]) {
     return {
       id: formatMaybe(value.id),
       state: cronTaskState(value),
-      next: formatTime(value.nextRunAt),
+      next: formatReportTime(value.nextRunAt),
       active: value.activeDurationMs
         ? formatDuration(value.activeDurationMs)
         : "-",
@@ -235,30 +182,22 @@ export function renderStatusReport(snapshot: unknown) {
   const workers = asArray(status.workers);
   const tasks = asArray(cron.tasks);
   const lines = [
-    `Rin activity @ ${formatTime(status.generatedAt)}`,
+    `Rin activity @ ${formatReportTime(status.generatedAt)}`,
     `socket: ${formatMaybe(status.socketPath)}`,
     "",
     `workers: ${String(status.workerCount ?? workers.length)} total, ${String(status.activeWorkerCount ?? 0)} active`,
-    renderTable(renderWorkerRows(workers), [
-      "id",
-      "pid",
-      "state",
-      "attached",
-      "pending",
-      "idle",
-      "session",
-    ]),
+    renderReportTable(
+      renderWorkerRows(workers),
+      ["id", "pid", "state", "attached", "pending", "idle", "session"],
+      { emptyText: "(none)", indent: "  ", maxColumnWidth: 44 },
+    ),
     "",
-    `cron: ${String(cron.taskCount ?? tasks.length)} tasks, ${String(cron.enabledTaskCount ?? 0)} enabled, ${String(cron.runningTaskCount ?? 0)} running, next ${formatTime(cron.nextRunAt)}`,
-    renderTable(renderCronRows(tasks), [
-      "id",
-      "state",
-      "next",
-      "active",
-      "runs",
-      "session",
-      "target",
-    ]),
+    `cron: ${String(cron.taskCount ?? tasks.length)} tasks, ${String(cron.enabledTaskCount ?? 0)} enabled, ${String(cron.runningTaskCount ?? 0)} running, next ${formatReportTime(cron.nextRunAt)}`,
+    renderReportTable(
+      renderCronRows(tasks),
+      ["id", "state", "next", "active", "runs", "session", "target"],
+      { emptyText: "(none)", indent: "  ", maxColumnWidth: 44 },
+    ),
   ];
   return lines.join("\n");
 }

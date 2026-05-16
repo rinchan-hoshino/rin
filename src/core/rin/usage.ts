@@ -10,6 +10,7 @@ import {
 } from "./shared.js";
 import { loadRinCodingAgent } from "../rin-lib/loader.js";
 import { nowIso } from "../time-utils.js";
+import { formatReportTime, renderReportTable } from "./report-format.js";
 import type { TokenUsageQueryOptions } from "../token-usage/store.js";
 import {
   formatProviderModelLabel,
@@ -270,17 +271,6 @@ function formatCost(value: unknown) {
   return Number(value || 0).toFixed(4);
 }
 
-function pad(value: string, width: number) {
-  if (value.length >= width) return value;
-  return value + " ".repeat(width - value.length);
-}
-
-function truncate(value: string, width: number) {
-  if (value.length <= width) return value;
-  if (width <= 1) return value.slice(0, width);
-  return `${value.slice(0, width - 1)}…`;
-}
-
 function formatPercent(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "-";
@@ -299,48 +289,6 @@ function renderBar(value: unknown, width = 18) {
   if (percent === undefined) return `${"░".repeat(width)} -`;
   const filled = Math.round((percent / 100) * width);
   return `${"█".repeat(filled)}${"░".repeat(width - filled)} ${formatPercent(percent)}`;
-}
-
-function formatTime(value: unknown) {
-  const text = safeString(value).trim();
-  if (!text) return "-";
-  const timestamp = Date.parse(text);
-  if (Number.isNaN(timestamp)) return text;
-  return new Date(timestamp).toLocaleString();
-}
-
-function renderTable(rows: Array<Record<string, unknown>>, columns: string[]) {
-  if (!rows.length) return "(no rows)";
-  const widths = new Map<string, number>();
-  for (const column of columns) {
-    widths.set(column, column.length);
-  }
-  for (const row of rows) {
-    for (const column of columns) {
-      const value = safeString(row[column] ?? "");
-      widths.set(
-        column,
-        Math.min(48, Math.max(widths.get(column) || 0, value.length)),
-      );
-    }
-  }
-  const header = columns
-    .map((column) => pad(column, widths.get(column) || column.length))
-    .join("  ");
-  const divider = columns
-    .map((column) => "-".repeat(widths.get(column) || column.length))
-    .join("  ");
-  const body = rows.map((row) =>
-    columns
-      .map((column) =>
-        pad(
-          truncate(safeString(row[column] ?? ""), widths.get(column) || 0),
-          widths.get(column) || 0,
-        ),
-      )
-      .join("  "),
-  );
-  return [header, divider, ...body].join("\n");
 }
 
 function decodeJwtPayload(token: string): Record<string, any> | undefined {
@@ -781,7 +729,7 @@ function renderProviderQuotas(statuses?: ProviderQuotaStatus[]) {
               ? "7-day"
               : window.name;
         lines.push(
-          `    ${pad(label, 8)} ${renderBar(window.percentLeft)} left · reset ${formatTime(window.resetAt)}`,
+          `    ${label.padEnd(8)} ${renderBar(window.percentLeft)} left · reset ${formatReportTime(window.resetAt)}`,
         );
       }
     } else {
@@ -809,7 +757,7 @@ function summarizeOverview(overview: any) {
     `  tokens   ${formatInt(totalTokens)}`,
     ...tokenRows.map((row) => {
       const share = totalTokens > 0 ? (row.value / totalTokens) * 100 : 0;
-      return `  ${pad(row.label, 11)} ${renderBar(share, 14)} · ${formatInt(row.value)}`;
+      return `  ${row.label.padEnd(11)} ${renderBar(share, 14)} · ${formatInt(row.value)}`;
     }),
     `  cost     $${formatCost(overview?.cost_total)}`,
   ];
@@ -861,7 +809,7 @@ function renderAggregateTable(
     next.cost_total = `$${formatCost(row.cost_total)}`;
     return next;
   });
-  return `${title}\n${renderTable(formatted, [...groupBy, "chart", ...metrics])}`;
+  return `${title}\n${renderReportTable(formatted, [...groupBy, "chart", ...metrics])}`;
 }
 
 function renderEventTable(rows: Array<Record<string, unknown>>) {
@@ -880,7 +828,7 @@ function renderEventTable(rows: Array<Record<string, unknown>>) {
     cost_total: `$${formatCost(row.cost_total)}`,
     stop_reason: row.stop_reason,
   }));
-  return renderTable(formatted, [
+  return renderReportTable(formatted, [
     "timestamp",
     "session_id",
     "source",
@@ -973,7 +921,7 @@ export function renderUsageReport(
   const recent = queryRecentMessageEvents(scope, 10);
 
   return [
-    `Rin usage @ ${formatTime(nowIso())}`,
+    `Rin usage @ ${formatReportTime(nowIso())}`,
     renderProviderQuotas(providerQuotas),
     "",
     summarizeOverview(overview),
