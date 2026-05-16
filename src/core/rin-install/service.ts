@@ -27,6 +27,7 @@ import {
   systemdUserUnitPathForHome,
   windowsStartupLauncherPathForHome,
 } from "./paths.js";
+import { sleep } from "../platform/process.js";
 import {
   buildDaemonSocketProbeScript,
   canConnectDaemonSocket,
@@ -642,7 +643,7 @@ export async function waitForSocket(
       void canConnectDaemonSocket(socketPath, 300).then(resolve);
     });
     if (ok) return true;
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await sleep(150);
   }
   return false;
 }

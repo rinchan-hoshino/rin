@@ -7,6 +7,7 @@ import {
   ParsedArgs,
   safeString,
 } from "./shared.js";
+import { sleep } from "../platform/process.js";
 import {
   canConnectDaemonSocket,
   requestDaemonCommand,
@@ -302,7 +303,7 @@ async function runStatusLoop(options: StatusCliOptions, socketPath?: string) {
         console.log("\nPress Ctrl+C to stop.");
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
+    await sleep(options.intervalMs);
   }
 }
 

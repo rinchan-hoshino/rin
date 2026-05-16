@@ -18,6 +18,7 @@ import {
 
 import { theme } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 
+import { sleep } from "../platform/process.js";
 import {
   checkForRinUpdateNotice,
   getCurrentRinVersion,
@@ -293,7 +294,7 @@ async function showRinUpdateNotificationWhenReady(instance: any) {
     if (!notice) return;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if (instance?.isInitialized) break;
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await sleep(50);
     }
     showRinUpdateNotification(instance, notice);
   } catch {

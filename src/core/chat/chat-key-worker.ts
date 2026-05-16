@@ -1,8 +1,5 @@
+import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 export type PreparedChatKeyWorkerJob = {
   run: () => Promise<void>;

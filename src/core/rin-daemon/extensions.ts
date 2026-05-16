@@ -24,6 +24,7 @@ import type {
   TranscriptArchiveEntry,
 } from "../memory/transcript-types.js";
 import { ensureDir, stringifyJson } from "../platform/fs.js";
+import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
 
 export type RinDaemonExtensionLogger = {
@@ -504,7 +505,7 @@ export class RinDaemonExtensionManager {
         }
         await Promise.race([
           Promise.allSettled([...worker.tasks]),
-          new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+          sleep(timeoutMs),
         ]);
       }),
     );

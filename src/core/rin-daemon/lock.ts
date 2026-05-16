@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ensureDir } from "../platform/fs.js";
+import { sleep } from "../platform/process.js";
 
 const LOCK_DIR_NAME = "daemon.lock";
 const OWNER_FILE_NAME = "owner.json";
@@ -32,10 +33,6 @@ export function daemonInstanceLockPath(agentDir: string) {
 
 function daemonInstanceLockOwnerPath(lockDir: string) {
   return path.join(lockDir, OWNER_FILE_NAME);
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function readLockOwner(lockDir: string): DaemonLockOwner | null {

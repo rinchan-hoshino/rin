@@ -11,6 +11,7 @@ import {
   stringifyJson,
   writeJsonAtomic,
 } from "../platform/fs.js";
+import { sleep } from "../platform/process.js";
 import { normalizeSessionValue } from "../session/ref.js";
 import { nowIso, safeString, uniqueStrings } from "./core/utils.js";
 import {
@@ -228,10 +229,6 @@ async function releaseWorkerLock(
   } catch {}
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function acquireWorkerLockWithWait(
   agentDir: string,
   timeoutMs = 30 * 60 * 1000,
@@ -241,7 +238,7 @@ async function acquireWorkerLockWithWait(
     const handle = await acquireWorkerLock(agentDir);
     if (handle) return handle;
     if (Date.now() >= deadline) return null;
-    await delay(250);
+    await sleep(250);
   }
 }
 
