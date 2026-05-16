@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 
 import { safeString } from "../text-utils.js";
+import { shellQuote } from "../rin-lib/system.js";
 import { normalizeTargetName } from "../rin-targets/registry.js";
 import { upsertTarget } from "../rin-targets/store.js";
 
@@ -97,10 +98,6 @@ function requireCommand(command: string) {
   } catch {
     throw new Error(`rin_missing_required_tool:${command}`);
   }
-}
-
-function shellQuote(value: string) {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
 function ensureSshKey(targetName: string) {

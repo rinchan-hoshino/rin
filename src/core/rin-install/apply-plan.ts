@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
+import { shellQuote } from "../rin-lib/system.js";
 
 export type FinalizeInstallOptions = {
   currentUser: string;
@@ -42,10 +43,6 @@ export function writeFinalizeInstallPlanFile(
   writeFileSync(planPath, `${JSON.stringify(options, null, 2)}\n`, "utf8");
   chmodSync(planPath, 0o600);
   return planPath;
-}
-
-function shellQuote(value: string) {
-  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
 export function buildFinalizeInstallPlanCommand(

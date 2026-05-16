@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { safeString } from "../text-utils.js";
+
 export type ReleaseChannel = "stable" | "beta" | "nightly" | "git";
 
 export type ReleaseRequest = {
@@ -71,11 +73,6 @@ const DEFAULT_STABLE_VERSION = "0.0.0";
 const DEFAULT_BETA_PROMOTION_VERSION = "0.1.0";
 const DEFAULT_BETA_VERSION = `${DEFAULT_BETA_PROMOTION_VERSION}-beta.0`;
 const DEFAULT_NIGHTLY_VERSION = `${DEFAULT_BETA_PROMOTION_VERSION}-nightly.0`;
-
-function safeString(value: unknown) {
-  if (value == null) return "";
-  return String(value);
-}
 
 function trimReleaseValue(value: unknown) {
   return safeString(value).trim();

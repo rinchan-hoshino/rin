@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { safeString } from "../text-utils.js";
 import { getChangelogPath, parseChangelog } from "./changelog.js";
 import { resolveRuntimeProfile } from "./profile.js";
 import {
@@ -44,11 +45,6 @@ const RIN_RELEASE_CHANNELS: readonly ReleaseChannel[] = [
   "nightly",
   "git",
 ];
-
-function safeString(value: unknown) {
-  if (value == null) return "";
-  return String(value);
-}
 
 function trim(value: unknown) {
   return safeString(value).trim();
