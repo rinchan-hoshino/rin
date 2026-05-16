@@ -6,6 +6,7 @@ import { safeString } from "../text-utils.js";
 
 import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import { readJsonFile } from "../platform/fs.js";
+import { sleep } from "../platform/process.js";
 import {
   buildDaemonSocketProbeScript,
   buildDaemonStatusScript,
@@ -251,7 +252,7 @@ export async function ensureDaemonAvailable(context: TargetExecutionContext) {
     const startedAt = Date.now();
     while (Date.now() - startedAt < 5000) {
       if (await context.canConnectSocket()) return;
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await sleep(150);
     }
   }
 

@@ -3,6 +3,7 @@ import fssync from "node:fs";
 import path from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 
+import { sleep } from "../platform/process.js";
 import {
   normalizeNeedle,
   safeString,
@@ -563,7 +564,7 @@ export async function repairTranscriptSearchIndex(rootOverride = "") {
       }
     } catch (error) {
       if (!isSqliteBusyError(error) || attempt >= 3) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      await sleep(500 * (attempt + 1));
     }
   }
   return { dbPath, transcriptRoot, fileCount: 0, entryCount: 0 };

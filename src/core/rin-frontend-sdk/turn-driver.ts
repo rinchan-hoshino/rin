@@ -7,6 +7,7 @@ import {
   resolveChatCommandResponses,
   type ChatCommandResponses,
 } from "../chat/command-responses.js";
+import { sleep } from "../platform/process.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
@@ -90,10 +91,6 @@ function isRecoverableConnectionError(error: unknown) {
   return /rin_tui_not_connected|rin_disconnected|rin_session_recovering|frontend_turn_driver_disposed/.test(
     safeString((error as any)?.message || error),
   );
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class RinFrontendTurnDriver {

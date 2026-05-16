@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 
+import { sleep } from "../platform/process.js";
 import type { RpcSocketLike } from "../platform/rpc-socket.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
@@ -505,7 +506,7 @@ export class WorkerPool {
     this.beginShutdown();
     const deadline = Date.now() + Math.max(0, graceMs);
     while (this.workers.size > 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await sleep(50);
       for (const worker of Array.from(this.workers)) {
         this.maybeReleaseWorker(worker);
       }

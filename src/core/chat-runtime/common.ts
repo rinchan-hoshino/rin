@@ -16,13 +16,21 @@ import {
   type RenderChatNodesOptions,
 } from "../chat/rich-text.js";
 import { ensureDir } from "../platform/fs.js";
+import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
 
 const ALL_TEXT_MIME_EXTENSION_OPTIONS = {
   allTextMimeTypes: true,
 } as const;
 
-export { ensureDir, ensureFileName, isImageMimeType, isImageName, safeString };
+export {
+  ensureDir,
+  ensureFileName,
+  isImageMimeType,
+  isImageName,
+  safeString,
+  sleep,
+};
 
 export function extensionFromMimeType(mimeType: string) {
   return extensionFromSharedMimeType(mimeType, ALL_TEXT_MIME_EXTENSION_OPTIONS);
@@ -34,10 +42,6 @@ export function ensureExtension(fileName: string, mimeType = "") {
     mimeType,
     ALL_TEXT_MIME_EXTENSION_OPTIONS,
   );
-}
-
-export function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function createPrefixedLogger(name: string, fallback: any) {
