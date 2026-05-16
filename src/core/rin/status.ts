@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { isJsonRecord } from "../json-utils.js";
 import {
   captureInternalRinCommand,
   createTargetExecutionContext,
@@ -96,10 +97,8 @@ function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
-function asRecord(value: unknown) {
-  return value && typeof value === "object"
-    ? (value as Record<string, unknown>)
-    : undefined;
+function asRecord(value: unknown): Record<string, any> | undefined {
+  return isJsonRecord(value) ? value : undefined;
 }
 
 function formatMaybe(value: unknown, fallback = "-") {

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
 
-import { cloneJson, cloneJsonIfObject } from "../json-utils.js";
+import { cloneJson, cloneJsonIfObject, isJsonRecord } from "../json-utils.js";
 import {
   claimFileToDir,
   listJsonFiles,
@@ -114,10 +114,8 @@ export function readChatInboxItem(filePath: string) {
   return readJsonFile<ChatInboxItem | null>(filePath, null);
 }
 
-function asRecord(value: unknown) {
-  return value && typeof value === "object"
-    ? (value as Record<string, any>)
-    : ({} as Record<string, any>);
+function asRecord(value: unknown): Record<string, any> {
+  return isJsonRecord(value) ? value : {};
 }
 
 function pickTrimmedString(...values: unknown[]) {
