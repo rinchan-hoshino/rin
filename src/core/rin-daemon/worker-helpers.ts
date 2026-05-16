@@ -1,4 +1,5 @@
 import { readChatCommandResponses } from "../chat/command-responses.js";
+import { asArray } from "../json-utils.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
 import { listBoundSessions } from "../session/factory.js";
@@ -177,8 +178,7 @@ export async function getCommandArgumentCompletions(
   const complete = command?.getArgumentCompletions;
   if (typeof complete !== "function") return { items: [] };
   const result = await complete(String(argumentPrefix || ""));
-  const items = Array.isArray(result) ? result : [];
-  return { items: items.map(normalizeCompletionItem) };
+  return { items: asArray(result).map(normalizeCompletionItem) };
 }
 
 export function getResourceDiagnostics(session: any) {

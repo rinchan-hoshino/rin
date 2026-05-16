@@ -1,7 +1,12 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
 
-import { cloneJson, cloneJsonIfObject, isJsonRecord } from "../json-utils.js";
+import {
+  asArray,
+  cloneJson,
+  cloneJsonIfObject,
+  isJsonRecord,
+} from "../json-utils.js";
 import {
   claimFileToDir,
   listJsonFiles,
@@ -87,7 +92,7 @@ export function buildChatInboxItem(input: {
     attemptCount: 0,
     routing: buildChatInboxRouting(input.session, input.elements),
     session: serializeChatInboxSession(input.session),
-    elements: Array.isArray(input.elements) ? cloneJson(input.elements) : [],
+    elements: cloneJson(asArray(input.elements)),
   } satisfies ChatInboxItem;
 }
 

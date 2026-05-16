@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { isJsonRecord } from "../json-utils.js";
+import { asArray, isJsonRecord } from "../json-utils.js";
 import {
   captureInternalRinCommand,
   createTargetExecutionContext,
@@ -91,10 +91,6 @@ export function parseStatusArgs(argv: string[]): StatusCliOptions {
     throw new Error(`unknown_status_arg:${arg}`);
   }
   return result;
-}
-
-function asArray(value: unknown) {
-  return Array.isArray(value) ? value : [];
 }
 
 function asRecord(value: unknown): Record<string, any> | undefined {

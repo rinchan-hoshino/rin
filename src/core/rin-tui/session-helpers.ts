@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
+import { asArray } from "../json-utils.js";
 import { extractMessageText } from "../message-content.js";
 import { calculateUsageTotalTokens } from "../usage-metrics.js";
 
@@ -7,10 +8,6 @@ export { computeAvailableThinkingLevels } from "../model-thinking-levels.js";
 
 export function extractText(value: any): string {
   return extractMessageText(value, { includeThinking: true });
-}
-
-function asMessages(messages: AgentMessage[] | unknown) {
-  return Array.isArray(messages) ? (messages as AgentMessage[]) : [];
 }
 
 function getReusableUsage(message: any) {
@@ -22,7 +19,7 @@ function getReusableUsage(message: any) {
 }
 
 export function getLastAssistantText(messages: AgentMessage[]) {
-  const list = asMessages(messages);
+  const list = asArray<AgentMessage>(messages);
   for (let i = list.length - 1; i >= 0; i--) {
     const message: any = list[i];
     if (message?.role !== "assistant") continue;
@@ -47,7 +44,7 @@ export function estimateMessageTokens(message: any) {
 }
 
 export function estimateContextTokens(messages: AgentMessage[]) {
-  const list = asMessages(messages);
+  const list = asArray<AgentMessage>(messages);
   let trailingTokens = 0;
   for (let i = list.length - 1; i >= 0; i--) {
     const message: any = list[i];

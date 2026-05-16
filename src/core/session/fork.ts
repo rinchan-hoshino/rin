@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { asArray } from "../json-utils.js";
+
 type ForkCapabilities = {
   legacy: boolean;
   optionAware: boolean;
@@ -46,12 +48,11 @@ function getForkCapabilities(SessionManager: any): ForkCapabilities {
 }
 
 function resolveForkEntries(sourceManager: any, leafId?: string) {
-  const branchEntries = leafId ? sourceManager.getBranch?.(leafId) : undefined;
-  if (Array.isArray(branchEntries) && branchEntries.length > 0) {
-    return branchEntries;
-  }
-  const entries = sourceManager.getEntries?.();
-  return Array.isArray(entries) ? entries : [];
+  const branchEntries = asArray(
+    leafId ? sourceManager.getBranch?.(leafId) : undefined,
+  );
+  if (branchEntries.length > 0) return branchEntries;
+  return asArray(sourceManager.getEntries?.());
 }
 
 function createEphemeralForkManager(

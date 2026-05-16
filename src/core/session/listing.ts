@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { asArray } from "../json-utils.js";
 import { normalizeSessionValue } from "./ref.js";
 import {
   DEFAULT_SESSION_DISPLAY_NAME,
@@ -190,7 +191,7 @@ function normalizeBoundSessionDetailsList(
   sessions: unknown,
 ): NormalizedBoundSessionDetails[] {
   const seen = new Set<string>();
-  return (Array.isArray(sessions) ? sessions : [])
+  return asArray(sessions)
     .map(normalizeBoundSessionDetails)
     .filter((details): details is NormalizedBoundSessionDetails =>
       Boolean(details),

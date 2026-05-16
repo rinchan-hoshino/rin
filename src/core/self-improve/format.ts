@@ -1,3 +1,5 @@
+import { asArray } from "../json-utils.js";
+
 function toSentenceCaseLabel(text: string) {
   const parts = String(text || "")
     .split(/[_\s-]+/)
@@ -14,12 +16,8 @@ function trimText(value: unknown) {
 
 function collectPromptDocs(result: any) {
   return [
-    ...(Array.isArray(result?.self_improve_prompt_prompt_docs)
-      ? result.self_improve_prompt_prompt_docs
-      : []),
-    ...(Array.isArray(result?.self_improve_prompt_docs)
-      ? result.self_improve_prompt_docs
-      : []),
+    ...asArray<any>(result?.self_improve_prompt_prompt_docs),
+    ...asArray<any>(result?.self_improve_prompt_docs),
   ];
 }
 
@@ -67,7 +65,7 @@ function buildPromptBlock(
 }
 
 function normalizeResultRows(response: any) {
-  return Array.isArray(response?.results) ? response.results : [];
+  return asArray<any>(response?.results);
 }
 
 function formatMetaParts(parts: unknown[], separator: string) {
@@ -78,12 +76,10 @@ function formatMetaParts(parts: unknown[], separator: string) {
 }
 
 function formatTags(tags: unknown) {
-  return Array.isArray(tags)
-    ? tags
-        .map((tag) => trimText(tag))
-        .filter(Boolean)
-        .join(",")
-    : "";
+  return asArray(tags)
+    .map((tag) => trimText(tag))
+    .filter(Boolean)
+    .join(",");
 }
 
 function getItemName(item: any) {

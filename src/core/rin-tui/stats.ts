@@ -1,3 +1,4 @@
+import { asArray } from "../json-utils.js";
 import { countToolCalls } from "../message-content.js";
 import { readUsageMetrics } from "../usage-metrics.js";
 import {
@@ -5,16 +6,12 @@ import {
   estimateContextTokens,
 } from "./session-helpers.js";
 
-function normalizeList<T>(value: T[] | undefined | null) {
-  return Array.isArray(value) ? value : [];
-}
-
 export function getContextUsage(model: any, messages: any[], branch: any[]) {
   const contextWindow = Number(model?.contextWindow || 0);
   if (contextWindow <= 0) return undefined;
 
-  const nextMessages = normalizeList(messages);
-  const nextBranch = normalizeList(branch);
+  const nextMessages = asArray<any>(messages);
+  const nextBranch = asArray<any>(branch);
 
   let latestCompactionIndex = -1;
   for (let i = nextBranch.length - 1; i >= 0; i--) {
@@ -62,7 +59,7 @@ export function computeSessionStats(
   let cacheWrite = 0;
   let cost = 0;
 
-  for (const entry of normalizeList(entries)) {
+  for (const entry of asArray<any>(entries)) {
     if (entry?.type !== "message" || !entry.message) continue;
     const message = entry.message;
     if (message.role === "user") userMessages += 1;

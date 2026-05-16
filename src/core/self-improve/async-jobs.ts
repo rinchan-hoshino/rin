@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { maintainMemory } from "./maintainer.js";
+import { asArray } from "../json-utils.js";
 import {
   appendJsonLine,
   readJsonFile,
@@ -70,9 +71,10 @@ function resolveSessionFile(value: unknown) {
 }
 
 function normalizeAdditionalExtensionPaths(value: unknown) {
-  if (!Array.isArray(value)) return undefined;
   const normalized = uniqueStrings(
-    value.map((item) => safeString(item).trim()).filter(Boolean),
+    asArray(value)
+      .map((item) => safeString(item).trim())
+      .filter(Boolean),
   );
   return normalized.length ? normalized : undefined;
 }
@@ -83,14 +85,12 @@ async function ensureStateDir(agentDir: string) {
 
 async function loadQueue(agentDir: string): Promise<MaintenanceJob[]> {
   const parsed = readJsonFile<unknown>(maintenanceQueuePath(agentDir), []);
-  return Array.isArray(parsed)
-    ? parsed.filter(
-        (item) =>
-          item &&
-          typeof item === "object" &&
-          safeString((item as any).kind).trim() !== "session_summary",
-      )
-    : [];
+  return asArray<MaintenanceJob>(parsed).filter(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      safeString((item as any).kind).trim() !== "session_summary",
+  );
 }
 
 async function saveQueue(agentDir: string, jobs: MaintenanceJob[]) {

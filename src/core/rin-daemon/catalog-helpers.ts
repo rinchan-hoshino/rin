@@ -1,3 +1,4 @@
+import { asArray } from "../json-utils.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
 
 type SlashCommandEntry = {
@@ -45,10 +46,6 @@ type SlashCommandCollectorSpec<T> = {
 
 function trimText(value: unknown) {
   return String(value ?? "").trim();
-}
-
-function asArray<T>(value: unknown) {
-  return Array.isArray(value) ? (value as T[]) : [];
 }
 
 function eachUniqueNormalizedValue<T>(
