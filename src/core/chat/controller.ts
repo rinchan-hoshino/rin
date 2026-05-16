@@ -107,6 +107,17 @@ function normalizeWorkingIndicators(value: unknown): WorkingIndicator[] {
   );
 }
 
+const DETERMINISTIC_ACK_COMMANDS = new Set([
+  "abort",
+  "new",
+  "compact",
+  "reload",
+]);
+
+function usesDeterministicCommandAck(commandName: string) {
+  return DETERMINISTIC_ACK_COMMANDS.has(safeString(commandName).trim());
+}
+
 function summarizePromptText(text: string, limit = 80) {
   const value = safeString(text).replace(/\s+/g, " ").trim();
   if (!value) return "";
@@ -427,6 +438,7 @@ export class ChatController {
   private async beginVisibleProcessingTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
+    showWorking?: boolean;
   }) {
     const previousIncomingMessageId = this.currentIncomingMessageId();
     const nextIncomingMessageId = safeString(
@@ -441,6 +453,7 @@ export class ChatController {
     }
     this.setCurrentTurn(input);
     this.awaitingTurnSettle = true;
+    if (input.showWorking === false) return;
     const marker = this.startWorkingMarker().catch(() => false);
     const poll = this.pollTyping().catch(() => false);
     await Promise.race([
@@ -824,11 +837,13 @@ export class ChatController {
     const commandName = commandNameFromCommandLine(commandLine);
     const hadActiveTurn = this.hasActiveTurn();
     const abortingActiveTurn = commandName === "abort" && hadActiveTurn;
+    const showCommandWorking = !usesDeterministicCommandAck(commandName);
     if (abortingActiveTurn) {
       this.lastActivityAt = Date.now();
       await this.beginVisibleProcessingTurn({
         incomingMessageId: incomingMessageId || undefined,
         replyToMessageId: replyToMessageId || undefined,
+        showWorking: showCommandWorking,
       });
       try {
         this.turnAbortRequested = true;
@@ -889,6 +904,7 @@ export class ChatController {
     await this.beginVisibleProcessingTurn({
       incomingMessageId: incomingMessageId || undefined,
       replyToMessageId: replyToMessageId || undefined,
+      showWorking: showCommandWorking,
     });
     try {
       let data: any = await this.driver.runCommand(commandLine, {
