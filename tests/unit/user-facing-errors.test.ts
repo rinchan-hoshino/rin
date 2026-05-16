@@ -11,13 +11,20 @@ test("runtime error formatter keeps human messages", () => {
   );
 });
 
-test("runtime error formatter makes internal marker messages readable", () => {
+test("runtime error formatter maps known internal markers to actionable messages", () => {
   assert.equal(
-    formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
-    "rpc turn final output missing",
+    formatRuntimeErrorForUser("new_session_session_file_unsupported"),
+    "Could not start a new chat session because the command was bound to a replied message's old session. Retry /new; chat commands should not use replied-message sessions.",
   );
   assert.equal(
     formatRuntimeErrorForUser("frontend_model_not_found:openai/missing"),
-    "frontend model not found: openai/missing",
+    "Model not found: openai/missing. Choose an available model in /model or settings.",
+  );
+});
+
+test("runtime error formatter labels unknown internal markers", () => {
+  assert.equal(
+    formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
+    "Internal error: rpc_turn_final_output_missing",
   );
 });

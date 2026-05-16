@@ -463,6 +463,118 @@ test("chat controller skips recovery bootstrap and uses configured copy for /new
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller ignores replied session files for /new", async () => {
+  const controller = await createController();
+  const calls = [];
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  const repliedSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "replied-old-session.jsonl",
+  );
+  await fs.mkdir(path.dirname(repliedSessionFile), { recursive: true });
+  await fs.writeFile(repliedSessionFile, "", "utf8");
+
+  let currentSessionFile;
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => currentSessionFile,
+      getSessionId: () => "session-new",
+      getSessionName: () => controller.chatKey,
+    },
+    newSession: async (options = {}) => {
+      calls.push(`newSession:${options.managedSessionLeaf}`);
+      currentSessionFile = path.join(
+        controller.agentDir,
+        "sessions",
+        "managed",
+        options.managedSessionLeaf,
+        "created-with-reply.jsonl",
+      );
+      return true;
+    },
+    switchSession: async (sessionFile) => {
+      calls.push(
+        `switchSession:${path.relative(controller.agentDir, sessionFile)}`,
+      );
+      currentSessionFile = sessionFile;
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: currentSessionFile,
+      sessionId: "session-new",
+    }),
+  };
+
+  await controller.runCommand("/new", "m-new", "m-new", repliedSessionFile);
+
+  assert.deepEqual(calls, ["newSession:chat"]);
+  assert.deepEqual(deliveries, ["Started a new session."]);
+  assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
+});
+
+test("chat controller ignores replied session files for non-new commands", async () => {
+  const controller = await createController();
+  controller.deliveryEnabled = false;
+  const calls = [];
+
+  const currentSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "current-chat.jsonl",
+  );
+  const repliedSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "replied-old-session.jsonl",
+  );
+  await fs.mkdir(path.dirname(currentSessionFile), { recursive: true });
+  await fs.writeFile(currentSessionFile, "", "utf8");
+  await fs.writeFile(repliedSessionFile, "", "utf8");
+
+  let liveSessionFile = currentSessionFile;
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => liveSessionFile,
+      getSessionId: () => "session-current",
+      getSessionName: () => controller.chatKey,
+    },
+    switchSession: async (sessionFile) => {
+      calls.push(
+        `switchSession:${path.relative(controller.agentDir, sessionFile)}`,
+      );
+      liveSessionFile = sessionFile;
+    },
+    ensureSessionReady: async () => {
+      calls.push("ensureSessionReady");
+      return {
+        sessionFile: liveSessionFile,
+        sessionId: "session-current",
+      };
+    },
+    runCommand: async (commandLine) => {
+      calls.push(`runCommand:${commandLine}`);
+      return { handled: true, text: "Compacted session." };
+    },
+  };
+
+  await controller.runCommand(
+    "/compact",
+    "m-compact",
+    "m-compact",
+    repliedSessionFile,
+  );
+
+  assert.deepEqual(calls, ["ensureSessionReady", "runCommand:/compact"]);
+  assert.equal(liveSessionFile, currentSessionFile);
+});
+
 test("chat controller uses configured command response overrides", async () => {
   const controller = await createController();
   controller.commandResponses = {

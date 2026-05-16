@@ -208,7 +208,7 @@ test("chat main treats /resume as a normal prompt after the command is removed",
   }
 });
 
-test("chat main forwards command sender identity to controller prompt context", async () => {
+test("chat main forwards command sender identity without reply session binding", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -223,10 +223,12 @@ test("chat main forwards command sender identity to controller prompt context", 
 
       const rootDir = process.env.RIN_REPO_ROOT;
       const agentDir = process.env.RIN_DIR;
+      const fs = await import("node:fs/promises");
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.js")).href);
       installChatControllerSessionClient(controllerMod.ChatController);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
       const seen = [];
@@ -247,6 +249,22 @@ test("chat main forwards command sender identity to controller prompt context", 
         seen.push({ commandLine, replyToMessageId, incomingMessageId, sessionFile, promptMeta });
         return { handled: true, text: "ok" };
       };
+
+      const repliedSessionFile = path.join(agentDir, "sessions", "replied-old-session.jsonl");
+      await fs.mkdir(path.dirname(repliedSessionFile), { recursive: true });
+      await fs.writeFile(repliedSessionFile, "", "utf8");
+      storeMod.saveChatMessage(agentDir, {
+        messageId: "assistant-old",
+        role: "assistant",
+        chatKey: "telegram/1:2",
+        platform: "telegram",
+        botId: "1",
+        chatId: "2",
+        chatType: "private",
+        receivedAt: new Date(1767225599000).toISOString(),
+        text: "old assistant reply",
+        sessionFile: repliedSessionFile,
+      });
 
       const { app } = await mainMod.startChatBridge();
       app.bots.push({
@@ -269,6 +287,7 @@ test("chat main forwards command sender identity to controller prompt context", 
         content: "/new",
         stripped: { content: "/new" },
         elements: [h.createChatRuntimeH().text("/new")],
+        quote: { messageId: "assistant-old" },
       });
 
       const deadline = Date.now() + 5000;
@@ -283,6 +302,7 @@ test("chat main forwards command sender identity to controller prompt context", 
         call.replyToMessageId !== "m-new" ||
         call.incomingMessageId !== "m-new" ||
         call.sessionFile !== "" ||
+        call.promptMeta?.replyToMessageId !== undefined ||
         call.promptMeta?.source !== "chat-bridge" ||
         "triggerKind" in (call.promptMeta || {}) ||
         call.promptMeta?.chatKey !== "telegram/1:2" ||
