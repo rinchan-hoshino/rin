@@ -74,11 +74,11 @@ function buildDaemonSocketScript(
   const resolvedSocketPath = resolveDaemonSocketPath(socketPath);
   const timeout = resolveTimeoutMs(timeoutMs, 500);
   return [
-    "const net=require('node:net');",
-    `const socketPath=${JSON.stringify(resolvedSocketPath)};`,
-    `const timeoutMs=${timeout};`,
+    "const net = require('node:net');",
+    `const socketPath = ${JSON.stringify(resolvedSocketPath)};`,
+    `const timeoutMs = ${timeout};`,
     body,
-  ].join("");
+  ].join("\n");
 }
 
 export function buildDaemonSocketProbeScript(
@@ -86,7 +86,19 @@ export function buildDaemonSocketProbeScript(
   timeoutMs = 500,
 ) {
   return buildDaemonSocketScript(
-    "const s=net.createConnection({path:socketPath});let done=false;const finish=(ok)=>{if(done)return;done=true;try{s.destroy()}catch{};process.exit(ok?0:1)};s.once('connect',()=>finish(true));s.once('error',()=>finish(false));setTimeout(()=>finish(false),timeoutMs);",
+    String.raw`
+const socket = net.createConnection({ path: socketPath });
+let settled = false;
+const finish = (ok) => {
+  if (settled) return;
+  settled = true;
+  try { socket.destroy(); } catch {}
+  process.exit(ok ? 0 : 1);
+};
+socket.once("connect", () => finish(true));
+socket.once("error", () => finish(false));
+setTimeout(() => finish(false), timeoutMs);
+`.trim(),
     socketPath,
     timeoutMs,
   );
@@ -102,7 +114,47 @@ export function buildDaemonStatusScript(
     createDaemonRequestPayload("daemon_status", id),
   );
   return buildDaemonSocketScript(
-    `const requestJson=${JSON.stringify(requestPayload)};const socket=net.createConnection({path:socketPath});let buffer='';let settled=false;const finish=(value)=>{if(settled)return;settled=true;try{socket.destroy()}catch{};process.stdout.write(JSON.stringify(value===undefined?null:value));};socket.once('error',()=>finish(undefined));socket.on('data',(chunk)=>{buffer+=String(chunk);while(true){const idx=buffer.indexOf('\\n');if(idx<0)break;let line=buffer.slice(0,idx);buffer=buffer.slice(idx+1);if(line.endsWith('\\r'))line=line.slice(0,-1);if(!line.trim())continue;try{const payload=JSON.parse(line);if(payload?.type==='response'&&payload?.command==='daemon_status'&&payload?.id===${JSON.stringify(id)}){finish(payload.success===true?payload.data:undefined);return;}}catch{finish(undefined);return;}}});socket.once('connect',()=>{socket.write(requestJson+'\\n');setTimeout(()=>finish(undefined),timeoutMs);});`,
+    String.raw`
+const requestJson = ${JSON.stringify(requestPayload)};
+const socket = net.createConnection({ path: socketPath });
+let buffer = "";
+let settled = false;
+const finish = (value) => {
+  if (settled) return;
+  settled = true;
+  clearTimeout(timer);
+  try { socket.destroy(); } catch {}
+  process.stdout.write(JSON.stringify(value === undefined ? null : value));
+};
+const timer = setTimeout(() => finish(undefined), timeoutMs);
+socket.once("error", () => finish(undefined));
+socket.on("data", (chunk) => {
+  buffer += String(chunk);
+  while (true) {
+    const idx = buffer.indexOf("\n");
+    if (idx < 0) break;
+    let line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (line.endsWith("\r")) line = line.slice(0, -1);
+    if (!line.trim()) continue;
+    try {
+      const payload = JSON.parse(line);
+      if (
+        payload?.type === "response" &&
+        payload?.command === "daemon_status" &&
+        payload?.id === ${JSON.stringify(id)}
+      ) {
+        finish(payload.success === true ? payload.data : undefined);
+        return;
+      }
+    } catch {
+      finish(undefined);
+      return;
+    }
+  }
+});
+socket.once("connect", () => socket.write(requestJson + "\n"));
+`.trim(),
     socketPath,
     timeoutMs,
   );
