@@ -326,10 +326,15 @@ test("compaction self-improve review completes synchronously before routine thre
 
 test("compaction self-improve review skips overflow recovery compaction", async () => {
   await withTempRoot(async (root) => {
+    const calls = [];
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
         return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
       },
     });
     const beforeCompact = definition.hooks.session_before_compact[0];
@@ -351,6 +356,7 @@ test("compaction self-improve review skips overflow recovery compaction", async 
       ctx,
     );
 
+    assert.deepEqual(calls, []);
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
@@ -618,6 +624,34 @@ test("automatic self-improve handlers require persisted sessions", async () => {
       await messageEnd({ message: assistantFinal() }, ctx);
     }
     await shutdown({}, ctx);
+
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+  });
+});
+
+test("session reload does not trigger self-improve shutdown maintenance", async () => {
+  await withTempRoot(async (root) => {
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+    });
+    const shutdown = definition.hooks.session_shutdown[0];
+    const sessionFile = path.join(root, "sessions", "reload-summary.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "reload-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-reload-summary",
+        isPersisted: () => true,
+      },
+    };
+
+    await shutdown({ reason: "reload" }, ctx);
 
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });

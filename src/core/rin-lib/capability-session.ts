@@ -332,8 +332,8 @@ export function createRinCapabilitySet(options: {
   return capabilitySet;
 }
 
-const RIN_EXTENSION_RUNNER_EVENTS = new Set(["session_before_compact"]);
-const RIN_EXTENSION_RUNNER_BEFORE_EVENTS = new Set(["session_before_compact"]);
+const RIN_EXTENSION_RUNNER_EVENTS = new Set<string>();
+const RIN_EXTENSION_RUNNER_BEFORE_EVENTS = new Set<string>();
 const RIN_EXTENSION_RUNNER_PATCH_KEY = Symbol.for(
   "rin.capabilityExtensionRunnerPatch",
 );
