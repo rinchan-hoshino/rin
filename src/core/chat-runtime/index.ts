@@ -1458,23 +1458,27 @@ class OneBotAdapter {
 
   getWorkingIndicators(context: any) {
     const chatId = safeString(context?.chatId).trim();
+    if (chatId.startsWith("private:")) {
+      return [
+        {
+          type: "marker",
+          start: async (startContext: any) =>
+            await this.startPrivateWorkingNotice(startContext),
+        },
+      ];
+    }
     return [
       {
         type: "polling",
         tick: async (tickContext: any) =>
-          chatId.startsWith("private:")
-            ? await this.tickPrivateWorkingNotice(tickContext)
-            : await this.tickGroupWorkingReaction(tickContext),
+          await this.tickGroupWorkingReaction(tickContext),
         end: async (endContext: any) =>
-          chatId.startsWith("private:")
-            ? false
-            : await this.endGroupWorkingReaction(endContext),
+          await this.endGroupWorkingReaction(endContext),
       },
     ];
   }
 
-  async tickPrivateWorkingNotice(context: any) {
-    if (Number(context?.tick || 0) !== 0) return false;
+  async startPrivateWorkingNotice(context: any) {
     const chatId = safeString(context?.chatId).trim();
     if (!chatId.startsWith("private:")) return false;
     const targetId = Number(chatId.replace(/^private:/, "").trim());

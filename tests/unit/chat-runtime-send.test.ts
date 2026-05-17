@@ -506,6 +506,44 @@ test("lark adapter sends quote nodes through the native reply endpoint", async (
   });
 });
 
+test("onebot private working indicator is a one-shot marker", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { endpoint: "ws://127.0.0.1:1" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      return { message_id: "notice-1" };
+    };
+
+    const [indicator] = app.bots[0].getWorkingIndicators({
+      chatId: "private:2",
+    });
+
+    assert.equal(indicator.type, "marker");
+    assert.equal(typeof indicator.tick, "undefined");
+    assert.equal(
+      await indicator.start({ chatId: "private:2", messageId: "m1" }),
+      true,
+    );
+
+    assert.deepEqual(calls, [
+      {
+        action: "send_private_msg",
+        params: {
+          user_id: 2,
+          message: "[CQ:reply,id=m1]Working...",
+          auto_escape: false,
+        },
+      },
+    ]);
+  });
+});
+
 test("discord working indicator replaces the previous reaction frame", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
