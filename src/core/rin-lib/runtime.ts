@@ -672,6 +672,16 @@ export function applyRinRetryableProviderErrors(session: any) {
   (session as any)[RETRYABLE_PROVIDER_ERRORS_KEY] = { original };
 }
 
+function readCurrentSessionSystemPrompt(session: any) {
+  try {
+    return ensureSessionBaseSystemPrompt(session);
+  } catch {
+    return String(
+      session?._baseSystemPrompt || session?.agent?.state?.systemPrompt || "",
+    );
+  }
+}
+
 export function applyMidTurnCompaction(
   session: any,
   thresholdPercent = DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT,
@@ -689,6 +699,7 @@ export function applyMidTurnCompaction(
 
   let inPreflight = false;
   let injectCueForCurrentCall = false;
+  let postCompactionSystemPrompt = "";
 
   agent.transformContext = async (messages: any[], signal?: AbortSignal) => {
     const transformed = originalTransformContext
@@ -716,6 +727,7 @@ export function applyMidTurnCompaction(
         ? session.agent.state.messages
         : transformed;
       mutateMessageArray(messages, compactedMessages);
+      postCompactionSystemPrompt = readCurrentSessionSystemPrompt(session);
       injectCueForCurrentCall = true;
       return compactedMessages;
     } finally {
@@ -730,9 +742,10 @@ export function applyMidTurnCompaction(
     injectCueForCurrentCall = false;
     const nextContext = await buildMidTurnLlmContext(
       session,
-      String(context?.systemPrompt || ""),
+      postCompactionSystemPrompt || String(context?.systemPrompt || ""),
       context?.tools,
     );
+    postCompactionSystemPrompt = "";
     return await originalStreamFn(model, nextContext, options);
   };
 
@@ -774,15 +787,65 @@ export function applyAutoReloadAfterCompaction(session: any) {
     return reloadInFlight;
   };
 
+  let compactionDepth = 0;
+  let pendingCompactionReload = false;
+
+  const finishCompactionReload = async () => {
+    compactionDepth -= 1;
+    if (compactionDepth > 0 || !pendingCompactionReload) return;
+    pendingCompactionReload = false;
+    await runReload();
+  };
+
+  const originalRunAutoCompaction =
+    typeof session._runAutoCompaction === "function"
+      ? session._runAutoCompaction.bind(session)
+      : null;
+  if (originalRunAutoCompaction) {
+    session._runAutoCompaction = async function patchedAutoReloadCompaction(
+      ...args: any[]
+    ) {
+      compactionDepth += 1;
+      try {
+        return await originalRunAutoCompaction(...args);
+      } finally {
+        await finishCompactionReload();
+      }
+    };
+  }
+
+  const originalCompact =
+    typeof session.compact === "function"
+      ? session.compact.bind(session)
+      : null;
+  if (originalCompact) {
+    session.compact = async function patchedManualReloadCompaction(
+      ...args: any[]
+    ) {
+      compactionDepth += 1;
+      try {
+        return await originalCompact(...args);
+      } finally {
+        await finishCompactionReload();
+      }
+    };
+  }
+
   const unsubscribe = session.subscribe((event: any) => {
     if (event?.type !== "compaction_end") return;
     if (event?.aborted || !event?.result) return;
-    setTimeout(() => {
-      void runReload();
-    }, 0);
+    if (compactionDepth > 0) {
+      pendingCompactionReload = true;
+      return;
+    }
+    void runReload();
   });
 
-  (session as any)[AUTO_RELOAD_AFTER_COMPACTION_KEY] = { unsubscribe };
+  (session as any)[AUTO_RELOAD_AFTER_COMPACTION_KEY] = {
+    unsubscribe,
+    originalRunAutoCompaction,
+    originalCompact,
+  };
 }
 
 export {
@@ -799,6 +862,114 @@ export {
   PI_AGENT_DIR_ENV,
   RIN_DIR_ENV,
 };
+
+const RIN_BEFORE_COMPACTION_HOOKS_KEY = Symbol.for("rin.beforeCompactionHooks");
+const RIN_RUNTIME_SESSION_SHUTDOWN_KEY = Symbol.for(
+  "rin.runtimeSessionShutdown",
+);
+
+async function emitRinCapabilityEvent(session: any, event: any) {
+  const type = String(event?.type || "").trim();
+  const capabilitySet = session?.__rinCapabilities;
+  if (!type || !capabilitySet || typeof capabilitySet.emit !== "function") {
+    return;
+  }
+  if (
+    typeof capabilitySet.hasHandlers === "function" &&
+    !capabilitySet.hasHandlers(type)
+  ) {
+    return;
+  }
+  await capabilitySet.emit(event);
+}
+
+async function emitRinBeforeCompaction(session: any, event: any) {
+  await emitRinCapabilityEvent(session, {
+    type: "session_before_compact",
+    ...(event || {}),
+  });
+}
+
+export function applyRinBeforeCompactionHooks(session: any) {
+  if (!session || typeof session !== "object") return;
+  if (session[RIN_BEFORE_COMPACTION_HOOKS_KEY]) return;
+
+  const originalRunAutoCompaction =
+    typeof session._runAutoCompaction === "function"
+      ? session._runAutoCompaction.bind(session)
+      : null;
+  if (originalRunAutoCompaction) {
+    session._runAutoCompaction = async function patchedRinBeforeAutoCompaction(
+      reason: string,
+      willRetry: boolean,
+      ...args: any[]
+    ) {
+      await emitRinBeforeCompaction(session, { reason });
+      return await originalRunAutoCompaction(reason, willRetry, ...args);
+    };
+  }
+
+  const originalCompact =
+    typeof session.compact === "function"
+      ? session.compact.bind(session)
+      : null;
+  if (originalCompact) {
+    session.compact = async (...args: any[]) => {
+      await emitRinBeforeCompaction(session, { reason: "manual" });
+      return await originalCompact(...args);
+    };
+  }
+
+  session[RIN_BEFORE_COMPACTION_HOOKS_KEY] = {
+    originalRunAutoCompaction,
+    originalCompact,
+  };
+}
+
+async function emitRinSessionShutdown(session: any, event: any) {
+  await emitRinCapabilityEvent(session, {
+    type: "session_shutdown",
+    ...(event || {}),
+  });
+}
+
+export function patchRinRuntimeSessionShutdown(runtime: any) {
+  if (!runtime || typeof runtime !== "object") return;
+  if (runtime[RIN_RUNTIME_SESSION_SHUTDOWN_KEY]) return;
+
+  const originalTeardownCurrent =
+    typeof runtime.teardownCurrent === "function"
+      ? runtime.teardownCurrent.bind(runtime)
+      : null;
+  if (originalTeardownCurrent) {
+    runtime.teardownCurrent = async (
+      reason: string,
+      targetSessionFile?: string,
+    ) => {
+      await emitRinSessionShutdown(runtime.session, {
+        reason,
+        targetSessionFile,
+      });
+      return await originalTeardownCurrent(reason, targetSessionFile);
+    };
+  }
+
+  const originalDispose =
+    typeof runtime.dispose === "function"
+      ? runtime.dispose.bind(runtime)
+      : null;
+  if (originalDispose) {
+    runtime.dispose = async (...args: any[]) => {
+      await emitRinSessionShutdown(runtime.session, { reason: "quit" });
+      return await originalDispose(...args);
+    };
+  }
+
+  runtime[RIN_RUNTIME_SESSION_SHUTDOWN_KEY] = {
+    originalTeardownCurrent,
+    originalDispose,
+  };
+}
 
 const BACKEND_TOOL_EXECUTION_LOCKS_KEY = Symbol.for(
   "rin.backendToolExecutionLocks",
@@ -1089,6 +1260,7 @@ export async function createConfiguredAgentSession(
     clearCompactionContinuationMarker(result.session);
 
     applyRinPromptBuilder(result.session);
+    applyRinBeforeCompactionHooks(result.session);
     applyDisableEndTurnThresholdCompaction(result.session);
     applyRinRetryableProviderErrors(result.session);
     applyMidTurnCompaction(result.session);
@@ -1106,6 +1278,7 @@ export async function createConfiguredAgentSession(
     agentDir,
     sessionManager: initialSessionManager,
   });
+  patchRinRuntimeSessionShutdown(runtime);
 
   return {
     session: runtime.session,

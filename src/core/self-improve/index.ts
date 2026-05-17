@@ -229,7 +229,8 @@ export default function selfImproveModule(
         },
       ],
       session_shutdown: [
-        async (_event, ctx) => {
+        async (event, ctx) => {
+          if (String(event?.reason || "").trim() === "reload") return;
           const meta = sessionMeta(ctx);
           if (!meta.sessionPersisted) {
             if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);

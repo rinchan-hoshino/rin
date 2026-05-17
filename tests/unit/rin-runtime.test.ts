@@ -28,6 +28,69 @@ test("getManagedSkillPaths includes agent memory skills and builtin skills", () 
   ]);
 });
 
+test("auto compaction emits Rin before-compact hooks without extension-runner bridging", async () => {
+  const calls = [];
+  const session = {
+    __rinCapabilities: {
+      hasHandlers(eventName) {
+        calls.push(`has:${eventName}`);
+        return eventName === "session_before_compact";
+      },
+      async emit(event) {
+        calls.push(`emit:${event.reason}`);
+      },
+    },
+    async _runAutoCompaction(reason, willRetry) {
+      calls.push(`compact:${reason}:${willRetry}`);
+    },
+  };
+
+  runtimeMod.applyRinBeforeCompactionHooks(session);
+  await session._runAutoCompaction("threshold", false);
+
+  assert.deepEqual(calls, [
+    "has:session_before_compact",
+    "emit:threshold",
+    "compact:threshold:false",
+  ]);
+});
+
+test("runtime session shutdown emits Rin capability hooks without extension-runner bridging", async () => {
+  const calls = [];
+  const runtime = {
+    session: {
+      __rinCapabilities: {
+        hasHandlers(eventName) {
+          calls.push(`has:${eventName}`);
+          return eventName === "session_shutdown";
+        },
+        async emit(event) {
+          calls.push(`emit:${event.reason}:${event.targetSessionFile || ""}`);
+        },
+      },
+    },
+    async teardownCurrent(reason, targetSessionFile) {
+      calls.push(`teardown:${reason}:${targetSessionFile}`);
+    },
+    async dispose() {
+      calls.push("dispose");
+    },
+  };
+
+  runtimeMod.patchRinRuntimeSessionShutdown(runtime);
+  await runtime.teardownCurrent("new", "/tmp/next-session.jsonl");
+  await runtime.dispose();
+
+  assert.deepEqual(calls, [
+    "has:session_shutdown",
+    "emit:new:/tmp/next-session.jsonl",
+    "teardown:new:/tmp/next-session.jsonl",
+    "has:session_shutdown",
+    "emit:quit:",
+    "dispose",
+  ]);
+});
+
 test("applyAutoReloadAfterCompaction reloads after successful compaction only once per session", async () => {
   const listeners = [];
   let subscribeCount = 0;
@@ -106,6 +169,92 @@ test("applyAutoReloadAfterCompaction queues one extra reload while a reload is i
   assert.equal(reloadCount, 2);
 });
 
+test("auto compaction waits for refresh before returning", async () => {
+  const listeners = [];
+  let reloadCount = 0;
+  const sourceMessages = [
+    {
+      role: "user",
+      content: [{ type: "text", text: "x".repeat(400) }],
+    },
+  ];
+  const agent = {
+    state: { messages: [...sourceMessages] },
+    async streamFn() {
+      return { fake: true };
+    },
+  };
+  const session = {
+    model: { provider: "openai", id: "gpt-test", contextWindow: 100 },
+    agent,
+    subscribe(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload() {
+      reloadCount += 1;
+      this._baseSystemPrompt = `fresh prompt ${reloadCount}`;
+      agent.state.systemPrompt = this._baseSystemPrompt;
+    },
+    async _runAutoCompaction() {
+      agent.state.messages = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "compacted" }],
+        },
+      ];
+      for (const listener of listeners) {
+        listener({
+          type: "compaction_end",
+          reason: "threshold",
+          aborted: false,
+          result: { summary: "ok" },
+        });
+      }
+    },
+  };
+
+  runtimeMod.applyAutoReloadAfterCompaction(session);
+  runtimeMod.applyMidTurnCompaction(session, 50);
+  await agent.transformContext(sourceMessages, undefined);
+
+  assert.equal(reloadCount, 1);
+});
+
+test("manual compaction waits for refresh before returning", async () => {
+  const listeners = [];
+  let reloadCount = 0;
+  const sequence = [];
+  const session = {
+    subscribe(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload() {
+      reloadCount += 1;
+      sequence.push("reload");
+    },
+    async compact() {
+      for (const listener of listeners) {
+        listener({
+          type: "compaction_end",
+          reason: "manual",
+          aborted: false,
+          result: { summary: "ok" },
+        });
+      }
+      sequence.push("compact-done");
+      return { summary: "ok" };
+    },
+  };
+
+  runtimeMod.applyAutoReloadAfterCompaction(session);
+  await session.compact();
+
+  assert.equal(reloadCount, 1);
+  assert.deepEqual(sequence, ["compact-done", "reload"]);
+});
+
 test("applyDisableEndTurnThresholdCompaction preserves overflow and skips normal threshold checks", async () => {
   let originalCalls = 0;
   const overflowMessage = {
@@ -140,7 +289,9 @@ test("applyDisableEndTurnThresholdCompaction preserves overflow and skips normal
 });
 
 test("applyMidTurnCompaction compacts before a provider call and injects continuation cue", async () => {
+  const listeners = [];
   let compactCalls = 0;
+  let reloadCalls = 0;
   let seenContext;
   const sourceMessages = [
     {
@@ -163,6 +314,15 @@ test("applyMidTurnCompaction compacts before a provider call and injects continu
   const session = {
     model: { provider: "openai", id: "gpt-test", contextWindow: 100 },
     agent,
+    subscribe(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload() {
+      reloadCalls += 1;
+      this._baseSystemPrompt = "fresh prompt after memory maintenance";
+      agent.state.systemPrompt = this._baseSystemPrompt;
+    },
     async _runAutoCompaction(reason, willRetry) {
       compactCalls += 1;
       assert.equal(reason, "threshold");
@@ -173,20 +333,38 @@ test("applyMidTurnCompaction compacts before a provider call and injects continu
           content: [{ type: "text", text: "compacted" }],
         },
       ];
+      for (const listener of listeners) {
+        listener({
+          type: "compaction_end",
+          reason: "threshold",
+          aborted: false,
+          result: { summary: "ok" },
+        });
+      }
     },
   };
 
+  runtimeMod.applyAutoReloadAfterCompaction(session);
   runtimeMod.applyMidTurnCompaction(session, 50);
   const transformed = await agent.transformContext(sourceMessages, undefined);
   assert.equal(compactCalls, 1);
+  assert.equal(reloadCalls, 1);
   assert.equal(transformed[0].content[0].text, "compacted");
   assert.equal(sourceMessages[0].content[0].text, "compacted");
 
   await agent.streamFn(session.model, {
-    systemPrompt: "base prompt",
+    systemPrompt: "stale prompt before memory maintenance",
     messages: transformed,
     tools: [],
   });
+  assert.ok(
+    seenContext.systemPrompt.includes("fresh prompt after memory maintenance"),
+  );
+  assert.ok(
+    !seenContext.systemPrompt.includes(
+      "stale prompt before memory maintenance",
+    ),
+  );
   assert.ok(
     seenContext.systemPrompt.includes(
       "Context compacted; treat this as a routine internal checkpoint.",
