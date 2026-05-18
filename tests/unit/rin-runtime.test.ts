@@ -36,6 +36,9 @@ test("auto compaction emits Rin before-compact hooks without extension-runner br
         calls.push(`emit:${event.reason}`);
       },
     },
+    _emit(event) {
+      calls.push(`event:${event.type}:${event.compactionReason || ""}`);
+    },
     async _runAutoCompaction(reason, willRetry) {
       calls.push(`compact:${reason}:${willRetry}`);
     },
@@ -46,7 +49,9 @@ test("auto compaction emits Rin before-compact hooks without extension-runner br
 
   assert.deepEqual(calls, [
     "has:session_before_compact",
+    "event:rin_working_start:threshold",
     "emit:threshold",
+    "event:rin_working_end:threshold",
     "compact:threshold:false",
   ]);
 });

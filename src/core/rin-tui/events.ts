@@ -34,6 +34,10 @@ export async function handleRpcSessionEvent(
   if (payload.type === "agent_start") {
     setRemoteTurnRunning(true);
   }
+  if (payload.type === "rin_working_start") {
+    target.rinWorking = true;
+    setRemoteTurnRunning(true);
+  }
   if (
     payload.type === "rpc_turn_event" &&
     (payload.event === "start" || payload.event === "heartbeat")
@@ -43,8 +47,13 @@ export async function handleRpcSessionEvent(
   if (payload.type === "compaction_start") {
     target.isCompacting = true;
   }
+  if (payload.type === "rin_working_end") {
+    target.rinWorking = false;
+    if (!target.isCompacting) setRemoteTurnRunning(false);
+  }
   if (payload.type === "compaction_end") {
     target.isCompacting = false;
+    if (target.rinWorking === false) setRemoteTurnRunning(false);
     void refreshMessagesAndSession();
   }
   if (payload.type === "auto_retry_start")
@@ -81,6 +90,8 @@ export async function handleRpcSessionEvent(
   }
   target.emitEvent(payload);
   if (
+    payload.type === "rin_working_start" ||
+    payload.type === "rin_working_end" ||
     payload.type === "compaction_start" ||
     payload.type === "compaction_end"
   ) {

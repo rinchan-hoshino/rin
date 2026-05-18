@@ -79,6 +79,8 @@ export type RinFrontendBackendEvent =
       isStreaming?: boolean;
     }
   | { type: "turn_accepted"; requestTag?: string }
+  | { type: "external_working_start" }
+  | { type: "external_working_end" }
   | { type: "assistant_stream"; text: string }
   | { type: "assistant_interim"; text: string }
   | {

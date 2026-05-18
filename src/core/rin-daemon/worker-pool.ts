@@ -46,6 +46,7 @@ export type WorkerHandle = {
   turnActive: boolean;
   isStreaming: boolean;
   isCompacting: boolean;
+  rinWorking: boolean;
   lastUsedAt: number;
   idleSince: number | null;
   gracefulShutdownRequested: boolean;
@@ -83,7 +84,12 @@ const RESUMABLE_COMMAND_TYPES = new Set([
 ]);
 
 function hasResumableWorkerActivity(worker: WorkerHandle) {
-  if (worker.turnActive || worker.isStreaming || worker.isCompacting) {
+  if (
+    worker.turnActive ||
+    worker.isStreaming ||
+    worker.isCompacting ||
+    worker.rinWorking
+  ) {
     return true;
   }
   for (const pending of worker.pendingResponses.values()) {
@@ -385,7 +391,7 @@ export class WorkerPool {
         ? "stopping"
         : worker.isCompacting
           ? "compacting"
-          : worker.turnActive || worker.isStreaming
+          : worker.turnActive || worker.isStreaming || worker.rinWorking
             ? "working"
             : worker.idleSince
               ? "idle"
@@ -400,6 +406,7 @@ export class WorkerPool {
         turnActive: worker.turnActive,
         isStreaming: worker.isStreaming,
         isCompacting: worker.isCompacting,
+        rinWorking: worker.rinWorking,
         state,
         lastUsedAt: worker.lastUsedAt,
         idleSince: worker.idleSince,
@@ -531,6 +538,7 @@ export class WorkerPool {
         worker.turnActive = Boolean(data.turnActive ?? data.isStreaming);
         worker.isStreaming = Boolean(data.isStreaming);
         worker.isCompacting = Boolean(data.isCompacting);
+        worker.rinWorking = false;
         this.maybeReleaseWorker(worker);
         return;
       }
@@ -543,6 +551,13 @@ export class WorkerPool {
     if (payload.type === "agent_end") {
       worker.turnActive = false;
       worker.isStreaming = false;
+      this.maybeReleaseWorker(worker);
+    }
+    if (payload.type === "rin_working_start") {
+      worker.rinWorking = true;
+    }
+    if (payload.type === "rin_working_end") {
+      worker.rinWorking = false;
       this.maybeReleaseWorker(worker);
     }
     if (payload.type === "compaction_start") {
@@ -607,6 +622,7 @@ export class WorkerPool {
       turnActive: false,
       isStreaming: false,
       isCompacting: false,
+      rinWorking: false,
       lastUsedAt: Date.now(),
       idleSince: null,
       gracefulShutdownRequested: false,

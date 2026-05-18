@@ -840,26 +840,47 @@ const RIN_RUNTIME_SESSION_SHUTDOWN_KEY = Symbol.for(
   "rin.runtimeSessionShutdown",
 );
 
-async function emitRinCapabilityEvent(session: any, event: any) {
-  const type = String(event?.type || "").trim();
+function hasRinCapabilityHandlers(session: any, type: string) {
   const capabilitySet = session?.__rinCapabilities;
   if (!type || !capabilitySet || typeof capabilitySet.emit !== "function") {
-    return;
+    return false;
   }
-  if (
-    typeof capabilitySet.hasHandlers === "function" &&
-    !capabilitySet.hasHandlers(type)
-  ) {
-    return;
-  }
-  await capabilitySet.emit(event);
+  if (typeof capabilitySet.hasHandlers !== "function") return true;
+  return capabilitySet.hasHandlers(type);
+}
+
+async function emitRinCapabilityEvent(session: any, event: any) {
+  const type = String(event?.type || "").trim();
+  if (!hasRinCapabilityHandlers(session, type)) return;
+  await session.__rinCapabilities.emit(event);
+}
+
+function emitRinSessionEvent(session: any, event: any) {
+  try {
+    session?._emit?.(event);
+  } catch {}
 }
 
 async function emitRinBeforeCompaction(session: any, event: any) {
-  await emitRinCapabilityEvent(session, {
+  const payload = {
     type: "session_before_compact",
     ...(event || {}),
+  };
+  if (!hasRinCapabilityHandlers(session, payload.type)) return;
+  emitRinSessionEvent(session, {
+    type: "rin_working_start",
+    reason: "session_before_compact",
+    compactionReason: payload.reason,
   });
+  try {
+    await session.__rinCapabilities.emit(payload);
+  } finally {
+    emitRinSessionEvent(session, {
+      type: "rin_working_end",
+      reason: "session_before_compact",
+      compactionReason: payload.reason,
+    });
+  }
 }
 
 export function applyRinBeforeCompactionHooks(session: any) {

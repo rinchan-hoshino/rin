@@ -38,6 +38,23 @@ test("frontend backend event translator exposes status as a shared frontend even
   );
 });
 
+test("frontend backend event translator exposes compaction review as external working", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(translator.translate({ type: "rin_working_start" }), [
+    { type: "external_working_start" },
+  ]);
+  assert.deepEqual(translator.translate({ type: "rin_working_end" }), [
+    { type: "external_working_end" },
+  ]);
+  assert.deepEqual(translator.translate({ type: "compaction_start" }), [
+    { type: "external_working_start" },
+  ]);
+  assert.deepEqual(translator.translate({ type: "compaction_end" }), [
+    { type: "external_working_end" },
+  ]);
+});
+
 test("frontend backend event translator classifies assistant tool preface as interim", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 

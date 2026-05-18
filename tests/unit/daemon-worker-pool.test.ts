@@ -871,6 +871,38 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("worker status snapshot treats Rin pre-compaction work as working", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker.mjs");
+  await fs.writeFile(
+    workerPath,
+    `process.stdout.write(JSON.stringify({ type: "rin_working_start", reason: "session_before_compact" }) + "\\n");
+process.stdin.resume();
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    { type: "new_session" },
+  );
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const status = pool.getStatusSnapshot();
+    if (status.workers[0]?.rinWorking) break;
+    await sleep(25);
+  }
+
+  const status = pool.getStatusSnapshot();
+  assert.equal(status.activeWorkerCount, 1);
+  assert.equal(status.workers[0]?.rinWorking, true);
+  assert.equal(status.workers[0]?.state, "working");
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("worker status snapshot exposes graceful shutdown state", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");

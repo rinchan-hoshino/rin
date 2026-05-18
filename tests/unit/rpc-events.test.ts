@@ -152,6 +152,47 @@ test("rpc session events do not refresh whole state on every stream update", asy
   ]);
 });
 
+test("rpc session events expose Rin pre-compaction work as working", async () => {
+  const seen = [];
+  const target = {
+    isStreaming: false,
+    isCompacting: false,
+    remoteTurnRunning: false,
+    setRemoteTurnRunning(value) {
+      this.remoteTurnRunning = value;
+      this.isStreaming = value;
+    },
+    emitFrontendStatus(force) {
+      seen.push({ type: "frontend_status_refresh", force });
+    },
+    emitEvent: (event) => seen.push(event),
+  };
+
+  await events.handleRpcSessionEvent(
+    target,
+    { type: "rin_working_start", reason: "session_before_compact" },
+    async () => {},
+    async () => {},
+  );
+  assert.equal(target.remoteTurnRunning, true);
+  assert.equal(target.rinWorking, true);
+
+  await events.handleRpcSessionEvent(
+    target,
+    { type: "rin_working_end", reason: "session_before_compact" },
+    async () => {},
+    async () => {},
+  );
+  assert.equal(target.remoteTurnRunning, false);
+  assert.equal(target.rinWorking, false);
+  assert.deepEqual(seen, [
+    { type: "rin_working_start", reason: "session_before_compact" },
+    { type: "frontend_status_refresh", force: true },
+    { type: "rin_working_end", reason: "session_before_compact" },
+    { type: "frontend_status_refresh", force: true },
+  ]);
+});
+
 test("rpc session events delegate worker exit recovery to the runtime when available", async () => {
   const seen = [];
   let refreshMessages = 0;

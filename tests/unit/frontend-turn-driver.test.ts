@@ -141,6 +141,24 @@ function createFrontendClient() {
   };
 }
 
+test("external compaction review work drives the frontend working phase", async () => {
+  const driver = createDriver();
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+
+  await emitDriverEvent(driver, { type: "rin_working_start" });
+  await emitDriverEvent(driver, { type: "rin_working_end" });
+  await emitDriverEvent(driver, { type: "compaction_start" });
+  await emitDriverEvent(driver, { type: "compaction_end" });
+
+  assert.deepEqual(seen, [
+    { type: "frontend_status", phase: "working" },
+    { type: "frontend_status", phase: "idle" },
+    { type: "frontend_status", phase: "working" },
+    { type: "frontend_status", phase: "idle" },
+  ]);
+});
+
 async function emitRpcTurnComplete(
   driver: any,
   requestTag: string,

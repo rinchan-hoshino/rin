@@ -129,6 +129,7 @@ export class RinFrontendTurnDriver {
   latestAssistantText = "";
   assistantFinalReplyCommitted = false;
   frontendPhase: RinFrontendTurnPhase = "idle";
+  private externalWorkingDepth = 0;
   listeners = new Set<(event: RinFrontendTurnDriverEvent) => void>();
   private reconnectingTurnPromise: Promise<void> | null = null;
   private liveTurnRecoveryContext: {
@@ -1119,6 +1120,20 @@ export class RinFrontendTurnDriver {
       case "turn_accepted":
         this.frontendState.turnActive = true;
         this.emit({ type: "turn_accepted" });
+        return;
+      case "external_working_start":
+        this.externalWorkingDepth += 1;
+        this.setFrontendPhase("working");
+        return;
+      case "external_working_end":
+        this.externalWorkingDepth = Math.max(0, this.externalWorkingDepth - 1);
+        if (
+          this.externalWorkingDepth === 0 &&
+          !this.liveTurn &&
+          !this.isStreaming()
+        ) {
+          this.setFrontendPhase("idle");
+        }
         return;
       case "assistant_stream":
         this.latestAssistantText = event.text;

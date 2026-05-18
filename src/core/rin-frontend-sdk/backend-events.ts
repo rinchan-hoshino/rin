@@ -174,10 +174,14 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
           const interim = takeInterim(assistantInterimText(payload.message));
           return interim ? [interim] : [];
         }
+        case "rin_working_start":
+        case "compaction_start":
+          return [{ type: "external_working_start" }];
+        case "rin_working_end":
+        case "compaction_end":
+          return [{ type: "external_working_end" }];
         case "tool_execution_start":
         case "tool_execution_end":
-        case "compaction_start":
-        case "compaction_end":
           return [{ type: "turn_accepted" }];
         default:
           return [];
