@@ -350,9 +350,11 @@ export async function runBuiltinCommand(
   );
   switch (command) {
     case "abort":
+      session.abortCompaction?.();
       await session.abort();
       return handledText(commandResponses.abort);
     case "new":
+      session.abortCompaction?.();
       await session.abort();
       await runtime.newSession();
       return handledText(commandResponses.new);

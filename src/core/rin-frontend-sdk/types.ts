@@ -221,6 +221,10 @@ export interface RinFrontendClient {
   getMessages(): Promise<unknown[]>;
   getCommands(): Promise<RinFrontendCommandItem[]>;
   runCommand(commandLine: string): Promise<unknown>;
+  compact(
+    customInstructions?: string,
+    options?: { sessionFile?: string },
+  ): Promise<unknown>;
   getCommandArgumentCompletions(
     commandName: string,
     argumentPrefix: string,

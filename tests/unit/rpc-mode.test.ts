@@ -87,6 +87,63 @@ test(
 );
 
 test(
+  "rpc mode abort cancels active compaction before aborting the agent",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const calls: string[] = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function () {
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: true,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        abortCompaction: () => {
+          calls.push("session.abortCompaction");
+        },
+        abort: async () => {
+          calls.push("session.abort");
+        },
+      };
+      const runtime = { session };
+
+      void runCustomRpcMode(runtime, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(Buffer.from(`${JSON.stringify({ id: "1", type: "abort" })}\n`));
+      await wait(20);
+
+      assert.deepEqual(calls, ["session.abortCompaction", "session.abort"]);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode bridges extension UI dialog requests and responses",
   { concurrency: false },
   async () => {

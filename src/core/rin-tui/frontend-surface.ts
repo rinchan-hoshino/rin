@@ -109,6 +109,10 @@ export interface RpcFrontendClient extends InteractiveFrontendSurface {
   prompt(text: string, options?: Record<string, unknown>): Promise<void>;
   getState(): Promise<Record<string, unknown>>;
   runCommand(commandLine: string): Promise<unknown>;
+  compact(
+    customInstructions?: string,
+    options?: { sessionFile?: string },
+  ): Promise<unknown>;
   newSession(options?: RinNewSessionOptions): Promise<RinNewSessionResult>;
   setModel(
     provider: string,

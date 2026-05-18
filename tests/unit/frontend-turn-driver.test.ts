@@ -71,6 +71,10 @@ function createFrontendClient() {
       calls.push({ type: "runCommand", commandLine });
       return { handled: true, text: "command done", sessionFile };
     },
+    async compact(customInstructions?: string, options: any = {}) {
+      calls.push({ type: "compact", customInstructions, options });
+      return { handled: true, text: "compact done", sessionFile };
+    },
     async terminateSession() {
       calls.push({ type: "terminateSession" });
     },
@@ -185,6 +189,27 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
     source: "chat-bridge",
     chatKey: "telegram/1:2",
   });
+});
+
+test("frontend SDK turn driver routes compact through the native compact client method", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+
+  const result = await driver.runCommand("/compact keep recent plan");
+
+  assert.equal(result.text, "compact done");
+  assert.deepEqual(
+    client.calls.filter((call: any) =>
+      ["compact", "runCommand"].includes(call.type),
+    ),
+    [
+      {
+        type: "compact",
+        customInstructions: "keep recent plan",
+        options: { sessionFile: "/tmp/frontend-chat.jsonl" },
+      },
+    ],
+  );
 });
 
 test("frontend SDK turn driver uses configured built-in command responses", async () => {
@@ -405,11 +430,12 @@ test("frontend SDK turn driver carries sessionFile on restored commands", async 
   await driver.runCommand("/compact", { restoreSessionFile: sessionFile });
 
   assert.deepEqual(
-    client.calls.find(
-      (call: any) =>
-        call.type === "request" && call.command.type === "run_command",
-    )?.command,
-    { type: "run_command", commandLine: "/compact", sessionFile },
+    client.calls.find((call: any) => call.type === "compact"),
+    {
+      type: "compact",
+      customInstructions: undefined,
+      options: { sessionFile },
+    },
   );
 });
 

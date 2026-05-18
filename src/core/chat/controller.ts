@@ -583,7 +583,17 @@ export class ChatController {
         text: data?.cancelled ? responses.newCancelled : responses.new,
       };
     }
-    if (commandName === "compact") return { ...data, text: responses.compact };
+    if (commandName === "compact") {
+      if (data?.compactionBusy) {
+        return {
+          ...data,
+          text:
+            safeString(data?.text || "").trim() ||
+            "Compaction already in progress.",
+        };
+      }
+      return { ...data, text: responses.compact };
+    }
     if (commandName === "reload") return { ...data, text: responses.reload };
     return data;
   }
@@ -883,6 +893,9 @@ export class ChatController {
           : undefined;
     this.lastActivityAt = Date.now();
     await this.connect({ restoreSession: !skipSessionRecovery });
+    if (["abort", "new", "compact", "reload"].includes(commandName)) {
+      this.markAcceptedMessage(incomingMessageId);
+    }
     try {
       let data: any = await this.driver.runCommand(commandLine, {
         skipSessionRecovery,

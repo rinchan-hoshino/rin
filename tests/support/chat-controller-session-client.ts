@@ -92,6 +92,14 @@ function createSessionFrontendClient(controller) {
     async runCommand(commandLine) {
       return await controller.session?.runCommand?.(commandLine);
     },
+    async compact(customInstructions) {
+      if (typeof controller.session?.compact === "function") {
+        return await controller.session.compact(customInstructions);
+      }
+      return await controller.session?.runCommand?.(
+        customInstructions ? `/compact ${customInstructions}` : "/compact",
+      );
+    },
     async getAutocompleteItems() {
       return [];
     },

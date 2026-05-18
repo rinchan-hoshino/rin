@@ -93,6 +93,19 @@ function isNewSessionCommand(commandLine: string) {
   return safeString(commandLine).trim() === "/new";
 }
 
+function parseCompactCommand(commandLine: string) {
+  const trimmed = safeString(commandLine).trim();
+  if (trimmed === "/compact")
+    return { compact: true, customInstructions: undefined };
+  if (!trimmed.startsWith("/compact ")) {
+    return { compact: false, customInstructions: undefined };
+  }
+  return {
+    compact: true,
+    customInstructions: trimmed.slice("/compact ".length).trim() || undefined,
+  };
+}
+
 function isRecoverableConnectionError(error: unknown) {
   return /rin_tui_not_connected|rin_disconnected|rin_session_recovering|frontend_turn_driver_disposed/.test(
     safeString((error as any)?.message || error),
@@ -466,6 +479,7 @@ export class RinFrontendTurnDriver {
       managedSessionLeaf?: string;
     } = {},
   ) {
+    const compactCommand = parseCompactCommand(commandLine);
     const skipSessionRecovery = options.skipSessionRecovery === true;
     const restoreSessionFile = safeString(
       options.restoreSessionFile || "",
@@ -519,10 +533,11 @@ export class RinFrontendTurnDriver {
       ready,
       sessionFile || restoreSessionFile,
     );
-    const data: any = await this.runCommandForSession(
-      commandLine,
-      targetSessionFile,
-    );
+    const data: any = compactCommand.compact
+      ? await this.client.compact(compactCommand.customInstructions, {
+          sessionFile: targetSessionFile || undefined,
+        })
+      : await this.runCommandForSession(commandLine, targetSessionFile);
     if (isAbortCommand(commandLine)) this.rejectLiveTurnAsAborted();
     return {
       ...data,

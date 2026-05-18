@@ -489,11 +489,26 @@ function applyRinPromptBuilder(session: any) {
       if (turnPrompt === basePrompt) {
         return await originalPrompt(text, options);
       }
+      const previousActiveTurnPrompt = session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
+      const activeTurnPrompt: {
+        basePrompt: string;
+        turnPrompt: string;
+        refreshedBasePrompt?: string;
+      } = { basePrompt, turnPrompt };
+      session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = activeTurnPrompt;
       applySessionBaseSystemPrompt(session, turnPrompt);
       try {
         return await originalPrompt(text, options);
       } finally {
-        applySessionBaseSystemPrompt(session, basePrompt);
+        if (previousActiveTurnPrompt === undefined) {
+          delete session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
+        } else {
+          session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = previousActiveTurnPrompt;
+        }
+        applySessionBaseSystemPrompt(
+          session,
+          String(activeTurnPrompt.refreshedBasePrompt || basePrompt),
+        );
       }
     };
   }
@@ -503,13 +518,21 @@ function applyRinPromptBuilder(session: any) {
   if (originalReload) {
     session.reload = async (...args: any[]) => {
       clearSessionBaseSystemPrompt(session, { ignorePersistedPrompt: true });
-      return await originalReload(...args);
+      const result = await originalReload(...args);
+      if (session[ACTIVE_TURN_SYSTEM_PROMPT_KEY]) {
+        applySessionBaseSystemPrompt(
+          session,
+          readCurrentSessionSystemPrompt(session),
+        );
+      }
+      return result;
     };
   }
 
   clearSessionBaseSystemPrompt(session);
 }
 
+const ACTIVE_TURN_SYSTEM_PROMPT_KEY = Symbol.for("rin.activeTurnSystemPrompt");
 const AUTO_RELOAD_AFTER_COMPACTION_KEY = Symbol.for(
   "rin.autoReloadAfterCompaction",
 );
@@ -523,6 +546,12 @@ const DISABLE_END_TURN_THRESHOLD_KEY = Symbol.for(
 const RETRYABLE_PROVIDER_ERRORS_KEY = Symbol.for("rin.retryableProviderErrors");
 const COMPACTION_REASON_TRACKING_KEY = Symbol.for(
   "rin.compactionReasonTracking",
+);
+const COMPACTION_CONCURRENCY_GUARD_KEY = Symbol.for(
+  "rin.compactionConcurrencyGuard",
+);
+const COMPACTION_SETTINGS_TUNING_KEY = Symbol.for(
+  "rin.compactionSettingsTuning",
 );
 const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 88;
 const MID_TURN_CONTINUATION_BLOCK = COMPACTION_CONTINUATION_BLOCK;
@@ -676,12 +705,160 @@ export function applyRinRetryableProviderErrors(session: any) {
   (session as any)[RETRYABLE_PROVIDER_ERRORS_KEY] = { original };
 }
 
+function abortActiveCompaction(session: any) {
+  try {
+    session?.abortCompaction?.();
+  } catch {}
+}
+
+type RinCompactionGuardState = {
+  activeCompaction?: { reason: string; promise: Promise<unknown> };
+};
+
+function isRinCompactionBusy(session: any, state: RinCompactionGuardState) {
+  return Boolean(state.activeCompaction || session?.isCompacting);
+}
+
+async function runRinCompactionExclusive<T>(
+  session: any,
+  state: RinCompactionGuardState,
+  reason: string,
+  onBusy: () => T | Promise<T>,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  if (isRinCompactionBusy(session, state)) return await onBusy();
+  const promise = Promise.resolve(run());
+  state.activeCompaction = { reason, promise };
+  try {
+    return await promise;
+  } finally {
+    if (state.activeCompaction?.promise === promise) {
+      state.activeCompaction = undefined;
+    }
+  }
+}
+
+export function applyRinCompactionSettingsTuning(session: any) {
+  if (!session || typeof session !== "object") return;
+  if ((session as any)[COMPACTION_SETTINGS_TUNING_KEY]) return;
+  const settingsManager = session.settingsManager;
+  const original =
+    typeof settingsManager?.getCompactionSettings === "function"
+      ? settingsManager.getCompactionSettings.bind(settingsManager)
+      : null;
+  if (!original) return;
+
+  settingsManager.getCompactionSettings = () => {
+    const settings = { ...(original() || {}) };
+    const contextWindow = Number(session.model?.contextWindow || 0);
+    if (contextWindow >= 100_000) {
+      settings.reserveTokens = Math.max(
+        Number(settings.reserveTokens || 0),
+        Math.min(32_768, Math.floor(contextWindow * 0.08)),
+      );
+      settings.keepRecentTokens = Math.max(
+        Number(settings.keepRecentTokens || 0),
+        Math.min(120_000, Math.floor(contextWindow * 0.35)),
+      );
+    }
+    return settings;
+  };
+
+  (session as any)[COMPACTION_SETTINGS_TUNING_KEY] = { original };
+}
+
+export function applyRinCompactionConcurrencyGuard(session: any) {
+  if (!session || typeof session !== "object") return;
+  if ((session as any)[COMPACTION_CONCURRENCY_GUARD_KEY]) return;
+
+  const guardState: RinCompactionGuardState = {};
+
+  const originalCompact =
+    typeof session.compact === "function"
+      ? session.compact.bind(session)
+      : null;
+  if (originalCompact) {
+    session.compact = async function guardedManualCompaction(...args: any[]) {
+      return await runRinCompactionExclusive(
+        session,
+        guardState,
+        "manual",
+        () => {
+          throw new Error("Compaction already in progress");
+        },
+        () => originalCompact(...args),
+      );
+    };
+  }
+
+  const originalRunAutoCompaction =
+    typeof session._runAutoCompaction === "function"
+      ? session._runAutoCompaction.bind(session)
+      : null;
+  if (originalRunAutoCompaction) {
+    session._runAutoCompaction = async function guardedAutoCompaction(
+      reason: string,
+      ...args: any[]
+    ) {
+      return await runRinCompactionExclusive(
+        session,
+        guardState,
+        String(reason || "auto"),
+        () => undefined,
+        () => originalRunAutoCompaction(reason, ...args),
+      );
+    };
+  }
+
+  const originalAbort =
+    typeof session.abort === "function" ? session.abort.bind(session) : null;
+  if (originalAbort) {
+    session.abort = async (...args: any[]) => {
+      if (isRinCompactionBusy(session, guardState))
+        abortActiveCompaction(session);
+      return await originalAbort(...args);
+    };
+  }
+
+  (session as any)[COMPACTION_CONCURRENCY_GUARD_KEY] = {
+    originalCompact,
+    originalRunAutoCompaction,
+    originalAbort,
+  };
+}
+
+function mergeActiveTurnSystemPrompt(session: any, basePrompt: string) {
+  const active = session?.[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
+  if (!active || typeof active !== "object") return basePrompt;
+
+  const originalBase = String(active.basePrompt || "");
+  const originalTurn = String(active.turnPrompt || "");
+  if (!originalTurn || originalTurn === originalBase) return basePrompt;
+
+  active.refreshedBasePrompt = basePrompt;
+
+  let suffix = "";
+  if (originalBase && originalTurn.startsWith(originalBase)) {
+    suffix = originalTurn.slice(originalBase.length).trim();
+  } else if (!originalBase) {
+    suffix = originalTurn.trim();
+  }
+  if (!suffix || basePrompt.includes(suffix)) return basePrompt;
+  return `${String(basePrompt || "").trimEnd()}\n\n${suffix}`.trimEnd();
+}
+
 function readCurrentSessionSystemPrompt(session: any) {
   try {
-    return ensureSessionBaseSystemPrompt(session);
+    return mergeActiveTurnSystemPrompt(
+      session,
+      ensureSessionBaseSystemPrompt(session),
+    );
   } catch {
-    return String(
-      session?._baseSystemPrompt || session?.agent?.state?.systemPrompt || "",
+    return mergeActiveTurnSystemPrompt(
+      session,
+      String(
+        session?._baseSystemPrompt || session?.agent?.state?.systemPrompt || "",
+      ),
     );
   }
 }
@@ -1290,9 +1467,11 @@ export async function createConfiguredAgentSession(
     applyRinBeforeCompactionHooks(result.session);
     applyDisableEndTurnThresholdCompaction(result.session);
     applyRinRetryableProviderErrors(result.session);
+    applyRinCompactionSettingsTuning(result.session);
     applyMidTurnCompaction(result.session);
     applyOverflowContinuationPrompt(result.session);
     applyAutoReloadAfterCompaction(result.session);
+    applyRinCompactionConcurrencyGuard(result.session);
     return {
       ...result,
       services,

@@ -919,6 +919,7 @@ export async function runCustomRpcMode(
         return done(id, type, session.clearQueue());
       case "abort":
         return run(id, type, async () => {
+          session.abortCompaction?.();
           await session.abort();
         });
       case "shutdown_session":
