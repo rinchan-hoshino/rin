@@ -150,6 +150,10 @@ export class ChatController {
   activeWorkingIndicators: WorkingIndicator[] = [];
   workingIndicatorTick = 0;
   currentTurn: ChatTurnMeta | null = null;
+  activeCommandTurnInput: {
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+  } | null = null;
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatTextDelivery | null = null;
   awaitingTurnSettle = false;
@@ -229,6 +233,7 @@ export class ChatController {
     this.lastActivityAt = Date.now();
     void this.clearWorkingReaction().catch(() => {});
     this.currentTurn = null;
+    this.activeCommandTurnInput = null;
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
@@ -253,6 +258,7 @@ export class ChatController {
     this.stagedDelivery = null;
     await this.clearWorkingReaction().catch(() => {});
     this.currentTurn = null;
+    this.activeCommandTurnInput = null;
     this.backendAcceptedIncomingMessageId = "";
     this.saveState();
   }
@@ -331,6 +337,29 @@ export class ChatController {
   private clearCurrentTurn() {
     this.currentTurn = null;
     this.backendAcceptedIncomingMessageId = "";
+  }
+
+  private setActiveCommandTurnInput(input: {
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+  }) {
+    this.activeCommandTurnInput = {
+      incomingMessageId:
+        safeString(input.incomingMessageId || "").trim() || undefined,
+      replyToMessageId:
+        safeString(input.replyToMessageId || "").trim() || undefined,
+    };
+  }
+
+  private clearActiveCommandTurnInput() {
+    this.activeCommandTurnInput = null;
+  }
+
+  private ensureVisibleCommandTurn() {
+    if (this.currentTurn || !this.activeCommandTurnInput) return false;
+    this.setCurrentTurn(this.activeCommandTurnInput);
+    this.awaitingTurnSettle = true;
+    return true;
   }
 
   private workingIndicatorContext(extra: Record<string, any> = {}) {
@@ -892,6 +921,7 @@ export class ChatController {
           ? this.managedSessionLeafForFreshChat()
           : undefined;
     this.lastActivityAt = Date.now();
+    this.setActiveCommandTurnInput({ incomingMessageId, replyToMessageId });
     await this.connect({ restoreSession: !skipSessionRecovery });
     if (["abort", "new", "compact", "reload"].includes(commandName)) {
       this.markAcceptedMessage(incomingMessageId);
@@ -939,6 +969,7 @@ export class ChatController {
       this.awaitingTurnSettle = false;
       await this.clearWorkingReaction().catch(() => {});
       this.clearCurrentTurn();
+      this.clearActiveCommandTurnInput();
       this.stagedDelivery = null;
       this.saveState();
     }
@@ -1168,7 +1199,9 @@ export class ChatController {
     switch (event.type) {
       case "frontend_status":
         if (event.phase === "sending" || event.phase === "working") {
+          const createdCommandTurn = this.ensureVisibleCommandTurn();
           this.markAcceptedMessage(this.currentIncomingMessageId());
+          if (createdCommandTurn) await this.pollTyping().catch(() => false);
         }
         if (
           event.phase === "idle" &&
