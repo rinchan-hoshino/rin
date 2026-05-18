@@ -379,10 +379,11 @@ export function clearSessionBaseSystemPrompt(
 }
 
 const COMPACTION_CONTINUATION_BLOCK = [
-  "Context compacted; treat this as a routine internal checkpoint.",
-  "Resume the current task immediately from its current state.",
-  "Execute the next concrete step directly without narration.",
-  "If work remains, keep doing it.",
+  "Context compacted; treat this as a routine internal checkpoint, not a task change.",
+  "Continue the exact pre-compaction objective, plan, constraints, authority boundaries, and chosen implementation approach.",
+  "Do not switch to a different task or downgrade to a simpler/worse method just because details were summarized.",
+  "If the summary is missing needed detail, inspect the live files/session evidence before acting.",
+  "Execute the next concrete step directly without narration. If work remains, keep doing it.",
 ].join("\n");
 
 function appendCompactionContinuationBlock(systemPrompt: string) {
@@ -518,7 +519,14 @@ function applyRinPromptBuilder(session: any) {
   if (originalReload) {
     session.reload = async (...args: any[]) => {
       clearSessionBaseSystemPrompt(session, { ignorePersistedPrompt: true });
-      return await originalReload(...args);
+      const result = await originalReload(...args);
+      if (session[ACTIVE_TURN_SYSTEM_PROMPT_KEY]) {
+        applySessionBaseSystemPrompt(
+          session,
+          readCurrentSessionSystemPrompt(session),
+        );
+      }
+      return result;
     };
   }
 
@@ -539,6 +547,12 @@ const DISABLE_END_TURN_THRESHOLD_KEY = Symbol.for(
 const RETRYABLE_PROVIDER_ERRORS_KEY = Symbol.for("rin.retryableProviderErrors");
 const COMPACTION_REASON_TRACKING_KEY = Symbol.for(
   "rin.compactionReasonTracking",
+);
+const COMPACTION_CONCURRENCY_GUARD_KEY = Symbol.for(
+  "rin.compactionConcurrencyGuard",
+);
+const COMPACTION_SETTINGS_TUNING_KEY = Symbol.for(
+  "rin.compactionSettingsTuning",
 );
 const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 88;
 const MID_TURN_CONTINUATION_BLOCK = COMPACTION_CONTINUATION_BLOCK;
@@ -690,6 +704,107 @@ export function applyRinRetryableProviderErrors(session: any) {
   };
 
   (session as any)[RETRYABLE_PROVIDER_ERRORS_KEY] = { original };
+}
+
+function abortActiveCompaction(session: any) {
+  try {
+    session?.abortCompaction?.();
+  } catch {}
+}
+
+export function applyRinCompactionSettingsTuning(session: any) {
+  if (!session || typeof session !== "object") return;
+  if ((session as any)[COMPACTION_SETTINGS_TUNING_KEY]) return;
+  const settingsManager = session.settingsManager;
+  const original =
+    typeof settingsManager?.getCompactionSettings === "function"
+      ? settingsManager.getCompactionSettings.bind(settingsManager)
+      : null;
+  if (!original) return;
+
+  settingsManager.getCompactionSettings = () => {
+    const settings = { ...(original() || {}) };
+    const contextWindow = Number(session.model?.contextWindow || 0);
+    if (contextWindow >= 100_000) {
+      settings.reserveTokens = Math.max(
+        Number(settings.reserveTokens || 0),
+        Math.min(32_768, Math.floor(contextWindow * 0.08)),
+      );
+      settings.keepRecentTokens = Math.max(
+        Number(settings.keepRecentTokens || 0),
+        Math.min(120_000, Math.floor(contextWindow * 0.35)),
+      );
+    }
+    return settings;
+  };
+
+  (session as any)[COMPACTION_SETTINGS_TUNING_KEY] = { original };
+}
+
+export function applyRinCompactionConcurrencyGuard(session: any) {
+  if (!session || typeof session !== "object") return;
+  if ((session as any)[COMPACTION_CONCURRENCY_GUARD_KEY]) return;
+
+  let activeCompaction:
+    | { reason: string; promise: Promise<unknown> }
+    | undefined;
+
+  const originalCompact =
+    typeof session.compact === "function"
+      ? session.compact.bind(session)
+      : null;
+  if (originalCompact) {
+    session.compact = async function guardedManualCompaction(...args: any[]) {
+      if (activeCompaction || session.isCompacting) {
+        throw new Error("Compaction already in progress");
+      }
+      const promise = Promise.resolve(originalCompact(...args));
+      activeCompaction = { reason: "manual", promise };
+      try {
+        return await promise;
+      } finally {
+        if (activeCompaction?.promise === promise) activeCompaction = undefined;
+      }
+    };
+  }
+
+  const originalRunAutoCompaction =
+    typeof session._runAutoCompaction === "function"
+      ? session._runAutoCompaction.bind(session)
+      : null;
+  if (originalRunAutoCompaction) {
+    session._runAutoCompaction = async function guardedAutoCompaction(
+      reason: string,
+      ...args: any[]
+    ) {
+      if (activeCompaction || session.isCompacting) return undefined;
+      const promise = Promise.resolve(
+        originalRunAutoCompaction(reason, ...args),
+      );
+      activeCompaction = { reason: String(reason || "auto"), promise };
+      try {
+        return await promise;
+      } finally {
+        if (activeCompaction?.promise === promise) activeCompaction = undefined;
+      }
+    };
+  }
+
+  const originalAbort =
+    typeof session.abort === "function" ? session.abort.bind(session) : null;
+  if (originalAbort) {
+    session.abort = async (...args: any[]) => {
+      if (activeCompaction || session.isCompacting)
+        abortActiveCompaction(session);
+      return await originalAbort(...args);
+    };
+  }
+
+  (session as any)[COMPACTION_CONCURRENCY_GUARD_KEY] = {
+    originalCompact,
+    originalRunAutoCompaction,
+    originalAbort,
+  };
 }
 
 function mergeActiveTurnSystemPrompt(session: any, basePrompt: string) {
@@ -1332,9 +1447,11 @@ export async function createConfiguredAgentSession(
     applyRinBeforeCompactionHooks(result.session);
     applyDisableEndTurnThresholdCompaction(result.session);
     applyRinRetryableProviderErrors(result.session);
+    applyRinCompactionSettingsTuning(result.session);
     applyMidTurnCompaction(result.session);
     applyOverflowContinuationPrompt(result.session);
     applyAutoReloadAfterCompaction(result.session);
+    applyRinCompactionConcurrencyGuard(result.session);
     return {
       ...result,
       services,
