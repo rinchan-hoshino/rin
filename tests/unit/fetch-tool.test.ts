@@ -63,7 +63,7 @@ test("web_search fetches URLs with Chrome-like headers and Readability markdown"
 
       assert.equal(result.details?.mode, "fetch");
       assert.equal(result.details?.fetch?.finalUrl, `${baseUrl}/page`);
-      assert.match(agentText, /web_fetch ok/);
+      assert.match(agentText, /Web fetch ok/);
       assert.match(agentText, /status=200 OK/);
       assert.match(userText, new RegExp(`Fetched: ${baseUrl}/page`));
       assert.match(userText, /Status: 200 OK/);

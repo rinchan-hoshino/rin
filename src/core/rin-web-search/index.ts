@@ -12,6 +12,7 @@ import {
   renderTextToolResult,
 } from "../pi/render-utils.js";
 import { fetchReadableUrl, parseFetchUrl } from "./url-fetch.js";
+import { formatRuntimeErrorForUser } from "../rin-lib/user-facing-errors.js";
 
 function trimSnippet(value: string, max = 220): string {
   const text = String(value || "")
@@ -21,32 +22,9 @@ function trimSnippet(value: string, max = 220): string {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-function formatAttempts(response: any, options: { maxError?: number } = {}) {
-  const attempts = Array.isArray(response?.attempts) ? response.attempts : [];
-  if (!attempts.length) return "";
-  const maxError = options.maxError ?? 260;
-  const lines = attempts.map((attempt: any) => {
-    const engine = String(attempt?.engine || "unknown").trim() || "unknown";
-    if (attempt?.ok) {
-      return `- ${engine}: ok results=${Number(attempt?.results || 0)}`;
-    }
-    const error = String(attempt?.error || "unknown_error").replace(
-      /\s+/g,
-      " ",
-    );
-    return `- ${engine}: ${trimSnippet(error, maxError)}`;
-  });
-  return ["attempts:", ...lines].join("\n");
-}
-
 function formatResults(response: any): string {
   if (!response?.ok) {
-    return [
-      `Web search failed: ${String(response?.error || "unknown_error")}`,
-      formatAttempts(response),
-    ]
-      .filter(Boolean)
-      .join("\n");
+    return formatRuntimeErrorForUser(response?.error || "web_search_failed");
   }
   const rows = Array.isArray(response.results) ? response.results : [];
   if (!rows.length) return "No web results found.";
@@ -64,12 +42,9 @@ function formatResults(response: any): string {
 function formatAgentResults(response: any): string {
   if (!response?.ok)
     return [
-      "web_search error",
-      `error=${String(response?.error || "unknown_error")}`,
-      formatAttempts(response, { maxError: 520 }),
-    ]
-      .filter(Boolean)
-      .join("\n");
+      "Web search failed",
+      formatRuntimeErrorForUser(response?.error || "web_search_failed"),
+    ].join("\n");
   const rows = Array.isArray(response.results) ? response.results : [];
   if (!rows.length) return "web_search 0";
   return [
@@ -130,14 +105,14 @@ async function loadSearchWeb() {
 function formatWebSearchCall(args: any, theme: any) {
   const query = String(args?.q || "").trim();
   const url = parseFetchUrl(query);
-  return formatToolCallLine("web_search", url ? `fetch ${url}` : query, theme);
+  return formatToolCallLine("web_search", url || query, theme);
 }
 
 function formatFetchAgentResult(
   response: Awaited<ReturnType<typeof fetchReadableUrl>>,
 ) {
   const lines = [
-    `web_fetch ${response.ok ? "ok" : "error"}`,
+    response.ok ? "Web fetch ok" : "Web fetch failed",
     `url=${response.finalUrl || response.url}`,
     response.status
       ? `status=${response.status} ${response.statusText}`.trim()
@@ -146,7 +121,9 @@ function formatFetchAgentResult(
     `bytes=${response.bytes}`,
     response.title ? `title=${response.title}` : "",
     "",
-    response.ok ? response.text || "" : response.error || "fetch_failed",
+    response.ok
+      ? response.text || ""
+      : formatRuntimeErrorForUser(response.error || "fetch_failed"),
   ].filter((line) => line !== "");
   return lines.join("\n");
 }
@@ -163,7 +140,9 @@ function formatFetchUserResult(
     `Bytes: ${response.bytes}`,
     response.title ? `Title: ${response.title}` : "",
     "",
-    response.ok ? response.text || "" : response.error || "fetch_failed",
+    response.ok
+      ? response.text || ""
+      : formatRuntimeErrorForUser(response.error || "fetch_failed"),
   ].filter((line) => line !== "");
   return lines.join("\n");
 }
@@ -271,17 +250,12 @@ export default function webSearchModule(): RinCapabilityDefinition {
             hiddenCount?: number;
             totalResults?: number;
             userText?: string;
-            attempts?: unknown[];
           } = {
             mode: "search",
             hiddenCount,
             totalResults: rows.length,
             userText,
           };
-
-          if (Array.isArray(response?.attempts)) {
-            details.attempts = response.attempts;
-          }
 
           if (!rows.length && response?.ok) {
             details.emptyMessage = "No web results found.";

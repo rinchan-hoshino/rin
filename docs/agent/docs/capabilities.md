@@ -131,7 +131,7 @@ Use only trusted package names and versions. Packages may be installed or update
 
 Use fresh web search for latest, time-sensitive, version-sensitive, or otherwise changeable information. When `q` is an HTTP(S) URL, `web_search` fetches that page directly with a browser-like user agent and extracts readable content.
 
-Direct web search currently uses Google only. If search fails with `google_challenge_required`, the upstream engine challenged the Rin runtime's network path. Practical recovery is to wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, fetch a known URL directly, or use a trusted search backend/API.
+Direct web search currently uses Google only. Rin keeps the Google request shape close to SearXNG's low-noise Google engine path: Google Go/mobile user agents with the `NSTNWV` marker, supported localized Google domains, `hl`/`lr`/`cr` language-region parameters, `filter=0`, `CONSENT=YES+`, `Accept: */*`, and no extra empty-result retry. If Google challenges the runtime's network path, practical recovery is to wait and retry with fewer repeated searches, change the runtime egress network/proxy/VPN or IP, fetch a known URL directly, or use a trusted search backend/API.
 
 ## Runtime status and token usage
 

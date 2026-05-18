@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { formatRuntimeErrorForUser } from "../../src/core/rin-lib/user-facing-errors.js";
+import {
+  formatRuntimeErrorForUser,
+  hasUserFacingRuntimeErrorMapping,
+} from "../../src/core/rin-lib/user-facing-errors.js";
 
 test("runtime error formatter keeps human messages", () => {
   assert.equal(formatRuntimeErrorForUser("fetch failed"), "fetch failed");
@@ -50,13 +53,24 @@ test("runtime error formatter hides unmapped internal markers from user-facing t
   );
   assert.equal(text.includes("some_new_internal_marker"), false);
   assert.equal(text.includes("debug_code"), false);
+
+  const embedded = formatRuntimeErrorForUser(
+    "Web search failed: google_challenge_required",
+  );
+  assert.match(embedded, /internal runtime problem|Google blocked/);
+  assert.equal(embedded.includes("google_challenge_required"), false);
+
+  const camel = formatRuntimeErrorForUser("invalid_chatKey:onebot/demo");
+  assert.match(camel, /Invalid chat key/);
+  assert.equal(camel.includes("invalid_chatKey"), false);
 });
 
 test("runtime error formatter does not leak Rin-owned marker literals", () => {
-  const markerPattern = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/;
+  const markerPattern = /\b[a-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b/;
   const markers = collectRinOwnedErrorMarkers();
   assert.ok(markers.size > 0);
   for (const marker of markers) {
+    assert.equal(hasUserFacingRuntimeErrorMapping(marker), true, marker);
     const formatted = formatRuntimeErrorForUser(marker);
     assert.equal(
       markerPattern.test(formatted),
@@ -73,7 +87,8 @@ function collectRinOwnedErrorMarkers() {
   );
   const files = roots.flatMap((root) => listFiles(root));
   const markers = new Set<string>();
-  const markerLiteral = "([a-z][a-z0-9]*(?:_[a-z0-9]+)+(?::[^\"'`\\s]*)?)";
+  const markerLiteral =
+    "([a-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+(?::[^\"'`\\s]*)?)";
   const patterns = [
     new RegExp(`throw\\s+new\\s+Error\\(\\s*["']${markerLiteral}["']`, "g"),
     new RegExp(`responseError\\([^)]*?["']${markerLiteral}["']`, "g"),
@@ -83,12 +98,31 @@ function collectRinOwnedErrorMarkers() {
     const text = fs.readFileSync(file, "utf8");
     for (const pattern of patterns) {
       for (const match of text.matchAll(pattern)) {
-        markers.add(match[1]);
+        markers.add(String(match[1]).split(":", 1)[0]);
       }
     }
   }
   return markers;
 }
+
+test("app entrypoints format caught errors before printing", () => {
+  const repoRoot = path.resolve(import.meta.dirname, "../..");
+  const entrypoints = [
+    "src/app/rin/main.ts",
+    "src/app/rin-tui/main.ts",
+    "src/app/rin-install/main.ts",
+    "src/app/rin-gui/main.ts",
+    "src/app/rin-desktop-host/main.ts",
+    "src/app/rin-daemon/daemon.ts",
+    "src/app/rin-daemon/worker.ts",
+    "src/core/rin-tui/main.ts",
+  ];
+  for (const relative of entrypoints) {
+    const text = fs.readFileSync(path.join(repoRoot, relative), "utf8");
+    assert.match(text, /formatRuntimeErrorForUser\(error \|\|/);
+    assert.doesNotMatch(text, /console\.error\(String\(error\?\.message/);
+  }
+});
 
 function listFiles(root: string): string[] {
   const entries = fs.readdirSync(root, { withFileTypes: true });

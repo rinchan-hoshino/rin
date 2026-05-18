@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { startChatBridge } from "../../core/chat/main.js";
 import { defaultDaemonSocketPath } from "../../core/rin-lib/common.js";
+import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
 import { startDaemon } from "../../core/rin-daemon/daemon.js";
 import { RinDaemonExtensionManager } from "../../core/rin-daemon/extensions.js";
 import {
@@ -150,6 +151,6 @@ async function main() {
 }
 
 main().catch((error: any) => {
-  console.error(String(error?.message || error || "rin_app_daemon_failed"));
+  console.error(formatRuntimeErrorForUser(error || "rin_app_daemon_failed"));
   process.exit(1);
 });

@@ -281,7 +281,7 @@ export function styleToolOutputLine(line: string, theme: any) {
     return theme.fg("muted", line);
   }
   if (
-    /^(Error:|Web search failed:|Fetch failed:|Message not found:)/.test(
+    /^(Error:|Web search failed:?|Web fetch failed:?|Fetch failed:?|The network request failed\.|Google blocked this search path|Message not found:)/.test(
       trimmed,
     )
   ) {

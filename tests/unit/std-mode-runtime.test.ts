@@ -162,7 +162,8 @@ test("std configured session keeps daemon-independent Rin tools usable without d
           undefined,
           { agentDir },
         );
-      assert.match(searchResult.content[0].text, /web_search error/);
+      assert.match(searchResult.content[0].text, /Web search failed/);
+      assert.doesNotMatch(searchResult.content[0].text, /web_search/);
     } finally {
       globalThis.fetch = originalFetch;
     }

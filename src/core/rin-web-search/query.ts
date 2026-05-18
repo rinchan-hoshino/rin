@@ -1,4 +1,11 @@
 const SEARCH_TIMEOUT_MS = 8_000;
+const DEFAULT_GOOGLE_MIN_INTERVAL_MS = 1_000;
+const DEFAULT_GOOGLE_MAX_INTERVAL_MS = 3_000;
+let googleNextRequestAt = 0;
+let googleRequestQueue: Promise<void> = Promise.resolve();
+let googleMinIntervalMs = DEFAULT_GOOGLE_MIN_INTERVAL_MS;
+let googleMaxIntervalMs = DEFAULT_GOOGLE_MAX_INTERVAL_MS;
+
 const USER_AGENT =
   "Mozilla/5.0 (compatible; RinWebSearch/1.0; +https://github.com/rinchanai/rin)";
 // SearXNG's Google engine intentionally uses a Google Go / mobile Chrome
@@ -8,8 +15,11 @@ const USER_AGENT =
 // Keep the Google request close to SearXNG's low-noise shape: localized
 // supported domain + hl/lr/cr, utf8 encoding, filter=0, CONSENT cookie, Accept
 // */*, and no ineffective num/gl parameters.
-const GOOGLE_GSA_USER_AGENT =
-  "Mozilla/5.0 (Linux; Android 10; HUAWEI P30 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36 NSTNWV";
+const GOOGLE_GSA_USER_AGENTS = [
+  "Mozilla/5.0 (Linux; Android 10; HUAWEI P30 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36 NSTNWV",
+  "Mozilla/5.0 (Linux; Android 12; SM-S901U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36 NSTNWV",
+  "Mozilla/5.0 (Linux; Android 11; KFTUWI) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.165 Safari/537.36 NSTNWV",
+];
 const GOOGLE_SUPPORTED_DOMAINS: Record<string, string> = {
   AU: "www.google.com.au",
   CA: "www.google.ca",
@@ -104,6 +114,52 @@ function truncateText(value: unknown, max = 240): string {
   const text = safeText(value);
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+function nextGoogleIntervalMs() {
+  const min = Math.max(0, Math.floor(googleMinIntervalMs));
+  const max = Math.max(min, Math.floor(googleMaxIntervalMs));
+  if (max <= min) return min;
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+export function resetWebSearchRuntimeStateForTests(options?: {
+  googleMinIntervalMs?: number;
+  googleMaxIntervalMs?: number;
+}) {
+  googleNextRequestAt = 0;
+  googleRequestQueue = Promise.resolve();
+  googleMinIntervalMs = Math.max(
+    0,
+    Math.floor(options?.googleMinIntervalMs ?? DEFAULT_GOOGLE_MIN_INTERVAL_MS),
+  );
+  googleMaxIntervalMs = Math.max(
+    googleMinIntervalMs,
+    Math.floor(options?.googleMaxIntervalMs ?? DEFAULT_GOOGLE_MAX_INTERVAL_MS),
+  );
+}
+
+async function withGoogleSearchInterval<T>(task: () => Promise<T>): Promise<T> {
+  const run = googleRequestQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const delay = googleNextRequestAt - Date.now();
+      if (delay > 0) await sleep(delay);
+      try {
+        return await task();
+      } finally {
+        googleNextRequestAt = Date.now() + nextGoogleIntervalMs();
+      }
+    });
+  googleRequestQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 function formatFetchUrl(value: string): string {
@@ -269,6 +325,12 @@ function stripHtml(text: string): string {
         .replace(/<[^>]+>/g, " "),
     ),
   ).replace(/\s+([.,!?;:])/g, "$1");
+}
+
+function pickGoogleGsaUserAgent(): string {
+  return GOOGLE_GSA_USER_AGENTS[
+    Math.floor(Math.random() * GOOGLE_GSA_USER_AGENTS.length)
+  ];
 }
 
 function buildAcceptLanguage(language: string): string {
@@ -598,50 +660,34 @@ export function parseGoogleResults(html: string, limit = 8): WebSearchResult[] {
 }
 
 async function fetchGoogleHtml(request: NormalizedWebSearchRequest) {
-  const url = buildGoogleUrl(request);
-  try {
-    const html = await fetchText(url, {
-      headers: {
-        Accept: "*/*",
-        "Accept-Language": buildAcceptLanguage(request.language),
-        Cookie: "CONSENT=YES+",
-        Referer: new URL(url).origin + "/",
-        "User-Agent": GOOGLE_GSA_USER_AGENT,
-      },
-    });
-    if (isChallengePage(html)) {
-      throw new Error("google_challenge_required");
+  return withGoogleSearchInterval(async () => {
+    const url = buildGoogleUrl(request);
+    try {
+      const html = await fetchText(url, {
+        headers: {
+          Accept: "*/*",
+          "Accept-Language": buildAcceptLanguage(request.language),
+          Cookie: "CONSENT=YES+",
+          Referer: new URL(url).origin + "/",
+          "User-Agent": pickGoogleGsaUserAgent(),
+        },
+      });
+      if (isChallengePage(html)) {
+        throw new Error("google_challenge_required");
+      }
+      return html;
+    } catch (error: unknown) {
+      if (isChallengePage(String(error))) {
+        throw new Error("google_challenge_required");
+      }
+      throw error;
     }
-    return html;
-  } catch (error: unknown) {
-    if (isChallengePage(String(error))) {
-      throw new Error("google_challenge_required");
-    }
-    throw error;
-  }
+  });
 }
 
 async function searchGoogle(request: NormalizedWebSearchRequest) {
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const html = await fetchGoogleHtml(request);
-      const results = filterSearchResults(
-        parseGoogleResults(html, request.limit),
-        request,
-      );
-      if (results.length > 0 || attempt > 0) return results;
-    } catch (error: unknown) {
-      const message = safeText(error instanceof Error ? error.message : error);
-      if (message === "google_challenge_required") {
-        throw error;
-      }
-      lastError = error;
-      if (attempt > 0) throw error;
-    }
-  }
-  if (lastError) throw lastError;
-  return [];
+  const html = await fetchGoogleHtml(request);
+  return filterSearchResults(parseGoogleResults(html, request.limit), request);
 }
 
 const DIRECT_PROVIDER_HANDLERS: DirectProvider[] = [
@@ -681,7 +727,6 @@ export async function searchWeb(
           results: merged,
         };
       }
-      if (!lastError) lastError = "web_search_no_results";
     } catch (error: unknown) {
       lastError = safeText(
         error instanceof Error ? error.message : error || "web_search_failed",
@@ -703,11 +748,11 @@ export async function searchWeb(
   }
 
   return {
-    ok: false,
+    ok: !lastError,
     query: request.q,
     engine: primaryEngine || DIRECT_PROVIDER_HANDLERS[0].name,
     attempts,
     results: [],
-    error: lastError || "web_search_no_results",
+    ...(lastError ? { error: lastError } : {}),
   };
 }
