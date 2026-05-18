@@ -103,13 +103,16 @@ if ($mode -eq "update") {
   $prepLabel = "Preparing updater source"
   $buildLabel = "Building updater"
   $launchLabel = "Launching updater..."
+  $nodeError = "rin updater requires Node.js >= 22.19.0"
 } else {
   $workPrefix = "rin-install"
   $fetchLabel = "Fetching installer source"
   $prepLabel = "Preparing installer source"
   $buildLabel = "Building installer"
   $launchLabel = "Launching installer..."
+  $nodeError = "rin installer requires Node.js >= 22.19.0"
 }
+$minimumNodeVersion = [version]"22.19.0"
 
 $repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchanai/rin" }
 $bootstrapBranch = if ($env:RIN_BOOTSTRAP_BRANCH) { $env:RIN_BOOTSTRAP_BRANCH } else { "bootstrap" }
@@ -124,6 +127,21 @@ New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
 function Say([string]$Message) {
   Write-Host $Message
+}
+
+function Assert-NodeVersion {
+  try {
+    $rawVersion = (& node -p "process.versions.node" 2>$null | Select-Object -First 1)
+  } catch {
+    throw $script:nodeError
+  }
+  if ($LASTEXITCODE -ne 0 -or -not $rawVersion) { throw $script:nodeError }
+  try {
+    $currentVersion = [version]($rawVersion -replace "^v", "")
+  } catch {
+    throw $script:nodeError
+  }
+  if ($currentVersion -lt $script:minimumNodeVersion) { throw $script:nodeError }
 }
 
 function Invoke-WithSpinner([string]$Label, [scriptblock]$Action) {
@@ -242,6 +260,7 @@ function Set-Release-Env($Release) {
 }
 
 try {
+  Assert-NodeVersion
   Invoke-WithSpinner "Fetching release manifest" {
     $rawBase = ($using:repoUrl -replace "^https://github.com/", "https://raw.githubusercontent.com/") -replace "\.git$", ""
     $primaryUrl = "$rawBase/$using:bootstrapBranch/release-manifest.json"

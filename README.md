@@ -23,6 +23,8 @@ Rin is a local, general-purpose AI assistant with memory, tools, scheduling, UI 
 > [!TIP]
 > Most users should start with the stable install command below. Pre-release and git channels are available in the folded sections.
 
+Rin requires Node.js 22.19.0 or newer and npm on every platform.
+
 ### Linux and macOS
 
 ```bash
@@ -44,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh 
 
 ### Windows
 
-Install from PowerShell or Windows Terminal. Node.js and npm must be available first.
+Install from PowerShell or Windows Terminal.
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.ps1)))

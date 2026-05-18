@@ -43,11 +43,11 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.10.1",
+    "@earendil-works/pi-agent-core": "^0.75.1",
+    "@earendil-works/pi-ai": "^0.75.1",
+    "@earendil-works/pi-coding-agent": "^0.75.1",
+    "@earendil-works/pi-tui": "^0.75.1",
     "@larksuiteoapi/node-sdk": "^1.60.0",
-    "@earendil-works/pi-agent-core": "^0.74.0",
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
     "@mozilla/readability": "^0.6.0",
     "@silvia-odwyer/photon-node": "^0.3.4",
     "@slack/socket-mode": "^2.0.6",
@@ -90,5 +90,8 @@
     "tsx": "^4.21.0",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.29.1"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }

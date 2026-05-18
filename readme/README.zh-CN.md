@@ -23,6 +23,8 @@ Rin 是一个本地运行的通用 AI 助手，内置记忆、工具、定时任
 > [!TIP]
 > 大多数用户应从下面的 stable 安装命令开始。预发布和 git 通道放在折叠区域中。
 
+Rin 在所有平台上都需要 Node.js 22.19.0 或更新版本，以及 npm。
+
 ### Linux 和 macOS
 
 ```bash
@@ -44,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh 
 
 ### Windows
 
-从 PowerShell 或 Windows Terminal 安装。需要先确保 Node.js 和 npm 可用。
+从 PowerShell 或 Windows Terminal 安装。
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.ps1)))
