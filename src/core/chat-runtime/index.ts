@@ -925,13 +925,30 @@ class TelegramAdapter {
   async endWorkingIndicator(context: any) {
     const chatId = safeString(context?.chatId).trim();
     const messageId = safeString(context?.messageId).trim();
-    if (!chatId || !messageId) return false;
-    const key = `${chatId}:${messageId}`;
-    const emoji = this.workingReactions.get(key) || "";
-    this.workingReactions.delete(key);
-    if (!emoji) return false;
-    await this.deleteReaction(chatId, messageId, emoji);
-    return true;
+    if (!chatId) return false;
+    const prefix = `${chatId}:`;
+    const entries = messageId
+      ? [
+          [
+            `${chatId}:${messageId}`,
+            this.workingReactions.get(`${chatId}:${messageId}`) || "",
+          ],
+        ]
+      : [...this.workingReactions.entries()].filter(([key]) =>
+          key.startsWith(prefix),
+        );
+    let deletedAny = false;
+    for (const [key, emoji] of entries) {
+      const targetMessageId = key.slice(prefix.length);
+      if (!targetMessageId || !emoji) {
+        this.workingReactions.delete(key);
+        continue;
+      }
+      await this.deleteReaction(chatId, targetMessageId, emoji);
+      this.workingReactions.delete(key);
+      deletedAny = true;
+    }
+    return deletedAny;
   }
 
   async createReaction(chatId: string, messageId: string, emoji: string) {
@@ -1519,12 +1536,30 @@ class OneBotAdapter {
   async endGroupWorkingReaction(context: any) {
     const chatId = safeString(context?.chatId).trim();
     const messageId = safeString(context?.messageId).trim();
-    const key = `${chatId}:${messageId}`;
-    const emoji = this.workingReactions.get(key) || "";
-    this.workingReactions.delete(key);
-    if (!isOneBotGroupChatId(chatId) || !messageId || !emoji) return false;
-    await this.deleteReaction(chatId, messageId, emoji);
-    return true;
+    if (!isOneBotGroupChatId(chatId)) return false;
+    const prefix = `${chatId}:`;
+    const entries = messageId
+      ? [
+          [
+            `${chatId}:${messageId}`,
+            this.workingReactions.get(`${chatId}:${messageId}`) || "",
+          ],
+        ]
+      : [...this.workingReactions.entries()].filter(([key]) =>
+          key.startsWith(prefix),
+        );
+    let deletedAny = false;
+    for (const [key, emoji] of entries) {
+      const targetMessageId = key.slice(prefix.length);
+      if (!targetMessageId || !emoji) {
+        this.workingReactions.delete(key);
+        continue;
+      }
+      await this.deleteReaction(chatId, targetMessageId, emoji);
+      this.workingReactions.delete(key);
+      deletedAny = true;
+    }
+    return deletedAny;
   }
 
   async createReaction(chatId: string, messageId: string, emoji: string) {

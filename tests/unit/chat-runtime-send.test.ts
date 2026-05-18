@@ -506,6 +506,99 @@ test("lark adapter sends quote nodes through the native reply endpoint", async (
   });
 });
 
+test("telegram working indicator retries clearing a stale reaction without current message metadata", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: Array<{ method: string; payload: any }> = [];
+    let failNextClear = true;
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      if (
+        method === "setMessageReaction" &&
+        Array.isArray(payload?.reaction) &&
+        payload.reaction.length === 0 &&
+        failNextClear
+      ) {
+        failNextClear = false;
+        throw new Error("transient clear failure");
+      }
+      return {};
+    };
+
+    const [indicator] = app.bots[0].workingIndicators;
+    await indicator.tick({ chatId: "456", messageId: "101", tick: 0 });
+    await assert.rejects(
+      indicator.end({ chatId: "456", messageId: "101" }),
+      /transient clear failure/,
+    );
+    assert.equal(await indicator.end({ chatId: "456" }), true);
+
+    assert.deepEqual(
+      calls
+        .filter((entry) => entry.method === "setMessageReaction")
+        .map((entry) => entry.payload),
+      [
+        {
+          chat_id: "456",
+          message_id: 101,
+          reaction: [{ type: "emoji", emoji: "🤔" }],
+        },
+        { chat_id: "456", message_id: 101, reaction: [] },
+        { chat_id: "456", message_id: 101, reaction: [] },
+      ],
+    );
+  });
+});
+
+test("onebot group working indicator retries clearing a stale reaction without current message metadata", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { endpoint: "ws://127.0.0.1:1" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: Array<{ action: string; params: any }> = [];
+    let failNextClear = true;
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      if (
+        action === "set_msg_emoji_like" &&
+        params?.set === false &&
+        failNextClear
+      ) {
+        failNextClear = false;
+        throw new Error("transient clear failure");
+      }
+      return {};
+    };
+
+    const [indicator] = app.bots[0].getWorkingIndicators({ chatId: "123" });
+    await indicator.tick({ chatId: "123", messageId: "101", tick: 0 });
+    await assert.rejects(
+      indicator.end({ chatId: "123", messageId: "101" }),
+      /transient clear failure/,
+    );
+    assert.equal(await indicator.end({ chatId: "123" }), true);
+
+    assert.deepEqual(
+      calls
+        .filter((entry) => entry.action === "set_msg_emoji_like")
+        .map((entry) => entry.params),
+      [
+        { message_id: 101, emoji_id: "212", set: true },
+        { message_id: 101, emoji_id: "212", set: false },
+        { message_id: 101, emoji_id: "212", set: false },
+      ],
+    );
+  });
+});
+
 test("onebot private working indicator is a one-shot marker", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
