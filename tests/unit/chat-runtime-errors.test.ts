@@ -22,6 +22,10 @@ test("chat runtime treats frontend turn disposal as transient", () => {
   );
 });
 
+test("chat runtime treats worker exits without detail as transient", () => {
+  assert.equal(isTransientChatRuntimeError("rin_worker_exit"), true);
+});
+
 test("chat runtime maps internal marker errors to user-facing messages", () => {
   assert.equal(
     formatChatRuntimeErrorForUser("new_session_session_file_unsupported"),
