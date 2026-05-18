@@ -51,6 +51,7 @@ const WORKING_REACTION_INTERVAL_MS = 30_000;
 type ChatTurnMeta = {
   incomingMessageId?: string;
   replyToMessageId?: string;
+  workingIndicatorsDisabled?: boolean;
   workingNoticeSent?: boolean;
   startedAt: number;
 };
@@ -309,6 +310,7 @@ export class ChatController {
   private setCurrentTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
+    workingIndicatorsDisabled?: boolean;
   }) {
     const nextIncomingMessageId =
       safeString(input.incomingMessageId || "").trim() || undefined;
@@ -318,6 +320,7 @@ export class ChatController {
       startedAt: Date.now(),
       incomingMessageId: nextIncomingMessageId,
       replyToMessageId: nextReplyToMessageId,
+      workingIndicatorsDisabled: input.workingIndicatorsDisabled === true,
       workingNoticeSent: false,
     };
     this.backendAcceptedIncomingMessageId = "";
@@ -421,6 +424,7 @@ export class ChatController {
 
   private async startWorkingMarker() {
     if (!this.deliveryEnabled) return false;
+    if (this.currentTurn?.workingIndicatorsDisabled) return false;
     const indicators = this.getWorkingIndicators();
     this.activeWorkingIndicators = indicators;
     const context = this.workingIndicatorContext({ event: "start" });
@@ -452,7 +456,10 @@ export class ChatController {
     ) {
       await this.clearWorkingReaction().catch(() => {});
     }
-    this.setCurrentTurn(input);
+    this.setCurrentTurn({
+      ...input,
+      workingIndicatorsDisabled: input.showWorking === false,
+    });
     this.awaitingTurnSettle = true;
     if (input.showWorking === false) return;
     const marker = this.startWorkingMarker().catch(() => false);
@@ -524,6 +531,7 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
       return false;
     }
+    if (this.currentTurn?.workingIndicatorsDisabled) return false;
     const indicators = this.activeWorkingIndicators.length
       ? this.activeWorkingIndicators
       : this.getWorkingIndicators();

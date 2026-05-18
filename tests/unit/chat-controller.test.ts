@@ -528,6 +528,61 @@ test("chat controller does not send working notices before deterministic command
   }
 });
 
+test("chat controller keeps deterministic command acknowledgements silent during polling", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  const reactions = [];
+  controller.app.bots[0].workingIndicators = [
+    testPollingIndicator(actions, reactions),
+  ];
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "compact-without-working-poll.jsonl",
+  );
+  let releaseCommand = () => {};
+  let commandStarted = () => {};
+  const commandStartedPromise = new Promise((resolve) => {
+    commandStarted = resolve;
+  });
+  const releaseCommandPromise = new Promise((resolve) => {
+    releaseCommand = resolve;
+  });
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-compact",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-compact",
+    }),
+    runCommand: async () => {
+      commandStarted();
+      await releaseCommandPromise;
+      return { handled: true, text: "backend text should be localized" };
+    },
+  };
+
+  const command = controller.runCommand("/compact", "m-compact", "m-compact");
+  await commandStartedPromise;
+  await controller.pollTyping();
+  releaseCommand();
+  await command;
+
+  assert.deepEqual(actions, []);
+  assert.deepEqual(reactions, []);
+  assert.deepEqual(deliveries, ["Compacted session."]);
+});
+
 test("chat controller ignores replied session files for /new", async () => {
   const controller = await createController();
   const calls = [];
