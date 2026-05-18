@@ -94,11 +94,7 @@ function createPollingWorkingIndicator(platform: string, getBot: () => any) {
       const bot = getBot();
       const chatId = safeString(context?.chatId).trim();
       const messageId = safeString(context?.messageId).trim();
-      if (!chatId || !messageId) return false;
-      const key = `${chatId}:${messageId}`;
-      const emoji = reactions.get(key) || "";
-      reactions.delete(key);
-      if (!emoji) return false;
+      if (!chatId) return false;
       const deleteReaction =
         typeof bot?.deleteReaction === "function"
           ? bot.deleteReaction.bind(bot)
@@ -108,13 +104,32 @@ function createPollingWorkingIndicator(platform: string, getBot: () => any) {
               ? bot.internal.deleteReaction.bind(bot.internal)
               : null;
       if (!deleteReaction) return false;
-      await deleteReaction(
-        chatId,
-        messageId,
-        emoji,
-        safeString(bot?.selfId).trim() || undefined,
-      );
-      return true;
+      const prefix = `${chatId}:`;
+      const entries = messageId
+        ? [
+            [
+              `${chatId}:${messageId}`,
+              reactions.get(`${chatId}:${messageId}`) || "",
+            ],
+          ]
+        : [...reactions.entries()].filter(([key]) => key.startsWith(prefix));
+      let deletedAny = false;
+      for (const [key, emoji] of entries) {
+        const targetMessageId = key.slice(prefix.length);
+        if (!targetMessageId || !emoji) {
+          reactions.delete(key);
+          continue;
+        }
+        await deleteReaction(
+          chatId,
+          targetMessageId,
+          emoji,
+          safeString(bot?.selfId).trim() || undefined,
+        );
+        reactions.delete(key);
+        deletedAny = true;
+      }
+      return deletedAny;
     },
   };
 }
