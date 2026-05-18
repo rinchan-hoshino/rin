@@ -489,11 +489,26 @@ function applyRinPromptBuilder(session: any) {
       if (turnPrompt === basePrompt) {
         return await originalPrompt(text, options);
       }
+      const previousActiveTurnPrompt = session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
+      const activeTurnPrompt: {
+        basePrompt: string;
+        turnPrompt: string;
+        refreshedBasePrompt?: string;
+      } = { basePrompt, turnPrompt };
+      session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = activeTurnPrompt;
       applySessionBaseSystemPrompt(session, turnPrompt);
       try {
         return await originalPrompt(text, options);
       } finally {
-        applySessionBaseSystemPrompt(session, basePrompt);
+        if (previousActiveTurnPrompt === undefined) {
+          delete session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
+        } else {
+          session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = previousActiveTurnPrompt;
+        }
+        applySessionBaseSystemPrompt(
+          session,
+          String(activeTurnPrompt.refreshedBasePrompt || basePrompt),
+        );
       }
     };
   }
@@ -510,6 +525,7 @@ function applyRinPromptBuilder(session: any) {
   clearSessionBaseSystemPrompt(session);
 }
 
+const ACTIVE_TURN_SYSTEM_PROMPT_KEY = Symbol.for("rin.activeTurnSystemPrompt");
 const AUTO_RELOAD_AFTER_COMPACTION_KEY = Symbol.for(
   "rin.autoReloadAfterCompaction",
 );
@@ -676,12 +692,38 @@ export function applyRinRetryableProviderErrors(session: any) {
   (session as any)[RETRYABLE_PROVIDER_ERRORS_KEY] = { original };
 }
 
+function mergeActiveTurnSystemPrompt(session: any, basePrompt: string) {
+  const active = session?.[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
+  if (!active || typeof active !== "object") return basePrompt;
+
+  const originalBase = String(active.basePrompt || "");
+  const originalTurn = String(active.turnPrompt || "");
+  if (!originalTurn || originalTurn === originalBase) return basePrompt;
+
+  active.refreshedBasePrompt = basePrompt;
+
+  let suffix = "";
+  if (originalBase && originalTurn.startsWith(originalBase)) {
+    suffix = originalTurn.slice(originalBase.length).trim();
+  } else if (!originalBase) {
+    suffix = originalTurn.trim();
+  }
+  if (!suffix || basePrompt.includes(suffix)) return basePrompt;
+  return `${String(basePrompt || "").trimEnd()}\n\n${suffix}`.trimEnd();
+}
+
 function readCurrentSessionSystemPrompt(session: any) {
   try {
-    return ensureSessionBaseSystemPrompt(session);
+    return mergeActiveTurnSystemPrompt(
+      session,
+      ensureSessionBaseSystemPrompt(session),
+    );
   } catch {
-    return String(
-      session?._baseSystemPrompt || session?.agent?.state?.systemPrompt || "",
+    return mergeActiveTurnSystemPrompt(
+      session,
+      String(
+        session?._baseSystemPrompt || session?.agent?.state?.systemPrompt || "",
+      ),
     );
   }
 }

@@ -372,6 +372,82 @@ test("applyMidTurnCompaction compacts before a provider call and injects continu
   );
 });
 
+test("applyMidTurnCompaction preserves active turn prompt context after reload", async () => {
+  const listeners = [];
+  let seenContext;
+  const activeTurnPromptKey = Symbol.for("rin.activeTurnSystemPrompt");
+  const sourceMessages = [
+    {
+      role: "user",
+      content: [{ type: "text", text: "x".repeat(400) }],
+    },
+  ];
+
+  const agent = {
+    state: { messages: [...sourceMessages], systemPrompt: "old base" },
+    async convertToLlm(messages) {
+      return messages;
+    },
+    async streamFn(_model, context) {
+      seenContext = context;
+      return { fake: true };
+    },
+  };
+
+  const session = {
+    [activeTurnPromptKey]: {
+      basePrompt: "old base",
+      turnPrompt: "old base\n\nChat context:\n- chatKey: github:private:demo#1",
+    },
+    _baseSystemPrompt: "old base",
+    model: { provider: "openai", id: "gpt-test", contextWindow: 100 },
+    agent,
+    subscribe(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload() {
+      this._baseSystemPrompt = "fresh base after reload";
+      agent.state.systemPrompt = this._baseSystemPrompt;
+    },
+    async _runAutoCompaction() {
+      agent.state.messages = [
+        {
+          role: "user",
+          content: [{ type: "text", text: "compacted" }],
+        },
+      ];
+      for (const listener of listeners) {
+        listener({
+          type: "compaction_end",
+          reason: "threshold",
+          aborted: false,
+          result: { summary: "ok" },
+        });
+      }
+    },
+  };
+
+  runtimeMod.applyAutoReloadAfterCompaction(session);
+  runtimeMod.applyMidTurnCompaction(session, 50);
+  const transformed = await agent.transformContext(sourceMessages, undefined);
+  await agent.streamFn(session.model, {
+    systemPrompt: "old base\n\nChat context:\n- chatKey: github:private:demo#1",
+    messages: transformed,
+    tools: [],
+  });
+
+  assert.ok(seenContext.systemPrompt.includes("fresh base after reload"));
+  assert.ok(
+    seenContext.systemPrompt.includes("chatKey: github:private:demo#1"),
+  );
+  assert.ok(!seenContext.systemPrompt.includes("old base\n\nChat context"));
+  assert.equal(
+    session[activeTurnPromptKey].refreshedBasePrompt,
+    "fresh base after reload",
+  );
+});
+
 test("applyMidTurnCompaction defaults to an 88 percent threshold", async () => {
   let compactCalls = 0;
   const sourceMessages = [
