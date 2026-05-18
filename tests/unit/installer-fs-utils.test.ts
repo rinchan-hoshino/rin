@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -116,6 +117,31 @@ test("installer fs utils prefer Rin temp roots deterministically", () => {
     if (previousTmpDir == null) delete process.env.TMPDIR;
     else process.env.TMPDIR = previousTmpDir;
   }
+});
+
+test("elevated install writes create target-owned parent directories", () => {
+  const source = fsSync.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "fs-utils.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /function ensurePrivilegedOwnedDir/);
+  assert.match(
+    source,
+    /ensurePrivilegedOwnedDir\(path\.dirname\(filePath\), ownerUser, ownerGroup\)/,
+  );
+  assert.match(
+    source,
+    /ensurePrivilegedOwnedDir\(path\.dirname\(destDir\), target\?\.name, targetGroup\)/,
+  );
+  assert.match(
+    source,
+    /ensurePrivilegedOwnedDir\(\s*path\.dirname\(releaseRoot\),\s*target\?\.name,\s*targetGroup,?\s*\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /runPrivileged\("mkdir", \["-p", path\.dirname\(filePath\)\]\)/,
+  );
 });
 
 test("syncInstalledDocs copies upstream mirrors into installed doc locations", async () => {

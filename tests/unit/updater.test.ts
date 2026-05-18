@@ -17,7 +17,7 @@ const installerI18n = await import(
     .href
 );
 
-function fakeUpdateResult() {
+function fakeUpdateResult(overrides: Record<string, unknown> = {}) {
   return {
     written: {
       launcherPath: "/home/alice/.config/rin/install.json",
@@ -34,10 +34,11 @@ function fakeUpdateResult() {
     daemonReady: false,
     serviceHint: "",
     prunedReleases: { removed: [] },
+    ...overrides,
   };
 }
 
-async function withUpdaterEnv(fn: () => Promise<void>) {
+async function withUpdaterEnv(fn: (stdout: string[]) => Promise<void>) {
   const keys = [
     "RIN_UPDATE_INSTALL_DIR",
     "RIN_UPDATE_TARGET_USER",
@@ -46,13 +47,17 @@ async function withUpdaterEnv(fn: () => Promise<void>) {
   ] as const;
   const original = new Map<string, string | undefined>();
   const originalWrite = process.stdout.write;
+  const stdout: string[] = [];
   for (const key of keys) original.set(key, process.env[key]);
   process.env.RIN_UPDATE_INSTALL_DIR = "/home/alice/.rin";
   process.env.RIN_UPDATE_TARGET_USER = "alice";
   process.env.RIN_UPDATE_ASSUME_YES = "true";
-  process.stdout.write = (() => true) as typeof process.stdout.write;
+  process.stdout.write = ((chunk: any) => {
+    stdout.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
   try {
-    await fn();
+    await fn(stdout);
   } finally {
     process.stdout.write = originalWrite;
     for (const key of keys) {
@@ -111,6 +116,47 @@ test("startUpdater uses installed language for UI without rewriting settings", a
     assert.equal(
       confirmMessage,
       installerI18n.createInstallerI18n("zh_CN").publishUpdateConfirmMessage,
+    );
+  });
+});
+
+test("startUpdater localizes zh_CN update notes beyond the confirm prompt", async () => {
+  await withUpdaterEnv(async (stdout) => {
+    process.env.RIN_UPDATE_ASSUME_YES = "true";
+
+    await updater.startUpdater({
+      detectCurrentUser: () => "alice",
+      repoRootFromHere: () => "/src/rin",
+      ensureNotCancelled: (value: unknown) => value,
+      release: {
+        channel: "git",
+        archiveUrl: "https://example.test/rin.tar.gz",
+        version: "main",
+        branch: "main",
+        ref: "main",
+        sourceLabel: "git branch main",
+      },
+      i18n: installerI18n.createInstallerI18n("en_US"),
+      readInstalledUpdateLanguage: () => "zh_CN",
+      async runFinalizeInstallPlanInChild() {
+        return fakeUpdateResult({
+          serviceHint:
+            "A Linux user service will be installed and started for this daemon when supported.",
+        });
+      },
+    });
+
+    const output = stdout.join("");
+    assert.match(output, /\u53d1\u73b0\u6765\u6e90: \u542f\u52a8\u5668/);
+    assert.match(output, /\u7528\u6237\u4e3b\u76ee\u5f55: \/home\/alice/);
+    assert.match(output, /\u8bf7\u6c42\u6765\u6e90: Git \u5206\u652f main/);
+    assert.match(
+      output,
+      /\u5982\u5e73\u53f0\u652f\u6301\uff0c\u5c06\u4e3a\u6b64\u5b88\u62a4\u8fdb\u7a0b\u5b89\u88c5\u5e76\u542f\u52a8 Linux \u7528\u6237\u670d\u52a1/,
+    );
+    assert.doesNotMatch(
+      output,
+      /Owner home|Discovered from|Requested source|Service\/platform note|Linux user service will be installed/,
     );
   });
 });

@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { safeString } from "../text-utils.js";
 
+import { normalizeLanguageTag } from "../language.js";
 import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import { readJsonFile } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
@@ -26,11 +27,14 @@ import {
   repoRootFromHere,
   runCommand,
 } from "../rin-install/common.js";
+import { createInstallerI18n } from "../rin-install/i18n.js";
+import { readJsonFileWithPrivilege } from "../rin-install/fs-utils.js";
 import { loadInstallRecordFromCandidates } from "../rin-install/install-record.js";
 import { runInstallerProgress } from "../rin-install/progress.js";
 import {
   defaultInstallDirForHome,
   installRecordCandidatesForHome,
+  installSettingsPath,
   launcherMetadataPathForHome,
   managedSystemdUnitCandidates,
 } from "../rin-install/paths.js";
@@ -149,6 +153,33 @@ export function loadInstallConfigForHome(home = os.homedir()): InstallConfig {
 
 export function loadInstallConfig() {
   return loadInstallConfigForHome(os.homedir());
+}
+
+export function readUpdateDisplayLanguage(
+  installDir: string,
+  options: {
+    targetUser?: string;
+    currentUser?: string;
+    readJson?: typeof readJsonFile;
+    readPrivilegedJson?: typeof readJsonFileWithPrivilege;
+  } = {},
+) {
+  const currentUser = safeString(options.currentUser || os.userInfo().username);
+  const targetUser = safeString(options.targetUser || currentUser);
+  const readSettings =
+    targetUser === currentUser
+      ? options.readJson || readJsonFile
+      : options.readPrivilegedJson || readJsonFileWithPrivilege;
+  return normalizeLanguageTag(
+    readSettings<any>(installSettingsPath(installDir), {})?.language,
+    "",
+  );
+}
+
+export function createUpdateI18n(installDir: string, targetUser?: string) {
+  return createInstallerI18n(
+    readUpdateDisplayLanguage(installDir, { targetUser }),
+  );
 }
 
 type TargetExecutionContextBase = ReturnType<typeof daemonControlContext>;
@@ -286,6 +317,8 @@ function runLoggedUpdateCommandSync(
   label: string,
   logFile: string,
   options: any = {},
+  buildFailureHeader: (label: string) => string = (value) =>
+    `${value} failed; recent log:`,
 ) {
   if (!process.stderr.isTTY) {
     runCommandSync(command, args, options);
@@ -304,7 +337,7 @@ function runLoggedUpdateCommandSync(
       const log = fs.readFileSync(logFile, "utf8").trimEnd();
       const recent = log.split("\n").slice(-80).join("\n");
       if (recent)
-        process.stderr.write(`\n${label} failed; recent log:\n${recent}\n`);
+        process.stderr.write(`\n${buildFailureHeader(label)}\n${recent}\n`);
     } catch {}
     throw error;
   } finally {
@@ -588,6 +621,7 @@ export function resolveParsedArgs(
 
 export async function runUpdate(parsed: ParsedArgs) {
   const installDir = resolveInstallDirForTarget(parsed);
+  const i18n = createUpdateI18n(installDir, parsed.targetUser);
   const manifest = await loadReleaseManifestForNetwork();
   const requestedRelease = resolveReleaseRequest(manifest, {
     channel: parsed.releaseChannel,
@@ -611,6 +645,7 @@ export async function runUpdate(parsed: ParsedArgs) {
     RIN_RELEASE_SOURCE_LABEL: resolvedRelease.sourceLabel,
     RIN_RELEASE_ARCHIVE_URL: resolvedRelease.archiveUrl,
     RIN_UPDATE_ASSUME_YES: parsed.updateAssumeYes ? "1" : "",
+    RIN_INSTALL_LANGUAGE: i18n.language,
   };
 
   if (resolvedRelease.channel === "stable") {
@@ -665,60 +700,69 @@ export async function runUpdate(parsed: ParsedArgs) {
     fs.mkdirSync(tmpDir, { recursive: true });
     fs.writeFileSync(logFile, "", "utf8");
 
-    await runInstallerProgress("Fetching update source", () => {
+    await runInstallerProgress(i18n.fetchingUpdateSourceMessage, () => {
       if (curl) {
         runLoggedUpdateCommandSync(
           curl,
           ["-fsSL", resolvedRelease.archiveUrl, "-o", archivePath],
-          "Fetching update source",
+          i18n.fetchingUpdateSourceMessage,
           logFile,
+          {},
+          i18n.buildUpdateCommandFailureHeader,
         );
       } else if (wget) {
         runLoggedUpdateCommandSync(
           wget,
           ["-qO", archivePath, resolvedRelease.archiveUrl],
-          "Fetching update source",
+          i18n.fetchingUpdateSourceMessage,
           logFile,
+          {},
+          i18n.buildUpdateCommandFailureHeader,
         );
       } else {
         throw new Error("rin_missing_required_tool:curl_or_wget");
       }
     });
-    await runInstallerProgress("Preparing update source", () =>
+    await runInstallerProgress(i18n.preparingUpdateSourceMessage, () =>
       runLoggedUpdateCommandSync(
         tar,
         ["-xzf", archivePath, "-C", sourceRoot, "--strip-components=1"],
-        "Preparing update source",
+        i18n.preparingUpdateSourceMessage,
         logFile,
+        {},
+        i18n.buildUpdateCommandFailureHeader,
       ),
     );
 
-    await runInstallerProgress("Installing update dependencies", () => {
+    await runInstallerProgress(i18n.installingUpdateDependenciesMessage, () => {
       if (fs.existsSync(path.join(sourceRoot, "package-lock.json"))) {
         runLoggedUpdateCommandSync(
           npm,
           ["ci", "--no-fund", "--no-audit", "--loglevel=error"],
-          "Installing update dependencies",
+          i18n.installingUpdateDependenciesMessage,
           logFile,
           { cwd: sourceRoot, env: buildEnv },
+          i18n.buildUpdateCommandFailureHeader,
         );
       } else {
         runLoggedUpdateCommandSync(
           npm,
           ["install", "--no-fund", "--no-audit", "--loglevel=error"],
-          "Installing update dependencies",
+          i18n.installingUpdateDependenciesMessage,
           logFile,
           { cwd: sourceRoot, env: buildEnv },
+          i18n.buildUpdateCommandFailureHeader,
         );
       }
     });
-    await runInstallerProgress("Building update runtime", () =>
+    await runInstallerProgress(i18n.buildingUpdateRuntimeMessage, () =>
       runLoggedUpdateCommandSync(
         npm,
         ["run", "build", "--silent"],
-        "Building update runtime",
+        i18n.buildingUpdateRuntimeMessage,
         logFile,
         { cwd: sourceRoot, env: buildEnv },
+        i18n.buildUpdateCommandFailureHeader,
       ),
     );
 

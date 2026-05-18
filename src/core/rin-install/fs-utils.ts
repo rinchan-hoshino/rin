@@ -333,6 +333,32 @@ export function captureCommandAsUser(
   });
 }
 
+function ownerGroupValue(ownerGroup?: string | number) {
+  return ownerGroup != null && `${ownerGroup}` !== "" ? String(ownerGroup) : "";
+}
+
+function ownerSpec(ownerUser?: string, ownerGroup?: string | number) {
+  if (!ownerUser) return "";
+  const group = ownerGroupValue(ownerGroup);
+  return group ? `${ownerUser}:${group}` : ownerUser;
+}
+
+function ensurePrivilegedOwnedDir(
+  dir: string,
+  ownerUser?: string,
+  ownerGroup?: string | number,
+  mode = "755",
+) {
+  const args = ["-d", "-m", mode];
+  if (ownerUser && process.platform !== "win32") {
+    args.push("-o", ownerUser);
+    const group = ownerGroupValue(ownerGroup);
+    if (group) args.push("-g", group);
+  }
+  args.push(dir);
+  runPrivileged("install", args);
+}
+
 export function writeTextFileWithPrivilege(
   filePath: string,
   value: string,
@@ -344,18 +370,15 @@ export function writeTextFileWithPrivilege(
   const tempFile = path.join(tempDir, "payload");
   try {
     fs.writeFileSync(tempFile, value, "utf8");
-    runPrivileged("mkdir", ["-p", path.dirname(filePath)]);
+    ensurePrivilegedOwnedDir(path.dirname(filePath), ownerUser, ownerGroup);
     runPrivileged("install", [
       "-m",
       String(mode.toString(8)),
       tempFile,
       filePath,
     ]);
-    if (ownerUser && process.platform !== "win32") {
-      const owner =
-        ownerGroup != null && `${ownerGroup}` !== ""
-          ? `${ownerUser}:${ownerGroup}`
-          : ownerUser;
+    const owner = ownerSpec(ownerUser, ownerGroup);
+    if (owner && process.platform !== "win32") {
       runPrivileged("chown", [owner, filePath]);
     }
   } finally {
@@ -423,15 +446,11 @@ export function syncInstalledDocTree(
   if (elevated) {
     const target = deps.findSystemUser(targetUser) as any;
     const targetGroup = target?.name ? String(target?.gid ?? "") : "";
+    ensurePrivilegedOwnedDir(path.dirname(destDir), target?.name, targetGroup);
     runPrivileged("rm", ["-rf", destDir]);
-    runPrivileged("mkdir", ["-p", path.dirname(destDir)]);
     runPrivileged("cp", ["-a", sourceDir, destDir]);
-    if (target?.name)
-      runPrivileged("chown", [
-        "-R",
-        `${target.name}${targetGroup ? `:${targetGroup}` : ""}`,
-        destDir,
-      ]);
+    const owner = ownerSpec(target?.name, targetGroup);
+    if (owner) runPrivileged("chown", ["-R", owner, destDir]);
     return destDir;
   }
   syncTree(sourceDir, destDir);
@@ -576,7 +595,18 @@ export function publishInstalledRuntime(
   if (elevated) {
     const target = deps.findSystemUser(targetUser) as any;
     const targetGroup = target?.name ? String(target?.gid ?? "") : "";
-    runPrivileged("mkdir", ["-p", releaseRoot]);
+    const owner = ownerSpec(target?.name, targetGroup);
+    ensurePrivilegedOwnedDir(
+      path.dirname(path.dirname(releaseRoot)),
+      target?.name,
+      targetGroup,
+    );
+    ensurePrivilegedOwnedDir(
+      path.dirname(releaseRoot),
+      target?.name,
+      targetGroup,
+    );
+    ensurePrivilegedOwnedDir(releaseRoot, target?.name, targetGroup);
     for (const name of RUNTIME_COPY_ENTRY_NAMES) {
       runPrivileged("rm", ["-rf", path.join(releaseRoot, name)]);
       runPrivileged("cp", [
@@ -594,18 +624,10 @@ export function publishInstalledRuntime(
       runPrivileged("rm", ["-rf", currentLink]);
     } catch {}
     runPrivileged("mv", [currentTmpLink, currentLink]);
-    if (target?.name) {
-      runPrivileged("chown", [
-        "-R",
-        `${target.name}${targetGroup ? `:${targetGroup}` : ""}`,
-        releaseRoot,
-      ]);
+    if (owner) {
+      runPrivileged("chown", ["-R", owner, releaseRoot]);
       try {
-        runPrivileged("chown", [
-          "-h",
-          `${target.name}${targetGroup ? `:${targetGroup}` : ""}`,
-          currentLink,
-        ]);
+        runPrivileged("chown", ["-h", owner, currentLink]);
       } catch {}
     }
     return { releaseRoot, currentLink };
