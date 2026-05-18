@@ -1,11 +1,8 @@
 import os from "node:os";
 import path from "node:path";
 
-import { isContextOverflow } from "@earendil-works/pi-ai";
-
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
-import { estimateContextTokens } from "../rin-tui/session-helpers.js";
-import todoExtension from "./todo-extension.js";
+import todoCapability from "./todo.js";
 import {
   buildConfiguredLanguageSystemPrompt,
   readConfiguredLanguageFromSettings,
@@ -57,6 +54,7 @@ export function createRinCapabilityDefinitions(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition[] {
   return [
+    todoCapability(),
     webSearchModule(),
     memoryModule(options),
     selfImproveModule(options),
@@ -536,14 +534,6 @@ const ACTIVE_TURN_SYSTEM_PROMPT_KEY = Symbol.for("rin.activeTurnSystemPrompt");
 const AUTO_RELOAD_AFTER_COMPACTION_KEY = Symbol.for(
   "rin.autoReloadAfterCompaction",
 );
-const OVERFLOW_CONTINUATION_PROMPT_KEY = Symbol.for(
-  "rin.overflowContinuationPrompt",
-);
-const MID_TURN_COMPACTION_KEY = Symbol.for("rin.midTurnCompaction");
-const DISABLE_END_TURN_THRESHOLD_KEY = Symbol.for(
-  "rin.disableEndTurnThresholdCompaction",
-);
-const RETRYABLE_PROVIDER_ERRORS_KEY = Symbol.for("rin.retryableProviderErrors");
 const COMPACTION_REASON_TRACKING_KEY = Symbol.for(
   "rin.compactionReasonTracking",
 );
@@ -553,48 +543,6 @@ const COMPACTION_CONCURRENCY_GUARD_KEY = Symbol.for(
 const COMPACTION_SETTINGS_TUNING_KEY = Symbol.for(
   "rin.compactionSettingsTuning",
 );
-const DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT = 88;
-const MID_TURN_CONTINUATION_BLOCK = COMPACTION_CONTINUATION_BLOCK;
-
-function mutateMessageArray(target: any[], source: any[]) {
-  if (!Array.isArray(target)) return;
-  target.length = 0;
-  for (const item of Array.isArray(source) ? source : []) target.push(item);
-}
-
-export function isRinContextOverflow(message: any, contextWindow?: number) {
-  if (isContextOverflow(message, contextWindow)) return true;
-  if (message?.stopReason !== "error") return false;
-  const errorMessage = String(message?.errorMessage || "");
-  return /\bWebSocket closed\s+1009\b/i.test(errorMessage);
-}
-
-export function isRinRetryableProviderError(message: any) {
-  if (message?.stopReason !== "error") return false;
-  const errorMessage = String(message?.errorMessage || "");
-  if (/\bWebSocket closed\s+1009\b/i.test(errorMessage)) return false;
-  return /\bWebSocket (?:error|closed)\b/i.test(errorMessage);
-}
-
-function buildMidTurnLlmContext(
-  session: any,
-  systemPrompt: string,
-  tools: any[],
-) {
-  const rawMessages = Array.isArray(session?.agent?.state?.messages)
-    ? session.agent.state.messages
-    : [];
-  const converted = session?.agent?.convertToLlm
-    ? session.agent.convertToLlm(rawMessages)
-    : rawMessages;
-  return Promise.resolve(converted).then((messages: any[]) => ({
-    systemPrompt: systemPrompt
-      ? `${systemPrompt}\n\n${MID_TURN_CONTINUATION_BLOCK}`
-      : MID_TURN_CONTINUATION_BLOCK,
-    messages,
-    tools,
-  }));
-}
 
 export function applyRinCompactionReasonTracking(session: any) {
   if (!session || typeof session !== "object") return;
@@ -620,89 +568,6 @@ export function applyRinCompactionReasonTracking(session: any) {
   };
 
   (session as any)[COMPACTION_REASON_TRACKING_KEY] = { original };
-}
-
-export function applyOverflowContinuationPrompt(session: any) {
-  if (!session || typeof session !== "object") return;
-  if ((session as any)[OVERFLOW_CONTINUATION_PROMPT_KEY]) return;
-  if (typeof session.subscribe !== "function") return;
-
-  const unsubscribe = session.subscribe((event: any) => {
-    if (event?.type !== "compaction_end") return;
-    if (event?.aborted || !event?.result) return;
-    if (String(event?.reason || "").trim() !== "overflow") return;
-    writeCompactionContinuationMarker(session, {
-      reason: "overflow",
-    });
-  });
-
-  (session as any)[OVERFLOW_CONTINUATION_PROMPT_KEY] = { unsubscribe };
-}
-
-export function applyDisableEndTurnThresholdCompaction(session: any) {
-  if (!session || typeof session !== "object") return;
-  if ((session as any)[DISABLE_END_TURN_THRESHOLD_KEY]) return;
-  const original =
-    typeof session._checkCompaction === "function"
-      ? session._checkCompaction.bind(session)
-      : null;
-  if (!original) return;
-
-  session._checkCompaction = async function patchedCheckCompaction(
-    assistantMessage: any,
-    skipAbortedCheck = true,
-  ) {
-    const contextWindow = Number(session.model?.contextWindow || 0);
-    if (!isRinContextOverflow(assistantMessage, contextWindow)) {
-      return;
-    }
-
-    if (isContextOverflow(assistantMessage, contextWindow)) {
-      return await original(assistantMessage, skipAbortedCheck);
-    }
-
-    if (session._overflowRecoveryAttempted) {
-      session._emit?.({
-        type: "compaction_end",
-        reason: "overflow",
-        result: undefined,
-        aborted: false,
-        willRetry: false,
-        errorMessage:
-          "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.",
-      });
-      return;
-    }
-
-    session._overflowRecoveryAttempted = true;
-    const messages = session.agent?.state?.messages;
-    if (
-      Array.isArray(messages) &&
-      messages.length > 0 &&
-      messages[messages.length - 1]?.role === "assistant"
-    ) {
-      session.agent.state.messages = messages.slice(0, -1);
-    }
-    await session._runAutoCompaction?.("overflow", true);
-  };
-
-  (session as any)[DISABLE_END_TURN_THRESHOLD_KEY] = { original };
-}
-
-export function applyRinRetryableProviderErrors(session: any) {
-  if (!session || typeof session !== "object") return;
-  if ((session as any)[RETRYABLE_PROVIDER_ERRORS_KEY]) return;
-  const original =
-    typeof session._isRetryableError === "function"
-      ? session._isRetryableError.bind(session)
-      : null;
-  if (!original) return;
-
-  session._isRetryableError = function patchedIsRetryableError(message: any) {
-    return original(message) || isRinRetryableProviderError(message);
-  };
-
-  (session as any)[RETRYABLE_PROVIDER_ERRORS_KEY] = { original };
 }
 
 function abortActiveCompaction(session: any) {
@@ -861,80 +726,6 @@ function readCurrentSessionSystemPrompt(session: any) {
       ),
     );
   }
-}
-
-export function applyMidTurnCompaction(
-  session: any,
-  thresholdPercent = DEFAULT_AUTO_COMPACTION_THRESHOLD_PERCENT,
-) {
-  if (!session || typeof session !== "object") return;
-  if ((session as any)[MID_TURN_COMPACTION_KEY]) return;
-  const agent = session.agent;
-  if (!agent || typeof agent.streamFn !== "function") return;
-
-  const originalStreamFn = agent.streamFn.bind(agent);
-  const originalTransformContext =
-    typeof agent.transformContext === "function"
-      ? agent.transformContext.bind(agent)
-      : null;
-
-  let inPreflight = false;
-  let injectCueForCurrentCall = false;
-  let postCompactionSystemPrompt = "";
-
-  agent.transformContext = async (messages: any[], signal?: AbortSignal) => {
-    const transformed = originalTransformContext
-      ? await originalTransformContext(messages, signal)
-      : messages;
-
-    if (inPreflight) return transformed;
-    if (session?.[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY]) {
-      return transformed;
-    }
-    if (session?.autoCompactionEnabled === false) return transformed;
-    const contextWindow = Number(session.model?.contextWindow || 0);
-    if (contextWindow <= 0) return transformed;
-
-    const usageTokens = estimateContextTokens(
-      Array.isArray(transformed) ? transformed : [],
-    );
-    const usagePercent = (usageTokens / contextWindow) * 100;
-    if (usagePercent < thresholdPercent) return transformed;
-
-    inPreflight = true;
-    try {
-      await session._runAutoCompaction?.("threshold", false);
-      const compactedMessages = Array.isArray(session?.agent?.state?.messages)
-        ? session.agent.state.messages
-        : transformed;
-      mutateMessageArray(messages, compactedMessages);
-      postCompactionSystemPrompt = readCurrentSessionSystemPrompt(session);
-      injectCueForCurrentCall = true;
-      return compactedMessages;
-    } finally {
-      inPreflight = false;
-    }
-  };
-
-  agent.streamFn = async (model: any, context: any, options: any) => {
-    if (!injectCueForCurrentCall) {
-      return await originalStreamFn(model, context, options);
-    }
-    injectCueForCurrentCall = false;
-    const nextContext = await buildMidTurnLlmContext(
-      session,
-      postCompactionSystemPrompt || String(context?.systemPrompt || ""),
-      context?.tools,
-    );
-    postCompactionSystemPrompt = "";
-    return await originalStreamFn(model, nextContext, options);
-  };
-
-  (session as any)[MID_TURN_COMPACTION_KEY] = {
-    thresholdPercent,
-    originalStreamFn,
-    originalTransformContext,
-  };
 }
 
 export function applyAutoReloadAfterCompaction(session: any) {
@@ -1286,25 +1077,6 @@ export function applyRinSettingsDefaults(settingsManager: any) {
   }
 }
 
-function isBuiltinTodoDisabled(settingsManager: any) {
-  const entries =
-    typeof settingsManager?.getExtensionPaths === "function"
-      ? settingsManager.getExtensionPaths()
-      : [];
-  return (Array.isArray(entries) ? entries : []).some((entry) => {
-    const text = String(entry ?? "").trim();
-    return text === "!rin:todo" || text === "-rin:todo";
-  });
-}
-
-function getBuiltinExtensionFactories(
-  settingsManager: any,
-  noExtensions?: boolean,
-) {
-  if (noExtensions || isBuiltinTodoDisabled(settingsManager)) return [];
-  return [todoExtension];
-}
-
 export async function createConfiguredAgentSession(
   options: {
     cwd?: string;
@@ -1387,10 +1159,6 @@ export async function createConfiguredAgentSession(
         noContextFiles: options.noContextFiles,
         systemPrompt: options.systemPrompt,
         appendSystemPrompt: options.appendSystemPrompt,
-        extensionFactories: getBuiltinExtensionFactories(
-          settingsManager,
-          options.noExtensions,
-        ),
       },
       extensionFlagValues: options.extensionFlagValues,
     });
@@ -1465,11 +1233,7 @@ export async function createConfiguredAgentSession(
 
     applyRinPromptBuilder(result.session);
     applyRinBeforeCompactionHooks(result.session);
-    applyDisableEndTurnThresholdCompaction(result.session);
-    applyRinRetryableProviderErrors(result.session);
     applyRinCompactionSettingsTuning(result.session);
-    applyMidTurnCompaction(result.session);
-    applyOverflowContinuationPrompt(result.session);
     applyAutoReloadAfterCompaction(result.session);
     applyRinCompactionConcurrencyGuard(result.session);
     return {

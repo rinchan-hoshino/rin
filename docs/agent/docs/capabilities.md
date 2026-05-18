@@ -12,7 +12,7 @@ Use this page as a quick entrypoint for Rin runtime capabilities. Follow the sys
 - **Initialization:** if the user asks to initialize or reset preferences, read `docs/initialization.md`.
 - **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, manual run-now starts, and recurring agent automation. Read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, running, completing, pausing, resuming, or deleting them.
 - **Chat bridge:** chat sender identity comes from the platform, not the shell user. Read `docs/chat-bridge.md` for SDK/file workflows and adapter behavior; read `docs/rich-text-output-format.md` for native output objects.
-- **Todo extension:** the built-in `rin:todo` Pi-style extension is enabled by default; it registers the `todo` tool and `/todos` command.
+- **Todo:** the core todo capability is always enabled; it registers the `todo` tool and `/todos` command.
 - **Optional browser/computer tools:** disabled unless `settings.json -> extensions` includes `rin:browser-use` or `rin:computer-use`.
 - **Web search:** use `web_search` proactively for fresh or version-sensitive facts; direct URL mode fetches a known page.
 - **Status and usage:** use `rin status` / `rin status --json` for daemon activity and `rin usage` for token telemetry.
@@ -62,15 +62,11 @@ Key points for agents:
 - `/chat` configures official adapters in the TUI and enters platform selection directly.
 - Official adapter setup should use the minimum runnable fields, prefer polling/socket modes when supported, avoid webhook-only setup when possible, and include direct official links for required values.
 
-## Built-in and bundled Pi extensions
+## Core todo and bundled Pi extensions
 
-Rin enables the built-in `rin:todo` Pi-style extension by default. It registers the `todo` tool for branch-aware checklists and `/todos` for the interactive TUI view directly from core code, without resolving an installed extension path. To disable it, add a native Pi resource filter:
+Rin always enables the core todo capability. It registers the `todo` tool for branch-aware checklists and `/todos` for the interactive TUI view directly from core code. It stays enabled even when optional Pi extensions are disabled.
 
-```json
-{
-  "extensions": ["!rin:todo"]
-}
-```
+In daemon/RPC chat turns, Rin can withhold a premature final answer when the todo list still contains incomplete items and continue hidden work automatically. Hidden continuations stop when todos complete, when the todo state does not change between continuations, or after 64 continuations.
 
 Rin also ships optional browser/computer control as normal Pi extension packages under the installed app. They are packaged with Rin but stay off until enabled:
 
@@ -103,7 +99,7 @@ Optional config files are only for non-default behavior:
 
 Notes:
 
-- `rin:todo` registers `todo` from core code and is on by default unless filtered with `!rin:todo`.
+- Core todo registers `todo` from core code and is always on.
 - `rin:browser-use` registers `browser_use`, drives the external `agent-browser` CLI, uses `agent-browser` from PATH by default, then falls back to `npx -y agent-browser`.
 - `rin:computer-use` registers `computer_use` and uses platform backends for Windows, Linux, or macOS by default.
 - Use Pi resource filters such as `!rin:browser-use` to disable a previously enabled bundled resource.

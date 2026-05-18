@@ -5,7 +5,7 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
 ## Quick reference
 
 - Core Rin capabilities are available through native product code when their tools are present in the live tool list.
-- The built-in `rin:todo` Pi-style extension is enabled by default and registers the `todo` tool plus `/todos` command.
+- The core todo capability is always enabled and registers the `todo` tool plus `/todos` command.
 - Optional browser/computer tools are packaged with Rin but remain off until `settings.json -> extensions` enables their `rin:` aliases.
 - Daemon worker extensions run inside the daemon process and are not Pi session tools.
 - The current tool list and system prompt remain authoritative for a specific turn.
@@ -41,23 +41,15 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
   - records detailed token telemetry under `~/.rin/data/token-usage/usage.db`
   - powers the charted `rin usage` text dashboard, grouped usage queries, and best-effort configured provider account/quota display
 
-## Built-in Pi-style extensions
+## Core todo capability
 
-Rin can register selected Pi extension factories directly from core code.
+Rin's todo support is native core behavior, not a Pi extension.
 
-- `rin:todo`
-  - enabled by default
-  - registers the built-in `todo` extension factory without resolving an installed extension path
-  - registers `todo` for branch-aware task checklists and `/todos` for the interactive TUI view
-  - stores state in session tool result details, so forks and session branches reconstruct the matching todo list
-
-Use a native Pi resource filter to disable the default todo extension when needed:
-
-```json
-{
-  "extensions": ["!rin:todo"]
-}
-```
+- always enabled
+- registers `todo` for branch-aware task checklists and `/todos` for the interactive TUI view
+- stores state in session tool result details, so forks and session branches reconstruct the matching todo list
+- remains enabled even when optional Pi extensions are disabled; it is part of Rin's reliability path rather than a user-toggleable component
+- in daemon/RPC chat turns, if a final answer is produced while todos are still incomplete, Rin may withhold that final answer and silently continue work; hidden continuations stop when todos complete, when the todo state does not change between continuations, or after 64 continuations
 
 ## Bundled optional Pi extensions
 

@@ -132,7 +132,7 @@ test("stage B browser and computer use extensions stay disabled by default", asy
   }
 });
 
-test("built-in todo loads from configured runtime without extension paths", async () => {
+test("core todo loads from configured runtime without extension paths", async () => {
   const originalCwd = process.cwd();
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-builtin-todo-"),
@@ -149,7 +149,7 @@ test("built-in todo loads from configured runtime without extension paths", asyn
 
       const added = await todoTool.execute(
         "tool-call-1",
-        { action: "add", text: "Wire todo extension" },
+        { action: "add", text: "Wire core todo" },
         undefined,
         undefined,
         { cwd: agentDir },
@@ -172,11 +172,11 @@ test("built-in todo loads from configured runtime without extension paths", asyn
       assert.match(added.content[0].text, /Added todo #1/);
       assert.match(toggled.content[0].text, /completed/);
       assert.deepEqual(toggled.details.todos, [
-        { id: 1, text: "Wire todo extension", done: true },
+        { id: 1, text: "Wire core todo", done: true },
       ]);
       assert.match(toggledFromStringId.content[0].text, /uncompleted/);
       assert.deepEqual(toggledFromStringId.details.todos, [
-        { id: 1, text: "Wire todo extension", done: false },
+        { id: 1, text: "Wire core todo", done: false },
       ]);
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});
@@ -187,14 +187,14 @@ test("built-in todo loads from configured runtime without extension paths", asyn
   }
 });
 
-test("built-in todo honors no-extensions and native filters", async () => {
+test("core todo remains enabled when optional extensions are disabled", async () => {
   const originalCwd = process.cwd();
   for (const scenario of [
     { settings: {}, options: { noExtensions: true } },
-    { settings: { extensions: ["!rin:todo"] }, options: {} },
+    { settings: { extensions: ["!rin:browser-use"] }, options: {} },
   ]) {
     const agentDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "rin-builtin-todo-off-"),
+      path.join(os.tmpdir(), "rin-builtin-todo-on-"),
     );
     try {
       await writeJson(path.join(agentDir, "settings.json"), scenario.settings);
@@ -204,7 +204,7 @@ test("built-in todo honors no-extensions and native filters", async () => {
         ...scenario.options,
       });
       try {
-        assert.equal(configured.session.getToolDefinition("todo"), undefined);
+        assert.ok(configured.session.getToolDefinition("todo"));
       } finally {
         await configured.runtime?.dispose?.().catch?.(() => {});
       }

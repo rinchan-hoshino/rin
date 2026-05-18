@@ -7,6 +7,7 @@ import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
+import { continueTodoFinalIfNeeded } from "../rin-lib/todo-state.js";
 import { safeString } from "../text-utils.js";
 import {
   getCommandArgumentCompletions,
@@ -687,6 +688,16 @@ export async function runCustomRpcMode(
           if (!recoveryStarted) break;
           taskError = null;
         }
+        if (lastCompletedAssistantMessage && !taskError) {
+          hiddenTodoContinuationSessions.add(turnSession);
+          try {
+            await continueTodoFinalIfNeeded(turnSession, {
+              waitForEvents: () => waitForSessionPostAgentEvents(turnSession),
+            });
+          } finally {
+            hiddenTodoContinuationSessions.delete(turnSession);
+          }
+        }
         let completion = resolveTurnCompletion({
           messages: lastCompletedAssistantMessage
             ? [lastCompletedAssistantMessage]
@@ -816,6 +827,7 @@ export async function runCustomRpcMode(
   };
 
   let unsubscribeSessionEvents: (() => void) | undefined;
+  const hiddenTodoContinuationSessions = new WeakSet<object>();
   const bindCurrentSession = async () => {
     const session = getSession();
     await session.bindExtensions({
@@ -863,9 +875,16 @@ export async function runCustomRpcMode(
     });
 
     unsubscribeSessionEvents?.();
-    unsubscribeSessionEvents = session.subscribe((event: unknown) =>
-      output(event),
-    );
+    unsubscribeSessionEvents = session.subscribe((event: unknown) => {
+      if (
+        session &&
+        typeof session === "object" &&
+        hiddenTodoContinuationSessions.has(session)
+      ) {
+        return;
+      }
+      output(event);
+    });
   };
 
   await bindCurrentSession();

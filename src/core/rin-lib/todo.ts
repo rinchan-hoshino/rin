@@ -1,18 +1,18 @@
 /**
- * Rin Todo Extension - built from Pi's stateful todo extension example.
+ * Rin core todo capability.
  *
  * State is stored in tool result details instead of an external file, so session
  * branches reconstruct the todo list that belongs to that branch.
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  Theme,
-} from "@earendil-works/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import type {
+  RinCapabilityDefinition,
+  RinCapabilityContext,
+} from "./capability-types.js";
 
 interface Todo {
   id: number;
@@ -124,7 +124,7 @@ class TodoListComponent {
   }
 }
 
-export default function todoExtension(pi: ExtensionAPI) {
+export default function todoCapability(): RinCapabilityDefinition {
   let todos: Todo[] = [];
   let nextId = 1;
 
@@ -138,7 +138,7 @@ export default function todoExtension(pi: ExtensionAPI) {
     ...(error ? { error } : {}),
   });
 
-  const reconstructState = (ctx: ExtensionContext) => {
+  const reconstructState = (ctx: RinCapabilityContext) => {
     todos = [];
     nextId = 1;
 
@@ -153,9 +153,6 @@ export default function todoExtension(pi: ExtensionAPI) {
       nextId = details.nextId;
     }
   };
-
-  pi.on("session_start", async (_event, ctx) => reconstructState(ctx));
-  pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));
 
   const todoToolDefinition: any = {
     name: "todo",
@@ -363,19 +360,28 @@ export default function todoExtension(pi: ExtensionAPI) {
     },
   };
 
-  pi.registerTool(todoToolDefinition);
+  return {
+    name: "todo",
+    tools: [todoToolDefinition],
+    commands: [
+      {
+        name: "todos",
+        description: "Show all todos on the current branch",
+        handler: async (_args, ctx) => {
+          if (!ctx.hasUI) {
+            ctx.ui.notify("/todos requires interactive mode", "error");
+            return;
+          }
 
-  pi.registerCommand("todos", {
-    description: "Show all todos on the current branch",
-    handler: async (_args, ctx) => {
-      if (!ctx.hasUI) {
-        ctx.ui.notify("/todos requires interactive mode", "error");
-        return;
-      }
-
-      await ctx.ui.custom<void>((_tui, theme, _kb, done) => {
-        return new TodoListComponent(todos, theme, () => done());
-      });
+          await ctx.ui.custom((_tui, theme, _kb, done) => {
+            return new TodoListComponent(todos, theme, () => done());
+          });
+        },
+      },
+    ],
+    hooks: {
+      session_start: [async (_event, ctx) => reconstructState(ctx)],
+      session_tree: [async (_event, ctx) => reconstructState(ctx)],
     },
-  });
+  };
 }
