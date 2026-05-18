@@ -104,6 +104,58 @@ test("rpc client supports injected in-process transport connectors", async () =>
   ]);
 });
 
+test("rpc client runs compact through a shared single-flight request", async () => {
+  let client: RinDaemonFrontendClient | undefined;
+  let releaseCompact: (() => void) | undefined;
+  const compactReceived = new Promise<void>((resolve) => {
+    client = new RinDaemonFrontendClient({
+      socketPath: "inprocess://compact-single-flight",
+      connectSocket: async () => {
+        const { clientSocket, serverSocket } = createConnectedRpcSocketPair();
+        let buffer = "";
+        serverSocket.on("data", (chunk) => {
+          buffer += String(chunk);
+          while (true) {
+            const idx = buffer.indexOf("\n");
+            if (idx < 0) break;
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (!line) continue;
+            const payload = JSON.parse(line);
+            if (payload.type !== "compact") continue;
+            resolve();
+            void new Promise<void>((next) => {
+              releaseCompact = next;
+            }).then(() => {
+              serverSocket.write(
+                `${JSON.stringify({
+                  type: "response",
+                  id: payload.id,
+                  command: payload.type,
+                  success: true,
+                  data: { compacted: true },
+                })}\n`,
+              );
+            });
+          }
+        });
+        return clientSocket;
+      },
+    });
+  });
+  assert.ok(client);
+
+  await client.connect();
+  const first = client.compact();
+  await compactReceived;
+  const second = await client.compact();
+  releaseCompact?.();
+  const firstResult = await first;
+
+  assert.equal(second.compactionBusy, true);
+  assert.deepEqual(firstResult, { compacted: true });
+});
+
 test("rpc client exposes typed extension UI events and responses", async () => {
   const client = new RinDaemonFrontendClient("/tmp/fake.sock");
   const events = [];

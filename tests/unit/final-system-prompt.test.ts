@@ -147,7 +147,7 @@ test("buildFinalAppSystemPrompt injects a continuation prompt after automatic co
 
   assert.ok(
     finalSystemPrompt.includes(
-      "Context compacted; treat this as a routine internal checkpoint, not a task change.",
+      "Context compacted; treat this as a routine internal checkpoint.",
     ),
   );
   assert.ok(
@@ -168,7 +168,7 @@ test("buildFinalAppSystemPrompt injects a continuation prompt after automatic co
   );
   assert.equal(
     secondPrompt.includes(
-      "Context compacted; treat this as a routine internal checkpoint, not a task change.",
+      "Context compacted; treat this as a routine internal checkpoint.",
     ),
     false,
   );

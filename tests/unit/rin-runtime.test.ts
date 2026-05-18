@@ -432,7 +432,7 @@ test("applyMidTurnCompaction compacts before a provider call and injects continu
   );
   assert.ok(
     seenContext.systemPrompt.includes(
-      "Context compacted; treat this as a routine internal checkpoint, not a task change.",
+      "Context compacted; treat this as a routine internal checkpoint.",
     ),
   );
 });

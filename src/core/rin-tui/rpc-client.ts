@@ -24,6 +24,23 @@ import type {
   RpcFrontendClient,
 } from "./frontend-surface.js";
 
+const DEFAULT_RPC_TIMEOUT_MS = 120_000;
+const LONG_RUNNING_RPC_TIMEOUT_MS = 5 * 60 * 1000;
+
+function rpcTimeoutMs(command: RinRpcCommand) {
+  const type = String(command?.type || "").trim();
+  if (type === "compact") return LONG_RUNNING_RPC_TIMEOUT_MS;
+  if (
+    type === "run_command" &&
+    String((command as any)?.commandLine || "")
+      .trim()
+      .match(/^\/compact(?:\s|$)/)
+  ) {
+    return LONG_RUNNING_RPC_TIMEOUT_MS;
+  }
+  return DEFAULT_RPC_TIMEOUT_MS;
+}
+
 function toFrontendEvent(event: any): InteractiveFrontendEvent | null {
   if (!event || typeof event !== "object") return null;
 
@@ -81,6 +98,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   >();
   listeners = new Set<(event: InteractiveFrontendEvent) => void>();
   connectPromise: Promise<void> | null = null;
+  private compactPromise: Promise<unknown> | null = null;
 
   constructor(
     transport:
@@ -242,6 +260,33 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     return await this.request({ type: "run_command", commandLine });
   }
 
+  async compact(
+    customInstructions?: string,
+    options: { sessionFile?: string } = {},
+  ) {
+    if (this.compactPromise) {
+      return {
+        handled: true,
+        compactionBusy: true,
+        text: "Compaction already in progress.",
+      };
+    }
+    const tracked = (async () => {
+      try {
+        const sessionFile = String(options.sessionFile || "").trim();
+        return await this.request({
+          type: "compact",
+          customInstructions,
+          ...(sessionFile ? { sessionFile } : {}),
+        });
+      } finally {
+        if (this.compactPromise === tracked) this.compactPromise = null;
+      }
+    })();
+    this.compactPromise = tracked;
+    return await tracked;
+  }
+
   async terminateSession() {
     return await this.request({ type: "terminate_session" });
   }
@@ -348,7 +393,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`rin_timeout:${String(command?.type || "command")}`));
-      }, 120000);
+      }, rpcTimeoutMs(command));
       this.pending.set(id, { resolve, reject, timer });
       this.socket.write(`${JSON.stringify({ ...command, id })}\n`);
     });

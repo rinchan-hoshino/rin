@@ -46,7 +46,7 @@ type MaintenanceChangedFile = {
 type MaintenanceHistoryRecord = {
   id: string;
   kind: MaintenanceJob["kind"];
-  status: "completed" | "failed" | "retry_scheduled";
+  status: "completed" | "failed";
   trigger: string;
   sessionFile: string;
   leafId?: string;
@@ -242,17 +242,6 @@ async function acquireWorkerLockWithWait(
   }
 }
 
-async function replaceMatchingJob(
-  agentDir: string,
-  target: MaintenanceJob,
-  replacement?: MaintenanceJob,
-) {
-  const jobs = await loadQueue(agentDir);
-  const remaining = jobs.filter((job) => !sameJob(job, target));
-  if (replacement) remaining.push(replacement);
-  await saveQueue(agentDir, remaining);
-}
-
 async function removeMatchingJobs(agentDir: string, target: MaintenanceJob) {
   const jobs = await loadQueue(agentDir);
   const remaining = jobs.filter((job) => !sameJob(job, target));
@@ -289,17 +278,6 @@ function normalizeErrorMessage(error: unknown) {
   return safeString(
     (error as any)?.message || error || "maintenance_job_failed",
   ).trim();
-}
-
-function isPermanentJobError(message: string) {
-  return [
-    "maintenance_job_invalid_input",
-    "maintenance_job_invalid_payload",
-    "maintenance_job_missing_session_file:",
-    "maintenance_job_invalid_session_file:",
-    "session_file_required",
-    "Cannot fork: source session file is empty or invalid:",
-  ].some((needle) => message.includes(needle));
 }
 
 async function appendHistoryRecord(
@@ -407,14 +385,11 @@ export async function processQueuedMemoryJobs(agentDir: string) {
   if (!handle) return { skipped: "locked" };
   let processed = 0;
   let failed = 0;
-  let retried = 0;
-  const deferredRetryIds = new Set<string>();
   try {
     while (true) {
       const jobs = await loadQueue(resolvedAgentDir);
       const job = jobs[0];
       if (!job) break;
-      if (deferredRetryIds.has(job.id)) break;
       const startedAt = nowIso();
       try {
         const result = await processJob(job);
@@ -440,37 +415,11 @@ export async function processQueuedMemoryJobs(agentDir: string) {
         const finishedAt = nowIso();
         const message = normalizeErrorMessage(error);
         const attempts = Math.max(1, Number(job.attempts || 0) + 1);
-        const updatedJob: MaintenanceJob = {
-          ...job,
-          attempts,
-          updatedAt: finishedAt,
-          lastAttemptAt: finishedAt,
-          lastError: message,
-        };
-        const permanent = isPermanentJobError(message);
-        if (permanent || attempts >= 3) {
-          await removeMatchingJobs(resolvedAgentDir, job);
-          await appendHistoryRecord(resolvedAgentDir, {
-            id: job.id,
-            kind: job.kind,
-            status: "failed",
-            trigger: job.trigger,
-            sessionFile: job.sessionFile,
-            leafId: job.leafId,
-            snapshotKey: job.snapshotKey,
-            startedAt,
-            finishedAt,
-            attempts,
-            error: message,
-          });
-          failed += 1;
-          continue;
-        }
-        await replaceMatchingJob(resolvedAgentDir, job, updatedJob);
+        await removeMatchingJobs(resolvedAgentDir, job);
         await appendHistoryRecord(resolvedAgentDir, {
           id: job.id,
           kind: job.kind,
-          status: "retry_scheduled",
+          status: "failed",
           trigger: job.trigger,
           sessionFile: job.sessionFile,
           leafId: job.leafId,
@@ -480,11 +429,10 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           attempts,
           error: message,
         });
-        retried += 1;
-        deferredRetryIds.add(job.id);
+        failed += 1;
       }
     }
-    return { skipped: "", processed, failed, retried };
+    return { skipped: "", processed, failed, retried: 0 };
   } finally {
     await releaseWorkerLock(resolvedAgentDir, handle);
   }

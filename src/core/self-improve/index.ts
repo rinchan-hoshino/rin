@@ -21,7 +21,6 @@ const reviewStateBySession = new Map<
   string,
   { finalMessages: number; lastQueuedMessage: number; initialized: boolean }
 >();
-
 function normalizeReviewEveryTurns(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed))
@@ -169,7 +168,14 @@ async function processSelfImproveReviewNow(
 ) {
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
-  await runner(job);
+  try {
+    return await runner(job);
+  } catch (error: any) {
+    return {
+      status: "failed",
+      error: String(error?.message || error || "maintenance_job_failed"),
+    };
+  }
 }
 
 export default function selfImproveModule(

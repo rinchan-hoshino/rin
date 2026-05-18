@@ -996,12 +996,7 @@ export async function runCustomRpcMode(
       case "set_follow_up_mode":
         return run(id, type, () => session.setFollowUpMode(command.mode));
       case "compact":
-        return run(id, type, () => {
-          if (session.isCompacting) {
-            throw new Error("Compaction already in progress");
-          }
-          return session.compact(command.customInstructions);
-        });
+        return run(id, type, () => session.compact(command.customInstructions));
       case "set_auto_compaction":
         return run(id, type, () =>
           session.setAutoCompactionEnabled(Boolean(command.enabled)),

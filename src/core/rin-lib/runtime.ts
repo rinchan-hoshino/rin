@@ -379,11 +379,10 @@ export function clearSessionBaseSystemPrompt(
 }
 
 const COMPACTION_CONTINUATION_BLOCK = [
-  "Context compacted; treat this as a routine internal checkpoint, not a task change.",
-  "Continue the exact pre-compaction objective, plan, constraints, authority boundaries, and chosen implementation approach.",
-  "Do not switch to a different task or downgrade to a simpler/worse method just because details were summarized.",
-  "If the summary is missing needed detail, inspect the live files/session evidence before acting.",
-  "Execute the next concrete step directly without narration. If work remains, keep doing it.",
+  "Context compacted; treat this as a routine internal checkpoint.",
+  "Resume the current task immediately from its current state.",
+  "Execute the next concrete step directly without narration.",
+  "If work remains, keep doing it.",
 ].join("\n");
 
 function appendCompactionContinuationBlock(systemPrompt: string) {
@@ -712,6 +711,33 @@ function abortActiveCompaction(session: any) {
   } catch {}
 }
 
+type RinCompactionGuardState = {
+  activeCompaction?: { reason: string; promise: Promise<unknown> };
+};
+
+function isRinCompactionBusy(session: any, state: RinCompactionGuardState) {
+  return Boolean(state.activeCompaction || session?.isCompacting);
+}
+
+async function runRinCompactionExclusive<T>(
+  session: any,
+  state: RinCompactionGuardState,
+  reason: string,
+  onBusy: () => T | Promise<T>,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  if (isRinCompactionBusy(session, state)) return await onBusy();
+  const promise = Promise.resolve(run());
+  state.activeCompaction = { reason, promise };
+  try {
+    return await promise;
+  } finally {
+    if (state.activeCompaction?.promise === promise) {
+      state.activeCompaction = undefined;
+    }
+  }
+}
+
 export function applyRinCompactionSettingsTuning(session: any) {
   if (!session || typeof session !== "object") return;
   if ((session as any)[COMPACTION_SETTINGS_TUNING_KEY]) return;
@@ -745,9 +771,7 @@ export function applyRinCompactionConcurrencyGuard(session: any) {
   if (!session || typeof session !== "object") return;
   if ((session as any)[COMPACTION_CONCURRENCY_GUARD_KEY]) return;
 
-  let activeCompaction:
-    | { reason: string; promise: Promise<unknown> }
-    | undefined;
+  const guardState: RinCompactionGuardState = {};
 
   const originalCompact =
     typeof session.compact === "function"
@@ -755,16 +779,15 @@ export function applyRinCompactionConcurrencyGuard(session: any) {
       : null;
   if (originalCompact) {
     session.compact = async function guardedManualCompaction(...args: any[]) {
-      if (activeCompaction || session.isCompacting) {
-        throw new Error("Compaction already in progress");
-      }
-      const promise = Promise.resolve(originalCompact(...args));
-      activeCompaction = { reason: "manual", promise };
-      try {
-        return await promise;
-      } finally {
-        if (activeCompaction?.promise === promise) activeCompaction = undefined;
-      }
+      return await runRinCompactionExclusive(
+        session,
+        guardState,
+        "manual",
+        () => {
+          throw new Error("Compaction already in progress");
+        },
+        () => originalCompact(...args),
+      );
     };
   }
 
@@ -777,16 +800,13 @@ export function applyRinCompactionConcurrencyGuard(session: any) {
       reason: string,
       ...args: any[]
     ) {
-      if (activeCompaction || session.isCompacting) return undefined;
-      const promise = Promise.resolve(
-        originalRunAutoCompaction(reason, ...args),
+      return await runRinCompactionExclusive(
+        session,
+        guardState,
+        String(reason || "auto"),
+        () => undefined,
+        () => originalRunAutoCompaction(reason, ...args),
       );
-      activeCompaction = { reason: String(reason || "auto"), promise };
-      try {
-        return await promise;
-      } finally {
-        if (activeCompaction?.promise === promise) activeCompaction = undefined;
-      }
     };
   }
 
@@ -794,7 +814,7 @@ export function applyRinCompactionConcurrencyGuard(session: any) {
     typeof session.abort === "function" ? session.abort.bind(session) : null;
   if (originalAbort) {
     session.abort = async (...args: any[]) => {
-      if (activeCompaction || session.isCompacting)
+      if (isRinCompactionBusy(session, guardState))
         abortActiveCompaction(session);
       return await originalAbort(...args);
     };

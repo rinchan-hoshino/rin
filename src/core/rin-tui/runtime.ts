@@ -688,7 +688,7 @@ export class RpcInteractiveSession {
   }
 
   async compact(customInstructions?: string) {
-    const data = await this.call("compact", { customInstructions });
+    const data = await this.client.compact(customInstructions);
     await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
     return data;
   }
@@ -790,6 +790,20 @@ export class RpcInteractiveSession {
         handled: true,
         text: completed ? commandResponses.new : commandResponses.newCancelled,
       };
+    }
+    if (trimmed === "/compact" || trimmed.startsWith("/compact ")) {
+      const data: any = await this.compact(
+        trimmed.startsWith("/compact ")
+          ? trimmed.slice("/compact ".length).trim() || undefined
+          : undefined,
+      );
+      return data?.compactionBusy
+        ? {
+            ...data,
+            handled: true,
+            text: String(data?.text || "Compaction already in progress."),
+          }
+        : { ...data, handled: true, text: commandResponses.compact };
     }
     if (trimmed.startsWith("/resume ")) {
       const wanted = trimmed.slice("/resume ".length).trim();

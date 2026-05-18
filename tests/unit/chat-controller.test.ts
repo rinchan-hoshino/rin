@@ -513,6 +513,11 @@ test("chat controller does not send working notices before deterministic command
         text: "backend text should be localized",
         sessionFile: currentSessionFile,
       }),
+      compact: async () => ({
+        handled: true,
+        text: "backend text should be localized",
+        sessionFile: currentSessionFile,
+      }),
       switchSession: async () => {},
     };
 
@@ -683,6 +688,10 @@ test("chat controller ignores replied session files for non-new commands", async
     },
     runCommand: async (commandLine) => {
       calls.push(`runCommand:${commandLine}`);
+      return { handled: true, text: "Command done." };
+    },
+    compact: async () => {
+      calls.push("compact");
       return { handled: true, text: "Compacted session." };
     },
   };
@@ -694,7 +703,7 @@ test("chat controller ignores replied session files for non-new commands", async
     repliedSessionFile,
   );
 
-  assert.deepEqual(calls, ["ensureSessionReady", "runCommand:/compact"]);
+  assert.deepEqual(calls, ["ensureSessionReady", "compact"]);
   assert.equal(liveSessionFile, currentSessionFile);
 });
 
@@ -930,6 +939,10 @@ test("chat controller uses configured command responses for /compact and /reload
         calls.push(`runCommand:${commandLine}`);
         return { handled: true, text: resultText, sessionFile };
       },
+      compact: async () => {
+        calls.push("compact");
+        return { handled: true, text: resultText, sessionFile };
+      },
       prompt: async (text, options = {}) => {
         prompts.push(text);
         emitRpcTurnComplete(controller, options, "unexpected temp reply");
@@ -939,7 +952,12 @@ test("chat controller uses configured command responses for /compact and /reload
 
     await controller.runCommand(command);
 
-    assert.deepEqual(calls, ["ensureSessionReady", `runCommand:${command}`]);
+    assert.deepEqual(
+      calls,
+      command === "/compact"
+        ? ["ensureSessionReady", "compact"]
+        : ["ensureSessionReady", `runCommand:${command}`],
+    );
     assert.deepEqual(prompts, []);
     assert.deepEqual(deliveries, [resultText]);
   }
