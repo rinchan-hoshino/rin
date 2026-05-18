@@ -203,6 +203,8 @@ export type RinPromptOptions = {
   source?: string;
   requestTag?: string;
   promptContext?: RinPromptContext;
+  sessionFile?: string;
+  sessionId?: string;
 };
 
 export interface RinFrontendClient {

@@ -73,6 +73,7 @@ test("rpc prompt routes extension slash commands using daemon catalog authority"
     {
       type: "run_command",
       commandLine: "/local hello world",
+      sessionFile: "/tmp/s.jsonl",
     },
   );
 });
@@ -745,7 +746,11 @@ test("rpc runtime routes extension slash commands from prompt to daemon", async 
   );
   assert.deepEqual(
     sent.find((payload) => payload.type === "run_command"),
-    { type: "run_command", commandLine: "/chat telegram" },
+    {
+      type: "run_command",
+      commandLine: "/chat telegram",
+      sessionFile: "/tmp/rpc-session.jsonl",
+    },
   );
   assert.deepEqual(session.getSteeringMessages(), []);
   assert.equal(session.pendingMessageCount, 0);
@@ -776,6 +781,7 @@ test("rpc runtime forwards prompt streamingBehavior through prompt mode", async 
   });
 
   session.sessionId = "s1";
+  session.sessionFile = "/tmp/rpc-session.jsonl";
   session.rpcConnected = true;
   session.startupPending = false;
   await session.prompt("hello", { streamingBehavior: "steer" });
@@ -796,10 +802,47 @@ test("rpc runtime forwards prompt streamingBehavior through prompt mode", async 
       streamingBehavior: "steer",
       source: undefined,
       requestTag: "<auto>",
+      sessionFile: "/tmp/rpc-session.jsonl",
     },
   );
   assert.deepEqual(session.getSteeringMessages(), []);
   assert.equal(session.pendingMessageCount, 0);
+});
+
+test("rpc runtime routes session-scoped commands by current session file", async () => {
+  const sent = [];
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      return Promise.resolve({ success: true, data: { tools: [] } });
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return true;
+    },
+    connect() {
+      return Promise.resolve();
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+
+  session.sessionId = "s1";
+  session.sessionFile = "/tmp/rpc-session.jsonl";
+  session.rpcConnected = true;
+  session.startupPending = false;
+
+  await session.getActiveTools();
+
+  assert.deepEqual(sent, [
+    { type: "get_active_tools", sessionFile: "/tmp/rpc-session.jsonl" },
+  ]);
 });
 
 test("rpc runtime switches sessions through the daemon worker", async () => {

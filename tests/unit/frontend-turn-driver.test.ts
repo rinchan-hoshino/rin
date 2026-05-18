@@ -97,6 +97,13 @@ function createFrontendClient() {
     },
     async request(command: any) {
       calls.push({ type: "request", command });
+      if (command.type === "get_state") return await this.getState();
+      if (command.type === "get_messages") {
+        return { messages: await this.getMessages() };
+      }
+      if (command.type === "run_command") {
+        return await this.runCommand(String(command.commandLine || ""));
+      }
       return {};
     },
     async send(command: any) {
@@ -165,12 +172,16 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   assert.equal(result.finalText, "frontend final");
   assert.equal(result.sessionFile, "/tmp/frontend-managed.jsonl");
   assert.deepEqual(
-    client.calls.map((call: any) => call.type),
+    client.calls
+      .filter((call: any) => ["newSession", "prompt"].includes(call.type))
+      .map((call: any) => call.type),
     ["newSession", "prompt"],
   );
   assert.equal(client.calls[0].options.managedSessionLeaf, "telegram/1:2");
-  assert.equal(client.calls[1].text, "hello");
-  assert.deepEqual(client.calls[1].options.promptContext, {
+  const promptCall = client.calls.find((call: any) => call.type === "prompt");
+  assert.equal(promptCall.text, "hello");
+  assert.equal(promptCall.options.sessionFile, "/tmp/frontend-managed.jsonl");
+  assert.deepEqual(promptCall.options.promptContext, {
     source: "chat-bridge",
     chatKey: "telegram/1:2",
   });
@@ -234,12 +245,15 @@ test("frontend SDK turn driver applies turn-scoped model without persisting defa
   });
 
   assert.equal(result.finalText, "frontend final");
-  const modelCall = client.calls.find((call: any) => call.type === "setModel");
-  assert.deepEqual(modelCall, {
-    type: "setModel",
+  const modelCall = client.calls.find(
+    (call: any) => call.type === "request" && call.command.type === "set_model",
+  );
+  assert.deepEqual(modelCall.command, {
+    type: "set_model",
     provider: "openai-codex",
     modelId: "gpt-5.5",
-    options: { persistSettings: false },
+    persistSettings: false,
+    sessionFile: "/tmp/frontend-chat.jsonl",
   });
 });
 
@@ -255,11 +269,16 @@ test("frontend SDK turn driver can reset model options from settings before prom
   assert.equal(result.finalText, "frontend final");
   assert.deepEqual(
     client.calls
-      .filter((call: any) =>
-        ["resetModelOptionsFromSettings", "prompt"].includes(call.type),
+      .filter(
+        (call: any) =>
+          (call.type === "request" &&
+            call.command.type === "reset_model_options_from_settings") ||
+          call.type === "prompt",
       )
-      .map((call: any) => call.type),
-    ["resetModelOptionsFromSettings", "prompt"],
+      .map((call: any) =>
+        call.type === "request" ? call.command.type : call.type,
+      ),
+    ["reset_model_options_from_settings", "prompt"],
   );
 });
 
@@ -273,12 +292,14 @@ test("frontend SDK turn driver applies turn-scoped thinking without persisting d
 
   assert.equal(result.finalText, "frontend final");
   const thinkingCall = (driver as any).testClient.calls.find(
-    (call: any) => call.type === "setThinkingLevel",
+    (call: any) =>
+      call.type === "request" && call.command.type === "set_thinking_level",
   );
-  assert.deepEqual(thinkingCall, {
-    type: "setThinkingLevel",
+  assert.deepEqual(thinkingCall.command, {
+    type: "set_thinking_level",
     level: "low",
-    options: { persistSettings: false },
+    persistSettings: false,
+    sessionFile: "/tmp/frontend-chat.jsonl",
   });
 });
 
@@ -318,6 +339,77 @@ test("frontend SDK turn driver resolves an already submitted restored turn witho
   assert.equal(
     client.calls.some((call: any) => call.type === "prompt"),
     false,
+  );
+});
+
+test("frontend SDK turn driver reselects a restored session even when cached state matches", async () => {
+  const client = createFrontendClient();
+  const sessionFile = "/tmp/frontend-chat.jsonl";
+  client.getState = async () => ({
+    sessionFile,
+    sessionId: "frontend-session",
+    isStreaming: false,
+  });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "hello",
+    restoreSessionFile: sessionFile,
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "resumeSession"),
+    [{ type: "resumeSession", sessionFile }],
+  );
+});
+
+test("frontend SDK turn driver carries sessionFile on restored turn RPCs", async () => {
+  const client = createFrontendClient();
+  const sessionFile = "/tmp/frontend-chat.jsonl";
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  await driver.runTurn({
+    text: "hello",
+    restoreSessionFile: sessionFile,
+  });
+
+  const scopedCommands = client.calls
+    .filter((call: any) => call.type === "request")
+    .map((call: any) => call.command)
+    .filter((command: any) =>
+      ["get_state", "get_messages"].includes(command.type),
+    );
+  assert.ok(scopedCommands.length >= 2);
+  assert.ok(
+    scopedCommands.every((command: any) => command.sessionFile === sessionFile),
+  );
+  const promptCall = client.calls.find((call: any) => call.type === "prompt");
+  assert.equal(promptCall.options.sessionFile, sessionFile);
+});
+
+test("frontend SDK turn driver carries sessionFile on restored commands", async () => {
+  const client = createFrontendClient();
+  const sessionFile = "/tmp/frontend-chat.jsonl";
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  await driver.runCommand("/compact", { restoreSessionFile: sessionFile });
+
+  assert.deepEqual(
+    client.calls.find(
+      (call: any) =>
+        call.type === "request" && call.command.type === "run_command",
+    )?.command,
+    { type: "run_command", commandLine: "/compact", sessionFile },
   );
 });
 
@@ -624,8 +716,17 @@ test("frontend SDK turn driver reconnects and resolves an interrupted prompt fro
   assert.equal(result.finalText, "recovered final");
   assert.equal(result.sessionFile, "/tmp/frontend-chat.jsonl");
   assert.equal(connectCount, 2);
-  assert.deepEqual(
-    client.calls.map((call: any) => call.type),
-    ["prompt"],
+  assert.equal(
+    client.calls.filter((call: any) => call.type === "prompt").length,
+    1,
+  );
+  assert.ok(
+    client.calls
+      .filter((call: any) => call.type === "request")
+      .every(
+        (call: any) =>
+          !["get_state", "get_messages"].includes(call.command.type) ||
+          call.command.sessionFile === "/tmp/frontend-chat.jsonl",
+      ),
   );
 });
