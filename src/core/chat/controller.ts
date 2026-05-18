@@ -51,7 +51,6 @@ const WORKING_REACTION_INTERVAL_MS = 30_000;
 type ChatTurnMeta = {
   incomingMessageId?: string;
   replyToMessageId?: string;
-  workingIndicatorsDisabled?: boolean;
   workingNoticeSent?: boolean;
   startedAt: number;
 };
@@ -107,17 +106,6 @@ function normalizeWorkingIndicators(value: unknown): WorkingIndicator[] {
       typeof indicator === "object" &&
       Boolean(workingIndicatorKind(indicator as WorkingIndicator)),
   );
-}
-
-const DETERMINISTIC_ACK_COMMANDS = new Set([
-  "abort",
-  "new",
-  "compact",
-  "reload",
-]);
-
-function usesDeterministicCommandAck(commandName: string) {
-  return DETERMINISTIC_ACK_COMMANDS.has(safeString(commandName).trim());
 }
 
 function summarizePromptText(text: string, limit = 80) {
@@ -310,7 +298,6 @@ export class ChatController {
   private setCurrentTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
-    workingIndicatorsDisabled?: boolean;
   }) {
     const nextIncomingMessageId =
       safeString(input.incomingMessageId || "").trim() || undefined;
@@ -320,7 +307,6 @@ export class ChatController {
       startedAt: Date.now(),
       incomingMessageId: nextIncomingMessageId,
       replyToMessageId: nextReplyToMessageId,
-      workingIndicatorsDisabled: input.workingIndicatorsDisabled === true,
       workingNoticeSent: false,
     };
     this.backendAcceptedIncomingMessageId = "";
@@ -424,7 +410,6 @@ export class ChatController {
 
   private async startWorkingMarker() {
     if (!this.deliveryEnabled) return false;
-    if (this.currentTurn?.workingIndicatorsDisabled) return false;
     const indicators = this.getWorkingIndicators();
     this.activeWorkingIndicators = indicators;
     const context = this.workingIndicatorContext({ event: "start" });
@@ -443,7 +428,6 @@ export class ChatController {
   private async beginVisibleProcessingTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
-    showWorking?: boolean;
   }) {
     const previousIncomingMessageId = this.currentIncomingMessageId();
     const nextIncomingMessageId = safeString(
@@ -456,12 +440,8 @@ export class ChatController {
     ) {
       await this.clearWorkingReaction().catch(() => {});
     }
-    this.setCurrentTurn({
-      ...input,
-      workingIndicatorsDisabled: input.showWorking === false,
-    });
+    this.setCurrentTurn(input);
     this.awaitingTurnSettle = true;
-    if (input.showWorking === false) return;
     const marker = this.startWorkingMarker().catch(() => false);
     const poll = this.pollTyping().catch(() => false);
     await Promise.race([
@@ -531,7 +511,6 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
       return false;
     }
-    if (this.currentTurn?.workingIndicatorsDisabled) return false;
     const indicators = this.activeWorkingIndicators.length
       ? this.activeWorkingIndicators
       : this.getWorkingIndicators();
@@ -846,14 +825,8 @@ export class ChatController {
     const commandName = commandNameFromCommandLine(commandLine);
     const hadActiveTurn = this.hasActiveTurn();
     const abortingActiveTurn = commandName === "abort" && hadActiveTurn;
-    const showCommandWorking = !usesDeterministicCommandAck(commandName);
     if (abortingActiveTurn) {
       this.lastActivityAt = Date.now();
-      await this.beginVisibleProcessingTurn({
-        incomingMessageId: incomingMessageId || undefined,
-        replyToMessageId: replyToMessageId || undefined,
-        showWorking: showCommandWorking,
-      });
       try {
         this.turnAbortRequested = true;
         const data: any = {
@@ -910,11 +883,6 @@ export class ChatController {
           : undefined;
     this.lastActivityAt = Date.now();
     await this.connect({ restoreSession: !skipSessionRecovery });
-    await this.beginVisibleProcessingTurn({
-      incomingMessageId: incomingMessageId || undefined,
-      replyToMessageId: replyToMessageId || undefined,
-      showWorking: showCommandWorking,
-    });
     try {
       let data: any = await this.driver.runCommand(commandLine, {
         skipSessionRecovery,

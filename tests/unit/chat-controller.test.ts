@@ -528,7 +528,7 @@ test("chat controller does not send working notices before deterministic command
   }
 });
 
-test("chat controller keeps deterministic command acknowledgements silent during polling", async () => {
+test("chat controller does not create processing turns for slash commands", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -572,15 +572,18 @@ test("chat controller keeps deterministic command acknowledgements silent during
     },
   };
 
-  const command = controller.runCommand("/compact", "m-compact", "m-compact");
+  const command = controller.runCommand("/session", "m-session", "m-session");
   await commandStartedPromise;
+
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.awaitingTurnSettle, false);
   await controller.pollTyping();
   releaseCommand();
   await command;
 
   assert.deepEqual(actions, []);
   assert.deepEqual(reactions, []);
-  assert.deepEqual(deliveries, ["Compacted session."]);
+  assert.deepEqual(deliveries, ["backend text should be localized"]);
 });
 
 test("chat controller ignores replied session files for /new", async () => {
@@ -940,75 +943,6 @@ test("chat controller uses configured command responses for /compact and /reload
     assert.deepEqual(prompts, []);
     assert.deepEqual(deliveries, [resultText]);
   }
-});
-
-test("chat controller starts working indicators for non-ack chat commands", async () => {
-  const command = "/session";
-  const controller = await createController("telegram/1:2");
-  const actions = [];
-  const reactions = [];
-  const deliveries = [];
-  controller.app = {
-    bots: [
-      {
-        platform: "telegram",
-        selfId: "1",
-        workingIndicators: [testPollingIndicator(actions, reactions)],
-        async createReaction(chatId, messageId, emoji) {
-          reactions.push(["create", chatId, messageId, emoji]);
-        },
-        async deleteReaction(chatId, messageId, emoji, userId) {
-          reactions.push(["delete", chatId, messageId, emoji, userId]);
-        },
-        internal: {
-          async sendChatAction(payload) {
-            actions.push(payload);
-          },
-        },
-      },
-    ],
-  };
-  controller.commitPendingDelivery = async function (clearProcessing = false) {
-    deliveries.push(this.stagedDelivery?.text || "");
-    this.stagedDelivery = null;
-    if (clearProcessing) {
-      await this.clearWorkingReaction().catch(() => {});
-      this.currentTurn = null;
-    }
-  };
-
-  const currentSessionFile = path.join(
-    controller.agentDir,
-    "sessions",
-    "session-command.jsonl",
-  );
-  controller.session = {
-    isStreaming: false,
-    sessionManager: {
-      getSessionFile: () => currentSessionFile,
-      getSessionId: () => "session-command",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: currentSessionFile,
-      sessionId: "session-command",
-    }),
-    runCommand: async () => ({
-      handled: true,
-      text: `Command reply for ${command}`,
-      sessionFile: currentSessionFile,
-    }),
-    switchSession: async () => {},
-  };
-
-  await controller.runCommand(command, "m-session", "m-session");
-
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-  assert.deepEqual(reactions, [
-    ["create", "2", "m-session", "🤔"],
-    ["delete", "2", "m-session", "🤔", "1"],
-  ]);
-  assert.deepEqual(deliveries, [`Command reply for ${command}`]);
 });
 
 test("chat controller moves working indicators to the steering message", async () => {
