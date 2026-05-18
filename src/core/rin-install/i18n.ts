@@ -215,6 +215,14 @@ type InstallerDisplayCopy = {
   updaterFinishedWithoutWritingChanges: string;
   publishUpdateConfirmMessage: string;
   publishingUpdateMessage: string;
+  fetchingUpdateSourceMessage: string;
+  preparingUpdateSourceMessage: string;
+  installingUpdateDependenciesMessage: string;
+  buildingUpdateRuntimeMessage: string;
+  buildUpdateCommandFailureHeader: (label: string) => string;
+  formatUpdateDiscoverySource: (source: string) => string;
+  formatUpdateSourceLabel: (sourceLabel: string) => string;
+  formatUpdateServiceHint: (serviceHint: string) => string;
   buildUpdateTargetText: (options: {
     currentUser: string;
     targetUser: string;
@@ -563,12 +571,21 @@ const INSTALLER_DISPLAY_COPY = {
       "Publish the latest built runtime to this installed target now?",
     publishingUpdateMessage:
       "Publishing runtime and refreshing the installed target...",
+    fetchingUpdateSourceMessage: "Fetching update source",
+    preparingUpdateSourceMessage: "Preparing update source",
+    installingUpdateDependenciesMessage: "Installing update dependencies",
+    buildingUpdateRuntimeMessage: "Building update runtime",
+    buildUpdateCommandFailureHeader: (label: string) =>
+      `${label} failed; recent log:`,
+    formatUpdateDiscoverySource: (source: string) => source,
+    formatUpdateSourceLabel: (sourceLabel: string) => sourceLabel,
+    formatUpdateServiceHint: (serviceHint: string) => serviceHint,
     buildUpdateTargetText(options) {
       return [
         `Current user: ${options.currentUser}`,
         `Selected daemon user: ${options.targetUser}`,
         `${this.targetInstallDirLabel}: ${options.installDir}`,
-        `Discovered from: ${options.source}`,
+        `Discovered from: ${this.formatUpdateDiscoverySource(options.source)}`,
         `Owner home: ${options.ownerHome}`,
       ].join("\n");
     },
@@ -577,9 +594,9 @@ const INSTALLER_DISPLAY_COPY = {
         `Current user: ${options.currentUser}`,
         `Selected daemon user: ${options.targetUser}`,
         `Install dir: ${options.installDir}`,
-        `Discovered from: ${options.source}`,
+        `Discovered from: ${this.formatUpdateDiscoverySource(options.source)}`,
         `Owner home: ${options.ownerHome}`,
-        `Requested source: ${options.sourceLabel}`,
+        `Requested source: ${this.formatUpdateSourceLabel(options.sourceLabel)}`,
         "",
         "Updater policy:",
         "- publish a new runtime release into the existing install dir",
@@ -605,7 +622,7 @@ const INSTALLER_DISPLAY_COPY = {
     },
     buildAfterUpdateText(options) {
       return [
-        `Service/platform note: ${options.serviceHint}`,
+        `Service/platform note: ${this.formatUpdateServiceHint(options.serviceHint)}`,
         `Daemon started now: ${options.daemonReady ? "yes" : "no"}`,
         "",
         "Recommended next commands:",
@@ -959,13 +976,61 @@ const INSTALLER_DISPLAY_COPY = {
     updaterFinishedWithoutWritingChanges: "更新器结束，未写入变更。",
     publishUpdateConfirmMessage: "现在将最新构建的运行时发布到此目标吗？",
     publishingUpdateMessage: "正在发布运行时并刷新已安装目标……",
+    fetchingUpdateSourceMessage: "正在获取更新源",
+    preparingUpdateSourceMessage: "正在准备更新源",
+    installingUpdateDependenciesMessage: "正在安装更新依赖",
+    buildingUpdateRuntimeMessage: "正在构建更新运行时",
+    buildUpdateCommandFailureHeader: (label: string) =>
+      `${label}失败；最近日志：`,
+    formatUpdateDiscoverySource(source) {
+      const labels: Record<string, string> = {
+        launcher: "启动器",
+        manifest: "安装清单",
+        systemd: "systemd 用户服务",
+        launchd: "launchd 代理",
+      };
+      return labels[String(source || "").trim()] || source;
+    },
+    formatUpdateSourceLabel(sourceLabel) {
+      const text = String(sourceLabel || "").trim();
+      if (/^stable latest$/i.test(text)) return "稳定版最新";
+      return (
+        text
+          .replace(/^stable version\s+/i, "稳定版版本 ")
+          .replace(/^stable\s+/i, "稳定版 ")
+          .replace(/^beta version\s+/i, "beta 版本 ")
+          .replace(/^beta branch\s+/i, "beta 分支 ")
+          .replace(/^beta\s+/i, "beta ")
+          .replace(/^nightly\s+/i, "nightly ")
+          .replace(/^git ref\s+/i, "Git 引用 ")
+          .replace(/^git branch\s+/i, "Git 分支 ") || text
+      );
+    },
+    formatUpdateServiceHint(serviceHint) {
+      const text = String(serviceHint || "").trim();
+      const labels: Record<string, string> = {
+        "A macOS launchd LaunchAgent will be installed and started for this daemon.":
+          "将为此守护进程安装并启动 macOS launchd LaunchAgent。",
+        "You skipped launchd installation for now; start the daemon explicitly when needed.":
+          "你暂时跳过了 launchd 安装；需要时请显式启动守护进程。",
+        "A Linux user service will be installed and started for this daemon when supported.":
+          "如平台支持，将为此守护进程安装并启动 Linux 用户服务。",
+        "You skipped dedicated Linux service installation for now; start the daemon explicitly when needed.":
+          "你暂时跳过了专用 Linux 服务安装；需要时请显式启动守护进程。",
+        "A Windows Startup launcher will be installed for this daemon.":
+          "将为此守护进程安装 Windows 启动项。",
+        "No dedicated service was installed; the installer will not start the daemon for you.":
+          "未安装专用服务；安装器不会替你启动守护进程。",
+      };
+      return labels[text] || text;
+    },
     buildUpdateTargetText(options) {
       return [
         `当前用户: ${options.currentUser}`,
         `选中的守护进程用户: ${options.targetUser}`,
         `${this.targetInstallDirLabel}: ${options.installDir}`,
-        `发现来源: ${options.source}`,
-        `Owner home: ${options.ownerHome}`,
+        `发现来源: ${this.formatUpdateDiscoverySource(options.source)}`,
+        `用户主目录: ${options.ownerHome}`,
       ].join("\n");
     },
     buildUpdatePlanText(options) {
@@ -973,16 +1038,16 @@ const INSTALLER_DISPLAY_COPY = {
         `当前用户: ${options.currentUser}`,
         `选中的守护进程用户: ${options.targetUser}`,
         `安装目录: ${options.installDir}`,
-        `发现来源: ${options.source}`,
-        `Owner home: ${options.ownerHome}`,
-        `请求来源: ${options.sourceLabel}`,
+        `发现来源: ${this.formatUpdateDiscoverySource(options.source)}`,
+        `用户主目录: ${options.ownerHome}`,
+        `请求来源: ${this.formatUpdateSourceLabel(options.sourceLabel)}`,
         "",
         "更新器策略：",
         "- 将新的运行时版本发布到现有安装目录",
         "- 清理旧运行时版本，仅保留最近 3 个",
         "- 为当前用户刷新启动器和安装器元数据",
         "- 如适用，刷新托管守护进程服务文件并重启守护进程",
-        "- 保留现有 provider / auth / settings，除非其他流程显式修改",
+        "- 保留现有提供商、认证和设置，除非其他流程显式修改",
       ].join("\n");
     },
     buildUpdatedTargetText(options) {
@@ -1001,7 +1066,7 @@ const INSTALLER_DISPLAY_COPY = {
     },
     buildAfterUpdateText(options) {
       return [
-        `服务/平台提示: ${options.serviceHint}`,
+        `服务/平台提示: ${this.formatUpdateServiceHint(options.serviceHint)}`,
         `守护进程已立即启动: ${options.daemonReady ? "是" : "否"}`,
         "",
         "建议的下一步命令：",
