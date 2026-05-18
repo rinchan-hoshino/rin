@@ -54,6 +54,7 @@ Delete obsolete plans, todo files, and AGENTS-style local instruction documents 
 
 ## Dependency and generated-output rules
 
+- Use Node.js 22.19.0 or newer; this is Rin's minimum runtime and release-build baseline.
 - Run `npm ci` in fresh clones before build, lint, or tests.
 - TypeScript source uses NodeNext/ESM runtime suffixes, so relative imports in `.ts` files normally keep `.js` suffixes.
 - Keep scratch files out of the repository.

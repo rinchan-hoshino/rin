@@ -192,7 +192,7 @@ async function runBootstrapWrapper(scriptName, args, env) {
   });
 }
 
-async function assertBootstrapFails(args, pattern) {
+async function assertBootstrapFails(args, pattern, envOverrides = {}) {
   await withTempDir(async (tempDir) => {
     await assert.rejects(
       execFileAsync(
@@ -200,7 +200,11 @@ async function assertBootstrapFails(args, pattern) {
         [path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"), ...args],
         {
           cwd: rootDir,
-          env: { ...process.env, RIN_INSTALL_TMPDIR: tempDir },
+          env: {
+            ...process.env,
+            ...envOverrides,
+            RIN_INSTALL_TMPDIR: tempDir,
+          },
         },
       ),
       pattern,
@@ -224,6 +228,38 @@ test("bootstrap entrypoint rejects missing legacy selector values", async () => 
     powerShell,
     /\$Value\.StartsWith\("-"\).*missing value for \$DisplayName/,
   );
+});
+
+test("bootstrap entrypoint rejects Node.js versions below the supported minimum", async () => {
+  await withTempDir(async (tempDir) => {
+    const fakeBin = path.join(tempDir, "bin");
+    await fs.mkdir(fakeBin, { recursive: true });
+    await writeExecutable(
+      path.join(fakeBin, "node"),
+      `#!/bin/sh
+if [ "$1" = "-e" ]; then exit 1; fi
+exit 0
+`,
+    );
+    await writeExecutable(
+      path.join(fakeBin, "npm"),
+      `#!/bin/sh
+exit 0
+`,
+    );
+
+    await assertBootstrapFails(
+      ["install"],
+      { stderr: /rin installer requires Node\.js >= 22\.19\.0/ },
+      { PATH: `${fakeBin}:${process.env.PATH}` },
+    );
+  });
+
+  const powerShell = await fs.readFile(
+    path.join(rootDir, "scripts", "bootstrap-entrypoint.ps1"),
+    "utf8",
+  );
+  assert.match(powerShell, /requires Node\.js >= 22\.19\.0/);
 });
 
 test("bootstrap scripts render progress without rin-install log prefixes", async () => {

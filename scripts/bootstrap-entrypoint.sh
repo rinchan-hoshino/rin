@@ -13,6 +13,7 @@ case "$MODE" in
     LAUNCH_LABEL='Launching installer...'
     FETCH_ERROR='rin installer requires curl or wget'
     NPM_ERROR='rin installer requires npm'
+    NODE_ERROR='rin installer requires Node.js >= 22.19.0'
     ;;
   update)
     WORK_PREFIX=rin-update
@@ -24,6 +25,7 @@ case "$MODE" in
     LAUNCH_LABEL='Launching updater...'
     FETCH_ERROR='rin updater requires curl or wget'
     NPM_ERROR='rin updater requires npm'
+    NODE_ERROR='rin updater requires Node.js >= 22.19.0'
     ;;
   *)
     echo "unknown Rin bootstrap mode: $MODE" >&2
@@ -78,6 +80,24 @@ say() {
     printf '%s\n' "$1" >"$TTY"
   else
     printf '%s\n' "$1"
+  fi
+}
+
+check_node_version() {
+  if ! command -v node >/dev/null 2>&1; then
+    echo "$NODE_ERROR" >&2
+    exit 1
+  fi
+  if ! node -e '
+const min = process.argv[1].split(".").map(Number);
+const current = process.versions.node.split(".").map(Number);
+for (let i = 0; i < min.length; i += 1) {
+  if ((current[i] || 0) > min[i]) process.exit(0);
+  if ((current[i] || 0) < min[i]) process.exit(1);
+}
+' 22.19.0 >/dev/null 2>&1; then
+    echo "$NODE_ERROR" >&2
+    exit 1
   fi
 }
 
@@ -464,6 +484,7 @@ launch_published_installer() {
 INSTALLER_ENTRY='dist/app/rin-install/main.js'
 PACKAGE_NAME=${RIN_NPM_PACKAGE:-@rinchanai20260422/rin}
 parse_args "$@"
+check_node_version
 : >"$LOGFILE"
 run_step "$MANIFEST_LABEL" fetch_manifest
 eval "$(RIN_RELEASE_CHANNEL=$CHANNEL RIN_RELEASE_BRANCH=$BRANCH RIN_RELEASE_VERSION=$VERSION RIN_INSTALL_REPO_URL=$REPO_URL RIN_NPM_PACKAGE=$PACKAGE_NAME resolve_release)"

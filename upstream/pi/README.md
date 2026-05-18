@@ -1,16 +1,11 @@
 <p align="center">
   <a href="https://pi.dev">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://pi.dev/logo.svg">
-      <source media="(prefers-color-scheme: light)" srcset="https://huggingface.co/buckets/julien-c/my-training-bucket/resolve/pi-logo-dark.svg">
-      <img alt="pi logo" src="https://pi.dev/logo.svg" width="128">
-    </picture>
+    <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
   </a>
 </p>
 <p align="center">
   <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
   <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
-  <a href="https://github.com/earendil-works/pi-mono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/earendil-works/pi-mono/ci.yml?style=flat-square&branch=main" /></a>
 </p>
 <p align="center">
   <a href="https://pi.dev">pi.dev</a> domain graciously donated by
@@ -73,6 +68,12 @@ I regularly publish my own `pi-mono` work sessions here:
 ## Quick Start
 
 ```bash
+curl -fsSL https://pi.dev/install.sh | sh
+```
+
+Or with npm:
+
+```bash
 npm install -g @earendil-works/pi-coding-agent
 ```
 
@@ -126,6 +127,7 @@ For each built-in provider, pi maintains a list of tool-capable models, updated 
 - OpenCode Go
 - Hugging Face
 - Fireworks
+- Together AI
 - Kimi For Coding
 - MiniMax
 - Xiaomi MiMo
@@ -404,7 +406,7 @@ pi update npm:@foo/pi-tools             # update one package
 pi config                               # enable/disable extensions, skills, prompts, themes
 ```
 
-Packages install to `~/.pi/agent/git/` (git) or global npm. Use `-l` for project-local installs (`.pi/git/`, `.pi/npm/`). Git packages install dependencies with `npm install --omit=dev` by default, so runtime deps must be listed under `dependencies`; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
+Packages install to `~/.pi/agent/git/` (git) or `~/.pi/agent/npm/` (npm). Use `-l` for project-local installs (`.pi/git/`, `.pi/npm/`). Git packages install dependencies with `npm install --omit=dev` by default, so runtime deps must be listed under `dependencies`; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
 
 Create a package by adding a `pi` key to `package.json`:
 
