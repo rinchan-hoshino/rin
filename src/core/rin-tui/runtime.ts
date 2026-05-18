@@ -1335,6 +1335,7 @@ export class RpcInteractiveSession {
             streamingBehavior: operation.streamingBehavior,
             source: operation.source,
             requestTag: operation.requestTag,
+            sessionFile: this.sessionFile,
           },
         );
         return;
@@ -1520,26 +1521,37 @@ export class RpcInteractiveSession {
     type: string,
     payload: Record<string, unknown>,
   ) {
-    if (
-      [
-        "get_state",
-        "new_session",
-        "select_session",
-        "attach_session",
-        "switch_session",
-        "get_commands",
-        "get_resource_diagnostics",
-        "get_command_argument_completions",
-      ].includes(type)
-    ) {
-      return {
-        ...payload,
-        resourceOptions:
-          payload.resourceOptions ||
-          serializeRpcResourceOptions(this.extensionOptions),
-      };
-    }
-    return payload;
+    const withResources = [
+      "get_state",
+      "new_session",
+      "select_session",
+      "attach_session",
+      "switch_session",
+      "get_commands",
+      "get_resource_diagnostics",
+      "get_command_argument_completions",
+    ].includes(type)
+      ? {
+          ...payload,
+          resourceOptions:
+            payload.resourceOptions ||
+            serializeRpcResourceOptions(this.extensionOptions),
+        }
+      : payload;
+    const hasExplicitSessionTarget = Boolean(
+      withResources.sessionFile ||
+      withResources.sessionPath ||
+      withResources.sessionId,
+    );
+    const shouldAttachSessionFile =
+      isSessionScopedCommand(type) &&
+      type !== "new_session" &&
+      !["select_session", "attach_session", "switch_session"].includes(type) &&
+      !hasExplicitSessionTarget &&
+      this.sessionFile;
+    return shouldAttachSessionFile
+      ? { ...withResources, sessionFile: this.sessionFile }
+      : withResources;
   }
 
   private async refreshResourceDiagnostics() {

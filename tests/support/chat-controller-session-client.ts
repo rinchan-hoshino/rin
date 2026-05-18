@@ -30,14 +30,12 @@ function createSessionFrontendClient(controller) {
       return state();
     },
     async ensureSessionReady(restoreSessionFile = "", managedSessionLeaf = "") {
-      const current =
-        controller.session?.sessionManager?.getSessionFile?.() || "";
       if (managedSessionLeaf && !restoreSessionFile) {
         const completed = await controller.session?.newSession?.({
           managedSessionLeaf,
         });
         if (completed === false) throw new Error("rin_new_session_cancelled");
-      } else if (restoreSessionFile && current !== restoreSessionFile) {
+      } else if (restoreSessionFile) {
         await controller.session?.switchSession?.(restoreSessionFile);
       }
       const ready = await controller.session?.ensureSessionReady?.();
@@ -50,8 +48,32 @@ function createSessionFrontendClient(controller) {
       }
       await controller.session?.abort?.();
     },
-    async request() {
-      return {};
+    async request(command = {}) {
+      const sessionFile = String(command?.sessionFile || "").trim();
+      const current =
+        controller.session?.sessionManager?.getSessionFile?.() || "";
+      if (sessionFile && current !== sessionFile) {
+        await controller.session?.switchSession?.(sessionFile);
+      }
+      switch (command?.type) {
+        case "get_state":
+          return state();
+        case "get_messages":
+          return { messages: await this.getMessages() };
+        case "run_command":
+          return await this.runCommand(String(command.commandLine || ""));
+        case "reset_model_options_from_settings":
+          return await this.resetModelOptionsFromSettings();
+        case "set_model":
+          return await this.setModel(
+            String(command.provider || ""),
+            String(command.modelId || ""),
+          );
+        case "set_thinking_level":
+          return await this.setThinkingLevel(String(command.level || ""));
+        default:
+          return {};
+      }
     },
     async send(command) {
       return { type: "response", command: command?.type, success: true };

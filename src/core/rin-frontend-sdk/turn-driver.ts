@@ -57,6 +57,8 @@ export type RinFrontendPromptTurnInput = {
   requestTag?: string;
   streamingBehavior?: "steer" | "followUp";
   promptContext?: RinPromptContext;
+  sessionFile?: string;
+  sessionId?: string;
 };
 
 export async function submitNativeFrontendPromptTurn(
@@ -70,6 +72,10 @@ export async function submitNativeFrontendPromptTurn(
     requestTag: input.requestTag,
   };
   if (input.promptContext) promptOptions.promptContext = input.promptContext;
+  const sessionFile = safeString(input.sessionFile || "").trim();
+  if (sessionFile) promptOptions.sessionFile = sessionFile;
+  const sessionId = safeString(input.sessionId || "").trim();
+  if (sessionId) promptOptions.sessionId = sessionId;
   await client.prompt(input.text, promptOptions);
 }
 
@@ -155,7 +161,7 @@ export class RinFrontendTurnDriver {
       options.restoreSessionFile || "",
     ).trim();
     if (wantedSessionFile) {
-      await this.switchSessionIfNeeded(wantedSessionFile);
+      await this.selectSessionTarget(wantedSessionFile);
       return;
     }
     await this.refreshFrontendState().catch(() => {});
@@ -182,9 +188,39 @@ export class RinFrontendTurnDriver {
     await this.client.request({ type: "terminate_session" });
   }
 
-  private async refreshFrontendState() {
+  private sessionFileFromReady(
+    ready?: RinSessionState | Record<string, unknown>,
+    fallback = "",
+  ) {
+    return safeString(
+      (ready as any)?.sessionFile || fallback || this.currentSessionFile(),
+    ).trim();
+  }
+
+  private async getStateForSession(sessionFile?: string) {
     if (!this.client) return this.frontendState;
-    const state = await this.client.getState();
+    const wanted = safeString(sessionFile || "").trim();
+    if (!wanted) return await this.client.getState();
+    return await this.client.request<Record<string, unknown>>({
+      type: "get_state",
+      sessionFile: wanted,
+    });
+  }
+
+  private async getMessagesForSession(sessionFile?: string) {
+    if (!this.client) return [];
+    const wanted = safeString(sessionFile || "").trim();
+    if (!wanted) return await this.client.getMessages();
+    const data: any = await this.client.request({
+      type: "get_messages",
+      sessionFile: wanted,
+    });
+    return Array.isArray(data?.messages) ? data.messages : [];
+  }
+
+  private async refreshFrontendState(sessionFile?: string) {
+    if (!this.client) return this.frontendState;
+    const state = await this.getStateForSession(sessionFile);
     this.frontendState = { ...this.frontendState, ...(state || {}) };
     return this.frontendState;
   }
@@ -321,7 +357,9 @@ export class RinFrontendTurnDriver {
       while (this.liveTurn && Date.now() < deadline) {
         try {
           await this.connect({ restoreSessionFile: context?.sessionFile });
-          const state = await this.refreshFrontendState().catch(() => ({}));
+          const state = await this.refreshFrontendState(
+            context?.sessionFile,
+          ).catch(() => ({}));
           if (
             Boolean((state as any)?.turnActive || (state as any)?.isStreaming)
           ) {
@@ -329,7 +367,9 @@ export class RinFrontendTurnDriver {
             await Promise.race([this.liveTurn.promise, sleep(1000)]);
             continue;
           }
-          const messages = await this.client?.getMessages?.().catch(() => []);
+          const messages = await this.getMessagesForSession(
+            context?.sessionFile,
+          ).catch(() => []);
           if (
             Array.isArray(messages) &&
             this.messagesAdvanced(context?.baselineMessages || [], messages) &&
@@ -361,17 +401,17 @@ export class RinFrontendTurnDriver {
     throw new Error("rin_disconnected:rpc_turn_queued_offline");
   }
 
-  private async switchSessionIfNeeded(sessionFile?: string) {
+  private async selectSessionTarget(sessionFile?: string) {
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return { changed: false };
     if (!this.client) throw new Error("frontend_session_not_connected");
     const before = this.currentSessionFile();
-    if (before !== wanted) await this.client.resumeSession(wanted);
-    await this.refreshFrontendState().catch(() => {});
+    await this.client.resumeSession(wanted);
+    await this.refreshFrontendState(wanted).catch(() => {});
     return {
       changed: before !== wanted,
       sessionId: this.currentSessionId() || undefined,
-      sessionFile: this.currentSessionFile() || undefined,
+      sessionFile: this.currentSessionFile() || wanted,
     };
   }
 
@@ -379,7 +419,7 @@ export class RinFrontendTurnDriver {
     if (!sessionFileExists(sessionFile))
       throw missingSessionFileError(sessionFile);
     await this.connect();
-    return await this.switchSessionIfNeeded(sessionFile);
+    return await this.selectSessionTarget(sessionFile);
   }
 
   private async ensureSessionReady(
@@ -396,18 +436,20 @@ export class RinFrontendTurnDriver {
       return ready;
     }
 
-    await this.refreshFrontendState().catch(() => {});
     const wanted = safeString(restoreSessionFile || "").trim();
     const managedLeaf = safeString(managedSessionLeaf || "").trim();
+    await this.refreshFrontendState(wanted).catch(() => {});
     if (managedLeaf && !wanted) {
       const value = await this.client.newSession({
         managedSessionLeaf: managedLeaf,
       });
       if (value?.cancelled) throw new Error("rin_new_session_cancelled");
       this.updateFrontendStateFrom(value);
-      await this.refreshFrontendState().catch(() => {});
-    } else if (wanted && this.currentSessionFile() !== wanted) {
-      await this.switchSessionIfNeeded(wanted);
+      await this.refreshFrontendState(this.currentSessionFile()).catch(
+        () => {},
+      );
+    } else if (wanted) {
+      await this.selectSessionTarget(wanted);
     }
     return {
       sessionId: this.currentSessionId() || undefined,
@@ -439,9 +481,7 @@ export class RinFrontendTurnDriver {
         ...this.interruptActiveTurnLikeTui(),
       };
     }
-    await this.connect({
-      restoreSessionFile: skipSessionRecovery ? "" : restoreSessionFile,
-    });
+    await this.connect();
     if (!this.client) throw new Error("frontend_session_not_connected");
     if (isNewSessionCommand(commandLine)) {
       if (sessionFile && !managedSessionLeaf) {
@@ -451,7 +491,9 @@ export class RinFrontendTurnDriver {
         managedSessionLeaf ? { managedSessionLeaf } : undefined,
       );
       this.updateFrontendStateFrom(value);
-      await this.refreshFrontendState().catch(() => {});
+      await this.refreshFrontendState(this.currentSessionFile()).catch(
+        () => {},
+      );
       return {
         handled: true,
         cancelled: Boolean(value?.cancelled),
@@ -465,7 +507,7 @@ export class RinFrontendTurnDriver {
     if (sessionFile) {
       if (!sessionFileExists(sessionFile))
         throw missingSessionFileError(sessionFile);
-      await this.switchSessionIfNeeded(sessionFile);
+      if (skipSessionRecovery) await this.selectSessionTarget(sessionFile);
     }
     const ready = !skipSessionRecovery
       ? await this.ensureSessionReady(
@@ -473,7 +515,14 @@ export class RinFrontendTurnDriver {
           managedSessionLeaf,
         )
       : undefined;
-    const data: any = await this.client.runCommand(commandLine);
+    const targetSessionFile = this.sessionFileFromReady(
+      ready,
+      sessionFile || restoreSessionFile,
+    );
+    const data: any = await this.runCommandForSession(
+      commandLine,
+      targetSessionFile,
+    );
     if (isAbortCommand(commandLine)) this.rejectLiveTurnAsAborted();
     return {
       ...data,
@@ -488,17 +537,43 @@ export class RinFrontendTurnDriver {
     };
   }
 
-  private async resetModelOptionsFromSettings() {
+  private async runCommandForSession(
+    commandLine: string,
+    sessionFile?: string,
+  ) {
     if (!this.client) throw new Error("frontend_session_not_connected");
-    await this.client.resetModelOptionsFromSettings();
-    await this.refreshFrontendState();
+    const wanted = safeString(sessionFile || "").trim();
+    if (!wanted) return await this.client.runCommand(commandLine);
+    return await this.client.request({
+      type: "run_command",
+      commandLine,
+      sessionFile: wanted,
+    });
   }
 
-  private async applyTurnModelOptions(options: {
-    model?: string;
-    thinkingLevel?: string;
-  }) {
+  private async resetModelOptionsFromSettings(sessionFile?: string) {
     if (!this.client) throw new Error("frontend_session_not_connected");
+    const wanted = safeString(sessionFile || "").trim();
+    if (wanted) {
+      await this.client.request({
+        type: "reset_model_options_from_settings",
+        sessionFile: wanted,
+      });
+    } else {
+      await this.client.resetModelOptionsFromSettings();
+    }
+    await this.refreshFrontendState(wanted);
+  }
+
+  private async applyTurnModelOptions(
+    options: {
+      model?: string;
+      thinkingLevel?: string;
+    },
+    sessionFile?: string,
+  ) {
+    if (!this.client) throw new Error("frontend_session_not_connected");
+    const wanted = safeString(sessionFile || "").trim();
     const modelRef = safeString(options.model || "").trim();
     if (modelRef) {
       const [provider, ...modelIdParts] = modelRef.split("/");
@@ -508,16 +583,35 @@ export class RinFrontendTurnDriver {
         (item: any) => item?.provider === provider && item?.id === modelId,
       );
       if (!model) throw new Error(`frontend_model_not_found:${modelRef}`);
-      await this.client.setModel(provider, modelId, {
-        persistSettings: false,
-      });
+      if (wanted) {
+        await this.client.request({
+          type: "set_model",
+          provider,
+          modelId,
+          persistSettings: false,
+          sessionFile: wanted,
+        });
+      } else {
+        await this.client.setModel(provider, modelId, {
+          persistSettings: false,
+        });
+      }
     }
 
     const thinkingLevel = safeString(options.thinkingLevel || "").trim();
     if (thinkingLevel) {
-      await this.client.setThinkingLevel(thinkingLevel, {
-        persistSettings: false,
-      });
+      if (wanted) {
+        await this.client.request({
+          type: "set_thinking_level",
+          level: thinkingLevel,
+          persistSettings: false,
+          sessionFile: wanted,
+        });
+      } else {
+        await this.client.setThinkingLevel(thinkingLevel, {
+          persistSettings: false,
+        });
+      }
       this.frontendState.thinkingLevel = thinkingLevel;
     }
   }
@@ -618,16 +712,17 @@ export class RinFrontendTurnDriver {
     this.latestAssistantText = "";
     const liveTurn = this.liveTurn || this.startLiveTurn("");
     liveTurn.requestTag = "";
+    const targetSessionFile = this.sessionFileFromReady(ready);
     this.liveTurnRecoveryContext = {
-      sessionFile:
-        safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
-        undefined,
+      sessionFile: targetSessionFile || undefined,
       baselineMessages: [],
     };
     this.setFrontendPhase("working");
     const deadline = Date.now() + 120_000;
     while (this.liveTurn === liveTurn && Date.now() < deadline) {
-      const messages = await this.client.getMessages().catch(() => []);
+      const messages = await this.getMessagesForSession(
+        targetSessionFile,
+      ).catch(() => []);
       if (Array.isArray(messages)) {
         const recovered = this.resolveExistingSubmittedTurnFromMessages(
           messages,
@@ -638,7 +733,7 @@ export class RinFrontendTurnDriver {
           break;
         }
       }
-      await this.refreshFrontendState().catch(() => ({}));
+      await this.refreshFrontendState(targetSessionFile).catch(() => ({}));
       const raced = await Promise.race([
         liveTurn.promise.then((completion) => ({ completion })),
         sleep(1000).then(() => ({})),
@@ -656,21 +751,26 @@ export class RinFrontendTurnDriver {
 
   private async followActiveTurn(ready?: RinSessionState) {
     if (!this.client) throw new Error("frontend_session_not_connected");
+    const targetSessionFile = this.sessionFileFromReady(ready);
     this.resetAssistantSegmentTracking();
     this.latestAssistantText = "";
     const liveTurn = this.liveTurn || this.startLiveTurn("");
     liveTurn.requestTag = "";
     this.liveTurnRecoveryContext = {
-      sessionFile:
-        safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
-        undefined,
-      baselineMessages: await this.client.getMessages().catch(() => []),
+      sessionFile: targetSessionFile || undefined,
+      baselineMessages: await this.getMessagesForSession(
+        targetSessionFile,
+      ).catch(() => []),
     };
     this.setFrontendPhase("working");
     while (this.liveTurn === liveTurn) {
-      const state: any = await this.refreshFrontendState().catch(() => ({}));
+      const state: any = await this.refreshFrontendState(
+        targetSessionFile,
+      ).catch(() => ({}));
       if (!Boolean(state?.turnActive || state?.isStreaming)) {
-        const messages = await this.client.getMessages().catch(() => []);
+        const messages = await this.getMessagesForSession(
+          targetSessionFile,
+        ).catch(() => []);
         if (this.resolveLiveTurnFromMessages(messages)) break;
         const error = new Error("rpc_turn_final_output_missing");
         this.failLiveTurn(error);
@@ -719,25 +819,30 @@ export class RinFrontendTurnDriver {
         sessionFile: this.currentSessionFile() || undefined,
       };
     } else {
-      await this.connect({ restoreSessionFile });
+      await this.connect();
       if (!this.client) throw new Error("frontend_session_not_connected");
-      if (sessionFile) {
-        if (!sessionFileExists(sessionFile))
-          throw missingSessionFileError(sessionFile);
-        await this.switchSessionIfNeeded(sessionFile);
+      if (sessionFile && !sessionFileExists(sessionFile)) {
+        throw missingSessionFileError(sessionFile);
       }
       ready = await this.ensureSessionReady(
         sessionFile || restoreSessionFile,
         managedSessionLeaf,
       );
     }
+    const targetSessionFile = this.sessionFileFromReady(
+      ready,
+      sessionFile || restoreSessionFile,
+    );
     if (input.resetModelOptionsFromSettings) {
-      await this.resetModelOptionsFromSettings();
+      await this.resetModelOptionsFromSettings(targetSessionFile);
     }
-    await this.applyTurnModelOptions({
-      model: input.model,
-      thinkingLevel: input.thinkingLevel,
-    });
+    await this.applyTurnModelOptions(
+      {
+        model: input.model,
+        thinkingLevel: input.thinkingLevel,
+      },
+      targetSessionFile,
+    );
     const requestTag =
       safeString(input.requestTag).trim() || this.createTurnRequestTag();
     await submitNativeFrontendPromptTurn(this.client, {
@@ -747,6 +852,7 @@ export class RinFrontendTurnDriver {
       requestTag,
       streamingBehavior: input.streamingBehavior,
       promptContext: input.promptContext,
+      sessionFile: targetSessionFile,
     });
     this.throwIfQueuedOffline(requestTag);
     return {
@@ -780,24 +886,29 @@ export class RinFrontendTurnDriver {
     const managedSessionLeaf = safeString(
       input.managedSessionLeaf || "",
     ).trim();
-    await this.connect({ restoreSessionFile });
+    await this.connect();
     if (!this.client) throw new Error("frontend_session_not_connected");
-    if (sessionFile) {
-      if (!sessionFileExists(sessionFile))
-        throw missingSessionFileError(sessionFile);
-      await this.switchSessionIfNeeded(sessionFile);
+    if (sessionFile && !sessionFileExists(sessionFile)) {
+      throw missingSessionFileError(sessionFile);
     }
     const ready = await this.ensureSessionReady(
       sessionFile || restoreSessionFile,
       managedSessionLeaf,
     );
+    const targetSessionFile = this.sessionFileFromReady(
+      ready,
+      sessionFile || restoreSessionFile,
+    );
     if (input.resetModelOptionsFromSettings) {
-      await this.resetModelOptionsFromSettings();
+      await this.resetModelOptionsFromSettings(targetSessionFile);
     }
-    await this.applyTurnModelOptions({
-      model: input.model,
-      thinkingLevel: input.thinkingLevel,
-    });
+    await this.applyTurnModelOptions(
+      {
+        model: input.model,
+        thinkingLevel: input.thinkingLevel,
+      },
+      targetSessionFile,
+    );
     const text = safeString(input.text).trim();
     const images = Array.isArray(input.images) ? input.images : [];
 
@@ -814,6 +925,7 @@ export class RinFrontendTurnDriver {
         streamingBehavior: "steer",
         requestTag,
         promptContext: input.promptContext,
+        sessionFile: targetSessionFile,
       });
       this.throwIfQueuedOffline(requestTag);
       return {
@@ -828,7 +940,9 @@ export class RinFrontendTurnDriver {
     }
 
     if (input.streamingBehavior !== "steer") {
-      const messages = await this.client.getMessages().catch(() => []);
+      const messages = await this.getMessagesForSession(
+        targetSessionFile,
+      ).catch(() => []);
       if (Array.isArray(messages)) {
         const existing = this.resolveExistingSubmittedTurnFromMessages(
           messages,
@@ -848,7 +962,9 @@ export class RinFrontendTurnDriver {
 
     this.resetAssistantSegmentTracking();
     this.latestAssistantText = "";
-    const baselineMessages = await this.client.getMessages().catch(() => []);
+    const baselineMessages = await this.getMessagesForSession(
+      targetSessionFile,
+    ).catch(() => []);
     const requestTag = this.createTurnRequestTag();
     const liveTurn = this.startLiveTurn(requestTag);
     this.liveTurnRecoveryContext = {
@@ -864,6 +980,7 @@ export class RinFrontendTurnDriver {
         source: promptSource,
         requestTag,
         promptContext: input.promptContext,
+        sessionFile: targetSessionFile,
       });
       this.throwIfQueuedOffline(requestTag);
     })();
@@ -901,6 +1018,7 @@ export class RinFrontendTurnDriver {
           streamingBehavior: "steer",
           requestTag: steerRequestTag,
           promptContext: input.promptContext,
+          sessionFile: targetSessionFile,
         });
         this.throwIfQueuedOffline(steerRequestTag);
         return {
