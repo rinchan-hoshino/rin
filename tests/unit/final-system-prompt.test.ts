@@ -81,15 +81,18 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "Start with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md",
     ),
   );
+  assert.ok(baseSystemPrompt.includes("Scheduled task guidance:"));
   assert.ok(
     baseSystemPrompt.includes(
-      "scheduled tasks/reminders/cron jobs -> docs/scheduled-tasks.md",
+      "use Rin scheduled tasks as the primary runtime feature",
     ),
   );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "rich text output format -> docs/rich-text-output-format.md",
-    ),
+  assert.ok(baseSystemPrompt.includes("Rich text guidance:"));
+  assert.ok(baseSystemPrompt.includes("use Rin native rich output syntax"));
+  assert.ok(baseSystemPrompt.includes("Chat bridge guidance:"));
+  assert.equal(
+    baseSystemPrompt.includes("Memory and self-improvement guidance:"),
+    false,
   );
   assert.equal(baseSystemPrompt.includes("- Topic map:"), false);
 
