@@ -472,8 +472,9 @@ test("chat controller does not send working notices before deterministic command
   ]) {
     const controller = await createController();
     const actions = [];
+    const reactions = [];
     controller.app.bots[0].workingIndicators = [
-      testPollingIndicator(actions, []),
+      testPollingIndicator(actions, reactions),
     ];
     const deliveries = [];
     controller.commitPendingDelivery = async function () {
@@ -522,6 +523,7 @@ test("chat controller does not send working notices before deterministic command
     );
 
     assert.deepEqual(actions, []);
+    assert.deepEqual(reactions, []);
     assert.deepEqual(deliveries, [expectedText]);
   }
 });
