@@ -463,11 +463,10 @@ test("chat controller skips recovery bootstrap and uses configured copy for /new
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
-test("chat controller does not send working notices before deterministic command acknowledgements", async () => {
+test("chat controller does not send working notices before deterministic non-compact command acknowledgements", async () => {
   for (const [command, expectedText] of [
     ["/new", "Started a new session."],
     ["/abort", "Aborted current operation."],
-    ["/compact", "Compacted session."],
     ["/reload", "Reloaded extensions, prompts, skills, and themes."],
   ]) {
     const controller = await createController();
@@ -531,6 +530,83 @@ test("chat controller does not send working notices before deterministic command
     assert.deepEqual(reactions, []);
     assert.deepEqual(deliveries, [expectedText]);
   }
+});
+
+test("chat controller starts command reactions from frontend working status", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  const reactions = [];
+  controller.app.bots[0].workingIndicators = [
+    testPollingIndicator(actions, reactions),
+  ];
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "compact-command-working-reaction.jsonl",
+  );
+  let commandStarted = () => {};
+  let releaseCommand = () => {};
+  const commandStartedPromise = new Promise((resolve) => {
+    commandStarted = resolve;
+  });
+  const releaseCommandPromise = new Promise((resolve) => {
+    releaseCommand = resolve;
+  });
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-compact",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-compact",
+    }),
+    compact: async () => {
+      commandStarted();
+      await controller.driver.handleClientEvent({
+        type: "backend_event",
+        payload: { type: "external_working_start" },
+      });
+      await releaseCommandPromise;
+      await controller.driver.handleClientEvent({
+        type: "backend_event",
+        payload: { type: "external_working_end" },
+      });
+      return {
+        handled: true,
+        text: "backend text should be localized",
+        sessionFile,
+      };
+    },
+    switchSession: async () => {},
+  };
+
+  const command = controller.runCommand("/compact", "m-compact", "m-compact");
+  await commandStartedPromise;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-compact");
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [["create", "2", "m-compact", "🤔"]]);
+
+  releaseCommand();
+  await command;
+
+  assert.equal(controller.currentTurn, null);
+
+  assert.deepEqual(reactions, [
+    ["create", "2", "m-compact", "🤔"],
+    ["delete", "2", "m-compact", "🤔", "1"],
+  ]);
+  assert.deepEqual(deliveries, ["Compacted session."]);
 });
 
 test("chat controller does not create processing turns for slash commands", async () => {
