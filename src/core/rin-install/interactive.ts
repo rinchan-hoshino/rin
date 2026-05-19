@@ -7,8 +7,6 @@ import {
   defaultInstallDirForHome,
   installAuthPath,
   installSettingsPath,
-  installerManifestPath,
-  legacyInstallerManifestPath,
 } from "./paths.js";
 import {
   configureProviderAuth,
@@ -433,19 +431,14 @@ function loadExistingProviderDefaults(
   installDir: string,
   readJsonFile: <T>(filePath: string, fallback: T) => T,
 ) {
-  const candidates = [
-    installSettingsPath(installDir),
-    installerManifestPath(installDir),
-    legacyInstallerManifestPath(installDir),
-  ];
-  for (const filePath of candidates) {
-    const record = normalizeRecord(readJsonFile<any>(filePath, {}));
-    const provider = String(record.defaultProvider || "").trim();
-    const modelId = String(record.defaultModel || "").trim();
-    const thinkingLevel = String(record.defaultThinkingLevel || "").trim();
-    if (provider && modelId && thinkingLevel) {
-      return { provider, modelId, thinkingLevel };
-    }
+  const record = normalizeRecord(
+    readJsonFile<any>(installSettingsPath(installDir), {}),
+  );
+  const provider = String(record.defaultProvider || "").trim();
+  const modelId = String(record.defaultModel || "").trim();
+  const thinkingLevel = String(record.defaultThinkingLevel || "").trim();
+  if (provider && modelId && thinkingLevel) {
+    return { provider, modelId, thinkingLevel };
   }
   return null;
 }

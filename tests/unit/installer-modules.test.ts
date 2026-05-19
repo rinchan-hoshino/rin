@@ -298,7 +298,7 @@ test("install-record normalizes launcher metadata and installer manifests", () =
   assert.equal(installRecord.normalizeInstallRecord("/home/demo", null), null);
 });
 
-test("persist reconcileInstallerManifest writes primary and locator manifests for custom install dirs", async () => {
+test("persist reconcileInstallerManifest writes only install metadata for custom install dirs", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");
     const ownerHome = path.join(dir, "home", "demo");
@@ -307,10 +307,6 @@ test("persist reconcileInstallerManifest writes primary and locator manifests fo
       {
         targetUser: "demo",
         installDir,
-        provider: "openai",
-        modelId: "gpt",
-        thinkingLevel: "medium",
-        chatConfig: { telegram: { token: "x" } },
         elevated: false,
       },
       {
@@ -335,10 +331,16 @@ test("persist reconcileInstallerManifest writes primary and locator manifests fo
       writes.map((entry) => entry.filePath).sort(),
       [result.manifestPath, result.locatorManifestPath].sort(),
     );
-    assert.equal(writes[0].value.defaultProvider, "openai");
-    assert.equal(writes[0].value.defaultModel, "gpt");
-    assert.equal(writes[0].value.defaultThinkingLevel, "medium");
-    assert.equal("koishi" in writes[0].value, false);
+    for (const entry of writes) {
+      assert.equal(entry.value.targetUser, "demo");
+      assert.equal(entry.value.installDir, installDir);
+      assert.equal("defaultProvider" in entry.value, false);
+      assert.equal("defaultModel" in entry.value, false);
+      assert.equal("defaultThinkingLevel" in entry.value, false);
+      assert.equal("language" in entry.value, false);
+      assert.equal("chat" in entry.value, false);
+      assert.equal("koishi" in entry.value, false);
+    }
   });
 });
 
@@ -480,7 +482,7 @@ test("persist reconcileInstallerManifest records current and previous release ro
   });
 });
 
-test("persist reconcileInstallerManifest skips malformed recovery candidates before reusing a prior manifest", async () => {
+test("persist reconcileInstallerManifest reuses only release state from prior manifests", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");
     const ownerHome = path.join(dir, "home", "demo");
@@ -491,7 +493,6 @@ test("persist reconcileInstallerManifest skips malformed recovery candidates bef
       {
         targetUser: "demo",
         installDir,
-        provider: "openai",
         elevated: false,
       },
       {
@@ -501,7 +502,30 @@ test("persist reconcileInstallerManifest skips malformed recovery candidates bef
           readCalls.push(filePath);
           if (filePath === path.join(installDir, "installer.json")) return [];
           if (filePath === path.join(ownerHome, ".rin", "installer.json")) {
-            return { preserved: true, defaultModel: "existing-model" };
+            return {
+              preserved: true,
+              defaultModel: "existing-model",
+              release: {
+                channel: "git",
+                version: "abc123",
+                branch: "main",
+                ref: "abc123",
+                sourceLabel: "git ref abc123",
+                archiveUrl: "https://example.com/rin.tar.gz",
+              },
+              currentRelease: {
+                name: "abc123",
+                path: path.join(installDir, "app", "releases", "abc123"),
+                release: {
+                  channel: "git",
+                  version: "abc123",
+                  branch: "main",
+                  ref: "abc123",
+                  sourceLabel: "git ref abc123",
+                  archiveUrl: "https://example.com/rin.tar.gz",
+                },
+              },
+            };
           }
           return fallback;
         },
@@ -517,9 +541,11 @@ test("persist reconcileInstallerManifest skips malformed recovery candidates bef
     ]);
     assert.equal(writes.length, 2);
     for (const entry of writes) {
-      assert.equal(entry.value.preserved, true);
-      assert.equal(entry.value.defaultModel, "existing-model");
-      assert.equal(entry.value.defaultProvider, "openai");
+      assert.equal("preserved" in entry.value, false);
+      assert.equal("defaultModel" in entry.value, false);
+      assert.equal("defaultProvider" in entry.value, false);
+      assert.equal(entry.value.release.version, "abc123");
+      assert.equal(entry.value.currentRelease.name, "abc123");
     }
   });
 });
@@ -550,7 +576,7 @@ test("persist reconcileInstallerManifest avoids duplicate writes for default ins
   });
 });
 
-test("persist reconcileInstallerManifest stores configured language in installer manifest", async () => {
+test("persist reconcileInstallerManifest keeps runtime defaults out of installer manifests", async () => {
   await withTempDir(async (dir) => {
     const ownerHome = path.join(dir, "home", "demo");
     const installDir = path.join(ownerHome, ".rin");
@@ -559,10 +585,6 @@ test("persist reconcileInstallerManifest stores configured language in installer
       {
         targetUser: "demo",
         installDir,
-        provider: "openai",
-        modelId: "gpt",
-        thinkingLevel: "medium",
-        language: "zh_CN",
         elevated: false,
       },
       {
@@ -577,14 +599,16 @@ test("persist reconcileInstallerManifest stores configured language in installer
 
     assert.equal(result.manifestPath, result.locatorManifestPath);
     assert.equal(writes.length, 1);
-    assert.equal(writes[0].value.defaultProvider, "openai");
-    assert.equal(writes[0].value.defaultModel, "gpt");
-    assert.equal(writes[0].value.defaultThinkingLevel, "medium");
-    assert.equal(writes[0].value.language, "zh_CN");
+    assert.equal(writes[0].value.targetUser, "demo");
+    assert.equal(writes[0].value.installDir, installDir);
+    assert.equal("defaultProvider" in writes[0].value, false);
+    assert.equal("defaultModel" in writes[0].value, false);
+    assert.equal("defaultThinkingLevel" in writes[0].value, false);
+    assert.equal("language" in writes[0].value, false);
   });
 });
 
-test("persist reconcileInstallerManifest preserves existing chat config when new chat config is malformed", async () => {
+test("persist reconcileInstallerManifest removes chat settings from installer manifests", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");
     const ownerHome = path.join(dir, "home", "demo");
@@ -594,8 +618,6 @@ test("persist reconcileInstallerManifest preserves existing chat config when new
       {
         targetUser: "demo",
         installDir,
-        provider: "openai",
-        chatConfig: "broken",
         elevated: false,
       },
       {
@@ -613,8 +635,8 @@ test("persist reconcileInstallerManifest preserves existing chat config when new
 
     assert.equal(writes.length, 2);
     for (const entry of writes) {
-      assert.deepEqual(entry.value.chat, { telegram: { token: "existing" } });
-      assert.equal(entry.value.defaultProvider, "openai");
+      assert.equal("chat" in entry.value, false);
+      assert.equal("defaultProvider" in entry.value, false);
     }
   });
 });
@@ -669,6 +691,20 @@ test("persistInstallerOutputs stores configured language in settings", async () 
     assert.equal(settingsWrite.value.defaultModel, "gpt");
     assert.equal(settingsWrite.value.defaultThinkingLevel, "medium");
     assert.equal(settingsWrite.value.language, "zh_CN");
+
+    const manifestWrites = writes.filter(
+      (entry) =>
+        entry.filePath === result.manifestPath ||
+        entry.filePath === result.locatorManifestPath,
+    );
+    assert.equal(manifestWrites.length >= 1, true);
+    for (const entry of manifestWrites) {
+      assert.equal("defaultProvider" in entry.value, false);
+      assert.equal("defaultModel" in entry.value, false);
+      assert.equal("defaultThinkingLevel" in entry.value, false);
+      assert.equal("language" in entry.value, false);
+      assert.equal("chat" in entry.value, false);
+    }
   });
 });
 
@@ -1234,6 +1270,10 @@ test("persist persistInstallerOutputs forwards release metadata into installer m
         archiveUrl: "https://example.com/rin-deadbeef.tar.gz",
         installedAt: "2026-04-20T11:00:00.000Z",
       });
+      assert.equal("defaultProvider" in entry.value, false);
+      assert.equal("defaultModel" in entry.value, false);
+      assert.equal("defaultThinkingLevel" in entry.value, false);
+      assert.equal("chat" in entry.value, false);
     }
   });
 });
