@@ -159,31 +159,17 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
   );
   assert.deepEqual(pathsMod.installerLocatorCandidatesForHome(linuxHome), [
     path.join(linuxHome, ".rin", "installer.json"),
-    path.join(linuxHome, ".rin", "config", "installer.json"),
   ]);
   assert.deepEqual(pathsMod.installerManifestPaths(installDir, linuxHome), {
     manifestPath: path.join(installDir, "installer.json"),
     locatorManifestPath: path.join(linuxHome, ".rin", "installer.json"),
-    legacyManifestPath: path.join(installDir, "config", "installer.json"),
-    legacyLocatorManifestPath: path.join(
-      linuxHome,
-      ".rin",
-      "config",
-      "installer.json",
-    ),
     writePaths: [
       path.join(installDir, "installer.json"),
       path.join(linuxHome, ".rin", "installer.json"),
     ],
-    cleanupPaths: [
-      path.join(installDir, "config", "installer.json"),
-      path.join(linuxHome, ".rin", "config", "installer.json"),
-    ],
     recoveryPaths: [
       path.join(installDir, "installer.json"),
       path.join(linuxHome, ".rin", "installer.json"),
-      path.join(installDir, "config", "installer.json"),
-      path.join(linuxHome, ".rin", "config", "installer.json"),
     ],
   });
   assert.deepEqual(
@@ -194,18 +180,13 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
   assert.deepEqual(
     pathsMod.installerManifestPaths(path.join(linuxHome, ".rin"), linuxHome)
       .recoveryPaths,
-    [
-      path.join(linuxHome, ".rin", "installer.json"),
-      path.join(linuxHome, ".rin", "config", "installer.json"),
-    ],
+    [path.join(linuxHome, ".rin", "installer.json")],
   );
   assert.deepEqual(
     pathsMod.installerRecoveryManifestCandidates(installDir, linuxHome),
     [
       path.join(installDir, "installer.json"),
       path.join(linuxHome, ".rin", "installer.json"),
-      path.join(installDir, "config", "installer.json"),
-      path.join(linuxHome, ".rin", "config", "installer.json"),
     ],
   );
   assert.equal(
@@ -282,10 +263,7 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
   assert.deepEqual(pathsMod.installRecordSourcesForHome(linuxHome), [
     {
       source: "manifest",
-      filePaths: [
-        path.join(linuxHome, ".rin", "installer.json"),
-        path.join(linuxHome, ".rin", "config", "installer.json"),
-      ],
+      filePaths: [path.join(linuxHome, ".rin", "installer.json")],
     },
     {
       source: "launcher",
@@ -299,7 +277,6 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
     pathsMod.launcherMetadataPathForHome(linuxHome),
     alternateLauncherMetadataPath,
     path.join(linuxHome, ".rin", "installer.json"),
-    path.join(linuxHome, ".rin", "config", "installer.json"),
   ]);
   assert.equal(
     pathsMod.managedLaunchdLabel("demo.user+test"),

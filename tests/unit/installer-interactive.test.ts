@@ -445,8 +445,8 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.doesNotMatch(updateModeBlock, /promptInstallerLanguage/);
   assert.match(updateModeBlock, /readInstalledUpdateLanguage/);
   assert.match(mainSource, /installSettingsPath/);
-  assert.match(mainSource, /installerManifestPaths/);
-  assert.match(mainSource, /launcherMetadataCandidatesForHome/);
+  assert.doesNotMatch(mainSource, /installerManifestPaths/);
+  assert.doesNotMatch(mainSource, /launcherMetadataCandidatesForHome/);
   assert.match(mainSource, /currentUser: updateCurrentUser/);
   assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
   assert.match(updaterSource, /renderInstallerNote/);
@@ -529,6 +529,66 @@ test("promptProviderSetup reuses complete existing provider config", async () =>
   assert.equal(result.thinkingLevel, "medium");
   assert.equal(result.authResult.available, true);
   assert.equal(result.authResult.authKind, "existing");
+});
+
+test("promptProviderSetup does not reuse stale installer manifest provider config", async () => {
+  const installDir = "/tmp/demo";
+  const selectCalls = [];
+  const result = await interactive.promptProviderSetup(
+    {
+      ensureNotCancelled(value) {
+        return value;
+      },
+      async select(options) {
+        selectCalls.push(options.message);
+        return options.options[0].value;
+      },
+      async text() {
+        return "secret";
+      },
+      async confirm() {
+        return true;
+      },
+    },
+    installDir,
+    (filePath) => {
+      if (filePath === path.join(installDir, "installer.json")) {
+        return {
+          defaultProvider: "openai",
+          defaultModel: "gpt-5",
+          defaultThinkingLevel: "medium",
+        };
+      }
+      if (filePath === path.join(installDir, "auth.json")) {
+        return { openai: { type: "api_key", key: "demo" } };
+      }
+      return {};
+    },
+    {
+      async loadModelChoices() {
+        return [
+          {
+            provider: "openai",
+            id: "gpt-5",
+            reasoning: true,
+            available: false,
+          },
+        ];
+      },
+      async configureProviderAuth() {
+        return { available: true, authKind: "existing", authData: {} };
+      },
+    },
+  );
+
+  assert.deepEqual(selectCalls, [
+    "Choose a provider to authenticate and use.",
+    "Choose a model.",
+    "Choose the default thinking level.",
+  ]);
+  assert.equal(result.provider, "openai");
+  assert.equal(result.modelId, "gpt-5");
+  assert.equal(result.thinkingLevel, "off");
 });
 
 test("promptProviderSetup prompts when no reusable provider config exists", async () => {

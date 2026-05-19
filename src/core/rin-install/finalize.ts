@@ -101,11 +101,6 @@ async function applyInstalledRuntime(
     {
       targetUser,
       installDir,
-      provider,
-      modelId,
-      thinkingLevel,
-      language,
-      chatConfig,
       release,
       currentReleaseName,
       currentReleaseRoot: publishedRuntime.releaseRoot,

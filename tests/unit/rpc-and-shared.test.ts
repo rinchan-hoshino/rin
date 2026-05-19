@@ -135,7 +135,7 @@ test("shared reuses installer common repo helpers", async () => {
   );
 });
 
-test("shared loadInstallConfigForHome prefers launcher metadata candidates and recovers installer manifests", async () => {
+test("shared loadInstallConfigForHome prefers launcher metadata and ignores retired config manifests", async () => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "rin-shared-home-"));
   try {
     await fs.mkdir(path.join(home, ".rin"), { recursive: true });
@@ -196,10 +196,7 @@ test("shared loadInstallConfigForHome prefers launcher metadata candidates and r
       }),
       "utf8",
     );
-    assert.deepEqual(shared.loadInstallConfigForHome(home), {
-      defaultTargetUser: "demo",
-      defaultInstallDir: "/srv/rin-demo",
-    });
+    assert.deepEqual(shared.loadInstallConfigForHome(home), {});
   } finally {
     await fs.rm(home, { recursive: true, force: true });
   }

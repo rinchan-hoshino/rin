@@ -46,12 +46,7 @@ import {
   listSystemUsers,
   targetHomeForUser,
 } from "./users.js";
-import {
-  defaultInstallDirForHome,
-  installSettingsPath,
-  installerManifestPaths,
-  launcherMetadataCandidatesForHome,
-} from "./paths.js";
+import { defaultInstallDirForHome, installSettingsPath } from "./paths.js";
 import { startUpdater } from "./updater.js";
 import { runInstallerProgress } from "./progress.js";
 import {
@@ -104,21 +99,10 @@ function readInstalledUpdateLanguage(options: {
   installDir: string;
   ownerHome?: string;
 }) {
-  const ownerHome = options.ownerHome || targetHomeForUser(options.targetUser);
-  const currentHome = targetHomeForUser(options.currentUser);
-  const candidates = [
-    installSettingsPath(options.installDir),
-    ...installerManifestPaths(options.installDir, ownerHome).recoveryPaths,
-    ...launcherMetadataCandidatesForHome(currentHome),
-  ];
-  for (const candidate of candidates) {
-    const language = normalizeLanguageTag(
-      readJsonFile<any>(candidate, {})?.language,
-      "",
-    );
-    if (language) return language;
-  }
-  return "";
+  return normalizeLanguageTag(
+    readJsonFile<any>(installSettingsPath(options.installDir), {})?.language,
+    "",
+  );
 }
 
 async function launchInstallerInitTui(options: {

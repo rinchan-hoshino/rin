@@ -65,20 +65,6 @@ function writeInstallerJson(
   deps.writeJsonFile(filePath, value);
 }
 
-function removeFile(
-  filePath: string,
-  elevated: boolean,
-  runPrivileged: (command: string, args: string[]) => void,
-) {
-  try {
-    if (elevated) {
-      runPrivileged("rm", ["-f", filePath]);
-      return;
-    }
-    fs.rmSync(filePath, { force: true });
-  } catch {}
-}
-
 const PREVIOUS_CHAT_MESSAGE_STORE_DIRNAME = "koishi-message-store";
 const CHAT_MESSAGE_STORE_DIRNAME = "chat-message-store";
 
@@ -590,7 +576,6 @@ function applyInstalledDefaults(
   }
   const language = normalizeConfiguredLanguage(options.language);
   if (language) target.language = language;
-  return language;
 }
 
 function installerWriteOptions(
@@ -617,13 +602,6 @@ function mergeInstalledChatSettings(settingsJson: any, chatConfig?: any) {
     if (adapterConfig === undefined) continue;
     normalized.chat[adapterKey] = adapterConfig;
   }
-  return normalized;
-}
-
-function normalizeInstalledManifest(manifestJson: any, chatConfig?: any) {
-  const normalized = normalizeStoredChatSettings(manifestJson);
-  const normalizedChatConfig = normalizeChatConfigRoot(chatConfig);
-  if (normalizedChatConfig) normalized.chat = normalizedChatConfig;
   return normalized;
 }
 
@@ -663,6 +641,15 @@ function isInstalledReleaseRecord(value: any) {
   return isJsonRecord(value) && typeof value.name === "string";
 }
 
+function normalizeInstalledReleaseRecord(value: any) {
+  if (!isInstalledReleaseRecord(value)) return undefined;
+  return buildInstalledReleaseRecord({
+    name: value.name,
+    root: value.path,
+    release: value.release,
+  });
+}
+
 function buildInstalledReleaseRecord(options: {
   name?: string;
   root?: string;
@@ -684,11 +671,6 @@ export function reconcileInstallerManifest(
   options: {
     targetUser: string;
     installDir: string;
-    provider?: string;
-    modelId?: string;
-    thinkingLevel?: string;
-    language?: string;
-    chatConfig?: any;
     release?: InstalledReleaseInfo;
     currentReleaseName?: string;
     currentReleaseRoot?: string;
@@ -721,92 +703,84 @@ export function reconcileInstallerManifest(
   if (!options.elevated) deps.ensureDir(options.installDir);
 
   const manifestPaths = installerManifestPaths(options.installDir, ownerHome);
-  const {
-    manifestPath,
-    locatorManifestPath,
-    legacyManifestPath,
-    legacyLocatorManifestPath,
-  } = manifestPaths;
+  const { manifestPath, locatorManifestPath } = manifestPaths;
   const writeOptions = installerWriteOptions(
     ownerUser,
     ownerGroup,
     options.elevated,
   );
-  const manifestJson: any = normalizeInstalledManifest(
+  const priorManifest: any =
     loadFirstValidCandidate(
       manifestPaths.recoveryPaths,
       (filePath) =>
         deps.readInstallerJson<any>(filePath, null, Boolean(options.elevated)),
       (value) => (isJsonRecord(value) ? value : null),
-    ) || {},
-    options.chatConfig,
-  );
-  manifestJson.targetUser = options.targetUser;
-  manifestJson.installDir = options.installDir;
-  applyInstalledDefaults(manifestJson, options);
+    ) || {};
+  const manifestJson: any = {
+    targetUser: options.targetUser,
+    installDir: options.installDir,
+  };
   const normalizedRelease = normalizeInstalledReleaseInfo(options.release);
-  const priorCurrentRelease = isInstalledReleaseRecord(
-    manifestJson.currentRelease,
-  )
-    ? manifestJson.currentRelease
-    : undefined;
-  const priorPreviousRelease = isInstalledReleaseRecord(
-    manifestJson.previousRelease,
-  )
-    ? manifestJson.previousRelease
-    : undefined;
+  const priorRelease = normalizeInstalledReleaseInfo(priorManifest.release);
+  const release = normalizedRelease || priorRelease;
+  if (release) {
+    manifestJson.release = {
+      channel: release.channel,
+      version: release.version,
+      branch: release.branch,
+      ref: release.ref,
+      sourceLabel: release.sourceLabel,
+      archiveUrl: release.archiveUrl,
+      ...(release.installedAt || normalizedRelease
+        ? { installedAt: release.installedAt || nowIso() }
+        : {}),
+    };
+  }
+  const priorCurrentRelease = normalizeInstalledReleaseRecord(
+    priorManifest.currentRelease,
+  );
+  const priorPreviousRelease = normalizeInstalledReleaseRecord(
+    priorManifest.previousRelease,
+  );
   const previousReleaseName = String(options.previousReleaseName || "").trim();
   const previousReleaseMetadata = previousReleaseName
     ? priorCurrentRelease?.name === previousReleaseName
       ? priorCurrentRelease.release
       : priorPreviousRelease?.name === previousReleaseName
         ? priorPreviousRelease.release
-        : manifestJson.release
+        : priorRelease
     : undefined;
+  const currentRelease =
+    buildInstalledReleaseRecord({
+      name: options.currentReleaseName,
+      root: options.currentReleaseRoot,
+      release: normalizedRelease,
+    }) || priorCurrentRelease;
   const previousRelease = buildInstalledReleaseRecord({
     name: options.previousReleaseName,
     root: options.previousReleaseRoot,
     release: previousReleaseMetadata,
   });
-  const currentRelease = buildInstalledReleaseRecord({
-    name: options.currentReleaseName,
-    root: options.currentReleaseRoot,
-    release: normalizedRelease,
-  });
-  if (normalizedRelease) {
-    manifestJson.release = {
-      channel: normalizedRelease.channel,
-      version: normalizedRelease.version,
-      branch: normalizedRelease.branch,
-      ref: normalizedRelease.ref,
-      sourceLabel: normalizedRelease.sourceLabel,
-      archiveUrl: normalizedRelease.archiveUrl,
-      installedAt: normalizedRelease.installedAt || nowIso(),
-    };
-  }
   if (currentRelease) manifestJson.currentRelease = currentRelease;
   if (
     previousRelease &&
     previousRelease.name !== String(currentRelease?.name || "")
   ) {
     manifestJson.previousRelease = previousRelease;
-  } else if (!currentRelease && priorCurrentRelease) {
-    manifestJson.currentRelease = priorCurrentRelease;
+  } else if (
+    priorPreviousRelease &&
+    priorPreviousRelease.name !== String(currentRelease?.name || "")
+  ) {
+    manifestJson.previousRelease = priorPreviousRelease;
   }
   manifestJson.updatedAt = nowIso();
 
   for (const filePath of manifestPaths.writePaths) {
     writeInstallerJson(filePath, manifestJson, writeOptions, deps);
   }
-  for (const filePath of manifestPaths.cleanupPaths) {
-    removeFile(filePath, Boolean(options.elevated), deps.runPrivileged);
-  }
-
   return {
     manifestPath,
     locatorManifestPath,
-    legacyManifestPath,
-    legacyLocatorManifestPath,
   };
 }
 
@@ -933,7 +907,7 @@ export async function persistInstallerOutputs(
     deps.readInstallerJson<any>(settingsPath, {}, Boolean(options.elevated)),
     options.chatConfig,
   );
-  const language = applyInstalledDefaults(settingsJson, options);
+  applyInstalledDefaults(settingsJson, options);
 
   const authPath = installAuthPath(options.installDir);
   const authJson = normalizeInstallerRecord(
@@ -963,11 +937,6 @@ export async function persistInstallerOutputs(
     {
       targetUser: options.targetUser,
       installDir: options.installDir,
-      provider: options.provider,
-      modelId: options.modelId,
-      thinkingLevel: options.thinkingLevel,
-      language,
-      chatConfig: normalizeChatConfigRoot(options.chatConfig) || {},
       release: options.release,
       currentReleaseName: options.currentReleaseName,
       currentReleaseRoot: options.currentReleaseRoot,
