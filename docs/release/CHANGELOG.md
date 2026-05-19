@@ -1,5 +1,10 @@
 # Rin Changelog
 
+## 0.2.0
+
+- Startup changelog tracking keeps the existing single `lastChangelogVersion` value while comparing stable, beta, nightly, and build-metadata version strings correctly.
+- Startup update checks now run in the background without blocking TUI input; git-channel probes use an asynchronous child process.
+
 ## 0.1.0
 
 - Rin TUI update notices now use Rin release metadata and link to Rin release notes instead of Pi update feeds.
