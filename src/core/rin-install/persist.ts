@@ -721,21 +721,6 @@ export function reconcileInstallerManifest(
     installDir: options.installDir,
   };
   const normalizedRelease = normalizeInstalledReleaseInfo(options.release);
-  const priorRelease = normalizeInstalledReleaseInfo(priorManifest.release);
-  const release = normalizedRelease || priorRelease;
-  if (release) {
-    manifestJson.release = {
-      channel: release.channel,
-      version: release.version,
-      branch: release.branch,
-      ref: release.ref,
-      sourceLabel: release.sourceLabel,
-      archiveUrl: release.archiveUrl,
-      ...(release.installedAt || normalizedRelease
-        ? { installedAt: release.installedAt || nowIso() }
-        : {}),
-    };
-  }
   const priorCurrentRelease = normalizeInstalledReleaseRecord(
     priorManifest.currentRelease,
   );
@@ -748,7 +733,7 @@ export function reconcileInstallerManifest(
       ? priorCurrentRelease.release
       : priorPreviousRelease?.name === previousReleaseName
         ? priorPreviousRelease.release
-        : priorRelease
+        : undefined
     : undefined;
   const currentRelease =
     buildInstalledReleaseRecord({

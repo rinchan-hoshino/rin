@@ -344,25 +344,33 @@ test("persist reconcileInstallerManifest writes only install metadata for custom
   });
 });
 
-test("persist reconcileInstallerManifest persists release metadata when provided", async () => {
+test("persist reconcileInstallerManifest stores release metadata on currentRelease only", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");
     const ownerHome = path.join(dir, "home", "demo");
     const writes = [];
+    const betaRelease = {
+      channel: "beta" as const,
+      version: "1.3.0-beta.2",
+      branch: "release/1.3",
+      ref: "1.3.0-beta.2",
+      sourceLabel: "beta version 1.3.0-beta.2",
+      archiveUrl: "https://example.com/release-1.3-beta.2.tgz",
+      installedAt: "2026-04-20T10:00:00.000Z",
+    };
 
     persist.reconcileInstallerManifest(
       {
         targetUser: "demo",
         installDir,
-        release: {
-          channel: "beta",
-          version: "1.3.0-beta.2",
-          branch: "release/1.3",
-          ref: "1.3.0-beta.2",
-          sourceLabel: "beta version 1.3.0-beta.2",
-          archiveUrl: "https://example.com/release-1.3-beta.2.tgz",
-          installedAt: "2026-04-20T10:00:00.000Z",
-        },
+        release: betaRelease,
+        currentReleaseName: "1.3.0-beta.2",
+        currentReleaseRoot: path.join(
+          installDir,
+          "app",
+          "releases",
+          "1.3.0-beta.2",
+        ),
         elevated: false,
       },
       {
@@ -377,15 +385,9 @@ test("persist reconcileInstallerManifest persists release metadata when provided
 
     assert.equal(writes.length, 2);
     for (const entry of writes) {
-      assert.deepEqual(entry.value.release, {
-        channel: "beta",
-        version: "1.3.0-beta.2",
-        branch: "release/1.3",
-        ref: "1.3.0-beta.2",
-        sourceLabel: "beta version 1.3.0-beta.2",
-        archiveUrl: "https://example.com/release-1.3-beta.2.tgz",
-        installedAt: "2026-04-20T10:00:00.000Z",
-      });
+      assert.equal("release" in entry.value, false);
+      assert.equal(entry.value.currentRelease.name, "1.3.0-beta.2");
+      assert.deepEqual(entry.value.currentRelease.release, betaRelease);
     }
 
     const nightlyWrites = [];
@@ -401,6 +403,13 @@ test("persist reconcileInstallerManifest persists release metadata when provided
           sourceLabel: "nightly 1.4.0-nightly.20260513+abc1234",
           archiveUrl: "https://example.com/nightly.tgz",
         },
+        currentReleaseName: "1.4.0-nightly.20260513+abc1234",
+        currentReleaseRoot: path.join(
+          installDir,
+          "app",
+          "releases",
+          "1.4.0-nightly.20260513+abc1234",
+        ),
         elevated: false,
       },
       {
@@ -415,9 +424,10 @@ test("persist reconcileInstallerManifest persists release metadata when provided
     );
 
     for (const entry of nightlyWrites) {
-      assert.equal(entry.value.release.channel, "nightly");
+      assert.equal("release" in entry.value, false);
+      assert.equal(entry.value.currentRelease.release.channel, "nightly");
       assert.equal(
-        entry.value.release.version,
+        entry.value.currentRelease.release.version,
         "1.4.0-nightly.20260513+abc1234",
       );
     }
@@ -454,13 +464,17 @@ test("persist reconcileInstallerManifest records current and previous release ro
       readInstallerJson: (_filePath, fallback) =>
         fallback === null
           ? writes.at(-1)?.value || {
-              release: {
-                channel: "stable",
-                version: "1.2.0",
-                branch: "stable",
-                ref: "1.2.0",
-                sourceLabel: "stable version 1.2.0",
-                archiveUrl: "https://example.com/release-1.2.0.tgz",
+              currentRelease: {
+                name: "1.2.0",
+                path: path.join(installDir, "app", "releases", "1.2.0"),
+                release: {
+                  channel: "stable",
+                  version: "1.2.0",
+                  branch: "stable",
+                  ref: "1.2.0",
+                  sourceLabel: "stable version 1.2.0",
+                  archiveUrl: "https://example.com/release-1.2.0.tgz",
+                },
               },
             }
           : fallback,
@@ -474,6 +488,7 @@ test("persist reconcileInstallerManifest records current and previous release ro
 
     assert.equal(writes.length, 4);
     for (const entry of writes) {
+      assert.equal("release" in entry.value, false);
       assert.equal(entry.value.currentRelease.name, "1.3.0");
       assert.equal(entry.value.currentRelease.release.version, "1.3.0");
       assert.equal(entry.value.previousRelease.name, "1.2.0");
@@ -482,7 +497,7 @@ test("persist reconcileInstallerManifest records current and previous release ro
   });
 });
 
-test("persist reconcileInstallerManifest reuses only release state from prior manifests", async () => {
+test("persist reconcileInstallerManifest reuses only currentRelease state from prior manifests", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");
     const ownerHome = path.join(dir, "home", "demo");
@@ -507,11 +522,11 @@ test("persist reconcileInstallerManifest reuses only release state from prior ma
               defaultModel: "existing-model",
               release: {
                 channel: "git",
-                version: "abc123",
+                version: "poison",
                 branch: "main",
-                ref: "abc123",
-                sourceLabel: "git ref abc123",
-                archiveUrl: "https://example.com/rin.tar.gz",
+                ref: "poison",
+                sourceLabel: "ignored top-level release",
+                archiveUrl: "https://example.com/ignored.tar.gz",
               },
               currentRelease: {
                 name: "abc123",
@@ -544,8 +559,9 @@ test("persist reconcileInstallerManifest reuses only release state from prior ma
       assert.equal("preserved" in entry.value, false);
       assert.equal("defaultModel" in entry.value, false);
       assert.equal("defaultProvider" in entry.value, false);
-      assert.equal(entry.value.release.version, "abc123");
+      assert.equal("release" in entry.value, false);
       assert.equal(entry.value.currentRelease.name, "abc123");
+      assert.equal(entry.value.currentRelease.release.version, "abc123");
     }
   });
 });
@@ -1211,10 +1227,19 @@ test("persist persistInstallerOutputs applies install upgrade migrations before 
   });
 });
 
-test("persist persistInstallerOutputs forwards release metadata into installer manifests", async () => {
+test("persist persistInstallerOutputs forwards release metadata into currentRelease", async () => {
   await withTempDir(async (dir) => {
     const ownerHome = path.join(dir, "home", "demo");
     const writes = [];
+    const release = {
+      channel: "git" as const,
+      version: "deadbeef",
+      branch: "main",
+      ref: "deadbeef",
+      sourceLabel: "git ref deadbeef",
+      archiveUrl: "https://example.com/rin-deadbeef.tar.gz",
+      installedAt: "2026-04-20T11:00:00.000Z",
+    };
 
     await persist.persistInstallerOutputs(
       {
@@ -1226,15 +1251,9 @@ test("persist persistInstallerOutputs forwards release metadata into installer m
         thinkingLevel: "medium",
         chatConfig: null,
         authData: {},
-        release: {
-          channel: "git",
-          version: "deadbeef",
-          branch: "main",
-          ref: "deadbeef",
-          sourceLabel: "git ref deadbeef",
-          archiveUrl: "https://example.com/rin-deadbeef.tar.gz",
-          installedAt: "2026-04-20T11:00:00.000Z",
-        },
+        release,
+        currentReleaseName: "deadbeef",
+        currentReleaseRoot: path.join(dir, "app", "releases", "deadbeef"),
         elevated: false,
       },
       {
@@ -1261,15 +1280,9 @@ test("persist persistInstallerOutputs forwards release metadata into installer m
     );
     assert.equal(manifestWrites.length >= 1, true);
     for (const entry of manifestWrites) {
-      assert.deepEqual(entry.value.release, {
-        channel: "git",
-        version: "deadbeef",
-        branch: "main",
-        ref: "deadbeef",
-        sourceLabel: "git ref deadbeef",
-        archiveUrl: "https://example.com/rin-deadbeef.tar.gz",
-        installedAt: "2026-04-20T11:00:00.000Z",
-      });
+      assert.equal("release" in entry.value, false);
+      assert.equal(entry.value.currentRelease.name, "deadbeef");
+      assert.deepEqual(entry.value.currentRelease.release, release);
       assert.equal("defaultProvider" in entry.value, false);
       assert.equal("defaultModel" in entry.value, false);
       assert.equal("defaultThinkingLevel" in entry.value, false);

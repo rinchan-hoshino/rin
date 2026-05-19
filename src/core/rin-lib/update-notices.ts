@@ -168,10 +168,8 @@ export function readInstalledRinReleaseInfo(
     const manifest = JSON.parse(
       fs.readFileSync(path.join(runtimeDir, "installer.json"), "utf8"),
     ) as Record<string, unknown>;
-    return (
-      normalizeInstalledReleaseInfo(
-        (manifest.currentRelease as any)?.release,
-      ) || normalizeInstalledReleaseInfo(manifest.release)
+    return normalizeInstalledReleaseInfo(
+      (manifest.currentRelease as any)?.release,
     );
   } catch {
     return undefined;

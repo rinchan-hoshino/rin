@@ -173,6 +173,26 @@ test("Rin update check follows installed release channel metadata", async () => 
   });
 });
 
+test("Rin update notices ignore top-level release metadata", async () => {
+  await withTempDir(async (dir) => {
+    await fs.writeFile(
+      path.join(dir, "installer.json"),
+      `${JSON.stringify({
+        release: {
+          channel: "git",
+          version: "dc6b3a586e35",
+          branch: "main",
+          ref: "dc6b3a586e35f078ab26d861624f91e465004648",
+          sourceLabel: "git branch main @ dc6b3a586e35",
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    assert.equal(notices.readInstalledRinReleaseInfo(dir), undefined);
+  });
+});
+
 test("Rin git installs do not receive stable package update notices", async () => {
   await withReleaseEnvCleared(async () => {
     await withTempDir(async (dir) => {
@@ -184,12 +204,14 @@ test("Rin git installs do not receive stable package update notices", async () =
       await fs.writeFile(
         path.join(runtimeDir, "installer.json"),
         `${JSON.stringify({
-          release: {
-            channel: "git",
-            version: "dc6b3a586e35",
-            branch: "main",
-            ref: "dc6b3a586e35f078ab26d861624f91e465004648",
-            sourceLabel: "git branch main @ dc6b3a586e35",
+          currentRelease: {
+            release: {
+              channel: "git",
+              version: "dc6b3a586e35",
+              branch: "main",
+              ref: "dc6b3a586e35f078ab26d861624f91e465004648",
+              sourceLabel: "git branch main @ dc6b3a586e35",
+            },
           },
         })}\n`,
         "utf8",
