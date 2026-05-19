@@ -43,6 +43,42 @@ function normalizeTodoId(value: unknown): number | undefined {
   return Number.isSafeInteger(id) ? id : undefined;
 }
 
+function formatTodoChecklistContent(todoList: Todo[]): string {
+  if (todoList.length === 0) return "- [ ] No todos";
+
+  return todoList
+    .map((todo) => `- [${todo.done ? "x" : " "}] #${todo.id}: ${todo.text}`)
+    .join("\n");
+}
+
+function formatTodoChecklistRender(
+  todoList: Todo[],
+  expanded: boolean,
+  theme: Theme,
+): string {
+  if (todoList.length === 0) {
+    return theme.fg("dim", "- [ ] No todos");
+  }
+
+  const display = expanded ? todoList : todoList.slice(0, 5);
+  const lines = display.map((todo) => {
+    const check = todo.done
+      ? theme.fg("success", "- [x]")
+      : theme.fg("dim", "- [ ]");
+    const id = theme.fg("accent", `#${todo.id}:`);
+    const text = todo.done
+      ? theme.fg("dim", todo.text)
+      : theme.fg("muted", todo.text);
+    return `${check} ${id} ${text}`;
+  });
+
+  if (!expanded && todoList.length > 5) {
+    lines.push(theme.fg("dim", `... ${todoList.length - 5} more`));
+  }
+
+  return lines.join("\n");
+}
+
 class TodoListComponent {
   private todos: Todo[];
   private theme: Theme;
@@ -71,7 +107,7 @@ class TodoListComponent {
     const th = this.theme;
 
     lines.push("");
-    const title = th.fg("accent", " Todos ");
+    const title = th.fg("accent", " Checklist ");
     const headerLine =
       th.fg("borderMuted", "─".repeat(3)) +
       title +
@@ -82,7 +118,7 @@ class TodoListComponent {
     if (this.todos.length === 0) {
       lines.push(
         truncateToWidth(
-          `  ${th.fg("dim", "No todos yet. Ask the agent to add some!")}`,
+          `  ${th.fg("dim", "- [ ] No todos yet. Ask the agent to add some!")}`,
           width,
         ),
       );
@@ -98,8 +134,10 @@ class TodoListComponent {
       lines.push("");
 
       for (const todo of this.todos) {
-        const check = todo.done ? th.fg("success", "✓") : th.fg("dim", "○");
-        const id = th.fg("accent", `#${todo.id}`);
+        const check = todo.done
+          ? th.fg("success", "- [x]")
+          : th.fg("dim", "- [ ]");
+        const id = th.fg("accent", `#${todo.id}:`);
         const text = todo.done
           ? th.fg("dim", todo.text)
           : th.fg("text", todo.text);
@@ -156,16 +194,18 @@ export default function todoCapability(): RinCapabilityDefinition {
 
   const todoToolDefinition: any = {
     name: "todo",
-    label: "Todo",
+    label: "Checklist",
     description:
-      "Manage the current session todo list. Actions: list, add (text), toggle (id), clear.",
+      "Manage the current session todo checklist. Actions: list, add (text), toggle (id), clear.",
     promptSnippet:
-      "Manage the current branch todo list: list items, add concrete steps, toggle completion, or clear it.",
+      "Manage the current branch todo checklist: list items, add concrete steps, toggle completion, or clear it.",
     promptGuidelines: [
       "Use todo for multi-step task tracking when a structured checklist would reduce missed work.",
       "Keep todo current: add concrete steps before long work and toggle items as they are completed.",
+      "Todo output is user-visible checklist state; read and write actions should leave the checklist display current.",
     ],
     parameters: TodoParams,
+    renderShell: "self",
 
     async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
       switch (params.action) {
@@ -174,14 +214,7 @@ export default function todoCapability(): RinCapabilityDefinition {
             content: [
               {
                 type: "text" as const,
-                text: todos.length
-                  ? todos
-                      .map(
-                        (todo) =>
-                          `[${todo.done ? "x" : " "}] #${todo.id}: ${todo.text}`,
-                      )
-                      .join("\n")
-                  : "No todos",
+                text: formatTodoChecklistContent(todos),
               },
             ],
             details: snapshot("list"),
@@ -206,7 +239,7 @@ export default function todoCapability(): RinCapabilityDefinition {
             content: [
               {
                 type: "text" as const,
-                text: `Added todo #${newTodo.id}: ${newTodo.text}`,
+                text: formatTodoChecklistContent(todos),
               },
             ],
             details: snapshot("add"),
@@ -251,7 +284,7 @@ export default function todoCapability(): RinCapabilityDefinition {
             content: [
               {
                 type: "text" as const,
-                text: `Todo #${todo.id} ${todo.done ? "completed" : "uncompleted"}`,
+                text: formatTodoChecklistContent(todos),
               },
             ],
             details: snapshot("toggle"),
@@ -259,12 +292,14 @@ export default function todoCapability(): RinCapabilityDefinition {
         }
 
         case "clear": {
-          const count = todos.length;
           todos = [];
           nextId = 1;
           return {
             content: [
-              { type: "text" as const, text: `Cleared ${count} todos` },
+              {
+                type: "text" as const,
+                text: formatTodoChecklistContent(todos),
+              },
             ],
             details: snapshot("clear"),
           };
@@ -285,7 +320,7 @@ export default function todoCapability(): RinCapabilityDefinition {
 
     renderCall(args: any, theme, _context) {
       let text =
-        theme.fg("toolTitle", theme.bold("todo ")) +
+        theme.fg("toolTitle", theme.bold("Checklist ")) +
         theme.fg("muted", args.action);
       if (args.text) text += ` ${theme.fg("dim", `"${args.text}"`)}`;
       if (args.id !== undefined)
@@ -300,63 +335,20 @@ export default function todoCapability(): RinCapabilityDefinition {
         return new Text(text?.type === "text" ? text.text : "", 0, 0);
       }
 
+      const checklist = formatTodoChecklistRender(
+        details.todos,
+        expanded,
+        theme,
+      );
       if (details.error) {
-        return new Text(theme.fg("error", `Error: ${details.error}`), 0, 0);
+        return new Text(
+          `${theme.fg("error", `Error: ${details.error}`)}\n${checklist}`,
+          0,
+          0,
+        );
       }
 
-      const todoList = details.todos;
-
-      switch (details.action) {
-        case "list": {
-          if (todoList.length === 0) {
-            return new Text(theme.fg("dim", "No todos"), 0, 0);
-          }
-          let listText = theme.fg("muted", `${todoList.length} todo(s):`);
-          const display = expanded ? todoList : todoList.slice(0, 5);
-          for (const todo of display) {
-            const check = todo.done
-              ? theme.fg("success", "✓")
-              : theme.fg("dim", "○");
-            const itemText = todo.done
-              ? theme.fg("dim", todo.text)
-              : theme.fg("muted", todo.text);
-            listText += `\n${check} ${theme.fg("accent", `#${todo.id}`)} ${itemText}`;
-          }
-          if (!expanded && todoList.length > 5) {
-            listText += `\n${theme.fg("dim", `... ${todoList.length - 5} more`)}`;
-          }
-          return new Text(listText, 0, 0);
-        }
-
-        case "add": {
-          const added = todoList[todoList.length - 1];
-          return new Text(
-            theme.fg("success", "✓ Added ") +
-              theme.fg("accent", `#${added.id}`) +
-              " " +
-              theme.fg("muted", added.text),
-            0,
-            0,
-          );
-        }
-
-        case "toggle": {
-          const text = result.content[0];
-          const message = text?.type === "text" ? text.text : "";
-          return new Text(
-            theme.fg("success", "✓ ") + theme.fg("muted", message),
-            0,
-            0,
-          );
-        }
-
-        case "clear":
-          return new Text(
-            theme.fg("success", "✓ ") + theme.fg("muted", "Cleared all todos"),
-            0,
-            0,
-          );
-      }
+      return new Text(checklist, 0, 0);
     },
   };
 
@@ -366,7 +358,7 @@ export default function todoCapability(): RinCapabilityDefinition {
     commands: [
       {
         name: "todos",
-        description: "Show all todos on the current branch",
+        description: "Show the current branch checklist",
         handler: async (_args, ctx) => {
           if (!ctx.hasUI) {
             ctx.ui.notify("/todos requires interactive mode", "error");
