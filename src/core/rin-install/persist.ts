@@ -65,20 +65,6 @@ function writeInstallerJson(
   deps.writeJsonFile(filePath, value);
 }
 
-function removeFile(
-  filePath: string,
-  elevated: boolean,
-  runPrivileged: (command: string, args: string[]) => void,
-) {
-  try {
-    if (elevated) {
-      runPrivileged("rm", ["-f", filePath]);
-      return;
-    }
-    fs.rmSync(filePath, { force: true });
-  } catch {}
-}
-
 const PREVIOUS_CHAT_MESSAGE_STORE_DIRNAME = "koishi-message-store";
 const CHAT_MESSAGE_STORE_DIRNAME = "chat-message-store";
 
@@ -717,12 +703,7 @@ export function reconcileInstallerManifest(
   if (!options.elevated) deps.ensureDir(options.installDir);
 
   const manifestPaths = installerManifestPaths(options.installDir, ownerHome);
-  const {
-    manifestPath,
-    locatorManifestPath,
-    legacyManifestPath,
-    legacyLocatorManifestPath,
-  } = manifestPaths;
+  const { manifestPath, locatorManifestPath } = manifestPaths;
   const writeOptions = installerWriteOptions(
     ownerUser,
     ownerGroup,
@@ -797,15 +778,9 @@ export function reconcileInstallerManifest(
   for (const filePath of manifestPaths.writePaths) {
     writeInstallerJson(filePath, manifestJson, writeOptions, deps);
   }
-  for (const filePath of manifestPaths.cleanupPaths) {
-    removeFile(filePath, Boolean(options.elevated), deps.runPrivileged);
-  }
-
   return {
     manifestPath,
     locatorManifestPath,
-    legacyManifestPath,
-    legacyLocatorManifestPath,
   };
 }
 

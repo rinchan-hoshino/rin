@@ -18,10 +18,6 @@ const INSTALLED_APP_ENTRY_LAYOUT = {
 } as const;
 
 const INSTALLER_MANIFEST_RELATIVE_PATH = ["installer.json"] as const;
-const LEGACY_INSTALLER_MANIFEST_RELATIVE_PATH = [
-  "config",
-  "installer.json",
-] as const;
 const LAUNCHER_METADATA_FILE_NAME = "install.json";
 
 export type InstalledAppKey = keyof typeof INSTALLED_APP_ENTRY_LAYOUT;
@@ -196,41 +192,23 @@ export function installerManifestPath(installDir: string) {
   return installDirPath(installDir, INSTALLER_MANIFEST_RELATIVE_PATH);
 }
 
-export function legacyInstallerManifestPath(installDir: string) {
-  return installDirPath(installDir, LEGACY_INSTALLER_MANIFEST_RELATIVE_PATH);
-}
-
 export function installerLocatorPathForHome(home: string) {
   return defaultInstallDirPathForHome(home, INSTALLER_MANIFEST_RELATIVE_PATH);
-}
-
-export function legacyInstallerLocatorPathForHome(home: string) {
-  return defaultInstallDirPathForHome(
-    home,
-    LEGACY_INSTALLER_MANIFEST_RELATIVE_PATH,
-  );
 }
 
 export function installerManifestPaths(installDir: string, home: string) {
   const manifestFiles = {
     manifestPath: installerManifestPath(installDir),
     locatorManifestPath: installerLocatorPathForHome(home),
-    legacyManifestPath: legacyInstallerManifestPath(installDir),
-    legacyLocatorManifestPath: legacyInstallerLocatorPathForHome(home),
   };
   const writePaths = uniqueNonEmptyStrings([
     manifestFiles.manifestPath,
     manifestFiles.locatorManifestPath,
   ]);
-  const cleanupPaths = uniqueNonEmptyStrings([
-    manifestFiles.legacyManifestPath,
-    manifestFiles.legacyLocatorManifestPath,
-  ]);
   return {
     ...manifestFiles,
     writePaths,
-    cleanupPaths,
-    recoveryPaths: uniqueNonEmptyStrings([...writePaths, ...cleanupPaths]),
+    recoveryPaths: writePaths,
   };
 }
 

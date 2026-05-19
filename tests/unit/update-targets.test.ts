@@ -176,12 +176,6 @@ test("discoverInstalledTargets scans manifest, launcher, systemd, and launchd ho
         source: "manifest",
       },
       {
-        targetUser: "bob",
-        installDir: path.join(bobHome, ".rin"),
-        ownerHome: bobHome,
-        source: "manifest",
-      },
-      {
         targetUser: "carol",
         installDir: "/Users/carol/.rin-managed",
         ownerHome: carolHome,
