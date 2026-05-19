@@ -9,8 +9,9 @@ const rootDir = path.resolve(
   "..",
 );
 const stateUtils = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "state-utils.js"))
-    .href
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
+  ).href
 );
 
 test("rpc state utils derive branch and apply state", () => {

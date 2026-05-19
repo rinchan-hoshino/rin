@@ -12,7 +12,7 @@ import type {
   RinNewSessionResult,
   RinRpcCommand,
   RinRpcResponse,
-} from "../rin-frontend-sdk/index.js";
+} from "./types.js";
 
 export interface FrontendMessageDeltaEvent {
   type: "message_delta";

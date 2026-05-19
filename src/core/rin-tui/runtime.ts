@@ -11,28 +11,39 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
-import { readChatCommandResponses } from "../chat/command-responses.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
   formatRuntimeErrorForUser,
   rawErrorMessage,
 } from "../rin-lib/user-facing-errors.js";
-import { submitNativeFrontendPromptTurn } from "../rin-frontend-sdk/index.js";
-import type { RpcFrontendClient } from "./frontend-surface.js";
-import { handleRpcSessionEvent } from "./events.js";
-import type { TuiResourceOptions } from "./cli-options.js";
 import {
-  setRpcAutoCompaction,
+  applyFrontendBuiltinCommandText,
+  applyRpcSessionState,
+  applyRpcSessionTree,
+  computeAvailableThinkingLevels,
+  computeSessionStats,
+  createModelRegistry,
   cycleRpcModel,
   cycleRpcThinkingLevel,
+  extractText,
+  getContextUsage,
+  getLastAssistantText,
   getPersistentSettingsManager,
+  getSessionBranch,
+  parseFrontendCompactCommand,
   persistRpcSettingsMutation,
+  resolveRinFrontendCommandResponses,
+  setRpcAutoCompaction,
   setRpcFollowUpMode,
   setRpcModel,
   setRpcSteeringMode,
   setRpcThinkingLevel,
-} from "./model-settings.js";
+  submitNativeFrontendPromptTurn,
+  type RpcFrontendClient,
+} from "../rin-frontend-sdk/index.js";
+import { handleRpcSessionEvent } from "./events.js";
+import type { TuiResourceOptions } from "./cli-options.js";
 type PendingRpcOperation = {
   mode: "prompt" | "steer" | "follow_up";
   message: string;
@@ -41,18 +52,6 @@ type PendingRpcOperation = {
   source?: string;
   requestTag?: string;
 };
-import { createModelRegistry } from "./rpc-model-registry.js";
-import {
-  computeAvailableThinkingLevels,
-  extractText,
-  getLastAssistantText,
-} from "./session-helpers.js";
-import { computeSessionStats, getContextUsage } from "./stats.js";
-import {
-  applyRpcSessionState,
-  applyRpcSessionTree,
-  getSessionBranch,
-} from "./state-utils.js";
 import { normalizeBoundSessionList } from "../session/listing.js";
 
 type RpcExtensionBindings = {
@@ -777,33 +776,32 @@ export class RpcInteractiveSession {
 
   async runCommand(commandLine: string) {
     const trimmed = String(commandLine || "").trim();
-    const commandResponses = readChatCommandResponses(
-      getRuntimeProfile().agentDir,
-    );
+    const commandResponses = resolveRinFrontendCommandResponses();
     if (trimmed === "/abort") {
       await this.abort();
-      return { handled: true, text: commandResponses.abort };
+      return applyFrontendBuiltinCommandText(
+        "abort",
+        { handled: true },
+        commandResponses,
+      );
     }
     if (trimmed === "/new") {
       const completed = await this.newSession();
-      return {
-        handled: true,
-        text: completed ? commandResponses.new : commandResponses.newCancelled,
-      };
-    }
-    if (trimmed === "/compact" || trimmed.startsWith("/compact ")) {
-      const data: any = await this.compact(
-        trimmed.startsWith("/compact ")
-          ? trimmed.slice("/compact ".length).trim() || undefined
-          : undefined,
+      return applyFrontendBuiltinCommandText(
+        "new",
+        { handled: true, cancelled: !completed },
+        commandResponses,
       );
-      return data?.compactionBusy
-        ? {
-            ...data,
-            handled: true,
-            text: String(data?.text || "Compaction already in progress."),
-          }
-        : { ...data, handled: true, text: commandResponses.compact };
+    }
+    const compactCommand = parseFrontendCompactCommand(trimmed);
+    if (compactCommand.compact) {
+      const data: any = await this.compact(compactCommand.customInstructions);
+      return applyFrontendBuiltinCommandText(
+        "compact",
+        { ...data, handled: true },
+        commandResponses,
+        { preferConfiguredText: true },
+      );
     }
     if (trimmed.startsWith("/resume ")) {
       const wanted = trimmed.slice("/resume ".length).trim();

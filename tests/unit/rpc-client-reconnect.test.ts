@@ -9,8 +9,9 @@ const rootDir = path.resolve(
   "..",
 );
 const { RinDaemonFrontendClient } = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "rpc-client.js"))
-    .href
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
+  ).href
 );
 const { createConnectedRpcSocketPair } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "platform", "rpc-socket.js"))

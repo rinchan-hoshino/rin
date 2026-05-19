@@ -9,7 +9,7 @@ const rootDir = path.resolve(
 );
 const sessionHelpers = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-tui", "session-helpers.js"),
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
 const providerAuth = await import(

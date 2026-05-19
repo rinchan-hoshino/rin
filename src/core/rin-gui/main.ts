@@ -1,4 +1,4 @@
-import { RinDaemonFrontendClient } from "../rin-tui/rpc-client.js";
+import { RinDaemonFrontendClient } from "../rin-frontend-sdk/index.js";
 import {
   createTargetExecutionContext,
   ensureDaemonAvailable,

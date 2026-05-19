@@ -3,10 +3,12 @@ import path from "node:path";
 import prettyMilliseconds from "pretty-ms";
 
 import {
+  RinDaemonFrontendClient,
   RinFrontendTurnDriver,
+  applyFrontendBuiltinCommandText,
+  frontendCommandNameFromLine,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
-import { RinDaemonFrontendClient } from "../rin-tui/rpc-client.js";
 import {
   injectPromptContextHeader,
   type PromptContextMeta,
@@ -63,14 +65,6 @@ type ChatTextDelivery = {
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
-
-function commandNameFromCommandLine(commandLine: string) {
-  const trimmed = safeString(commandLine).trim();
-  if (!trimmed.startsWith("/")) return "";
-  const commandPart = trimmed.slice(1).trim();
-  if (!commandPart) return "";
-  return safeString(commandPart.split(/\s+/, 1)[0]).trim();
-}
 
 function formatPromptForChatContext(
   text: string,
@@ -604,27 +598,12 @@ export class ChatController {
   }
 
   private localizeBuiltinCommandResult(commandName: string, data: any) {
-    const responses = this.getCommandResponses();
-    if (commandName === "abort") return { ...data, text: responses.abort };
-    if (commandName === "new") {
-      return {
-        ...data,
-        text: data?.cancelled ? responses.newCancelled : responses.new,
-      };
-    }
-    if (commandName === "compact") {
-      if (data?.compactionBusy) {
-        return {
-          ...data,
-          text:
-            safeString(data?.text || "").trim() ||
-            "Compaction already in progress.",
-        };
-      }
-      return { ...data, text: responses.compact };
-    }
-    if (commandName === "reload") return { ...data, text: responses.reload };
-    return data;
+    return applyFrontendBuiltinCommandText(
+      commandName,
+      data,
+      this.getCommandResponses(),
+      { preferConfiguredText: true },
+    );
   }
 
   private pickStoredValue(...candidates: unknown[]) {
@@ -861,7 +840,7 @@ export class ChatController {
     _sessionFile = "",
     promptMeta?: PromptContextMeta,
   ) {
-    const commandName = commandNameFromCommandLine(commandLine);
+    const commandName = frontendCommandNameFromLine(commandLine);
     const hadActiveTurn = this.hasActiveTurn();
     const abortingActiveTurn = commandName === "abort" && hadActiveTurn;
     if (abortingActiveTurn) {

@@ -27,7 +27,7 @@ test("explicit rpc ui persistence writes settings without needing a session", as
   process.env.RIN_DIR = agentDir;
   const stamp = Date.now();
   const { persistRpcSettingsMutation } = await import(
-    `${fileUrl("dist/core/rin-tui/model-settings.js")}?t=${stamp}`
+    `${fileUrl("dist/core/rin-frontend-sdk/index.js")}?t=${stamp}`
   );
 
   await persistRpcSettingsMutation((settings) => {

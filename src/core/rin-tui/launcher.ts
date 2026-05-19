@@ -20,8 +20,10 @@ import {
 } from "../rin-lib/user-facing-errors.js";
 
 import { parseTuiCliOptions, type TuiResourceOptions } from "./cli-options.js";
-import { RinDaemonFrontendClient } from "./rpc-client.js";
-import { createFrontendSdkRuntimeWrapper } from "../rin-frontend-sdk/index.js";
+import {
+  RinDaemonFrontendClient,
+  createFrontendSdkRuntimeWrapper,
+} from "../rin-frontend-sdk/index.js";
 import { RpcInteractiveSession } from "./runtime.js";
 import { createRpcRuntimeHost } from "./runtime-host.js";
 import { applyRinTuiOverrides } from "./upstream-overrides.js";

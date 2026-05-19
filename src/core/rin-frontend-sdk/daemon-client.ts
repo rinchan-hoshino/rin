@@ -13,7 +13,7 @@ import type {
   RinExtensionUiResponse,
   RinRpcCommand,
   RinRpcResponse,
-} from "../rin-frontend-sdk/index.js";
+} from "./types.js";
 import type {
   FrontendAutocompleteItem,
   FrontendCommandItem,
@@ -70,7 +70,7 @@ function toFrontendEvent(event: any): InteractiveFrontendEvent | null {
   return { type: "ui", name: String(event.type || "event"), payload: event };
 }
 
-type FrontendClientTransportOptions = {
+export type RinDaemonFrontendClientTransportOptions = {
   socketPath?: string;
   connectSocket: RpcSocketConnector;
 };
@@ -103,7 +103,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   constructor(
     transport:
       | string
-      | FrontendClientTransportOptions = defaultDaemonSocketPath(),
+      | RinDaemonFrontendClientTransportOptions = defaultDaemonSocketPath(),
   ) {
     if (typeof transport === "string") {
       this.socketPath = transport;
