@@ -58,21 +58,21 @@ await rin.chat.runTurn({
 
 Rin does not ask the agent to write routine chat command acknowledgements such as `/new`, `/abort`, `/compact`, or `/reload`. These replies come from configuration so they are predictable and do not create temporary agent turns.
 
-If `~/.rin/chat-command-responses.json` is absent, Rin uses the built-in English replies. To customize them, create or edit that file:
+If `~/.rin/i18n.json` is absent, Rin uses the built-in English replies. To customize them, create or edit that generic i18n catalog with chat command message IDs:
 
 ```json
 {
-  "abort": "Aborted current operation.",
-  "new": "Started a new session.",
-  "newCancelled": "Session switch cancelled.",
-  "compact": "Compacted session.",
-  "reload": "Reloaded extensions, prompts, skills, and themes."
+  "chat.commandResponses.abort": "Aborted current operation.",
+  "chat.commandResponses.new": "Started a new session.",
+  "chat.commandResponses.newCancelled": "Session switch cancelled.",
+  "chat.commandResponses.compact": "Compacted session.",
+  "chat.commandResponses.reload": "Reloaded extensions, prompts, skills, and themes."
 }
 ```
 
-All fields are optional. Missing or blank fields fall back to the built-in English text.
+Nested JSON is also accepted, for example `{"chat":{"commandResponses":{"new":"Started a new session."}}}`. All entries are optional. Missing or blank entries fall back to the built-in English text.
 
-When a user asks to change these command replies, edit `~/.rin/chat-command-responses.json`. Do not put these replies in `settings.json`.
+When a user asks to change these command replies, edit `~/.rin/i18n.json`. Do not put these replies in `settings.json`.
 
 ## Rich message parts
 
