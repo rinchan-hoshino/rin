@@ -363,3 +363,34 @@ test("Rin changelog entries read docs/release without settings state", async () 
     }
   });
 });
+
+test("Rin changelog entry comparison handles prerelease and build metadata versions", () => {
+  const entries = [
+    { heading: "[1.1.0-beta.20260518] - old", content: "old beta" },
+    { heading: "1.1.0-beta.20260519+abc1234", content: "new beta" },
+    { heading: "1.1.0-nightly.20260519+def5678", content: "nightly" },
+    { heading: "1.1.0", content: "stable" },
+    { heading: "not-a-version", content: "ignored" },
+  ];
+
+  assert.deepEqual(
+    notices
+      .getNewRinChangelogEntries(
+        entries,
+        "1.1.0-beta.20260518",
+        "1.1.0-nightly.20260519+def5678",
+      )
+      .map((entry) => entry.content),
+    ["new beta", "nightly"],
+  );
+  assert.deepEqual(
+    notices
+      .getNewRinChangelogEntries(entries, "abcdef012345", "1.1.0")
+      .map((entry) => entry.content),
+    [],
+  );
+  assert.equal(
+    notices.comparePackageVersions("1.1.0+abc1234", "1.1.0+def5678"),
+    0,
+  );
+});

@@ -39,6 +39,11 @@ export type RinUpdateNotice = {
   command: string;
 };
 
+export type RinChangelogEntry = {
+  heading: string;
+  content: string;
+};
+
 const RIN_RELEASE_CHANNELS: readonly ReleaseChannel[] = [
   "stable",
   "beta",
@@ -255,6 +260,33 @@ function gitRefsMatch(a: unknown, b: unknown) {
 function shortGitRef(value: unknown) {
   const text = trim(value);
   return isGitHash(text) ? text.slice(0, 12) : text;
+}
+
+export function versionFromRinChangelogHeading(heading: unknown) {
+  const match = trim(heading).match(
+    /^\[?(v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)\]?\b/,
+  );
+  return match?.[1];
+}
+
+export function getNewRinChangelogEntries(
+  entries: readonly RinChangelogEntry[],
+  lastVersion: unknown,
+  currentVersion?: unknown,
+) {
+  if (!parsePackageVersion(lastVersion)) return [];
+  const current = parsePackageVersion(currentVersion)
+    ? currentVersion
+    : undefined;
+  return entries.filter((entry) => {
+    const entryVersion = versionFromRinChangelogHeading(entry.heading);
+    if (!entryVersion) return false;
+    if (comparePackageVersions(entryVersion, lastVersion) <= 0) return false;
+    return (
+      current === undefined ||
+      comparePackageVersions(entryVersion, current) <= 0
+    );
+  });
 }
 
 function latestGitRefForBranch(

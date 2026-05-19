@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -52,6 +54,15 @@ const settingsManagerWithoutTerminalProgress = {
     return false;
   },
 };
+
+async function withTempDir(fn: (dir: string) => Promise<void>) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-tui-overrides-"));
+  try {
+    await fn(dir);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
 
 test("terminal title override shows only session name", async () => {
   await overrides.applyRinTuiOverrides();
@@ -116,27 +127,61 @@ test("startup header override replaces upstream Pi branding with Rin", async () 
   }
 });
 
-test("update overrides replace startup update path and skip settings changelog state", async () => {
+test("update overrides replace startup update path and keep single changelog version state", async () => {
   await overrides.applyRinTuiOverrides();
 
-  let wroteSetting = false;
-  assert.equal(
-    codingAgentModule.InteractiveMode.prototype.getChangelogForDisplay.call({
-      settingsManager: {
-        getLastChangelogVersion: () => "0.70.6",
-        setLastChangelogVersion: () => {
-          wroteSetting = true;
-        },
-      },
-      session: { state: { messages: [] } },
-    }),
-    undefined,
-  );
-  assert.equal(wroteSetting, false);
-  assert.match(
-    String(codingAgentModule.InteractiveMode.prototype.run),
-    /showRinUpdateNotificationWhenReady/,
-  );
+  await withTempDir(async (dir) => {
+    const previousRinDir = process.env.RIN_DIR;
+    const previousVersion = process.env.RIN_RELEASE_VERSION;
+    let writtenVersion;
+    try {
+      process.env.RIN_DIR = dir;
+      process.env.RIN_RELEASE_VERSION = "1.1.0-beta.20260519+abc1234";
+      const changelogPath = path.join(dir, "docs", "release", "CHANGELOG.md");
+      await fs.mkdir(path.dirname(changelogPath), { recursive: true });
+      await fs.writeFile(
+        changelogPath,
+        [
+          "# Rin Changelog",
+          "",
+          "## 1.1.0-beta.20260518",
+          "",
+          "- old beta",
+          "",
+          "## 1.1.0-beta.20260519+abc1234",
+          "",
+          "- beta fix",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const changelog =
+        codingAgentModule.InteractiveMode.prototype.getChangelogForDisplay.call(
+          {
+            settingsManager: {
+              getLastChangelogVersion: () => "1.1.0-beta.20260518",
+              setLastChangelogVersion: (version) => {
+                writtenVersion = version;
+              },
+            },
+            session: { state: { messages: [] } },
+          },
+        );
+
+      assert.match(changelog, /beta fix/);
+      assert.equal(writtenVersion, "1.1.0-beta.20260519+abc1234");
+      assert.match(
+        String(codingAgentModule.InteractiveMode.prototype.run),
+        /showRinUpdateNotificationWhenReady/,
+      );
+    } finally {
+      if (previousRinDir === undefined) delete process.env.RIN_DIR;
+      else process.env.RIN_DIR = previousRinDir;
+      if (previousVersion === undefined) delete process.env.RIN_RELEASE_VERSION;
+      else process.env.RIN_RELEASE_VERSION = previousVersion;
+    }
+  });
 });
 
 test("startup header branding replaces upstream Pi name and version", async () => {

@@ -22,7 +22,9 @@ import { sleep } from "../platform/process.js";
 import {
   checkForRinUpdateNotice,
   getCurrentRinVersion,
+  getNewRinChangelogEntries,
   getRinChangelogUrl,
+  parsePackageVersion,
   readRinChangelogEntries,
   type RinUpdateNotice,
 } from "../rin-lib/update-notices.js";
@@ -300,6 +302,33 @@ async function showRinUpdateNotificationWhenReady(instance: any) {
   } catch {
     // Update checks must never block the TUI.
   }
+}
+
+function getRinStartupChangelogForDisplay(instance: any) {
+  if ((instance?.session?.state?.messages || []).length > 0) {
+    return undefined;
+  }
+
+  const currentVersion = getCurrentRinVersion();
+  if (!parsePackageVersion(currentVersion)) return undefined;
+
+  const settingsManager = instance?.settingsManager;
+  const lastVersion = settingsManager?.getLastChangelogVersion?.();
+  if (!parsePackageVersion(lastVersion)) {
+    settingsManager?.setLastChangelogVersion?.(currentVersion);
+    return undefined;
+  }
+
+  const entries = getNewRinChangelogEntries(
+    readRinChangelogEntries(),
+    lastVersion,
+    currentVersion,
+  );
+  if (entries.length > 0) {
+    settingsManager?.setLastChangelogVersion?.(currentVersion);
+    return entries.map((entry) => entry.content).join("\n\n");
+  }
+  return undefined;
 }
 
 function renderRinChangelog(instance: any) {
@@ -722,8 +751,8 @@ export async function applyRinTuiOverrides() {
     interactiveModeProto?.getChangelogForDisplay;
   if (typeof originalGetChangelogForDisplay === "function") {
     interactiveModeProto.getChangelogForDisplay =
-      function skipAutomaticChangelogDisplay() {
-        return undefined;
+      function getRinChangelogForDisplay() {
+        return getRinStartupChangelogForDisplay(this);
       };
   }
 

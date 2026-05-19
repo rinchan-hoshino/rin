@@ -32,7 +32,7 @@ Rin uses a four-channel release model.
 - `--git` with no suffix means `main`
 - `--git <name>` means that branch or ref directly
 - `--branch` / `--version` remain supported as explicit selectors for direct stable/git resolution when needed
-- `/changelog` and bootstrap changelog docs read Rin-native notes from `docs/release/CHANGELOG.md`; startup update checks use `release-manifest.json` and do not persist a separate last-seen version in settings
+- `/changelog` and bootstrap changelog docs read Rin-native notes from `docs/release/CHANGELOG.md`; startup update checks use `release-manifest.json`, while startup changelog display keeps Pi-compatible single-value `lastChangelogVersion` state
 
 ## Cadence
 
