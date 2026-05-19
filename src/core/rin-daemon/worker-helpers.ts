@@ -1,7 +1,10 @@
 import { readChatCommandResponses } from "../chat/command-responses.js";
+import { runChatBridgeConfigureCommand } from "../chat/configure-chat-bridge.js";
 import { asArray } from "../json-utils.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
+import { readTodoSnapshotFromSession } from "../rin-lib/todo-state.js";
+import { showTodoList } from "../rin-lib/todo.js";
 import { listBoundSessions } from "../session/factory.js";
 
 export function writeJsonLine(value: unknown) {
@@ -338,7 +341,7 @@ export function formatSessionStats(stats: any) {
 export async function runBuiltinCommand(
   runtime: any,
   commandLine: string,
-  deps: { SessionManager: any },
+  deps: { SessionManager: any; uiContext?: any },
 ) {
   const session = runtime.session;
   const parsedCommand = parseBuiltinCommand(commandLine);
@@ -366,6 +369,25 @@ export async function runBuiltinCommand(
       return handledText(commandResponses.reload);
     case "session":
       return handledText(formatSessionStats(session.getSessionStats()));
+    case "todos": {
+      const ui =
+        deps.uiContext || session.__rinCapabilities?.createContext?.().ui;
+      const shown = await showTodoList(
+        ui,
+        readTodoSnapshotFromSession(session).todos,
+      );
+      return shown
+        ? { handled: true }
+        : handledText("/todos requires interactive mode.");
+    }
+    case "chat": {
+      const ui =
+        deps.uiContext || session.__rinCapabilities?.createContext?.().ui;
+      const shown = await runChatBridgeConfigureCommand(ui);
+      return shown
+        ? { handled: true }
+        : handledText("/chat requires interactive mode.");
+    }
     case "changelog": {
       const { getChangelogPath, parseChangelog }: any =
         await loadRinChangelogModule();

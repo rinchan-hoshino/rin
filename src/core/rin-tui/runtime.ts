@@ -11,7 +11,10 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
-import { isSessionScopedCommand } from "../rin-lib/rpc.js";
+import {
+  isDaemonBuiltinSlashCommand,
+  isSessionScopedCommand,
+} from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
   formatRuntimeErrorForUser,
@@ -493,7 +496,7 @@ export class RpcInteractiveSession {
     const expandPromptTemplates = options?.expandPromptTemplates ?? true;
     if (
       expandPromptTemplates &&
-      (await this.isDaemonExtensionCommand(message).catch(() => false))
+      (await this.isDaemonRunnableSlashCommand(message).catch(() => false))
     ) {
       await this.runCommand(message);
       return;
@@ -1509,9 +1512,10 @@ export class RpcInteractiveSession {
     return this.commandCatalog;
   }
 
-  private async isDaemonExtensionCommand(text: string) {
+  private async isDaemonRunnableSlashCommand(text: string) {
     const commandName = this.parseSlashCommandName(text);
     if (!commandName) return false;
+    if (isDaemonBuiltinSlashCommand(commandName)) return true;
     const commands = await this.refreshDaemonCommandCatalog();
     return commands.some(
       (command: any) =>

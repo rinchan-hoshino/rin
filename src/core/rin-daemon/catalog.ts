@@ -179,10 +179,9 @@ async function withCatalogContext<T>(
 export async function listCatalogCommands(options: CatalogOptions = {}) {
   return withCatalogContext(
     options,
-    async ({ resourceLoader, extensionRunner, rinCapabilities }) => {
+    async ({ resourceLoader, extensionRunner }) => {
       return collectRuntimeSlashCommands({
         extensionCommands: extensionRunner.getRegisteredCommands(),
-        rinCapabilityCommands: rinCapabilities.getRegisteredCommands(),
         promptTemplates: resourceLoader.getPrompts().prompts,
         skills: resourceLoader.getSkills().skills,
       });

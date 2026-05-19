@@ -78,7 +78,7 @@ test("rpc prompt routes extension slash commands using daemon catalog authority"
   );
 });
 
-test("rpc prompt does not treat non-extension slash catalog entries as extension commands", async () => {
+test("rpc prompt routes daemon builtin slash commands without a side registry", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -89,7 +89,68 @@ test("rpc prompt does not treat non-extension slash catalog entries as extension
             success: true,
             data: {
               commands: [
-                { name: "reload", description: "reload", source: "builtin" },
+                {
+                  name: "todos",
+                  description: "Show todos",
+                  source: "builtin",
+                },
+              ],
+            },
+          });
+        case "new_session":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
+          });
+        case "run_command":
+          return Promise.resolve({ success: true, data: { handled: true } });
+        case "get_state":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
+          });
+        case "get_session_snapshot":
+          return Promise.resolve({ success: true, data: { entries: [] } });
+        default:
+          return Promise.resolve({ success: true, data: {} });
+      }
+    },
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+  });
+
+  await session.prompt("/todos");
+
+  assert.equal(
+    sent.some((payload) => payload.type === "prompt"),
+    false,
+  );
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "run_command"),
+    {
+      type: "run_command",
+      commandLine: "/todos",
+      sessionFile: "/tmp/s.jsonl",
+    },
+  );
+});
+
+test("rpc prompt does not route non-runnable slash catalog entries as commands", async () => {
+  const sent = [];
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      switch (payload.type) {
+        case "get_commands":
+          return Promise.resolve({
+            success: true,
+            data: {
+              commands: [
+                { name: "polish", description: "polish", source: "prompt" },
               ],
             },
           });
@@ -121,7 +182,7 @@ test("rpc prompt does not treat non-extension slash catalog entries as extension
 
   session.rpcConnected = true;
 
-  await session.prompt("/reload");
+  await session.prompt("/polish");
 
   assert.equal(
     sent.some((payload) => payload.type === "run_command"),
@@ -202,7 +263,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
   assert.doesNotMatch(todoResult, /Added todo|completed/);
 });
 
-test("rpc extension runner is a passive daemon catalog facade", async () => {
+test("rpc extension command facade is backed by the daemon catalog", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -732,7 +793,7 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
   assert.equal(sentTypes.at(-1), "get_resource_diagnostics");
 });
 
-test("rpc runtime routes extension slash commands from prompt to daemon", async () => {
+test("rpc runtime routes daemon builtin slash commands from prompt to daemon", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -740,7 +801,7 @@ test("rpc runtime routes extension slash commands from prompt to daemon", async 
       if (payload.type === "get_commands") {
         return Promise.resolve({
           success: true,
-          data: { commands: [{ name: "chat", source: "extension" }] },
+          data: { commands: [{ name: "chat", source: "builtin" }] },
         });
       }
       if (payload.type === "run_command") {

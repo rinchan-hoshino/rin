@@ -14,7 +14,7 @@ import type {
   RinCapabilityContext,
 } from "./capability-types.js";
 
-interface Todo {
+export interface Todo {
   id: number;
   text: string;
   done: boolean;
@@ -160,6 +160,17 @@ class TodoListComponent {
     this.cachedWidth = undefined;
     this.cachedLines = undefined;
   }
+}
+
+export async function showTodoList(ui: any, todos: Todo[]) {
+  if (!ui || typeof ui.custom !== "function") {
+    ui?.notify?.("/todos requires interactive mode", "error");
+    return false;
+  }
+  await ui.custom((_tui: any, theme: Theme, _kb: any, done: () => void) => {
+    return new TodoListComponent(todos, theme, () => done());
+  });
+  return true;
 }
 
 export default function todoCapability(): RinCapabilityDefinition {
@@ -355,22 +366,6 @@ export default function todoCapability(): RinCapabilityDefinition {
   return {
     name: "todo",
     tools: [todoToolDefinition],
-    commands: [
-      {
-        name: "todos",
-        description: "Show the current branch checklist",
-        handler: async (_args, ctx) => {
-          if (!ctx.hasUI) {
-            ctx.ui.notify("/todos requires interactive mode", "error");
-            return;
-          }
-
-          await ctx.ui.custom((_tui, theme, _kb, done) => {
-            return new TodoListComponent(todos, theme, () => done());
-          });
-        },
-      },
-    ],
     hooks: {
       session_start: [async (_event, ctx) => reconstructState(ctx)],
       session_tree: [async (_event, ctx) => reconstructState(ctx)],

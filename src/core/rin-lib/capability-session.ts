@@ -3,27 +3,14 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type {
   RinCapabilityContext,
   RinCapabilityDefinition,
-  RinCommandDefinition,
   RinHookHandler,
 } from "./capability-types.js";
 import { normalizeStringList } from "../text-utils.js";
 
 type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
 
-type RegisteredRinCommand = RinCommandDefinition & {
-  invocationName: string;
-  sourceInfo?: {
-    source: "rin_capability";
-    name?: string;
-  };
-};
-
 type RegisteredTool = {
   definition: any;
-  sourceName?: string;
-};
-
-type RegisteredCommandInput = RinCommandDefinition & {
   sourceName?: string;
 };
 
@@ -38,7 +25,6 @@ type CoreActions = {
   getAllTools: () => any[];
   setActiveTools: (toolNames: string[]) => void;
   refreshTools: () => void;
-  getCommands: () => any[];
   setModel: (model: any) => Promise<boolean>;
   getThinkingLevel: () => ThinkingLevel;
   setThinkingLevel: (level: ThinkingLevel) => void;
@@ -80,8 +66,6 @@ export type RinCapabilitySet = {
   hasHandlers: (eventName: string) => boolean;
   emit: (event: any) => Promise<any>;
   getToolDefinitions: () => any[];
-  getRegisteredCommands: () => RegisteredRinCommand[];
-  getCommand: (name: string) => RegisteredRinCommand | undefined;
   createContext: () => RinCapabilityContext;
   createCommandContext: () => any;
 };
@@ -117,7 +101,6 @@ const noOpCoreActions: CoreActions = {
   getAllTools: () => [],
   setActiveTools: () => {},
   refreshTools: () => {},
-  getCommands: () => [],
   setModel: async () => false,
   getThinkingLevel: () => "medium",
   setThinkingLevel: () => {},
@@ -144,39 +127,6 @@ const noOpCommandContextActions: CommandContextActions = {
   reload: async () => {},
 };
 
-function resolveRegisteredCommands(
-  commands: RegisteredCommandInput[],
-): RegisteredRinCommand[] {
-  const counts = new Map<string, number>();
-  for (const command of commands) {
-    counts.set(command.name, (counts.get(command.name) || 0) + 1);
-  }
-  const seen = new Map<string, number>();
-  const taken = new Set<string>();
-  return commands.map((command) => {
-    const occurrence = (seen.get(command.name) || 0) + 1;
-    seen.set(command.name, occurrence);
-    let invocationName =
-      (counts.get(command.name) || 0) > 1
-        ? `${command.name}:${occurrence}`
-        : command.name;
-    while (taken.has(invocationName)) {
-      invocationName = `${command.name}:${taken.size + 1}`;
-    }
-    taken.add(invocationName);
-    return {
-      name: command.name,
-      invocationName,
-      description: command.description,
-      handler: command.handler,
-      sourceInfo: {
-        source: "rin_capability",
-        name: command.sourceName,
-      },
-    };
-  });
-}
-
 export function normalizeCapabilityNames(values: unknown): string[] {
   return Array.isArray(values)
     ? normalizeStringList(values, { lowercase: true })
@@ -194,7 +144,6 @@ export function createRinCapabilitySet(options: {
   const disabled = new Set(normalizeCapabilityNames(options.disabledNames));
   const handlers = new Map<string, RinHookHandler[]>();
   const tools = new Map<string, RegisteredTool>();
-  const commands: RegisteredCommandInput[] = [];
   let uiContext: any = noOpUIContext;
   let coreActions: CoreActions = noOpCoreActions;
   let contextActions: ContextActions = noOpContextActions;
@@ -226,7 +175,7 @@ export function createRinCapabilitySet(options: {
 
   const emitHandlerError = (eventName: string, error: any) => {
     try {
-      options.sessionManager?.appendCustomEntry?.("rin_capability_error", {
+      options.sessionManager?.appendCustomEntry?.("rin_core_capability_error", {
         event: eventName,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
@@ -269,14 +218,6 @@ export function createRinCapabilitySet(options: {
     getToolDefinitions() {
       return Array.from(tools.values()).map((entry) => entry.definition);
     },
-    getRegisteredCommands() {
-      return resolveRegisteredCommands(commands);
-    },
-    getCommand(name: string) {
-      return this.getRegisteredCommands().find(
-        (command) => command.invocationName === String(name || "").trim(),
-      );
-    },
     createContext,
     createCommandContext() {
       return {
@@ -305,16 +246,6 @@ export function createRinCapabilitySet(options: {
       if (!toolName || tools.has(toolName)) continue;
       tools.set(toolName, { definition: tool, sourceName: current.name });
     }
-    for (const command of current.commands || []) {
-      const commandName = String(command?.name || "").trim();
-      if (!commandName || typeof command?.handler !== "function") continue;
-      commands.push({
-        name: commandName,
-        description: String(command.description || "").trim() || undefined,
-        handler: command.handler,
-        sourceName: current.name,
-      });
-    }
     for (const [eventName, capabilityHandlers] of Object.entries(
       current.hooks || {},
     )) {
@@ -332,19 +263,6 @@ export function createRinCapabilitySet(options: {
   return capabilitySet;
 }
 
-const RIN_EXTENSION_RUNNER_EVENTS = new Set<string>();
-const RIN_EXTENSION_RUNNER_BEFORE_EVENTS = new Set<string>();
-const RIN_EXTENSION_RUNNER_PATCH_KEY = Symbol.for(
-  "rin.capabilityExtensionRunnerPatch",
-);
-
-type RinExtensionRunnerPatchState = {
-  capabilitySet: RinCapabilitySet;
-  session: any;
-  originalHasHandlers: (eventName: string) => boolean;
-  originalEmit: (event: any) => Promise<any>;
-};
-
 function withRinEventMetadata(event: any, session: any) {
   const type = String(event?.type || "").trim();
   if (
@@ -358,69 +276,6 @@ function withRinEventMetadata(event: any, session: any) {
   return {
     ...event,
     reason: String(session?.__rinCurrentCompactionReason || "").trim(),
-  };
-}
-
-function patchRinCapabilityExtensionRunner(
-  session: any,
-  capabilitySet: RinCapabilitySet,
-) {
-  const runner = session?._extensionRunner;
-  if (!runner || typeof runner !== "object") return;
-  const existing = runner[RIN_EXTENSION_RUNNER_PATCH_KEY] as
-    | RinExtensionRunnerPatchState
-    | undefined;
-  if (existing) {
-    existing.capabilitySet = capabilitySet;
-    existing.session = session;
-    return;
-  }
-  if (
-    typeof runner.hasHandlers !== "function" ||
-    typeof runner.emit !== "function"
-  ) {
-    return;
-  }
-
-  const state: RinExtensionRunnerPatchState = {
-    capabilitySet,
-    session,
-    originalHasHandlers: runner.hasHandlers.bind(runner),
-    originalEmit: runner.emit.bind(runner),
-  };
-  runner[RIN_EXTENSION_RUNNER_PATCH_KEY] = state;
-
-  runner.hasHandlers = (eventName: string) => {
-    const type = String(eventName || "").trim();
-    return (
-      state.originalHasHandlers(eventName) ||
-      (RIN_EXTENSION_RUNNER_EVENTS.has(type) &&
-        state.capabilitySet.hasHandlers(type))
-    );
-  };
-
-  runner.emit = async (event: any) => {
-    const result = await state.originalEmit(event);
-    const type = String(event?.type || "").trim();
-    if (
-      !RIN_EXTENSION_RUNNER_EVENTS.has(type) ||
-      !state.capabilitySet.hasHandlers(type)
-    ) {
-      return result;
-    }
-    if (RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type) && result?.cancel) {
-      return result;
-    }
-    const rinResult = await state.capabilitySet.emit(
-      withRinEventMetadata(event, state.session),
-    );
-    if (!RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type)) {
-      return result || rinResult;
-    }
-    if (rinResult?.cancel || rinResult?.compaction) {
-      return rinResult;
-    }
-    return result || rinResult;
   };
 }
 
@@ -450,10 +305,6 @@ function bindCapabilitySetToSession(
       getAllTools: () => session.getAllTools?.() || [],
       setActiveTools: (toolNames) => session.setActiveToolsByName?.(toolNames),
       refreshTools: () => session._refreshToolRegistry?.(),
-      getCommands: () => [
-        ...(session._extensionRunner?.getRegisteredCommands?.() || []),
-        ...capabilitySet.getRegisteredCommands(),
-      ],
       setModel: async (model) => {
         if (!session.modelRegistry?.hasConfiguredAuth?.(model)) return false;
         await session.setModel?.(model);
@@ -518,7 +369,6 @@ function subscribeRinCapabilityEvents(
     const type = String(event?.type || "");
     if (!type || type === "input" || type === "before_agent_start") return;
     if (!capabilitySet.hasHandlers(type)) return;
-    if (RIN_EXTENSION_RUNNER_EVENTS.has(type)) return;
     void capabilitySet
       .emit(withRinEventMetadata(event, session))
       .catch(() => {});
@@ -535,7 +385,6 @@ export async function attachRinCapabilitiesToSession(
 ) {
   const capabilitySet = options.capabilitySet;
   bindCapabilitySetToSession(capabilitySet, session);
-  patchRinCapabilityExtensionRunner(session, capabilitySet);
   subscribeRinCapabilityEvents(session, capabilitySet);
   session.__rinCapabilities = capabilitySet;
 

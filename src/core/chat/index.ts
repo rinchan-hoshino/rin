@@ -9,7 +9,6 @@ function mergeChatDefinitions(
   return {
     name: "chat",
     tools: current.flatMap((definition) => definition.tools || []),
-    commands: current.flatMap((definition) => definition.commands || []),
     hooks: Object.assign(
       {},
       ...current.map((definition) => definition.hooks || {}),

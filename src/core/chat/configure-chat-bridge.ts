@@ -85,66 +85,69 @@ function createUiPromptApi(ui: any): ChatBridgePromptApi {
   };
 }
 
+export async function runChatBridgeConfigureCommand(ui: any) {
+  if (
+    !ui ||
+    typeof ui.select !== "function" ||
+    typeof ui.input !== "function" ||
+    typeof ui.confirm !== "function"
+  ) {
+    ui?.notify?.("/chat requires interactive mode", "error");
+    return false;
+  }
+
+  const prompt = createUiPromptApi(ui);
+  const profile = resolveRuntimeProfile();
+  const settingsPath = path.join(profile.agentDir, "settings.json");
+  const settings = normalizeStoredChatSettings(
+    readJsonFile<any>(settingsPath, {}),
+    {
+      ensureChat: true,
+    },
+  );
+
+  let result;
+  try {
+    result = await promptChatBridgeSetup(prompt, {
+      confirmEnable: false,
+    });
+  } catch (error: any) {
+    if (String(error?.message || error) === CHAT_BRIDGE_COMMAND_CANCELLED) {
+      ui.notify("Chat bridge setup cancelled.", "info");
+      return true;
+    }
+    throw error;
+  }
+
+  const adapterKey = String(result?.adapterKey || "").trim();
+  if (!adapterKey || !result?.chatConfig) {
+    ui.notify("Chat bridge setup skipped.", "info");
+    return true;
+  }
+
+  if (settings.chat[adapterKey] !== undefined) {
+    const overwrite = await ui.confirm(
+      "Chat bridge",
+      `Replace the existing ${result.chatDescription} configuration?`,
+    );
+    if (!overwrite) {
+      ui.notify("Chat bridge setup cancelled.", "info");
+      return true;
+    }
+  }
+
+  settings.chat[adapterKey] = result.chatConfig[adapterKey];
+  writeJsonFile(settingsPath, settings);
+
+  const lines = [
+    `Chat bridge updated: ${result.chatDescription}`,
+    result.chatDetail,
+    "Restart Rin to apply the updated chat configuration.",
+  ].filter(Boolean);
+  ui.notify(lines.join("\n"), "info");
+  return true;
+}
+
 export default function configureChatBridgeCommandModule(): RinCapabilityDefinition {
-  return {
-    name: "chat-configure",
-    commands: [
-      {
-        name: "chat",
-        description: "Configure an official chat bridge adapter.",
-        handler: async (_args, ctx) => {
-          const prompt = createUiPromptApi(ctx.ui);
-          const profile = resolveRuntimeProfile();
-          const settingsPath = path.join(profile.agentDir, "settings.json");
-          const settings = normalizeStoredChatSettings(
-            readJsonFile<any>(settingsPath, {}),
-            { ensureChat: true },
-          );
-
-          let result;
-          try {
-            result = await promptChatBridgeSetup(prompt, {
-              confirmEnable: false,
-            });
-          } catch (error: any) {
-            if (
-              String(error?.message || error) === CHAT_BRIDGE_COMMAND_CANCELLED
-            ) {
-              ctx.ui.notify("Chat bridge setup cancelled.", "info");
-              return;
-            }
-            throw error;
-          }
-
-          const adapterKey = String(result?.adapterKey || "").trim();
-          if (!adapterKey || !result?.chatConfig) {
-            ctx.ui.notify("Chat bridge setup skipped.", "info");
-            return;
-          }
-
-          if (settings.chat[adapterKey] !== undefined) {
-            const overwrite = await ctx.ui.confirm(
-              "Chat bridge",
-              `Replace the existing ${result.chatDescription} configuration?`,
-            );
-            if (!overwrite) {
-              ctx.ui.notify("Chat bridge setup cancelled.", "info");
-              return;
-            }
-          }
-
-          settings.chat[adapterKey] = result.chatConfig[adapterKey];
-          writeJsonFile(settingsPath, settings);
-
-          const lines = [
-            `Chat bridge updated: ${result.chatDescription}`,
-            result.chatDetail,
-            "Restart Rin to apply the updated chat configuration.",
-          ].filter(Boolean);
-          ctx.ui.notify(lines.join("\n"), "info");
-          return;
-        },
-      },
-    ],
-  };
+  return { name: "chat-configure" };
 }

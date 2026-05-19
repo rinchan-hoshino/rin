@@ -9,16 +9,9 @@ export type RinCapabilityOptions = {
   readonly sendMessage: (message: any, options?: any) => void;
 };
 
-export type RinCommandDefinition = {
-  name: string;
-  description?: string;
-  handler: (args: string, ctx: any) => Promise<void> | void;
-};
-
 export type RinCapabilityDefinition = {
   name?: string;
   tools?: any[];
-  commands?: RinCommandDefinition[];
   hooks?: Record<string, RinHookHandler[]>;
 };
 

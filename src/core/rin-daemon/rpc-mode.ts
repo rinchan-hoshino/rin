@@ -1129,31 +1129,31 @@ export async function runCustomRpcMode(
         });
       case "run_command": {
         const commandLine = String(command.commandLine || "").trim();
-        if (commandLine.startsWith("/")) {
-          const spaceIndex = commandLine.indexOf(" ");
-          const commandName =
-            spaceIndex === -1
-              ? commandLine.slice(1)
-              : commandLine.slice(1, spaceIndex);
-          if (session.extensionRunner?.getCommand?.(commandName)) {
-            return run(
-              id,
-              type,
-              async () => {
-                await session.prompt(commandLine);
-                return { handled: true };
-              },
-              (value) => value,
-            );
-          }
-        }
+        const commandName = commandLine.startsWith("/")
+          ? commandLine.split(/\s+/, 1)[0]?.slice(1) || ""
+          : "";
         return run(
           id,
           type,
-          () =>
-            runBuiltinCommand(runtime, commandLine, {
-              SessionManager,
-            }),
+          async () => {
+            const builtinResult = await runBuiltinCommand(
+              runtime,
+              commandLine,
+              {
+                SessionManager,
+                uiContext: createExtensionUiContext(),
+              },
+            );
+            if (builtinResult.handled) return builtinResult;
+            if (
+              commandName &&
+              session.extensionRunner?.getCommand?.(commandName)
+            ) {
+              await session.prompt(commandLine);
+              return { handled: true };
+            }
+            return builtinResult;
+          },
           (value) => value,
         );
       }

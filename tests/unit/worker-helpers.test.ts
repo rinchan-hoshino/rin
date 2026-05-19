@@ -226,6 +226,11 @@ test("worker helpers expose normalized slash commands and oauth state", () => {
         command.source === "skill",
     ),
   );
+  assert.ok(
+    commands.some(
+      (command) => command.name === "todos" && command.source === "builtin",
+    ),
+  );
   assert.equal(
     commands.some((command) => command.name === "model"),
     true,
@@ -328,6 +333,46 @@ test("runBuiltinCommand lists available models before selection", async () => {
     SessionManager: { list: async () => [] },
   });
   assert.equal(empty.text, "No models available.");
+});
+
+test("runBuiltinCommand shows the built-in todo list", async () => {
+  let rendered = "";
+  const runtime = {
+    session: {
+      agent: {
+        state: {
+          messages: [
+            {
+              role: "toolResult",
+              toolName: "todo",
+              details: {
+                todos: [{ id: 1, text: "Wire /todos", done: false }],
+                nextId: 2,
+              },
+            },
+          ],
+        },
+      },
+      sessionManager: {},
+    },
+  };
+  const result = await workerHelpers.runBuiltinCommand(runtime, "/todos", {
+    SessionManager: { list: async () => [] },
+    uiContext: {
+      custom(factory) {
+        const theme = {
+          fg: (_kind, text) => String(text),
+          bold: (text) => String(text),
+        };
+        rendered = factory(null, theme, null, () => {})
+          .render(80)
+          .join("\n");
+      },
+    },
+  });
+
+  assert.equal(result.handled, true);
+  assert.match(rendered, /Wire \/todos/);
 });
 
 test("runBuiltinCommand uses runtime for session replacement commands", async () => {

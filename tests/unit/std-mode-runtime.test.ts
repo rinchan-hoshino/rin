@@ -119,13 +119,6 @@ test("std configured session keeps daemon-independent Rin tools usable without d
       session._customTools?.some((tool: any) => tool?.name === "web_search"),
       "Rin tools should enter the Pi session through SDK customTools",
     );
-    assert.ok(
-      !session.__rinCapabilities
-        ?.getRegisteredCommands()
-        ?.some((command: any) => command.invocationName === "init"),
-      "self-improve init should be documentation-driven instead of a slash command",
-    );
-
     const memoryResult = await session
       .getToolDefinition("search_memory")
       .execute("tool-memory", { limit: 1 }, undefined, undefined, {

@@ -16,7 +16,6 @@ type SlashCommandSourceGroup = {
 type RuntimeSlashCommandCollectionOptions = {
   includeBuiltin?: boolean;
   extensionCommands?: unknown[];
-  rinCapabilityCommands?: unknown[];
   promptTemplates?: unknown[];
   skills?: unknown[];
 };
@@ -161,12 +160,8 @@ export function collectSlashCommands(
 
 const RUNTIME_SLASH_COMMAND_GROUP_DEFINITIONS = [
   { key: "extensionCommands", source: "extension" },
-  { key: "rinCapabilityCommands", source: "rin_capability" },
 ] as const satisfies Array<{
-  key: keyof Pick<
-    RuntimeSlashCommandCollectionOptions,
-    "extensionCommands" | "rinCapabilityCommands"
-  >;
+  key: keyof Pick<RuntimeSlashCommandCollectionOptions, "extensionCommands">;
   source: string;
 }>;
 
