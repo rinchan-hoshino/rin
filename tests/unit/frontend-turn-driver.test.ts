@@ -691,6 +691,60 @@ test("frontend SDK turn driver does not emit text-only assistant messages as int
   assert.deepEqual(interimTexts, []);
 });
 
+test("frontend SDK turn driver follows Pi overflow continuation through shared native events", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.prompt = async (_text: string, options: any = {}) => {
+    await emitDriverEvent(driver, { type: "agent_start" });
+    await emitDriverEvent(driver, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage:
+          'Codex error: {"error":{"code":"context_length_exceeded"}}',
+        content: [],
+      },
+    });
+    await emitDriverEvent(driver, { type: "agent_end" });
+    await emitDriverEvent(driver, {
+      type: "compaction_start",
+      reason: "overflow",
+    });
+    await emitDriverEvent(driver, {
+      type: "compaction_end",
+      reason: "overflow",
+      aborted: false,
+      willRetry: true,
+      result: { summary: "compacted" },
+    });
+    await emitDriverEvent(driver, {
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag: options.requestTag,
+      error: "context_length_exceeded",
+    });
+    setTimeout(() => {
+      void (async () => {
+        await emitDriverEvent(driver, { type: "agent_start" });
+        await emitDriverEvent(driver, {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [{ type: "text", text: "continued after compaction" }],
+          },
+        });
+        await emitDriverEvent(driver, { type: "agent_end" });
+      })();
+    }, 5);
+  };
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "continued after compaction");
+});
+
 test("frontend SDK turn driver waits for an already submitted restored prompt instead of resubmitting", async () => {
   const client = createFrontendClient();
   let getMessagesCount = 0;

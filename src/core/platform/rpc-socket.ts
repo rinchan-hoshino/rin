@@ -65,10 +65,9 @@ export function createConnectedRpcSocketPair() {
   const serverSocket = new InMemoryRpcSocket();
   clientSocket.attachPeer(serverSocket);
   serverSocket.attachPeer(clientSocket);
-  const connectTimer = setTimeout(() => {
+  setTimeout(() => {
     if (!clientSocket.destroyed) clientSocket.emit("connect");
     if (!serverSocket.destroyed) serverSocket.emit("connect");
   }, 0);
-  connectTimer.unref?.();
   return { clientSocket, serverSocket };
 }

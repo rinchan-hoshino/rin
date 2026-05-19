@@ -21,6 +21,7 @@ import {
 
 import { parseTuiCliOptions, type TuiResourceOptions } from "./cli-options.js";
 import { RinDaemonFrontendClient } from "./rpc-client.js";
+import { createFrontendSdkRuntimeWrapper } from "../rin-frontend-sdk/index.js";
 import { RpcInteractiveSession } from "./runtime.js";
 import { createRpcRuntimeHost } from "./runtime-host.js";
 import { applyRinTuiOverrides } from "./upstream-overrides.js";
@@ -237,7 +238,10 @@ async function startStdTui(
     interactiveOptions,
   );
   clearVisibleTerminalForTuiStartup();
-  await runInteractiveMode(sessionRuntime, interactiveOptions);
+  await runInteractiveMode(
+    createFrontendSdkRuntimeWrapper(sessionRuntime),
+    interactiveOptions,
+  );
 }
 
 async function startRpcTui(
@@ -251,7 +255,9 @@ async function startRpcTui(
   let interactiveMode: InteractiveMode | undefined;
   try {
     await rpcSession.prepareForInteractiveStartup();
-    runtimeHost = createRpcRuntimeHost(rpcSession);
+    runtimeHost = createFrontendSdkRuntimeWrapper(
+      createRpcRuntimeHost(rpcSession),
+    );
     clearVisibleTerminalForTuiStartup();
     interactiveMode = new InteractiveMode(
       runtimeHost as any,

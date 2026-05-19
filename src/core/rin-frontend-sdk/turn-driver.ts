@@ -107,8 +107,10 @@ function parseCompactCommand(commandLine: string) {
 }
 
 function isRecoverableConnectionError(error: unknown) {
+  const message = safeString((error as any)?.message || error);
+  if (message.includes("rpc_turn_queued_offline")) return false;
   return /rin_tui_not_connected|rin_disconnected|rin_session_recovering|frontend_turn_driver_disposed/.test(
-    safeString((error as any)?.message || error),
+    message,
   );
 }
 
@@ -136,6 +138,7 @@ export class RinFrontendTurnDriver {
     sessionFile?: string;
     baselineMessages: unknown[];
   } | null = null;
+  private nativeContinuationPending = false;
 
   constructor(options: {
     clientFactory: () => RinFrontendTurnClient;
@@ -261,6 +264,7 @@ export class RinFrontendTurnDriver {
 
   private startLiveTurn(requestTag?: string) {
     if (this.liveTurn) throw new Error("frontend_turn_already_running");
+    this.nativeContinuationPending = false;
     let resolve!: (value: any) => void;
     let reject!: (error: Error) => void;
     const liveTurn = {
@@ -1121,6 +1125,12 @@ export class RinFrontendTurnDriver {
         this.frontendState.turnActive = true;
         this.emit({ type: "turn_accepted" });
         return;
+      case "turn_continuing":
+        this.nativeContinuationPending = true;
+        this.frontendState.turnActive = true;
+        this.frontendState.isStreaming = true;
+        this.setFrontendPhase("working");
+        return;
       case "external_working_start":
         this.externalWorkingDepth += 1;
         this.setFrontendPhase("working");
@@ -1160,6 +1170,7 @@ export class RinFrontendTurnDriver {
           return;
         }
         this.latestAssistantText = finalText;
+        this.nativeContinuationPending = false;
         this.updateFrontendStateFrom(event);
         this.setFrontendPhase("idle");
         this.liveTurn.resolve({
@@ -1171,6 +1182,12 @@ export class RinFrontendTurnDriver {
         return;
       }
       case "turn_error": {
+        if (this.nativeContinuationPending) {
+          this.frontendState.turnActive = true;
+          this.frontendState.isStreaming = true;
+          this.setFrontendPhase("working");
+          return;
+        }
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.setFrontendPhase("idle");
