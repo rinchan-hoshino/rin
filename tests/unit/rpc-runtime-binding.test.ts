@@ -145,8 +145,13 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
       return true;
     },
   });
+  const theme = {
+    fg: (_kind, text) => String(text),
+    bold: (text) => String(text),
+  };
+  const renderContext = { state: {}, lastComponent: undefined };
 
-  for (const name of ["web_search", "search_memory"]) {
+  for (const name of ["web_search", "search_memory", "todo"]) {
     const tool = session.getToolDefinition(name);
     assert.ok(tool, `${name} should be available in the RPC frontend`);
     assert.equal(typeof tool.renderCall, "function");
@@ -157,12 +162,44 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
     .getToolDefinition("web_search")
     .renderCall(
       { q: "RAG retrieval augmented generation", limit: 5 },
-      { fg: (_kind, text) => String(text), bold: (text) => String(text) },
-      { state: {}, lastComponent: undefined },
+      theme,
+      renderContext,
     )
     .render(80)
     .join("\n");
   assert.match(rendered, /RAG retrieval augmented generation/);
+
+  const todoTool = session.getToolDefinition("todo");
+  assert.equal(todoTool.renderShell, "self");
+
+  const todoCall = todoTool
+    .renderCall({ action: "add", text: "Wire core todo" }, theme, renderContext)
+    .render(80)
+    .join("\n");
+  assert.match(todoCall, /Checklist add "Wire core todo"/);
+
+  const todoResult = todoTool
+    .renderResult(
+      {
+        content: [{ type: "text", text: "" }],
+        details: {
+          action: "toggle",
+          todos: [
+            { id: 1, text: "Wire core todo", done: false },
+            { id: 2, text: "Ship renderer", done: true },
+          ],
+          nextId: 3,
+        },
+      },
+      { expanded: false },
+      theme,
+      renderContext,
+    )
+    .render(80)
+    .join("\n");
+  assert.match(todoResult, /- \[ \] #1: Wire core todo/);
+  assert.match(todoResult, /- \[x\] #2: Ship renderer/);
+  assert.doesNotMatch(todoResult, /Added todo|completed/);
 });
 
 test("rpc extension runner is a passive daemon catalog facade", async () => {

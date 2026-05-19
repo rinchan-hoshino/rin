@@ -168,16 +168,35 @@ test("core todo loads from configured runtime without extension paths", async ()
         undefined,
         { cwd: agentDir },
       );
+      const listed = await todoTool.execute(
+        "tool-call-4",
+        { action: "list" },
+        undefined,
+        undefined,
+        { cwd: agentDir },
+      );
+      const cleared = await todoTool.execute(
+        "tool-call-5",
+        { action: "clear" },
+        undefined,
+        undefined,
+        { cwd: agentDir },
+      );
 
-      assert.match(added.content[0].text, /Added todo #1/);
-      assert.match(toggled.content[0].text, /completed/);
+      assert.equal(added.content[0].text, "- [ ] #1: Wire core todo");
+      assert.equal(toggled.content[0].text, "- [x] #1: Wire core todo");
       assert.deepEqual(toggled.details.todos, [
         { id: 1, text: "Wire core todo", done: true },
       ]);
-      assert.match(toggledFromStringId.content[0].text, /uncompleted/);
+      assert.equal(
+        toggledFromStringId.content[0].text,
+        "- [ ] #1: Wire core todo",
+      );
       assert.deepEqual(toggledFromStringId.details.todos, [
         { id: 1, text: "Wire core todo", done: false },
       ]);
+      assert.equal(listed.content[0].text, "- [ ] #1: Wire core todo");
+      assert.equal(cleared.content[0].text, "- [ ] No todos");
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});
     }
