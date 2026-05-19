@@ -18,6 +18,16 @@ const cliOptions = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "cli-options.js"))
     .href
 );
+const sdk = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
+  ).href
+);
+
+test("tui launcher exports frontend SDK wrappers for both rpc and std TUI paths", () => {
+  assert.equal(typeof sdk.createFrontendSdkRuntimeWrapper, "function");
+  assert.equal(typeof sdk.createFrontendSdkSessionWrapper, "function");
+});
 
 test("tui launcher resolves interactive startup options", () => {
   assert.deepEqual(launcher.resolveTuiInteractiveOptions([]), {

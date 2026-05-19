@@ -88,6 +88,65 @@ test("frontend backend event translator classifies assistant tool preface as int
   );
 });
 
+test("frontend backend event translator keeps Pi overflow continuation active", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "agent_end",
+      messages: [
+        {
+          role: "assistant",
+          stopReason: "error",
+          errorMessage: "context_length_exceeded",
+        },
+      ],
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "compaction_end",
+      reason: "overflow",
+      willRetry: true,
+      aborted: false,
+    }),
+    [
+      { type: "external_working_end" },
+      { type: "turn_accepted" },
+      { type: "turn_continuing", reason: "overflow" },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "rpc_turn_event",
+      event: "error",
+      error: "context_length_exceeded",
+    }),
+    [{ type: "turn_continuing", reason: "overflow" }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "agent_start",
+    }),
+    [{ type: "turn_accepted" }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "continued" }],
+        stopReason: "stop",
+      },
+    }),
+    [{ type: "assistant_final", text: "continued" }],
+  );
+  assert.deepEqual(translator.translate({ type: "agent_end" }), [
+    { type: "turn_complete", finalText: "continued" },
+  ]);
+});
+
 test("frontend backend event translator returns final typed turn events after completion", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 

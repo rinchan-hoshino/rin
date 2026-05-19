@@ -34,6 +34,15 @@ export {
   type RinFrontendTurnResult,
 } from "./turn-driver.js";
 
+export {
+  FRONTEND_SDK_RUNTIME_WRAPPER_KEY,
+  FRONTEND_SDK_SESSION_WRAPPER_KEY,
+  createFrontendSdkRuntimeWrapper,
+  createFrontendSdkSessionWrapper,
+  isFrontendSdkRuntimeWrapper,
+  isFrontendSdkSessionWrapper,
+} from "./runtime-wrapper.js";
+
 export type {
   ExtensionAPI,
   ExtensionCommandContext,

@@ -49,6 +49,15 @@ function assistantInterimText(message: any) {
   ).trim();
 }
 
+function isPiOverflowContinuation(payload: any) {
+  return (
+    safeString(payload?.type).trim() === "compaction_end" &&
+    safeString(payload?.reason).trim() === "overflow" &&
+    payload?.willRetry === true &&
+    payload?.aborted !== true
+  );
+}
+
 export type RinFrontendBackendEventTranslator = {
   translate(event: unknown): RinFrontendBackendEvent[];
   resetAssistantSegments(): void;
@@ -56,6 +65,7 @@ export type RinFrontendBackendEventTranslator = {
 
 export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEventTranslator {
   let latestAssistantText = "";
+  let nativeContinuationPending = false;
   const deliveredAssistantInterimTexts = new Set<string>();
 
   const resetAssistantSegments = () => {
@@ -139,6 +149,9 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
           return events;
         }
         if (payload.event === "error") {
+          if (nativeContinuationPending) {
+            return [{ type: "turn_continuing", reason: "overflow" }];
+          }
           const session = normalizeSessionRef(payload);
           return [
             {
@@ -156,6 +169,14 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
         case "agent_start":
           resetAssistantSegments();
           return [{ type: "turn_accepted" }];
+        case "agent_end":
+          if (!latestAssistantText || nativeContinuationPending) return [];
+          return [
+            {
+              type: "turn_complete",
+              finalText: latestAssistantText,
+            },
+          ];
         case "message_update":
           if (payload?.message?.role !== "assistant") return [];
           latestAssistantText =
@@ -169,20 +190,35 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
           if (text) latestAssistantText = text;
           const finalText = extractAssistantFinalText(payload.message);
           if (finalText) {
+            latestAssistantText = finalText;
+            nativeContinuationPending = false;
             return [{ type: "assistant_final", text: finalText }];
           }
           const interim = takeInterim(assistantInterimText(payload.message));
           return interim ? [interim] : [];
         }
         case "rin_working_start":
-        case "compaction_start":
           return [{ type: "external_working_start" }];
         case "rin_working_end":
-        case "compaction_end":
           return [{ type: "external_working_end" }];
         case "tool_execution_start":
         case "tool_execution_end":
           return [{ type: "turn_accepted" }];
+        case "compaction_start":
+          return [{ type: "external_working_start" }];
+        case "compaction_end": {
+          const events: RinFrontendBackendEvent[] = [
+            { type: "external_working_end" },
+          ];
+          if (isPiOverflowContinuation(payload)) {
+            nativeContinuationPending = true;
+            events.push(
+              { type: "turn_accepted" },
+              { type: "turn_continuing", reason: "overflow" },
+            );
+          }
+          return events;
+        }
         default:
           return [];
       }

@@ -277,6 +277,105 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller follows SDK overflow continuation instead of delivering raw error", async () => {
+  const controller = await createController();
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  const currentSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "overflow.jsonl",
+  );
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => currentSessionFile,
+      getSessionId: () => "session-overflow",
+      getSessionName: () => controller.chatKey,
+    },
+    newSession: async () => true,
+    ensureSessionReady: async () => ({
+      sessionFile: currentSessionFile,
+      sessionId: "session-overflow",
+    }),
+    prompt: async (_text, options = {}) => {
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: { type: "agent_start" },
+      });
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "context_length_exceeded",
+            content: [],
+          },
+        },
+      });
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: { type: "agent_end" },
+      });
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "compaction_end",
+          reason: "overflow",
+          willRetry: true,
+          aborted: false,
+        },
+      });
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "rpc_turn_event",
+          event: "error",
+          requestTag: options.requestTag,
+          error: "context_length_exceeded",
+        },
+      });
+      setTimeout(() => {
+        void (async () => {
+          await controller.handleClientEvent({
+            type: "ui",
+            payload: { type: "agent_start" },
+          });
+          await controller.handleClientEvent({
+            type: "ui",
+            payload: {
+              type: "message_end",
+              message: {
+                role: "assistant",
+                stopReason: "stop",
+                content: [{ type: "text", text: "continued answer" }],
+              },
+            },
+          });
+          await controller.handleClientEvent({
+            type: "ui",
+            payload: { type: "agent_end" },
+          });
+        })();
+      }, 5);
+    },
+  };
+
+  const result = await controller.runTurn({ text: "hello", attachments: [] });
+
+  assert.equal(result.finalText, "continued answer");
+  assert.deepEqual(deliveries, ["continued answer"]);
+});
+
 test("chat controller resets chat prompt sessions through the session settings reload path", async () => {
   const controller = await createController();
   const calls = [];
