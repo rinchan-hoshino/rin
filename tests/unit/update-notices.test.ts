@@ -323,6 +323,66 @@ test("Rin git update notice follows the installed git branch", async () => {
   });
 });
 
+test("Rin git update check returns before the git probe completes", async () => {
+  await withTempDir(async (dir) => {
+    const binDir = path.join(dir, "bin");
+    await fs.mkdir(binDir, { recursive: true });
+    const gitPath = path.join(binDir, "git");
+    await fs.writeFile(
+      gitPath,
+      [
+        "#!/bin/sh",
+        "sleep 0.2",
+        "printf '1234567890abcdef1234567890abcdef12345678\\trefs/heads/main\\n'",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.chmod(gitPath, 0o755);
+
+    const previousPath = process.env.PATH;
+    const previousSkip = process.env.PI_SKIP_VERSION_CHECK;
+    const previousPiOffline = process.env.PI_OFFLINE;
+    const previousRinOffline = process.env.RIN_OFFLINE;
+    try {
+      process.env.PATH = `${binDir}${path.delimiter}${previousPath || ""}`;
+      delete process.env.PI_SKIP_VERSION_CHECK;
+      delete process.env.PI_OFFLINE;
+      delete process.env.RIN_OFFLINE;
+
+      const startedAt = Date.now();
+      const noticePromise = notices.checkForRinUpdateNotice({
+        currentRelease: {
+          channel: "git",
+          version: "000000000000",
+          branch: "main",
+          ref: "0000000000000000000000000000000000000000",
+          sourceLabel: "git branch main @ 000000000000",
+          archiveUrl: "",
+        },
+        manifest: { git: { repoUrl: "ignored", defaultBranch: "main" } },
+      });
+      const elapsedMs = Date.now() - startedAt;
+
+      assert.ok(
+        elapsedMs < 100,
+        `git update check blocked startup for ${elapsedMs}ms`,
+      );
+      const notice = await noticePromise;
+      assert.equal(notice?.version, "1234567890ab");
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousSkip === undefined) delete process.env.PI_SKIP_VERSION_CHECK;
+      else process.env.PI_SKIP_VERSION_CHECK = previousSkip;
+      if (previousPiOffline === undefined) delete process.env.PI_OFFLINE;
+      else process.env.PI_OFFLINE = previousPiOffline;
+      if (previousRinOffline === undefined) delete process.env.RIN_OFFLINE;
+      else process.env.RIN_OFFLINE = previousRinOffline;
+    }
+  });
+});
+
 test("Rin update check preserves Pi version-check skip env", async () => {
   const previous = process.env.PI_SKIP_VERSION_CHECK;
   try {

@@ -290,6 +290,10 @@ function showRinUpdateNotification(instance: any, notice: RinUpdateNotice) {
   instance?.ui?.requestRender?.();
 }
 
+function scheduleRinUpdateNotificationWhenReady(instance: any) {
+  void sleep(0).then(() => showRinUpdateNotificationWhenReady(instance));
+}
+
 async function showRinUpdateNotificationWhenReady(instance: any) {
   try {
     const notice = await checkForRinUpdateNotice();
@@ -690,7 +694,7 @@ export async function applyRinTuiOverrides() {
   if (typeof originalRun === "function") {
     interactiveModeProto.run = async function runWithRinUpdateNotices() {
       await this.init();
-      void showRinUpdateNotificationWhenReady(this);
+      scheduleRinUpdateNotificationWhenReady(this);
       this.checkTmuxKeyboardSetup?.().then((warning: string | undefined) => {
         if (warning) this.showWarning(warning);
       });

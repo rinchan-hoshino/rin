@@ -173,7 +173,7 @@ test("update overrides replace startup update path and keep single changelog ver
       assert.equal(writtenVersion, "1.1.0-beta.20260519+abc1234");
       assert.match(
         String(codingAgentModule.InteractiveMode.prototype.run),
-        /showRinUpdateNotificationWhenReady/,
+        /scheduleRinUpdateNotificationWhenReady/,
       );
     } finally {
       if (previousRinDir === undefined) delete process.env.RIN_DIR;

@@ -1,7 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { safeString } from "../text-utils.js";
 import { getChangelogPath, parseChangelog } from "./changelog.js";
@@ -50,6 +51,7 @@ const RIN_RELEASE_CHANNELS: readonly ReleaseChannel[] = [
   "nightly",
   "git",
 ];
+const execFileAsync = promisify(execFile);
 
 function trim(value: unknown) {
   return safeString(value).trim();
@@ -289,7 +291,7 @@ export function getNewRinChangelogEntries(
   });
 }
 
-function latestGitRefForBranch(
+async function latestGitRefForBranch(
   manifest: ReleaseManifest,
   currentRelease?: InstalledReleaseInfo,
 ) {
@@ -300,15 +302,15 @@ function latestGitRefForBranch(
   if (!branch) return undefined;
   const repoUrl = trim(manifest.git?.repoUrl) || getReleaseRepoUrl(manifest);
   try {
-    const raw = execFileSync(
+    const { stdout } = await execFileAsync(
       "git",
       ["ls-remote", repoUrl, `refs/heads/${branch}`],
       {
         encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
         timeout: 10_000,
       },
-    ).trim();
+    );
+    const raw = String(stdout || "").trim();
     const hash = raw.split(/\s+/)[0] || "";
     return isGitHash(hash) ? hash : undefined;
   } catch {
@@ -323,7 +325,8 @@ export async function latestRinVersionForChannel(
   const manifest =
     options.manifest ||
     (await loadReleaseManifestForNetwork(options.sourceRoot));
-  if (channel === "git") return latestGitRefForBranch(manifest, currentRelease);
+  if (channel === "git")
+    return await latestGitRefForBranch(manifest, currentRelease);
   return resolveReleaseRequest(manifest, { channel }).version;
 }
 
