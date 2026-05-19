@@ -9,7 +9,7 @@ const rootDir = path.resolve(
 );
 const modelSettings = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-tui", "model-settings.js"),
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
 

@@ -4,9 +4,14 @@ import {
   sessionFileExists,
 } from "../session/ref.js";
 import {
-  resolveChatCommandResponses,
-  type ChatCommandResponses,
-} from "../chat/command-responses.js";
+  applyFrontendBuiltinCommandText,
+  frontendCommandNameFromLine,
+  isFrontendAbortCommand,
+  isFrontendNewSessionCommand,
+  parseFrontendCompactCommand,
+  resolveRinFrontendCommandResponses,
+  type RinFrontendCommandResponses,
+} from "./command-responses.js";
 import { sleep } from "../platform/process.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
@@ -85,27 +90,6 @@ function isAgentAlreadyProcessingError(error: unknown) {
   );
 }
 
-function isAbortCommand(commandLine: string) {
-  return safeString(commandLine).trim() === "/abort";
-}
-
-function isNewSessionCommand(commandLine: string) {
-  return safeString(commandLine).trim() === "/new";
-}
-
-function parseCompactCommand(commandLine: string) {
-  const trimmed = safeString(commandLine).trim();
-  if (trimmed === "/compact")
-    return { compact: true, customInstructions: undefined };
-  if (!trimmed.startsWith("/compact ")) {
-    return { compact: false, customInstructions: undefined };
-  }
-  return {
-    compact: true,
-    customInstructions: trimmed.slice("/compact ".length).trim() || undefined,
-  };
-}
-
 function isRecoverableConnectionError(error: unknown) {
   const message = safeString((error as any)?.message || error);
   if (message.includes("rpc_turn_queued_offline")) return false;
@@ -117,7 +101,7 @@ function isRecoverableConnectionError(error: unknown) {
 export class RinFrontendTurnDriver {
   private readonly clientFactory: () => RinFrontendTurnClient;
   private readonly promptSource: string;
-  private readonly commandResponses: ChatCommandResponses;
+  private readonly commandResponses: RinFrontendCommandResponses;
   client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
@@ -143,11 +127,11 @@ export class RinFrontendTurnDriver {
   constructor(options: {
     clientFactory: () => RinFrontendTurnClient;
     promptSource?: string;
-    commandResponses?: Partial<ChatCommandResponses>;
+    commandResponses?: Partial<RinFrontendCommandResponses>;
   }) {
     this.clientFactory = options.clientFactory;
     this.promptSource = safeString(options.promptSource).trim() || "frontend";
-    this.commandResponses = resolveChatCommandResponses(
+    this.commandResponses = resolveRinFrontendCommandResponses(
       options.commandResponses,
     );
   }
@@ -484,7 +468,8 @@ export class RinFrontendTurnDriver {
       managedSessionLeaf?: string;
     } = {},
   ) {
-    const compactCommand = parseCompactCommand(commandLine);
+    const commandName = frontendCommandNameFromLine(commandLine);
+    const compactCommand = parseFrontendCompactCommand(commandLine);
     const skipSessionRecovery = options.skipSessionRecovery === true;
     const restoreSessionFile = safeString(
       options.restoreSessionFile || "",
@@ -493,7 +478,10 @@ export class RinFrontendTurnDriver {
     const managedSessionLeaf = safeString(
       options.managedSessionLeaf || "",
     ).trim();
-    if (isAbortCommand(commandLine) && (this.liveTurn || this.isStreaming())) {
+    if (
+      isFrontendAbortCommand(commandLine) &&
+      (this.liveTurn || this.isStreaming())
+    ) {
       return {
         handled: true,
         text: this.commandResponses.abort,
@@ -502,7 +490,7 @@ export class RinFrontendTurnDriver {
     }
     await this.connect();
     if (!this.client) throw new Error("frontend_session_not_connected");
-    if (isNewSessionCommand(commandLine)) {
+    if (isFrontendNewSessionCommand(commandLine)) {
       if (sessionFile && !managedSessionLeaf) {
         throw new Error("new_session_session_file_unsupported");
       }
@@ -543,16 +531,25 @@ export class RinFrontendTurnDriver {
           sessionFile: targetSessionFile || undefined,
         })
       : await this.runCommandForSession(commandLine, targetSessionFile);
-    if (isAbortCommand(commandLine)) this.rejectLiveTurnAsAborted();
+    if (isFrontendAbortCommand(commandLine)) this.rejectLiveTurnAsAborted();
+    const normalizedData = applyFrontendBuiltinCommandText(
+      commandName,
+      data,
+      this.commandResponses,
+    );
     return {
-      ...data,
+      ...normalizedData,
       sessionId:
         safeString(
-          data?.sessionId || ready?.sessionId || this.currentSessionId(),
+          normalizedData?.sessionId ||
+            ready?.sessionId ||
+            this.currentSessionId(),
         ).trim() || undefined,
       sessionFile:
         safeString(
-          data?.sessionFile || ready?.sessionFile || this.currentSessionFile(),
+          normalizedData?.sessionFile ||
+            ready?.sessionFile ||
+            this.currentSessionFile(),
         ).trim() || undefined,
     };
   }

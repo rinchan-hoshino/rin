@@ -22,7 +22,7 @@ import {
   resolveRuntimeProfile,
 } from "../../core/rin-lib/runtime.js";
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
-import { RinDaemonFrontendClient } from "../../core/rin-tui/rpc-client.js";
+import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/index.js";
 
 async function main() {
   const here = path.dirname(fileURLToPath(import.meta.url));

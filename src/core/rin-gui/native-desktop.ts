@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 import { buildGuiInstallerHtml } from "../rin-install/gui.js";
-import type { RinDaemonFrontendClient } from "../rin-tui/rpc-client.js";
+import type { RinDaemonFrontendClient } from "../rin-frontend-sdk/index.js";
 import {
   buildDesktopHostLaunch,
   type DesktopHostLaunch,

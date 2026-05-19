@@ -14,7 +14,7 @@ const { RpcInteractiveSession } = await import(
 );
 const { createModelRegistry } = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-tui", "rpc-model-registry.js"),
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
 test("rpc prompt routes extension slash commands using daemon catalog authority", async () => {

@@ -1,4 +1,4 @@
-import type { RinRpcCommand } from "../rin-frontend-sdk/index.js";
+import type { RinRpcCommand } from "./types.js";
 import type { RpcFrontendClient } from "./frontend-surface.js";
 
 type OAuthCredentialSummary = { type: string } | undefined;

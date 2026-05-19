@@ -9,7 +9,9 @@ const rootDir = path.resolve(
   "..",
 );
 const stats = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "stats.js")).href
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
+  ).href
 );
 
 test("tui stats compute session stats from entries", () => {

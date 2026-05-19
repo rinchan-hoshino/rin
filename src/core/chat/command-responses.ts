@@ -1,38 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { isJsonRecord } from "../json-utils.js";
+import {
+  DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
+  resolveRinFrontendCommandResponses,
+  type RinFrontendCommandResponses,
+} from "../rin-frontend-sdk/command-responses.js";
 
-export type ChatCommandResponses = {
-  abort: string;
-  new: string;
-  newCancelled: string;
-  compact: string;
-  reload: string;
-};
+export type ChatCommandResponses = RinFrontendCommandResponses;
 
-export const DEFAULT_CHAT_COMMAND_RESPONSES: ChatCommandResponses = {
-  abort: "Aborted current operation.",
-  new: "Started a new session.",
-  newCancelled: "Session switch cancelled.",
-  compact: "Compacted session.",
-  reload: "Reloaded extensions, prompts, skills, and themes.",
-};
+export const DEFAULT_CHAT_COMMAND_RESPONSES =
+  DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES;
 
-export function resolveChatCommandResponses(
-  configured?: unknown,
-): ChatCommandResponses {
-  const source = isJsonRecord(configured) ? configured : {};
-  return Object.fromEntries(
-    Object.entries(DEFAULT_CHAT_COMMAND_RESPONSES).map(([key, fallback]) => {
-      const value = source[key];
-      return [
-        key,
-        typeof value === "string" && value.trim() ? value : fallback,
-      ];
-    }),
-  ) as ChatCommandResponses;
-}
+export const resolveChatCommandResponses = resolveRinFrontendCommandResponses;
 
 export function chatCommandResponsesPath(agentDir: string) {
   return path.join(
