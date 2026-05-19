@@ -15,8 +15,11 @@ const commandResponses = await import(
     path.join(rootDir, "dist", "core", "chat", "command-responses.js"),
   ).href
 );
+const rinI18n = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "i18n.js")).href
+);
 
-test("chat command responses default to English when config file is absent", async () => {
+test("chat command responses default to English when local i18n file is absent", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-command-copy-"),
   );
@@ -27,7 +30,7 @@ test("chat command responses default to English when config file is absent", asy
   );
 });
 
-test("chat command responses can be overridden from a standalone config file", async () => {
+test("chat command responses can be overridden from the generic i18n catalog", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-command-copy-"),
   );
@@ -41,11 +44,31 @@ test("chat command responses can be overridden from a standalone config file", a
     0x3002,
   );
   await fs.writeFile(
-    commandResponses.chatCommandResponsesPath(agentDir),
-    JSON.stringify({ new: customNew }),
+    rinI18n.rinI18nPath(agentDir),
+    JSON.stringify({ "chat.commandResponses.new": customNew }),
   );
 
   const responses = commandResponses.readChatCommandResponses(agentDir);
   assert.equal(responses.new, customNew);
   assert.equal(responses.abort, "Aborted current operation.");
+});
+
+test("generic i18n catalog accepts nested message keys", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-command-copy-"),
+  );
+  await fs.writeFile(
+    rinI18n.rinI18nPath(agentDir),
+    JSON.stringify({
+      chat: {
+        commandResponses: {
+          reload: "Reloaded from i18n catalog.",
+        },
+      },
+    }),
+  );
+
+  const responses = commandResponses.readChatCommandResponses(agentDir);
+  assert.equal(responses.reload, "Reloaded from i18n catalog.");
+  assert.equal(responses.new, "Started a new session.");
 });
