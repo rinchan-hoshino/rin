@@ -373,12 +373,10 @@ function resolveGitCommitForRelease(
 }
 
 export function updateWorkRoot() {
-  const explicitRoot = safeString(process.env.RIN_INSTALL_TMPDIR).trim();
   const base =
-    explicitRoot ||
     safeString(process.env.XDG_CACHE_HOME).trim() ||
     path.join(os.homedir(), ".cache");
-  const dir = explicitRoot ? path.resolve(base) : path.join(base, "rin-update");
+  const dir = path.join(base, "rin-update");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -633,38 +631,59 @@ export async function runUpdate(parsed: ParsedArgs) {
     requestedRelease,
   );
   const npm = requireTool("npm", ["/usr/bin/npm", "/bin/npm"]);
-  const installerEnv = {
-    ...process.env,
-    RIN_INSTALL_MODE: "update",
-    RIN_UPDATE_TARGET_USER: parsed.targetUser,
-    RIN_UPDATE_INSTALL_DIR: installDir,
-    RIN_RELEASE_CHANNEL: resolvedRelease.channel,
-    RIN_RELEASE_VERSION: resolvedRelease.version,
-    RIN_RELEASE_BRANCH: resolvedRelease.branch,
-    RIN_RELEASE_REF: resolvedRelease.ref,
-    RIN_RELEASE_SOURCE_LABEL: resolvedRelease.sourceLabel,
-    RIN_RELEASE_ARCHIVE_URL: resolvedRelease.archiveUrl,
-    RIN_UPDATE_ASSUME_YES: parsed.updateAssumeYes ? "1" : "",
-    RIN_INSTALL_LANGUAGE: i18n.language,
+  const installerEnv = { ...process.env };
+  const baseInstallerArgs = [
+    "--update",
+    "--target-user",
+    parsed.targetUser,
+    "--install-dir",
+    installDir,
+    "--language",
+    i18n.language,
+    ...(parsed.updateAssumeYes ? ["--yes"] : []),
+  ];
+
+  const writeReleaseHandoffFile = (dir: string) => {
+    const releaseFile = path.join(dir, "release.json");
+    fs.writeFileSync(releaseFile, `${JSON.stringify(resolvedRelease)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    return releaseFile;
   };
 
   if (resolvedRelease.channel === "stable") {
     const packageName = getReleasePackageName(manifest);
-    runCommandSync(
-      npm,
-      [
-        "exec",
-        "--yes",
-        "--loglevel=error",
-        "--no-fund",
-        "--no-audit",
-        "--package",
-        `${packageName}@${resolvedRelease.version}`,
-        "--",
-        "rin-install",
-      ],
-      { env: installerEnv },
+    const releaseDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "rin-update-release-"),
     );
+    try {
+      const installerArgs = [
+        ...baseInstallerArgs,
+        "--release-file",
+        writeReleaseHandoffFile(releaseDir),
+      ];
+      runCommandSync(
+        npm,
+        [
+          "exec",
+          "--yes",
+          "--loglevel=error",
+          "--no-fund",
+          "--no-audit",
+          "--package",
+          `${packageName}@${resolvedRelease.version}`,
+          "--",
+          "rin-install",
+          ...installerArgs,
+        ],
+        { env: installerEnv },
+      );
+    } finally {
+      try {
+        fs.rmSync(releaseDir, { recursive: true, force: true });
+      } catch {}
+    }
     return;
   }
 
@@ -699,6 +718,11 @@ export async function runUpdate(parsed: ParsedArgs) {
     fs.mkdirSync(sourceRoot, { recursive: true });
     fs.mkdirSync(tmpDir, { recursive: true });
     fs.writeFileSync(logFile, "", "utf8");
+    const installerArgs = [
+      ...baseInstallerArgs,
+      "--release-file",
+      writeReleaseHandoffFile(tempRoot),
+    ];
 
     await runInstallerProgress(i18n.fetchingUpdateSourceMessage, () => {
       if (curl) {
@@ -768,7 +792,10 @@ export async function runUpdate(parsed: ParsedArgs) {
 
     runCommandSync(
       process.execPath,
-      [path.join(sourceRoot, "dist", "app", "rin-install", "main.js")],
+      [
+        path.join(sourceRoot, "dist", "app", "rin-install", "main.js"),
+        ...installerArgs,
+      ],
       { env: installerEnv, cwd: sourceRoot },
     );
   } finally {

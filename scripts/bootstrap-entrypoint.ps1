@@ -117,12 +117,13 @@ $minimumNodeVersion = [version]"22.19.0"
 $repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchanai/rin" }
 $bootstrapBranch = if ($env:RIN_BOOTSTRAP_BRANCH) { $env:RIN_BOOTSTRAP_BRANCH } else { "bootstrap" }
 $cacheBase = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } elseif ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
-$tempBase = if ($env:RIN_INSTALL_TMPDIR) { $env:RIN_INSTALL_TMPDIR } else { Join-Path $cacheBase "rin-install" }
+$tempBase = if ($env:TEMP) { $env:TEMP } else { Join-Path $cacheBase "rin-install" }
 New-Item -ItemType Directory -Force -Path $tempBase | Out-Null
 $workDir = Join-Path $tempBase ("{0}.{1}" -f $workPrefix, [System.Guid]::NewGuid().ToString("N"))
 $archive = Join-Path $workDir "rin.tar.gz"
 $srcDir = Join-Path $workDir "src"
 $manifestPath = Join-Path $workDir "release-manifest.json"
+$releaseFile = Join-Path $workDir "release.json"
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
 function Say([string]$Message) {
@@ -249,14 +250,8 @@ function Resolve-Release {
   }
 }
 
-function Set-Release-Env($Release) {
-  $env:RIN_RELEASE_CHANNEL = $Release.Channel
-  $env:RIN_RELEASE_VERSION = $Release.Version
-  $env:RIN_RELEASE_BRANCH = $Release.Branch
-  $env:RIN_RELEASE_REF = $Release.Ref
-  $env:RIN_RELEASE_SOURCE_LABEL = $Release.SourceLabel
-  $env:RIN_RELEASE_ARCHIVE_URL = $Release.ArchiveUrl
-  if ($mode -eq "update") { $env:RIN_INSTALL_MODE = "update" }
+function Write-Release-Handoff($Release) {
+  $Release | ConvertTo-Json -Compress | Set-Content -LiteralPath $script:releaseFile -Encoding UTF8
 }
 
 try {
@@ -272,11 +267,14 @@ try {
     }
   }
   $release = Resolve-Release
-  Set-Release-Env $release
+  Write-Release-Handoff $release
 
   if ($release.Channel -eq "stable") {
     Say $launchLabel
-    npm exec --yes --package "$($release.PackageName)@$($release.Version)" -- rin-install
+    $installArgs = @("exec", "--yes", "--package", "$($release.PackageName)@$($release.Version)", "--", "rin-install")
+    $installArgs += @("--release-file", $releaseFile)
+    if ($mode -eq "update") { $installArgs += "--update" }
+    npm @installArgs
     exit $LASTEXITCODE
   }
 
@@ -310,7 +308,9 @@ try {
       if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
     }
     Say $launchLabel
-    node "dist/app/rin-install/main.js"
+    $installerArgs = @("dist/app/rin-install/main.js", "--release-file", $releaseFile)
+    if ($mode -eq "update") { $installerArgs += "--update" }
+    node @installerArgs
     exit $LASTEXITCODE
   } finally {
     Pop-Location

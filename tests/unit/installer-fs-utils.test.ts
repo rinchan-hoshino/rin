@@ -102,18 +102,14 @@ test("commandAsUserInvocation falls back to plain privilege shell command", () =
 });
 
 test("installer fs utils prefer Rin temp roots deterministically", () => {
-  const previousRinTmpDir = process.env.RIN_TMP_DIR;
   const previousTmpDir = process.env.TMPDIR;
   try {
-    process.env.RIN_TMP_DIR = "/tmp/rin-custom-root";
     process.env.TMPDIR = "/tmp/rin-custom-root";
     assert.deepEqual(fsUtils.installerTempRootCandidates().slice(0, 2), [
       path.resolve("/tmp/rin-custom-root"),
       path.resolve("/home/rin/tmp"),
     ]);
   } finally {
-    if (previousRinTmpDir == null) delete process.env.RIN_TMP_DIR;
-    else process.env.RIN_TMP_DIR = previousRinTmpDir;
     if (previousTmpDir == null) delete process.env.TMPDIR;
     else process.env.TMPDIR = previousTmpDir;
   }

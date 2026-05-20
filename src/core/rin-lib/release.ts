@@ -361,7 +361,7 @@ export async function fetchReleaseManifest(
   fallbackManifestUrl?: string,
 ): Promise<ReleaseManifest> {
   const urls = [
-    trimReleaseValue(manifestUrl || process.env.RIN_RELEASE_MANIFEST_URL),
+    trimReleaseValue(manifestUrl),
     trimReleaseValue(fallbackManifestUrl),
   ].filter(Boolean);
   for (const url of urls) {
@@ -394,15 +394,19 @@ export async function loadReleaseManifestForNetwork(sourceRoot?: string) {
   return await fetchReleaseManifest(primary, fallback);
 }
 
-export function releaseInfoFromEnv(): InstalledReleaseInfo | undefined {
-  const channel = normalizeReleaseChannel(process.env.RIN_RELEASE_CHANNEL);
-  const version = trimReleaseValue(process.env.RIN_RELEASE_VERSION);
-  const branch = trimReleaseValue(process.env.RIN_RELEASE_BRANCH);
-  const ref = firstReleaseValue(process.env.RIN_RELEASE_REF, branch, version);
-  const sourceLabel = trimReleaseValue(process.env.RIN_RELEASE_SOURCE_LABEL);
-  const archiveUrl = trimReleaseValue(process.env.RIN_RELEASE_ARCHIVE_URL);
-  if (!version && !branch && !ref && !sourceLabel && !archiveUrl)
+export function releaseInfoFromObject(
+  value: unknown,
+): InstalledReleaseInfo | undefined {
+  const record = value && typeof value === "object" ? (value as any) : {};
+  const channel = normalizeReleaseChannel(record.channel);
+  const version = trimReleaseValue(record.version);
+  const branch = trimReleaseValue(record.branch);
+  const ref = firstReleaseValue(record.ref, branch, version);
+  const sourceLabel = trimReleaseValue(record.sourceLabel);
+  const archiveUrl = trimReleaseValue(record.archiveUrl);
+  if (!version && !branch && !ref && !sourceLabel && !archiveUrl) {
     return undefined;
+  }
   return {
     channel,
     version: firstReleaseValue(version, ref, branch, "unknown"),
@@ -412,6 +416,20 @@ export function releaseInfoFromEnv(): InstalledReleaseInfo | undefined {
       sourceLabel ||
       `${channel} ${firstReleaseValue(version, branch, ref, "unknown")}`,
     archiveUrl,
-    installedAt: nowIso(),
+    installedAt: trimReleaseValue(record.installedAt) || nowIso(),
   };
+}
+
+export function releaseInfoFromFile(
+  filePath: string | undefined,
+): InstalledReleaseInfo | undefined {
+  const resolvedPath = trimReleaseValue(filePath);
+  if (!resolvedPath) return undefined;
+  try {
+    return releaseInfoFromObject(
+      JSON.parse(fs.readFileSync(resolvedPath, "utf8")),
+    );
+  } catch {
+    return undefined;
+  }
 }

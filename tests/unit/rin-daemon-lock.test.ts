@@ -26,13 +26,17 @@ async function makeTempDir(prefix: string) {
 function spawnDaemon(agentDir: string, socketPath: string) {
   const child = spawn(
     process.execPath,
-    [path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"), socketPath],
+    [
+      path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"),
+      socketPath,
+      "--shutdown-grace-ms",
+      "200",
+    ],
     {
       cwd: rootDir,
       env: {
         ...process.env,
         RIN_DIR: agentDir,
-        RIN_DAEMON_SHUTDOWN_GRACE_MS: "200",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

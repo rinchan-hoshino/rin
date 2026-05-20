@@ -46,6 +46,9 @@ const themeModule = await import(
     ),
   ).href
 );
+const tuiRuntimeEnv = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "tui-runtime-env.js")).href
+);
 
 const ESC = "\u001b";
 
@@ -133,8 +136,6 @@ test("terminal title override shows only session name", async () => {
 test("startup header override replaces upstream Pi branding with Rin", async () => {
   await overrides.applyRinTuiOverrides();
 
-  const previousVersion = process.env.RIN_RELEASE_VERSION;
-  process.env.RIN_RELEASE_VERSION = "1.2.3";
   const header = {
     text: "",
     getCollapsedText() {
@@ -151,28 +152,23 @@ test("startup header override replaces upstream Pi branding with Rin", async () 
     },
   };
 
-  try {
-    assert.equal(
-      overrides.applyRinStartupHeaderBranding({
-        builtInHeader: header,
-        getStartupExpansionState: () => false,
-      }),
-      true,
-    );
+  assert.equal(
+    overrides.applyRinStartupHeaderBranding({
+      builtInHeader: header,
+      getStartupExpansionState: () => false,
+    }),
+    true,
+  );
 
-    assert.match(header.text, /Rin v1\.2\.3/);
-    assert.match(header.text, /Rin can explain her own features/);
-    assert.match(header.text, /extend Rin/);
-    assert.doesNotMatch(header.text, /\bpi v0\.74\.0\b/i);
-    assert.doesNotMatch(header.text, /extend Pi/);
-    assert.match(
-      codingAgentModule.InteractiveMode.prototype.init.toString(),
-      /applyRinStartupHeaderBranding/,
-    );
-  } finally {
-    if (previousVersion === undefined) delete process.env.RIN_RELEASE_VERSION;
-    else process.env.RIN_RELEASE_VERSION = previousVersion;
-  }
+  assert.match(header.text, /Rin (?:v0\.0\.0|[0-9a-f]{40})/);
+  assert.match(header.text, /Rin can explain her own features/);
+  assert.match(header.text, /extend Rin/);
+  assert.doesNotMatch(header.text, /\bpi v0\.74\.0\b/i);
+  assert.doesNotMatch(header.text, /extend Pi/);
+  assert.match(
+    codingAgentModule.InteractiveMode.prototype.init.toString(),
+    /applyRinStartupHeaderBranding/,
+  );
 });
 
 test("update overrides replace startup update path and keep single changelog version state", async () => {
@@ -180,11 +176,18 @@ test("update overrides replace startup update path and keep single changelog ver
 
   await withTempDir(async (dir) => {
     const previousRinDir = process.env.RIN_DIR;
-    const previousVersion = process.env.RIN_RELEASE_VERSION;
     let writtenVersion;
     try {
       process.env.RIN_DIR = dir;
-      process.env.RIN_RELEASE_VERSION = "1.1.0-beta.20260519+abc1234";
+      await fs.writeFile(
+        path.join(dir, "installer.json"),
+        `${JSON.stringify({
+          currentRelease: {
+            release: { version: "1.1.0-beta.20260519+abc1234" },
+          },
+        })}\n`,
+        "utf8",
+      );
       const changelogPath = path.join(dir, "docs", "release", "CHANGELOG.md");
       await fs.mkdir(path.dirname(changelogPath), { recursive: true });
       await fs.writeFile(
@@ -226,8 +229,6 @@ test("update overrides replace startup update path and keep single changelog ver
     } finally {
       if (previousRinDir === undefined) delete process.env.RIN_DIR;
       else process.env.RIN_DIR = previousRinDir;
-      if (previousVersion === undefined) delete process.env.RIN_RELEASE_VERSION;
-      else process.env.RIN_RELEASE_VERSION = previousVersion;
     }
   });
 });
@@ -243,30 +244,23 @@ test("startup header branding replaces upstream Pi name and version", async () =
   );
 
   let currentText = "";
-  const previousReleaseVersion = process.env.RIN_RELEASE_VERSION;
-  try {
-    process.env.RIN_RELEASE_VERSION = "0.3.0";
-    const header = {
-      getCollapsedText: () => "pi v0.74.0\nPi can help.",
-      getExpandedText: () => "pi v0.74.0\nExpanded Pi help.",
-      setExpanded(expanded) {
-        currentText = expanded
-          ? this.getExpandedText()
-          : this.getCollapsedText();
-      },
-    };
-    overrides.applyRinStartupHeaderBranding({
-      builtInHeader: header,
-      version: "0.74.0",
-      getStartupExpansionState: () => true,
-    });
-  } finally {
-    if (previousReleaseVersion === undefined)
-      delete process.env.RIN_RELEASE_VERSION;
-    else process.env.RIN_RELEASE_VERSION = previousReleaseVersion;
-  }
+  const header = {
+    getCollapsedText: () => "pi v0.74.0\nPi can help.",
+    getExpandedText: () => "pi v0.74.0\nExpanded Pi help.",
+    setExpanded(expanded) {
+      currentText = expanded ? this.getExpandedText() : this.getCollapsedText();
+    },
+  };
+  overrides.applyRinStartupHeaderBranding({
+    builtInHeader: header,
+    version: "0.74.0",
+    getStartupExpansionState: () => true,
+  });
 
-  assert.equal(currentText, "rin v0.3.0\nExpanded Rin help.");
+  assert.match(
+    currentText,
+    /^rin (?:v0\.0\.0|[0-9a-f]{40})\nExpanded Rin help\.$/,
+  );
   assert.match(
     String(codingAgentModule.InteractiveMode.prototype.init),
     /applyRinStartupHeaderBranding/,
@@ -277,7 +271,6 @@ test("footer appends runtime mode to the model label before rendering", async ()
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
-  const originalRole = process.env.RIN_TUI_RUNTIME_ROLE;
   const session = {
     state: {
       model: {
@@ -304,7 +297,7 @@ test("footer appends runtime mode to the model label before rendering", async ()
   const footer = new codingAgentModule.FooterComponent(session, footerData);
 
   try {
-    process.env.RIN_TUI_RUNTIME_ROLE = "rpc-frontend";
+    tuiRuntimeEnv.setRinTuiRuntimeRole("rpc-frontend");
     let lines = footer.render(60);
     assert.match(lines.at(-1), /syncing/);
     assert.match(lines[0], /daemon/);
@@ -324,7 +317,7 @@ test("footer appends runtime mode to the model label before rendering", async ()
 
     session.state.model.id = "gpt-demo";
     session.state.thinkingLevel = "medium";
-    process.env.RIN_TUI_RUNTIME_ROLE = "maintenance-tui";
+    tuiRuntimeEnv.setRinTuiRuntimeRole("maintenance-tui");
     lines = footer.render(60);
     assert.match(lines[0], /medium • maint/);
     assert.doesNotMatch(lines[0], /mode:|rpc|std/);
@@ -332,11 +325,7 @@ test("footer appends runtime mode to the model label before rendering", async ()
       assert.ok(piTuiModule.visibleWidth(line) <= 60);
     }
   } finally {
-    if (originalRole === undefined) {
-      delete process.env.RIN_TUI_RUNTIME_ROLE;
-    } else {
-      process.env.RIN_TUI_RUNTIME_ROLE = originalRole;
-    }
+    tuiRuntimeEnv.setRinTuiRuntimeRole(undefined);
   }
 });
 

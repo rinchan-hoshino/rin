@@ -29,9 +29,7 @@ Agent SDK examples:
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const rinAppDir =
-  process.env.RIN_APP_DIR ||
-  path.join(process.env.HOME, ".rin", "app", "current");
+const rinAppDir = path.join(process.env.HOME, ".rin", "app", "current");
 const sdkUrl = pathToFileURL(
   path.join(rinAppDir, "src", "core", "rin-agent-sdk", "index.ts"),
 ).href;
@@ -105,7 +103,7 @@ Cookbook:
 When both `chatKey` and `messageId` are known, the record key is SHA-1 of `chatKey + "\n" + messageId`:
 
 ```sh
-agent_dir="${RIN_AGENT_DIR:-$HOME/.rin}"
+agent_dir="$HOME/.rin"
 chat_key='onebot/2301401877:1067390680'
 message_id='1234567890'
 record_key=$(node -e 'const crypto=require("crypto"); const [chatKey,messageId]=process.argv.slice(1); console.log(crypto.createHash("sha1").update(`${chatKey}\n${messageId}`).digest("hex"));' "$chat_key" "$message_id")
@@ -115,7 +113,7 @@ record_path="$agent_dir/data/chat-message-store/records/${record_key:0:2}/$recor
 When only `messageId` is known, read the message-id index first; it contains relative record paths:
 
 ```sh
-agent_dir="${RIN_AGENT_DIR:-$HOME/.rin}"
+agent_dir="$HOME/.rin"
 message_id='1234567890'
 index_key=$(node -e 'const crypto=require("crypto"); console.log(crypto.createHash("sha1").update(process.argv[1]).digest("hex"));' "$message_id")
 index_path="$agent_dir/data/chat-message-store/indexes/by-message-id/${index_key:0:2}/$index_key.json"

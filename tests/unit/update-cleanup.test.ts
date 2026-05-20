@@ -39,17 +39,15 @@ test("cleanupStaleUpdateWorkDirs prunes only stale work dirs", async () => {
   await assert.rejects(fs.access(staleDir));
 });
 
-test("updateWorkRoot prefers explicit installer tmpdir", async () => {
-  const previous = process.env.RIN_INSTALL_TMPDIR;
-  const root = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-install-explicit-"),
-  );
+test("updateWorkRoot uses the platform cache root", async () => {
+  const previous = process.env.XDG_CACHE_HOME;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-cache-"));
   try {
-    process.env.RIN_INSTALL_TMPDIR = path.join(root, " custom ", "..");
-    assert.equal(shared.updateWorkRoot(), path.resolve(root));
+    process.env.XDG_CACHE_HOME = root;
+    assert.equal(shared.updateWorkRoot(), path.join(root, "rin-update"));
   } finally {
-    if (previous == null) delete process.env.RIN_INSTALL_TMPDIR;
-    else process.env.RIN_INSTALL_TMPDIR = previous;
+    if (previous == null) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = previous;
     await fs.rm(root, { recursive: true, force: true });
   }
 });

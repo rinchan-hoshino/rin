@@ -26,14 +26,14 @@ async function withTempRoot(fn: (dir: string) => Promise<void>) {
   }
 }
 
-async function withConfiguredRinTempRoot(dir: string, fn: () => Promise<void>) {
-  const previousRinTmpDir = process.env.RIN_TMP_DIR;
+async function withConfiguredTempRoot(dir: string, fn: () => Promise<void>) {
+  const previousTmpDir = process.env.TMPDIR;
   try {
-    process.env.RIN_TMP_DIR = dir;
+    process.env.TMPDIR = dir;
     await fn();
   } finally {
-    if (previousRinTmpDir == null) delete process.env.RIN_TMP_DIR;
-    else process.env.RIN_TMP_DIR = previousRinTmpDir;
+    if (previousTmpDir == null) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previousTmpDir;
   }
 }
 
@@ -47,9 +47,9 @@ function createSession(id: string) {
   };
 }
 
-test("compaction continuation markers prefer the configured Rin temp root", async () => {
+test("compaction continuation markers prefer the configured temp root", async () => {
   await withTempRoot(async (dir) => {
-    await withConfiguredRinTempRoot(dir, async () => {
+    await withConfiguredTempRoot(dir, async () => {
       const session = createSession("session-temp-root");
       const markerPath =
         runtimeMod.getCompactionContinuationMarkerPath(session);
@@ -73,7 +73,7 @@ test("compaction continuation markers prefer the configured Rin temp root", asyn
 
 test("compaction continuation markers roundtrip once and clear invalid marker files", async () => {
   await withTempRoot(async (dir) => {
-    await withConfiguredRinTempRoot(dir, async () => {
+    await withConfiguredTempRoot(dir, async () => {
       const session = createSession("session-roundtrip");
       const markerPath =
         runtimeMod.getCompactionContinuationMarkerPath(session);
@@ -112,7 +112,7 @@ test("compaction continuation markers fall back when the preferred temp root is 
     const blocker = path.join(tempRoot, "blocked-root");
     await fs.writeFile(blocker, "not a directory", "utf8");
 
-    await withConfiguredRinTempRoot(path.join(blocker, "nested"), async () => {
+    await withConfiguredTempRoot(path.join(blocker, "nested"), async () => {
       const session = createSession(`session-fallback-${process.pid}`);
       runtimeMod.clearCompactionContinuationMarker(session);
 

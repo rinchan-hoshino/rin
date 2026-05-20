@@ -143,9 +143,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   frontend_turn_driver_disposed: () =>
     "Rin stopped the previous chat driver while recovering. Retry the action now.",
 
-  google_challenge_required: () =>
-    "Google blocked this search path with a bot check. Wait before retrying, use fewer repeated searches, fetch a known URL directly, or switch search backend/network.",
-
   identity_first_owner_must_self_claim: () =>
     "The first owner identity must be claimed by the same platform user. Use the owner account and retry.",
   identity_last_owner_required: () =>
@@ -231,6 +228,9 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Heartbeat inbox entries need a title. Add a concise title and retry.",
   heartbeat_task_id_required: () =>
     "Heartbeat read marking needs the heartbeat task id from the heartbeat context. Use that id and retry.",
+
+  python_not_found: () =>
+    "Web search needs Python to start the local SearXNG sidecar. Install Python 3 and retry.",
   qq_app_id_required: () =>
     "QQ adapter needs an app id before it can start. Add the app id and restart Rin.",
   qq_reaction_requires_channel_chat: () =>
@@ -397,6 +397,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Run command needs a prompt. Provide a prompt and retry.",
 
   search_memory_aborted: () => "Memory search was aborted.",
+  searxng_start_failed: () =>
+    "The local SearXNG search sidecar exited before it became ready. Restart Rin or run rin doctor.",
+  searxng_start_timeout: () =>
+    "The local SearXNG search sidecar did not become ready in time. Retry later or run rin doctor.",
   self_improve_content_required: () =>
     "Self-improvement update needs content. Add content and retry.",
   session_file_required: () =>
@@ -434,10 +438,19 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       ". Remove it or check the command help.",
     ),
 
+  sidecar_lock_timeout: () =>
+    "A local helper process is still preparing web search. Wait a moment and retry.",
+
   web_fetch_invalid_url: () => "Enter a valid HTTP or HTTPS URL.",
   web_search_failed: () =>
     "Web search failed. Check the network or search backend, then retry.",
   web_search_query_required: () => "Enter a search query or URL.",
+  web_search_runtime_fetch_tools_not_found: () =>
+    "Web search needs git, or curl/wget plus tar, to install the local SearXNG sidecar. Install the missing tool and retry.",
+  web_search_runtime_source_invalid: () =>
+    "The local SearXNG search runtime is incomplete. Restart Rin so it can rebuild the search sidecar.",
+  web_search_sidecar_unavailable: () =>
+    "The local SearXNG search sidecar is not available yet. Restart Rin or run rin doctor.",
 
   fetch_failed: () =>
     "The network request failed. Check the URL, network/proxy, or retry later.",

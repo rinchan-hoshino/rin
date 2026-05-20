@@ -11,7 +11,8 @@ import {
 import {
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RPC_FRONTEND_ROLE,
-  RIN_TUI_RUNTIME_ROLE_ENV,
+  setRinTuiRuntimeRole,
+  type RinTuiRuntimeRole,
 } from "../tui-runtime-env.js";
 import { requestDaemonCommand } from "../rin-daemon/client.js";
 import {
@@ -128,14 +129,12 @@ export async function isDaemonReadyForRpcStartup(
 
 export async function shouldStartMaintenanceMode(
   options: {
-    env?: NodeJS.ProcessEnv;
+    requestedRole?: RinTuiRuntimeRole;
     socketPath?: string;
     timeoutMs?: number;
   } = {},
 ) {
-  const env = options.env ?? process.env;
-  const requestedRole = String(env[RIN_TUI_RUNTIME_ROLE_ENV] || "").trim();
-  if (requestedRole === RIN_TUI_MAINTENANCE_ROLE) return true;
+  if (options.requestedRole === RIN_TUI_MAINTENANCE_ROLE) return true;
   return !(await isDaemonReadyForRpcStartup({
     socketPath: options.socketPath,
     timeoutMs: options.timeoutMs,
@@ -143,20 +142,8 @@ export async function shouldStartMaintenanceMode(
 }
 
 function startupProfiler() {
-  const enabled = /^(1|true|yes)$/i.test(
-    String(process.env.RIN_STARTUP_PROFILE || "").trim(),
-  );
-  const startedAt = Date.now();
-  let lastAt = startedAt;
   return {
-    mark(label: string) {
-      if (!enabled) return;
-      const now = Date.now();
-      const delta = now - lastAt;
-      const total = now - startedAt;
-      lastAt = now;
-      console.error(`[rin-startup] ${label} +${delta}ms total=${total}ms`);
-    },
+    mark(_label: string) {},
   };
 }
 
@@ -183,9 +170,9 @@ export function applyQuietStartupVersionCheckEnv(
 }
 
 function applyTuiRuntimeRole(maintenanceMode: boolean) {
-  process.env[RIN_TUI_RUNTIME_ROLE_ENV] = maintenanceMode
-    ? RIN_TUI_MAINTENANCE_ROLE
-    : RIN_TUI_RPC_FRONTEND_ROLE;
+  setRinTuiRuntimeRole(
+    maintenanceMode ? RIN_TUI_MAINTENANCE_ROLE : RIN_TUI_RPC_FRONTEND_ROLE,
+  );
 }
 
 async function runInteractiveMode(

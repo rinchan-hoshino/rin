@@ -39,24 +39,8 @@ async function runGit(cwd: string, args: string[]) {
   await execFileAsync("git", args, { cwd });
 }
 
-async function withReleaseEnvCleared(fn: () => Promise<void>) {
-  const previous = {
-    RIN_RELEASE_CHANNEL: process.env.RIN_RELEASE_CHANNEL,
-    RIN_RELEASE_VERSION: process.env.RIN_RELEASE_VERSION,
-    RIN_RELEASE_BRANCH: process.env.RIN_RELEASE_BRANCH,
-    RIN_RELEASE_REF: process.env.RIN_RELEASE_REF,
-    RIN_RELEASE_SOURCE_LABEL: process.env.RIN_RELEASE_SOURCE_LABEL,
-    RIN_RELEASE_ARCHIVE_URL: process.env.RIN_RELEASE_ARCHIVE_URL,
-  };
-  for (const key of Object.keys(previous)) delete process.env[key];
-  try {
-    await fn();
-  } finally {
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  }
+async function withoutReleaseEnvHandoff(fn: () => Promise<void>) {
+  await fn();
 }
 
 test("Rin update notices compare package versions with prerelease precedence", () => {
@@ -71,9 +55,7 @@ test("Rin update notices compare package versions with prerelease precedence", (
 test("current Rin version prefers installed release metadata outside source-root reads", async () => {
   await withTempDir(async (dir) => {
     const previousRinDir = process.env.RIN_DIR;
-    const previousReleaseVersion = process.env.RIN_RELEASE_VERSION;
     try {
-      delete process.env.RIN_RELEASE_VERSION;
       process.env.RIN_DIR = dir;
       await fs.writeFile(
         path.join(dir, "installer.json"),
@@ -89,9 +71,6 @@ test("current Rin version prefers installed release metadata outside source-root
     } finally {
       if (previousRinDir === undefined) delete process.env.RIN_DIR;
       else process.env.RIN_DIR = previousRinDir;
-      if (previousReleaseVersion === undefined)
-        delete process.env.RIN_RELEASE_VERSION;
-      else process.env.RIN_RELEASE_VERSION = previousReleaseVersion;
     }
   });
 });
@@ -122,7 +101,7 @@ test("Rin update check uses Rin release manifest instead of Pi latest-version", 
 });
 
 test("Rin update check follows installed release channel metadata", async () => {
-  await withReleaseEnvCleared(async () => {
+  await withoutReleaseEnvHandoff(async () => {
     await withTempDir(async (dir) => {
       const sourceRoot = path.join(dir, "src");
       const runtimeDir = path.join(dir, "runtime");
@@ -194,7 +173,7 @@ test("Rin update notices ignore top-level release metadata", async () => {
 });
 
 test("Rin git installs do not receive stable package update notices", async () => {
-  await withReleaseEnvCleared(async () => {
+  await withoutReleaseEnvHandoff(async () => {
     await withTempDir(async (dir) => {
       const sourceRoot = path.join(dir, "src");
       const runtimeDir = path.join(dir, "runtime");
@@ -268,7 +247,7 @@ test("Rin update notice follows the installed release channel", async () => {
 });
 
 test("Rin update notice reads installed release metadata", async () => {
-  await withReleaseEnvCleared(async () => {
+  await withoutReleaseEnvHandoff(async () => {
     await withTempDir(async (dir) => {
       await writePackageVersion(dir, "0.0.0");
       await fs.writeFile(

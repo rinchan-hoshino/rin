@@ -43,7 +43,7 @@ test("installer apply-plan writes a private terminal handoff plan and command", 
       planPath,
       "/opt/rin install/main.js",
     ),
-    /^RIN_INSTALL_APPLY_PLAN_FILE='\/tmp\/rin-install-plan-demo\/apply-plan.json' '.+' '\/opt\/rin install\/main.js'$/,
+    /^'.+' '\/opt\/rin install\/main.js' --apply-plan-file '\/tmp\/rin-install-plan-demo\/apply-plan.json'$/,
   );
 });
 
@@ -66,11 +66,8 @@ test("runFinalizeInstallPlanInChild inherits stdio so sudo prompts stay interact
         spawnCalls.push({ command, args, options });
         const child = new EventEmitter();
         setImmediate(() => {
-          fs.writeFileSync(
-            options.env.RIN_INSTALL_APPLY_RESULT,
-            JSON.stringify({ ok: true }),
-            "utf8",
-          );
+          const resultPath = args[args.indexOf("--apply-result-file") + 1];
+          fs.writeFileSync(resultPath, JSON.stringify({ ok: true }), "utf8");
           child.emit("exit", 0, null);
         });
         return child;
@@ -87,10 +84,8 @@ test("runFinalizeInstallPlanInChild inherits stdio so sudo prompts stay interact
     "inherit",
     "inherit",
   ]);
-  assert.equal(
-    typeof spawnCalls[0].options.env.RIN_INSTALL_APPLY_PLAN,
-    "string",
-  );
+  assert.equal(spawnCalls[0].args.includes("--apply-plan-file"), true);
+  assert.equal(spawnCalls[0].options.env, process.env);
   assert.deepEqual(result, { ok: true });
 });
 
@@ -105,14 +100,11 @@ test("runFinalizeInstallPlanInChild surfaces child error output on failure", asy
       "Publishing runtime...",
       {
         writeStatus() {},
-        spawnImpl(_command, _args, options) {
+        spawnImpl(_command, args, _options) {
           const child = new EventEmitter();
           setImmediate(() => {
-            fs.writeFileSync(
-              options.env.RIN_INSTALL_APPLY_ERROR,
-              "sudo interaction failed",
-              "utf8",
-            );
+            const errorPath = args[args.indexOf("--apply-error-file") + 1];
+            fs.writeFileSync(errorPath, "sudo interaction failed", "utf8");
             child.emit("exit", 1, null);
           });
           return child;

@@ -63,7 +63,6 @@ async function setupIsolatedCliEnv(tempDir: string) {
       RIN_DIR: agentDir,
       PI_CODING_AGENT_DIR: agentDir,
       RIN_DAEMON_SOCKET_PATH: socketPath,
-      RIN_DAEMON_SHUTDOWN_GRACE_MS: "250",
       NO_COLOR: "1",
       TERM: "dumb",
     },

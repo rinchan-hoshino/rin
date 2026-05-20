@@ -211,14 +211,14 @@ test("tui launch helpers target the direct TUI runner", () => {
   );
 });
 
-test("TUI launch environment enables maintenance mode only when the daemon is unavailable", async () => {
+test("TUI launch environment reports maintenance notice when the daemon is unavailable", async () => {
   const available = await launch.resolveTuiLaunchEnvironment(
     {} as any,
     { BASE: "1" } as any,
     { ensureDaemonAvailable: async () => undefined },
   );
   assert.equal(available.runtimeEnv.BASE, "1");
-  assert.equal(available.runtimeEnv.RIN_TUI_RUNTIME_ROLE, "rpc-frontend");
+  assert.equal("RIN_TUI_RUNTIME_ROLE" in available.runtimeEnv, false);
 
   const unavailable = await launch.resolveTuiLaunchEnvironment(
     {} as any,
@@ -230,7 +230,7 @@ test("TUI launch environment enables maintenance mode only when the daemon is un
     },
   );
   assert.equal(unavailable.runtimeEnv.BASE, "1");
-  assert.equal(unavailable.runtimeEnv.RIN_TUI_RUNTIME_ROLE, "maintenance-tui");
+  assert.equal("RIN_TUI_RUNTIME_ROLE" in unavailable.runtimeEnv, false);
   assert.match(
     unavailable.maintenanceModeNotice,
     /Rin daemon is unavailable \(daemon down\)\./,

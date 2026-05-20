@@ -7,12 +7,6 @@ import {
 } from "../rin-lib/system.js";
 import { PI_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import {
-  RIN_TUI_MAINTENANCE_ROLE,
-  RIN_TUI_RPC_FRONTEND_ROLE,
-  RIN_TUI_RUNTIME_ROLE_ENV,
-} from "../tui-runtime-env.js";
-
-import {
   createTargetExecutionContext,
   ensureDaemonAvailable,
   installConfigPath,
@@ -85,18 +79,10 @@ export async function resolveTuiLaunchEnvironment(
 ): Promise<{ runtimeEnv: NodeJS.ProcessEnv; maintenanceModeNotice?: string }> {
   try {
     await (deps.ensureDaemonAvailable || ensureDaemonAvailable)(context);
-    return {
-      runtimeEnv: {
-        ...runtimeEnv,
-        [RIN_TUI_RUNTIME_ROLE_ENV]: RIN_TUI_RPC_FRONTEND_ROLE,
-      },
-    };
+    return { runtimeEnv };
   } catch (error) {
     return {
-      runtimeEnv: {
-        ...runtimeEnv,
-        [RIN_TUI_RUNTIME_ROLE_ENV]: RIN_TUI_MAINTENANCE_ROLE,
-      },
+      runtimeEnv,
       maintenanceModeNotice: formatMaintenanceModeNotice(error),
     };
   }

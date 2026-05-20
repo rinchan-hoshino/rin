@@ -625,7 +625,7 @@ test("sync-upstreams cleans temporary clone directories after successful sync", 
       ref: "v0.70.0",
     });
 
-    runDefaultSync(workspace, { RIN_TMP_DIR: tempRoot });
+    runDefaultSync(workspace, { TMPDIR: tempRoot });
 
     assert.deepEqual(syncTempEntries(tempRoot), []);
   } finally {
@@ -652,7 +652,7 @@ test("sync-upstreams cleans temporary clone directories after clone failures", (
           "v0.70.0",
         ],
         workspace,
-        { RIN_TMP_DIR: tempRoot },
+        { TMPDIR: tempRoot },
       ),
     );
     assert.deepEqual(syncTempEntries(tempRoot), []);

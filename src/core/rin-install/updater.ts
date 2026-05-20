@@ -34,14 +34,6 @@ function note(message?: string, title?: string) {
   process.stdout.write(`${renderUpdaterNote(message, title)}\n`);
 }
 
-function shouldAssumeYes() {
-  return ["1", "true", "yes", "y"].includes(
-    String(process.env.RIN_UPDATE_ASSUME_YES || "")
-      .trim()
-      .toLowerCase(),
-  );
-}
-
 async function selectUpdateTarget(
   ensureNotCancelled: <T>(value: T | symbol) => T,
   promptSelect: typeof select,
@@ -81,26 +73,21 @@ export async function startUpdater(deps: {
     ownerHome: string;
   }) => string;
   runFinalizeInstallPlanInChild?: typeof runFinalizeInstallPlanInChildImpl;
+  requestedInstallDir?: string;
+  requestedTargetUser?: string;
+  assumeYes?: boolean;
 }) {
   const currentUser = deps.detectCurrentUser();
   const promptSelect = deps.select || select;
   const promptConfirm = deps.confirm || confirm;
-  const initialI18n =
-    deps.i18n ||
-    createInstallerI18n(
-      process.env.RIN_INSTALL_LANGUAGE || DEFAULT_LANGUAGE_TAG,
-    );
+  const initialI18n = deps.i18n || createInstallerI18n(DEFAULT_LANGUAGE_TAG);
   const runFinalizeInstallPlanInChild =
     deps.runFinalizeInstallPlanInChild || runFinalizeInstallPlanInChildImpl;
 
   intro(initialI18n.updaterIntroTitle);
 
-  const requestedInstallDir = String(
-    process.env.RIN_UPDATE_INSTALL_DIR || "",
-  ).trim();
-  const requestedTargetUser = String(
-    process.env.RIN_UPDATE_TARGET_USER || "",
-  ).trim();
+  const requestedInstallDir = String(deps.requestedInstallDir || "").trim();
+  const requestedTargetUser = String(deps.requestedTargetUser || "").trim();
   const target =
     requestedInstallDir && requestedTargetUser
       ? {
@@ -158,7 +145,7 @@ export async function startUpdater(deps: {
     i18n.updatePlanTitle,
   );
 
-  const shouldProceed = shouldAssumeYes()
+  const shouldProceed = deps.assumeYes
     ? true
     : deps.ensureNotCancelled(
         await promptConfirm({

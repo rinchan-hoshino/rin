@@ -39,7 +39,7 @@ import {
   detectLocalLanguageTag,
   normalizeLanguageTag,
 } from "../language.js";
-import { releaseInfoFromEnv } from "../rin-lib/release.js";
+import { releaseInfoFromFile } from "../rin-lib/release.js";
 import { runGuiInstaller, shouldStartGuiInstaller } from "./gui.js";
 import {
   describeOwnership,
@@ -58,15 +58,41 @@ import {
   registerLocalUserTarget,
 } from "./deployment-targets.js";
 
+let currentInstallerLanguage = DEFAULT_LANGUAGE_TAG;
+
 function ensureNotCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
-    const i18n = createInstallerI18n(
-      process.env.RIN_INSTALL_LANGUAGE || DEFAULT_LANGUAGE_TAG,
-    );
+    const i18n = createInstallerI18n(currentInstallerLanguage);
     cancel(i18n.installerCancelled);
     process.exit(1);
   }
   return value as T;
+}
+
+function readValueArg(argv: string[], name: string) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = String(argv[index] || "").trim();
+    if (value === name) return String(argv[index + 1] || "").trim();
+    if (value.startsWith(`${name}=`))
+      return value.slice(name.length + 1).trim();
+  }
+  return "";
+}
+
+function parseInstallerCliArgs(argv: string[]) {
+  const hasFlag = (name: string) =>
+    argv.some((arg) => String(arg || "").trim() === name);
+  return {
+    applyPlanFile: readValueArg(argv, "--apply-plan-file"),
+    applyResultFile: readValueArg(argv, "--apply-result-file"),
+    applyErrorFile: readValueArg(argv, "--apply-error-file"),
+    update: hasFlag("--update"),
+    updateTargetUser: readValueArg(argv, "--target-user"),
+    updateInstallDir: readValueArg(argv, "--install-dir"),
+    updateAssumeYes: hasFlag("--yes"),
+    language: normalizeLanguageTag(readValueArg(argv, "--language"), ""),
+    releaseFile: readValueArg(argv, "--release-file"),
+  };
 }
 
 function summarizeDirState(dir: string) {
@@ -114,18 +140,13 @@ async function launchInstallerInitTui(options: {
   });
 }
 
-export async function startInstaller() {
-  const applyPlanRaw = String(process.env.RIN_INSTALL_APPLY_PLAN || "").trim();
-  const applyPlanFile = String(
-    process.env.RIN_INSTALL_APPLY_PLAN_FILE || "",
-  ).trim();
-  if (applyPlanRaw || applyPlanFile) {
-    const resultPath = String(
-      process.env.RIN_INSTALL_APPLY_RESULT || "",
-    ).trim();
-    const errorPath = String(process.env.RIN_INSTALL_APPLY_ERROR || "").trim();
+export async function startInstaller(argv = process.argv.slice(2)) {
+  const cli = parseInstallerCliArgs(argv);
+  if (cli.applyPlanFile) {
+    const resultPath = cli.applyResultFile;
+    const errorPath = cli.applyErrorFile;
     try {
-      const rawPlan = applyPlanRaw || fs.readFileSync(applyPlanFile, "utf8");
+      const rawPlan = fs.readFileSync(cli.applyPlanFile, "utf8");
       const result = await finalizeInstallPlan(
         JSON.parse(rawPlan) as FinalizeInstallOptions,
       );
@@ -143,28 +164,19 @@ export async function startInstaller() {
     }
   }
 
-  if (
-    String(process.env.RIN_INSTALL_MODE || "")
-      .trim()
-      .toLowerCase() === "update"
-  ) {
+  if (cli.update) {
     const updateCurrentUser = detectCurrentUser();
-    const updateTargetUser = String(
-      process.env.RIN_UPDATE_TARGET_USER || updateCurrentUser,
-    ).trim();
+    const updateTargetUser = cli.updateTargetUser || updateCurrentUser;
     const updateTargetHome = targetHomeForUser(updateTargetUser);
     const selectedLanguage = readInstalledUpdateLanguage({
       currentUser: updateCurrentUser,
       targetUser: updateTargetUser,
       installDir:
-        String(process.env.RIN_UPDATE_INSTALL_DIR || "").trim() ||
-        defaultInstallDirForHome(updateTargetHome),
+        cli.updateInstallDir || defaultInstallDirForHome(updateTargetHome),
     });
     const displayLanguage =
-      selectedLanguage ||
-      normalizeLanguageTag(process.env.RIN_INSTALL_LANGUAGE, "") ||
-      detectLocalLanguageTag();
-    process.env.RIN_INSTALL_LANGUAGE = displayLanguage;
+      selectedLanguage || cli.language || detectLocalLanguageTag();
+    currentInstallerLanguage = displayLanguage;
     const i18n = createInstallerI18n(displayLanguage);
     const localizedConfirm: typeof confirm = (options) =>
       confirm({
@@ -176,17 +188,20 @@ export async function startInstaller() {
       detectCurrentUser: () => updateCurrentUser,
       repoRootFromHere,
       ensureNotCancelled,
-      release: releaseInfoFromEnv(),
+      release: releaseInfoFromFile(cli.releaseFile),
       select,
       confirm: localizedConfirm,
       i18n,
       readInstalledUpdateLanguage,
+      requestedInstallDir: cli.updateInstallDir,
+      requestedTargetUser: cli.updateTargetUser,
+      assumeYes: cli.updateAssumeYes,
     });
     return;
   }
 
-  if (shouldStartGuiInstaller(process.argv.slice(2))) {
-    await runGuiInstaller(process.argv.slice(2));
+  if (shouldStartGuiInstaller(argv)) {
+    await runGuiInstaller(argv);
     return;
   }
 
@@ -195,7 +210,7 @@ export async function startInstaller() {
     select,
     text,
   });
-  process.env.RIN_INSTALL_LANGUAGE = selectedLanguage;
+  currentInstallerLanguage = selectedLanguage;
   const i18n = createInstallerI18n(selectedLanguage);
 
   const { currentUser, allUsers } = await runInstallerProgress(
@@ -415,7 +430,7 @@ export async function startInstaller() {
           chatDetail,
           chatConfig,
           authData: authResult.authData || {},
-          release: releaseInfoFromEnv(),
+          release: releaseInfoFromFile(cli.releaseFile),
         },
         installSpinnerMessage,
         { writeStatus() {} },

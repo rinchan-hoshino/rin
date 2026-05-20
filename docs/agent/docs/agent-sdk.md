@@ -10,9 +10,7 @@ Run scripts that import Rin source modules with `node --import tsx script.mjs`.
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const rinAppDir =
-  process.env.RIN_APP_DIR ||
-  path.join(process.env.HOME, ".rin", "app", "current");
+const rinAppDir = path.join(process.env.HOME, ".rin", "app", "current");
 const sdkUrl = pathToFileURL(
   path.join(rinAppDir, "src", "core", "rin-agent-sdk", "index.ts"),
 ).href;

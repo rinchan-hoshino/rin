@@ -12,8 +12,6 @@ export type RinTargetStoreData = {
 };
 
 export function targetStorePath(home = os.homedir()) {
-  const explicit = safeString(process.env.RIN_TARGETS_FILE).trim();
-  if (explicit) return path.resolve(explicit);
   return path.join(home, ".rin", "targets.json");
 }
 

@@ -263,7 +263,7 @@ test("tui launcher treats daemon status as the rpc startup health check", async 
     assert.equal(requests[0].type, "daemon_status");
     assert.equal(
       await launcher.shouldStartMaintenanceMode({
-        env: { RIN_TUI_RUNTIME_ROLE: "rpc-frontend" },
+        requestedRole: "rpc-frontend",
         socketPath,
         timeoutMs: 500,
       }),
@@ -271,7 +271,7 @@ test("tui launcher treats daemon status as the rpc startup health check", async 
     );
     assert.equal(
       await launcher.shouldStartMaintenanceMode({
-        env: { RIN_TUI_RUNTIME_ROLE: "maintenance-tui" },
+        requestedRole: "maintenance-tui",
         socketPath: path.join(runtimeDir, "missing.sock"),
         timeoutMs: 1,
       }),

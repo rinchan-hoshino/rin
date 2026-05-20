@@ -7,7 +7,10 @@ import {
 } from "../rin-gui/host-launch.js";
 import { escapeHtml } from "../rin-gui/web-assets.js";
 import { DEFAULT_LANGUAGE_TAG } from "../language.js";
-import { releaseInfoFromEnv } from "../rin-lib/release.js";
+import {
+  releaseInfoFromFile,
+  type InstalledReleaseInfo,
+} from "../rin-lib/release.js";
 import {
   buildFinalizeInstallPlanCommand,
   runFinalizeInstallPlanInChild,
@@ -33,7 +36,7 @@ import {
   targetHomeForUser,
 } from "./users.js";
 
-export type GuiInstallerOptions = Record<string, never>;
+export type GuiInstallerOptions = { releaseFile?: string };
 
 export type GuiInstallerPlanInput = {
   language?: string;
@@ -77,29 +80,33 @@ export function buildGuiInstallerHostLaunch(
 export function shouldStartGuiInstaller(
   argv: string[],
   platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
 ) {
   const args = argv.map((arg) => String(arg || "").trim()).filter(Boolean);
-  if (String(env.RIN_INSTALL_APPLY_PLAN || "").trim()) return false;
-  if (
-    String(env.RIN_INSTALL_MODE || "")
-      .trim()
-      .toLowerCase() === "update"
-  )
+  if (args.includes("--apply-plan-file") || args.includes("--update")) {
     return false;
+  }
   if (args.includes("--tui") || args.includes("--no-gui")) return false;
   if (args.includes("--gui")) return true;
   return platform === "win32";
 }
 
 export function parseGuiInstallerArgs(argv: string[]): GuiInstallerOptions {
-  for (const rawArg of argv) {
-    const arg = String(rawArg || "").trim();
+  let releaseFile = "";
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = String(argv[index] || "").trim();
     if (!arg || arg === "--gui") continue;
+    if (arg === "--release-file") {
+      releaseFile = String(argv[++index] || "").trim();
+      continue;
+    }
+    if (arg.startsWith("--release-file=")) {
+      releaseFile = arg.slice("--release-file=".length).trim();
+      continue;
+    }
     if (arg === "--") break;
     throw new Error(`rin_installer_gui_unrecognized_arg:${arg}`);
   }
-  return {};
+  return releaseFile ? { releaseFile } : {};
 }
 
 function sendHostEvent(stdin: NodeJS.WritableStream, payload: unknown) {
@@ -232,7 +239,7 @@ export function buildGuiInstallerFinalizePlan(
   input: GuiInstallerPlanInput = {},
   deps: {
     readJsonFile?: typeof readJsonFile;
-    releaseInfoFromEnv?: typeof releaseInfoFromEnv;
+    release?: InstalledReleaseInfo;
     describeOwnership?: typeof describeOwnership;
     shouldUseElevatedWrite?: typeof shouldUseElevatedWrite;
     platform?: NodeJS.Platform;
@@ -275,7 +282,7 @@ export function buildGuiInstallerFinalizePlan(
       chatDetail: "",
       chatConfig: null,
       authData,
-      release: (deps.releaseInfoFromEnv || releaseInfoFromEnv)(),
+      release: deps.release,
     },
     needsElevatedWrite,
     needsElevatedService,
@@ -558,7 +565,10 @@ export function buildGuiInstallerHtml() {
 </html>`;
 }
 
-async function handleGuiInstallerCommand(command: any) {
+async function handleGuiInstallerCommand(
+  command: any,
+  options: GuiInstallerOptions = {},
+) {
   if (command?.type === "installer:models") {
     return {
       type: "installer:models",
@@ -578,7 +588,9 @@ async function handleGuiInstallerCommand(command: any) {
     return { type: "installer:auth:api-key", ok: true, ...result };
   }
   if (command?.type === "installer:apply") {
-    const finalPlan = buildGuiInstallerFinalizePlan(command.input || {});
+    const finalPlan = buildGuiInstallerFinalizePlan(command.input || {}, {
+      release: releaseInfoFromFile(options.releaseFile),
+    });
     if (finalPlan.needsElevatedWrite || finalPlan.needsElevatedService) {
       const planPath = writeFinalizeInstallPlanFile(finalPlan.options);
       return {
@@ -603,7 +615,7 @@ async function handleGuiInstallerCommand(command: any) {
 export async function runGuiInstaller(
   rawArgv: string[] = process.argv.slice(2),
 ) {
-  parseGuiInstallerArgs(rawArgv);
+  const options = parseGuiInstallerArgs(rawArgv);
   const launch = buildGuiInstallerHostLaunch();
   const child = spawn(launch.command, launch.args, {
     stdio: ["pipe", "pipe", "inherit"],
@@ -630,7 +642,7 @@ export async function runGuiInstaller(
           child.kill();
           return;
         }
-        const event = await handleGuiInstallerCommand(command);
+        const event = await handleGuiInstallerCommand(command, options);
         if (event) sendHostEvent(child.stdin, event);
       })().catch((error) => {
         const type = (() => {

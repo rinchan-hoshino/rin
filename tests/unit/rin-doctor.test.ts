@@ -106,9 +106,9 @@ test("rin doctor renderers format daemon status details consistently", () => {
     renderWebSearchDoctorLines({
       runtime: {
         ready: true,
-        mode: "direct",
-        providerCount: 1,
-        providers: ["google"],
+        mode: "searxng-sidecar",
+        providerCount: 3,
+        providers: ["google", "bing", "duckduckgo"],
       },
       instances: [
         {
@@ -122,10 +122,12 @@ test("rin doctor renderers format daemon status details consistently", () => {
     }),
     [
       "webSearchRuntimeReady=yes",
-      "webSearchMode=direct",
-      "webSearchProviderCount=1",
+      "webSearchMode=searxng-sidecar",
+      "webSearchProviderCount=3",
       "webSearchInstanceCount=1",
       "webSearchProvider=google",
+      "webSearchProvider=bing",
+      "webSearchProvider=duckduckgo",
       "webSearchInstance=primary pid=123 alive=yes port=8080 baseUrl=http://127.0.0.1:8080",
     ],
   );

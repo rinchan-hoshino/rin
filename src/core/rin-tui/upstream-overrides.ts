@@ -31,9 +31,9 @@ import {
 import { extractMessageText } from "../message-content.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 import {
+  getRinTuiRuntimeRole,
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RPC_FRONTEND_ROLE,
-  RIN_TUI_RUNTIME_ROLE_ENV,
 } from "../tui-runtime-env.js";
 
 let applied = false;
@@ -64,7 +64,7 @@ function dim(text: string) {
 }
 
 function currentRuntimeModeLabel() {
-  const role = String(process.env[RIN_TUI_RUNTIME_ROLE_ENV] || "").trim();
+  const role = getRinTuiRuntimeRole();
   if (role === RIN_TUI_RPC_FRONTEND_ROLE) return "daemon";
   if (role === RIN_TUI_MAINTENANCE_ROLE) return "maint";
   return undefined;

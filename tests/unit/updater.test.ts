@@ -38,20 +38,9 @@ function fakeUpdateResult(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function withUpdaterEnv(fn: (stdout: string[]) => Promise<void>) {
-  const keys = [
-    "RIN_UPDATE_INSTALL_DIR",
-    "RIN_UPDATE_TARGET_USER",
-    "RIN_UPDATE_ASSUME_YES",
-    "RIN_INSTALL_LANGUAGE",
-  ] as const;
-  const original = new Map<string, string | undefined>();
+async function withUpdaterStdout(fn: (stdout: string[]) => Promise<void>) {
   const originalWrite = process.stdout.write;
   const stdout: string[] = [];
-  for (const key of keys) original.set(key, process.env[key]);
-  process.env.RIN_UPDATE_INSTALL_DIR = "/home/alice/.rin";
-  process.env.RIN_UPDATE_TARGET_USER = "alice";
-  process.env.RIN_UPDATE_ASSUME_YES = "true";
   process.stdout.write = ((chunk: any) => {
     stdout.push(String(chunk));
     return true;
@@ -60,16 +49,16 @@ async function withUpdaterEnv(fn: (stdout: string[]) => Promise<void>) {
     await fn(stdout);
   } finally {
     process.stdout.write = originalWrite;
-    for (const key of keys) {
-      const value = original.get(key);
-      if (value == null) delete process.env[key];
-      else process.env[key] = value;
-    }
   }
 }
 
+const requestedUpdateTarget = {
+  requestedInstallDir: "/home/alice/.rin",
+  requestedTargetUser: "alice",
+};
+
 test("startUpdater does not write language during core updates", async () => {
-  await withUpdaterEnv(async () => {
+  await withUpdaterStdout(async () => {
     let capturedOptions: any;
 
     await updater.startUpdater({
@@ -78,6 +67,8 @@ test("startUpdater does not write language during core updates", async () => {
       ensureNotCancelled: (value: unknown) => value,
       i18n: installerI18n.createInstallerI18n("en_US"),
       readInstalledUpdateLanguage: () => "",
+      ...requestedUpdateTarget,
+      assumeYes: true,
       async runFinalizeInstallPlanInChild(options: any) {
         capturedOptions = options;
         return fakeUpdateResult();
@@ -91,10 +82,9 @@ test("startUpdater does not write language during core updates", async () => {
 });
 
 test("startUpdater uses installed language for UI without rewriting settings", async () => {
-  await withUpdaterEnv(async () => {
+  await withUpdaterStdout(async () => {
     let capturedOptions: any;
     let confirmMessage = "";
-    process.env.RIN_UPDATE_ASSUME_YES = "";
 
     await updater.startUpdater({
       detectCurrentUser: () => "alice",
@@ -102,6 +92,7 @@ test("startUpdater uses installed language for UI without rewriting settings", a
       ensureNotCancelled: (value: unknown) => value,
       i18n: installerI18n.createInstallerI18n("en_US"),
       readInstalledUpdateLanguage: () => "zh_CN",
+      ...requestedUpdateTarget,
       async confirm(options: any) {
         confirmMessage = String(options.message || "");
         return true;
@@ -121,9 +112,7 @@ test("startUpdater uses installed language for UI without rewriting settings", a
 });
 
 test("startUpdater localizes zh_CN update notes beyond the confirm prompt", async () => {
-  await withUpdaterEnv(async (stdout) => {
-    process.env.RIN_UPDATE_ASSUME_YES = "true";
-
+  await withUpdaterStdout(async (stdout) => {
     await updater.startUpdater({
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
@@ -138,6 +127,8 @@ test("startUpdater localizes zh_CN update notes beyond the confirm prompt", asyn
       },
       i18n: installerI18n.createInstallerI18n("en_US"),
       readInstalledUpdateLanguage: () => "zh_CN",
+      ...requestedUpdateTarget,
+      assumeYes: true,
       async runFinalizeInstallPlanInChild() {
         return fakeUpdateResult({
           serviceHint:

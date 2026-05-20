@@ -105,16 +105,11 @@ function createLogger(name: string) {
 }
 
 const logger = createLogger("rin-chat");
-const RIN_CHAT_SETTINGS_PATH_ENV = "RIN_CHAT_SETTINGS_PATH";
-const LEGACY_RIN_KOISHI_SETTINGS_PATH_ENV = "RIN_KOISHI_SETTINGS_PATH";
 const TYPING_POLL_INTERVAL_MS = 4000;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
 const CHAT_INBOX_PROCESSING_STALE_MS = 10 * 60 * 1000;
 const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
-const DETACHED_CONTROLLER_SLEEP_IDLE_MS = Math.max(
-  1_000,
-  Number(process.env.RIN_DETACHED_CONTROLLER_SLEEP_IDLE_MS || 60_000),
-);
+const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
 
 async function buildTelegramInboundMediaDebug(session: any) {
   const update = session?.telegram;
@@ -299,13 +294,13 @@ export async function startChatBridge(
     hosted?: boolean;
     frontendClientFactory?: () => RinFrontendTurnClient;
     chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
+    settingsPath?: string;
   } = {},
 ): Promise<ChatBridgeHandle> {
   const runtime = resolveRuntimeProfile();
   const dataDir = path.join(runtime.agentDir, "data");
   const settingsPath =
-    process.env[RIN_CHAT_SETTINGS_PATH_ENV]?.trim() ||
-    process.env[LEGACY_RIN_KOISHI_SETTINGS_PATH_ENV]?.trim() ||
+    safeString(options.settingsPath).trim() ||
     path.join(runtime.agentDir, "settings.json");
   applyRuntimeProfileEnvironment(runtime);
   if (process.cwd() !== runtime.cwd) process.chdir(runtime.cwd);

@@ -97,16 +97,17 @@ export async function startDaemon(
     backgroundExtensionManager?: RinBackgroundExtensionManager;
     daemonExtensionManager?: RinBackgroundExtensionManager;
     instanceLock?: DaemonInstanceLock;
+    workerGcIdleMs?: number;
+    workerSweepIntervalMs?: number;
+    shutdownGraceMs?: number;
   } = {},
 ) {
-  const socketPath =
-    options.socketPath || process.argv[2] || defaultDaemonSocketPath();
+  const socketPath = options.socketPath || defaultDaemonSocketPath();
   const bridgeSocketPath = bridgeDaemonSocketPath(
     process.env.RIN_DIR || resolveRuntimeProfile().agentDir,
   );
   const workerPath =
     options.workerPath ||
-    process.env.RIN_WORKER_PATH ||
     path.join(path.dirname(new URL(import.meta.url).pathname), "worker.js");
   const runtime = resolveRuntimeProfile();
   applyRuntimeProfileEnvironment(runtime);
@@ -126,8 +127,9 @@ export async function startDaemon(
   const workerPool = new WorkerPool({
     workerPath,
     cwd: runtime.cwd,
-    gcIdleMs: Number(process.env.RIN_WORKER_GC_IDLE_MS || 30_000),
-    sweepIntervalMs: Number(process.env.RIN_WORKER_GC_SWEEP_MS || 5_000),
+    gcIdleMs: options.workerGcIdleMs,
+    sweepIntervalMs: options.workerSweepIntervalMs,
+    resourceOptionsDir: path.join(runtime.agentDir, "data", "worker-options"),
     onWorkerSpawn: (requester, worker) => {
       if (requester)
         writeLine(requester.socket, {
@@ -669,10 +671,7 @@ export async function startDaemon(
   }
 
   let shuttingDown = false;
-  const shutdownGraceMs = Math.max(
-    0,
-    Number(process.env.RIN_DAEMON_SHUTDOWN_GRACE_MS || 3_000),
-  );
+  const shutdownGraceMs = Math.max(0, Number(options.shutdownGraceMs ?? 3_000));
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -705,8 +704,50 @@ export async function startDaemon(
   process.on("SIGTERM", shutdown);
 }
 
+function parseDaemonCliArgs(argv: string[]) {
+  let socketPath = "";
+  let workerPath = "";
+  let shutdownGraceMs: number | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = String(argv[index] || "").trim();
+    if (!arg) continue;
+    if (arg === "--socket") {
+      socketPath = String(argv[++index] || "").trim() || socketPath;
+      continue;
+    }
+    if (arg.startsWith("--socket=")) {
+      socketPath = arg.slice("--socket=".length).trim() || socketPath;
+      continue;
+    }
+    if (arg === "--worker") {
+      workerPath = String(argv[++index] || "").trim() || workerPath;
+      continue;
+    }
+    if (arg.startsWith("--worker=")) {
+      workerPath = arg.slice("--worker=".length).trim() || workerPath;
+      continue;
+    }
+    if (arg === "--shutdown-grace-ms") {
+      shutdownGraceMs = Number(argv[++index]);
+      continue;
+    }
+    if (arg.startsWith("--shutdown-grace-ms=")) {
+      shutdownGraceMs = Number(arg.slice("--shutdown-grace-ms=".length));
+      continue;
+    }
+    if (!arg.startsWith("-") && !socketPath) socketPath = arg;
+  }
+  return {
+    socketPath: socketPath || undefined,
+    workerPath: workerPath || undefined,
+    shutdownGraceMs: Number.isFinite(shutdownGraceMs)
+      ? shutdownGraceMs
+      : undefined,
+  };
+}
+
 async function main() {
-  await startDaemon();
+  await startDaemon(parseDaemonCliArgs(process.argv.slice(2)));
 }
 
 const isDirectEntry =

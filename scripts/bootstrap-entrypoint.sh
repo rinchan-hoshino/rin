@@ -37,7 +37,7 @@ shift || true
 REPO_URL=${RIN_INSTALL_REPO_URL:-https://github.com/rinchanai/rin}
 BOOTSTRAP_BRANCH=${RIN_BOOTSTRAP_BRANCH:-bootstrap}
 CACHE_BASE=${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}
-TMPDIR_BASE=${RIN_INSTALL_TMPDIR:-$CACHE_BASE/rin-install}
+TMPDIR_BASE=${TMPDIR:-$CACHE_BASE/rin-install}
 mkdir -p "$TMPDIR_BASE"
 WORKDIR=$(mktemp -d "$TMPDIR_BASE/$WORK_PREFIX.XXXXXX")
 ARCHIVE="$WORKDIR/rin.tar.gz"
@@ -310,16 +310,16 @@ fetch_manifest() {
 }
 
 resolve_release() {
-  node - "$MANIFEST_PATH" <<'NODE'
+  node - "$MANIFEST_PATH" "$REPO_URL" "$PACKAGE_NAME" "$CHANNEL" "$BRANCH" "$VERSION" "$BOOTSTRAP_BRANCH" <<'NODE'
 const fs = require('node:fs');
-const manifestPath = process.argv[2];
+const [manifestPath, repoArg, packageArg, channelArg, branchArg, versionArg, bootstrapBranchArg] = process.argv.slice(2);
 const safeString = (value) => (value == null ? '' : String(value));
 const trimValue = (value) => safeString(value).trim();
-const repoUrl = trimValue(process.env.RIN_INSTALL_REPO_URL || 'https://github.com/rinchanai/rin').replace(/\.git$/i, '');
-const packageName = trimValue(process.env.RIN_NPM_PACKAGE || '@rinchanai20260422/rin');
-const channel = trimValue(process.env.RIN_RELEASE_CHANNEL || 'stable').toLowerCase() || 'stable';
-const branch = trimValue(process.env.RIN_RELEASE_BRANCH);
-const version = trimValue(process.env.RIN_RELEASE_VERSION);
+const repoUrl = trimValue(repoArg || 'https://github.com/rinchanai/rin').replace(/\.git$/i, '');
+const packageName = trimValue(packageArg || '@rinchanai20260422/rin');
+const channel = trimValue(channelArg || 'stable').toLowerCase() || 'stable';
+const branch = trimValue(branchArg);
+const version = trimValue(versionArg);
 const buildNpmTarballUrl = (name, releaseVersion) => {
   const encodedName = encodeURIComponent(name || '@rinchanai20260422/rin');
   const fileBase = String(name || '@rinchanai20260422/rin').split('/').pop();
@@ -329,7 +329,7 @@ const defaultManifest = {
   schemaVersion: 2,
   packageName,
   repoUrl,
-  bootstrapBranch: trimValue(process.env.RIN_BOOTSTRAP_BRANCH || 'bootstrap') || 'bootstrap',
+  bootstrapBranch: trimValue(bootstrapBranchArg || 'bootstrap') || 'bootstrap',
   train: {
     series: '0.0',
     nightlyBranch: 'main',
@@ -434,51 +434,21 @@ NODE
 
 launch_installer_entry() {
   if [ "$MODE" = update ]; then
-    env \
-      RIN_INSTALL_MODE=update \
-      RIN_RELEASE_CHANNEL="$CHANNEL" \
-      RIN_RELEASE_VERSION="$VERSION" \
-      RIN_RELEASE_BRANCH="$BRANCH" \
-      RIN_RELEASE_REF="$REF" \
-      RIN_RELEASE_SOURCE_LABEL="$SOURCE_LABEL" \
-      RIN_RELEASE_ARCHIVE_URL="$ARCHIVE_URL" \
-      node "$INSTALLER_ENTRY"
+    node "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --update
     return $?
   fi
 
-  env \
-    RIN_RELEASE_CHANNEL="$CHANNEL" \
-    RIN_RELEASE_VERSION="$VERSION" \
-    RIN_RELEASE_BRANCH="$BRANCH" \
-    RIN_RELEASE_REF="$REF" \
-    RIN_RELEASE_SOURCE_LABEL="$SOURCE_LABEL" \
-    RIN_RELEASE_ARCHIVE_URL="$ARCHIVE_URL" \
-    node "$INSTALLER_ENTRY"
+  node "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE"
 }
 
 launch_published_installer() {
   package_spec=${PACKAGE_NAME}@${VERSION}
   if [ "$MODE" = update ]; then
-    env \
-      RIN_INSTALL_MODE=update \
-      RIN_RELEASE_CHANNEL="$CHANNEL" \
-      RIN_RELEASE_VERSION="$VERSION" \
-      RIN_RELEASE_BRANCH="$BRANCH" \
-      RIN_RELEASE_REF="$REF" \
-      RIN_RELEASE_SOURCE_LABEL="$SOURCE_LABEL" \
-      RIN_RELEASE_ARCHIVE_URL="$ARCHIVE_URL" \
-      npm exec --yes --package "$package_spec" -- rin-install
+    npm exec --yes --package "$package_spec" -- rin-install --release-file "$RELEASE_FILE" --update
     return $?
   fi
 
-  env \
-    RIN_RELEASE_CHANNEL="$CHANNEL" \
-    RIN_RELEASE_VERSION="$VERSION" \
-    RIN_RELEASE_BRANCH="$BRANCH" \
-    RIN_RELEASE_REF="$REF" \
-    RIN_RELEASE_SOURCE_LABEL="$SOURCE_LABEL" \
-    RIN_RELEASE_ARCHIVE_URL="$ARCHIVE_URL" \
-    npm exec --yes --package "$package_spec" -- rin-install
+  npm exec --yes --package "$package_spec" -- rin-install --release-file "$RELEASE_FILE"
 }
 
 INSTALLER_ENTRY='dist/app/rin-install/main.js'
@@ -487,8 +457,14 @@ parse_args "$@"
 check_node_version
 : >"$LOGFILE"
 run_step "$MANIFEST_LABEL" fetch_manifest
-eval "$(RIN_RELEASE_CHANNEL=$CHANNEL RIN_RELEASE_BRANCH=$BRANCH RIN_RELEASE_VERSION=$VERSION RIN_INSTALL_REPO_URL=$REPO_URL RIN_NPM_PACKAGE=$PACKAGE_NAME resolve_release)"
+eval "$(resolve_release)"
 PACKAGE_NAME=${PACKAGE_NAME:-${RIN_NPM_PACKAGE:-@rinchanai20260422/rin}}
+RELEASE_FILE="$WORKDIR/release.json"
+node - "$RELEASE_FILE" "$CHANNEL" "$VERSION" "$BRANCH" "$REF" "$SOURCE_LABEL" "$ARCHIVE_URL" <<'NODE'
+const fs = require('node:fs');
+const [file, channel, version, branch, ref, sourceLabel, archiveUrl] = process.argv.slice(2);
+fs.writeFileSync(file, `${JSON.stringify({ channel, version, branch, ref, sourceLabel, archiveUrl })}\n`, { mode: 0o600 });
+NODE
 
 if [ "$CHANNEL" = stable ]; then
   if command -v npm >/dev/null 2>&1; then

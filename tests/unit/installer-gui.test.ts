@@ -13,18 +13,18 @@ const gui = await import(
 );
 
 test("installer GUI starts by default only for Windows interactive installs", () => {
-  assert.equal(gui.shouldStartGuiInstaller([], "win32", {}), true);
-  assert.equal(gui.shouldStartGuiInstaller(["--gui"], "linux", {}), true);
-  assert.equal(gui.shouldStartGuiInstaller(["--tui"], "win32", {}), false);
-  assert.equal(gui.shouldStartGuiInstaller(["--no-gui"], "win32", {}), false);
+  assert.equal(gui.shouldStartGuiInstaller([], "win32"), true);
+  assert.equal(gui.shouldStartGuiInstaller(["--gui"], "linux"), true);
+  assert.equal(gui.shouldStartGuiInstaller(["--tui"], "win32"), false);
+  assert.equal(gui.shouldStartGuiInstaller(["--no-gui"], "win32"), false);
   assert.equal(
-    gui.shouldStartGuiInstaller([], "win32", { RIN_INSTALL_APPLY_PLAN: "{}" }),
+    gui.shouldStartGuiInstaller(
+      ["--apply-plan-file", "/tmp/plan.json"],
+      "win32",
+    ),
     false,
   );
-  assert.equal(
-    gui.shouldStartGuiInstaller([], "win32", { RIN_INSTALL_MODE: "update" }),
-    false,
-  );
+  assert.equal(gui.shouldStartGuiInstaller(["--update"], "win32"), false);
 });
 
 test("installer GUI launcher uses the shared desktop host contract", () => {
@@ -146,8 +146,14 @@ test("installer GUI builds final apply options from auth-ready selections", () =
       readJsonFile() {
         return { copilot: { type: "oauth" } };
       },
-      releaseInfoFromEnv() {
-        return { channel: "git", version: "0.0.0", sourceRef: "main" };
+      release: {
+        channel: "git",
+        version: "0.0.0",
+        branch: "main",
+        ref: "main",
+        sourceLabel: "git branch main",
+        archiveUrl: "https://example.test/rin.tar.gz",
+        installedAt: "2026-05-20T00:00:00.000Z",
       },
       describeOwnership() {
         return {

@@ -99,7 +99,7 @@ function formatWebSearchResult(
 
 async function loadSearchWeb() {
   const mod = await import("./service.js");
-  return mod.searchWeb as (params: any) => Promise<any>;
+  return mod.searchWeb as (params: any, options?: any) => Promise<any>;
 }
 
 function formatWebSearchCall(args: any, theme: any) {
@@ -192,7 +192,7 @@ export default function webSearchModule(): RinCapabilityDefinition {
             }),
           ),
         }),
-        execute: async (_toolCallId, params, signal) => {
+        execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
           const url = parseFetchUrl((params as any)?.q);
           if (url) {
             const response = await fetchReadableUrl({
@@ -230,13 +230,13 @@ export default function webSearchModule(): RinCapabilityDefinition {
               ? Number((params as any).limit)
               : 8,
           };
-          const response = await searchWeb(normalizedParams).catch(
-            (error: any) => ({
-              ok: false,
-              results: [],
-              error: String(error?.message || error || "web_search_failed"),
-            }),
-          );
+          const response = await searchWeb(normalizedParams, {
+            stateRoot: ctx?.agentDir,
+          }).catch((error: any) => ({
+            ok: false,
+            results: [],
+            error: String(error?.message || error || "web_search_failed"),
+          }));
 
           const agentText = formatAgentResults(response);
           const userText = formatResults(response);

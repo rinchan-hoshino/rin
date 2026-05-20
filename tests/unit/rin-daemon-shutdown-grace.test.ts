@@ -76,23 +76,31 @@ async function waitForLine(socket, predicate, timeoutMs = 5000) {
   });
 }
 
-async function withDaemon(workerScript, env, fn) {
+async function withDaemon(workerScript, options, fn) {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-daemon-grace-"),
   );
   const socketPath = path.join(agentDir, "daemon.sock");
   const workerPath = path.join(agentDir, "fake-worker.mjs");
-  await fs.writeFile(workerPath, workerScript);
+  await fs.writeFile(
+    workerPath,
+    workerScript.replace("__FAKE_STEP_MS__", String(options.stepMs ?? 0)),
+  );
   const child = spawn(
     process.execPath,
-    [path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"), socketPath],
+    [
+      path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"),
+      socketPath,
+      "--worker",
+      workerPath,
+      "--shutdown-grace-ms",
+      String(options.shutdownGraceMs),
+    ],
     {
       cwd: rootDir,
       env: {
         ...process.env,
         RIN_DIR: agentDir,
-        ...env,
-        RIN_WORKER_PATH: workerPath,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -146,7 +154,7 @@ process.stdin.on("data", (chunk) => {
     }
     if (command.type === "prompt") {
       send({ type: "agent_start" });
-      const delay = Number(process.env.FAKE_STEP_MS || 0);
+      const delay = __FAKE_STEP_MS__;
       const timer = setTimeout(() => {
         timers.delete(timer);
         send({ type: "agent_end" });
@@ -163,7 +171,7 @@ process.stdin.on("data", (chunk) => {
 test("daemon waits for the current worker step to finish before exiting", async () => {
   await withDaemon(
     workerScript,
-    { FAKE_STEP_MS: "400", RIN_DAEMON_SHUTDOWN_GRACE_MS: "5000" },
+    { stepMs: 400, shutdownGraceMs: 5000 },
     async ({ socketPath, child, stdoutRef, stderrRef }) => {
       const socket = net.createConnection(socketPath);
       await new Promise((resolve, reject) => {
@@ -202,7 +210,7 @@ test("daemon waits for the current worker step to finish before exiting", async 
 test("daemon stops waiting once the graceful shutdown timeout is reached", async () => {
   await withDaemon(
     workerScript,
-    { FAKE_STEP_MS: "3000", RIN_DAEMON_SHUTDOWN_GRACE_MS: "250" },
+    { stepMs: 3000, shutdownGraceMs: 250 },
     async ({ socketPath, child }) => {
       const socket = net.createConnection(socketPath);
       await new Promise((resolve, reject) => {

@@ -13,7 +13,6 @@ import {
   loadReleaseManifestForNetwork,
   ReleaseChannel,
   ReleaseManifest,
-  releaseInfoFromEnv,
   resolveReleaseRequest,
 } from "./release.js";
 
@@ -180,9 +179,7 @@ function currentReleaseInfoForOptions(
   options: RinUpdateCheckOptions = {},
 ): InstalledReleaseInfo | undefined {
   return (
-    options.currentRelease ||
-    releaseInfoFromEnv() ||
-    readInstalledRinReleaseInfo(options.runtimeDir)
+    options.currentRelease || readInstalledRinReleaseInfo(options.runtimeDir)
   );
 }
 
@@ -196,8 +193,6 @@ export function getCurrentRinVersion(
   sourceRoot?: string,
   currentRelease?: InstalledReleaseInfo,
 ) {
-  const envVersion = trim(process.env.RIN_RELEASE_VERSION);
-  if (envVersion) return envVersion;
   const releaseVersion = trim(currentRelease?.version);
   if (releaseVersion) return releaseVersion;
   if (!sourceRoot) {
@@ -211,10 +206,6 @@ export function inferRinReleaseChannel(
   version = getCurrentRinVersion(),
   currentRelease?: InstalledReleaseInfo,
 ): ReleaseChannel {
-  const envChannel = trim(process.env.RIN_RELEASE_CHANNEL).toLowerCase();
-  if (isReleaseChannel(envChannel)) {
-    return envChannel;
-  }
   const normalizedVersion = trim(version).toLowerCase();
   if (normalizedVersion.includes("-nightly.")) return "nightly";
   if (normalizedVersion.includes("-beta.")) return "beta";

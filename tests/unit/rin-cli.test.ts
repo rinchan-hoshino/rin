@@ -115,17 +115,17 @@ test("rin update can read target language through the privileged cross-user path
   assert.equal(language, "zh_CN");
 });
 
-test("rin update delegates final update UI to rin-install update mode", () => {
+test("rin update delegates final update UI to rin-install update args", () => {
   const source = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin", "shared.ts"),
     "utf8",
   );
 
-  assert.match(source, /RIN_INSTALL_MODE: "update"/);
-  assert.match(source, /RIN_UPDATE_TARGET_USER/);
-  assert.match(source, /RIN_UPDATE_INSTALL_DIR/);
-  assert.match(source, /RIN_UPDATE_ASSUME_YES/);
-  assert.match(source, /RIN_INSTALL_LANGUAGE: i18n\.language/);
+  assert.match(source, /"--update"/);
+  assert.match(source, /"--target-user"/);
+  assert.match(source, /"--install-dir"/);
+  assert.match(source, /"--language"/);
+  assert.match(source, /parsed\.updateAssumeYes \? \["--yes"\]/);
   assert.match(source, /createUpdateI18n\(installDir, parsed\.targetUser\)/);
   assert.match(source, /rin-install/);
   assert.match(source, /runInstallerProgress/);

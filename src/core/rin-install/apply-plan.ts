@@ -50,9 +50,10 @@ export function buildFinalizeInstallPlanCommand(
   entryPath = process.argv[1] || fileURLToPath(import.meta.url),
 ) {
   return [
-    `RIN_INSTALL_APPLY_PLAN_FILE=${shellQuote(planPath)}`,
     shellQuote(process.execPath),
     shellQuote(entryPath),
+    "--apply-plan-file",
+    shellQuote(planPath),
   ].join(" ");
 }
 
@@ -65,6 +66,7 @@ export async function runFinalizeInstallPlanInChild(
   } = {},
 ) {
   const resultDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-install-"));
+  const planPath = path.join(resultDir, "apply-plan.json");
   const resultPath = path.join(resultDir, "result.json");
   const errorPath = path.join(resultDir, "error.txt");
   try {
@@ -74,17 +76,24 @@ export async function runFinalizeInstallPlanInChild(
       ((status: string) => process.stderr.write(`${status}\n`));
     writeStatus(message);
 
+    fs.writeFileSync(planPath, `${JSON.stringify(options)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     const child = spawnImpl(
       process.execPath,
-      [process.argv[1] || fileURLToPath(import.meta.url)],
+      [
+        process.argv[1] || fileURLToPath(import.meta.url),
+        "--apply-plan-file",
+        planPath,
+        "--apply-result-file",
+        resultPath,
+        "--apply-error-file",
+        errorPath,
+      ],
       {
         stdio: ["inherit", "inherit", "inherit"],
-        env: {
-          ...process.env,
-          RIN_INSTALL_APPLY_PLAN: JSON.stringify(options),
-          RIN_INSTALL_APPLY_RESULT: resultPath,
-          RIN_INSTALL_APPLY_ERROR: errorPath,
-        },
+        env: process.env,
       },
     );
 

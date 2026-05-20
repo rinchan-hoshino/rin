@@ -439,7 +439,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   );
 
   const updateModeBlock = mainSource.slice(
-    mainSource.indexOf('String(process.env.RIN_INSTALL_MODE || "")'),
+    mainSource.indexOf("if (cli.update)"),
     mainSource.indexOf("if (shouldStartGuiInstaller"),
   );
   assert.doesNotMatch(updateModeBlock, /promptInstallerLanguage/);
@@ -451,8 +451,8 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
   assert.match(updaterSource, /renderInstallerNote/);
   assert.match(updaterSource, /wrapInstallerNoteText/);
-  assert.match(updaterSource, /RIN_UPDATE_TARGET_USER/);
-  assert.match(updaterSource, /RIN_UPDATE_ASSUME_YES/);
+  assert.match(updaterSource, /requestedTargetUser/);
+  assert.match(updaterSource, /assumeYes/);
   assert.match(updaterSource, /selectUpdateTarget/);
   assert.match(updaterSource, /readInstalledUpdateLanguage/);
   assert.match(updaterSource, /createInstallerI18n\(displayLanguage\)/);
@@ -467,7 +467,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
     updaterSource,
     /const promptConfirm = deps\.confirm \|\| confirm/,
   );
-  assert.match(updaterSource, /shouldAssumeYes\(\)/);
+  assert.doesNotMatch(updaterSource, /process\.env/);
 });
 
 test("promptProviderSetup reuses complete existing provider config", async () => {

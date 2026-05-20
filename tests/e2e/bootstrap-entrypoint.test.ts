@@ -114,7 +114,7 @@ esac
   await writeExecutable(
     path.join(fakeBin, "npm"),
     `#!/bin/sh
-echo "npm:$PWD:RIN_INSTALL_MODE=\${RIN_INSTALL_MODE-}:RIN_RELEASE_CHANNEL=\${RIN_RELEASE_CHANNEL-}:RIN_RELEASE_BRANCH=\${RIN_RELEASE_BRANCH-}:RIN_RELEASE_VERSION=\${RIN_RELEASE_VERSION-}:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+echo "npm:$PWD:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
 if [ "$1" = "run" ] && [ "$2" = "build" ]; then
   mkdir -p dist/app/rin-install
   printf 'export {};\n' > dist/app/rin-install/main.js
@@ -132,10 +132,6 @@ const logPath = process.env.RIN_BOOTSTRAP_TEST_LOG;
 const args = process.argv.slice(2);
 const fields = [
   "node:" + process.cwd(),
-  "RIN_INSTALL_MODE=" + (process.env.RIN_INSTALL_MODE || ""),
-  "RIN_RELEASE_CHANNEL=" + (process.env.RIN_RELEASE_CHANNEL || ""),
-  "RIN_RELEASE_BRANCH=" + (process.env.RIN_RELEASE_BRANCH || ""),
-  "RIN_RELEASE_VERSION=" + (process.env.RIN_RELEASE_VERSION || ""),
   "stdin_tty=" + (process.stdin.isTTY ? 1 : 0),
   "stdout_tty=" + (process.stdout.isTTY ? 1 : 0),
   args.join(" "),
@@ -177,7 +173,7 @@ if (args[0] === "-") {
       "SOURCE_LABEL='stable 1.2.3'",
     ],
   };
-  const key = process.env.RIN_RELEASE_CHANNEL || "stable";
+  const key = args[4] || args[2] || "stable";
   process.stdout.write((fixtures[key] || fixtures.stable).join("\\n") + "\\n");
 }
 `,
@@ -203,7 +199,7 @@ async function assertBootstrapFails(args, pattern, envOverrides = {}) {
           env: {
             ...process.env,
             ...envOverrides,
-            RIN_INSTALL_TMPDIR: tempDir,
+            TMPDIR: tempDir,
           },
         },
       ),
@@ -313,7 +309,7 @@ test("stable install and update wrappers resolve release metadata before launchi
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
       RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
-      RIN_INSTALL_TMPDIR: workRoot,
+      TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
       RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
@@ -340,11 +336,11 @@ test("stable install and update wrappers resolve release metadata before launchi
     assert.equal(/npm:.*:run build/.test(log), false);
     assert.match(
       log,
-      /npm:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install/,
+      /npm:.*:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install --release-file [^\n]+\n/,
     );
     assert.match(
       log,
-      /npm:.*:RIN_INSTALL_MODE=update:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install/,
+      /npm:.*:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install --release-file [^\s]+ --update/,
     );
 
     assert.deepEqual(await fs.readdir(workRoot), []);
@@ -371,7 +367,7 @@ test("wrapper-only main install script fetches the shared entrypoint from bootst
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
       RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
-      RIN_INSTALL_TMPDIR: workRoot,
+      TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
       RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
@@ -436,7 +432,7 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
       RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
-      RIN_INSTALL_TMPDIR: workRoot,
+      TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
       RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
@@ -473,11 +469,11 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
     );
     assert.match(
       log,
-      /npm:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install/,
+      /npm:.*:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install --release-file [^\n]+\n/,
     );
     assert.match(
       log,
-      /npm:.*:RIN_INSTALL_MODE=update:RIN_RELEASE_CHANNEL=stable:RIN_RELEASE_BRANCH=stable:RIN_RELEASE_VERSION=1\.2\.3:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install/,
+      /npm:.*:exec --yes --package @rinchanai20260422\/rin@1\.2\.3 -- rin-install --release-file [^\s]+ --update/,
     );
     assert.deepEqual(await fs.readdir(workRoot), []);
   });
@@ -497,7 +493,7 @@ test("bootstrap wrappers forward beta nightly and git channel selections", async
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
       RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
-      RIN_INSTALL_TMPDIR: workRoot,
+      TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
       RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
@@ -515,15 +511,15 @@ test("bootstrap wrappers forward beta nightly and git channel selections", async
     const log = await fs.readFile(logPath, "utf8");
     assert.match(
       log,
-      /node:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=beta:RIN_RELEASE_BRANCH=beta:RIN_RELEASE_VERSION=1\.2\.4-beta\.20260420:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js/,
+      /node:.*:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js --release-file [^\s]+/,
     );
     assert.match(
       log,
-      /node:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=nightly:RIN_RELEASE_BRANCH=main:RIN_RELEASE_VERSION=1\.2\.5-nightly\.20260420\+deadbee:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js/,
+      /node:.*:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js --release-file [^\s]+/,
     );
     assert.match(
       log,
-      /node:.*:RIN_INSTALL_MODE=update:RIN_RELEASE_CHANNEL=git:RIN_RELEASE_BRANCH=main:RIN_RELEASE_VERSION=main:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js/,
+      /node:.*:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js --release-file [^\s]+ --update/,
     );
   });
 });
@@ -563,7 +559,7 @@ printf x | sh "${path.join(rootDir, "install.sh")}" --git
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
       RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
-      RIN_INSTALL_TMPDIR: workRoot,
+      TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
       RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
@@ -582,7 +578,7 @@ printf x | sh "${path.join(rootDir, "install.sh")}" --git
     const log = await fs.readFile(logPath, "utf8");
     assert.match(
       log,
-      /node:.*:RIN_INSTALL_MODE=:RIN_RELEASE_CHANNEL=git:RIN_RELEASE_BRANCH=main:RIN_RELEASE_VERSION=main:stdin_tty=1:stdout_tty=1:dist\/app\/rin-install\/main\.js/,
+      /node:.*:stdin_tty=1:stdout_tty=1:dist\/app\/rin-install\/main\.js --release-file [^\s]+/,
     );
   });
 });

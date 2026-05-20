@@ -22,6 +22,11 @@ import {
   resolveRuntimeProfile,
 } from "../../core/rin-lib/runtime.js";
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
+import {
+  cleanupOrphanSearxngSidecars,
+  ensureSearxngSidecar,
+  stopSearxngSidecar,
+} from "../../core/rin-web-search/service.js";
 import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/index.js";
 
 async function main() {
@@ -40,22 +45,50 @@ async function main() {
   applyRuntimeProfileEnvironment(runtime);
 
   const daemonSocketPath = process.argv[2] || defaultDaemonSocketPath();
+  const webSearchInstanceId = `daemon-${process.pid}`;
   let daemonLock: DaemonInstanceLock | null = null;
   let backgroundExtensionManager: RinBackgroundExtensionManager | null = null;
   let chatBridge: Awaited<ReturnType<typeof startChatBridge>> | null = null;
   let servicesPromise: Promise<
     Awaited<ReturnType<typeof startChatBridge>>
   > | null = null;
+  let sidecarHealthTimer: NodeJS.Timeout | null = null;
+  let webSearchEnsureInFlight: Promise<void> | null = null;
+
+  const ensureWebSearch = async () => {
+    if (webSearchEnsureInFlight) return await webSearchEnsureInFlight;
+    webSearchEnsureInFlight = (async () => {
+      await cleanupOrphanSearxngSidecars(runtime.agentDir).catch(() => {});
+      await ensureSearxngSidecar(runtime.agentDir, {
+        instanceId: webSearchInstanceId,
+        logger: console,
+      }).catch(() => {});
+    })().finally(() => {
+      webSearchEnsureInFlight = null;
+    });
+    return await webSearchEnsureInFlight;
+  };
 
   const stopServices = async () => {
+    if (sidecarHealthTimer) clearInterval(sidecarHealthTimer);
+    sidecarHealthTimer = null;
     await chatBridge?.stop().catch(() => {});
     await backgroundExtensionManager?.stop().catch(() => {});
+    await stopSearxngSidecar(runtime.agentDir, {
+      instanceId: webSearchInstanceId,
+      logger: console,
+    }).catch(() => {});
   };
 
   try {
     daemonLock = await acquireDaemonInstanceLock(runtime.agentDir, {
       socketPath: daemonSocketPath,
     });
+
+    void ensureWebSearch();
+    sidecarHealthTimer = setInterval(() => {
+      void ensureWebSearch();
+    }, 10_000);
 
     backgroundExtensionManager = new RinBackgroundExtensionManager({
       cwd: runtime.cwd,

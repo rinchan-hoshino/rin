@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
@@ -20,14 +21,30 @@ type WorkerResourceOptions = {
   appendSystemPrompt?: string[];
 };
 
-function readWorkerResourceOptions(): WorkerResourceOptions {
-  const raw = process.env.RIN_WORKER_RESOURCE_OPTIONS;
-  if (!raw) return {};
+function readValueArg(argv: string[], name: string) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = String(argv[index] || "");
+    if (value === name) return String(argv[index + 1] || "").trim();
+    if (value.startsWith(`${name}=`))
+      return value.slice(name.length + 1).trim();
+  }
+  return "";
+}
+
+function readWorkerResourceOptions(
+  argv = process.argv.slice(2),
+): WorkerResourceOptions {
+  const filePath = readValueArg(argv, "--resource-options-file");
+  if (!filePath) return {};
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
+  } finally {
+    try {
+      fs.rmSync(filePath, { force: true });
+    } catch {}
   }
 }
 

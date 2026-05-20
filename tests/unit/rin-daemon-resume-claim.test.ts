@@ -105,14 +105,19 @@ async function rpc(socketPath, command, timeoutMs = 5000) {
 function spawnDaemon(agentDir, socketPath, workerPath) {
   return spawn(
     process.execPath,
-    [path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"), socketPath],
+    [
+      path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"),
+      socketPath,
+      "--worker",
+      workerPath,
+      "--shutdown-grace-ms",
+      "200",
+    ],
     {
       cwd: rootDir,
       env: {
         ...process.env,
         RIN_DIR: agentDir,
-        RIN_WORKER_PATH: workerPath,
-        RIN_DAEMON_SHUTDOWN_GRACE_MS: "200",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

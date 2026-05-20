@@ -99,11 +99,44 @@ test("std configured session keeps daemon-independent Rin tools usable without d
   const previousSocket = process.env.RIN_DAEMON_SOCKET_PATH;
   process.env.RIN_DAEMON_SOCKET_PATH = path.join(root, "missing-daemon.sock");
 
-  const server = http.createServer((_request, response) => {
+  const server = http.createServer((request, response) => {
+    if (request.url?.startsWith("/search")) {
+      response.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+      });
+      response.end(JSON.stringify({ results: [] }));
+      return;
+    }
     response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
     response.end("std fetch ok");
   });
   await listen(server);
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  const sidecarBaseUrl = `http://127.0.0.1:${address?.port}`;
+  const sidecarStatePath = path.join(
+    agentDir,
+    "data",
+    "web-search",
+    "instances",
+    `process-${process.pid}`,
+    "state.json",
+  );
+  await fs.mkdir(path.dirname(sidecarStatePath), { recursive: true });
+  await fs.writeFile(
+    sidecarStatePath,
+    `${JSON.stringify({
+      pid: process.pid,
+      port: address?.port,
+      baseUrl: sidecarBaseUrl,
+      pythonBin: "/tmp/python",
+      sourceDir: "/tmp/searxng",
+      settingsPath: path.join(path.dirname(sidecarStatePath), "settings.yml"),
+      startedAt: new Date().toISOString(),
+      ownerPid: process.pid,
+    })}\n`,
+    "utf8",
+  );
 
   const runtime = await runtimeMod.createConfiguredAgentSession({
     cwd: root,
@@ -127,8 +160,6 @@ test("std configured session keeps daemon-independent Rin tools usable without d
     assert.match(memoryResult.content[0].text, /search_memory recent/);
     assert.equal(memoryResult.details.emptyMessage, "No memory results found.");
 
-    const address = server.address();
-    assert.equal(typeof address, "object");
     const fetchResult = await session
       .getToolDefinition("web_search")
       .execute(
@@ -141,25 +172,17 @@ test("std configured session keeps daemon-independent Rin tools usable without d
     assert.match(fetchResult.content[0].text, /std fetch ok/);
     assert.equal(fetchResult.details.mode, "fetch");
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => {
-      throw new TypeError("std search network unavailable");
-    }) as typeof fetch;
-    try {
-      const searchResult = await session
-        .getToolDefinition("web_search")
-        .execute(
-          "tool-search",
-          { q: "rin std smoke", limit: 1 },
-          undefined,
-          undefined,
-          { agentDir },
-        );
-      assert.match(searchResult.content[0].text, /Web search failed/);
-      assert.doesNotMatch(searchResult.content[0].text, /web_search/);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const searchResult = await session
+      .getToolDefinition("web_search")
+      .execute(
+        "tool-search",
+        { q: "rin std smoke", limit: 1 },
+        undefined,
+        undefined,
+        { agentDir },
+      );
+    assert.equal(searchResult.isError, false);
+    assert.match(searchResult.content[0].text, /web_search 0/);
   } finally {
     await runtime.runtime?.dispose?.().catch?.(() => {});
     await closeServer(server).catch(() => {});

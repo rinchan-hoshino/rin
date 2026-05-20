@@ -54,11 +54,9 @@ test("runtime error formatter hides unmapped internal markers from user-facing t
   assert.equal(text.includes("some_new_internal_marker"), false);
   assert.equal(text.includes("debug_code"), false);
 
-  const embedded = formatRuntimeErrorForUser(
-    "Web search failed: google_challenge_required",
-  );
-  assert.match(embedded, /internal runtime problem|Google blocked/);
-  assert.equal(embedded.includes("google_challenge_required"), false);
+  const embedded = formatRuntimeErrorForUser("Web search failed: fetch_failed");
+  assert.match(embedded, /network request failed/i);
+  assert.equal(embedded.includes("fetch_failed"), false);
 
   const camel = formatRuntimeErrorForUser("invalid_chatKey:onebot/demo");
   assert.match(camel, /Invalid chat key/);

@@ -1,4 +1,8 @@
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { sleep } from "../platform/process.js";
 import type { RpcSocketLike } from "../platform/rpc-socket.js";
@@ -123,6 +127,7 @@ export class WorkerPool {
       internalCommandTimeoutMs?: number;
       switchSessionCommandTimeoutMs?: number;
       resourceOptions?: Record<string, unknown>;
+      resourceOptionsDir?: string;
     },
   ) {
     this.gcIdleMs = Math.max(0, Number(options.gcIdleMs ?? 30_000));
@@ -586,6 +591,25 @@ export class WorkerPool {
     }
   }
 
+  private writeWorkerResourceOptionsFile(
+    resourceOptions: Record<string, unknown> | undefined,
+  ) {
+    if (!resourceOptions) return [];
+    const root =
+      this.options.resourceOptionsDir ||
+      path.join(os.tmpdir(), "rin-worker-options");
+    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    const filePath = path.join(
+      root,
+      `worker-options-${process.pid}-${crypto.randomBytes(8).toString("hex")}.json`,
+    );
+    fs.writeFileSync(filePath, `${JSON.stringify(resourceOptions)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    return ["--resource-options-file", filePath];
+  }
+
   private createWorker(
     requester?: ConnectionState,
     resourceOptions?: Record<string, unknown>,
@@ -596,19 +620,14 @@ export class WorkerPool {
 
     const workerResourceOptions =
       resourceOptions || this.options.resourceOptions;
-    const child = spawn(process.execPath, [this.options.workerPath], {
+    const workerArgs = [
+      this.options.workerPath,
+      ...this.writeWorkerResourceOptionsFile(workerResourceOptions),
+    ];
+    const child = spawn(process.execPath, workerArgs, {
       cwd: this.options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        ...(workerResourceOptions
-          ? {
-              RIN_WORKER_RESOURCE_OPTIONS: JSON.stringify(
-                workerResourceOptions,
-              ),
-            }
-          : {}),
-      },
+      env: process.env,
     });
 
     const worker: WorkerHandle = {

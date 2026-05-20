@@ -256,40 +256,23 @@ test("release helpers keep trimmed env and manifest fallback precedence", () => 
   }
 });
 
-test("releaseInfoFromEnv normalizes installer bootstrap metadata", () => {
-  const env = {
-    ...process.env,
-    RIN_RELEASE_CHANNEL: process.env.RIN_RELEASE_CHANNEL,
-    RIN_RELEASE_VERSION: process.env.RIN_RELEASE_VERSION,
-    RIN_RELEASE_BRANCH: process.env.RIN_RELEASE_BRANCH,
-    RIN_RELEASE_REF: process.env.RIN_RELEASE_REF,
-    RIN_RELEASE_SOURCE_LABEL: process.env.RIN_RELEASE_SOURCE_LABEL,
-    RIN_RELEASE_ARCHIVE_URL: process.env.RIN_RELEASE_ARCHIVE_URL,
-  };
-  process.env.RIN_RELEASE_CHANNEL = "nightly";
-  process.env.RIN_RELEASE_VERSION = "1.3.0-nightly.20260420+deadbee";
-  process.env.RIN_RELEASE_BRANCH = "main";
-  process.env.RIN_RELEASE_REF = "deadbeef";
-  process.env.RIN_RELEASE_SOURCE_LABEL =
-    "nightly 1.3.0-nightly.20260420+deadbee";
-  process.env.RIN_RELEASE_ARCHIVE_URL =
-    "https://example.com/nightly-1.3.0-nightly.20260420.tgz";
-  try {
-    const info = release.releaseInfoFromEnv();
-    assert.equal(info.channel, "nightly");
-    assert.equal(info.version, "1.3.0-nightly.20260420+deadbee");
-    assert.equal(info.branch, "main");
-    assert.equal(info.ref, "deadbeef");
-    assert.equal(info.sourceLabel, "nightly 1.3.0-nightly.20260420+deadbee");
-    assert.equal(
-      info.archiveUrl,
-      "https://example.com/nightly-1.3.0-nightly.20260420.tgz",
-    );
-    assert.match(String(info.installedAt || ""), /^\d{4}-\d{2}-\d{2}T/);
-  } finally {
-    for (const [key, value] of Object.entries(env)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  }
+test("releaseInfoFromObject normalizes installer bootstrap metadata", () => {
+  const info = release.releaseInfoFromObject({
+    channel: "nightly",
+    version: "1.3.0-nightly.20260420+deadbee",
+    branch: "main",
+    ref: "deadbeef",
+    sourceLabel: "nightly 1.3.0-nightly.20260420+deadbee",
+    archiveUrl: "https://example.com/nightly-1.3.0-nightly.20260420.tgz",
+  });
+  assert.equal(info.channel, "nightly");
+  assert.equal(info.version, "1.3.0-nightly.20260420+deadbee");
+  assert.equal(info.branch, "main");
+  assert.equal(info.ref, "deadbeef");
+  assert.equal(info.sourceLabel, "nightly 1.3.0-nightly.20260420+deadbee");
+  assert.equal(
+    info.archiveUrl,
+    "https://example.com/nightly-1.3.0-nightly.20260420.tgz",
+  );
+  assert.match(String(info.installedAt || ""), /^\d{4}-\d{2}-\d{2}T/);
 });
