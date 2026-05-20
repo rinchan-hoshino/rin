@@ -1,13 +1,13 @@
 # Builtin Capabilities
 
-This document helps agents distinguish Rin core capabilities from optional Pi extensions. For general usage guidance, start with `docs/capabilities.md`; use this page when you need to know whether a tool is core, optional, or daemon-only.
+This document helps agents distinguish Rin core capabilities from optional Pi extensions. For general usage guidance, start with `docs/capabilities.md`; use this page when you need to know whether a tool is core, optional, or background-only.
 
 ## Quick reference
 
 - Core Rin capabilities are available through native product code when their tools are present in the live tool list.
 - The core todo capability is always enabled and registers the `todo` tool plus `/todos` command.
 - Optional browser/computer tools are packaged with Rin but remain off until `settings.json -> extensions` enables their `rin:` aliases.
-- Daemon worker extensions run inside the daemon process and are not Pi session tools.
+- Background extensions run in Rin's background runtime and are not Pi session tools.
 - The current tool list and system prompt remain authoritative for a specific turn.
 
 ## Default extra capabilities
@@ -125,13 +125,13 @@ Keep the change minimal:
 - for `computer_use`, inspect the host OS and install the smallest suitable native tool only when needed, such as `xdotool`/screenshot tools on Linux or `cliclick` on macOS; there is no adapter marketplace or curated adapter list to maintain
 - after changing extension settings, restart or reload the Rin session/daemon as appropriate so Pi resources are reloaded
 
-## Daemon worker extensions
+## Background extensions
 
-- disabled unless listed under `settings.json -> rinExtensions.daemonWorkers`
-- run as trusted Node.js packages inside the daemon process for long-running async work
-- may install or update configured npm packages under `~/.rin/data/daemon-runtime` during daemon startup
+- disabled unless listed under `settings.json -> rinExtensions.backgroundServices` or a local/package extension exposes background capabilities
+- run as trusted Node.js packages in Rin's background runtime for long-running async work
+- may install or update configured npm packages under `~/.rin/data/extension-runtime` during startup
 - do not run in std/maintenance mode
 - may register chat adapters with `ctx.registerChatAdapter(...)`
 - may register external memory providers with `ctx.registerMemoryProvider(...)`; providers can implement `search`, `listRecent`, and `write`, and can return remote `reference` or `url` values instead of local transcript paths
 
-Configure daemon workers only when the user intentionally wants a background extension such as an external event bridge or a trusted memory backend. Keep the normal chat adapters under `settings.json -> chat`, not daemon workers.
+Configure background services only when the user intentionally wants a background extension such as an external event bridge or a trusted memory backend. Keep the normal chat adapters under `settings.json -> chat`, not background services.

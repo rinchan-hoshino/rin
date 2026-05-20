@@ -24,7 +24,7 @@ const capabilitySession = await import(
     path.join(rootDir, "dist", "core", "rin-lib", "capability-session.js"),
   ).href
 );
-const daemonExtensions = await import(
+const backgroundExtensions = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-daemon", "extensions.js"),
   ).href
@@ -324,22 +324,22 @@ function restoreEnv(name: string, value: string | undefined) {
   else process.env[name] = value;
 }
 
-test("stage B daemon extension manager contributes chat runtime adapters", async () => {
+test("stage B background extension manager contributes chat runtime adapters", async () => {
   const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-daemon-chat-adapter-"),
+    path.join(os.tmpdir(), "rin-background-chat-adapter-"),
   );
   const packageDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-daemon-chat-adapter-pkg-"),
+    path.join(os.tmpdir(), "rin-background-chat-adapter-pkg-"),
   );
   const markerPath = path.join(agentDir, "chat-adapter.log");
   try {
     await writeProviderPackage(
       packageDir,
-      "rin-daemon-chat-adapter-test",
+      "rin-background-chat-adapter-test",
       `import fs from "node:fs";
 const markerPath = ${JSON.stringify(markerPath)};
-export function createDaemonWorker(ctx) {
-  ctx.registerChatAdapter(({ app }) => ({
+export default function extension(rin) {
+  rin.registerChatAdapter(({ app }) => ({
       adapter: {
         async start() {
           fs.appendFileSync(markerPath, "chat-start\\n");
@@ -375,7 +375,7 @@ export function createDaemonWorker(ctx) {
     });
 
     const warnings: string[] = [];
-    const manager = new daemonExtensions.RinDaemonExtensionManager({
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: (message: string) => warnings.push(String(message)) },
@@ -383,8 +383,8 @@ export function createDaemonWorker(ctx) {
     const started = await manager.start();
     assert.deepEqual(started, [
       {
-        name: "rin-daemon-chat-adapter-test",
-        packageName: "rin-daemon-chat-adapter-test",
+        name: "rin-background-chat-adapter-test",
+        packageName: "rin-background-chat-adapter-test",
       },
     ]);
     assert.deepEqual(warnings, []);
@@ -421,22 +421,22 @@ export function createDaemonWorker(ctx) {
   }
 });
 
-test("stage B daemon extension manager exposes memory provider API for non-local originals", async () => {
+test("stage B background extension manager exposes memory provider API for non-local originals", async () => {
   const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-daemon-memory-provider-"),
+    path.join(os.tmpdir(), "rin-background-memory-provider-"),
   );
   const packageDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-daemon-memory-provider-pkg-"),
+    path.join(os.tmpdir(), "rin-background-memory-provider-pkg-"),
   );
   const markerPath = path.join(agentDir, "memory-provider.log");
   try {
     await writeProviderPackage(
       packageDir,
-      "rin-daemon-memory-provider-test",
+      "rin-background-memory-provider-test",
       `import fs from "node:fs";
-export function createDaemonWorker(ctx) {
-  ctx.registerMemoryProvider({
-    async search(request) {
+export default function extension(rin) {
+  rin.registerMemoryProvider({
+    async search(request, ctx) {
       fs.appendFileSync(ctx.config.markerPath, "search:" + request.query + ":" + request.limit + "\\n");
       return [{
         id: "remote-hit-1",
@@ -447,11 +447,11 @@ export function createDaemonWorker(ctx) {
         messages: [{ line: 1, role: "memory", timestamp: "2026-05-11T06:00:00.000Z", text: "remote snippet only" }],
       }];
     },
-    async listRecent(request) {
+    async listRecent(request, ctx) {
       fs.appendFileSync(ctx.config.markerPath, "recent:" + request.limit + "\\n");
       return [{ id: "remote-recent-1", name: "Remote recent", summary: "Recent remote memory", reference: "mem://remote-recent-1" }];
     },
-    async write(entry) {
+    async write(entry, ctx) {
       fs.appendFileSync(ctx.config.markerPath, "write:" + entry.role + ":" + entry.text + "\\n");
     },
   }, { key: "remote-memory", name: "Remote Memory" });
@@ -460,10 +460,10 @@ export function createDaemonWorker(ctx) {
     );
     await writeJson(path.join(agentDir, "settings.json"), {
       rinExtensions: {
-        daemonWorkers: [
+        backgroundServices: [
           {
             name: "memory-provider",
-            packageName: "rin-daemon-memory-provider-test",
+            packageName: "rin-background-memory-provider-test",
             version: `file:${packageDir}`,
             config: { markerPath },
           },
@@ -471,7 +471,7 @@ export function createDaemonWorker(ctx) {
       },
     });
 
-    const manager = new daemonExtensions.RinDaemonExtensionManager({
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: () => {} },
@@ -528,25 +528,25 @@ export function createDaemonWorker(ctx) {
   }
 });
 
-test("stage B daemon extension manager ignores direct extensions without daemon entry", async () => {
+test("stage B background extension manager ignores direct extensions without background parts", async () => {
   const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-daemon-ignore-"),
+    path.join(os.tmpdir(), "rin-background-ignore-"),
   );
   const packageDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-nondaemon-extension-pkg-"),
+    path.join(os.tmpdir(), "rin-backgroundless-extension-pkg-"),
   );
   try {
     await writeProviderPackage(
       packageDir,
-      "rin-nondaemon-extension-test",
-      `export default function activate() { throw new Error("should_not_run"); }\n`,
+      "rin-backgroundless-extension-test",
+      `export default function activate(rin) { rin.registerTool({ name: "noop" }); }\n`,
     );
     await writeJson(path.join(agentDir, "settings.json"), {
       extensions: [packageDir],
     });
 
     const warnings: string[] = [];
-    const manager = new daemonExtensions.RinDaemonExtensionManager({
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: (message: string) => warnings.push(String(message)) },
@@ -561,38 +561,40 @@ test("stage B daemon extension manager ignores direct extensions without daemon 
   }
 });
 
-test("stage B daemon extension manager starts async workers and stops them", async () => {
+test("stage B background extension manager starts async services and stops them", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
   const packageDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-daemon-worker-pkg-"),
+    path.join(os.tmpdir(), "rin-background-service-pkg-"),
   );
   const markerPath = path.join(agentDir, "worker.log");
   try {
     await writeProviderPackage(
       packageDir,
-      "rin-daemon-worker-test",
+      "rin-background-service-test",
       `import fs from "node:fs";
-export const rinDaemonExtension = {
-  start(ctx) {
-    fs.appendFileSync(ctx.config.markerPath, "start:" + ctx.name + "\\n");
-    ctx.runAsync("tick", async () => {
-      fs.appendFileSync(ctx.config.markerPath, "async\\n");
-    });
-    return {
-      stop() {
-        fs.appendFileSync(ctx.config.markerPath, "stop\\n");
-      },
-    };
-  },
-};
+export default function extension(rin) {
+  rin.registerBackgroundService({
+    start(ctx) {
+      fs.appendFileSync(ctx.config.markerPath, "start:" + ctx.name + "\\n");
+      ctx.runAsync("tick", async () => {
+        fs.appendFileSync(ctx.config.markerPath, "async\\n");
+      });
+      return {
+        stop() {
+          fs.appendFileSync(ctx.config.markerPath, "stop\\n");
+        },
+      };
+    },
+  });
+}
 `,
     );
     await writeJson(path.join(agentDir, "settings.json"), {
       rinExtensions: {
-        daemonWorkers: [
+        backgroundServices: [
           {
             name: "worker-a",
-            packageName: "rin-daemon-worker-test",
+            packageName: "rin-background-service-test",
             version: `file:${packageDir}`,
             config: { markerPath },
           },
@@ -600,7 +602,7 @@ export const rinDaemonExtension = {
       },
     });
 
-    const manager = new daemonExtensions.RinDaemonExtensionManager({
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: () => {} },
@@ -609,7 +611,7 @@ export const rinDaemonExtension = {
     await manager.stop();
 
     assert.deepEqual(started, [
-      { name: "worker-a", packageName: "rin-daemon-worker-test" },
+      { name: "worker-a", packageName: "rin-background-service-test" },
     ]);
     assert.equal(
       await fs.readFile(markerPath, "utf8"),

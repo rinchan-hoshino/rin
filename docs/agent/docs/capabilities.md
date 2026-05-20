@@ -106,17 +106,17 @@ Notes:
 - For non-technical users, edit `settings.json` directly and avoid optional config files unless a non-default command, adapter, timeout, or install policy is required.
 - After changing extension settings, restart or reload Rin so resources are reloaded.
 
-## Daemon worker extensions
+## Background extensions
 
-Daemon worker extensions are configured under `settings.json -> rinExtensions.daemonWorkers`. They are trusted Node.js packages loaded by the daemon process for long-running async work. They are not Pi extensions and do not run in std mode.
+Background extensions are configured under `settings.json -> rinExtensions.backgroundServices`, or discovered from normal Rin/Pi extension entries that expose background capabilities. They are trusted Node.js packages loaded by Rin's background runtime for long-running async work. They are a Rin extension capability layer, not a separate extension type that extension authors need to target.
 
 ```json
 {
   "rinExtensions": {
-    "daemonWorkers": [
+    "backgroundServices": [
       {
-        "name": "example-worker",
-        "packageName": "rin-daemon-worker-example",
+        "name": "example-service",
+        "packageName": "rin-background-service-example",
         "version": "latest",
         "config": {}
       }
@@ -125,7 +125,7 @@ Daemon worker extensions are configured under `settings.json -> rinExtensions.da
 }
 ```
 
-Use only trusted package names and versions. Packages may be installed or updated under `~/.rin/data/daemon-runtime` during daemon startup; restart Rin after editing daemon worker settings.
+Use only trusted package names and versions. Packages may be installed or updated under `~/.rin/data/extension-runtime` during startup; restart Rin after editing background extension settings.
 
 ## Web search details
 
