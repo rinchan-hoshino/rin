@@ -182,7 +182,7 @@ function Get-Property($Object, [string]$Name) {
 
 function Resolve-Release {
   $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-  $packageName = if ($env:RIN_NPM_PACKAGE) { $env:RIN_NPM_PACKAGE } elseif ($manifest.packageName) { [string]$manifest.packageName } else { "@rinchanai20260422/rin" }
+  $packageName = if ($manifest.packageName) { [string]$manifest.packageName } else { "@rinchanai20260422/rin" }
   $releaseRepoUrl = if ($manifest.repoUrl) { [string]$manifest.repoUrl } else { $repoUrl }
   $releaseRepoUrl = $releaseRepoUrl -replace "\.git$", ""
   $fileBase = ($packageName -split "/")[-1]

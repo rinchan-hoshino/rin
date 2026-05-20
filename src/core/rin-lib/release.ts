@@ -188,11 +188,7 @@ export function getReleaseRepoUrl(manifest?: ReleaseManifest) {
 }
 
 export function getReleasePackageName(manifest?: ReleaseManifest) {
-  return firstReleaseValue(
-    process.env.RIN_NPM_PACKAGE,
-    manifest?.packageName,
-    DEFAULT_PACKAGE_NAME,
-  );
+  return firstReleaseValue(manifest?.packageName, DEFAULT_PACKAGE_NAME);
 }
 
 function normalizeReleaseChannel(requested: unknown): ReleaseChannel {

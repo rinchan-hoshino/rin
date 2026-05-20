@@ -109,11 +109,7 @@ function isLivePid(pid: unknown): boolean {
 }
 
 function defaultStateRoot(): string {
-  return (
-    process.env.RIN_DIR?.trim() ||
-    process.env.PI_CODING_AGENT_DIR?.trim() ||
-    path.join(os.homedir(), ".rin")
-  );
+  return process.env.RIN_DIR?.trim() || path.join(os.homedir(), ".rin");
 }
 
 function defaultInstanceId() {

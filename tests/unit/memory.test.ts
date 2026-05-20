@@ -49,8 +49,8 @@ async function withJsonlDaemonSocket(handler, fn) {
   const runtimeDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-memory-daemon-"),
   );
-  const socketPath = path.join(runtimeDir, "daemon.sock");
-  const previousSocketPath = process.env.RIN_DAEMON_SOCKET_PATH;
+  const socketPath = path.join(runtimeDir, "rin-daemon", "daemon.sock");
+  const previousRuntimeDir = process.env.XDG_RUNTIME_DIR;
   const server = net.createServer((socket) => {
     let buffer = "";
     socket.on("data", (chunk) => {
@@ -76,17 +76,17 @@ async function withJsonlDaemonSocket(handler, fn) {
       }
     });
   });
+  await fs.mkdir(path.dirname(socketPath), { recursive: true });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(socketPath, () => resolve());
   });
-  process.env.RIN_DAEMON_SOCKET_PATH = socketPath;
+  process.env.XDG_RUNTIME_DIR = runtimeDir;
   try {
     await fn(socketPath);
   } finally {
-    if (previousSocketPath === undefined)
-      delete process.env.RIN_DAEMON_SOCKET_PATH;
-    else process.env.RIN_DAEMON_SOCKET_PATH = previousSocketPath;
+    if (previousRuntimeDir === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = previousRuntimeDir;
     await new Promise((resolve) => server.close(() => resolve()));
     await fs.rm(runtimeDir, { recursive: true, force: true });
   }

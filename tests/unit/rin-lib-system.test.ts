@@ -76,35 +76,15 @@ test("rin system falls back safely for unknown user runtime paths", () => {
   );
 });
 
-test("defaultDaemonSocketPath prefers explicit socket env over platform defaults", async () => {
-  await withEnv(
-    {
-      RIN_DAEMON_SOCKET_PATH: " /tmp/custom-rin-daemon.sock ",
-      XDG_RUNTIME_DIR: "/tmp/ignored-runtime",
-    },
-    async () => {
-      assert.equal(
-        common.defaultDaemonSocketPath(),
-        "/tmp/custom-rin-daemon.sock",
-      );
-    },
-  );
-});
-
 test("defaultDaemonSocketPath keeps runtime dir precedence stable", async () => {
   await withEnv(
     {
-      RIN_DAEMON_SOCKET_PATH: undefined,
       XDG_RUNTIME_DIR: "/tmp/demo-runtime",
     },
     async () => {
-      const expectedRuntimeDir =
-        process.platform === "linux" && typeof process.getuid === "function"
-          ? path.join("/run/user", String(process.getuid()))
-          : "/tmp/demo-runtime";
       assert.equal(
         common.defaultDaemonSocketPath(),
-        path.join(expectedRuntimeDir, "rin-daemon", "daemon.sock"),
+        path.join("/tmp/demo-runtime", "rin-daemon", "daemon.sock"),
       );
     },
   );

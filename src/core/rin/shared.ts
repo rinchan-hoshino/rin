@@ -14,7 +14,7 @@ import {
   canConnectDaemonSocket,
   requestDaemonCommand,
 } from "../rin-daemon/client.js";
-import { PI_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/runtime.js";
+import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import {
   buildUserShell,
   readPasswdUser,
@@ -435,12 +435,9 @@ function daemonControlContext(parsed: ParsedArgs) {
   const targetHome = readPasswdUser(targetUser)?.home || os.homedir();
   const installDir = parsed.installDir || defaultInstallDirForHome(targetHome);
   const runtimeAgentDir =
-    safeString(process.env[RIN_DIR_ENV]).trim() ||
-    safeString(process.env[PI_AGENT_DIR_ENV]).trim() ||
-    installDir;
+    safeString(process.env[RIN_DIR_ENV]).trim() || installDir;
   const runtimeEnv = targetUserRuntimeEnv(targetUser, {
     [RIN_DIR_ENV]: runtimeAgentDir,
-    [PI_AGENT_DIR_ENV]: runtimeAgentDir,
   });
   const systemctl =
     process.platform === "linux"

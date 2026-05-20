@@ -452,13 +452,13 @@ launch_published_installer() {
 }
 
 INSTALLER_ENTRY='dist/app/rin-install/main.js'
-PACKAGE_NAME=${RIN_NPM_PACKAGE:-@rinchanai20260422/rin}
+PACKAGE_NAME='@rinchanai20260422/rin'
 parse_args "$@"
 check_node_version
 : >"$LOGFILE"
 run_step "$MANIFEST_LABEL" fetch_manifest
 eval "$(resolve_release)"
-PACKAGE_NAME=${PACKAGE_NAME:-${RIN_NPM_PACKAGE:-@rinchanai20260422/rin}}
+PACKAGE_NAME=${PACKAGE_NAME:-@rinchanai20260422/rin}
 RELEASE_FILE="$WORKDIR/release.json"
 node - "$RELEASE_FILE" "$CHANNEL" "$VERSION" "$BRANCH" "$REF" "$SOURCE_LABEL" "$ARCHIVE_URL" <<'NODE'
 const fs = require('node:fs');

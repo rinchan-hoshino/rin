@@ -342,13 +342,11 @@ test("Rin git update check returns before the git probe completes", async () => 
     await fs.chmod(gitPath, 0o755);
 
     const previousPath = process.env.PATH;
-    const previousSkip = process.env.PI_SKIP_VERSION_CHECK;
-    const previousPiOffline = process.env.PI_OFFLINE;
-    const previousRinOffline = process.env.RIN_OFFLINE;
+    const previousSkip = process.env.RIN_SKIP_VERSION_CHECK;
+    const previousOffline = process.env.RIN_OFFLINE;
     try {
       process.env.PATH = `${binDir}${path.delimiter}${previousPath || ""}`;
-      delete process.env.PI_SKIP_VERSION_CHECK;
-      delete process.env.PI_OFFLINE;
+      delete process.env.RIN_SKIP_VERSION_CHECK;
       delete process.env.RIN_OFFLINE;
 
       const startedAt = Date.now();
@@ -374,20 +372,18 @@ test("Rin git update check returns before the git probe completes", async () => 
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
-      if (previousSkip === undefined) delete process.env.PI_SKIP_VERSION_CHECK;
-      else process.env.PI_SKIP_VERSION_CHECK = previousSkip;
-      if (previousPiOffline === undefined) delete process.env.PI_OFFLINE;
-      else process.env.PI_OFFLINE = previousPiOffline;
-      if (previousRinOffline === undefined) delete process.env.RIN_OFFLINE;
-      else process.env.RIN_OFFLINE = previousRinOffline;
+      if (previousSkip === undefined) delete process.env.RIN_SKIP_VERSION_CHECK;
+      else process.env.RIN_SKIP_VERSION_CHECK = previousSkip;
+      if (previousOffline === undefined) delete process.env.RIN_OFFLINE;
+      else process.env.RIN_OFFLINE = previousOffline;
     }
   });
 });
 
-test("Rin update check preserves Pi version-check skip env", async () => {
-  const previous = process.env.PI_SKIP_VERSION_CHECK;
+test("Rin update check preserves Rin version-check skip env", async () => {
+  const previous = process.env.RIN_SKIP_VERSION_CHECK;
   try {
-    process.env.PI_SKIP_VERSION_CHECK = "1";
+    process.env.RIN_SKIP_VERSION_CHECK = "1";
     assert.equal(
       await notices.checkForNewRinVersion({
         currentVersion: "1.2.3",
@@ -397,8 +393,8 @@ test("Rin update check preserves Pi version-check skip env", async () => {
       undefined,
     );
   } finally {
-    if (previous === undefined) delete process.env.PI_SKIP_VERSION_CHECK;
-    else process.env.PI_SKIP_VERSION_CHECK = previous;
+    if (previous === undefined) delete process.env.RIN_SKIP_VERSION_CHECK;
+    else process.env.RIN_SKIP_VERSION_CHECK = previous;
   }
 });
 

@@ -31,9 +31,7 @@ export async function buildFinalAppSystemPrompt(options = {}) {
   const sessionManager = SessionManager.inMemory(cwd);
 
   const previousRinDir = process.env.RIN_DIR;
-  const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.RIN_DIR = agentDir;
-  process.env.PI_CODING_AGENT_DIR = agentDir;
 
   try {
     const { session } = await runtimeMod.createConfiguredAgentSession({
@@ -55,7 +53,5 @@ export async function buildFinalAppSystemPrompt(options = {}) {
   } finally {
     if (previousRinDir == null) delete process.env.RIN_DIR;
     else process.env.RIN_DIR = previousRinDir;
-    if (previousPiAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
   }
 }

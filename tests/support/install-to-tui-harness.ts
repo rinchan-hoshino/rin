@@ -283,8 +283,6 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
     XDG_RUNTIME_DIR: runtimeDir,
     DBUS_SESSION_BUS_ADDRESS: `unix:path=${path.join(runtimeDir, "bus")}`,
     RIN_DIR: agentDir,
-    PI_CODING_AGENT_DIR: agentDir,
-    RIN_DAEMON_SOCKET_PATH: path.join(runtimeDir, "daemon.sock"),
     NO_COLOR: "1",
     TERM: "xterm-256color",
   };
@@ -412,7 +410,9 @@ export async function assertInstalledRuntimeSmoke() {
     assert.match(doctor.stdout, new RegExp(`installDir=${flow.installDir}`));
     assert.match(
       doctor.stdout,
-      new RegExp(`socketPath=${flow.env.RIN_DAEMON_SOCKET_PATH}`),
+      new RegExp(
+        `socketPath=${path.join(flow.runtimeDir, "rin-daemon", "daemon.sock")}`,
+      ),
     );
     assert.match(doctor.stdout, /socketReady=no/);
 
@@ -498,7 +498,7 @@ export async function runManualInnerSession(options: { scripted?: boolean }) {
         `  home: ${flow.home}`,
         `  installDir: ${flow.installDir}`,
         `  agentDir: ${flow.agentDir}`,
-        `  socket: ${flow.env.RIN_DAEMON_SOCKET_PATH}`,
+        `  socket: ${path.join(flow.runtimeDir, "rin-daemon", "daemon.sock")}`,
         "  note: the container filesystem is disposable; exiting cleans this environment.",
         "",
       ].join("\n"),

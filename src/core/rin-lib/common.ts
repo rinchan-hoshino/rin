@@ -22,17 +22,13 @@ function defaultLinuxRuntimeDir(): string {
 
 function defaultDaemonRuntimeDir(): string {
   return (
-    defaultLinuxRuntimeDir() ||
     safeString(process.env.XDG_RUNTIME_DIR).trim() ||
+    defaultLinuxRuntimeDir() ||
     fallbackRuntimeDir()
   );
 }
 
 export function defaultDaemonSocketPath() {
-  const explicitSocketPath = safeString(
-    process.env.RIN_DAEMON_SOCKET_PATH,
-  ).trim();
-  if (explicitSocketPath) return explicitSocketPath;
   return path.join(defaultDaemonRuntimeDir(), "rin-daemon", "daemon.sock");
 }
 

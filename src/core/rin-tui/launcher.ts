@@ -165,7 +165,7 @@ export function applyQuietStartupVersionCheckEnv(
 ) {
   if (interactiveOptions.verbose) return;
   if (settingsManager?.getQuietStartup?.() === true) {
-    env.PI_SKIP_VERSION_CHECK ||= "1";
+    env.RIN_SKIP_VERSION_CHECK ||= "1";
   }
 }
 

@@ -50,7 +50,7 @@ async function setupIsolatedCliEnv(tempDir: string) {
     "utf8",
   );
 
-  const socketPath = path.join(runtimeDir, "daemon.sock");
+  const socketPath = path.join(runtimeDir, "rin-daemon", "daemon.sock");
   return {
     agentDir,
     socketPath,
@@ -61,8 +61,6 @@ async function setupIsolatedCliEnv(tempDir: string) {
       XDG_RUNTIME_DIR: runtimeDir,
       DBUS_SESSION_BUS_ADDRESS: `unix:path=${path.join(runtimeDir, "bus")}`,
       RIN_DIR: agentDir,
-      PI_CODING_AGENT_DIR: agentDir,
-      RIN_DAEMON_SOCKET_PATH: socketPath,
       NO_COLOR: "1",
       TERM: "dumb",
     },

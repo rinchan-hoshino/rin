@@ -950,10 +950,7 @@ export async function runUsageInternal(rawArgv: string[]) {
     return;
   }
   console.log(
-    await renderUsageReportForCli(
-      process.env.RIN_DIR || process.env.PI_CODING_AGENT_DIR || "",
-      options,
-    ),
+    await renderUsageReportForCli(process.env.RIN_DIR || "", options),
   );
 }
 

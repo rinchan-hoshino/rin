@@ -228,11 +228,9 @@ test("release helpers keep trimmed env and manifest fallback precedence", () => 
   const env = {
     RIN_BOOTSTRAP_BRANCH: process.env.RIN_BOOTSTRAP_BRANCH,
     RIN_INSTALL_REPO_URL: process.env.RIN_INSTALL_REPO_URL,
-    RIN_NPM_PACKAGE: process.env.RIN_NPM_PACKAGE,
   };
   process.env.RIN_BOOTSTRAP_BRANCH = "  ";
   process.env.RIN_INSTALL_REPO_URL = " https://example.com/override/repo.git ";
-  process.env.RIN_NPM_PACKAGE = "  ";
   try {
     assert.equal(
       release.getBootstrapBranch({ bootstrapBranch: " beta-bootstrap " }),

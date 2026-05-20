@@ -15,9 +15,7 @@ function readAgentDirArgValue() {
       return safeString(value.slice("--agent-dir=".length)).trim();
     }
   }
-  return safeString(
-    process.env.RIN_DIR || process.env.PI_CODING_AGENT_DIR || "",
-  ).trim();
+  return safeString(process.env.RIN_DIR || "").trim();
 }
 
 export async function runMemoryWorker() {

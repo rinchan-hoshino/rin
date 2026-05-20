@@ -23,7 +23,6 @@ Options:
 
 ```js
 const rin = createRinAgentSdk({
-  socketPath: process.env.RIN_DAEMON_SOCKET_PATH,
   timeoutMs: 30_000,
 });
 ```

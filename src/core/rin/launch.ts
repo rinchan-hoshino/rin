@@ -1,11 +1,7 @@
 import os from "node:os";
 import path from "node:path";
-import {
-  buildUserShell,
-  socketPathForUser,
-  targetUserRuntimeEnv,
-} from "../rin-lib/system.js";
-import { PI_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/runtime.js";
+import { buildUserShell, targetUserRuntimeEnv } from "../rin-lib/system.js";
+import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import {
   createTargetExecutionContext,
   ensureDaemonAvailable,
@@ -28,7 +24,6 @@ export function formatMaintenanceModeNotice(error: unknown) {
 function resolveTuiRuntimeAgentDir(installDir?: string) {
   return (
     String(process.env[RIN_DIR_ENV] || "").trim() ||
-    String(process.env[PI_AGENT_DIR_ENV] || "").trim() ||
     String(installDir || "").trim()
   );
 }
@@ -43,10 +38,8 @@ export function buildTuiRuntimeEnv(
     ...(runtimeAgentDir
       ? {
           [RIN_DIR_ENV]: runtimeAgentDir,
-          [PI_AGENT_DIR_ENV]: runtimeAgentDir,
         }
       : {}),
-    RIN_DAEMON_SOCKET_PATH: socketPathForUser(targetUser),
   });
 }
 

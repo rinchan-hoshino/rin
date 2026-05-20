@@ -150,7 +150,7 @@ test("tui launcher maps quiet startup to Pi version-check skip env", () => {
     {},
     env,
   );
-  assert.equal(env.PI_SKIP_VERSION_CHECK, "1");
+  assert.equal(env.RIN_SKIP_VERSION_CHECK, "1");
 
   const verboseEnv = {};
   launcher.applyQuietStartupVersionCheckEnv(
@@ -158,15 +158,15 @@ test("tui launcher maps quiet startup to Pi version-check skip env", () => {
     { verbose: true },
     verboseEnv,
   );
-  assert.equal(verboseEnv.PI_SKIP_VERSION_CHECK, undefined);
+  assert.equal(verboseEnv.RIN_SKIP_VERSION_CHECK, undefined);
 
-  const existingEnv = { PI_SKIP_VERSION_CHECK: "custom" };
+  const existingEnv = { RIN_SKIP_VERSION_CHECK: "custom" };
   launcher.applyQuietStartupVersionCheckEnv(
     { getQuietStartup: () => true },
     {},
     existingEnv,
   );
-  assert.equal(existingEnv.PI_SKIP_VERSION_CHECK, "custom");
+  assert.equal(existingEnv.RIN_SKIP_VERSION_CHECK, "custom");
 });
 
 test("tui launcher formats daemon startup socket failures with doctor/reopen guidance", () => {

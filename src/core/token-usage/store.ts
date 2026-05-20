@@ -383,9 +383,7 @@ function resolveDimensionDef(
 }
 
 export function resolveAgentDir(agentDir = ""): string {
-  const fromEnv = safeString(
-    process.env.PI_CODING_AGENT_DIR || process.env.RIN_DIR,
-  ).trim();
+  const fromEnv = safeString(process.env.RIN_DIR).trim();
   if (safeString(agentDir).trim()) return path.resolve(agentDir);
   if (fromEnv) return path.resolve(fromEnv);
   return path.join(os.homedir(), ".rin");

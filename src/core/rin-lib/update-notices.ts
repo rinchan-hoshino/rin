@@ -322,8 +322,8 @@ export async function latestRinVersionForChannel(
 export async function checkForRinUpdateNotice(
   options: RinUpdateCheckOptions = {},
 ): Promise<RinUpdateNotice | undefined> {
-  if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
-  if (process.env.PI_OFFLINE || process.env.RIN_OFFLINE) return undefined;
+  if (process.env.RIN_SKIP_VERSION_CHECK) return undefined;
+  if (process.env.RIN_OFFLINE) return undefined;
   const { currentRelease, currentVersion, channel } =
     currentUpdateContext(options);
   const latestVersion = await latestRinVersionForChannel({

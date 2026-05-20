@@ -245,47 +245,31 @@ test("TUI launch environment reports maintenance notice when the daemon is unava
   );
 });
 
-test("tui runtime env targets the target user's direct daemon socket", () => {
+test("tui runtime env targets only the Rin runtime root", () => {
   const currentUser = os.userInfo().username;
   const installDir = installPaths.defaultInstallDirForHome(os.homedir());
   const env = launch.buildTuiRuntimeEnv(currentUser, "THE_cattail", installDir);
   assert.equal(env.RIN_DIR, installDir);
-  assert.equal(env.PI_CODING_AGENT_DIR, installDir);
   assert.equal("RIN_INVOKING_SYSTEM_USER" in env, false);
-  assert.ok(String(env.RIN_DAEMON_SOCKET_PATH || "").includes("rin-daemon"));
-  assert.ok(!String(env.RIN_DAEMON_SOCKET_PATH || "").includes("bridge.sock"));
+  assert.equal("RIN_DAEMON_SOCKET_PATH" in env, false);
+  assert.equal("PI_CODING_AGENT_DIR" in env, false);
 });
 
-test("tui runtime env preserves explicit agent dir override precedence", () => {
+test("tui runtime env preserves explicit Rin dir override only", () => {
   const currentUser = os.userInfo().username;
   const previousRinDir = process.env.RIN_DIR;
-  const previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
 
   try {
     process.env.RIN_DIR = "/tmp/custom-rin-dir";
-    delete process.env.PI_CODING_AGENT_DIR;
     const rinEnv = launch.buildTuiRuntimeEnv(
       currentUser,
       "THE_cattail",
       installPaths.defaultInstallDirForHome(os.homedir()),
     );
     assert.equal(rinEnv.RIN_DIR, "/tmp/custom-rin-dir");
-    assert.equal(rinEnv.PI_CODING_AGENT_DIR, "/tmp/custom-rin-dir");
-
-    process.env.RIN_DIR = "   ";
-    process.env.PI_CODING_AGENT_DIR = "/tmp/custom-pi-dir";
-    const piEnv = launch.buildTuiRuntimeEnv(
-      currentUser,
-      "THE_cattail",
-      installPaths.defaultInstallDirForHome(os.homedir()),
-    );
-    assert.equal(piEnv.RIN_DIR, "/tmp/custom-pi-dir");
-    assert.equal(piEnv.PI_CODING_AGENT_DIR, "/tmp/custom-pi-dir");
+    assert.equal("PI_CODING_AGENT_DIR" in rinEnv, false);
   } finally {
     if (previousRinDir === undefined) delete process.env.RIN_DIR;
     else process.env.RIN_DIR = previousRinDir;
-    if (previousPiAgentDir === undefined)
-      delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
   }
 });

@@ -74,7 +74,6 @@ export async function runMemoryIndexInternal(rawArgv: string[]) {
 
   const agentDir =
     safeString(process.env.RIN_DIR).trim() ||
-    safeString(process.env.PI_CODING_AGENT_DIR).trim() ||
     path.join(process.env.HOME || "", ".rin");
   const { repairTranscriptSearchIndex } = await loadMemoryTranscriptsModule();
   const result = await repairTranscriptSearchIndex(agentDir);

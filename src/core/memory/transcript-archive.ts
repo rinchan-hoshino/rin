@@ -23,9 +23,7 @@ function resolveMemoryRoot(rootOverride = ""): string {
   return safeString(rootOverride).trim()
     ? path.join(path.resolve(rootOverride), "memory")
     : path.join(
-        process.env.PI_CODING_AGENT_DIR ||
-          process.env.RIN_DIR ||
-          path.join(process.env.HOME || "", ".rin"),
+        process.env.RIN_DIR || path.join(process.env.HOME || "", ".rin"),
         "memory",
       );
 }

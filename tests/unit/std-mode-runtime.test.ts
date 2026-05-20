@@ -96,9 +96,6 @@ test("std configured session keeps daemon-independent Rin tools usable without d
   const agentDir = path.join(root, "agent");
   await fs.mkdir(agentDir, { recursive: true });
 
-  const previousSocket = process.env.RIN_DAEMON_SOCKET_PATH;
-  process.env.RIN_DAEMON_SOCKET_PATH = path.join(root, "missing-daemon.sock");
-
   const server = http.createServer((request, response) => {
     if (request.url?.startsWith("/search")) {
       response.writeHead(200, {
@@ -186,11 +183,6 @@ test("std configured session keeps daemon-independent Rin tools usable without d
   } finally {
     await runtime.runtime?.dispose?.().catch?.(() => {});
     await closeServer(server).catch(() => {});
-    if (previousSocket === undefined) {
-      delete process.env.RIN_DAEMON_SOCKET_PATH;
-    } else {
-      process.env.RIN_DAEMON_SOCKET_PATH = previousSocket;
-    }
   }
 });
 
@@ -198,9 +190,6 @@ test("std configured session registration does not require daemon-only tools to 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-std-daemonless-"));
   const agentDir = path.join(root, "agent");
   await fs.mkdir(agentDir, { recursive: true });
-
-  const previousSocket = process.env.RIN_DAEMON_SOCKET_PATH;
-  process.env.RIN_DAEMON_SOCKET_PATH = path.join(root, "missing-daemon.sock");
 
   const runtime = await runtimeMod.createConfiguredAgentSession({
     cwd: root,
@@ -228,10 +217,5 @@ test("std configured session registration does not require daemon-only tools to 
     }
   } finally {
     await runtime.runtime?.dispose?.().catch?.(() => {});
-    if (previousSocket === undefined) {
-      delete process.env.RIN_DAEMON_SOCKET_PATH;
-    } else {
-      process.env.RIN_DAEMON_SOCKET_PATH = previousSocket;
-    }
   }
 });

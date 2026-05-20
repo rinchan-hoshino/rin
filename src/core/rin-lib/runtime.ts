@@ -12,7 +12,6 @@ import {
   applyRuntimeProfileEnvironment,
   getRuntimeSessionDir,
   resolveRuntimeProfile,
-  PI_AGENT_DIR_ENV,
   RIN_DIR_ENV,
 } from "./profile.js";
 import {
@@ -172,7 +171,6 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
   const promptAgentDir =
     session._resourceLoader.agentDir ||
     process.env.RIN_DIR ||
-    process.env[PI_AGENT_DIR_ENV] ||
     resolveRuntimeProfile().agentDir;
   const uniqueGuidelines: string[] = [];
   const seen = new Set<string>();
@@ -856,7 +854,6 @@ export {
   applyRuntimeProfileEnvironment,
   getRuntimeSessionDir,
   resolveRuntimeProfile,
-  PI_AGENT_DIR_ENV,
   RIN_DIR_ENV,
 };
 
