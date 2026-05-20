@@ -360,7 +360,7 @@ export class RinFrontendTurnDriver {
     const context = this.liveTurnRecoveryContext;
     this.reconnectingTurnPromise = (async () => {
       this.setFrontendPhase("connecting");
-      const deadline = Date.now() + 120_000;
+      let deadline = Date.now() + 120_000;
       while (this.liveTurn && Date.now() < deadline) {
         try {
           await this.connect({ restoreSessionFile: context?.sessionFile });
@@ -370,6 +370,7 @@ export class RinFrontendTurnDriver {
           if (
             Boolean((state as any)?.turnActive || (state as any)?.isStreaming)
           ) {
+            deadline = Date.now() + 120_000;
             this.setFrontendPhase("working");
             await Promise.race([this.liveTurn.promise, sleep(1000)]);
             continue;
@@ -740,7 +741,7 @@ export class RinFrontendTurnDriver {
       baselineMessages: [],
     };
     this.setFrontendPhase("working");
-    const deadline = Date.now() + 120_000;
+    let deadline = Date.now() + 120_000;
     while (this.liveTurn === liveTurn && Date.now() < deadline) {
       const messages = await this.getMessagesForSession(
         targetSessionFile,
@@ -755,7 +756,12 @@ export class RinFrontendTurnDriver {
           break;
         }
       }
-      await this.refreshFrontendState(targetSessionFile).catch(() => ({}));
+      const state = await this.refreshFrontendState(targetSessionFile).catch(
+        () => ({}),
+      );
+      if (Boolean((state as any)?.turnActive || (state as any)?.isStreaming)) {
+        deadline = Date.now() + 120_000;
+      }
       const raced = await Promise.race([
         liveTurn.promise.then((completion) => ({ completion })),
         sleep(1000).then(() => ({})),

@@ -41,6 +41,9 @@ const bundledExtensions = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-bundled-extensions.js"))
     .href
 );
+const todoModule = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href
+);
 
 function createCapabilities(agentDir: string) {
   return capabilitySession.createRinCapabilitySet({
@@ -205,6 +208,59 @@ test("core todo loads from configured runtime without extension paths", async ()
     process.chdir(originalCwd);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
+});
+
+test("core todo reconstructs around interrupted todo tool results", async () => {
+  const capability = todoModule.default();
+  const todoTool = capability.tools[0];
+  const interruptedTodoResult = {
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolName: "todo",
+      details: {
+        interrupted: true,
+        reason: "daemon_restart_or_disconnect",
+      },
+      content: [
+        {
+          type: "text",
+          text: "The tool was interrupted by a daemon restart or disconnect.",
+        },
+      ],
+    },
+  };
+
+  await capability.hooks?.session_start?.[0]?.({}, {
+    sessionManager: {
+      getBranch: () => [
+        interruptedTodoResult,
+        {
+          type: "message",
+          message: {
+            role: "toolResult",
+            toolName: "todo",
+            details: {
+              action: "add",
+              todos: [{ id: 1, text: "Preserve todo state", done: false }],
+              nextId: 2,
+            },
+          },
+        },
+        interruptedTodoResult,
+      ],
+    },
+  } as any);
+
+  const listed = await todoTool.execute(
+    "tool-call-list",
+    { action: "list" },
+    undefined,
+    undefined,
+    {},
+  );
+
+  assert.equal(listed.content[0].text, "○ #1  Preserve todo state");
 });
 
 test("core todo remains enabled when optional extensions are disabled", async () => {
