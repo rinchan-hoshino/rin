@@ -118,8 +118,26 @@ export function resolveTurnCompletion(input: TurnCompletionInput = {}) {
   };
 }
 
+function isSessionSummaryLikeMessage(message: any) {
+  const value =
+    message?.message && typeof message.message === "object"
+      ? message.message
+      : message;
+  const type = safeString(value?.type).trim();
+  const role = safeString(value?.role).trim();
+  const customType = safeString(value?.customType).trim();
+  return (
+    type === "compaction" ||
+    role === "compactionSummary" ||
+    role === "branchSummary" ||
+    customType === "session_summary" ||
+    Boolean(value?.summaryEntry)
+  );
+}
+
 function findLastAssistantDeliverableMessage(messages: any[]) {
   for (const message of [...messages].reverse()) {
+    if (isSessionSummaryLikeMessage(message)) continue;
     if (safeString(message?.role) !== "assistant") continue;
     if (countToolCalls(message?.content) > 0) continue;
     const text = extractMessageText(message.content, { trim: true });

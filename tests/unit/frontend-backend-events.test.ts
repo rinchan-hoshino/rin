@@ -148,6 +148,50 @@ test("frontend backend event translator classifies assistant tool preface as int
   );
 });
 
+test("frontend backend event translator does not complete turns from interim text before compaction", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(translator.translate({ type: "agent_start" }), [
+    { type: "turn_accepted" },
+  ]);
+  assert.deepEqual(
+    translator.translate({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "interim before compaction" },
+          { type: "toolCall", name: "todo", id: "call-1" },
+        ],
+      },
+    }),
+    [{ type: "assistant_interim", text: "interim before compaction" }],
+  );
+  assert.deepEqual(translator.translate({ type: "agent_end" }), []);
+  assert.deepEqual(translator.translate({ type: "compaction_start" }), [
+    { type: "external_working_start" },
+  ]);
+  assert.deepEqual(translator.translate({ type: "compaction_end" }), [
+    { type: "external_working_end" },
+  ]);
+  assert.deepEqual(translator.translate({ type: "agent_start" }), [
+    { type: "turn_accepted" },
+  ]);
+  assert.deepEqual(
+    translator.translate({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "real final after compaction" }],
+      },
+    }),
+    [{ type: "assistant_final", text: "real final after compaction" }],
+  );
+  assert.deepEqual(translator.translate({ type: "agent_end" }), [
+    { type: "turn_complete", finalText: "real final after compaction" },
+  ]);
+});
+
 test("frontend backend event translator ignores overflow continuation markers", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
