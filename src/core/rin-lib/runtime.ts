@@ -24,6 +24,7 @@ import {
 import memoryModule from "../memory/index.js";
 import selfImproveModule from "../self-improve/index.js";
 import taskModule from "../task/index.js";
+import heartbeatModule from "../heartbeat/index.js";
 import tokenUsageModule from "../token-usage/index.js";
 import webSearchModule from "../rin-web-search/index.js";
 import chatModule from "../chat/index.js";
@@ -59,6 +60,7 @@ export function createRinCapabilityDefinitions(
     memoryModule(options),
     selfImproveModule(options),
     taskModule(),
+    heartbeatModule(options),
     chatModule(),
     tokenUsageModule(options),
   ];
