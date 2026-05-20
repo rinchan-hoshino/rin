@@ -283,30 +283,6 @@ async function createManagedNewSession(
   return { cancelled: false };
 }
 
-function getSessionMessagesForTurnCompletion(session: any) {
-  if (Array.isArray(session?.agent?.state?.messages)) {
-    return session.agent.state.messages;
-  }
-  if (Array.isArray(session?.messages)) return session.messages;
-  return [];
-}
-
-function snapshotSessionTurnCompletion(session: any) {
-  const messages = getSessionMessagesForTurnCompletion(session);
-  let assistantCount = 0;
-  for (const message of messages) {
-    if (safeString(message?.role).trim() === "assistant") assistantCount += 1;
-  }
-  return {
-    messages,
-    assistantCount,
-    finalText: resolveTurnCompletion({ messages }).finalText,
-    lastAssistantText: safeString(
-      session?.getLastAssistantText?.() || "",
-    ).trim(),
-  };
-}
-
 function resolveTurnFailureMessage(session: any, messages: any[]) {
   const stateError = safeString(session?.agent?.state?.errorMessage).trim();
   if (stateError) return stateError;
@@ -662,7 +638,6 @@ export async function runCustomRpcMode(
   };
   const startTurnTask = (requestTag: string, task: () => Promise<void>) => {
     const turnSession = getSession();
-    const beforeSnapshot = snapshotSessionTurnCompletion(turnSession);
     let lastCompletedAssistantMessage: any = null;
     let piContinuationPending = false;
     const rawUnsubscribeTurnSession = turnSession.subscribe?.((event: any) => {
@@ -718,30 +693,11 @@ export async function runCustomRpcMode(
             hiddenTodoContinuationSessions.delete(turnSession);
           }
         }
-        let completion = resolveTurnCompletion({
+        const completion = resolveTurnCompletion({
           messages: lastCompletedAssistantMessage
             ? [lastCompletedAssistantMessage]
             : [],
         });
-        let afterSnapshot: ReturnType<
-          typeof snapshotSessionTurnCompletion
-        > | null = null;
-        if (!completion.finalText) {
-          afterSnapshot = snapshotSessionTurnCompletion(turnSession);
-          const sessionAdvanced =
-            afterSnapshot.assistantCount > beforeSnapshot.assistantCount ||
-            (afterSnapshot.finalText &&
-              afterSnapshot.finalText !== beforeSnapshot.finalText) ||
-            (afterSnapshot.lastAssistantText &&
-              afterSnapshot.lastAssistantText !==
-                beforeSnapshot.lastAssistantText);
-          if (sessionAdvanced) {
-            completion = resolveTurnCompletion({
-              messages: afterSnapshot.messages,
-              finalText: afterSnapshot.lastAssistantText,
-            });
-          }
-        }
         if (!completion.finalText) {
           if (
             taskError &&
@@ -751,10 +707,9 @@ export async function runCustomRpcMode(
           }
           const failureMessage = resolveTurnFailureMessage(
             turnSession,
-            afterSnapshot?.messages ||
-              (lastCompletedAssistantMessage
-                ? [lastCompletedAssistantMessage]
-                : []),
+            lastCompletedAssistantMessage
+              ? [lastCompletedAssistantMessage]
+              : [],
           );
           throw new Error(failureMessage || "rpc_turn_final_output_missing");
         }
