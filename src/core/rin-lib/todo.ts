@@ -7,7 +7,12 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import {
+  Container,
+  matchesKey,
+  Text,
+  truncateToWidth,
+} from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type {
   RinCapabilityDefinition,
@@ -44,10 +49,10 @@ function normalizeTodoId(value: unknown): number | undefined {
 }
 
 function formatTodoChecklistContent(todoList: Todo[]): string {
-  if (todoList.length === 0) return "- [ ] No todos";
+  if (todoList.length === 0) return "○ No todos";
 
   return todoList
-    .map((todo) => `- [${todo.done ? "x" : " "}] #${todo.id}: ${todo.text}`)
+    .map((todo) => `${todo.done ? "✓" : "○"} #${todo.id}  ${todo.text}`)
     .join("\n");
 }
 
@@ -57,23 +62,21 @@ function formatTodoChecklistRender(
   theme: Theme,
 ): string {
   if (todoList.length === 0) {
-    return theme.fg("dim", "- [ ] No todos");
+    return theme.fg("dim", "○ No todos");
   }
 
   const display = expanded ? todoList : todoList.slice(0, 5);
   const lines = display.map((todo) => {
-    const check = todo.done
-      ? theme.fg("success", "- [x]")
-      : theme.fg("dim", "- [ ]");
-    const id = theme.fg("accent", `#${todo.id}:`);
+    const check = todo.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
+    const id = theme.fg("accent", `#${todo.id}`);
     const text = todo.done
       ? theme.fg("dim", todo.text)
-      : theme.fg("muted", todo.text);
-    return `${check} ${id} ${text}`;
+      : theme.fg("text", todo.text);
+    return `${check} ${id}  ${text}`;
   });
 
   if (!expanded && todoList.length > 5) {
-    lines.push(theme.fg("dim", `... ${todoList.length - 5} more`));
+    lines.push(theme.fg("dim", `… ${todoList.length - 5} more`));
   }
 
   return lines.join("\n");
@@ -118,7 +121,7 @@ class TodoListComponent {
     if (this.todos.length === 0) {
       lines.push(
         truncateToWidth(
-          `  ${th.fg("dim", "- [ ] No todos yet. Ask the agent to add some!")}`,
+          `  ${th.fg("dim", "○ No todos yet. Ask the agent to add some!")}`,
           width,
         ),
       );
@@ -134,14 +137,12 @@ class TodoListComponent {
       lines.push("");
 
       for (const todo of this.todos) {
-        const check = todo.done
-          ? th.fg("success", "- [x]")
-          : th.fg("dim", "- [ ]");
-        const id = th.fg("accent", `#${todo.id}:`);
+        const check = todo.done ? th.fg("success", "✓") : th.fg("dim", "○");
+        const id = th.fg("accent", `#${todo.id}`);
         const text = todo.done
           ? th.fg("dim", todo.text)
           : th.fg("text", todo.text);
-        lines.push(truncateToWidth(`  ${check} ${id} ${text}`, width));
+        lines.push(truncateToWidth(`  ${check} ${id}  ${text}`, width));
       }
     }
 
@@ -329,14 +330,8 @@ export default function todoCapability(): RinCapabilityDefinition {
       }
     },
 
-    renderCall(args: any, theme, _context) {
-      let text =
-        theme.fg("toolTitle", theme.bold("Checklist ")) +
-        theme.fg("muted", args.action);
-      if (args.text) text += ` ${theme.fg("dim", `"${args.text}"`)}`;
-      if (args.id !== undefined)
-        text += ` ${theme.fg("accent", `#${args.id}`)}`;
-      return new Text(text, 0, 0);
+    renderCall(_args: any, _theme, _context) {
+      return new Container();
     },
 
     renderResult(result, { expanded }, theme, _context) {
