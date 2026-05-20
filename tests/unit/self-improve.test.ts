@@ -942,6 +942,38 @@ test("queued maintenance drops invalid session jobs into history instead of bloc
   });
 });
 
+test("queued maintenance reclaims expired worker locks", async () => {
+  await withTempRoot(async (root) => {
+    await asyncJobs.enqueueMemoryMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    });
+    await fs.mkdir(path.dirname(selfImprovePaths.maintenanceLockPath(root)), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      selfImprovePaths.maintenanceLockPath(root),
+      JSON.stringify({
+        pid: process.pid,
+        createdAt: "2000-01-01T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const result = await asyncJobs.processQueuedMemoryJobs(root);
+    assert.equal(result.failed, 1);
+    assert.equal(result.processed, 0);
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 0);
+    await assert.rejects(
+      () => fs.readFile(selfImprovePaths.maintenanceLockPath(root), "utf8"),
+      /ENOENT/,
+    );
+  });
+});
+
 test("queued maintenance ignores blank agent dir inputs", async () => {
   const result = await asyncJobs.processQueuedMemoryJobs("   ");
   assert.deepEqual(result, { skipped: "no-agent-dir" });

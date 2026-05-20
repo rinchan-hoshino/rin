@@ -178,6 +178,8 @@ export async function enqueueMemoryMaintenanceJob(
   });
 }
 
+const WORKER_LOCK_STALE_MS = 2 * 60 * 60 * 1000;
+
 function processExists(pid: number) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -186,6 +188,12 @@ function processExists(pid: number) {
   } catch {
     return false;
   }
+}
+
+function lockIsExpired(createdAt: unknown, nowMs = Date.now()) {
+  const timestamp = Date.parse(safeString(createdAt).trim());
+  if (!Number.isFinite(timestamp)) return true;
+  return nowMs - timestamp > WORKER_LOCK_STALE_MS;
 }
 
 async function acquireWorkerLock(agentDir: string) {
@@ -204,7 +212,7 @@ async function acquireWorkerLock(agentDir: string) {
       const raw = await fs.readFile(filePath, "utf8");
       const parsed = JSON.parse(raw);
       const pid = Number(parsed?.pid || 0);
-      if (!processExists(pid)) {
+      if (!processExists(pid) || lockIsExpired(parsed?.createdAt)) {
         await fs.rm(filePath, { force: true });
         const handle = await fs.open(filePath, "wx");
         await handle.writeFile(
