@@ -64,6 +64,54 @@ async function withTempDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
+test("todo tool coalescing hides earlier consecutive checklist results", () => {
+  const todoComponent = (toolCallId: string, hidden = false) => ({
+    toolName: "todo",
+    toolCallId,
+    hideComponent: hidden,
+    invalidations: 0,
+    invalidate() {
+      this.invalidations += 1;
+    },
+  });
+  const todoOnlyAssistant = {
+    lastMessage: {
+      role: "assistant",
+      content: [{ type: "toolCall", name: "todo" }],
+    },
+  };
+  const textAssistant = {
+    lastMessage: {
+      role: "assistant",
+      content: [{ type: "text", text: "visible assistant text" }],
+    },
+  };
+
+  const first = todoComponent("todo-1");
+  const second = todoComponent("todo-2");
+  const third = todoComponent("todo-3");
+  const fourth = todoComponent("todo-4", true);
+
+  const changed = overrides.coalesceTodoToolComponentsInContainer({
+    children: [
+      first,
+      todoOnlyAssistant,
+      second,
+      textAssistant,
+      third,
+      todoOnlyAssistant,
+      fourth,
+      { toolName: "bash" },
+    ],
+  });
+
+  assert.equal(changed, 3);
+  assert.equal(first.hideComponent, true);
+  assert.equal(second.hideComponent, false);
+  assert.equal(third.hideComponent, true);
+  assert.equal(fourth.hideComponent, false);
+});
+
 test("terminal title override shows only session name", async () => {
   await overrides.applyRinTuiOverrides();
 

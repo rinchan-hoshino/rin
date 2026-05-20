@@ -237,7 +237,8 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
     .renderCall({ action: "add", text: "Wire core todo" }, theme, renderContext)
     .render(80)
     .join("\n");
-  assert.match(todoCall, /Checklist add "Wire core todo"/);
+  assert.equal(todoCall, "");
+  assert.doesNotMatch(todoCall, /Checklist|add|Wire core todo/);
 
   const todoResult = todoTool
     .renderResult(
@@ -258,9 +259,9 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
     )
     .render(80)
     .join("\n");
-  assert.match(todoResult, /- \[ \] #1: Wire core todo/);
-  assert.match(todoResult, /- \[x\] #2: Ship renderer/);
-  assert.doesNotMatch(todoResult, /Added todo|completed/);
+  assert.match(todoResult, /○ #1 {2}Wire core todo/);
+  assert.match(todoResult, /✓ #2 {2}Ship renderer/);
+  assert.doesNotMatch(todoResult, /Checklist add|Added todo|completed/);
 });
 
 test("rpc extension command facade is backed by the daemon catalog", async () => {
