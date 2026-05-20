@@ -1,5 +1,7 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -277,6 +279,7 @@ test("web search spaces Google requests when configured", async () => {
   query.resetWebSearchRuntimeStateForTests?.({
     googleMinIntervalMs: 5,
     googleMaxIntervalMs: 5,
+    googleSharedGateRoot: false,
   });
   const originalFetch = globalThis.fetch;
   const starts: number[] = [];
@@ -298,6 +301,49 @@ test("web search spaces Google requests when configured", async () => {
     assert.ok(starts[1] - starts[0] >= 4);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("web search shares Google request spacing across module instances", async () => {
+  const gateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rin-google-gate-"));
+  const firstQuery = await import(
+    `${pathToFileURL(path.join(rootDir, "dist", "core", "rin-web-search", "query.js")).href}?gate=first-${Date.now()}`
+  );
+  const secondQuery = await import(
+    `${pathToFileURL(path.join(rootDir, "dist", "core", "rin-web-search", "query.js")).href}?gate=second-${Date.now()}`
+  );
+  firstQuery.resetWebSearchRuntimeStateForTests?.({
+    googleMinIntervalMs: 5,
+    googleMaxIntervalMs: 5,
+    googleSharedGateRoot: gateRoot,
+  });
+  secondQuery.resetWebSearchRuntimeStateForTests?.({
+    googleMinIntervalMs: 5,
+    googleMaxIntervalMs: 5,
+    googleSharedGateRoot: gateRoot,
+  });
+
+  const originalFetch = globalThis.fetch;
+  const starts: number[] = [];
+  globalThis.fetch = (async () => {
+    starts.push(Date.now());
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => googleFixture,
+    };
+  }) as typeof fetch;
+  try {
+    await Promise.all([
+      firstQuery.searchWeb({ q: "rinchanai one", limit: 1 }),
+      secondQuery.searchWeb({ q: "rinchanai two", limit: 1 }),
+    ]);
+    assert.equal(starts.length, 2);
+    assert.ok(starts[1] - starts[0] >= 4);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await fs.rm(gateRoot, { recursive: true, force: true });
   }
 });
 

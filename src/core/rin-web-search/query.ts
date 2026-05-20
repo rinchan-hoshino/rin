@@ -1,10 +1,19 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { dataRootForState } from "./paths.js";
+
 const SEARCH_TIMEOUT_MS = 8_000;
 const DEFAULT_GOOGLE_MIN_INTERVAL_MS = 1_000;
 const DEFAULT_GOOGLE_MAX_INTERVAL_MS = 3_000;
+const GOOGLE_GATE_LOCK_STALE_MS = 30_000;
+const GOOGLE_GATE_LOCK_POLL_MS = 25;
 let googleNextRequestAt = 0;
 let googleRequestQueue: Promise<void> = Promise.resolve();
 let googleMinIntervalMs = DEFAULT_GOOGLE_MIN_INTERVAL_MS;
 let googleMaxIntervalMs = DEFAULT_GOOGLE_MAX_INTERVAL_MS;
+let googleSharedGateRootForTests: string | false | undefined;
 
 const USER_AGENT =
   "Mozilla/5.0 (compatible; RinWebSearch/1.0; +https://github.com/rinchanai/rin)";
@@ -130,6 +139,7 @@ function nextGoogleIntervalMs() {
 export function resetWebSearchRuntimeStateForTests(options?: {
   googleMinIntervalMs?: number;
   googleMaxIntervalMs?: number;
+  googleSharedGateRoot?: string | false;
 }) {
   googleNextRequestAt = 0;
   googleRequestQueue = Promise.resolve();
@@ -141,20 +151,122 @@ export function resetWebSearchRuntimeStateForTests(options?: {
     googleMinIntervalMs,
     Math.floor(options?.googleMaxIntervalMs ?? DEFAULT_GOOGLE_MAX_INTERVAL_MS),
   );
+  googleSharedGateRootForTests = options?.googleSharedGateRoot ?? false;
+}
+
+type GoogleGateState = {
+  nextRequestAt?: number;
+};
+
+function runtimeAgentDir(): string {
+  return (
+    process.env.RIN_DIR?.trim() ||
+    process.env.PI_CODING_AGENT_DIR?.trim() ||
+    path.join(os.homedir(), ".rin")
+  );
+}
+
+function googleSharedGateRoot(): string {
+  if (googleSharedGateRootForTests === false) return "";
+  if (googleSharedGateRootForTests) return googleSharedGateRootForTests;
+  return path.join(dataRootForState(runtimeAgentDir()), "google-request-gate");
+}
+
+async function readGoogleGateState(
+  statePath: string,
+): Promise<GoogleGateState> {
+  try {
+    const raw = await fs.readFile(statePath, "utf8");
+    const parsed = JSON.parse(raw) as GoogleGateState;
+    return Number.isFinite(Number(parsed?.nextRequestAt)) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeGoogleGateState(
+  statePath: string,
+  state: GoogleGateState,
+): Promise<void> {
+  const tempPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(state)}\n`);
+  await fs.rename(tempPath, statePath);
+}
+
+async function removeStaleGoogleGateLock(lockPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(lockPath);
+    if (Date.now() - stat.mtimeMs < GOOGLE_GATE_LOCK_STALE_MS) return false;
+    await fs.rm(lockPath, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function acquireGoogleGateLock(
+  lockPath: string,
+): Promise<() => Promise<void>> {
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  for (;;) {
+    try {
+      await fs.mkdir(lockPath);
+      await fs.writeFile(
+        path.join(lockPath, "owner.json"),
+        `${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`,
+      );
+      return async () => {
+        await fs.rm(lockPath, { recursive: true, force: true });
+      };
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code !== "EEXIST") throw error;
+      if (await removeStaleGoogleGateLock(lockPath)) continue;
+      await sleep(GOOGLE_GATE_LOCK_POLL_MS);
+    }
+  }
+}
+
+async function withSharedGoogleSearchInterval<T>(
+  task: () => Promise<T>,
+): Promise<T> {
+  const root = googleSharedGateRoot();
+  if (!root) return await withInProcessGoogleSearchInterval(task);
+
+  const lockPath = path.join(root, "lock");
+  const statePath = path.join(root, "state.json");
+  const release = await acquireGoogleGateLock(lockPath);
+  try {
+    const state = await readGoogleGateState(statePath);
+    const delay = Number(state.nextRequestAt || 0) - Date.now();
+    if (delay > 0) await sleep(delay);
+    try {
+      return await task();
+    } finally {
+      await writeGoogleGateState(statePath, {
+        nextRequestAt: Date.now() + nextGoogleIntervalMs(),
+      });
+    }
+  } finally {
+    await release();
+  }
+}
+
+async function withInProcessGoogleSearchInterval<T>(
+  task: () => Promise<T>,
+): Promise<T> {
+  const delay = googleNextRequestAt - Date.now();
+  if (delay > 0) await sleep(delay);
+  try {
+    return await task();
+  } finally {
+    googleNextRequestAt = Date.now() + nextGoogleIntervalMs();
+  }
 }
 
 async function withGoogleSearchInterval<T>(task: () => Promise<T>): Promise<T> {
   const run = googleRequestQueue
     .catch(() => undefined)
-    .then(async () => {
-      const delay = googleNextRequestAt - Date.now();
-      if (delay > 0) await sleep(delay);
-      try {
-        return await task();
-      } finally {
-        googleNextRequestAt = Date.now() + nextGoogleIntervalMs();
-      }
-    });
+    .then(() => withSharedGoogleSearchInterval(task));
   googleRequestQueue = run.then(
     () => undefined,
     () => undefined,
