@@ -8,9 +8,9 @@
     "nightlyBranch": "main"
   },
   "stable": {
-    "version": "0.1.0",
-    "archiveUrl": "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-0.1.0.tgz",
-    "ref": "ae8593feb7a2361da8c9d200c4c27f575634145b",
+    "version": "0.1.1",
+    "archiveUrl": "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-0.1.1.tgz",
+    "ref": "637e0948d5d8f5f8998351949b42981b6d7b8521",
     "versions": {
       "0.0.0": {
         "archiveUrl": "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-0.0.0.tgz",
@@ -33,6 +33,10 @@
         "archiveUrl": "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-0.1.0.tgz",
         "ref": "ae8593feb7a2361da8c9d200c4c27f575634145b",
         "promotedFromBetaVersion": "0.1.0-beta.20260504"
+      },
+      "0.1.1": {
+        "archiveUrl": "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-0.1.1.tgz",
+        "ref": "637e0948d5d8f5f8998351949b42981b6d7b8521"
       }
     },
     "promotedFromBetaVersion": "0.1.0-beta.20260504"
