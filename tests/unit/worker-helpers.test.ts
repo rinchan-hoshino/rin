@@ -373,6 +373,7 @@ test("runBuiltinCommand shows the built-in todo list", async () => {
 
   assert.equal(result.handled, true);
   assert.match(rendered, /Wire \/todos/);
+  assert.doesNotMatch(rendered, /#1/);
 });
 
 test("runBuiltinCommand uses runtime for session replacement commands", async () => {
