@@ -1,7 +1,7 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { safeString } from "../text-utils.js";
 
 import { normalizeLanguageTag } from "../language.js";
@@ -304,6 +304,54 @@ export function requireTool(name: string, paths: string[] = []) {
     );
   } catch {
     throw new Error(`rin_missing_required_tool:${name}`);
+  }
+}
+
+const FORWARDED_CHILD_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+function signalExitCode(signal: NodeJS.Signals) {
+  if (signal === "SIGINT") return 130;
+  if (signal === "SIGTERM") return 143;
+  if (signal === "SIGHUP") return 129;
+  return 1;
+}
+
+async function runInteractiveCommand(
+  command: string,
+  args: string[],
+  options: any = {},
+) {
+  const child = spawn(command, args, { stdio: "inherit", ...options });
+  let forwardedSignal: NodeJS.Signals | null = null;
+  const handlers = new Map<NodeJS.Signals, () => void>();
+  for (const signal of FORWARDED_CHILD_SIGNALS) {
+    const handler = () => {
+      forwardedSignal = signal;
+      if (!child.killed) child.kill(signal);
+    };
+    handlers.set(signal, handler);
+    process.once(signal, handler);
+  }
+
+  try {
+    const result = await new Promise<{
+      code: number | null;
+      signal: NodeJS.Signals | null;
+    }>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    if (forwardedSignal) process.exit(signalExitCode(forwardedSignal));
+    if (result.signal) process.exit(signalExitCode(result.signal));
+    if (result.code && result.code !== 0) {
+      const error: any = new Error(`rin_child_command_failed:${result.code}`);
+      error.status = result.code;
+      throw error;
+    }
+  } finally {
+    for (const [signal, handler] of handlers) {
+      process.off(signal, handler);
+    }
   }
 }
 
@@ -660,7 +708,7 @@ export async function runUpdate(parsed: ParsedArgs) {
         "--release-file",
         writeReleaseHandoffFile(releaseDir),
       ];
-      runCommandSync(
+      await runInteractiveCommand(
         npm,
         [
           "exec",
@@ -787,7 +835,7 @@ export async function runUpdate(parsed: ParsedArgs) {
       ),
     );
 
-    runCommandSync(
+    await runInteractiveCommand(
       process.execPath,
       [
         path.join(sourceRoot, "dist", "app", "rin-install", "main.js"),

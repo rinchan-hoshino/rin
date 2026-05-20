@@ -57,6 +57,15 @@ export function buildFinalizeInstallPlanCommand(
   ].join(" ");
 }
 
+const FORWARDED_CHILD_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+
+function signalExitCode(signal: NodeJS.Signals) {
+  if (signal === "SIGINT") return 130;
+  if (signal === "SIGTERM") return 143;
+  if (signal === "SIGHUP") return 129;
+  return 1;
+}
+
 export async function runFinalizeInstallPlanInChild(
   options: FinalizeInstallOptions,
   message: string,
@@ -96,12 +105,25 @@ export async function runFinalizeInstallPlanInChild(
         env: process.env,
       },
     );
+    let forwardedSignal: NodeJS.Signals | null = null;
+    const handlers = new Map<NodeJS.Signals, () => void>();
+    for (const signal of FORWARDED_CHILD_SIGNALS) {
+      const handler = () => {
+        forwardedSignal = signal;
+        if (!child.killed) child.kill(signal);
+      };
+      handlers.set(signal, handler);
+      process.once(signal, handler);
+    }
 
     const exitCode = await new Promise<number>((resolve, reject) => {
       child.on("error", reject);
       child.on("exit", (code, signal) => {
-        if (signal)
-          reject(new Error(`rin_installer_child_terminated:${signal}`));
+        for (const [registeredSignal, handler] of handlers) {
+          process.off(registeredSignal, handler);
+        }
+        if (forwardedSignal) process.exit(signalExitCode(forwardedSignal));
+        if (signal) process.exit(signalExitCode(signal));
         else resolve(code ?? 1);
       });
     });

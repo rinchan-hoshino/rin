@@ -128,6 +128,8 @@ test("rin update delegates final update UI to rin-install update args", () => {
   assert.match(source, /parsed\.updateAssumeYes \? \["--yes"\]/);
   assert.match(source, /createUpdateI18n\(installDir, parsed\.targetUser\)/);
   assert.match(source, /rin-install/);
+  assert.match(source, /runInteractiveCommand/);
+  assert.match(source, /FORWARDED_CHILD_SIGNALS/);
   assert.match(source, /runInstallerProgress/);
   assert.match(source, /runLoggedUpdateCommandSync/);
   assert.match(source, /--loglevel=error/);
