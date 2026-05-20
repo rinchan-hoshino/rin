@@ -829,6 +829,11 @@ export class RpcInteractiveSession {
     return data;
   }
 
+  async shutdownSession() {
+    if (!this.client.isConnected()) return;
+    await this.call("shutdown_session");
+  }
+
   async terminateSession() {
     if (!this.client.isConnected()) return;
     await this.call("terminate_session");

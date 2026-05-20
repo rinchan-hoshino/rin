@@ -77,6 +77,7 @@ export type RinRpcCommandType =
   | "oauth_set_api_key"
   | "oauth_logout"
   | "reload"
+  | "shutdown_session"
   | "terminate_session";
 
 export type RinRpcResponseEnvelope = {

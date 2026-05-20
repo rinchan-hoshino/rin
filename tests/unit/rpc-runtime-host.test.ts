@@ -37,6 +37,9 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
     async shutdownLocalExtensions(event) {
       calls.push(["shutdownLocalExtensions", event]);
     },
+    async shutdownSession() {
+      calls.push(["shutdownSession"]);
+    },
     async terminateSession() {
       calls.push(["terminateSession"]);
     },
@@ -95,7 +98,7 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
     ["rebind", "session-like"],
     ["beforeInvalidate"],
     ["shutdownLocalExtensions", { reason: "quit" }],
-    ["terminateSession"],
+    ["shutdownSession"],
     ["disconnect"],
   ]);
 });

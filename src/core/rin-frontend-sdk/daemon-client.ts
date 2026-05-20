@@ -287,6 +287,10 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     return await tracked;
   }
 
+  async shutdownSession() {
+    return await this.request({ type: "shutdown_session" });
+  }
+
   async terminateSession() {
     return await this.request({ type: "terminate_session" });
   }
