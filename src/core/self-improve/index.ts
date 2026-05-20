@@ -17,7 +17,7 @@ import {
 } from "./lib.js";
 import { readSessionMetadata } from "../session/metadata.js";
 
-const DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES = 8;
+const DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES = 5;
 const reviewStateBySession = new Map<
   string,
   { finalMessages: number; lastQueuedMessage: number; initialized: boolean }
@@ -252,23 +252,6 @@ export default function selfImproveModule(
             );
             state.lastQueuedMessage = state.finalMessages;
           }
-        },
-      ],
-      session_before_compact: [
-        async (event, ctx) => {
-          const meta = sessionMeta(ctx);
-          if (!meta.sessionFile || !meta.sessionPersisted) return;
-          if (String(event?.reason || "").trim() === "overflow") return;
-          await processSelfImproveReviewNow(
-            ctx,
-            {
-              sessionFile: meta.sessionFile,
-              leafId: meta.leafId,
-              trigger: "self_improve:session_compaction_review",
-              snapshotKey: `compact:${meta.leafId || meta.sessionFile}`,
-            },
-            runMemoryMaintenanceNow,
-          );
         },
       ],
       session_shutdown: [

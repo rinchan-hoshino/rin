@@ -48,7 +48,7 @@ Transcript archives are the source for episodic recall. They can inform consolid
 
 ## Consolidation triggers
 
-Rin runs memory review during fixed-round periodic maintenance, synchronously before session compaction, and on real session shutdown. Idle daemon worker sleep is not session shutdown and does not trigger shutdown memory maintenance. The periodic threshold is counted from real agent final messages, is configurable with `settings.json -> selfImprove.reviewEveryTurns`, and defaults to `8`; user steering inputs and assistant tool-call-only/interim messages do not count.
+Rin runs memory review during fixed-round periodic maintenance and on real session shutdown. Idle daemon worker sleep is not session shutdown and does not trigger shutdown memory maintenance. The periodic threshold is counted from real agent final messages, is configurable with `settings.json -> selfImprove.reviewEveryTurns`, and defaults to `5`; user steering inputs and assistant tool-call-only/interim messages do not count.
 
 Daily sleep-style consolidation should use the same rules as a scheduled maintenance pass: revisit short-term memory, merge repeated observations, refresh indexes, and demote or delete stale material rather than adding more resident prompt text.
 
