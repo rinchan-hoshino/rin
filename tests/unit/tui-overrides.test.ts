@@ -369,7 +369,7 @@ test("loader stop clears render interval", () => {
   assert.ok(renders >= 1);
 });
 
-test("rpc frontend startup statuses use an animated loader until working starts", async () => {
+test("rpc frontend startup statuses use one animated loader until working starts", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -450,6 +450,17 @@ test("rpc frontend startup statuses use an animated loader until working starts"
   assert.match(startupLines[1], /Starting\.\.\./);
   assert.equal(additions, 1);
   assert.ok(renders >= 1);
+
+  const rendersAfterStarting = renders;
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_frontend_status",
+    phase: "starting",
+    label: "Starting",
+    connected: true,
+  });
+  assert.equal(instance.statusContainer.child, startupStatus);
+  assert.equal(additions, 1);
+  assert.equal(renders, rendersAfterStarting);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_frontend_status",
@@ -810,6 +821,7 @@ test("rpc session resync rebinds runtime state and redraws history directly", as
     renderSessionContext(_context, options) {
       directHistoryRenders += 1;
       assert.deepEqual(options, { updateFooter: true, populateHistory: true });
+      this.ui.requestRender();
     },
     statusContainer: {
       clear() {},
@@ -833,7 +845,7 @@ test("rpc session resync rebinds runtime state and redraws history directly", as
   assert.equal(runtimeChanges, 1);
   assert.equal(initialStateRenders, 0);
   assert.equal(directHistoryRenders, 1);
-  assert.ok(renders >= 1);
+  assert.equal(renders, 1);
 });
 
 test("rpc session resync redraw does not replay initial compaction status notice", async () => {
@@ -1041,7 +1053,9 @@ test("rpc session resync clears pending local user echo", async () => {
     },
     updatePendingMessagesDisplay() {},
     handleRuntimeSessionChange: async () => {},
-    renderSessionContext() {},
+    renderSessionContext() {
+      this.ui.requestRender();
+    },
     sessionManager: {
       buildSessionContext() {
         return { messages: [] };

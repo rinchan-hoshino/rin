@@ -52,6 +52,7 @@ const RPC_TRANSPORT_REAPPLY_EVENTS = new Set([
 const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
 const STARTUP_INPUT_QUEUE_KEY = "__rinStartupInputQueue";
 const RPC_TRANSPORT_STATUS_COMPONENT_KEY = "__rinRpcTransportStatusComponent";
+const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
 const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "starting",
   "connecting",
@@ -129,12 +130,15 @@ function statusContainerHasChild(instance: any, child: any) {
 
 function stopRpcTransportStatusComponent(instance: any) {
   const component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
-  if (!component) return;
+  if (!component) return false;
   component.stop?.();
-  if (statusContainerHasChild(instance, component)) {
+  const wasAttached = statusContainerHasChild(instance, component);
+  if (wasAttached) {
     instance.statusContainer.clear();
   }
   instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = undefined;
+  instance[RPC_TRANSPORT_STATUS_MESSAGE_KEY] = undefined;
+  return wasAttached;
 }
 
 function createRpcTransportStatusLoader(instance: any, message: string) {
@@ -153,32 +157,48 @@ function formatRpcTransportStatusLabel(label: string) {
 function showRpcTransportStatus(instance: any, event: any) {
   const phase = String(event?.phase || "");
   if (!RPC_TRANSPORT_STATUS_PHASES.has(phase)) {
-    stopRpcTransportStatusComponent(instance);
-    if (phase === "idle") instance?.ui?.requestRender?.();
+    const changed = stopRpcTransportStatusComponent(instance);
+    if (changed) instance?.ui?.requestRender?.();
     return;
   }
 
   const label = String(event?.label || phase || "Starting");
   const message = formatRpcTransportStatusLabel(label);
   let component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
+  const attached = statusContainerHasChild(instance, component);
+  const previousMessage = instance?.[RPC_TRANSPORT_STATUS_MESSAGE_KEY];
+  if (component && attached && previousMessage === message) {
+    return;
+  }
+
+  let renderedByLoader = false;
   if (!component) {
     component = createRpcTransportStatusLoader(instance, message);
     instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = component;
-  } else {
-    component.setMessage(message);
+    renderedByLoader = true;
+  } else if (previousMessage !== message) {
+    component.setMessage?.(message);
+    renderedByLoader = true;
   }
-  if (!statusContainerHasChild(instance, component)) {
+  instance[RPC_TRANSPORT_STATUS_MESSAGE_KEY] = message;
+
+  if (!attached) {
     instance.statusContainer.clear();
     instance.statusContainer.addChild(component);
+    if (!renderedByLoader) instance.ui.requestRender();
   }
-  instance.ui.requestRender();
 }
 
 function reattachExistingPiLoader(instance: any) {
-  stopRpcTransportStatusComponent(instance);
-  if (!instance?.loadingAnimation) return;
-  instance.statusContainer.clear();
-  instance.statusContainer.addChild(instance.loadingAnimation);
+  const clearedTransportStatus = stopRpcTransportStatusComponent(instance);
+  if (!instance?.loadingAnimation) {
+    if (clearedTransportStatus) instance?.ui?.requestRender?.();
+    return;
+  }
+  if (!statusContainerHasChild(instance, instance.loadingAnimation)) {
+    instance.statusContainer.clear();
+    instance.statusContainer.addChild(instance.loadingAnimation);
+  }
   instance.ui.requestRender();
 }
 
@@ -939,7 +959,6 @@ export async function applyRinTuiOverrides() {
         }
         redrawCurrentSessionHistoryAfterRpcResync(this);
         syncRpcPiLoader(this);
-        this.ui.requestRender();
         return;
       }
 
