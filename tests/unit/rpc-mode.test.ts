@@ -1937,7 +1937,7 @@ test(
 );
 
 test(
-  "rpc mode withholds premature finals while todo continuation completes work",
+  "rpc mode completes the original prompt without hidden todo continuation",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -1961,18 +1961,6 @@ test(
       const emit = (event) => {
         for (const handler of sessionSubscribers) handler(event);
       };
-      const todoResult = (done) => ({
-        type: "message",
-        message: {
-          role: "toolResult",
-          toolName: "todo",
-          details: {
-            action: "list",
-            todos: [{ id: 1, text: "finish hidden work", done }],
-            nextId: 2,
-          },
-        },
-      });
       const session = {
         isStreaming: false,
         isCompacting: false,
@@ -1986,18 +1974,23 @@ test(
         },
         prompt: async (_message, options) => {
           promptSources.push(options?.source || "");
-          const hidden = options?.source === "builtin:todo-continuation";
-          branch.push(todoResult(hidden));
+          branch.push({
+            type: "message",
+            message: {
+              role: "toolResult",
+              toolName: "todo",
+              details: {
+                action: "list",
+                todos: [{ id: 1, text: "unfinished work", done: false }],
+                nextId: 2,
+              },
+            },
+          });
           emit({
             type: "message_end",
             message: {
               role: "assistant",
-              content: [
-                {
-                  type: "text",
-                  text: hidden ? "hidden completed final" : "premature final",
-                },
-              ],
+              content: [{ type: "text", text: "original final" }],
             },
           });
         },
@@ -2017,7 +2010,7 @@ test(
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "hidden completed final",
+        getLastAssistantText: () => "stale final must not be used",
         setThinkingLevel: () => {},
         cycleThinkingLevel: () => undefined,
         setSteeringMode: () => {},
@@ -2080,9 +2073,9 @@ test(
         .filter((event) => event.type === "message_end")
         .map((event) => event.message?.content?.[0]?.text);
       assert.equal(completions.length, 1);
-      assert.equal(completions[0]?.finalText, "hidden completed final");
-      assert.deepEqual(visibleMessageEnds, ["premature final"]);
-      assert.deepEqual(promptSources, ["rpc", "builtin:todo-continuation"]);
+      assert.equal(completions[0]?.finalText, "original final");
+      assert.deepEqual(visibleMessageEnds, ["original final"]);
+      assert.deepEqual(promptSources, ["rpc"]);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

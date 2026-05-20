@@ -1,5 +1,4 @@
 import { extractMessageText } from "../message-content.js";
-import { continueTodoFinalIfNeeded } from "../rin-lib/todo-state.js";
 
 import { openBoundSession } from "./factory.js";
 import { readSessionMetadata } from "./metadata.js";
@@ -28,11 +27,6 @@ export async function runSessionPrompt(options: {
       source: "rpc" as any,
     });
     await session.agent.waitForIdle();
-    if (latestAssistantText) {
-      await continueTodoFinalIfNeeded(session, {
-        waitForEvents: () => session.agent.waitForIdle(),
-      });
-    }
     if (!latestAssistantText) throw new Error("final_assistant_text_missing");
     const sessionMeta = readSessionMetadata(session);
     const sessionFile = sessionMeta.sessionFile || undefined;

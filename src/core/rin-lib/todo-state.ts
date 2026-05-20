@@ -13,20 +13,6 @@ export type RinTodoSnapshot = {
   signature: string;
 };
 
-export type TodoFinalContinuationResult = {
-  continuations: number;
-  reason:
-    | "no_pending"
-    | "completed"
-    | "unchanged"
-    | "max_turns"
-    | "prompt_error";
-  snapshot: RinTodoSnapshot;
-  errorMessage?: string;
-};
-
-export const TODO_FINAL_CONTINUATION_MAX_TURNS = 64;
-
 function normalizeTodoItem(value: unknown): RinTodoItem | undefined {
   const item = value && typeof value === "object" ? (value as any) : null;
   if (!item) return undefined;
@@ -97,74 +83,4 @@ export function readTodoSnapshotFromSession(session: any): RinTodoSnapshot {
     if (next) latest = next;
   }
   return latest;
-}
-
-function formatPendingTodos(snapshot: RinTodoSnapshot) {
-  return snapshot.todos
-    .filter((todo) => !todo.done)
-    .map((todo) => `- #${todo.id}: ${todo.text}`)
-    .join("\n");
-}
-
-export function buildTodoFinalContinuationPrompt(snapshot: RinTodoSnapshot) {
-  const pending =
-    formatPendingTodos(snapshot) || "- unfinished todo items exist";
-  return [
-    "Hidden runtime continuation: your previous final answer is being withheld because the session todo list still has unfinished items.",
-    "Continue the task now and update the todo list as you work.",
-    "Do not give a final answer until the todo list is complete, or until you have made the required progress and are genuinely blocked by missing user input or authority.",
-    "If blocked, make the blocker clear in the next final answer without marking unfinished work as done.",
-    "",
-    "Unfinished todo items:",
-    pending,
-  ].join("\n");
-}
-
-export async function continueTodoFinalIfNeeded(
-  session: any,
-  options: {
-    maxContinuations?: number;
-    waitForEvents?: () => Promise<void> | void;
-  } = {},
-): Promise<TodoFinalContinuationResult> {
-  const maxContinuations = Math.max(
-    0,
-    Math.floor(
-      Number(options.maxContinuations ?? TODO_FINAL_CONTINUATION_MAX_TURNS),
-    ),
-  );
-  let snapshot = readTodoSnapshotFromSession(session);
-  if (snapshot.pendingCount <= 0) {
-    return { continuations: 0, reason: "no_pending", snapshot };
-  }
-
-  let continuations = 0;
-  while (continuations < maxContinuations) {
-    const previousSignature = snapshot.signature;
-    try {
-      await session.prompt(buildTodoFinalContinuationPrompt(snapshot), {
-        expandPromptTemplates: false,
-        source: "builtin:todo-continuation",
-      });
-      continuations += 1;
-      await options.waitForEvents?.();
-    } catch (error: any) {
-      return {
-        continuations,
-        reason: "prompt_error",
-        snapshot,
-        errorMessage: safeString(error?.message || error).trim(),
-      };
-    }
-
-    snapshot = readTodoSnapshotFromSession(session);
-    if (snapshot.pendingCount <= 0) {
-      return { continuations, reason: "completed", snapshot };
-    }
-    if (snapshot.signature === previousSignature) {
-      return { continuations, reason: "unchanged", snapshot };
-    }
-  }
-
-  return { continuations, reason: "max_turns", snapshot };
 }
