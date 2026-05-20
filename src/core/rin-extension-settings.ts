@@ -5,7 +5,7 @@ import { cloneJson, isJsonRecord } from "./json-utils.js";
 import { readJsonFile } from "./platform/fs.js";
 import { safeString } from "./text-utils.js";
 
-export type RinExtensionWorkerConfig = {
+export type RinBackgroundExtensionConfig = {
   name: string;
   packageName: string;
   version: string;
@@ -29,9 +29,9 @@ export function getRinExtensionRoot(settings: unknown): Record<string, any> {
     : {};
 }
 
-function normalizeWorkerConfig(
+function normalizeBackgroundExtensionConfig(
   value: unknown,
-): RinExtensionWorkerConfig | null {
+): RinBackgroundExtensionConfig | null {
   if (!isJsonRecord(value)) return null;
   if (value.enabled === false) return null;
   const packageName = safeString(value.packageName).trim();
@@ -71,10 +71,10 @@ function resolveLocalExtensionPath(entry: unknown, cwd: string) {
     : path.dirname(resolved);
 }
 
-function normalizeDirectExtensionWorkerConfig(
+function normalizeDirectBackgroundExtensionConfig(
   entry: unknown,
   cwd: string,
-): RinExtensionWorkerConfig | null {
+): RinBackgroundExtensionConfig | null {
   const extensionPath = resolveLocalExtensionPath(entry, cwd);
   if (!extensionPath) return null;
   const packageJsonPath = path.join(extensionPath, "package.json");
@@ -90,31 +90,35 @@ function normalizeDirectExtensionWorkerConfig(
   };
 }
 
-export function listRinDaemonWorkerConfigs(
+export function listRinBackgroundExtensionConfigs(
   settings: unknown,
   options: RinExtensionConfigOptions = {},
-): RinExtensionWorkerConfig[] {
+): RinBackgroundExtensionConfig[] {
   const root = getRinExtensionRoot(settings);
-  const workers = Array.isArray(root.daemonWorkers) ? root.daemonWorkers : [];
-  const configuredWorkers = workers
-    .map((entry) => normalizeWorkerConfig(entry))
-    .filter((entry): entry is RinExtensionWorkerConfig => Boolean(entry));
+  const configured = Array.isArray(root.backgroundServices)
+    ? root.backgroundServices
+    : [];
+  const configuredExtensions = configured
+    .map((entry) => normalizeBackgroundExtensionConfig(entry))
+    .filter((entry): entry is RinBackgroundExtensionConfig => Boolean(entry));
   const directExtensions =
     isJsonRecord(settings) && Array.isArray(settings.extensions)
       ? settings.extensions
           .map((entry) =>
-            normalizeDirectExtensionWorkerConfig(
+            normalizeDirectBackgroundExtensionConfig(
               entry,
               safeString(options.cwd).trim() || process.cwd(),
             ),
           )
-          .filter((entry): entry is RinExtensionWorkerConfig => Boolean(entry))
+          .filter((entry): entry is RinBackgroundExtensionConfig =>
+            Boolean(entry),
+          )
       : [];
-  return [...configuredWorkers, ...directExtensions];
+  return [...configuredExtensions, ...directExtensions];
 }
 
-export function getRinDaemonRuntimeRoot(agentDir: string): string {
-  return path.join(agentDir, "data", "daemon-runtime");
+export function getRinExtensionRuntimeRoot(agentDir: string): string {
+  return path.join(agentDir, "data", "extension-runtime");
 }
 
 export function ensureRuntimeImporter(runtimeRoot: string, fileName: string) {

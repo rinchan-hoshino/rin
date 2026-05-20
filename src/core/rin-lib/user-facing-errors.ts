@@ -219,8 +219,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   onebot_send_message_empty_result: () =>
     "OneBot accepted the send request but returned no delivered message. Check NapCat/OneBot and retry.",
 
-  provider_missing_createDaemonWorker: () =>
-    "Extension provider is missing its daemon worker factory. Fix the provider package and restart Rin.",
+  background_extension_entrypoint_missing: () =>
+    "Background extension is missing a Rin extension entry point. Export a Rin extension factory or background service and restart Rin.",
   qq_app_id_required: () =>
     "QQ adapter needs an app id before it can start. Add the app id and restart Rin.",
   qq_reaction_requires_channel_chat: () =>
