@@ -132,48 +132,6 @@ test("buildFinalAppSystemPrompt injects configured language from settings", asyn
   assert.ok(finalSystemPrompt.includes("Preferred language: zh_CN"));
 });
 
-test("buildFinalAppSystemPrompt injects a continuation prompt after automatic compaction", async () => {
-  const { session, baseSystemPrompt } = await buildFinalAppSystemPrompt();
-  runtimeMod.writeCompactionContinuationMarker(session, {
-    reason: "threshold",
-    assistantPreview: "Need to continue editing tests.",
-  });
-
-  const finalSystemPrompt =
-    runtimeMod.consumeCompactionContinuationSystemPrompt(
-      session,
-      baseSystemPrompt,
-    );
-
-  assert.ok(
-    finalSystemPrompt.includes(
-      "Context compacted; treat this as a routine internal checkpoint.",
-    ),
-  );
-  assert.ok(
-    finalSystemPrompt.includes(
-      "Execute the next concrete step directly without narration",
-    ),
-  );
-  assert.equal(
-    finalSystemPrompt.includes(
-      "Reserve status updates for when the user asked for one, the task is actually complete, or you are blocked and need input.",
-    ),
-    false,
-  );
-
-  const secondPrompt = runtimeMod.consumeCompactionContinuationSystemPrompt(
-    session,
-    baseSystemPrompt,
-  );
-  assert.equal(
-    secondPrompt.includes(
-      "Context compacted; treat this as a routine internal checkpoint.",
-    ),
-    false,
-  );
-});
-
 test("system prompt stays frozen until reload", async (t) => {
   const cwd = makeTempDir(t, "rin-frozen-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-frozen-prompt-agent-");

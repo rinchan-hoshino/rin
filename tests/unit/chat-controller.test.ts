@@ -342,7 +342,7 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
-test("chat controller follows SDK overflow continuation instead of delivering raw error", async () => {
+test("chat controller surfaces SDK overflow errors instead of following continuation markers", async () => {
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -435,10 +435,11 @@ test("chat controller follows SDK overflow continuation instead of delivering ra
     },
   };
 
-  const result = await controller.runTurn({ text: "hello", attachments: [] });
-
-  assert.equal(result.finalText, "continued answer");
-  assert.deepEqual(deliveries, ["continued answer"]);
+  await assert.rejects(
+    () => controller.runTurn({ text: "hello", attachments: [] }),
+    /context_length_exceeded/,
+  );
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller resets chat prompt sessions through the session settings reload path", async () => {

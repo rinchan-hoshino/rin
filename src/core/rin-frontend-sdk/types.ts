@@ -79,7 +79,6 @@ export type RinFrontendBackendEvent =
       isStreaming?: boolean;
     }
   | { type: "turn_accepted"; requestTag?: string }
-  | { type: "turn_continuing"; reason?: string }
   | {
       type: "passive_notice";
       text: string;

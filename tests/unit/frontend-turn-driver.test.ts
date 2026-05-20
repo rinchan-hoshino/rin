@@ -719,7 +719,7 @@ test("frontend SDK turn driver does not emit text-only assistant messages as int
   assert.deepEqual(interimTexts, []);
 });
 
-test("frontend SDK turn driver follows Pi overflow continuation through shared native events", async () => {
+test("frontend SDK turn driver rejects overflow continuation markers instead of following them", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.prompt = async (_text: string, options: any = {}) => {
@@ -768,9 +768,10 @@ test("frontend SDK turn driver follows Pi overflow continuation through shared n
     }, 5);
   };
 
-  const result = await driver.runTurn({ text: "hello" });
-
-  assert.equal(result.finalText, "continued after compaction");
+  await assert.rejects(
+    () => driver.runTurn({ text: "hello" }),
+    /context_length_exceeded/,
+  );
 });
 
 test("frontend SDK turn driver waits for an already submitted restored prompt instead of resubmitting", async () => {

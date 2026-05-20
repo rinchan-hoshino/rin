@@ -18,7 +18,7 @@ function wait(ms = 0) {
 }
 
 test(
-  "rpc mode waits for recoverable websocket continuation after prompt throws",
+  "rpc mode surfaces websocket prompt throws instead of waiting for continuation",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -147,15 +147,15 @@ test(
           }
         })
         .filter(Boolean);
-      const completion = events.find(
-        (event) =>
-          event.type === "rpc_turn_event" && event.event === "complete",
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
-      assert.equal(completion?.requestTag, "tag-1");
-      assert.equal(completion?.finalText, "recovered after throw");
+      assert.equal(error?.requestTag, "tag-1");
+      assert.match(String(error?.error || ""), /WebSocket closed 1009/);
       assert.equal(
         events.some(
-          (event) => event.type === "rpc_turn_event" && event.event === "error",
+          (event) =>
+            event.type === "rpc_turn_event" && event.event === "complete",
         ),
         false,
       );

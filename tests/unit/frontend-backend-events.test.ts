@@ -148,7 +148,7 @@ test("frontend backend event translator classifies assistant tool preface as int
   );
 });
 
-test("frontend backend event translator keeps Pi overflow continuation active", () => {
+test("frontend backend event translator ignores overflow continuation markers", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -171,11 +171,7 @@ test("frontend backend event translator keeps Pi overflow continuation active", 
       willRetry: true,
       aborted: false,
     }),
-    [
-      { type: "external_working_end" },
-      { type: "turn_accepted" },
-      { type: "turn_continuing", reason: "overflow" },
-    ],
+    [{ type: "external_working_end" }],
   );
   assert.deepEqual(
     translator.translate({
@@ -183,7 +179,15 @@ test("frontend backend event translator keeps Pi overflow continuation active", 
       event: "error",
       error: "context_length_exceeded",
     }),
-    [{ type: "turn_continuing", reason: "overflow" }],
+    [
+      {
+        type: "turn_error",
+        error: "context_length_exceeded",
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: undefined,
+      },
+    ],
   );
   assert.deepEqual(
     translator.translate({
