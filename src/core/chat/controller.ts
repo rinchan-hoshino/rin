@@ -7,6 +7,7 @@ import {
   RinFrontendTurnDriver,
   applyFrontendBuiltinCommandText,
   frontendCommandNameFromLine,
+  getRinNonInteractiveCommandInteractionPolicy,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
 import {
@@ -934,7 +935,9 @@ export class ChatController {
         incomingMessageId,
       );
     }
-    const skipSessionRecovery = commandName === "new";
+    const commandPolicy =
+      getRinNonInteractiveCommandInteractionPolicy(commandName);
+    const skipSessionRecovery = commandPolicy.skipSessionRecovery;
     // Slash commands are controls; reply-bound session files belong to prompt turns only.
     const explicitSessionFile = "";
     const restoreSessionFile = skipSessionRecovery
@@ -949,7 +952,7 @@ export class ChatController {
     this.lastActivityAt = Date.now();
     this.setActiveCommandTurnInput({ incomingMessageId, replyToMessageId });
     await this.connect({ restoreSession: !skipSessionRecovery });
-    if (["abort", "new", "compact", "reload"].includes(commandName)) {
+    if (commandPolicy.acceptInboundBeforeExecution) {
       this.markAcceptedMessage(incomingMessageId);
     }
     try {

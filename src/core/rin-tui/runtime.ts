@@ -11,10 +11,7 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
-import {
-  isDaemonBuiltinSlashCommand,
-  isSessionScopedCommand,
-} from "../rin-lib/rpc.js";
+import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
   formatRuntimeErrorForUser,
@@ -24,6 +21,7 @@ import {
   applyFrontendBuiltinCommandText,
   applyRpcSessionState,
   applyRpcSessionTree,
+  classifyRinFrontendCommand,
   computeAvailableThinkingLevels,
   computeSessionStats,
   createModelRegistry,
@@ -1519,15 +1517,13 @@ export class RpcInteractiveSession {
   }
 
   private async isDaemonRunnableSlashCommand(text: string) {
-    const commandName = this.parseSlashCommandName(text);
-    if (!commandName) return false;
-    if (isDaemonBuiltinSlashCommand(commandName)) return true;
+    const initialRoute = classifyRinFrontendCommand(text);
+    if (initialRoute.kind === "frontend" || initialRoute.kind === "daemon") {
+      return true;
+    }
+    if (!initialRoute.name) return false;
     const commands = await this.refreshDaemonCommandCatalog();
-    return commands.some(
-      (command: any) =>
-        String(command?.name || "") === commandName &&
-        String(command?.source || "") === "extension",
-    );
+    return classifyRinFrontendCommand(text, commands).kind === "daemon";
   }
 
   private async ensureRemoteSession() {
