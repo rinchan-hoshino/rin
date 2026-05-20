@@ -190,16 +190,16 @@ test("core todo loads from configured runtime without extension paths", async ()
         { cwd: agentDir },
       );
 
-      assert.equal(added.content[0].text, "○ #1  Wire core todo");
-      assert.equal(toggled.content[0].text, "✓ #1  Wire core todo");
+      assert.equal(added.content[0].text, "○ Wire core todo");
+      assert.equal(toggled.content[0].text, "✓ Wire core todo");
       assert.deepEqual(toggled.details.todos, [
         { id: 1, text: "Wire core todo", done: true },
       ]);
-      assert.equal(toggledFromStringId.content[0].text, "○ #1  Wire core todo");
+      assert.equal(toggledFromStringId.content[0].text, "○ Wire core todo");
       assert.deepEqual(toggledFromStringId.details.todos, [
         { id: 1, text: "Wire core todo", done: false },
       ]);
-      assert.equal(listed.content[0].text, "○ #1  Wire core todo");
+      assert.equal(listed.content[0].text, "○ Wire core todo");
       assert.equal(cleared.content[0].text, "○ No todos");
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});
@@ -260,7 +260,7 @@ test("core todo reconstructs around interrupted todo tool results", async () => 
     {},
   );
 
-  assert.equal(listed.content[0].text, "○ #1  Preserve todo state");
+  assert.equal(listed.content[0].text, "○ Preserve todo state");
 });
 
 test("core todo remains enabled when optional extensions are disabled", async () => {

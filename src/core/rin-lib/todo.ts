@@ -90,7 +90,7 @@ function formatTodoChecklistContent(todoList: Todo[]): string {
   if (todoList.length === 0) return "○ No todos";
 
   return todoList
-    .map((todo) => `${todo.done ? "✓" : "○"} #${todo.id}  ${todo.text}`)
+    .map((todo) => `${todo.done ? "✓" : "○"} ${todo.text}`)
     .join("\n");
 }
 
@@ -106,11 +106,10 @@ function formatTodoChecklistRender(
   const display = expanded ? todoList : todoList.slice(0, 5);
   const lines = display.map((todo) => {
     const check = todo.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
-    const id = theme.fg("accent", `#${todo.id}`);
     const text = todo.done
       ? theme.fg("dim", todo.text)
       : theme.fg("text", todo.text);
-    return `${check} ${id}  ${text}`;
+    return `${check} ${text}`;
   });
 
   if (!expanded && todoList.length > 5) {
@@ -118,6 +117,26 @@ function formatTodoChecklistRender(
   }
 
   return lines.join("\n");
+}
+
+function getTodoBackground(
+  theme: Theme,
+  options: { isError?: boolean; isPartial?: boolean },
+) {
+  const bg = options.isPartial
+    ? "toolPendingBg"
+    : options.isError
+      ? "toolErrorBg"
+      : "toolSuccessBg";
+  return (text: string) => theme.bg(bg, text);
+}
+
+function renderTodoText(
+  text: string,
+  theme: Theme,
+  options: { isError?: boolean; isPartial?: boolean },
+) {
+  return new Text(text, 1, 0, getTodoBackground(theme, options));
 }
 
 class TodoListComponent {
@@ -176,11 +195,10 @@ class TodoListComponent {
 
       for (const todo of this.todos) {
         const check = todo.done ? th.fg("success", "✓") : th.fg("dim", "○");
-        const id = th.fg("accent", `#${todo.id}`);
         const text = todo.done
           ? th.fg("dim", todo.text)
           : th.fg("text", todo.text);
-        lines.push(truncateToWidth(`  ${check} ${id}  ${text}`, width));
+        lines.push(truncateToWidth(`  ${check} ${text}`, width));
       }
     }
 
@@ -372,11 +390,19 @@ export default function todoCapability(): RinCapabilityDefinition {
       return new Container();
     },
 
-    renderResult(result, { expanded }, theme, _context) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = readTodoDetails(result.details);
+      const renderOptions = {
+        isPartial: Boolean(isPartial),
+        isError: Boolean(context?.isError || details?.error),
+      };
       if (!details) {
         const text = result.content[0];
-        return new Text(text?.type === "text" ? text.text : "", 0, 0);
+        return renderTodoText(
+          text?.type === "text" ? text.text : "",
+          theme,
+          renderOptions,
+        );
       }
 
       const checklist = formatTodoChecklistRender(
@@ -385,14 +411,14 @@ export default function todoCapability(): RinCapabilityDefinition {
         theme,
       );
       if (details.error) {
-        return new Text(
+        return renderTodoText(
           `${theme.fg("error", `Error: ${details.error}`)}\n${checklist}`,
-          0,
-          0,
+          theme,
+          renderOptions,
         );
       }
 
-      return new Text(checklist, 0, 0);
+      return renderTodoText(checklist, theme, renderOptions);
     },
   };
 
