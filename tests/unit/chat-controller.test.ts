@@ -3017,12 +3017,17 @@ test("chat controller preserves a bound session after transient prompt timeout",
     syncPendingCount() {},
     emitFrontendStatus() {},
     sessionManager: {
-      getSessionFile: () => "/tmp/stale-chat.jsonl",
+      getSessionFile: () =>
+        path.join(controller.agentDir, "sessions", "stale-chat.jsonl"),
       getSessionId: () => "session-stale",
       getSessionName: () => controller.chatKey,
     },
     ensureSessionReady: async () => ({
-      sessionFile: "/tmp/stale-chat.jsonl",
+      sessionFile: path.join(
+        controller.agentDir,
+        "sessions",
+        "stale-chat.jsonl",
+      ),
       sessionId: "session-stale",
     }),
     prompt: async () => {

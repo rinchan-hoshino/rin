@@ -72,6 +72,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat outbox contains invalid JSON. Recreate the outbox item and retry.",
   chat_outbox_invalid_part: () =>
     "Chat send failed because one message part is invalid. Fix the rich message part and retry.",
+  chat_restored_session_mismatch: () =>
+    "Rin detected that the chat turn switched to a different session while recovering. Retry the message; if it repeats, restart Rin.",
   chat_send_at_id_required: () =>
     "Chat send failed because a mention is missing its target id. Fix the mention part and retry.",
   chat_send_message_empty_result: () =>
@@ -138,6 +140,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   frontend_model_not_found: modelNotFound,
   frontend_session_not_connected: () =>
     "Rin is not connected to a session yet. Reconnect or start a new session, then retry.",
+  frontend_session_restore_mismatch: () =>
+    "Rin could not restore the requested chat session before running the turn. Retry the message; if it repeats, restart Rin.",
   frontend_turn_already_running: () =>
     "A turn is already running in this session. Wait for it to finish or abort it, then retry.",
   frontend_turn_driver_disposed: () =>

@@ -338,13 +338,13 @@ export class WorkerPool {
     if (!wanted.sessionFile) return undefined;
 
     const worker = this.createWorker(connection, connection.resourceOptions);
-    this.setWorkerSessionRefs(worker, wanted);
-    this.attachWorker(connection, worker);
     try {
       await this.sendInternalCommand(
         worker,
         createSwitchSessionCommand(wanted.sessionFile),
       );
+      this.setWorkerSessionRefs(worker, wanted);
+      this.attachWorker(connection, worker);
       return worker;
     } catch (error) {
       this.destroyWorker(worker);
@@ -475,13 +475,13 @@ export class WorkerPool {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) return;
     const worker = this.createWorker();
-    this.setWorkerSessionRefs(worker, selector);
     void (async () => {
       try {
         await this.sendInternalCommand(
           worker,
           createSwitchSessionCommand(selector.sessionFile),
         );
+        this.setWorkerSessionRefs(worker, selector);
       } catch {
         this.destroyWorker(worker);
       }
@@ -496,13 +496,13 @@ export class WorkerPool {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) return;
     const worker = this.createWorker();
-    this.setWorkerSessionRefs(worker, selector);
     void (async () => {
       try {
         await this.sendInternalCommand(
           worker,
           createSwitchSessionCommand(selector.sessionFile),
         );
+        this.setWorkerSessionRefs(worker, selector);
         await this.sendInternalCommand(worker, {
           type: "resume_interrupted_turn",
           source: item.source || "daemon-restart",
@@ -930,10 +930,6 @@ export class WorkerPool {
     if (!selector.sessionFile) return;
 
     const replacement = this.createWorker();
-    this.setWorkerSessionRefs(replacement, selector);
-    for (const connection of liveConnections) {
-      this.attachWorker(connection, replacement);
-    }
 
     void (async () => {
       try {
@@ -941,6 +937,10 @@ export class WorkerPool {
           replacement,
           createSwitchSessionCommand(selector.sessionFile),
         );
+        this.setWorkerSessionRefs(replacement, selector);
+        for (const connection of liveConnections) {
+          this.attachWorker(connection, replacement);
+        }
         if (resumeTurn) {
           await this.sendInternalCommand(replacement, {
             type: "resume_interrupted_turn",

@@ -103,6 +103,12 @@ function isRecoverableConnectionError(error: unknown) {
   );
 }
 
+function sameFrontendSessionFile(left: unknown, right: unknown) {
+  const leftText = safeString(left).trim();
+  const rightText = safeString(right).trim();
+  return Boolean(leftText && rightText && leftText === rightText);
+}
+
 export class RinFrontendTurnDriver {
   private readonly clientFactory: () => RinFrontendTurnClient;
   private readonly promptSource: string;
@@ -201,6 +207,16 @@ export class RinFrontendTurnDriver {
     return safeString(
       (ready as any)?.sessionFile || fallback || this.currentSessionFile(),
     ).trim();
+  }
+
+  private assertTargetSessionReady(
+    requestedSessionFile: string,
+    actualSessionFile: unknown,
+  ) {
+    if (!requestedSessionFile) return;
+    if (sameFrontendSessionFile(requestedSessionFile, actualSessionFile))
+      return;
+    throw new Error("frontend_session_restore_mismatch");
   }
 
   private async getStateForSession(sessionFile?: string) {
@@ -532,6 +548,10 @@ export class RinFrontendTurnDriver {
       ready,
       sessionFile || restoreSessionFile,
     );
+    this.assertTargetSessionReady(
+      sessionFile || restoreSessionFile,
+      targetSessionFile,
+    );
     const data: any = compactCommand.compact
       ? await this.client.compact(compactCommand.customInstructions, {
           sessionFile: targetSessionFile || undefined,
@@ -861,6 +881,10 @@ export class RinFrontendTurnDriver {
       ready,
       sessionFile || restoreSessionFile,
     );
+    this.assertTargetSessionReady(
+      sessionFile || restoreSessionFile,
+      targetSessionFile,
+    );
     if (input.resetModelOptionsFromSettings) {
       await this.resetModelOptionsFromSettings(targetSessionFile);
     }
@@ -926,6 +950,10 @@ export class RinFrontendTurnDriver {
     const targetSessionFile = this.sessionFileFromReady(
       ready,
       sessionFile || restoreSessionFile,
+    );
+    this.assertTargetSessionReady(
+      sessionFile || restoreSessionFile,
+      targetSessionFile,
     );
     if (input.resetModelOptionsFromSettings) {
       await this.resetModelOptionsFromSettings(targetSessionFile);
