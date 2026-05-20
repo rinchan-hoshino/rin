@@ -358,43 +358,74 @@ test("verify-changelog script requires a target Rin changelog heading", () => {
 });
 
 test("release workflows retry main branch metadata pushes", () => {
-  for (const [workflow, followTags] of [
-    ["publish-nightly.yml", false],
-    ["publish-beta.yml", false],
-    ["publish-stable.yml", true],
-    ["publish-hotfix.yml", true],
+  for (const workflow of ["publish-nightly.yml", "publish-beta.yml"] as const) {
+    const content = readWorkflow(workflow);
+    assert.ok(
+      content.includes(
+        "if ! git push origin HEAD:main; then\n" +
+          "            git fetch origin main\n" +
+          "            git rebase origin/main\n" +
+          "            git push origin HEAD:main",
+      ),
+    );
+  }
+
+  for (const [workflow, tagRef] of [
+    ["publish-stable.yml", "steps.plan.outputs.version"],
+    ["publish-hotfix.yml", "inputs.version"],
   ] as const) {
     const content = readWorkflow(workflow);
-    const tagSuffix = followTags ? " --follow-tags" : "";
-    assert.match(
-      content,
-      new RegExp(
-        `if ! git push origin HEAD:main${tagSuffix}; then\\n` +
-          `            git fetch origin main\\n` +
-          `            git rebase origin/main\\n` +
-          `            git push origin HEAD:main${tagSuffix}`,
+    const tagExpression = `\${{ ${tagRef} }}`;
+    assert.ok(
+      content.includes(
+        `git tag -a 'v${tagExpression}' -m 'Rin v${tagExpression}'`,
+      ),
+    );
+    assert.ok(
+      content.includes(
+        `if ! git push origin HEAD:main 'refs/tags/v${tagExpression}'; then\n` +
+          "            git fetch origin main\n" +
+          "            git rebase origin/main\n" +
+          `            git push origin HEAD:main 'refs/tags/v${tagExpression}'`,
       ),
     );
   }
 });
 
-test("release workflows require changelog entries for user-facing releases", () => {
+test("release workflows require changelog entries before expensive publish gates", () => {
   const beta = readWorkflow("publish-beta.yml");
   assert.match(
     beta,
-    /npm run release:changelog -- --version '\$\{\{ steps\.plan\.outputs\.promotion_version \}\}'/,
+    /node scripts\/release\/verify-changelog\.mjs --version '\$\{\{ steps\.plan\.outputs\.promotion_version \}\}'/,
   );
+  assert.ok(
+    beta.indexOf("Verify Rin changelog entry") <
+      beta.indexOf("npm ci --no-fund --no-audit"),
+  );
+
   const stable = readWorkflow("publish-stable.yml");
   assert.match(
     stable,
-    /npm run release:changelog -- --version '\$\{\{ steps\.plan\.outputs\.version \}\}'/,
+    /node scripts\/release\/verify-changelog\.mjs --version '\$\{\{ steps\.plan\.outputs\.version \}\}'/,
   );
+  assert.ok(
+    stable.indexOf("Verify Rin changelog entry") <
+      stable.indexOf("npm ci --no-fund --no-audit"),
+  );
+
   const hotfix = readWorkflow("publish-hotfix.yml");
   assert.match(
     hotfix,
-    /npm run release:changelog -- --version '\$\{\{ inputs\.version \}\}'/,
+    /node scripts\/release\/verify-changelog\.mjs --version '\$\{\{ inputs\.version \}\}'/,
   );
-  assert.doesNotMatch(readWorkflow("publish-nightly.yml"), /release:changelog/);
+  assert.ok(
+    hotfix.indexOf("Verify Rin changelog entry") <
+      hotfix.indexOf("npm ci --no-fund --no-audit"),
+  );
+  assert.doesNotMatch(
+    readWorkflow("publish-nightly.yml"),
+    /verify-changelog|release:changelog/,
+  );
 });
 
 test("release workflows publish the public bootstrap branch", () => {

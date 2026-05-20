@@ -38,15 +38,15 @@ jobs:
           set -eu
           candidate_dir="$RUNNER_TEMP/hotfix-candidate"
           git worktree add --detach "$candidate_dir" '${{ inputs.ref }}'
+      - name: Verify Rin changelog entry
+        working-directory: ${{ runner.temp }}/hotfix-candidate
+        run: node scripts/release/verify-changelog.mjs --version '${{ inputs.version }}'
       - name: Install candidate dependencies
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm ci --no-fund --no-audit
       - name: Build candidate
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm run build
-      - name: Verify Rin changelog entry
-        working-directory: ${{ runner.temp }}/hotfix-candidate
-        run: npm run release:changelog -- --version '${{ inputs.version }}'
       - name: Validate candidate
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm run test:release
@@ -70,11 +70,11 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add release-manifest.json
           git commit -m 'chore(release): publish hotfix ${{ inputs.version }}' || true
-          git tag 'v${{ inputs.version }}' '${{ inputs.ref }}' || true
-          if ! git push origin HEAD:main --follow-tags; then
+          git tag -a 'v${{ inputs.version }}' -m 'Rin v${{ inputs.version }}' '${{ inputs.ref }}' || true
+          if ! git push origin HEAD:main 'refs/tags/v${{ inputs.version }}'; then
             git fetch origin main
             git rebase origin/main
-            git push origin HEAD:main --follow-tags
+            git push origin HEAD:main 'refs/tags/v${{ inputs.version }}'
           fi
       - name: Prepare bootstrap branch checkout
         env:

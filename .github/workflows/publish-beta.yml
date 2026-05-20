@@ -35,10 +35,10 @@ jobs:
           echo "release_ref=$release_ref" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "promotion_version=$promotion_version" >> "$GITHUB_OUTPUT"
+      - name: Verify Rin changelog entry
+        run: node scripts/release/verify-changelog.mjs --version '${{ steps.plan.outputs.promotion_version }}'
       - run: npm ci --no-fund --no-audit
       - run: npm run build
-      - name: Verify Rin changelog entry
-        run: npm run release:changelog -- --version '${{ steps.plan.outputs.promotion_version }}'
       - run: npm run test:release
       - name: Update release manifest
         run: >-

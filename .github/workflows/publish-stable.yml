@@ -46,15 +46,15 @@ jobs:
           set -eu
           candidate_dir="$RUNNER_TEMP/stable-candidate"
           git worktree add --detach "$candidate_dir" '${{ steps.plan.outputs.beta_ref }}'
+      - name: Verify Rin changelog entry
+        working-directory: ${{ runner.temp }}/stable-candidate
+        run: node scripts/release/verify-changelog.mjs --version '${{ steps.plan.outputs.version }}'
       - name: Install candidate dependencies
         working-directory: ${{ runner.temp }}/stable-candidate
         run: npm ci --no-fund --no-audit
       - name: Build candidate
         working-directory: ${{ runner.temp }}/stable-candidate
         run: npm run build
-      - name: Verify Rin changelog entry
-        working-directory: ${{ runner.temp }}/stable-candidate
-        run: npm run release:changelog -- --version '${{ steps.plan.outputs.version }}'
       - name: Validate candidate
         working-directory: ${{ runner.temp }}/stable-candidate
         run: npm run test:release
@@ -79,11 +79,11 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add release-manifest.json
           git commit -m 'chore(release): promote beta ${{ steps.plan.outputs.beta_version }} to stable ${{ steps.plan.outputs.version }}' || true
-          git tag 'v${{ steps.plan.outputs.version }}' '${{ steps.plan.outputs.beta_ref }}' || true
-          if ! git push origin HEAD:main --follow-tags; then
+          git tag -a 'v${{ steps.plan.outputs.version }}' -m 'Rin v${{ steps.plan.outputs.version }}' '${{ steps.plan.outputs.beta_ref }}' || true
+          if ! git push origin HEAD:main 'refs/tags/v${{ steps.plan.outputs.version }}'; then
             git fetch origin main
             git rebase origin/main
-            git push origin HEAD:main --follow-tags
+            git push origin HEAD:main 'refs/tags/v${{ steps.plan.outputs.version }}'
           fi
       - name: Prepare bootstrap branch checkout
         env:
