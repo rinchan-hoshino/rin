@@ -67,6 +67,36 @@ test("turn result builder returns empty messages when there is no assistant outp
   });
 });
 
+test("turn result builder ignores compaction and session summaries as non-final output", () => {
+  assert.deepEqual(
+    turnResult.resolveTurnCompletion({
+      messages: [
+        {
+          type: "compaction",
+          summary: "## Goal\nraw compacted summary must not be delivered",
+        },
+        {
+          role: "compactionSummary",
+          content: [
+            { type: "text", text: "raw compaction summary must not leak" },
+          ],
+        },
+        {
+          role: "assistant",
+          customType: "session_summary",
+          content: [{ type: "text", text: "session summary must not leak" }],
+        },
+        {
+          role: "assistant",
+          summaryEntry: { id: "summary" },
+          content: [{ type: "text", text: "summary entry must not leak" }],
+        },
+      ],
+    }),
+    { finalText: "", result: { messages: [] } },
+  );
+});
+
 test("turn result builder ignores assistant tool-call prefaces as non-final output", () => {
   assert.deepEqual(
     turnResult.buildTurnResultFromMessages([

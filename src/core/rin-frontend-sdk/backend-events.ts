@@ -65,10 +65,12 @@ export type RinFrontendBackendEventTranslator = {
 
 export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEventTranslator {
   let latestAssistantText = "";
+  let latestAssistantFinalText = "";
   const deliveredAssistantInterimTexts = new Set<string>();
 
   const resetAssistantSegments = () => {
     latestAssistantText = "";
+    latestAssistantFinalText = "";
     deliveredAssistantInterimTexts.clear();
   };
 
@@ -139,10 +141,11 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
           const session = normalizeSessionRef(payload);
           const finalText =
             safeString(payload.finalText).trim() ||
-            safeString(latestAssistantText).trim();
+            safeString(latestAssistantFinalText).trim();
           const events: RinFrontendBackendEvent[] = [];
           if (finalText) {
             latestAssistantText = finalText;
+            latestAssistantFinalText = finalText;
             events.push({
               type: "assistant_final",
               text: finalText,
@@ -181,11 +184,11 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
           resetAssistantSegments();
           return [{ type: "turn_accepted" }];
         case "agent_end":
-          if (!latestAssistantText) return [];
+          if (!latestAssistantFinalText) return [];
           return [
             {
               type: "turn_complete",
-              finalText: latestAssistantText,
+              finalText: latestAssistantFinalText,
             },
           ];
         case "message_update":
@@ -202,6 +205,7 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
           const finalText = extractAssistantFinalText(payload.message);
           if (finalText) {
             latestAssistantText = finalText;
+            latestAssistantFinalText = finalText;
             return [{ type: "assistant_final", text: finalText }];
           }
           const interim = takeInterim(assistantInterimText(payload.message));

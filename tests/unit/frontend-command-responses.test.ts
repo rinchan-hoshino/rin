@@ -45,19 +45,19 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
   assert.equal(
     sdk.applyFrontendBuiltinCommandText(
       "compact",
-      { text: "native compact done" },
+      { text: "native compact summary must not leak", tokensBefore: 108642 },
       responses,
     ).text,
-    "native compact done",
+    "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
   );
   assert.equal(
     sdk.applyFrontendBuiltinCommandText(
       "compact",
-      { text: "native compact done" },
+      { text: "native compact summary must not leak", tokensBefore: 108642 },
       responses,
       { preferConfiguredText: true },
     ).text,
-    "done",
+    "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
   );
   assert.equal(
     sdk.applyFrontendBuiltinCommandText(

@@ -243,7 +243,7 @@ test("frontend SDK turn driver routes compact through the native compact client 
 
   const result = await driver.runCommand("/compact keep recent plan");
 
-  assert.equal(result.text, "compact done");
+  assert.equal(result.text, "Compacted session.");
   assert.deepEqual(
     client.calls.filter((call: any) =>
       ["compact", "runCommand"].includes(call.type),
@@ -656,6 +656,49 @@ test("frontend SDK turn driver emits leading tool-call text as the only interim 
 
   assert.equal(result.finalText, "Final answer");
   assert.deepEqual(interimTexts, ["I will check this"]);
+});
+
+test("frontend SDK turn driver waits for real final after interim and compaction events", async () => {
+  const driver = createDriver();
+  const interimTexts: string[] = [];
+  driver.subscribe((event: any) => {
+    if (event.type === "assistant_interim") interimTexts.push(event.text);
+  });
+
+  (driver as any).testClient.prompt = async () => {
+    await emitDriverEvent(driver, { type: "agent_start" });
+    await emitDriverEvent(driver, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "interim before compaction" },
+          { type: "toolCall", name: "todo", id: "call-1" },
+        ],
+      },
+    });
+    await emitDriverEvent(driver, { type: "agent_end" });
+    await emitDriverEvent(driver, { type: "compaction_start" });
+    await emitDriverEvent(driver, { type: "compaction_end" });
+    setTimeout(() => {
+      void (async () => {
+        await emitDriverEvent(driver, { type: "agent_start" });
+        await emitDriverEvent(driver, {
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "real final after compaction" }],
+          },
+        });
+        await emitDriverEvent(driver, { type: "agent_end" });
+      })();
+    }, 5);
+  };
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "real final after compaction");
+  assert.deepEqual(interimTexts, ["interim before compaction"]);
 });
 
 test("frontend SDK turn driver starts managed leaf sessions even after connect reports a default session", async () => {

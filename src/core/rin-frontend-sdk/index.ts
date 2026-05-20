@@ -25,6 +25,13 @@ export {
 } from "./backend-events.js";
 
 export {
+  formatCompactionSummaryCollapsedLine,
+  formatCompactionSummaryCollapsedText,
+  formatCompactionTokenCount,
+  type CompactionSummaryCollapsedTextOptions,
+} from "./compaction-summary-format.js";
+
+export {
   DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
   applyFrontendBuiltinCommandText,
   frontendCommandNameFromLine,
