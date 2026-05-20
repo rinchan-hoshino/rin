@@ -88,6 +88,7 @@ export type IndexedSessionBucket = {
   hitCount: number;
   latestHitTimestampMs: number;
   messages: TranscriptResultMessage[];
+  displayEntries: TranscriptArchiveEntry[];
 };
 
 export type TranscriptFileState = {

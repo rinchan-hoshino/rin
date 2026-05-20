@@ -24,6 +24,7 @@ const transcriptArchiveModule = await import(
 const memoryExtensionModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "memory", "index.js")).href
 );
+const BetterSqlite3 = (await import("better-sqlite3")).default;
 
 async function withTempRoot(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-memory-test-"));
@@ -229,6 +230,40 @@ test("memory search index stays in sync when an archived session file grows", as
     assert.equal(second.length, 1);
     assert.equal(second[0].sessionId, "session-sync");
     assert.equal(second[0].hitCount, 1);
+  });
+});
+
+test("memory search indexes numeric millisecond timestamps for recent ordering", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-04-04T11:11:11.000Z",
+        sessionId: "session-older-iso",
+        sessionFile: "/tmp/session-older-iso.jsonl",
+        role: "assistant",
+        content: [{ type: "text", text: "older iso timestamp entry" }],
+      },
+      root,
+    );
+
+    const newerTimestamp = String(Date.UTC(2026, 4, 11, 7, 0, 0));
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: newerTimestamp,
+        sessionId: "session-newer-ms",
+        sessionFile: "/tmp/session-newer-ms.jsonl",
+        role: "assistant",
+        content: [{ type: "text", text: "newer numeric timestamp entry" }],
+      },
+      root,
+    );
+
+    const recent = await transcripts.loadRecentTranscriptSessions(
+      { limit: 2 },
+      root,
+    );
+    assert.equal(recent[0].sessionId, "session-newer-ms");
+    assert.equal(recent[1].sessionId, "session-older-iso");
   });
 });
 
@@ -465,6 +500,50 @@ test("memory search merges multiple message hits from the same session", async (
     assert.equal(results[0].hitCount, 2);
     assert.ok(Array.isArray(results[0].messages));
     assert.equal(results[0].messages.length, 2);
+  });
+});
+
+test("memory search avoids full entries-table exact scans before FTS lookup", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-04-06T12:00:00.000Z",
+        sessionId: "session-fast-search",
+        sessionFile: "/tmp/session-fast-search.jsonl",
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Debugged chat outbound send routing without a table scan.",
+          },
+        ],
+      },
+      root,
+    );
+
+    const originalPrepare = BetterSqlite3.prototype.prepare;
+    const likePreScans: string[] = [];
+    const fullSessionLoads: string[] = [];
+    BetterSqlite3.prototype.prepare = function patchedPrepare(sql, ...args) {
+      const text = String(sql || "");
+      if (/\bLIKE\b/i.test(text)) likePreScans.push(text);
+      if (/WHERE session_key IN/i.test(text)) fullSessionLoads.push(text);
+      return originalPrepare.call(this, sql, ...args);
+    };
+
+    try {
+      const results = await transcripts.searchTranscriptArchive(
+        "chat outbound send",
+        { limit: 8 },
+        root,
+      );
+      assert.equal(results.length, 1);
+      assert.equal(results[0].sessionId, "session-fast-search");
+      assert.deepEqual(likePreScans, []);
+      assert.deepEqual(fullSessionLoads, []);
+    } finally {
+      BetterSqlite3.prototype.prepare = originalPrepare;
+    }
   });
 });
 

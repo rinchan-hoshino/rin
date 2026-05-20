@@ -6,6 +6,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { sleep } from "../platform/process.js";
 import {
   normalizeNeedle,
+  parseTimestampMs,
   safeString,
   sha,
   trimText,
@@ -148,10 +149,6 @@ function buildTrigramFtsQuery(value: string): string {
     : "";
 }
 
-function escapeLike(value: string): string {
-  return safeString(value).replace(/([%_\\])/g, "\\$1");
-}
-
 function initializeTranscriptSearchDb(db: Database, busyTimeoutMs = 5000) {
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
@@ -274,8 +271,7 @@ function openTranscriptSearchDb(
 }
 
 function timestampValue(value: string): number {
-  const parsed = Date.parse(safeString(value).trim());
-  return Number.isFinite(parsed) ? parsed : 0;
+  return parseTimestampMs(value);
 }
 
 function toIndexedEntry(
@@ -733,52 +729,43 @@ function addCandidateScore(
   candidates.set(rowKey, Math.max(candidates.get(rowKey) || 0, score));
 }
 
-function queryExactCandidates(
-  db: Database,
+type SearchCandidateRow = {
+  row_key: string;
+  text: string;
+  role: string;
+  tool_name: string;
+  custom_type: string;
+  session_id: string;
+  session_file: string;
+};
+
+function candidateHaystack(row: SearchCandidateRow): string {
+  return normalizeNeedle(
+    [
+      row.text,
+      row.role,
+      row.tool_name,
+      row.session_id,
+      row.session_file,
+      row.custom_type,
+    ].join(" "),
+  );
+}
+
+function exactCandidateBoost(
+  row: SearchCandidateRow,
   rawQuery: string,
-  rawHitLimit: number,
-  candidates: Map<string, number>,
-) {
-  const like = `%${escapeLike(rawQuery)}%`;
-  const rows = db
-    .prepare(
-      `
-      SELECT row_key, text, preview, tool_name, session_id, custom_type
-      FROM entries
-      WHERE lower(text) LIKE lower(?) ESCAPE '\\'
-         OR lower(preview) LIKE lower(?) ESCAPE '\\'
-         OR lower(role) LIKE lower(?) ESCAPE '\\'
-         OR lower(tool_name) LIKE lower(?) ESCAPE '\\'
-         OR lower(custom_type) LIKE lower(?) ESCAPE '\\'
-         OR lower(session_id) LIKE lower(?) ESCAPE '\\'
-      ORDER BY timestamp_ms DESC
-      LIMIT ?
-    `,
-    )
-    .all(like, like, like, like, like, like, rawHitLimit) as Array<{
-    row_key: string;
-    text: string;
-    preview: string;
-    tool_name: string;
-    session_id: string;
-    custom_type: string;
-  }>;
-  rows.forEach((row, index) => {
-    let score = 180 - index * 4;
-    const haystack = normalizeNeedle(
-      [
-        row.text,
-        row.preview,
-        row.tool_name,
-        row.session_id,
-        row.custom_type,
-      ].join(" "),
-    );
-    const normalizedQuery = normalizeNeedle(rawQuery);
-    if (haystack === normalizedQuery) score += 30;
-    if (row.text.toLowerCase().includes(rawQuery.toLowerCase())) score += 18;
-    addCandidateScore(candidates, row.row_key, score);
-  });
+): number {
+  const normalizedQuery = normalizeNeedle(rawQuery);
+  if (!normalizedQuery) return 0;
+
+  const haystack = candidateHaystack(row);
+  if (!haystack.includes(normalizedQuery)) return 0;
+
+  let boost = 40;
+  if (haystack === normalizedQuery) boost += 30;
+  if (normalizeNeedle(row.text).includes(normalizedQuery)) boost += 18;
+  return boost;
 }
 
 function queryFtsCandidates(
@@ -812,6 +799,7 @@ function aggregateSearchResults(
   candidates: Map<string, number>,
   limit: number,
   rootOverride = "",
+  options: { rawQuery?: string; exactOnly?: boolean } = {},
 ): TranscriptSessionResult[] {
   if (!candidates.size) return [];
 
@@ -820,7 +808,8 @@ function aggregateSearchResults(
     .prepare(
       `
       SELECT row_key, archive_path, session_key, session_id, session_file,
-             timestamp, timestamp_ms, line_number, role, preview, entry_json
+             timestamp, timestamp_ms, line_number, role, tool_name, custom_type,
+             text, preview, entry_json
       FROM entries
       WHERE row_key IN (${placeholders})
     `,
@@ -835,12 +824,27 @@ function aggregateSearchResults(
     timestamp_ms: number;
     line_number: number;
     role: string;
+    tool_name: string;
+    custom_type: string;
+    text: string;
     preview: string;
     entry_json: string;
   }>;
 
   const orderedRows = rows
-    .map((row) => ({ ...row, score: candidates.get(row.row_key) || 0 }))
+    .map((row) => ({
+      ...row,
+      score:
+        (candidates.get(row.row_key) || 0) +
+        exactCandidateBoost(row, options.rawQuery || ""),
+    }))
+    .filter(
+      (row) =>
+        !options.exactOnly ||
+        candidateHaystack(row).includes(
+          normalizeNeedle(options.rawQuery || ""),
+        ),
+    )
     .sort((a, b) => {
       const diff = b.score - a.score;
       if (diff) return diff;
@@ -859,6 +863,7 @@ function aggregateSearchResults(
       hitCount: 0,
       latestHitTimestampMs: row.timestamp_ms,
       messages: [],
+      displayEntries: [],
     };
     bucket.bestScore = Math.max(bucket.bestScore, row.score);
     bucket.totalScore += row.score;
@@ -875,6 +880,7 @@ function aggregateSearchResults(
       });
       if (entry && !isLegacySyntheticSessionSummaryEntry(entry)) {
         bucket.messages.push(buildResultMessage(entry));
+        bucket.displayEntries.push(entry);
       }
     }
     grouped.set(row.session_key, bucket);
@@ -895,18 +901,18 @@ function aggregateSearchResults(
     })
     .slice(0, limit);
 
-  const sessionEntries = loadSessionEntriesByKeys(
-    db,
-    rankedSessions.map((bucket) => bucket.sessionKey),
-  );
-
   return rankedSessions
     .map((bucket) => {
-      const entries = sessionEntries.get(bucket.sessionKey) || [];
-      const result = presentSessionResult(entries, bucket.score, rootOverride, {
-        hitCount: bucket.hitCount,
-        messages: bucket.messages,
-      });
+      if (!bucket.displayEntries.length) return null;
+      const result = presentSessionResult(
+        bucket.displayEntries,
+        bucket.score,
+        rootOverride,
+        {
+          hitCount: bucket.hitCount,
+          messages: bucket.messages,
+        },
+      );
       return safeString(result?.sessionFile || "").trim() ? result : null;
     })
     .filter((item): item is TranscriptSessionResult => Boolean(item));
@@ -930,28 +936,28 @@ export async function searchTranscriptArchive(
     const trigramQuery = buildTrigramFtsQuery(rawQuery);
     const candidates = new Map<string, number>();
 
-    queryExactCandidates(db, rawQuery, RAW_SEARCH_LIMIT, candidates);
-    if (fidelity !== "exact") {
-      queryFtsCandidates(
-        db,
-        "entries_fts_token",
-        tokenQuery,
-        RAW_SEARCH_LIMIT,
-        140,
-        3,
-        candidates,
-      );
-      queryFtsCandidates(
-        db,
-        "entries_fts_trigram",
-        trigramQuery,
-        RAW_SEARCH_LIMIT,
-        100,
-        2,
-        candidates,
-      );
-    }
+    queryFtsCandidates(
+      db,
+      "entries_fts_token",
+      tokenQuery,
+      RAW_SEARCH_LIMIT,
+      140,
+      3,
+      candidates,
+    );
+    queryFtsCandidates(
+      db,
+      "entries_fts_trigram",
+      trigramQuery,
+      RAW_SEARCH_LIMIT,
+      100,
+      2,
+      candidates,
+    );
 
-    return aggregateSearchResults(db, candidates, limit, rootOverride);
+    return aggregateSearchResults(db, candidates, limit, rootOverride, {
+      rawQuery,
+      exactOnly: fidelity === "exact",
+    });
   });
 }
