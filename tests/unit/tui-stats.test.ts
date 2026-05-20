@@ -58,7 +58,12 @@ test("tui stats compute session stats from entries", () => {
 });
 
 test("tui stats get context usage preserves post-compaction unknown state", () => {
-  const usage = stats.getContextUsage(
+  const expected = {
+    tokens: null,
+    contextWindow: 1000,
+    percent: null,
+  };
+  const abortedUsage = stats.getContextUsage(
     { contextWindow: 1000 },
     [],
     [
@@ -74,9 +79,29 @@ test("tui stats get context usage preserves post-compaction unknown state", () =
       },
     ],
   );
-  assert.deepEqual(usage, {
-    tokens: null,
-    contextWindow: 1000,
-    percent: null,
-  });
+  assert.deepEqual(abortedUsage, expected);
+
+  const overflowUsage = stats.getContextUsage(
+    { contextWindow: 1000 },
+    [
+      {
+        role: "assistant",
+        usage: { input: 1000, output: 0, cacheRead: 0, cacheWrite: 0 },
+      },
+    ],
+    [
+      { type: "message", message: { role: "user" } },
+      { type: "compaction" },
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          stopReason: "error",
+          errorMessage: "context_length_exceeded",
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+    ],
+  );
+  assert.deepEqual(overflowUsage, expected);
 });

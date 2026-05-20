@@ -24,36 +24,25 @@ test("getManagedSkillPaths includes agent memory skills and builtin skills", () 
   ]);
 });
 
-test("auto compaction emits Rin before-compact hooks without extension-runner bridging", async () => {
+test("compaction reason tracking annotates native before-compact hooks", async () => {
   const calls = [];
   const session = {
-    __rinCapabilities: {
-      hasHandlers(eventName) {
-        calls.push(`has:${eventName}`);
-        return eventName === "session_before_compact";
-      },
-      async emit(event) {
-        calls.push(`emit:${event.reason}`);
-      },
-    },
-    _emit(event) {
-      calls.push(`event:${event.type}:${event.compactionReason || ""}`);
+    async compact() {
+      calls.push(`manual:${this.__rinCurrentCompactionReason}`);
     },
     async _runAutoCompaction(reason, willRetry) {
-      calls.push(`compact:${reason}:${willRetry}`);
+      calls.push(
+        `auto:${reason}:${willRetry}:${this.__rinCurrentCompactionReason}`,
+      );
     },
   };
 
-  runtimeMod.applyRinBeforeCompactionHooks(session);
+  runtimeMod.applyRinCompactionReasonTracking(session);
+  await session.compact();
   await session._runAutoCompaction("threshold", false);
 
-  assert.deepEqual(calls, [
-    "has:session_before_compact",
-    "event:rin_working_start:threshold",
-    "emit:threshold",
-    "event:rin_working_end:threshold",
-    "compact:threshold:false",
-  ]);
+  assert.deepEqual(calls, ["manual:manual", "auto:threshold:false:threshold"]);
+  assert.equal(session.__rinCurrentCompactionReason, undefined);
 });
 
 test("runtime session shutdown emits Rin capability hooks without extension-runner bridging", async () => {

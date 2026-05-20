@@ -14,7 +14,8 @@ const capabilitySession = await import(
   ).href
 );
 
-test("Rin capabilities do not add lifecycle hooks to the Pi extension runner", async () => {
+test("Rin compaction hooks are exposed through Pi's native before-compact span", async () => {
+  const calls: string[] = [];
   const capabilitySet = capabilitySession.createRinCapabilitySet({
     cwd: "/tmp/rin-capability-session-test",
     agentDir: "/tmp/rin-capability-session-test",
@@ -25,17 +26,24 @@ test("Rin capabilities do not add lifecycle hooks to the Pi extension runner", a
       {
         name: "demo_sync_compaction",
         hooks: {
-          session_before_compact: [async () => ({ rinResult: true })],
+          session_before_compact: [
+            async (event: any) => {
+              calls.push(`rin:${event.reason}`);
+              return { rinResult: true };
+            },
+          ],
         },
       },
     ],
   });
 
   const extensionRunner = {
-    hasHandlers() {
+    hasHandlers(eventName: string) {
+      calls.push(`pi-has:${eventName}`);
       return false;
     },
-    async emit() {
+    async emit(event: any) {
+      calls.push(`pi-emit:${event.type}`);
       return undefined;
     },
     getRegisteredCommands() {
@@ -44,6 +52,7 @@ test("Rin capabilities do not add lifecycle hooks to the Pi extension runner", a
   };
   const session = {
     _extensionRunner: extensionRunner,
+    __rinCurrentCompactionReason: "overflow",
     sessionManager: {
       appendCustomEntry() {},
     },
@@ -56,9 +65,20 @@ test("Rin capabilities do not add lifecycle hooks to the Pi extension runner", a
     capabilitySet,
   });
 
+  calls.length = 0;
   assert.equal(
     session._extensionRunner.hasHandlers("session_before_compact"),
-    false,
+    true,
   );
+  const result = await session._extensionRunner.emit({
+    type: "session_before_compact",
+  });
+
+  assert.deepEqual(calls, [
+    "pi-has:session_before_compact",
+    "pi-emit:session_before_compact",
+    "rin:overflow",
+  ]);
+  assert.deepEqual(result, { rinResult: true });
   assert.equal(session._extensionRunner.hasHandlers("session_shutdown"), false);
 });

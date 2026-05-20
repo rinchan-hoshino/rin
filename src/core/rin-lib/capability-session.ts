@@ -263,6 +263,21 @@ export function createRinCapabilitySet(options: {
   return capabilitySet;
 }
 
+const RIN_EXTENSION_RUNNER_EVENTS = new Set<string>(["session_before_compact"]);
+const RIN_EXTENSION_RUNNER_BEFORE_EVENTS = new Set<string>([
+  "session_before_compact",
+]);
+const RIN_EXTENSION_RUNNER_PATCH_KEY = Symbol.for(
+  "rin.capabilityExtensionRunnerPatch",
+);
+
+type RinExtensionRunnerPatchState = {
+  capabilitySet: RinCapabilitySet;
+  session: any;
+  originalHasHandlers: (eventName: string) => boolean;
+  originalEmit: (event: any) => Promise<any>;
+};
+
 function withRinEventMetadata(event: any, session: any) {
   const type = String(event?.type || "").trim();
   if (
@@ -276,6 +291,69 @@ function withRinEventMetadata(event: any, session: any) {
   return {
     ...event,
     reason: String(session?.__rinCurrentCompactionReason || "").trim(),
+  };
+}
+
+function patchRinCapabilityExtensionRunner(
+  session: any,
+  capabilitySet: RinCapabilitySet,
+) {
+  const runner = session?._extensionRunner;
+  if (!runner || typeof runner !== "object") return;
+  const existing = runner[RIN_EXTENSION_RUNNER_PATCH_KEY] as
+    | RinExtensionRunnerPatchState
+    | undefined;
+  if (existing) {
+    existing.capabilitySet = capabilitySet;
+    existing.session = session;
+    return;
+  }
+  if (
+    typeof runner.hasHandlers !== "function" ||
+    typeof runner.emit !== "function"
+  ) {
+    return;
+  }
+
+  const state: RinExtensionRunnerPatchState = {
+    capabilitySet,
+    session,
+    originalHasHandlers: runner.hasHandlers.bind(runner),
+    originalEmit: runner.emit.bind(runner),
+  };
+  runner[RIN_EXTENSION_RUNNER_PATCH_KEY] = state;
+
+  runner.hasHandlers = (eventName: string) => {
+    const type = String(eventName || "").trim();
+    return (
+      state.originalHasHandlers(eventName) ||
+      (RIN_EXTENSION_RUNNER_EVENTS.has(type) &&
+        state.capabilitySet.hasHandlers(type))
+    );
+  };
+
+  runner.emit = async (event: any) => {
+    const result = await state.originalEmit(event);
+    const type = String(event?.type || "").trim();
+    if (
+      !RIN_EXTENSION_RUNNER_EVENTS.has(type) ||
+      !state.capabilitySet.hasHandlers(type)
+    ) {
+      return result;
+    }
+    if (RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type) && result?.cancel) {
+      return result;
+    }
+    const rinResult = await state.capabilitySet.emit(
+      withRinEventMetadata(event, state.session),
+    );
+    if (!RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type)) {
+      return result || rinResult;
+    }
+    if (rinResult?.cancel || rinResult?.compaction) {
+      return rinResult;
+    }
+    return result || rinResult;
   };
 }
 
@@ -385,6 +463,7 @@ export async function attachRinCapabilitiesToSession(
 ) {
   const capabilitySet = options.capabilitySet;
   bindCapabilitySetToSession(capabilitySet, session);
+  patchRinCapabilityExtensionRunner(session, capabilitySet);
   subscribeRinCapabilityEvents(session, capabilitySet);
   session.__rinCapabilities = capabilitySet;
 

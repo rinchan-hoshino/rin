@@ -1,3 +1,25 @@
+function isPiOverflowContinuation(payload: any) {
+  return (
+    payload?.type === "compaction_end" &&
+    String(payload?.reason || "").trim() === "overflow" &&
+    payload?.willRetry === true &&
+    payload?.aborted !== true
+  );
+}
+
+function isRecoverableContextOverflowMessage(payload: any) {
+  const message = payload?.message;
+  const errorMessage = String(message?.errorMessage || "");
+  return (
+    payload?.type === "message_end" &&
+    message?.role === "assistant" &&
+    String(message?.stopReason || "") === "error" &&
+    (/context[_ ]length[_ ]exceeded/i.test(errorMessage) ||
+      /exceeds the context window/i.test(errorMessage) ||
+      /prompt is too long/i.test(errorMessage))
+  );
+}
+
 export async function handleRpcSessionEvent(
   target: any,
   payload: any,
@@ -32,7 +54,14 @@ export async function handleRpcSessionEvent(
     return;
   }
   if (payload.type === "agent_start") {
+    target.awaitingNativeOverflowContinuation = false;
     setRemoteTurnRunning(true);
+  }
+  if (isRecoverableContextOverflowMessage(payload)) {
+    target.awaitingNativeOverflowContinuation = true;
+    setRemoteTurnRunning(true);
+    emitFrontendStatus();
+    return;
   }
   if (payload.type === "rin_working_start") {
     target.rinWorking = true;
@@ -46,27 +75,44 @@ export async function handleRpcSessionEvent(
   }
   if (payload.type === "compaction_start") {
     target.isCompacting = true;
+    target.compactionReason = String(payload.reason || "").trim();
   }
   if (payload.type === "rin_working_end") {
     target.rinWorking = false;
     if (!target.isCompacting) setRemoteTurnRunning(false);
   }
   if (payload.type === "compaction_end") {
+    const willRetry = isPiOverflowContinuation(payload);
     target.isCompacting = false;
-    if (target.rinWorking === false) setRemoteTurnRunning(false);
+    target.compactionReason = "";
+    target.awaitingNativeOverflowContinuation = false;
+    if (willRetry) {
+      target.nativeContinuationPending = true;
+      setRemoteTurnRunning(true);
+    } else {
+      target.nativeContinuationPending = false;
+      if (target.rinWorking === false) setRemoteTurnRunning(false);
+    }
     void refreshMessagesAndSession();
   }
   if (payload.type === "auto_retry_start")
     target.retryAttempt = Number(payload.attempt || 1);
   if (payload.type === "auto_retry_end") target.retryAttempt = 0;
   if (payload.type === "agent_end") {
+    if (!target.awaitingNativeOverflowContinuation) {
+      finishRemoteTurn();
+    }
+    void refreshMessagesAndSession();
+  }
+  if (payload.type === "rpc_turn_event" && payload.event === "error") {
+    target.nativeContinuationPending = false;
+    target.awaitingNativeOverflowContinuation = false;
     finishRemoteTurn();
     void refreshMessagesAndSession();
   }
-  if (
-    payload.type === "rpc_turn_event" &&
-    (payload.event === "complete" || payload.event === "error")
-  ) {
+  if (payload.type === "rpc_turn_event" && payload.event === "complete") {
+    target.nativeContinuationPending = false;
+    target.awaitingNativeOverflowContinuation = false;
     finishRemoteTurn();
     void refreshMessagesAndSession();
   }

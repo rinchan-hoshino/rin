@@ -344,12 +344,24 @@ function isRecoverableTurnErrorMessage(message: any) {
     : false;
 }
 
+function isPiOverflowContinuationEvent(event: any) {
+  return (
+    safeString(event?.type).trim() === "compaction_end" &&
+    safeString(event?.reason).trim() === "overflow" &&
+    event?.willRetry === true &&
+    event?.aborted !== true
+  );
+}
+
 async function waitForRecoverableTurnContinuation(
   session: any,
-  lastAssistantMessage: any,
+  input: { lastAssistantMessage: any; piContinuationPending?: boolean },
   timeoutMs = 1500,
 ) {
-  if (!isRecoverableTurnErrorMessage(lastAssistantMessage)) return false;
+  const shouldWait =
+    input.piContinuationPending ||
+    isRecoverableTurnErrorMessage(input.lastAssistantMessage);
+  if (!shouldWait) return false;
 
   return await new Promise<boolean>((resolve) => {
     let settled = false;
@@ -369,8 +381,8 @@ async function waitForRecoverableTurnContinuation(
       const type = safeString(event?.type).trim();
       if (
         type === "compaction_start" ||
-        type === "compaction_end" ||
-        type === "agent_start"
+        type === "agent_start" ||
+        isPiOverflowContinuationEvent(event)
       ) {
         finish(true);
         return;
@@ -378,7 +390,7 @@ async function waitForRecoverableTurnContinuation(
       if (
         type === "message_end" &&
         event?.message?.role === "assistant" &&
-        event.message !== lastAssistantMessage
+        event.message !== input.lastAssistantMessage
       ) {
         finish(true);
       }
@@ -652,7 +664,11 @@ export async function runCustomRpcMode(
     const turnSession = getSession();
     const beforeSnapshot = snapshotSessionTurnCompletion(turnSession);
     let lastCompletedAssistantMessage: any = null;
+    let piContinuationPending = false;
     const rawUnsubscribeTurnSession = turnSession.subscribe?.((event: any) => {
+      if (isPiOverflowContinuationEvent(event)) {
+        piContinuationPending = true;
+      }
       if (event?.type !== "message_end") return;
       if (event?.message?.role !== "assistant") return;
       lastCompletedAssistantMessage = event.message;
@@ -683,8 +699,12 @@ export async function runCustomRpcMode(
           if (recoveryChecks >= 3) break;
           const recoveryStarted = await waitForRecoverableTurnContinuation(
             turnSession,
-            lastCompletedAssistantMessage,
+            {
+              lastAssistantMessage: lastCompletedAssistantMessage,
+              piContinuationPending,
+            },
           );
+          piContinuationPending = false;
           if (!recoveryStarted) break;
           taskError = null;
         }

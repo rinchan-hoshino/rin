@@ -293,6 +293,7 @@ export class RpcInteractiveSession {
   public systemPrompt = "";
   public isStreaming = false;
   public isCompacting = false;
+  public compactionReason = "";
   public isBashRunning = false;
   public retryAttempt = 0;
   public pendingMessageCount = 0;
@@ -1203,7 +1204,12 @@ export class RpcInteractiveSession {
   getFrontendStatusEvent() {
     const phase = this.getFrontendPhase();
     if (phase === "idle") return null;
-    const label = RPC_FRONTEND_PHASE_LABELS[phase];
+    const label =
+      phase === "compacting" &&
+      this.compactionReason &&
+      this.compactionReason !== "manual"
+        ? "Auto compacting context"
+        : RPC_FRONTEND_PHASE_LABELS[phase];
     return {
       type: "rpc_frontend_status",
       phase,

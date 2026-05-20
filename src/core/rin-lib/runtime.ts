@@ -547,27 +547,50 @@ const COMPACTION_SETTINGS_TUNING_KEY = Symbol.for(
 export function applyRinCompactionReasonTracking(session: any) {
   if (!session || typeof session !== "object") return;
   if ((session as any)[COMPACTION_REASON_TRACKING_KEY]) return;
-  const original =
-    typeof session._runAutoCompaction === "function"
-      ? session._runAutoCompaction.bind(session)
-      : null;
-  if (!original) return;
-
-  session._runAutoCompaction = async function patchedRunAutoCompaction(
-    reason: string,
-    ...args: any[]
-  ) {
+  const withReason = async <T>(reason: string, run: () => Promise<T>) => {
     const previous = session.__rinCurrentCompactionReason;
     session.__rinCurrentCompactionReason = String(reason || "").trim();
     try {
-      return await original(reason, ...args);
+      return await run();
     } finally {
       if (previous === undefined) delete session.__rinCurrentCompactionReason;
       else session.__rinCurrentCompactionReason = previous;
     }
   };
 
-  (session as any)[COMPACTION_REASON_TRACKING_KEY] = { original };
+  const originalRunAutoCompaction =
+    typeof session._runAutoCompaction === "function"
+      ? session._runAutoCompaction.bind(session)
+      : null;
+  if (originalRunAutoCompaction) {
+    session._runAutoCompaction = async function patchedRunAutoCompaction(
+      reason: string,
+      ...args: any[]
+    ) {
+      return await withReason(String(reason || "auto"), () =>
+        originalRunAutoCompaction(reason, ...args),
+      );
+    };
+  }
+
+  const originalCompact =
+    typeof session.compact === "function"
+      ? session.compact.bind(session)
+      : null;
+  if (originalCompact) {
+    session.compact = async function patchedManualCompactionReason(
+      ...args: any[]
+    ) {
+      return await withReason("manual", () => originalCompact(...args));
+    };
+  }
+
+  if (!originalRunAutoCompaction && !originalCompact) return;
+
+  (session as any)[COMPACTION_REASON_TRACKING_KEY] = {
+    originalRunAutoCompaction,
+    originalCompact,
+  };
 }
 
 function abortActiveCompaction(session: any) {
@@ -835,7 +858,6 @@ export {
   RIN_DIR_ENV,
 };
 
-const RIN_BEFORE_COMPACTION_HOOKS_KEY = Symbol.for("rin.beforeCompactionHooks");
 const RIN_RUNTIME_SESSION_SHUTDOWN_KEY = Symbol.for(
   "rin.runtimeSessionShutdown",
 );
@@ -853,70 +875,6 @@ async function emitRinCapabilityEvent(session: any, event: any) {
   const type = String(event?.type || "").trim();
   if (!hasRinCapabilityHandlers(session, type)) return;
   await session.__rinCapabilities.emit(event);
-}
-
-function emitRinSessionEvent(session: any, event: any) {
-  try {
-    session?._emit?.(event);
-  } catch {}
-}
-
-async function emitRinBeforeCompaction(session: any, event: any) {
-  const payload = {
-    type: "session_before_compact",
-    ...(event || {}),
-  };
-  if (!hasRinCapabilityHandlers(session, payload.type)) return;
-  emitRinSessionEvent(session, {
-    type: "rin_working_start",
-    reason: "session_before_compact",
-    compactionReason: payload.reason,
-  });
-  try {
-    await session.__rinCapabilities.emit(payload);
-  } finally {
-    emitRinSessionEvent(session, {
-      type: "rin_working_end",
-      reason: "session_before_compact",
-      compactionReason: payload.reason,
-    });
-  }
-}
-
-export function applyRinBeforeCompactionHooks(session: any) {
-  if (!session || typeof session !== "object") return;
-  if (session[RIN_BEFORE_COMPACTION_HOOKS_KEY]) return;
-
-  const originalRunAutoCompaction =
-    typeof session._runAutoCompaction === "function"
-      ? session._runAutoCompaction.bind(session)
-      : null;
-  if (originalRunAutoCompaction) {
-    session._runAutoCompaction = async function patchedRinBeforeAutoCompaction(
-      reason: string,
-      willRetry: boolean,
-      ...args: any[]
-    ) {
-      await emitRinBeforeCompaction(session, { reason });
-      return await originalRunAutoCompaction(reason, willRetry, ...args);
-    };
-  }
-
-  const originalCompact =
-    typeof session.compact === "function"
-      ? session.compact.bind(session)
-      : null;
-  if (originalCompact) {
-    session.compact = async (...args: any[]) => {
-      await emitRinBeforeCompaction(session, { reason: "manual" });
-      return await originalCompact(...args);
-    };
-  }
-
-  session[RIN_BEFORE_COMPACTION_HOOKS_KEY] = {
-    originalRunAutoCompaction,
-    originalCompact,
-  };
 }
 
 async function emitRinSessionShutdown(session: any, event: any) {
@@ -1253,7 +1211,6 @@ export async function createConfiguredAgentSession(
     clearCompactionContinuationMarker(result.session);
 
     applyRinPromptBuilder(result.session);
-    applyRinBeforeCompactionHooks(result.session);
     applyRinCompactionSettingsTuning(result.session);
     applyAutoReloadAfterCompaction(result.session);
     applyRinCompactionConcurrencyGuard(result.session);

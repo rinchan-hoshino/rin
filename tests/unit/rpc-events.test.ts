@@ -152,6 +152,153 @@ test("rpc session events do not refresh whole state on every stream update", asy
   ]);
 });
 
+test("rpc session events keep TUI turns alive through Pi overflow continuation", async () => {
+  const seen = [];
+  let refreshMessages = 0;
+  let refreshMessagesAndSession = 0;
+  const target = {
+    isStreaming: true,
+    isCompacting: false,
+    remoteTurnRunning: true,
+    activeTurn: { mode: "prompt" },
+    setRemoteTurnRunning(value) {
+      this.remoteTurnRunning = value;
+      this.isStreaming = value;
+    },
+    emitFrontendStatus(force) {
+      seen.push({ type: "frontend_status_refresh", force });
+    },
+    emitEvent: (event) => seen.push(event),
+  };
+
+  await events.handleRpcSessionEvent(
+    target,
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "context_length_exceeded",
+      },
+    },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.remoteTurnRunning, true);
+  assert.equal(target.awaitingNativeOverflowContinuation, true);
+  assert.equal(refreshMessages, 0);
+
+  await events.handleRpcSessionEvent(
+    target,
+    { type: "agent_end" },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.remoteTurnRunning, true);
+  assert.equal(target.activeTurn?.mode, "prompt");
+
+  await events.handleRpcSessionEvent(
+    target,
+    { type: "compaction_start", reason: "overflow" },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.isCompacting, true);
+  assert.equal(target.compactionReason, "overflow");
+
+  await events.handleRpcSessionEvent(
+    target,
+    {
+      type: "compaction_end",
+      reason: "overflow",
+      aborted: false,
+      willRetry: true,
+    },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.remoteTurnRunning, true);
+  assert.equal(target.awaitingNativeOverflowContinuation, false);
+  assert.equal(target.nativeContinuationPending, true);
+
+  await events.handleRpcSessionEvent(
+    target,
+    { type: "agent_start" },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.remoteTurnRunning, true);
+  assert.equal(target.activeTurn?.mode, "prompt");
+
+  await events.handleRpcSessionEvent(
+    target,
+    {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "tag-1",
+      finalText: "continued",
+    },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.remoteTurnRunning, false);
+  assert.equal(target.isStreaming, false);
+  assert.equal(target.activeTurn, null);
+  assert.equal(refreshMessagesAndSession, 3);
+  assert.equal(
+    seen.some(
+      (event) =>
+        event.type === "message_end" &&
+        event.message?.errorMessage === "context_length_exceeded",
+    ),
+    false,
+  );
+  assert.deepEqual(seen, [
+    { type: "frontend_status_refresh", force: true },
+    { type: "agent_end" },
+    { type: "compaction_start", reason: "overflow" },
+    { type: "frontend_status_refresh", force: true },
+    {
+      type: "compaction_end",
+      reason: "overflow",
+      aborted: false,
+      willRetry: true,
+    },
+    { type: "frontend_status_refresh", force: true },
+    { type: "agent_start" },
+    {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "tag-1",
+      finalText: "continued",
+    },
+  ]);
+});
+
 test("rpc session events expose Rin pre-compaction work as working", async () => {
   const seen = [];
   const target = {
