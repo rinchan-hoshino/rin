@@ -9,7 +9,7 @@ import {
   readSessionDisplayNameParts,
   resolveSessionDisplayName,
 } from "../session/names.js";
-import { safeString, sha, trimText } from "./utils.js";
+import { parseTimestampMs, safeString, sha, trimText } from "./utils.js";
 import type {
   TranscriptArchiveEntry,
   TranscriptFileState,
@@ -64,7 +64,8 @@ function transcriptDateParts(input: Record<string, unknown>): {
   month: string;
 } {
   const raw = safeString(input.timestamp || "").trim();
-  const date = raw ? new Date(raw) : new Date();
+  const parsedTimestampMs = parseTimestampMs(raw);
+  const date = raw ? new Date(parsedTimestampMs || raw) : new Date();
   if (Number.isNaN(date.getTime())) {
     const now = new Date();
     return {
@@ -279,8 +280,7 @@ export async function loadTranscriptArchiveEntries(
 }
 
 function timestampValue(value: string): number {
-  const parsed = Date.parse(safeString(value).trim());
-  return Number.isFinite(parsed) ? parsed : 0;
+  return parseTimestampMs(value);
 }
 
 export function isLegacySyntheticSessionSummaryEntry(input: {
