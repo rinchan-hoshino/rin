@@ -7,8 +7,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
-
+COPY scripts/install-git-hooks.ts ./scripts/install-git-hooks.ts
 RUN npm ci
 
 COPY .ci/local-ci/run-checks.sh /usr/local/bin/rin-local-ci-runner

@@ -49,7 +49,7 @@ test("local CI image includes prepare hook input before npm install", () => {
 
   assertOrdered(dockerfile, [
     "COPY package.json package-lock.json ./",
-    "COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs",
+    "COPY scripts/install-git-hooks.ts ./scripts/install-git-hooks.ts",
     "RUN npm ci",
   ]);
 });

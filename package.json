@@ -30,7 +30,7 @@
     "release:manifest": "node scripts/release/update-release-manifest.mjs",
     "release:changelog": "node scripts/release/verify-changelog.mjs",
     "release:bootstrap": "node scripts/release/export-bootstrap-branch.mjs",
-    "prepare": "node scripts/install-git-hooks.mjs",
+    "prepare": "tsx scripts/install-git-hooks.ts",
     "test": "npm run test:unit && npm run test:e2e",
     "test:release": "node --import tsx --test tests/unit/installer-modules.test.ts tests/unit/rin-cli.test.ts tests/unit/rpc-and-shared.test.ts tests/e2e/bootstrap-entrypoint.test.ts tests/e2e/install-to-tui-user-flow.test.ts tests/unit/release.test.ts tests/e2e/release-scripts.test.ts",
     "test:unit": "npm run build && node --import tsx --test $(find tests/unit -name '*.test.ts' -print | sort)",

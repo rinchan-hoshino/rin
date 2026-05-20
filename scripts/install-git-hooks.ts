@@ -1,9 +1,8 @@
-#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
-function runGit(args, options = {}) {
+function runGit(args: string[], options: { cwd?: string } = {}) {
   return execFileSync("git", args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
@@ -11,7 +10,7 @@ function runGit(args, options = {}) {
   }).trim();
 }
 
-function findRepoRoot(cwd) {
+function findRepoRoot(cwd: string) {
   try {
     return runGit(["rev-parse", "--show-toplevel"], { cwd }) || null;
   } catch {
@@ -19,12 +18,10 @@ function findRepoRoot(cwd) {
   }
 }
 
-const cwd = process.cwd();
-const repoRoot = findRepoRoot(cwd);
+const repoRoot = findRepoRoot(process.cwd());
 if (!repoRoot) process.exit(0);
 
-const hooksDir = path.join(repoRoot, ".githooks");
-const preCommit = path.join(hooksDir, "pre-commit");
+const preCommit = path.join(repoRoot, ".githooks", "pre-commit");
 if (!fs.existsSync(preCommit)) process.exit(0);
 
 try {

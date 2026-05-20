@@ -10,7 +10,8 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const scriptPath = path.join(rootDir, "scripts", "install-git-hooks.mjs");
+const scriptPath = path.join(rootDir, "scripts", "install-git-hooks.ts");
+const tsxBin = path.join(rootDir, "node_modules", ".bin", "tsx");
 
 function makeTempDir(prefix: string) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -36,7 +37,7 @@ test("install git hooks configures fresh worktrees", () => {
       "utf8",
     );
 
-    const output = run(process.execPath, [scriptPath], tempDir);
+    const output = run(tsxBin, [scriptPath], tempDir);
     assert.match(output, /configured core\.hooksPath=\.githooks/);
     assert.equal(
       run("git", ["config", "--get", "core.hooksPath"], tempDir),
@@ -65,7 +66,7 @@ test("install git hooks resolves the worktree root from nested directories", () 
       "utf8",
     );
 
-    const output = run(process.execPath, [scriptPath], nestedDir);
+    const output = run(tsxBin, [scriptPath], nestedDir);
     assert.match(output, /configured core\.hooksPath=\.githooks/);
     assert.equal(
       run("git", ["config", "--get", "core.hooksPath"], tempDir),
@@ -79,7 +80,7 @@ test("install git hooks resolves the worktree root from nested directories", () 
 test("install git hooks is a no-op outside a worktree", () => {
   const tempDir = makeTempDir("rin-install-hooks-noop-");
   try {
-    const output = run(process.execPath, [scriptPath], tempDir);
+    const output = run(tsxBin, [scriptPath], tempDir);
     assert.equal(output, "");
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
