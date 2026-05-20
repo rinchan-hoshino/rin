@@ -259,8 +259,16 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
       renderContext,
     )
     .render(80);
-  assert.equal(todoResultLines[0], "");
-  assert.equal(todoResultLines.at(-1), "");
+  assert.match(todoResultLines[0], /^<toolSuccessBg>\s*<\/toolSuccessBg>$/);
+  assert.match(
+    todoResultLines.at(-1) ?? "",
+    /^<toolSuccessBg>\s*<\/toolSuccessBg>$/,
+  );
+  assert.doesNotMatch(todoResultLines[0], /Wire core todo|Ship renderer/);
+  assert.doesNotMatch(
+    todoResultLines.at(-1) ?? "",
+    /Wire core todo|Ship renderer/,
+  );
 
   const todoResult = todoResultLines.join("\n");
   assert.match(todoResult, /<toolSuccessBg>/);
