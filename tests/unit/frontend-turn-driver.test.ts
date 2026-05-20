@@ -810,6 +810,128 @@ test("frontend SDK turn driver waits for an already submitted restored prompt in
   assert.equal(getMessagesCount, 2);
 });
 
+test(
+  "frontend SDK turn driver keeps waiting for restored prompts while the session is active",
+  { concurrency: false },
+  async () => {
+    const originalNow = Date.now;
+    let now = 0;
+    (Date as any).now = () => now;
+
+    try {
+      const client = createFrontendClient();
+      let getMessagesCount = 0;
+      client.getState = async () => ({
+        sessionFile: "/tmp/frontend-chat.jsonl",
+        sessionId: "frontend-session",
+        isStreaming: getMessagesCount >= 2 && getMessagesCount < 3,
+        turnActive: getMessagesCount >= 2 && getMessagesCount < 3,
+      });
+      client.getMessages = async () => {
+        getMessagesCount += 1;
+        now += 121_000;
+        const messages = [
+          { role: "user", timestamp: 1001, content: "long restored job" },
+        ];
+        if (getMessagesCount >= 3) {
+          messages.push({
+            role: "assistant",
+            timestamp: now,
+            content: "long restored final",
+          });
+        }
+        return messages;
+      };
+      client.prompt = async () => {
+        throw new Error("prompt_should_not_be_resubmitted");
+      };
+      const driver = new RinFrontendTurnDriver({
+        clientFactory: () => client,
+        promptSource: "chat-bridge",
+      });
+
+      const result = await driver.runTurn({
+        text: "long restored job",
+        promptContext: { sentAt: 1000 },
+      });
+
+      assert.equal(result.finalText, "long restored final");
+      assert.equal(
+        client.calls.some((call: any) => call.type === "prompt"),
+        false,
+      );
+      assert.equal(getMessagesCount, 3);
+    } finally {
+      (Date as any).now = originalNow;
+    }
+  },
+);
+
+test(
+  "frontend SDK turn driver keeps reconnect recovery alive while the session is active",
+  { concurrency: false },
+  async () => {
+    const originalNow = Date.now;
+    let now = 0;
+    (Date as any).now = () => now;
+
+    try {
+      const client = createFrontendClient();
+      const originalConnect = client.connect;
+      let promptAttempted = false;
+      let recoveryStateCount = 0;
+      client.connect = async () => {
+        await originalConnect.call(client);
+      };
+      client.getState = async () => {
+        if (!promptAttempted) {
+          return {
+            sessionFile: "/tmp/frontend-chat.jsonl",
+            sessionId: "frontend-session",
+            isStreaming: false,
+          };
+        }
+        recoveryStateCount += 1;
+        now += 121_000;
+        return {
+          sessionFile: "/tmp/frontend-chat.jsonl",
+          sessionId: "frontend-session",
+          isStreaming: recoveryStateCount < 2,
+          turnActive: recoveryStateCount < 2,
+        };
+      };
+      client.getMessages = async () =>
+        promptAttempted && recoveryStateCount >= 2
+          ? [
+              { role: "user", content: "hello" },
+              { role: "assistant", content: "recovered after long active" },
+            ]
+          : [{ role: "user", content: "hello" }];
+      client.prompt = async (text: string, options: any = {}) => {
+        client.calls.push({ type: "prompt", text, options });
+        promptAttempted = true;
+        await client.disconnect();
+        throw new Error("rin_disconnected:req_1");
+      };
+      const driver = new RinFrontendTurnDriver({
+        clientFactory: () => client,
+        promptSource: "chat-bridge",
+      });
+
+      const result = await driver.runTurn({ text: "hello" });
+
+      assert.equal(result.finalText, "recovered after long active");
+      assert.equal(
+        client.calls.filter((call: any) => call.type === "prompt").length,
+        1,
+      );
+      assert.equal(recoveryStateCount, 2);
+    } finally {
+      (Date as any).now = originalNow;
+    }
+  },
+);
+
 test("frontend SDK turn driver reconnects and resolves an interrupted prompt from session state", async () => {
   const client = createFrontendClient();
   const originalConnect = client.connect;

@@ -48,6 +48,44 @@ function normalizeTodoId(value: unknown): number | undefined {
   return Number.isSafeInteger(id) ? id : undefined;
 }
 
+const TODO_ACTIONS = new Set<TodoDetails["action"]>([
+  "list",
+  "add",
+  "toggle",
+  "clear",
+]);
+
+function cloneTodoItem(value: unknown): Todo | undefined {
+  const item = value && typeof value === "object" ? (value as any) : null;
+  if (!item) return undefined;
+  const id = normalizeTodoId(item.id);
+  const text = typeof item.text === "string" ? item.text.trim() : "";
+  if (id === undefined || id <= 0 || !text) return undefined;
+  return { id, text, done: Boolean(item.done) };
+}
+
+function normalizeNextTodoId(todoList: Todo[], value: unknown) {
+  const next = Number(value);
+  if (Number.isSafeInteger(next) && next > 0) return next;
+  return Math.max(0, ...todoList.map((todo) => todo.id)) + 1;
+}
+
+function readTodoDetails(value: unknown): TodoDetails | undefined {
+  const details = value && typeof value === "object" ? (value as any) : null;
+  if (!details || !Array.isArray(details.todos)) return undefined;
+  const todoList = details.todos
+    .map(cloneTodoItem)
+    .filter((todo): todo is Todo => Boolean(todo));
+  const action = TODO_ACTIONS.has(details.action) ? details.action : "list";
+  const error = typeof details.error === "string" ? details.error : undefined;
+  return {
+    action,
+    todos: todoList,
+    nextId: normalizeNextTodoId(todoList, details.nextId),
+    ...(error ? { error } : {}),
+  };
+}
+
 function formatTodoChecklistContent(todoList: Todo[]): string {
   if (todoList.length === 0) return "○ No todos";
 
@@ -197,7 +235,7 @@ export default function todoCapability(): RinCapabilityDefinition {
       const msg = entry.message;
       if (msg.role !== "toolResult" || msg.toolName !== "todo") continue;
 
-      const details = msg.details as TodoDetails | undefined;
+      const details = readTodoDetails(msg.details);
       if (!details) continue;
       todos = details.todos.map((todo) => ({ ...todo }));
       nextId = details.nextId;
@@ -335,7 +373,7 @@ export default function todoCapability(): RinCapabilityDefinition {
     },
 
     renderResult(result, { expanded }, theme, _context) {
-      const details = result.details as TodoDetails | undefined;
+      const details = readTodoDetails(result.details);
       if (!details) {
         const text = result.content[0];
         return new Text(text?.type === "text" ? text.text : "", 0, 0);
