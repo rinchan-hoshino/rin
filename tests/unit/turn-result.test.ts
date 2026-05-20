@@ -67,6 +67,36 @@ test("turn result builder returns empty messages when there is no assistant outp
   });
 });
 
+test("turn result builder ignores assistant tool-call prefaces as non-final output", () => {
+  assert.deepEqual(
+    turnResult.buildTurnResultFromMessages([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "I will check this" },
+          { type: "toolCall", name: "read", id: "call-1" },
+        ],
+      },
+    ]),
+    { messages: [] },
+  );
+
+  assert.deepEqual(
+    turnResult.resolveTurnCompletion({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "working preface" },
+            { type: "toolCall", name: "bash", id: "call-2" },
+          ],
+        },
+      ],
+    }),
+    { finalText: "", result: { messages: [] } },
+  );
+});
+
 test("turn result final text extractor returns the first non-empty text message", () => {
   assert.equal(
     turnResult.extractFinalTextFromTurnResult({

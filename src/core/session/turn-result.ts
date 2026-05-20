@@ -2,6 +2,8 @@ import path from "node:path";
 
 import { asArray } from "../json-utils.js";
 import {
+  countToolCalls,
+  extractAssistantFinalText,
   extractExistingFilePaths,
   extractImageParts,
   extractMessageText,
@@ -116,19 +118,21 @@ export function resolveTurnCompletion(input: TurnCompletionInput = {}) {
   };
 }
 
-function findLastAssistantMessage(messages: any[]) {
+function findLastAssistantDeliverableMessage(messages: any[]) {
   for (const message of [...messages].reverse()) {
     if (safeString(message?.role) !== "assistant") continue;
-    return message;
+    if (countToolCalls(message?.content) > 0) continue;
+    const text = extractMessageText(message.content, { trim: true });
+    if (text || extractImageParts(message.content).length > 0) return message;
   }
   return null;
 }
 
 export function buildTurnResultFromMessages(messages: any[]): TurnResult {
-  const assistant = findLastAssistantMessage(asArray(messages));
+  const assistant = findLastAssistantDeliverableMessage(asArray(messages));
   if (!assistant) return { messages: [] };
 
-  const text = extractMessageText(assistant.content, { trim: true });
+  const text = extractAssistantFinalText(assistant);
   const images = extractImageParts(assistant.content);
   const files = extractExistingFilePaths(text);
   const result: TurnResultMessage[] = [];
