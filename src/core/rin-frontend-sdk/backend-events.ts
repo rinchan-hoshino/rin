@@ -59,6 +59,14 @@ function isPiOverflowContinuation(payload: any) {
   );
 }
 
+function formatCompactionPassiveNotice(payload: any) {
+  if (safeString(payload?.type).trim() !== "compaction_end") return "";
+  if (payload?.aborted === true) return "";
+  const summary = safeString(payload?.result?.summary).trim();
+  if (summary) return summary;
+  return safeString(payload?.errorMessage).trim();
+}
+
 export type RinFrontendBackendEventTranslator = {
   translate(event: unknown): RinFrontendBackendEvent[];
   resetAssistantSegments(): void;
@@ -226,6 +234,14 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
           const events: RinFrontendBackendEvent[] = [
             { type: "external_working_end" },
           ];
+          const notice = formatCompactionPassiveNotice(payload);
+          if (notice) {
+            events.push({
+              type: "passive_notice",
+              text: notice,
+              level: "info",
+            });
+          }
           if (isPiOverflowContinuation(payload)) {
             nativeContinuationPending = true;
             events.push(

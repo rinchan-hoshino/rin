@@ -160,14 +160,16 @@ function notifySelfImproveReview(ctx: any, message: string) {
   } catch {}
 }
 
-async function processSelfImproveReview(
+async function enqueueSelfImproveReview(
   ctx: any,
   opts: SelfImproveReviewOptions,
+  options: { notifyQueued?: boolean } = {},
 ) {
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
   await enqueueMemoryMaintenanceJob(job);
   const spawned = spawnQueuedMemoryWorker(job.agentDir);
+  if (!options.notifyQueued) return;
   notifySelfImproveReview(
     ctx,
     formatMemoryMaintenancePassiveNotice({
@@ -238,12 +240,16 @@ export default function selfImproveModule(
             state.initialized = true;
           }
           if (state.finalMessages - state.lastQueuedMessage >= interval) {
-            await processSelfImproveReview(ctx, {
-              sessionFile: meta.sessionFile,
-              leafId: meta.leafId,
-              trigger: "self_improve:periodic_review",
-              snapshotKey: `review:${state.finalMessages}`,
-            });
+            await processSelfImproveReviewNow(
+              ctx,
+              {
+                sessionFile: meta.sessionFile,
+                leafId: meta.leafId,
+                trigger: "self_improve:periodic_review",
+                snapshotKey: `review:${state.finalMessages}`,
+              },
+              runMemoryMaintenanceNow,
+            );
             state.lastQueuedMessage = state.finalMessages;
           }
         },
@@ -273,7 +279,7 @@ export default function selfImproveModule(
             if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
             return;
           }
-          await processSelfImproveReview(ctx, {
+          await enqueueSelfImproveReview(ctx, {
             sessionFile: meta.sessionFile,
             leafId: meta.leafId,
             trigger: "self_improve:session_shutdown_review",

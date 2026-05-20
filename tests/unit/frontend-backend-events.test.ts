@@ -16,6 +16,7 @@ const sdk = await import(
 
 const NOTICE_NO_CHANGE =
   "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u65e0\u53d8\u66f4";
+const COMPACTION_NOTICE = "Summary of conversation...";
 
 test("frontend backend event translator exposes status as a shared frontend event", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
@@ -90,6 +91,27 @@ test("frontend backend event translator exposes notify requests as passive notic
       },
     }),
     [],
+  );
+});
+
+test("frontend backend event translator exposes compaction summaries as passive notices", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: { summary: "Summary of conversation..." },
+    }),
+    [
+      { type: "external_working_end" },
+      {
+        type: "passive_notice",
+        text: COMPACTION_NOTICE,
+        level: "info",
+      },
+    ],
   );
 });
 

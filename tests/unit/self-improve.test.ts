@@ -227,12 +227,17 @@ test("processing normalizes revised full-slot content and enforces limits", asyn
   );
 });
 
-test("automatic self-improve handlers queue managed task sessions", async () => {
+test("automatic self-improve handlers run periodic reviews synchronously", async () => {
   await withTempRoot(async (root) => {
+    const calls = [];
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
         return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
       },
     });
     const messageEnd = definition.hooks.message_end[0];
@@ -260,11 +265,11 @@ test("automatic self-improve handlers queue managed task sessions", async () => 
       await messageEnd({ message: assistantFinal() }, ctx);
     }
 
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].kind, "self_improve_review");
-    assert.equal(queue[0].sessionFile, managedSessionFile);
-    assert.equal(queue[0].snapshotKey, "review:8");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].sessionFile, managedSessionFile);
+    assert.equal(calls[0].snapshotKey, "review:8");
+    assert.equal(calls[0].trigger, "self_improve:periodic_review");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
 
@@ -375,6 +380,52 @@ test("compaction self-improve review emits a short passive notice", async () => 
   });
 });
 
+test("periodic self-improve review emits the completed result as a passive notice", async () => {
+  await withTempRoot(async (root) => {
+    const notices = [];
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+      async runMemoryMaintenanceJobNow() {
+        return {
+          status: "completed",
+          result: {
+            changedFiles: [
+              { path: path.join(root, "self_improve", "skills", "demo.md") },
+            ],
+          },
+        };
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const sessionFile = path.join(root, "sessions", "notice-periodic.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await writeSessionWithAssistantFinals(sessionFile, 8);
+    const ctx = {
+      agentDir: root,
+      ui: {
+        notify(message, level) {
+          notices.push({ message, level });
+        },
+      },
+      sessionManager: {
+        getSessionId: () => "notice-periodic-review-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "assistant-8",
+        isPersisted: () => true,
+      },
+    };
+
+    await messageEnd({ message: assistantFinal("done 8") }, ctx);
+
+    assert.deepEqual(notices, [
+      { message: NOTICE_CHANGED_SKILL_ONE, level: "info" },
+    ]);
+  });
+});
+
 test("compaction self-improve review skips overflow recovery compaction", async () => {
   await withTempRoot(async (root) => {
     const calls = [];
@@ -419,10 +470,15 @@ test("automatic self-improve review interval is configurable", async () => {
       JSON.stringify({ selfImprove: { reviewEveryTurns: 3 } }),
       "utf8",
     );
+    const calls = [];
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
         return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
       },
     });
     const messageEnd = definition.hooks.message_end[0];
@@ -444,18 +500,23 @@ test("automatic self-improve review interval is configurable", async () => {
       await messageEnd({ message: assistantFinal() }, ctx);
     }
 
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:3");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].snapshotKey, "review:3");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
 
 test("automatic self-improve review counts agent final messages, not user turns", async () => {
   await withTempRoot(async (root) => {
+    const calls = [];
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
         return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
       },
     });
     const messageEnd = definition.hooks.message_end[0];
@@ -485,18 +546,23 @@ test("automatic self-improve review counts agent final messages, not user turns"
       await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
     }
 
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:8");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].snapshotKey, "review:8");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
 
 test("automatic self-improve review reuses chat final-message detection for tool-call messages", async () => {
   await withTempRoot(async (root) => {
+    const calls = [];
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
         return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
       },
     });
     const messageEnd = definition.hooks.message_end[0];
@@ -529,9 +595,9 @@ test("automatic self-improve review reuses chat final-message detection for tool
       await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
     }
 
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:8");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].snapshotKey, "review:8");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
 
@@ -551,10 +617,15 @@ test("automatic self-improve review resumes from persisted session count after r
       },
     });
 
+    const calls = [];
     const firstDefinition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
         return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
       },
     });
     await firstDefinition.hooks.message_end[0](
@@ -569,15 +640,19 @@ test("automatic self-improve review resumes from persisted session count after r
       getThinkingLevel() {
         return "medium";
       },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
+      },
     });
     await restartedDefinition.hooks.message_end[0](
       { message: assistantFinal("done 16") },
       createContext("persisted-count-session-test-restarted", "assistant-16"),
     );
 
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:16");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].snapshotKey, "review:16");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
 
@@ -588,10 +663,15 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
       JSON.stringify({ selfImprove: { review: { everyTurns: 3 } } }),
       "utf8",
     );
+    const calls = [];
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
         return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
       },
     });
     const messageEnd = definition.hooks.message_end[0];
@@ -617,9 +697,9 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
       await messageEnd({ message: assistantFinal(`done ${i + 4}`) }, ctx);
     }
 
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:8");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].snapshotKey, "review:8");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
 
@@ -766,8 +846,9 @@ test("session reload does not trigger self-improve shutdown maintenance", async 
   });
 });
 
-test("real session shutdown triggers self-improve review maintenance", async () => {
+test("real session shutdown triggers self-improve review maintenance without a frontend notice", async () => {
   await withTempRoot(async (root) => {
+    const notices = [];
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
@@ -780,6 +861,11 @@ test("real session shutdown triggers self-improve review maintenance", async () 
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
+      ui: {
+        notify(message, level) {
+          notices.push({ message, level });
+        },
+      },
       sessionManager: {
         getSessionId: () => "persisted-shutdown-session-test",
         getSessionFile: () => sessionFile,
@@ -794,6 +880,7 @@ test("real session shutdown triggers self-improve review maintenance", async () 
     assert.equal(queue.length, 1);
     assert.equal(queue[0].kind, "self_improve_review");
     assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
+    assert.deepEqual(notices, []);
   });
 });
 
@@ -935,6 +1022,7 @@ test("queued maintenance drops invalid session jobs into history instead of bloc
     assert.equal(history.length, 1);
     assert.equal(history[0].status, "failed");
     assert.equal(history[0].trigger, "self_improve:periodic_review");
+    assert.equal(history[0].passiveNotice, undefined);
     assert.match(
       String(history[0].error || ""),
       /maintenance_job_missing_session_file:/,

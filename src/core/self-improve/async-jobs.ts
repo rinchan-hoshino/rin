@@ -441,7 +441,6 @@ export async function runMemoryMaintenanceJobNow(
             (result as any)?.output || (result as any)?.sessionSummary,
           ) || undefined,
         changedFiles,
-        passiveNotice,
       });
       return { status: "completed", result, passiveNotice };
     } catch (error: unknown) {
@@ -462,7 +461,6 @@ export async function runMemoryMaintenanceJobNow(
         finishedAt,
         attempts: 1,
         error: message,
-        passiveNotice,
       });
       return { status: "failed", error: message, passiveNotice };
     }
@@ -513,7 +511,6 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           skipped,
           outputPreview: truncateText((result as any)?.output) || undefined,
           changedFiles,
-          passiveNotice,
         });
         processed += 1;
         allChangedFiles.push(...changedFiles);
@@ -537,7 +534,6 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           finishedAt,
           attempts,
           error: message,
-          passiveNotice,
         });
         failed += 1;
       }
