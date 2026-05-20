@@ -13,6 +13,7 @@ import type {
 function eventPayload(event: unknown): any {
   const value: any = event;
   if (value?.type === "ui") return value.payload;
+  if (value?.type === "extension_ui_request") return value.payload;
   return value;
 }
 
@@ -110,6 +111,21 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
                 : undefined,
           },
         ];
+      }
+
+      if (payload.type === "extension_ui_request") {
+        const method = safeString(payload.method).trim();
+        if (method === "notify") {
+          const text = safeString(payload.message).trim();
+          if (!text || !text.startsWith("💡 自我整理：")) return [];
+          const notifyType = safeString(payload.notifyType).trim();
+          const level =
+            notifyType === "warning" || notifyType === "error"
+              ? notifyType
+              : "info";
+          return [{ type: "passive_notice", text, level }];
+        }
+        return [];
       }
 
       if (payload.type === "rpc_turn_event") {

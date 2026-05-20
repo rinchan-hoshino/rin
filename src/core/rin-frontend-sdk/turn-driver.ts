@@ -44,6 +44,11 @@ export type RinFrontendTurnResult = {
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "turn_accepted" }
+  | {
+      type: "passive_notice";
+      text: string;
+      level?: "info" | "warning" | "error";
+    }
   | { type: "assistant_interim"; text: string };
 
 export type RinFrontendTurnClient = RinFrontendClient & {
@@ -1127,6 +1132,13 @@ export class RinFrontendTurnDriver {
         this.frontendState.turnActive = true;
         this.frontendState.isStreaming = true;
         this.setFrontendPhase("working");
+        return;
+      case "passive_notice":
+        this.emit({
+          type: "passive_notice",
+          text: event.text,
+          level: event.level,
+        });
         return;
       case "external_working_start":
         this.externalWorkingDepth += 1;

@@ -80,6 +80,11 @@ export type RinFrontendBackendEvent =
     }
   | { type: "turn_accepted"; requestTag?: string }
   | { type: "turn_continuing"; reason?: string }
+  | {
+      type: "passive_notice";
+      text: string;
+      level?: "info" | "warning" | "error";
+    }
   | { type: "external_working_start" }
   | { type: "external_working_end" }
   | { type: "assistant_stream"; text: string }

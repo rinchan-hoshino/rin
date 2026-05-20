@@ -14,6 +14,9 @@ const sdk = await import(
   ).href
 );
 
+const NOTICE_NO_CHANGE =
+  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u65e0\u53d8\u66f4";
+
 test("frontend backend event translator exposes status as a shared frontend event", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
@@ -53,6 +56,41 @@ test("frontend backend event translator exposes compaction review as external wo
   assert.deepEqual(translator.translate({ type: "compaction_end" }), [
     { type: "external_working_end" },
   ]);
+});
+
+test("frontend backend event translator exposes notify requests as passive notices", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        method: "notify",
+        message: NOTICE_NO_CHANGE,
+        notifyType: "info",
+      },
+    }),
+    [
+      {
+        type: "passive_notice",
+        text: NOTICE_NO_CHANGE,
+        level: "info",
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        method: "notify",
+        message: "ordinary extension notice",
+        notifyType: "info",
+      },
+    }),
+    [],
+  );
 });
 
 test("frontend backend event translator classifies assistant tool preface as interim", () => {

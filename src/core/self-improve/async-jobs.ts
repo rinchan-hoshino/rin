@@ -58,6 +58,7 @@ type MaintenanceHistoryRecord = {
   error?: string;
   outputPreview?: string;
   changedFiles?: MaintenanceChangedFile[];
+  passiveNotice?: string;
 };
 
 function resolveAgentDir(value: unknown) {
@@ -274,10 +275,82 @@ function truncateText(value: unknown, limit = 800) {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
+function selfImproveRelativePath(filePath: string) {
+  const normalized = safeString(filePath).replace(/\\/g, "/");
+  const marker = "/self_improve/";
+  const markerIndex = normalized.indexOf(marker);
+  if (markerIndex >= 0) return normalized.slice(markerIndex + marker.length);
+  if (normalized.startsWith("self_improve/")) {
+    return normalized.slice("self_improve/".length);
+  }
+  return normalized;
+}
+
+function stripMarkdownExtension(value: string) {
+  return value.replace(/\.(?:md|markdown)$/i, "");
+}
+
+function shortTargetName(value: string, maxLength = 42) {
+  const target = stripMarkdownExtension(safeString(value).trim());
+  if (!target) return "";
+  return target.length > maxLength
+    ? `${target.slice(0, Math.max(1, maxLength - 1))}…`
+    : target;
+}
+
+function changedFileTarget(filePath: string) {
+  const relative = selfImproveRelativePath(filePath);
+  const parts = relative.split("/").filter(Boolean);
+  if (parts[0] === "prompts" && parts[1]) return shortTargetName(parts[1]);
+  if (parts[0] === "skills" && parts[1]) {
+    if (parts[1] === "memory-index" && parts.includes("transactions")) {
+      return shortTargetName(parts.at(-1) || parts[1]);
+    }
+    return shortTargetName(parts[1]);
+  }
+  return shortTargetName(parts.at(-1) || relative, 32);
+}
+
+function summarizeChangedFiles(changedFiles: MaintenanceChangedFile[]) {
+  const targets: string[] = [];
+  const seen = new Set<string>();
+  for (const file of changedFiles) {
+    const target = changedFileTarget(file.path);
+    if (!target || seen.has(target)) continue;
+    seen.add(target);
+    targets.push(target);
+  }
+  const visible = targets.slice(0, 3);
+  const hiddenCount = Math.max(0, targets.length - visible.length);
+  if (hiddenCount > 0) visible.push(`+${hiddenCount}`);
+  return visible.join("、");
+}
+
 function normalizeErrorMessage(error: unknown) {
   return safeString(
     (error as any)?.message || error || "maintenance_job_failed",
   ).trim();
+}
+
+export function formatMemoryMaintenancePassiveNotice(input: {
+  status?: string;
+  changedFiles?: unknown;
+  changedCount?: number;
+  skipped?: string;
+}): string {
+  const status = safeString(input.status).trim();
+  if (status === "queued") return "💡 自我整理：已排队";
+  if (status === "failed") return "💡 自我整理：失败";
+  const skipped = safeString(input.skipped).trim();
+  if (status === "skipped" || skipped) return "💡 自我整理：跳过";
+  const changedFiles = normalizeChangedFiles(input.changedFiles);
+  const summary = summarizeChangedFiles(changedFiles);
+  if (summary) return `💡 自我整理：更新 ${summary}`;
+  const changedCount = Number.isFinite(input.changedCount)
+    ? Math.max(0, Math.floor(Number(input.changedCount)))
+    : 0;
+  if (changedCount > 0) return `💡 自我整理：更新 other ${changedCount}`;
+  return "💡 自我整理：无变更";
 }
 
 async function appendHistoryRecord(
@@ -336,6 +409,13 @@ export async function runMemoryMaintenanceJobNow(
     try {
       const result = await processJob(job);
       const finishedAt = nowIso();
+      const changedFiles = normalizeChangedFiles((result as any)?.changedFiles);
+      const skipped = safeString((result as any)?.skipped).trim() || undefined;
+      const passiveNotice = formatMemoryMaintenancePassiveNotice({
+        status: "completed",
+        changedFiles,
+        skipped,
+      });
       await appendHistoryRecord(job.agentDir, {
         id: job.id,
         kind: job.kind,
@@ -347,17 +427,21 @@ export async function runMemoryMaintenanceJobNow(
         startedAt,
         finishedAt,
         attempts: 1,
-        skipped: safeString((result as any)?.skipped).trim() || undefined,
+        skipped,
         outputPreview:
           truncateText(
             (result as any)?.output || (result as any)?.sessionSummary,
           ) || undefined,
-        changedFiles: normalizeChangedFiles((result as any)?.changedFiles),
+        changedFiles,
+        passiveNotice,
       });
-      return { status: "completed", result };
+      return { status: "completed", result, passiveNotice };
     } catch (error: unknown) {
       const finishedAt = nowIso();
       const message = normalizeErrorMessage(error);
+      const passiveNotice = formatMemoryMaintenancePassiveNotice({
+        status: "failed",
+      });
       await appendHistoryRecord(job.agentDir, {
         id: job.id,
         kind: job.kind,
@@ -370,8 +454,9 @@ export async function runMemoryMaintenanceJobNow(
         finishedAt,
         attempts: 1,
         error: message,
+        passiveNotice,
       });
-      return { status: "failed", error: message };
+      return { status: "failed", error: message, passiveNotice };
     }
   } finally {
     await releaseWorkerLock(job.agentDir, handle);
@@ -385,6 +470,7 @@ export async function processQueuedMemoryJobs(agentDir: string) {
   if (!handle) return { skipped: "locked" };
   let processed = 0;
   let failed = 0;
+  const allChangedFiles: MaintenanceChangedFile[] = [];
   try {
     while (true) {
       const jobs = await loadQueue(resolvedAgentDir);
@@ -394,6 +480,16 @@ export async function processQueuedMemoryJobs(agentDir: string) {
       try {
         const result = await processJob(job);
         const finishedAt = nowIso();
+        const changedFiles = normalizeChangedFiles(
+          (result as any)?.changedFiles,
+        );
+        const skipped =
+          safeString((result as any)?.skipped).trim() || undefined;
+        const passiveNotice = formatMemoryMaintenancePassiveNotice({
+          status: "completed",
+          changedFiles,
+          skipped,
+        });
         await removeMatchingJobs(resolvedAgentDir, job);
         await appendHistoryRecord(resolvedAgentDir, {
           id: job.id,
@@ -406,16 +502,21 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           startedAt,
           finishedAt,
           attempts: Math.max(1, Number(job.attempts || 0) || 1),
-          skipped: safeString((result as any)?.skipped).trim() || undefined,
+          skipped,
           outputPreview: truncateText((result as any)?.output) || undefined,
-          changedFiles: normalizeChangedFiles((result as any)?.changedFiles),
+          changedFiles,
+          passiveNotice,
         });
         processed += 1;
+        allChangedFiles.push(...changedFiles);
       } catch (error: unknown) {
         const finishedAt = nowIso();
         const message = normalizeErrorMessage(error);
         const attempts = Math.max(1, Number(job.attempts || 0) + 1);
         await removeMatchingJobs(resolvedAgentDir, job);
+        const passiveNotice = formatMemoryMaintenancePassiveNotice({
+          status: "failed",
+        });
         await appendHistoryRecord(resolvedAgentDir, {
           id: job.id,
           kind: job.kind,
@@ -428,11 +529,21 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           finishedAt,
           attempts,
           error: message,
+          passiveNotice,
         });
         failed += 1;
       }
     }
-    return { skipped: "", processed, failed, retried: 0 };
+    return {
+      skipped: "",
+      processed,
+      failed,
+      retried: 0,
+      passiveNotice: formatMemoryMaintenancePassiveNotice({
+        status: failed > 0 ? "failed" : "completed",
+        changedFiles: allChangedFiles,
+      }),
+    };
   } finally {
     await releaseWorkerLock(resolvedAgentDir, handle);
   }

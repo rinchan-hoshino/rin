@@ -97,7 +97,9 @@ export function buildSelfImproveReviewPrompt(
   agentDir = "<agentDir>",
 ): string {
   void trigger;
-  return `Follow the maintenance requirements in ${selfImproveMemoryMaintenanceManualPath(agentDir)} to improve the entire current self-improve memory library under ${path.join(agentDir, "self_improve")} using the conversation above as evidence: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.`;
+  const manualPath = selfImproveMemoryMaintenanceManualPath(agentDir);
+  const libraryPath = path.join(agentDir, "self_improve");
+  return `Follow the maintenance requirements in ${manualPath} to improve the entire current self-improve memory library under ${libraryPath} using the conversation above as evidence: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.`;
 }
 
 async function createForkedSessionManager(options: {

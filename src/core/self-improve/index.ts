@@ -7,6 +7,7 @@ import { isAssistantFinalMessage } from "../message-content.js";
 
 import {
   enqueueMemoryMaintenanceJob,
+  formatMemoryMaintenancePassiveNotice,
   runMemoryMaintenanceJobNow,
   spawnQueuedMemoryWorker,
 } from "./async-jobs.js";
@@ -151,6 +152,14 @@ function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
   };
 }
 
+function notifySelfImproveReview(ctx: any, message: string) {
+  const text = String(message || "").trim();
+  if (!text) return;
+  try {
+    ctx?.ui?.notify?.(text, "info");
+  } catch {}
+}
+
 async function processSelfImproveReview(
   ctx: any,
   opts: SelfImproveReviewOptions,
@@ -158,7 +167,14 @@ async function processSelfImproveReview(
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
   await enqueueMemoryMaintenanceJob(job);
-  spawnQueuedMemoryWorker(job.agentDir);
+  const spawned = spawnQueuedMemoryWorker(job.agentDir);
+  notifySelfImproveReview(
+    ctx,
+    formatMemoryMaintenancePassiveNotice({
+      status: spawned ? "queued" : "skipped",
+      skipped: spawned ? "" : "worker-unavailable",
+    }),
+  );
 }
 
 async function processSelfImproveReviewNow(
@@ -169,12 +185,27 @@ async function processSelfImproveReviewNow(
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
   try {
-    return await runner(job);
+    const result = await runner(job);
+    notifySelfImproveReview(
+      ctx,
+      String(
+        (result as any)?.passiveNotice ||
+          formatMemoryMaintenancePassiveNotice({
+            status: (result as any)?.status,
+            changedFiles: (result as any)?.result?.changedFiles,
+            skipped: (result as any)?.skipped,
+          }),
+      ),
+    );
+    return result;
   } catch (error: any) {
-    return {
+    const result = {
       status: "failed",
       error: String(error?.message || error || "maintenance_job_failed"),
+      passiveNotice: formatMemoryMaintenancePassiveNotice({ status: "failed" }),
     };
+    notifySelfImproveReview(ctx, result.passiveNotice);
+    return result;
   }
 }
 

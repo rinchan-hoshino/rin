@@ -97,6 +97,16 @@ function historyPath(root) {
   return selfImprovePaths.maintenanceHistoryPath(root);
 }
 
+const NOTICE_QUEUED =
+  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u5df2\u6392\u961f";
+const NOTICE_CHANGED_SKILL_ONE =
+  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u66f4\u65b0 demo";
+const NOTICE_CHANGED_PROMPT_SKILL =
+  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u66f4\u65b0 core_doctrine\u3001demo";
+const NOTICE_NO_CHANGE =
+  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u65e0\u53d8\u66f4";
+const NOTICE_FAILED = "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u5931\u8d25";
+
 function selfImproveRoot(root) {
   return selfImprovePaths.resolveSelfImproveRoot(root);
 }
@@ -321,6 +331,55 @@ test("compaction self-improve review completes synchronously before routine thre
       "sync compaction prompt\n",
     );
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+  });
+});
+
+test("compaction self-improve review emits a short passive notice", async () => {
+  await withTempRoot(async (root) => {
+    const notices = [];
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+      async runMemoryMaintenanceJobNow() {
+        return {
+          status: "completed",
+          result: {
+            changedFiles: [
+              { path: path.join(root, "self_improve", "skills", "demo.md") },
+            ],
+          },
+        };
+      },
+    });
+    const beforeCompact = definition.hooks.session_before_compact[0];
+    const sessionFile = path.join(root, "sessions", "notice-compact.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "{}\n", "utf8");
+    const ctx = {
+      agentDir: root,
+      ui: {
+        notify(message, level) {
+          notices.push({ message, level });
+        },
+      },
+      sessionManager: {
+        getSessionId: () => "notice-compact-review-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-notice-compact",
+        isPersisted: () => true,
+      },
+    };
+
+    await beforeCompact(
+      { type: "session_before_compact", reason: "threshold" },
+      ctx,
+    );
+
+    assert.deepEqual(notices, [
+      { message: NOTICE_CHANGED_SKILL_ONE, level: "info" },
+    ]);
   });
 });
 
@@ -572,7 +631,32 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
   });
 });
 
-test("self-improve review prompt delegates shared maintenance rules", () => {
+test("self-improve passive notices stay short and distinct", () => {
+  assert.equal(
+    asyncJobs.formatMemoryMaintenancePassiveNotice({ status: "queued" }),
+    NOTICE_QUEUED,
+  );
+  assert.equal(
+    asyncJobs.formatMemoryMaintenancePassiveNotice({
+      status: "completed",
+      changedFiles: [
+        { path: "/tmp/rin/self_improve/prompts/core_doctrine.md" },
+        { path: "/tmp/rin/self_improve/skills/demo/SKILL.md" },
+      ],
+    }),
+    NOTICE_CHANGED_PROMPT_SKILL,
+  );
+  assert.equal(
+    asyncJobs.formatMemoryMaintenancePassiveNotice({ status: "completed" }),
+    NOTICE_NO_CHANGE,
+  );
+  assert.equal(
+    asyncJobs.formatMemoryMaintenancePassiveNotice({ status: "failed" }),
+    NOTICE_FAILED,
+  );
+});
+
+test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   const prompt = maintainer.buildSelfImproveReviewPrompt(
     "self_improve:periodic_review",
     "/tmp/rin-agent",
@@ -581,19 +665,52 @@ test("self-improve review prompt delegates shared maintenance rules", () => {
     prompt,
     "Follow the maintenance requirements in /tmp/rin-agent/docs/rin/docs/self-improve-memory-maintenance.md to improve the entire current self-improve memory library under /tmp/rin-agent/self_improve using the conversation above as evidence: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.",
   );
-  assert.doesNotMatch(prompt, /^- Trigger:/m);
-  assert.doesNotMatch(prompt, /## Basic concepts/);
-  assert.doesNotMatch(prompt, /## Document writing rules/);
-  assert.doesNotMatch(prompt, /## Destination rules/);
-  assert.doesNotMatch(prompt, /core_facts/);
-  assert.match(prompt, /entire current self-improve memory library/);
-  assert.match(prompt, /prompt baselines/);
-  assert.match(prompt, /reusable skills/);
-  assert.match(prompt, /memory-index skills/);
-  assert.match(prompt, /short-term memory skills/);
+  assert.doesNotMatch(prompt, /Trigger:/);
+  assert.doesNotMatch(prompt, /self_improve:periodic_review/);
+  assert.doesNotMatch(prompt, /Review priorities:/);
+  assert.doesNotMatch(prompt, /explicit owner corrections/);
+  assert.match(prompt, /prompt baselines, reusable skills/);
+  assert.match(prompt, /Optimize, consolidate, correct/);
   assert.match(prompt, /merge, move, delete, and prune/);
-  assert.match(prompt, /all reachable improvement points in one cohesive pass/);
-  assert.doesNotMatch(prompt, /read-only guidance/);
+  assert.doesNotMatch(prompt, /self_improve_manage/);
+  assert.doesNotMatch(prompt, /skill-read contract/);
+});
+
+test("self-improve maintenance manual codifies review rules", async () => {
+  const manual = await fs.readFile(
+    path.join(
+      rootDir,
+      "docs",
+      "agent",
+      "docs",
+      "self-improve-memory-maintenance.md",
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(manual, /conversation transcript/);
+  assert.match(manual, /explicit owner corrections/);
+  assert.match(manual, /Use prompt baselines only for every-turn identity/);
+  assert.match(manual, /Review priorities/);
+  assert.match(manual, /If the owner corrects behavior/);
+  assert.match(manual, /patch that current skill first/);
+  assert.match(manual, /patch the umbrella skill/);
+  assert.match(manual, /skill's `references\/` directory/);
+  assert.match(
+    manual,
+    /replace or remove the lower-priority\/conflicting line/,
+  );
+  assert.match(manual, /Prune stale short-term records/);
+  assert.match(manual, /Preserve original evidence in transcript memory/);
+  assert.match(manual, /Complete one cohesive pass across all reachable/);
+  assert.match(manual, /reusable class-level workflow/);
+  assert.match(manual, /current skill: the active workflow skill/);
+  assert.match(manual, /umbrella skill: a broader existing skill/);
+  assert.match(manual, /skill `references\/`: detailed reusable evidence/);
+  assert.match(manual, /historical evidence, chronology, provenance/);
+  assert.match(manual, /do not add new built-in tools, prompt contracts/);
+  assert.doesNotMatch(manual, /Passive observability/);
+  assert.doesNotMatch(manual, /\u{1f4a1}/u);
+  assert.match(manual, /one concise no-op reason/);
 });
 
 test("automatic self-improve handlers require persisted sessions", async () => {

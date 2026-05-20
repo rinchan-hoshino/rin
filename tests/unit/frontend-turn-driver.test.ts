@@ -14,6 +14,9 @@ const { RinFrontendTurnDriver } = await import(
   ).href
 );
 
+const NOTICE_NO_CHANGE =
+  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u65e0\u53d8\u66f4";
+
 function createDriver() {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
@@ -177,6 +180,31 @@ async function emitRpcTurnComplete(
     sessionFile,
   });
 }
+
+test("frontend SDK turn driver forwards passive notices without changing phase", async () => {
+  const driver = createDriver();
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+
+  await driver.handleClientEvent({
+    type: "extension_ui_request",
+    payload: {
+      type: "extension_ui_request",
+      method: "notify",
+      message: NOTICE_NO_CHANGE,
+      notifyType: "info",
+    },
+  });
+
+  assert.deepEqual(seen, [
+    {
+      type: "passive_notice",
+      text: NOTICE_NO_CHANGE,
+      level: "info",
+    },
+  ]);
+  assert.equal(driver.frontendPhase, "idle");
+});
 
 test("frontend SDK turn driver runs turns through a frontend client", async () => {
   const client = createFrontendClient();

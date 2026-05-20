@@ -781,6 +781,28 @@ export class ChatController {
     }
   }
 
+  private async deliverPassiveNotice(text: string) {
+    const trimmed = safeString(text).trim();
+    if (!trimmed) return false;
+    if (!this.deliveryEnabled) return true;
+    try {
+      await sendOutboxPayload(
+        this.app,
+        this.agentDir,
+        {
+          type: "text_delivery",
+          createdAt: nowIso(),
+          chatKey: this.chatKey,
+          text: trimmed,
+        },
+        this.h,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async terminateSession() {
     this.lastActivityAt = Date.now();
     const wanted = this.getRecoverableSessionFile();
@@ -1194,6 +1216,9 @@ export class ChatController {
       case "turn_accepted":
         this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
+        return;
+      case "passive_notice":
+        await this.deliverPassiveNotice(event.text);
         return;
       case "assistant_interim":
         await this.deliverAssistantInterim(event.text);

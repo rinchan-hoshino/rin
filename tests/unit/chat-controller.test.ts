@@ -21,6 +21,9 @@ const { getChatMessage, saveChatMessage } = await import(
     .href
 );
 
+const NOTICE_NO_CHANGE =
+  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u65e0\u53d8\u66f4";
+
 async function createController(chatKey = "telegram/1:2") {
   const tempDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-controller-"),
@@ -116,6 +119,33 @@ function emitRpcTurnComplete(controller, options, finalText, result) {
     },
   });
 }
+
+test("chat controller delivers passive notices as distinct short messages", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (chatId, content) => {
+    deliveries.push({ chatId, content });
+    return [`notice-${deliveries.length}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "extension_ui_request",
+    payload: {
+      type: "extension_ui_request",
+      method: "notify",
+      message: NOTICE_NO_CHANGE,
+      notifyType: "info",
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(deliveries, [
+    {
+      chatId: "2",
+      content: [{ type: "text", attrs: { content: NOTICE_NO_CHANGE } }],
+    },
+  ]);
+});
 
 test("chat controller terminates the frontend session before disposing", async () => {
   const controller = await createController();

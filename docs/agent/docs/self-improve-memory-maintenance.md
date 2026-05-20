@@ -1,10 +1,61 @@
 # Self-improve memory maintenance manual
 
-## Purpose
+## Scope
 
-Use this manual to improve the existing self-improve memory library: prompt baselines and skills.
+Use this manual to improve the existing self-improve memory library: prompt baselines, reusable skills, fixed memory skills, and short-term records.
 
-Each review starts from the current library, consolidates what already exists, and stores only future-useful conclusions. The maintenance target is `<agentDir>/self_improve`; product docs, bundled docs, and upstream skill sources are outside this review target.
+The maintenance target is `<agentDir>/self_improve`. Product docs, bundled docs, and upstream skill sources are outside this review target.
+
+A review should reduce entropy in the current library. It may add durable memory, but a useful review may only clean, merge, move, rewrite, delete, or prune existing material.
+
+## Operating rules
+
+Start from the existing library. Complete one cohesive pass across all reachable improvement points.
+
+Treat explicit owner corrections, frustration, repeated reminders, and failed prior behavior as high-salience evidence.
+
+Add or keep durable memory only when it improves future routing, decisions, execution, or recall. Preserve original evidence in transcript memory unless a compact memory-index pointer will materially improve future lookup.
+
+Do not turn a memory review into a runtime feature proposal: do not add new built-in tools, prompt contracts, or user-visible workflow requirements unless the owner explicitly asks for that product change.
+
+## Review workflow
+
+1. Inspect the current prompt slots.
+2. Inspect the current workflow skill, any umbrella skill that covers the same class of work, and the fixed memory skill destinations.
+3. Extract candidate lessons from the available evidence.
+4. Score each candidate quickly:
+   - attention: affects future behavior;
+   - emotion: strong correction, frustration, risk, preference, blocker, or failed prior behavior;
+   - repetition: repeated in evidence or confirmed by existing memory.
+5. Choose the smallest correct destination using the destination priority below.
+6. Rewrite the destination compactly. Replace or remove stale, lower-priority, conflicting, or duplicate lines instead of appending another rule.
+7. Prune stale short-term records and move misplaced material to the smallest correct destination.
+8. Validate skill frontmatter after editing skills.
+
+## Review priorities
+
+Apply these destination priorities before creating or expanding memory:
+
+1. Owner correction: If the owner corrects behavior, update the relevant skill; replace prompt text only when the rule truly belongs in a prompt baseline.
+2. Current skill: if the current conversation used a skill and revealed a gap, patch that current skill first.
+3. Umbrella skill: if no current skill applies but an umbrella skill covers the class of work, patch the umbrella skill.
+4. Skill `references/`: if detailed reusable evidence, examples, command traces, or longer notes are needed, put them under the owning skill's `references/` directory and keep `SKILL.md` concise.
+5. New reusable skill: create a new ordinary skill only when no current or umbrella skill is a clean home and the lesson is a reusable class-level workflow, domain, or playbook.
+6. Time-based memory: put active temporary continuity in `short-term-memory`; put historical evidence, chronology, provenance, or transaction context in `memory-index`.
+7. No write: if no durable memory change is useful, report a no-op with one concise reason.
+
+Use this destination map when selecting a target:
+
+- prompt slot: applies across most future turns;
+- current skill: the active workflow skill was used and has a gap;
+- umbrella skill: a broader existing skill cleanly covers the lesson;
+- skill `references/`: detailed reusable evidence or examples are useful but too bulky for `SKILL.md`;
+- new reusable skill: no current or umbrella skill is a clean home, and the lesson is class-level reusable;
+- `memory-index`: future lookup, provenance, chronology, or transaction context matters;
+- `short-term-memory`: active temporary continuity;
+- `people-and-relationships`: person identity, address, or relationship context matters;
+- `object-relationships`: non-person entity or relationship context matters;
+- no write: low-signal, one-off, stale, speculative, or already covered; include one concise no-op reason in the final output.
 
 ## Memory surfaces
 
@@ -16,15 +67,21 @@ Location: `<agentDir>/self_improve/prompts/*.md`
 - `user_profile.md`: basic user information; limit 4 lines.
 - `core_doctrine.md`: durable methodology, worldview, values, and decision rules; limit 32 lines.
 
-Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic.
+Use prompt baselines only for every-turn identity, user identity, or doctrine invariants. Put procedures, examples, durable facts, and troubleshooting detail in skills or memory-index destinations.
+
+Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic. When a new rule supersedes existing prompt text, replace or remove the lower-priority/conflicting line instead of appending another rule.
 
 ### Reusable skills
 
 Location: `<agentDir>/self_improve/skills`
 
-Use ordinary skills for reusable workflows, procedures, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow. Put related lessons into the closest matching skill with clear headings.
+Use ordinary skills for reusable workflows, procedures, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow.
 
-### Special memory skill layout
+Put related lessons into the closest matching skill with clear headings. Prefer updating the closest existing skill; when a lesson comes from a workflow where a skill was already in play, patch that skill before creating a new one.
+
+Use `references/` under the owning skill for detailed reusable evidence, examples, command traces, or longer notes that would make `SKILL.md` too noisy. Keep `SKILL.md` as the operational entry point and link or summarize the reference only when future execution needs it.
+
+### Fixed memory skills
 
 Use these fixed destinations under `<agentDir>/self_improve/skills`:
 
@@ -33,37 +90,7 @@ Use these fixed destinations under `<agentDir>/self_improve/skills`:
 - `people-and-relationships/SKILL.md`: semantic memory for named people, preferred titles and forms of address, and relationships. Update it whenever a memory item depends on who a person is, how they should be addressed, or how people relate.
 - `object-relationships/SKILL.md`: semantic memory for non-person entities and relationships among them. Update it whenever a memory item depends on what things are or how they relate.
 
-## Review posture
-
-Start from the existing library.
-
-1. Read current prompt slots.
-2. Inspect the relevant reusable skills and fixed memory skill destinations.
-3. Find repeated, misplaced, stale, verbose, narrow, or overlapping material.
-4. Merge, move, rewrite, delete, or prune existing material.
-5. Add new material only when it improves future routing, decisions, execution, or recall.
-
-A useful review may only clean existing memory.
-
-## Distillation workflow
-
-1. Extract candidate lessons from the available evidence.
-2. Score each candidate quickly:
-   - attention: affects future behavior;
-   - emotion: strong correction, risk, preference, or blocker;
-   - repetition: repeated in evidence or confirmed by existing memory.
-3. Choose the smallest correct destination:
-   - prompt slot: applies across most future turns;
-   - existing reusable skill: fits a recurring workflow or domain;
-   - `memory-index`: future lookup, provenance, chronology, or transaction context matters;
-   - `short-term-memory`: active temporary continuity;
-   - `people-and-relationships`: person identity, address, or relationship context matters;
-   - `object-relationships`: non-person entity or relationship context matters;
-   - no write: low-signal, one-off, stale, speculative, or already covered.
-4. Rewrite the destination compactly.
-5. Validate skill frontmatter after editing skills.
-
-## Skill organization
+## Skill lifecycle
 
 Follow the skill-creator skill when creating or editing skills. Follow the prompt-engineer skill when writing prompts, descriptions, docs, and reusable instructions.
 
@@ -72,8 +99,9 @@ Prefer broad reusable workflows over narrow fragments. Keep, merge, move, delete
 Create a new ordinary skill only when:
 
 - the trigger is reusable;
-- the scope covers a workflow, domain, or playbook;
-- existing skills do not provide a clean home.
+- the scope covers a reusable class-level workflow, domain, or playbook;
+- existing skills do not provide a clean home;
+- the lesson is not just a one-off issue, PR, error string, session artifact, or temporary implementation detail.
 
 Keep an ordinary skill only when it still has a distinct recurring trigger and enough reusable workflow, reference, or troubleshooting value to justify a separate file.
 
@@ -101,5 +129,7 @@ Report durable memory changes only:
 
 - changed memory files with one short reason each;
 - merged, moved, deleted, or pruned memory items;
-- cleanup performed when no new memory was added, or that no durable memory file changes were warranted;
+- cleanup performed when no new memory was added, or that no durable memory file changes were warranted with one concise no-op reason;
 - skipped memory items needing owner confirmation or fresher evidence.
+
+Do not leave an empty final response.
