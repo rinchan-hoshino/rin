@@ -241,7 +241,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
   assert.equal(todoCall, "");
   assert.doesNotMatch(todoCall, /Checklist|add|Wire core todo/);
 
-  const todoResult = todoTool
+  const todoResultLines = todoTool
     .renderResult(
       {
         content: [{ type: "text", text: "" }],
@@ -258,8 +258,11 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
       theme,
       renderContext,
     )
-    .render(80)
-    .join("\n");
+    .render(80);
+  assert.equal(todoResultLines[0], "");
+  assert.equal(todoResultLines.at(-1), "");
+
+  const todoResult = todoResultLines.join("\n");
   assert.match(todoResult, /<toolSuccessBg>/);
   assert.match(todoResult, /○ Wire core todo/);
   assert.match(todoResult, /✓ Ship renderer/);

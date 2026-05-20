@@ -136,7 +136,15 @@ function renderTodoText(
   theme: Theme,
   options: { isError?: boolean; isPartial?: boolean },
 ) {
-  return new Text(text, 1, 0, getTodoBackground(theme, options));
+  const content = new Text(text, 0, 0, getTodoBackground(theme, options));
+  return {
+    render(width: number) {
+      return ["", ...content.render(width), ""];
+    },
+    invalidate() {
+      content.invalidate?.();
+    },
+  };
 }
 
 class TodoListComponent {
