@@ -8,6 +8,8 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
 import type { RinFrontendTurnClient } from "../rin-frontend-sdk/index.js";
+import { isHeartbeatChatEnabled } from "../heartbeat/config.js";
+import { appendHeartbeatChatReadEntry } from "../heartbeat/inbox.js";
 import { nowIso } from "../time-utils.js";
 import {
   executeChatBridgeCode,
@@ -729,6 +731,22 @@ export async function startChatBridge(
     const queuedElements = Array.isArray(envelope.elements)
       ? envelope.elements
       : [];
+    if (isHeartbeatChatEnabled(settings, envelope.chatKey)) {
+      appendHeartbeatChatReadEntry(runtime.agentDir, {
+        chatKey: envelope.chatKey,
+        chatName:
+          safeString(envelope.routing?.chatName).trim() ||
+          pickChatName(queuedSession) ||
+          undefined,
+        metadata: {
+          latestMessageId: envelope.messageId,
+          routedAt: new Date().toISOString(),
+        },
+      });
+      return {
+        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
+      };
+    }
     const identity = getIdentity();
     const command = parseInboundCommand(
       queuedSession,

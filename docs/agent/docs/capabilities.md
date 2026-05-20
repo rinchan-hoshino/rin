@@ -10,7 +10,7 @@ Use this page as a quick entrypoint for Rin runtime capabilities. Follow the sys
 - **Memory:** prompt baselines stay compact; reusable procedures and facts belong in skills; archived sessions are searched with `search_memory`. Read `docs/memory-layering.md` before changing memory content.
 - **Non-interactive work:** use `rin -p` or `rin --mode json` only after reading `docs/non-interactive-cli.md`.
 - **Initialization:** if the user asks to initialize or reset preferences, read `docs/initialization.md`.
-- **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, manual run-now starts, and recurring agent automation. Read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, running, completing, pausing, resuming, or deleting them.
+- **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, manual run-now starts, and recurring agent automation. Use the built-in personality heartbeat for chat-like information review that should wake only when pending information exists. Read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, running, completing, pausing, resuming, deleting, or configuring heartbeat review.
 - **Chat bridge:** chat sender identity comes from the platform, not the shell user. Read `docs/chat-bridge.md` for SDK/file workflows and adapter behavior; read `docs/rich-text-output-format.md` for native output objects.
 - **Todo:** the core todo capability is always enabled; it registers the `todo` tool and `/todos` command.
 - **Optional browser/computer tools:** disabled unless `settings.json -> extensions` includes `rin:browser-use` or `rin:computer-use`.
@@ -60,6 +60,7 @@ Key points for agents:
 - Rich text output format lives in `docs/rich-text-output-format.md`; use it for native mentions, quotes, attachments, and fallback behavior.
 - Chat sending, stored-message lookup, log inspection, and identity updates are SDK/file workflows rather than model tools.
 - `/chat` configures official adapters in the TUI and enters platform selection directly.
+- `settings.json -> chat.heartbeat.chats` makes selected chat keys heartbeat-only: incoming messages create hourly heartbeat inbox entries instead of normal immediate chat turns.
 - Official adapter setup should use the minimum runnable fields, prefer polling/socket modes when supported, avoid webhook-only setup when possible, and include direct official links for required values.
 
 ## Core todo and bundled Pi extensions
@@ -125,7 +126,7 @@ Background extensions are configured under `settings.json -> rinExtensions.backg
 }
 ```
 
-Use only trusted package names and versions. Packages may be installed or updated under `~/.rin/data/extension-runtime` during startup; restart Rin after editing background extension settings.
+Use only trusted package names and versions. Packages may be installed or updated under `~/.rin/data/extension-runtime` during startup; restart Rin after editing background extension settings. Background services can append heartbeat inbox information with `ctx.heartbeat.appendInfo({ title, content, metadata })`.
 
 ## Web search details
 

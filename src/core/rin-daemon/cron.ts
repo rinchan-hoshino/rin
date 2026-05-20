@@ -6,6 +6,12 @@ import {
   ALL_THINKING_LEVELS,
   type AvailableThinkingLevel,
 } from "../model-thinking-levels.js";
+import {
+  appendHeartbeatInboxEntry,
+  listUnreadHeartbeatInboxEntries,
+  markHeartbeatInboxEntriesRead,
+  type HeartbeatInboxInput,
+} from "../heartbeat/inbox.js";
 import { readJsonFile, writeJsonAtomic } from "../platform/fs.js";
 import { safeString } from "../platform/process.js";
 import { shellQuote } from "../rin-lib/system.js";
@@ -49,6 +55,13 @@ export type CronTaskTermination = {
   stopAt?: string;
 };
 
+export type CronTaskHeartbeat = {
+  enabled: true;
+  inbox: "root";
+  lastCheckedAt?: string;
+  lastSkippedAt?: string;
+};
+
 export type CronTaskSessionBinding = {
   mode: ScheduledTaskSessionMode;
   sessionFile?: string;
@@ -79,6 +92,7 @@ export type CronTaskRecord = {
   termination?: CronTaskTermination;
   session: CronTaskSessionBinding;
   target: CronTaskTarget;
+  heartbeat?: CronTaskHeartbeat;
   dedicatedSessionFile?: string;
   dedicatedSessionPersistent?: boolean;
   nextRunAt?: string;
@@ -256,6 +270,45 @@ function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
   return task;
 }
 
+function createBuiltInPersonalityHeartbeatTask(
+  agentDir: string,
+): CronTaskRecord {
+  const createdAt = nowIso();
+  const prompt = [
+    "You are the root personality heartbeat agent.",
+    "Wake only to review unread heartbeat inbox entries.",
+    "Your job is to manage sub-persona heartbeat agents; do not perform concrete execution yourself.",
+    "For chat entries, inspect the referenced chat history only enough to decide whether subordinate heartbeat work is needed.",
+    "When entries have been reviewed or delegated, mark them read with mark_heartbeat_info_read.",
+  ].join("\n");
+  const task: CronTaskRecord = {
+    id: "builtin_personality_heartbeat",
+    builtIn: true,
+    createdAt,
+    updatedAt: createdAt,
+    name: "Personality heartbeat",
+    enabled: true,
+    thinkingLevel: "low",
+    trigger: { intervalMs: 5_000 },
+    session: { mode: "dedicated" },
+    target: {
+      kind: "agent_prompt",
+      prompt,
+      continuationPrompt: prompt,
+    },
+    heartbeat: { enabled: true, inbox: "root" },
+    dedicatedSessionFile: getManagedTaskSessionFile(
+      agentDir,
+      "builtin_personality_heartbeat",
+    ),
+    dedicatedSessionPersistent: true,
+    runCount: 0,
+    running: false,
+  };
+  task.nextRunAt = computeNextRunAt(task, Date.now());
+  return task;
+}
+
 function createBuiltInSelfImproveSleepConsolidationTask(
   agentDir: string,
 ): CronTaskRecord {
@@ -304,6 +357,13 @@ function mergeBuiltInTaskState(
     lastResultText: existing.lastResultText,
     lastError: existing.lastError ? safeString(existing.lastError) : undefined,
     runCount: Number(existing.runCount || 0),
+    heartbeat: builtin.heartbeat
+      ? {
+          ...builtin.heartbeat,
+          lastCheckedAt: existing.heartbeat?.lastCheckedAt,
+          lastSkippedAt: existing.heartbeat?.lastSkippedAt,
+        }
+      : undefined,
     nextRunAt:
       safeString(existing.nextRunAt).trim() ||
       computeNextRunAt(builtin, Date.now()),
@@ -315,6 +375,27 @@ function mergeBuiltInTaskState(
 function assertMutableTask(task: CronTaskRecord | undefined) {
   if (!task) return;
   if (task.builtIn) throw new Error(`cron_builtin_task_protected:${task.id}`);
+}
+
+function normalizeActorId(actorId: unknown) {
+  return safeString(actorId).trim() || "heartbeat";
+}
+
+function heartbeatTaskHasUnreadInbox(agentDir: string, task: CronTaskRecord) {
+  return (
+    !task.heartbeat || listUnreadHeartbeatInboxEntries(agentDir).length > 0
+  );
+}
+
+function normalizeHeartbeat(value: unknown): CronTaskHeartbeat | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const heartbeat = value as any;
+  return {
+    enabled: true,
+    inbox: "root",
+    lastCheckedAt: normalizeIso(heartbeat.lastCheckedAt, "lastCheckedAt"),
+    lastSkippedAt: normalizeIso(heartbeat.lastSkippedAt, "lastSkippedAt"),
+  };
 }
 
 export class CronScheduler {
@@ -379,6 +460,7 @@ export class CronScheduler {
       .map((task) => safeString(task.nextRunAt).trim())
       .filter(Boolean)
       .sort()[0];
+    const heartbeatTask = this.tasks.get("builtin_personality_heartbeat");
     return {
       taskCount: tasks.length,
       enabledTaskCount,
@@ -386,6 +468,14 @@ export class CronScheduler {
       builtInTaskCount: Array.from(this.tasks.values()).filter(
         (task) => task.builtIn,
       ).length,
+      heartbeat: heartbeatTask?.heartbeat
+        ? {
+            unreadCount: listUnreadHeartbeatInboxEntries(this.options.agentDir)
+              .length,
+            lastCheckedAt: heartbeatTask.heartbeat.lastCheckedAt,
+            lastSkippedAt: heartbeatTask.heartbeat.lastSkippedAt,
+          }
+        : undefined,
       nextRunAt,
       tasks,
     };
@@ -476,6 +566,7 @@ export class CronScheduler {
       termination,
       session: normalizedSession,
       target: normalizedTarget,
+      heartbeat: existing?.heartbeat,
       dedicatedSessionFile,
       dedicatedSessionPersistent,
       lastStartedAt: existing?.lastStartedAt,
@@ -496,6 +587,28 @@ export class CronScheduler {
     this.tasks.set(task.id, task);
     this.save();
     return this.publicTask(task);
+  }
+
+  appendHeartbeatInfo(input: HeartbeatInboxInput) {
+    return appendHeartbeatInboxEntry(this.options.agentDir, input);
+  }
+
+  markHeartbeatInfoRead(input: {
+    taskId?: string;
+    entryIds: string[];
+    result?: string;
+    actorId?: string;
+  }) {
+    const taskId = safeString(input.taskId).trim();
+    if (taskId) {
+      const task = this.tasks.get(taskId);
+      if (!task?.heartbeat)
+        throw new Error(`heartbeat_task_not_found:${taskId}`);
+    }
+    return markHeartbeatInboxEntriesRead(this.options.agentDir, {
+      ...input,
+      actorId: normalizeActorId(input.actorId || taskId),
+    });
   }
 
   deleteTask(taskId: string) {
@@ -580,6 +693,10 @@ export class CronScheduler {
     if (this.activeExecutions.has(taskId)) {
       throw new Error(`cron_task_already_running:${taskId}`);
     }
+    if (!heartbeatTaskHasUnreadInbox(this.options.agentDir, task)) {
+      this.skipEmptyHeartbeatTask(task);
+      return this.publicTask(task);
+    }
 
     this.activeExecutions.set(task.id, { startedAt: Date.now() });
     task.lastStartedAt = nowIso();
@@ -608,11 +725,13 @@ export class CronScheduler {
       row.lastError = row.lastError ? safeString(row.lastError) : undefined;
       row.thinkingLevel = normalizeThinkingLevel(row.thinkingLevel);
       row.model = normalizeModelOverride(row.model);
+      row.heartbeat = normalizeHeartbeat(row.heartbeat);
       const normalizedMode = normalizeScheduledTaskSessionMode(
         (row.session as any)?.mode,
       );
-      row.session =
-        normalizedMode === "session_instruction"
+      row.session = row.heartbeat
+        ? { mode: "dedicated" }
+        : normalizedMode === "session_instruction"
           ? {
               mode: normalizedMode,
               sessionFile: requireNonEmptyString(
@@ -677,6 +796,7 @@ export class CronScheduler {
       lastError,
       lastResultText,
       target,
+      heartbeat,
       ...safeTask
     } = snapshot;
     void createdFrom;
@@ -686,6 +806,16 @@ export class CronScheduler {
     return cloneJson({
       ...safeTask,
       hasChatBinding: Boolean(chatKey),
+      heartbeat: heartbeat
+        ? {
+            enabled: true,
+            inbox: heartbeat.inbox,
+            unreadCount: listUnreadHeartbeatInboxEntries(this.options.agentDir)
+              .length,
+            lastCheckedAt: heartbeat.lastCheckedAt,
+            lastSkippedAt: heartbeat.lastSkippedAt,
+          }
+        : undefined,
       session: { mode: snapshot.session.mode },
       target: { kind: target.kind },
     });
@@ -700,6 +830,7 @@ export class CronScheduler {
 
   private installBuiltInTasks() {
     const builtins = [
+      createBuiltInPersonalityHeartbeatTask(this.options.agentDir),
       createBuiltInMemoryIndexRepairTask(this.options.agentDir),
       createBuiltInSelfImproveSleepConsolidationTask(this.options.agentDir),
     ];
@@ -741,6 +872,28 @@ export class CronScheduler {
     void this.options.chat
       ?.terminateTurn?.({ controllerKey: task.id })
       .catch(() => {});
+  }
+
+  private skipEmptyHeartbeatTask(task: CronTaskRecord) {
+    const now = nowIso();
+    if (!task.heartbeat) return;
+    task.heartbeat.lastCheckedAt = now;
+    task.heartbeat.lastSkippedAt = now;
+    task.updatedAt = now;
+    const referenceTs = Date.now();
+    if (task.trigger.expression) {
+      task.nextRunAt = nextCronAt(task.trigger.expression, referenceTs);
+    } else if (task.trigger.intervalMs) {
+      task.nextRunAt = new Date(
+        referenceTs + Math.max(1_000, Number(task.trigger.intervalMs || 0)),
+      ).toISOString();
+    } else {
+      task.nextRunAt = undefined;
+      task.completedAt = now;
+      task.completionReason = "heartbeat_empty_once_skipped";
+      task.enabled = false;
+    }
+    this.save();
   }
 
   private async executeTask(task: CronTaskRecord) {

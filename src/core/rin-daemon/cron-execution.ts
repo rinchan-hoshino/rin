@@ -7,6 +7,7 @@ import path from "node:path";
 const HOME_DIR = os.homedir();
 
 import { listChatMessages } from "../chat/message-store.js";
+import { listUnreadHeartbeatInboxEntries } from "../heartbeat/inbox.js";
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
 import {
   MANAGED_TASK_SESSION_LEAF,
@@ -205,6 +206,44 @@ export function resolveCronSessionInstructionChatKey(
   return { chatKey, sessionFile: resolvedSessionFile };
 }
 
+function buildHeartbeatPrompt(
+  agentDir: string,
+  task: CronTaskRecord,
+  basePrompt: string,
+) {
+  if (!task.heartbeat) return basePrompt;
+  const unreadEntries = listUnreadHeartbeatInboxEntries(agentDir, {
+    limit: 20,
+  });
+  const entryText = unreadEntries
+    .map((entry, index) => {
+      const lines = [
+        `${index + 1}. entryId: ${entry.id}`,
+        `Title: ${entry.title}`,
+        `Source: ${entry.source}`,
+        entry.chatKey ? `chatKey: ${entry.chatKey}` : "",
+        entry.bucket ? `bucket: ${entry.bucket}` : "",
+        entry.content ? `Content: ${entry.content}` : "",
+      ].filter(Boolean);
+      return lines.join("\n");
+    })
+    .join("\n\n");
+  return [
+    basePrompt,
+    "",
+    "Heartbeat inbox context:",
+    `- heartbeatTaskId: ${task.id}`,
+    "- You are running in the root personality heartbeat dedicated session.",
+    "- Review only the unread information entries below.",
+    "- Your role is to manage sub-persona heartbeat agents; do not perform concrete execution yourself.",
+    "- For chat entries, inspect the referenced chat history only enough to decide whether subordinate heartbeat work is needed.",
+    "- After reviewing or delegating an entry, mark it read with mark_heartbeat_info_read.",
+    "",
+    "Unread heartbeat inbox entries:",
+    entryText || "(none)",
+  ].join("\n");
+}
+
 function isSelfImproveExtractionTask(task: CronTaskRecord) {
   if (task.id === "builtin_self_improve_sleep_consolidation_daily") return true;
   if (task.target.kind !== "agent_prompt") return false;
@@ -282,10 +321,11 @@ export async function executeCronAgentTask(
   const continuing = Boolean(
     sessionMode === "dedicated" && (sessionFile || task.runCount > 1),
   );
-  const prompt = continuing
+  const basePrompt = continuing
     ? String(task.target.continuationPrompt || "").trim()
     : String(task.target.prompt || "").trim();
-  if (!prompt) throw new Error("cron_prompt_required");
+  if (!basePrompt) throw new Error("cron_prompt_required");
+  const prompt = buildHeartbeatPrompt(options.agentDir, task, basePrompt);
   const result = await options.chat.runTurn({
     chatKey: task.chatKey,
     controllerKey,

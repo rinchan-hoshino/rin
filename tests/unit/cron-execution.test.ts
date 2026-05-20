@@ -945,6 +945,119 @@ test("cron execution shell task returns summarized success body", async () => {
   assert.ok(text.includes("stdout:"));
 });
 
+test("personality heartbeat is a hidden dedicated five-second cron task", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    scheduler.start();
+    assert.equal(
+      scheduler
+        .listTasks()
+        .some((task) => task.id === "builtin_personality_heartbeat"),
+      false,
+    );
+    const task = scheduler.getTask("builtin_personality_heartbeat", {
+      includeBuiltIn: true,
+    });
+    assert.ok(task);
+    assert.equal(task.builtIn, true);
+    assert.equal(task.trigger.intervalMs, 5_000);
+    assert.equal(task.session.mode, "dedicated");
+    assert.equal(task.heartbeat.inbox, "root");
+    assert.match(task.target.prompt, /root personality heartbeat agent/);
+    assert.match(task.target.prompt, /manage sub-persona heartbeat agents/);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("empty personality heartbeat ticks reschedule without running the agent", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  let runTurnCount = 0;
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        runTurnCount += 1;
+        return { finalText: "ran" };
+      },
+    },
+  });
+  try {
+    scheduler.start();
+    const skipped = scheduler.runTaskNow("builtin_personality_heartbeat");
+    assert.equal(runTurnCount, 0);
+    assert.equal(skipped.runCount, 0);
+    assert.equal(skipped.running, false);
+    assert.ok(skipped.heartbeat.lastSkippedAt);
+    assert.ok(Date.parse(skipped.nextRunAt) > Date.now());
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("personality heartbeat injects unread inbox entries into the dedicated prompt", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const calls = [];
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async (payload) => {
+        calls.push(payload);
+        return { finalText: "done" };
+      },
+    },
+  });
+  try {
+    scheduler.start();
+    scheduler.appendHeartbeatInfo({
+      id: "entry_42",
+      source: "extension",
+      title: "Review new chat information",
+      content: "Check only enough context to delegate if needed.",
+    });
+
+    const started = scheduler.runTaskNow("builtin_personality_heartbeat");
+    assert.equal(started.runCount, 1);
+    for (let i = 0; i < 50; i += 1) {
+      if (
+        !scheduler.getTask("builtin_personality_heartbeat", {
+          includeBuiltIn: true,
+        })?.running
+      )
+        break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0].sessionFile.endsWith("builtin_personality_heartbeat.jsonl"),
+      true,
+    );
+    assert.match(calls[0].text, /Heartbeat inbox context:/);
+    assert.match(
+      calls[0].text,
+      /heartbeatTaskId: builtin_personality_heartbeat/,
+    );
+    assert.match(calls[0].text, /entryId: entry_42/);
+    assert.match(calls[0].text, /Review new chat information/);
+    assert.match(calls[0].text, /mark_heartbeat_info_read/);
+
+    const marked = scheduler.markHeartbeatInfoRead({
+      taskId: "builtin_personality_heartbeat",
+      entryIds: ["entry_42"],
+      result: "reviewed",
+    });
+    assert.equal(marked.entries[0].status, "read");
+    assert.equal(marked.entries[0].result, "reviewed");
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron scheduler installs built-in daily memory maintenance tasks", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });

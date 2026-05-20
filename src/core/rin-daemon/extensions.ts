@@ -19,6 +19,10 @@ import {
   normalizeExternalMemoryLimit,
   normalizeExternalMemoryResults,
 } from "../memory/external-results.js";
+import {
+  appendHeartbeatInboxEntry,
+  type HeartbeatInboxInput,
+} from "../heartbeat/inbox.js";
 import type {
   ExternalMemoryResult,
   TranscriptArchiveEntry,
@@ -73,6 +77,13 @@ export type RinDaemonMemoryProvider = {
   ) => Promise<void> | void;
 };
 
+export type RinBackgroundHeartbeatApi = {
+  appendInfo: (entry: Omit<HeartbeatInboxInput, "source">) => {
+    entry: unknown;
+    filePath: string;
+  };
+};
+
 export type RinBackgroundExtensionContext = {
   readonly cwd: string;
   readonly agentDir: string;
@@ -83,6 +94,7 @@ export type RinBackgroundExtensionContext = {
   readonly config: Record<string, any>;
   readonly signal: AbortSignal;
   readonly logger: RinBackgroundExtensionLogger;
+  readonly heartbeat: RinBackgroundHeartbeatApi;
   runAsync: (label: string, work: () => Promise<void> | void) => void;
   registerChatAdapter: (
     provider: ChatRuntimeExternalAdapterProvider,
@@ -372,6 +384,17 @@ export class RinBackgroundExtensionManager {
           config: entry.config,
           signal: controller.signal,
           logger,
+          heartbeat: {
+            appendInfo: (heartbeatEntry) =>
+              appendHeartbeatInboxEntry(this.options.agentDir, {
+                ...heartbeatEntry,
+                source: "extension",
+                metadata: {
+                  extension: entry.name,
+                  ...(heartbeatEntry.metadata || {}),
+                },
+              }),
+          },
           runAsync: (label, work) => {
             const task = Promise.resolve()
               .then(work)

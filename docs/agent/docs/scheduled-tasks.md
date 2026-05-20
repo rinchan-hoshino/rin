@@ -4,12 +4,13 @@ Rin scheduled tasks are daemon-owned background jobs. Use them for reminders, de
 
 ## Quick path
 
-1. Identify the operation: create, inspect, update, reschedule a one-time task, run now, complete, pause, resume, or delete.
+1. Identify the operation: create, inspect, update, reschedule a one-time task, run now, complete, pause, resume, delete, or heartbeat inbox review.
 2. Use Rin scheduled tasks instead of systemd timers for user reminders and agent automation.
-3. Use the local agent SDK for scheduled-task create, inspect, update, one-time reschedule, complete, delete, pause, resume, and run-now operations.
-4. Use `rin status` or `rin status --json` for a redacted activity overview.
-5. Do not construct raw daemon RPC payloads for normal task work.
-6. After changing or starting a task, re-read daemon-visible state and verify the fields in the checklist below.
+3. Use the built-in personality heartbeat for chat-like information review that should wake only when pending information exists.
+4. Use the local agent SDK for scheduled-task create, inspect, update, one-time reschedule, complete, delete, pause, resume, and run-now operations.
+5. Use `rin status` or `rin status --json` for a redacted activity overview.
+6. Do not construct raw daemon RPC payloads for normal task work.
+7. After changing or starting a task, re-read daemon-visible state and verify the fields in the checklist below.
 
 Read `~/.rin/docs/rin/docs/agent-sdk.md` for the shared SDK import snippet. In examples below, `rin` is the SDK instance returned by `createRinAgentSdk()`.
 
@@ -22,7 +23,8 @@ After changing tasks:
 1. Re-read the task with `rin.tasks.get(taskId)` when it should still exist, or list tasks with `rin.tasks.list()` when it may be deleted.
 2. Check `rin status --json` when liveness or next-run timing matters.
 3. Confirm `enabled`, `nextRunAt`, `trigger`, `session.mode`, `thinkingLevel`, `target.kind`, and `chatKey` match the user's request.
-4. For pause/delete/complete operations, verify progress stopped if there was an active run; status alone may show only scheduler state, not a spawned worker that already started.
+4. For the built-in personality heartbeat, confirm `session.mode: "dedicated"`, unread inbox count, and `lastSkippedAt` when an empty heartbeat should avoid model use.
+5. For pause/delete/complete operations, verify progress stopped if there was an active run; status alone may show only scheduler state, not a spawned worker that already started.
 
 ## Task shape reference
 
@@ -72,6 +74,54 @@ Target rules:
 - `session_instruction` mode must be a one-time `runAt` task, must not set `chatKey`, and marks runtime prompt metadata as an agent-initiated scheduled task without adding task metadata to the system prompt.
 - `shell_command` runs a shell command and stores summarized output.
 - `chatKey` binds agent-task delivery to a chat bridge target when `agent_prompt` or `shell_command` should reply there.
+
+## Personality heartbeat
+
+Rin has a built-in personality heartbeat for chat-like information review:
+
+- it is a hidden scheduled task named `builtin_personality_heartbeat`;
+- it runs every 5 seconds through the normal scheduled-task path;
+- it uses a dedicated managed session, so context continues across heartbeat runs;
+- it checks the heartbeat inbox before starting a model turn;
+- when the inbox is empty, it records the empty check and schedules the next tick without calling a model;
+- when unread entries exist, it wakes the root personality heartbeat to review information and manage subordinate heartbeat work.
+
+Use heartbeat chat mode when a chat should be reviewed lazily instead of triggering an immediate normal chat turn. A chat must be either a normal chat bridge chat or a personality-heartbeat chat, not both. Whitelisted chats do not trigger normal immediate chat turns; at most once per hour per chat, incoming messages add an inbox entry titled like `阅读 <chat> chat 消息`.
+
+Example settings shape:
+
+```json
+{
+  "chat": {
+    "heartbeat": {
+      "chats": ["telegram/123456:7890"]
+    }
+  }
+}
+```
+
+After changing the whitelist, restart or reload the hosted chat bridge so new inbound messages use the heartbeat route. Verify with `rin status --json`: the hidden heartbeat task appears only when built-ins are included internally, but status exposes heartbeat unread/skipped state.
+
+The heartbeat marks reviewed entries read through the model tool:
+
+```text
+mark_heartbeat_info_read({ heartbeatTaskId: "builtin_personality_heartbeat", entryIds: ["..."], result: "Reviewed." })
+```
+
+Background extensions can add heartbeat inbox information from their Rin extension background service:
+
+```js
+export default function extension(rin) {
+  rin.registerBackgroundService({
+    start(ctx) {
+      ctx.heartbeat.appendInfo({
+        title: "Review external event",
+        content: "A trusted source delivered new information.",
+      });
+    },
+  });
+}
+```
 
 ## SDK operations
 
