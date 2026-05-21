@@ -213,9 +213,7 @@ test("frontend backend event translator does not complete turns from interim tex
     }),
     [{ type: "assistant_final", text: "real final after compaction" }],
   );
-  assert.deepEqual(translator.translate({ type: "agent_end" }), [
-    { type: "turn_complete", finalText: "real final after compaction" },
-  ]);
+  assert.deepEqual(translator.translate({ type: "agent_end" }), []);
 });
 
 test("frontend backend event translator ignores overflow continuation markers", () => {
@@ -276,9 +274,7 @@ test("frontend backend event translator ignores overflow continuation markers", 
     }),
     [{ type: "assistant_final", text: "continued" }],
   );
-  assert.deepEqual(translator.translate({ type: "agent_end" }), [
-    { type: "turn_complete", finalText: "continued" },
-  ]);
+  assert.deepEqual(translator.translate({ type: "agent_end" }), []);
 });
 
 test("frontend backend event translator returns final typed turn events after completion", () => {

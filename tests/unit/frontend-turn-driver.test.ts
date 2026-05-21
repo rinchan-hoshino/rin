@@ -691,7 +691,10 @@ test("frontend SDK turn driver waits for real final after interim and compaction
     if (event.type === "assistant_interim") interimTexts.push(event.text);
   });
 
-  (driver as any).testClient.prompt = async () => {
+  (driver as any).testClient.prompt = async (
+    _text: string,
+    options: any = {},
+  ) => {
     await emitDriverEvent(driver, { type: "agent_start" });
     await emitDriverEvent(driver, {
       type: "message_end",
@@ -717,6 +720,11 @@ test("frontend SDK turn driver waits for real final after interim and compaction
           },
         });
         await emitDriverEvent(driver, { type: "agent_end" });
+        await emitRpcTurnComplete(
+          driver,
+          options.requestTag,
+          "real final after compaction",
+        );
       })();
     }, 5);
   };
@@ -760,54 +768,51 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
   );
 });
 
-test("frontend SDK turn driver aligns with TUI by resolving agent_end from session messages", async () => {
+test("frontend SDK turn driver does not complete from agent_end before rpc final", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.getMessages = async () => [
-    { role: "user", content: "hello" },
-    { role: "assistant", content: "final after agent_end" },
-  ];
-  client.prompt = async () => {
-    await emitDriverEvent(driver, { type: "agent_start" });
-    await emitDriverEvent(driver, { type: "agent_end" });
-  };
-
-  const result = await driver.runTurn({ text: "hello" });
-
-  assert.equal(result.finalText, "final after agent_end");
-});
-
-test("frontend SDK turn driver resolves completion without finalText from session messages", async () => {
-  const driver = createDriver();
-  const client = (driver as any).testClient;
-  client.getMessages = async () => [
-    { role: "user", content: "hello" },
-    { role: "assistant", content: "final from refreshed messages" },
+    { role: "user", content: "old prompt" },
+    { role: "assistant", content: "old final" },
   ];
   client.prompt = async (_text: string, options: any = {}) => {
     await emitDriverEvent(driver, { type: "agent_start" });
     await emitDriverEvent(driver, { type: "agent_end" });
+    await emitRpcTurnComplete(driver, options.requestTag, "rpc final");
+  };
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "rpc final");
+});
+
+test("frontend SDK turn driver rejects rpc completion without finalText", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.getMessages = async () => [
+    { role: "user", content: "hello" },
+    { role: "assistant", content: "session text must not be a fallback" },
+  ];
+  client.prompt = async (_text: string, options: any = {}) => {
+    await emitDriverEvent(driver, { type: "agent_start" });
     await emitRpcTurnComplete(driver, options.requestTag, "");
   };
 
-  const result = await driver.runTurn({ text: "hello" });
-
-  assert.equal(result.finalText, "final from refreshed messages");
-  assert.deepEqual(result.result, {
-    messages: [{ type: "text", text: "final from refreshed messages" }],
-  });
+  await assert.rejects(
+    () => driver.runTurn({ text: "hello" }),
+    /rpc_turn_final_output_missing/,
+  );
 });
 
-test("frontend SDK turn driver treats missing-final rpc error like TUI completion when messages contain final", async () => {
+test("frontend SDK turn driver rejects missing-final rpc errors without session-message fallback", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.getMessages = async () => [
     { role: "user", content: "hello" },
-    { role: "assistant", content: "final despite rpc sentinel" },
+    { role: "assistant", content: "session text must not be a fallback" },
   ];
   client.prompt = async (_text: string, options: any = {}) => {
     await emitDriverEvent(driver, { type: "agent_start" });
-    await emitDriverEvent(driver, { type: "agent_end" });
     await emitDriverEvent(driver, {
       type: "rpc_turn_event",
       event: "error",
@@ -818,9 +823,10 @@ test("frontend SDK turn driver treats missing-final rpc error like TUI completio
     });
   };
 
-  const result = await driver.runTurn({ text: "hello" });
-
-  assert.equal(result.finalText, "final despite rpc sentinel");
+  await assert.rejects(
+    () => driver.runTurn({ text: "hello" }),
+    /rpc_turn_final_output_missing/,
+  );
 });
 
 test("frontend SDK turn driver does not emit text-only assistant messages as interim", async () => {
@@ -1001,7 +1007,7 @@ test(
 );
 
 test(
-  "frontend SDK turn driver keeps reconnect recovery alive while the session is active",
+  "frontend SDK turn driver does not recover disconnected turns from session-message fallback",
   { concurrency: false },
   async () => {
     const originalNow = Date.now;
@@ -1037,7 +1043,10 @@ test(
         promptAttempted && recoveryStateCount >= 2
           ? [
               { role: "user", content: "hello" },
-              { role: "assistant", content: "recovered after long active" },
+              {
+                role: "assistant",
+                content: "session text must not be a fallback",
+              },
             ]
           : [{ role: "user", content: "hello" }];
       client.prompt = async (text: string, options: any = {}) => {
@@ -1051,9 +1060,10 @@ test(
         promptSource: "chat-bridge",
       });
 
-      const result = await driver.runTurn({ text: "hello" });
-
-      assert.equal(result.finalText, "recovered after long active");
+      await assert.rejects(
+        () => driver.runTurn({ text: "hello" }),
+        /rin_disconnected:req_1/,
+      );
       assert.equal(
         client.calls.filter((call: any) => call.type === "prompt").length,
         1,
@@ -1065,49 +1075,116 @@ test(
   },
 );
 
-test("frontend SDK turn driver reconnects and resolves an interrupted prompt from session state", async () => {
+test("frontend SDK turn driver does not reuse an older final when the current turn has no final yet", async () => {
   const client = createFrontendClient();
-  const originalConnect = client.connect;
-  let connectCount = 0;
-  client.connect = async () => {
-    connectCount += 1;
-    await originalConnect.call(client);
-  };
-  let promptAttempted = false;
-  client.getMessages = async () =>
-    promptAttempted
-      ? [
-          { role: "user", content: "hello" },
-          { role: "assistant", content: "recovered final" },
-        ]
-      : [{ role: "user", content: "hello" }];
+  const oldFinal = "previous turn final";
+  client.getMessages = async () => [
+    {
+      role: "user",
+      content: "previous prompt",
+      timestamp: "2026-05-21T09:13:37.706Z",
+    },
+    {
+      role: "assistant",
+      content: oldFinal,
+      timestamp: "2026-05-21T09:19:54.183Z",
+    },
+    {
+      role: "user",
+      content: "new prompt",
+      timestamp: "2026-05-21T14:29:04.389Z",
+    },
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", text: "working" },
+        { type: "tool-call", name: "bash" },
+      ],
+      timestamp: "2026-05-21T14:33:34.199Z",
+    },
+  ];
   client.prompt = async (text: string, options: any = {}) => {
     client.calls.push({ type: "prompt", text, options });
-    promptAttempted = true;
-    await client.disconnect();
-    throw new Error("rin_disconnected:req_1");
+    await emitDriverEvent(driver as any, {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: options.requestTag,
+      finalText: "",
+      result: { messages: [] },
+      sessionId: "frontend-session",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+    });
   };
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
 
-  const result = await driver.runTurn({ text: "hello" });
+  await assert.rejects(
+    () => driver.runTurn({ text: "new prompt" }),
+    /rpc_turn_final_output_missing/,
+  );
+});
 
-  assert.equal(result.finalText, "recovered final");
-  assert.equal(result.sessionFile, "/tmp/frontend-chat.jsonl");
-  assert.equal(connectCount, 2);
-  assert.equal(
-    client.calls.filter((call: any) => call.type === "prompt").length,
-    1,
-  );
-  assert.ok(
-    client.calls
-      .filter((call: any) => call.type === "request")
-      .every(
-        (call: any) =>
-          !["get_state", "get_messages"].includes(call.command.type) ||
-          call.command.sessionFile === "/tmp/frontend-chat.jsonl",
-      ),
-  );
+test("frontend SDK turn driver does not resolve interrupted prompts from session state", async () => {
+  const originalNow = Date.now;
+  let now = 0;
+  (Date as any).now = () => now;
+
+  try {
+    const client = createFrontendClient();
+    const originalConnect = client.connect;
+    let connectCount = 0;
+    client.connect = async () => {
+      connectCount += 1;
+      await originalConnect.call(client);
+    };
+    let promptAttempted = false;
+    client.getState = async () => {
+      if (promptAttempted) now += 121_000;
+      return {
+        sessionFile: "/tmp/frontend-chat.jsonl",
+        sessionId: "frontend-session",
+        isStreaming: false,
+      };
+    };
+    client.getMessages = async () =>
+      promptAttempted
+        ? [
+            { role: "user", content: "hello" },
+            { role: "assistant", content: "recovered final" },
+          ]
+        : [{ role: "user", content: "hello" }];
+    client.prompt = async (text: string, options: any = {}) => {
+      client.calls.push({ type: "prompt", text, options });
+      promptAttempted = true;
+      await client.disconnect();
+      throw new Error("rin_disconnected:req_1");
+    };
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+    });
+
+    await assert.rejects(
+      () => driver.runTurn({ text: "hello" }),
+      /rin_disconnected:req_1/,
+    );
+    assert.equal(connectCount, 2);
+    assert.equal(
+      client.calls.filter((call: any) => call.type === "prompt").length,
+      1,
+    );
+    assert.ok(
+      client.calls
+        .filter((call: any) => call.type === "request")
+        .every(
+          (call: any) =>
+            !["get_state", "get_messages"].includes(call.command.type) ||
+            call.command.sessionFile === "/tmp/frontend-chat.jsonl",
+        ),
+    );
+  } finally {
+    (Date as any).now = originalNow;
+  }
 });

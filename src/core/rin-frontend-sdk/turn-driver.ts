@@ -373,35 +373,6 @@ export class RinFrontendTurnDriver {
     this.backendEventTranslator.resetAssistantSegments();
   }
 
-  private messagesAdvanced(baseline: unknown[], current: unknown[]) {
-    return Array.isArray(current) && current.length > baseline.length;
-  }
-
-  private resolveLiveTurnFromMessages(messages: unknown[]) {
-    if (!this.liveTurn) return false;
-    const completion = resolveTurnCompletion({ messages: messages as any[] });
-    const finalText = safeString(completion.finalText).trim();
-    if (!finalText) return false;
-    this.latestAssistantText = finalText;
-    this.setFrontendPhase("idle");
-    this.liveTurn.resolve({
-      finalText,
-      result: completion.result,
-      sessionId: this.currentSessionId() || undefined,
-      sessionFile: this.currentSessionFile() || undefined,
-    });
-    return true;
-  }
-
-  private async resolveLiveTurnFromSessionMessages(sessionFile?: string) {
-    const messages = await this.getMessagesForSession(sessionFile).catch(
-      () => [],
-    );
-    return (
-      Array.isArray(messages) && this.resolveLiveTurnFromMessages(messages)
-    );
-  }
-
   private async recoverLiveTurnAfterDisconnect(error?: unknown) {
     if (!this.liveTurn || this.reconnectingTurnPromise) {
       return await this.reconnectingTurnPromise;
@@ -423,16 +394,6 @@ export class RinFrontendTurnDriver {
             this.setFrontendPhase("working");
             await Promise.race([this.liveTurn.promise, sleep(1000)]);
             continue;
-          }
-          const messages = await this.getMessagesForSession(
-            context?.sessionFile,
-          ).catch(() => []);
-          if (
-            Array.isArray(messages) &&
-            this.messagesAdvanced(context?.baselineMessages || [], messages) &&
-            this.resolveLiveTurnFromMessages(messages)
-          ) {
-            return;
           }
           await sleep(1000);
         } catch {
@@ -850,11 +811,14 @@ export class RinFrontendTurnDriver {
     this.latestAssistantText = "";
     const liveTurn = this.liveTurn || this.startLiveTurn("");
     liveTurn.requestTag = "";
+    const baselineMessages = await this.getMessagesForSession(
+      targetSessionFile,
+    ).catch(() => []);
     this.liveTurnRecoveryContext = {
       sessionFile: targetSessionFile || undefined,
-      baselineMessages: await this.getMessagesForSession(
-        targetSessionFile,
-      ).catch(() => []),
+      baselineMessages: Array.isArray(baselineMessages)
+        ? [...baselineMessages]
+        : [],
     };
     this.setFrontendPhase("working");
     while (this.liveTurn === liveTurn) {
@@ -862,10 +826,6 @@ export class RinFrontendTurnDriver {
         targetSessionFile,
       ).catch(() => ({}));
       if (!Boolean(state?.turnActive || state?.isStreaming)) {
-        const messages = await this.getMessagesForSession(
-          targetSessionFile,
-        ).catch(() => []);
-        if (this.resolveLiveTurnFromMessages(messages)) break;
         const error = new Error("rpc_turn_final_output_missing");
         this.failLiveTurn(error);
         throw error;
@@ -1073,7 +1033,9 @@ export class RinFrontendTurnDriver {
       sessionFile:
         safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
         undefined,
-      baselineMessages: Array.isArray(baselineMessages) ? baselineMessages : [],
+      baselineMessages: Array.isArray(baselineMessages)
+        ? [...baselineMessages]
+        : [],
     };
     const promptSubmission = (async () => {
       await submitNativeFrontendPromptTurn(this.client!, {
@@ -1213,9 +1175,6 @@ export class RinFrontendTurnDriver {
               await this.refreshFrontendState(this.currentSessionFile()).catch(
                 () => ({}),
               );
-              await this.resolveLiveTurnFromSessionMessages(
-                this.currentSessionFile(),
-              );
             },
           },
         );
@@ -1286,15 +1245,8 @@ export class RinFrontendTurnDriver {
         const incoming = safeString(event.requestTag || "").trim();
         if (current && incoming && current !== incoming) return;
         this.updateFrontendStateFrom(event);
-        const finalText =
-          safeString(event.finalText).trim() ||
-          safeString(this.latestAssistantText).trim();
+        const finalText = safeString(event.finalText).trim();
         if (!finalText) {
-          if (
-            await this.resolveLiveTurnFromSessionMessages(event.sessionFile)
-          ) {
-            return;
-          }
           this.failLiveTurn(new Error("rpc_turn_final_output_missing"));
           return;
         }
@@ -1312,12 +1264,6 @@ export class RinFrontendTurnDriver {
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);
-        if (
-          safeString(event.error).trim() === "rpc_turn_final_output_missing" &&
-          (await this.resolveLiveTurnFromSessionMessages(event.sessionFile))
-        ) {
-          return;
-        }
         this.setFrontendPhase("idle");
         const error = new Error(event.error) as Error & {
           sessionId?: string;

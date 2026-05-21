@@ -238,7 +238,7 @@ test("rpc compaction refresh redraws footer after the session snapshot lands", a
   assert.ok(statuses.length >= 2);
 });
 
-test("rpc session events do not keep TUI turns alive for overflow continuation markers", async () => {
+test("rpc session events keep turns alive until explicit rpc completion", async () => {
   const seen = [];
   let refreshMessages = 0;
   let refreshMessagesAndSession = 0;
@@ -287,8 +287,8 @@ test("rpc session events do not keep TUI turns alive for overflow continuation m
       refreshMessagesAndSession += 1;
     },
   );
-  assert.equal(target.remoteTurnRunning, false);
-  assert.equal(target.activeTurn, null);
+  assert.equal(target.remoteTurnRunning, true);
+  assert.deepEqual(target.activeTurn, { mode: "prompt" });
 
   await events.handleRpcSessionEvent(
     target,
@@ -318,7 +318,7 @@ test("rpc session events do not keep TUI turns alive for overflow continuation m
       refreshMessagesAndSession += 1;
     },
   );
-  assert.equal(target.remoteTurnRunning, false);
+  assert.equal(target.remoteTurnRunning, true);
 
   await events.handleRpcSessionEvent(
     target,
@@ -331,7 +331,7 @@ test("rpc session events do not keep TUI turns alive for overflow continuation m
     },
   );
   assert.equal(target.remoteTurnRunning, true);
-  assert.equal(target.activeTurn, null);
+  assert.deepEqual(target.activeTurn, { mode: "prompt" });
 
   await events.handleRpcSessionEvent(
     target,

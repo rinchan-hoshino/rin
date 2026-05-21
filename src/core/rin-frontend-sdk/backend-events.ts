@@ -141,9 +141,7 @@ export function createRinFrontendBackendEventTranslator(
         }
         if (payload.event === "complete") {
           const session = normalizeSessionRef(payload);
-          const finalText =
-            safeString(payload.finalText).trim() ||
-            safeString(latestAssistantFinalText).trim();
+          const finalText = safeString(payload.finalText).trim();
           const events: RinFrontendBackendEvent[] = [];
           if (finalText) {
             latestAssistantText = finalText;
@@ -186,13 +184,7 @@ export function createRinFrontendBackendEventTranslator(
           resetAssistantSegments();
           return [{ type: "turn_accepted" }];
         case "agent_end":
-          if (!latestAssistantFinalText) return [];
-          return [
-            {
-              type: "turn_complete",
-              finalText: latestAssistantFinalText,
-            },
-          ];
+          return [];
         case "message_update":
           if (payload?.message?.role !== "assistant") return [];
           latestAssistantText =

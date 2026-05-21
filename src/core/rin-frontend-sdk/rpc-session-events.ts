@@ -82,7 +82,6 @@ export async function handleRinRpcSessionEvent(
   }
   if (payload.type === "auto_retry_end") target.retryAttempt = 0;
   if (payload.type === "agent_end") {
-    finishRemoteTurn();
     void refresh.refreshMessagesAndSession();
   }
   if (payload.type === "rpc_turn_event" && payload.event === "error") {

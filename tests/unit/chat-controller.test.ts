@@ -2685,7 +2685,7 @@ test("chat controller leaves inbound unprocessed when final reply delivery fails
   assert.equal(stored?.processedAt, undefined);
 });
 
-test("chat controller reuses an observed completed assistant message when rpc finalText is missing", async () => {
+test("chat controller rejects rpc completion without finalText instead of reusing observed assistant text", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -2725,23 +2725,19 @@ test("chat controller reuses an observed completed assistant message when rpc fi
     switchSession: async () => {},
   };
 
-  const result = await controller.runTurn({
-    text: "hello",
-    attachments: [],
-    incomingMessageId: "m-turn-observed-final",
-    replyToMessageId: "m-turn-observed-final",
-  });
-
-  assert.equal(result.finalText, "observed completed text");
-  assert.deepEqual(deliveries, [
-    {
-      text: "observed completed text",
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-turn-observed-final",
       replyToMessageId: "m-turn-observed-final",
-    },
-  ]);
+    }),
+    /rpc_turn_final_output_missing/,
+  );
+  assert.deepEqual(deliveries, []);
 });
 
-test("chat controller aligns with TUI by resolving rpc completion without finalText from session messages", async () => {
+test("chat controller rejects rpc completion without finalText instead of scanning session messages", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -2753,15 +2749,10 @@ test("chat controller aligns with TUI by resolving rpc completion without finalT
     if (clearProcessing) this.currentTurn = null;
   };
 
+  const sessionMessages: any[] = [];
   controller.session = {
     isStreaming: false,
-    messages: [
-      { role: "user", content: [{ type: "text", text: "hello" }] },
-      {
-        role: "assistant",
-        content: [{ type: "text", text: "canonical session text" }],
-      },
-    ],
+    messages: sessionMessages,
     sessionManager: {
       getSessionFile: () => "/tmp/rpc-result-chat.jsonl",
       getSessionId: () => "session-rpc-result",
@@ -2772,6 +2763,13 @@ test("chat controller aligns with TUI by resolving rpc completion without finalT
       sessionId: "session-rpc-result",
     }),
     prompt: async (_text, options = {}) => {
+      sessionMessages.push(
+        { role: "user", content: [{ type: "text", text: "hello" }] },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "canonical session text" }],
+        },
+      );
       controller.handleSessionEvent({ type: "agent_start" });
       emitRpcTurnComplete(controller, options, "", {
         messages: [{ type: "text", text: "canonical result text" }],
@@ -2780,20 +2778,16 @@ test("chat controller aligns with TUI by resolving rpc completion without finalT
     switchSession: async () => {},
   };
 
-  const result = await controller.runTurn({
-    text: "hello",
-    attachments: [],
-    incomingMessageId: "m-turn-missing-final",
-    replyToMessageId: "m-turn-missing-final",
-  });
-
-  assert.equal(result.finalText, "canonical session text");
-  assert.deepEqual(deliveries, [
-    {
-      text: "canonical session text",
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-turn-missing-final",
       replyToMessageId: "m-turn-missing-final",
-    },
-  ]);
+    }),
+    /rpc_turn_final_output_missing/,
+  );
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller switches to a linked reply session before sending the prompt", async () => {
