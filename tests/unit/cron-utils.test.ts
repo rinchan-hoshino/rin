@@ -29,7 +29,7 @@ test("cron utils normalize iso and summarize text", () => {
   );
 });
 
-test("cron utils compute next run for once and interval triggers", () => {
+test("cron utils compute next run for once triggers", () => {
   const once = cronUtils.computeNextRunAt(
     {
       id: "a",
@@ -47,28 +47,6 @@ test("cron utils compute next run for once and interval triggers", () => {
     Date.parse("2026-03-31T11:59:00.000Z"),
   );
   assert.equal(once, "2026-03-31T12:00:00.000Z");
-
-  const interval = cronUtils.computeNextRunAt(
-    {
-      id: "b",
-      createdAt: "",
-      updatedAt: "",
-      enabled: true,
-      cwd: "",
-      chatKey: undefined,
-      trigger: {
-        kind: "interval",
-        intervalMs: 60_000,
-        startAt: "2026-03-31T12:00:00.000Z",
-      },
-      session: { mode: "dedicated" },
-      target: { kind: "shell_command", command: "echo hi" },
-      runCount: 0,
-      running: false,
-    },
-    Date.parse("2026-03-31T11:50:00.000Z"),
-  );
-  assert.equal(interval, "2026-03-31T12:00:00.000Z");
 });
 
 test("cron utils compute next cron tick", () => {
@@ -101,7 +79,7 @@ test("cron utils stop disabled or exhausted tasks before computing the next run"
     target: { kind: "shell_command", command: "echo hi" },
     runCount: 0,
     running: false,
-    trigger: { kind: "interval", intervalMs: 60_000 },
+    trigger: { expression: "*/1 * * * *", timezone: "local" },
   };
 
   assert.equal(

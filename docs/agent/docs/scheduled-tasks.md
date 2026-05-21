@@ -40,7 +40,6 @@ type Task = {
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   trigger: {
     runAt?: string;
-    intervalMs?: number;
     startAt?: string;
     expression?: string;
     timezone?: "local";
@@ -58,8 +57,7 @@ type Task = {
 Trigger rules:
 
 - one-time task: `trigger.runAt` as an ISO timestamp
-- interval task: `trigger.intervalMs`, optionally `trigger.startAt`
-- cron task: `trigger.expression` with five fields, evaluated in local time
+- recurring task: `trigger.expression` with a standard five-field cron expression, evaluated in local time
 
 Session rules:
 
@@ -80,7 +78,7 @@ Target rules:
 Rin has a built-in personality heartbeat for chat-like information review:
 
 - it is a hidden scheduled task named `builtin_personality_heartbeat`;
-- it runs every 5 seconds through the normal scheduled-task path;
+- it runs every minute through the normal scheduled-task path with the cron expression `* * * * *`;
 - it uses a dedicated managed session, so context continues across heartbeat runs;
 - it checks the heartbeat inbox before starting a model turn;
 - when the inbox is empty, it records the empty check and schedules the next tick without calling a model;
@@ -200,7 +198,7 @@ await rin.tasks.upsert({
   id: "cron_disk_check",
   name: "Disk check",
   enabled: true,
-  trigger: { intervalMs: 3600000 },
+  trigger: { expression: "0 * * * *", timezone: "local" },
   session: { mode: "none" },
   target: { kind: "shell_command", command: "df -h" },
 });

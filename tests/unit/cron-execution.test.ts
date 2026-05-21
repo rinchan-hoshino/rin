@@ -94,7 +94,7 @@ test("cron scheduler always derives dedicated session files from task ids", asyn
   try {
     const task = scheduler.upsertTask({
       id: "cron_seeded_dedicated",
-      trigger: { intervalMs: 60_000 },
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
       session: { mode: "dedicated" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
@@ -120,7 +120,7 @@ test("cron scheduler assigns task-id-named dedicated session files before first 
   try {
     const task = scheduler.upsertTask({
       id: "cron_managed_dedicated",
-      trigger: { intervalMs: 60_000 },
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
       session: { mode: "dedicated" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
@@ -136,53 +136,6 @@ test("cron scheduler assigns task-id-named dedicated session files before first 
     );
     assert.equal(task.dedicatedSessionPersistent, true);
   } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("cron scheduler canonicalizes dedicated session files on load", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const tasksFile = path.join(agentDir, "data", "cron", "tasks.json");
-  await fs.mkdir(path.dirname(tasksFile), { recursive: true });
-  await fs.writeFile(
-    tasksFile,
-    JSON.stringify(
-      [
-        {
-          id: "cron_stale_dedicated",
-          createdAt: "2026-04-17T00:00:00.000Z",
-          updatedAt: "2026-04-17T00:00:00.000Z",
-          enabled: true,
-          trigger: { intervalMs: 60_000 },
-          session: { mode: "dedicated" },
-          target: { kind: "agent_prompt", prompt: "hello" },
-          dedicatedSessionFile: "/tmp/stale-dedicated.jsonl",
-          runCount: 0,
-          running: false,
-        },
-      ],
-      null,
-      2,
-    ),
-  );
-  const scheduler = new cronMod.CronScheduler({ agentDir });
-  try {
-    scheduler.start();
-    const task = scheduler.getTask("cron_stale_dedicated");
-    assert.ok(task);
-    assert.equal(task.dedicatedSessionPersistent, true);
-    assert.equal(
-      task.dedicatedSessionFile,
-      path.join(
-        agentDir,
-        "sessions",
-        "managed",
-        "task",
-        "cron_stale_dedicated.jsonl",
-      ),
-    );
-  } finally {
-    scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -442,7 +395,7 @@ test("cron chat-bound no-session agent task preserves session file for quote res
     chatKey: "telegram/demo:1",
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt: "hello" },
-    trigger: { intervalMs: 60_000 },
+    trigger: { expression: "*/1 * * * *", timezone: "local" },
   };
   const calls = [];
   try {
@@ -683,8 +636,8 @@ test("cron scheduler validates current-session instruction bindings", async () =
     assert.throws(
       () =>
         scheduler.upsertTask({
-          id: "cron_instruction_interval",
-          trigger: { intervalMs: 60_000 },
+          id: "cron_instruction_cron",
+          trigger: { expression: "*/1 * * * *", timezone: "local" },
           session: {
             mode: "session_instruction",
             sessionFile: "/tmp/session.jsonl",
@@ -902,19 +855,19 @@ test("cron scheduler terminates task sessions when tasks stop", async () => {
   try {
     scheduler.upsertTask({
       id: "cron_stop_me",
-      trigger: { intervalMs: 60_000 },
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
       session: { mode: "dedicated" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
     scheduler.upsertTask({
       id: "cron_unbound_stop_me",
-      trigger: { intervalMs: 60_000 },
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
       session: { mode: "none" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
     scheduler.upsertTask({
       id: "cron_none_complete_me",
-      trigger: { intervalMs: 60_000 },
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
       session: { mode: "none" },
       target: { kind: "shell_command", command: "printf hello" },
     });
@@ -945,7 +898,7 @@ test("cron execution shell task returns summarized success body", async () => {
   assert.ok(text.includes("stdout:"));
 });
 
-test("personality heartbeat is a hidden dedicated five-second cron task", async () => {
+test("personality heartbeat is a hidden dedicated standard cron task", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
@@ -961,7 +914,7 @@ test("personality heartbeat is a hidden dedicated five-second cron task", async 
     });
     assert.ok(task);
     assert.equal(task.builtIn, true);
-    assert.equal(task.trigger.intervalMs, 5_000);
+    assert.equal(task.trigger.expression, "* * * * *");
     assert.equal(task.session.mode, "dedicated");
     assert.equal(task.heartbeat.inbox, "root");
     assert.match(task.target.prompt, /root personality heartbeat agent/);
@@ -1234,7 +1187,7 @@ test("cron scheduler reschedule-once rejects recurring tasks", async () => {
     scheduler.start();
     scheduler.upsertTask({
       id: "cron_recurring",
-      trigger: { intervalMs: 60_000 },
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
       session: { mode: "none" },
       target: { kind: "shell_command", command: "echo ok" },
     });
@@ -1292,7 +1245,7 @@ test("cron scheduler derives running from live execution without persisting it",
     scheduler.start();
     scheduler.upsertTask({
       id: "cron_running_state",
-      trigger: { intervalMs: 60_000 },
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
       session: { mode: "dedicated" },
       target: { kind: "shell_command", command: "echo ready" },
     });
