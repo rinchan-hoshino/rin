@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -132,4 +133,23 @@ test("buildUserShell leaves returned env isolated from later mutations", () => {
     DEMO_FLAG: "1",
   });
   assert.equal(secondLaunch.env.DEMO_FLAG, "1");
+});
+
+test("sudo target-user shell launches preserve the pi-style parent environment", () => {
+  const currentUser = os.userInfo().username;
+  const sudoPath = ["/usr/bin/sudo", "/bin/sudo"].find((candidate) =>
+    fs.existsSync(candidate),
+  );
+  const rootUser = system.readPasswdUser("root");
+
+  if (!sudoPath || !rootUser || currentUser === "root") return;
+
+  const launch = system.buildUserShell("root", ["node", "app.js"], {
+    RIN_DIR: "/tmp/rin-test",
+  });
+
+  assert.equal(launch.command, sudoPath);
+  assert.deepEqual(launch.args.slice(0, 4), ["-E", "-u", "root", "env"]);
+  assert.equal(launch.env.RIN_DIR, "/tmp/rin-test");
+  assert.equal(launch.env.HOME, rootUser.home);
 });

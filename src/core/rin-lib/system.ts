@@ -61,6 +61,18 @@ function isDirectUserCommand(command: string) {
   return command.endsWith("doas") || command.endsWith("sudo");
 }
 
+function buildDirectUserCommandArgs(
+  privilegeCommand: string,
+  targetUser: string,
+  envArgs: string[],
+  argv: string[],
+) {
+  if (privilegeCommand.endsWith("sudo")) {
+    return ["-E", "-u", targetUser, "env", ...envArgs, ...argv];
+  }
+  return ["-u", targetUser, "env", ...envArgs, ...argv];
+}
+
 function requireTargetUser(targetUser: string) {
   const target = readPasswdUser(targetUser);
   if (!target) throw new Error(`target_user_not_found:${targetUser}`);
@@ -215,7 +227,12 @@ export function buildUserShell(
   if (isDirectUserCommand(privilegeCommand)) {
     return {
       command: privilegeCommand,
-      args: ["-u", target.name, "env", ...envArgs, ...argv],
+      args: buildDirectUserCommandArgs(
+        privilegeCommand,
+        target.name,
+        envArgs,
+        argv,
+      ),
       env: mergedEnv,
     };
   }
