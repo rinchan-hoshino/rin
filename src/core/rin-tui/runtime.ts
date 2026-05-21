@@ -642,16 +642,11 @@ export class RpcInteractiveSession {
     scope: "all" = "all",
     _onProgress?: (loaded: number, total: number) => void,
   ) {
-    this.setSessionOperationPending(true);
-    try {
-      if (!this.client.isConnected()) {
-        await this.waitForDaemonAvailable();
-      }
-      const data = await this.call("list_sessions", { scope });
-      return normalizeBoundSessionList(data?.sessions);
-    } finally {
-      this.setSessionOperationPending(false);
+    if (!this.client.isConnected()) {
+      await this.waitForDaemonAvailable();
     }
+    const data = await this.call("list_sessions", { scope });
+    return normalizeBoundSessionList(data?.sessions);
   }
 
   async setModel(model: any) {

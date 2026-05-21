@@ -53,7 +53,7 @@ test("rpc frontend reports Starting during initial TUI startup", () => {
   });
 });
 
-test("rpc frontend reports Starting while loading resume sessions", async () => {
+test("rpc frontend stays idle while loading resume sessions", async () => {
   const pending = deferred();
   const session = new RpcInteractiveSession(
     createClient({
@@ -68,19 +68,11 @@ test("rpc frontend reports Starting while loading resume sessions", async () => 
   session.subscribe((event) => events.push(event));
   const listPromise = session.listSessions("all");
 
-  assert.deepEqual(events.at(-1), {
-    type: "rpc_frontend_status",
-    phase: "starting",
-    label: "Starting",
-    connected: true,
-  });
+  assert.deepEqual(events, []);
 
   pending.resolve({ success: true, data: { sessions: [] } });
   assert.deepEqual(await listPromise, []);
-  assert.deepEqual(events.at(-1), {
-    type: "rpc_frontend_status",
-    phase: "idle",
-  });
+  assert.deepEqual(events, []);
 });
 
 test("rpc frontend status labels follow phase priority", () => {
