@@ -50,7 +50,6 @@ export type CronTaskTermination = {
 };
 
 export type CronTaskCondition = {
-  kind: "agent_code";
   code: string;
   timeoutMs?: number;
   lastEvaluatedAt?: string;
@@ -231,7 +230,6 @@ function normalizeTaskCondition(
     ? Math.min(60_000, Math.max(100, Math.round(Number(condition.timeoutMs))))
     : undefined;
   return {
-    kind: "agent_code",
     code,
     timeoutMs,
     lastEvaluatedAt: existing?.condition?.lastEvaluatedAt,

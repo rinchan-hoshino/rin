@@ -92,11 +92,8 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     ),
   );
   assert.ok(baseSystemPrompt.includes("Scheduled task guidance:"));
-  assert.ok(
-    baseSystemPrompt.includes(
-      "use Rin scheduled tasks as the primary runtime feature",
-    ),
-  );
+  assert.ok(baseSystemPrompt.includes("use Rin scheduled tasks first"));
+  assert.equal(baseSystemPrompt.includes("condition.kind"), false);
   assert.ok(baseSystemPrompt.includes("Rich text guidance:"));
   assert.ok(baseSystemPrompt.includes("use Rin native rich output syntax"));
   assert.ok(baseSystemPrompt.includes("Chat bridge guidance:"));

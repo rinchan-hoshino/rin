@@ -61,8 +61,18 @@ test("agent docs expose scheduled task operation workflow", () => {
 
   assert.match(agentSdk, /"src", "core", "rin-agent-sdk", "index\.ts"/);
   assert.match(scheduledTasks, /`session\.mode: "dedicated"`/);
+  assert.match(scheduledTasks, /code: string/);
   assert.match(
     scheduledTasks,
-    /After changing or starting a task, re-read daemon-visible state/,
+    /termination\?: \{ maxRuns\?: number; stopAt\?: string \}/,
+  );
+  assert.match(scheduledTasks, /session\.mode: "session_instruction"/);
+  assert.match(
+    scheduledTasks,
+    /Use `condition` when the schedule should wake only if agent-authored TypeScript returns true/,
+  );
+  assert.match(
+    scheduledTasks,
+    /Required verification after a create\/update\/run-state change/,
   );
 });

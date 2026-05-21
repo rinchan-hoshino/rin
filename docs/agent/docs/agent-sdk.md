@@ -29,10 +29,23 @@ const rin = createRinAgentSdk({
 
 ## Scheduled tasks
 
+Read `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating or changing tasks. Use these helpers instead of constructing `cron_*` daemon RPC calls directly.
+
 ```js
 const { tasks } = await rin.tasks.list();
 const { task } = await rin.tasks.get("cron_example");
-await rin.tasks.upsert({ id: "cron_example", name: "Example", enabled: true });
+await rin.tasks.upsert({
+  id: "cron_example",
+  name: "Example",
+  enabled: true,
+  trigger: { expression: "0 9 * * *", timezone: "local" },
+  condition: {
+    code: "return context.task.runCount === 0 || Boolean(context.task.lastError)",
+  },
+  termination: { maxRuns: 10 },
+  session: { mode: "none" },
+  target: { kind: "agent_prompt", prompt: "Run the check and report changes." },
+});
 await rin.tasks.pause("cron_example");
 await rin.tasks.resume("cron_example");
 await rin.tasks.rescheduleOnce("cron_example", "2026-05-08T15:00:00+08:00");
@@ -42,7 +55,19 @@ await rin.tasks.complete("cron_example", "finished");
 await rin.tasks.delete("cron_example");
 ```
 
-Use these helpers instead of constructing `cron_*` daemon RPC calls directly. `rescheduleOnce` is only for one-time tasks; it sets the next `runAt`, clears completed/paused state, and enables the task.
+Helper semantics:
+
+- `list()` returns agent-created task records visible through the daemon.
+- `get(taskId)` inspects one visible task.
+- `upsert(task, defaults?)` creates or updates a task; matching `id` merges with the existing record. Use `condition: null`, `termination: null`, or `chatKey: null` to remove those optional fields.
+- `run(taskId)` starts the existing task through the scheduler path and still evaluates `condition`; it does not clone the task or change its definition.
+- `pause(taskId)` disables future runs, records `pausedAt`, clears `nextRunAt`, and asks chat runtime to terminate the task turn when applicable.
+- `resume(taskId)` enables the task, clears `pausedAt`, and recomputes `nextRunAt`.
+- `rescheduleOnce(taskId, runAt)` is only for one-time tasks; it sets `trigger.runAt`, sets `nextRunAt`, clears completed/paused state, and enables the task.
+- `complete(taskId, reason?)` disables future runs while keeping the record and completion reason.
+- `delete(taskId)` removes the record.
+
+After writes, re-read with `get()` or `list()` and use `rin status --json` when liveness or next-run timing matters.
 
 ## Chat operations
 

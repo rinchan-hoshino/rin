@@ -40,8 +40,9 @@ const input = JSON.parse(await new Promise((resolve) => {
   process.stdin.on("data", (chunk) => { body += chunk; });
   process.stdin.on("end", () => resolve(body));
 }));
+const { stripTypeScriptTypes } = await import("node:module");
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-const code = String(input.code || "");
+const code = stripTypeScriptTypes(String(input.code || ""));
 const context = input.context || {};
 let result;
 if (/^\\s*(?:async\\s+)?(?:function\\b|\\(?[\\w\\s,{}[\\].:=]*\\)?\\s*=>)/.test(code)) {
@@ -55,7 +56,7 @@ process.stdout.write(JSON.stringify({ passed: Boolean(result), result }));
 `;
   const child = spawnSync(
     process.execPath,
-    ["--input-type=module", "-e", runner],
+    ["--no-warnings=ExperimentalWarning", "--input-type=module", "-e", runner],
     {
       input: JSON.stringify({ code: condition.code, context }),
       encoding: "utf8",
