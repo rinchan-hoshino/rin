@@ -123,6 +123,20 @@ function isSupportedFreshness(value: string): value is WebSearchFreshness {
   return (SUPPORTED_FRESHNESS as readonly string[]).includes(value);
 }
 
+function normalizeLanguageHint(value: unknown): string {
+  const language = safeText(value);
+  if (!language) return "all";
+  const normalized = language.replace(/_/g, "-");
+  const [primary = "", ...rest] = normalized.split("-");
+  if (!primary) return "all";
+  return [
+    primary.toLowerCase(),
+    ...rest.map((part) =>
+      part.length === 2 ? part.toUpperCase() : part.toLowerCase(),
+    ),
+  ].join("-");
+}
+
 function normalizeSiteConstraint(value: string): SearchSiteConstraint | null {
   const input = safeText(value)
     .replace(/^['"]+|['"),.]+$/g, "")
@@ -193,7 +207,7 @@ export function normalizeSearchRequest(
 ): NormalizedWebSearchRequest {
   const q = safeText(raw?.q);
   const limit = Math.max(1, Math.min(8, Number(raw?.limit || 5) || 5));
-  const language = safeText(raw?.language) || "all";
+  const language = normalizeLanguageHint(raw?.language);
   const freshnessValue = safeText(raw?.freshness).toLowerCase();
   const freshness = isSupportedFreshness(freshnessValue)
     ? freshnessValue

@@ -22,9 +22,58 @@ function trimSnippet(value: string, max = 220): string {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
+function searchFailureMessages(response: any): string[] {
+  return [
+    String(response?.error || "").trim(),
+    ...(Array.isArray(response?.attempts)
+      ? response.attempts.map((attempt: any) => String(attempt?.error || ""))
+      : []),
+  ].filter(Boolean);
+}
+
+function extractInvalidSearchParameter(response: any) {
+  const text = searchFailureMessages(response).join("\n");
+  const match =
+    /Invalid value\s+(.+?)\s+for parameter\s+([A-Za-z0-9_.-]+)/i.exec(text);
+  if (!match) return null;
+  return {
+    value: match[1].trim(),
+    parameter: match[2].trim(),
+  };
+}
+
+function formatSearchFailureForUser(response: any): string {
+  const invalidParameter = extractInvalidSearchParameter(response);
+  if (invalidParameter) {
+    return `Web search failed: invalid search parameter ${invalidParameter.parameter}=${invalidParameter.value}. Change or omit that parameter and retry.`;
+  }
+  return formatRuntimeErrorForUser(response?.error || "web_search_failed");
+}
+
+function formatSearchFailureForAgent(response: any): string {
+  const lines = ["Web search failed"];
+  const userText = formatSearchFailureForUser(response);
+  if (userText) lines.push(userText);
+  const rawError = String(response?.error || "").trim();
+  if (rawError) lines.push(`raw_error: ${rawError}`);
+  const attempts = Array.isArray(response?.attempts) ? response.attempts : [];
+  if (attempts.length) {
+    lines.push("attempts:");
+    for (const attempt of attempts) {
+      const engine = String(attempt?.engine || "unknown").trim() || "unknown";
+      if (attempt?.ok) {
+        lines.push(`- ${engine}: ok results=${Number(attempt?.results || 0)}`);
+      } else {
+        lines.push(`- ${engine}: ${String(attempt?.error || "failed").trim()}`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
 function formatResults(response: any): string {
   if (!response?.ok) {
-    return formatRuntimeErrorForUser(response?.error || "web_search_failed");
+    return formatSearchFailureForUser(response);
   }
   const rows = Array.isArray(response.results) ? response.results : [];
   if (!rows.length) return "No web results found.";
@@ -40,11 +89,7 @@ function formatResults(response: any): string {
 }
 
 function formatAgentResults(response: any): string {
-  if (!response?.ok)
-    return [
-      "Web search failed",
-      formatRuntimeErrorForUser(response?.error || "web_search_failed"),
-    ].join("\n");
+  if (!response?.ok) return formatSearchFailureForAgent(response);
   const rows = Array.isArray(response.results) ? response.results : [];
   if (!rows.length) return "web_search 0";
   return [
@@ -250,12 +295,21 @@ export default function webSearchModule(): RinCapabilityDefinition {
             hiddenCount?: number;
             totalResults?: number;
             userText?: string;
+            error?: string;
+            attempts?: any[];
           } = {
             mode: "search",
             hiddenCount,
             totalResults: rows.length,
             userText,
           };
+
+          if (response?.ok !== true) {
+            details.error = String(response?.error || "web_search_failed");
+            if (Array.isArray(response?.attempts)) {
+              details.attempts = response.attempts;
+            }
+          }
 
           if (!rows.length && response?.ok) {
             details.emptyMessage = "No web results found.";

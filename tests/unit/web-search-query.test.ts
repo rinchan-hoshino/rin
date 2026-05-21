@@ -127,11 +127,23 @@ test("web search query helpers discard invalid freshness", () => {
   const req = query.normalizeSearchRequest({
     q: " demo ",
     freshness: "decade",
-    language: "  zh-CN  ",
+    language: "  zh_CN  ",
   });
   assert.equal(req.q, "demo");
   assert.equal(req.language, "zh-CN");
   assert.equal(req.freshness, undefined);
+});
+
+test("web search query helpers normalize locale-style language hints", () => {
+  assert.equal(
+    query.normalizeSearchRequest({ q: "demo", language: "en_US" }).language,
+    "en-US",
+  );
+  assert.equal(
+    query.normalizeSearchRequest({ q: "demo", language: "zh-hans_cn" })
+      .language,
+    "zh-hans-CN",
+  );
 });
 
 test("web search maps freshness to SearXNG sidecar query parameters", async () => {
@@ -265,7 +277,7 @@ test("web search service reuses Rin-managed sidecar state", async () => {
   );
 });
 
-test("web search tool output omits provider attempts and raw markers on sidecar failure", async () => {
+test("web search tool output exposes provider attempts to the agent on sidecar failure", async () => {
   const registeredTool = webSearchIndex
     .default()
     .tools.find((tool: any) => tool.name === "web_search");
@@ -289,12 +301,78 @@ test("web search tool output omits provider attempts and raw markers on sidecar 
       assert.equal(result.isError, true);
       assert.match(result.content[0].text, /Web search failed/);
       assert.match(result.content[0].text, /network request failed/i);
-      assert.doesNotMatch(result.content[0].text, /attempts:/);
-      assert.doesNotMatch(result.content[0].text, /fetch_failed/);
-      assert.equal(result.details.attempts, undefined);
+      assert.match(result.content[0].text, /attempts:/);
+      assert.match(result.content[0].text, /fetch_failed/);
+      assert.equal(result.details.attempts.length, 3);
       assert.match(result.details.userText, /network request failed/i);
       assert.doesNotMatch(result.details.userText, /attempts:/);
       assert.doesNotMatch(result.details.userText, /fetch_failed/);
+    },
+  );
+});
+
+test("web search tool exposes SearXNG parameter errors for agent retry", async () => {
+  const registeredTool = webSearchIndex
+    .default()
+    .tools.find((tool: any) => tool.name === "web_search");
+
+  await withMockManagedSidecar(
+    (_request, response) => {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end('{"error":"Invalid value zh_CN for parameter language"}');
+    },
+    async (agentDir) => {
+      const result = await registeredTool.execute(
+        "call-demo",
+        {
+          q: "rinchanai",
+          limit: 1,
+          language: "bad_language",
+        },
+        undefined,
+        undefined,
+        { agentDir },
+      );
+      assert.equal(result.isError, true);
+      assert.match(
+        result.content[0].text,
+        /Invalid value zh_CN for parameter language/,
+      );
+      assert.match(result.content[0].text, /attempts:/);
+      assert.match(result.content[0].text, /language=zh_CN/);
+      assert.equal(result.details.attempts.length, 3);
+      assert.match(
+        result.details.userText,
+        /invalid search parameter language=zh_CN/,
+      );
+      assert.doesNotMatch(result.details.userText, /fetch_failed/);
+    },
+  );
+});
+
+test("web search maps zh_CN language hints to SearXNG-compatible zh-CN", async () => {
+  await withMockManagedSidecar(
+    (request, response) => {
+      const target = new URL(request.url || "/", "http://127.0.0.1");
+      assert.equal(target.searchParams.get("language"), "zh-CN");
+      jsonResponse(response, {
+        results: [
+          {
+            title: "Chinese result",
+            url: "https://example.com/zh",
+            content: "from local sidecar",
+            engine: "google",
+          },
+        ],
+      });
+    },
+    async (agentDir) => {
+      const result = await service.searchWeb(
+        { q: "hangzhou weather", limit: 1, language: "zh_CN" },
+        { stateRoot: agentDir },
+      );
+      assert.equal(result.ok, true);
+      assert.equal(result.results[0].url, "https://example.com/zh");
     },
   );
 });
