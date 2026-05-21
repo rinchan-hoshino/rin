@@ -1,11 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import {
-  buildUserShell,
-  shellQuote,
-  targetUserRuntimeEnv,
-} from "../rin-lib/system.js";
+import { buildUserShell, targetUserRuntimeEnv } from "../rin-lib/system.js";
 import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import {
   createTargetExecutionContext,
@@ -55,40 +50,6 @@ export function buildDirectTuiArgs(
   return [process.execPath, tuiEntry, ...options.passthrough];
 }
 
-function isValidShellEnvName(name: string) {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
-}
-
-export function buildTuiEnvironmentScript(env: NodeJS.ProcessEnv) {
-  const exports = Object.entries(env)
-    .filter(
-      (entry): entry is [string, string] =>
-        isValidShellEnvName(entry[0]) && entry[1] !== undefined,
-    )
-    .map(([key, value]) => `export ${key}=${shellQuote(value)}`);
-  return [...exports, 'exec "$@"', ""].join("\n");
-}
-
-async function runCommandWithInput(
-  command: string,
-  args: string[],
-  options: { env: NodeJS.ProcessEnv; cwd: string },
-  input: string,
-) {
-  return await new Promise<number>((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: ["pipe", "inherit", "inherit"],
-      ...options,
-    });
-    child.on("error", reject);
-    child.on("exit", (code, signal) => {
-      if (signal) return reject(new Error(`terminated:${signal}`));
-      resolve(code ?? 0);
-    });
-    child.stdin.end(input);
-  });
-}
-
 async function runTargetCommand(
   targetUser: string,
   argv: string[],
@@ -96,17 +57,6 @@ async function runTargetCommand(
   cwd: string,
 ) {
   const launch = buildUserShell(targetUser, argv, env);
-  if (launch.command.endsWith("sudo")) {
-    return await runCommandWithInput(
-      launch.command,
-      ["-u", targetUser, "sh", "-s", "--", ...argv],
-      {
-        env: launch.env,
-        cwd,
-      },
-      buildTuiEnvironmentScript(launch.env),
-    );
-  }
   return await runCommand(launch.command, launch.args, {
     env: launch.env,
     cwd,

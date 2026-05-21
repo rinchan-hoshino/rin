@@ -273,18 +273,3 @@ test("tui runtime env preserves explicit Rin dir override only", () => {
     else process.env.RIN_DIR = previousRinDir;
   }
 });
-
-test("tui sudo launch script carries the full parent environment without argv env assignments", () => {
-  const script = launch.buildTuiEnvironmentScript({
-    COLORTERM: "truecolor",
-    RIN_DIR: "/home/rin/.rin",
-    "INVALID-NAME": "ignored",
-    QUOTED_VALUE: "it's fine",
-  });
-
-  assert.match(script, /export COLORTERM='truecolor'/);
-  assert.match(script, /export RIN_DIR='\/home\/rin\/\.rin'/);
-  assert.match(script, /export QUOTED_VALUE='it'"'"'s fine'/);
-  assert.doesNotMatch(script, /INVALID-NAME/);
-  assert.match(script, /exec "\$@"\n$/);
-});
