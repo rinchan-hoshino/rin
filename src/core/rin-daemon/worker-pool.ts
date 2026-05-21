@@ -174,25 +174,17 @@ export class WorkerPool {
   terminateWorkerGracefully(worker: WorkerHandle) {
     if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
     worker.gracefulShutdownRequested = true;
-    try {
-      worker.child.stdin.write(
-        `${JSON.stringify({ type: "shutdown_session" })}\n`,
-      );
-    } catch {
+    this.writeWorkerStdin(worker, { type: "shutdown_session" }, () => {
       this.destroyWorker(worker);
-    }
+    });
   }
 
   sleepWorkerGracefully(worker: WorkerHandle) {
     if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
     worker.gracefulShutdownRequested = true;
-    try {
-      worker.child.stdin.write(
-        `${JSON.stringify({ type: "sleep_session" })}\n`,
-      );
-    } catch {
+    this.writeWorkerStdin(worker, { type: "sleep_session" }, () => {
       this.destroyWorker(worker, { signal: "SIGKILL" });
-    }
+    });
   }
 
   destroyWorker(
@@ -269,7 +261,9 @@ export class WorkerPool {
         connection,
       });
     }
-    worker.child.stdin.write(`${JSON.stringify(command)}\n`);
+    this.writeWorkerStdin(worker, command, (error) => {
+      this.handleWorkerStdinFailure(worker, error);
+    });
   }
 
   forwardToWorker(
@@ -986,6 +980,29 @@ export class WorkerPool {
     );
   }
 
+  private writeWorkerStdin(
+    worker: WorkerHandle,
+    command: unknown,
+    onError: (error: Error) => void,
+  ) {
+    if (!this.isWorkerStdinWritable(worker)) {
+      onError(new Error("rin_worker_stdin_unavailable"));
+      return false;
+    }
+    try {
+      worker.child.stdin.write(
+        `${JSON.stringify(command)}\n`,
+        (error?: Error | null) => {
+          if (error) onError(error);
+        },
+      );
+      return true;
+    } catch (error: any) {
+      onError(error instanceof Error ? error : new Error(String(error)));
+      return false;
+    }
+  }
+
   private handleWorkerStdinFailure(worker: WorkerHandle, error: Error) {
     if (!this.workers.has(worker)) return;
     for (const pending of Array.from(worker.pendingResponses.values())) {
@@ -1020,55 +1037,56 @@ export class WorkerPool {
     this.destroyWorker(worker);
   }
 
-  private async sendInternalCommand(worker: WorkerHandle, command: any) {
+  private sendInternalCommand(worker: WorkerHandle, command: any) {
     const id = `rin_internal_${++this.internalRequestSeq}`;
-    return await new Promise<any>((resolve, reject) => {
-      const commandType = String(command?.type || "unknown");
-      const timeout = setTimeout(() => {
-        worker.pendingResponses.delete(id);
-        worker.ignoredResponseIds.add(id);
-        this.maybeReleaseWorker(worker);
-        reject(new Error(`rin_internal_timeout:${commandType}`));
-      }, this.getInternalCommandTimeoutMs(command));
-      timeout.unref?.();
-
-      const finalize = () => clearTimeout(timeout);
-      worker.pendingResponses.set(id, {
-        id,
-        commandType,
-        resolve,
-        reject,
-        finalize,
-      });
-
-      if (!this.isWorkerStdinWritable(worker)) {
-        this.rejectInternalCommandWrite(
-          worker,
-          id,
-          finalize,
-          reject,
-          new Error(`rin_worker_stdin_unavailable:${commandType}`),
-        );
-        return;
-      }
-
-      try {
-        worker.child.stdin.write(
-          `${JSON.stringify({ ...command, id })}\n`,
-          (error?: Error | null) => {
-            if (!error) return;
-            this.rejectInternalCommandWrite(
-              worker,
-              id,
-              finalize,
-              reject,
-              error,
-            );
-          },
-        );
-      } catch (error: any) {
-        this.rejectInternalCommandWrite(worker, id, finalize, reject, error);
-      }
+    const commandType = String(command?.type || "unknown");
+    let resolveCommand!: (value: any) => void;
+    let rejectCommand!: (error: Error) => void;
+    const pendingCommand = new Promise<any>((resolve, reject) => {
+      resolveCommand = resolve;
+      rejectCommand = reject;
     });
+    pendingCommand.catch(() => {});
+
+    const timeout = setTimeout(() => {
+      worker.pendingResponses.delete(id);
+      worker.ignoredResponseIds.add(id);
+      this.maybeReleaseWorker(worker);
+      rejectCommand(new Error(`rin_internal_timeout:${commandType}`));
+    }, this.getInternalCommandTimeoutMs(command));
+    timeout.unref?.();
+
+    const finalize = () => clearTimeout(timeout);
+    worker.pendingResponses.set(id, {
+      id,
+      commandType,
+      resolve: resolveCommand,
+      reject: rejectCommand,
+      finalize,
+    });
+
+    if (!this.isWorkerStdinWritable(worker)) {
+      this.rejectInternalCommandWrite(
+        worker,
+        id,
+        finalize,
+        rejectCommand,
+        new Error(`rin_worker_stdin_unavailable:${commandType}`),
+      );
+      return pendingCommand;
+    }
+
+    this.writeWorkerStdin(worker, { ...command, id }, (error) => {
+      this.rejectInternalCommandWrite(
+        worker,
+        id,
+        finalize,
+        rejectCommand,
+        error.message === "rin_worker_stdin_unavailable"
+          ? new Error(`rin_worker_stdin_unavailable:${commandType}`)
+          : error,
+      );
+    });
+    return pendingCommand;
   }
 }

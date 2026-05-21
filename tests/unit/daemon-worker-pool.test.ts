@@ -827,6 +827,80 @@ test("worker session ref updates clear stale attached connection selectors", asy
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("client worker commands fail closed stdin without daemon stream errors", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker.mjs");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: { destroyed: false, write: (line: string) => writes.push(line) },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 50,
+    internalCommandTimeoutMs: 200,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+
+  worker.child.stdin.end();
+  await new Promise((resolve) => worker.child.stdin.once("finish", resolve));
+
+  pool.forwardToWorker(connection, worker, { id: "1", type: "prompt" });
+
+  assert.equal(worker.pendingResponses.size, 0);
+  assert.equal(pool.getStatusSnapshot().workerCount, 0);
+  assert.ok(
+    writes.some((line) => {
+      return (
+        JSON.stringify(JSON.parse(line)) ===
+        JSON.stringify({
+          id: "1",
+          type: "response",
+          command: "prompt",
+          success: false,
+          error: "rin_worker_exit",
+        })
+      );
+    }),
+  );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("graceful worker commands destroy workers with closed stdin", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker.mjs");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  const worker = pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    { type: "new_session" },
+  );
+
+  worker.child.stdin.end();
+  await new Promise((resolve) => worker.child.stdin.once("finish", resolve));
+
+  pool.sleepWorkerGracefully(worker);
+
+  assert.equal(pool.getStatusSnapshot().workerCount, 0);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("internal worker commands time out cleanly without leaking late responses", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");
