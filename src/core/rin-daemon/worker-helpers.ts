@@ -106,7 +106,6 @@ function sanitizeTheme(theme: any) {
 
 function sanitizeExtension(extension: any) {
   return {
-    name: String(extension?.name || extension?.sourceInfo?.packageName || ""),
     path: String(extension?.path || ""),
     sourceInfo: sanitizeSourceInfo(extension?.sourceInfo),
   };
