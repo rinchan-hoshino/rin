@@ -10,6 +10,7 @@ import {
   resolveRinFrontendCommandResponses,
   type RinFrontendCommandResponses,
 } from "./command-responses.js";
+import { formatCompactionSummaryCollapsedText } from "./compaction-summary-format.js";
 import type {
   RinFrontendBackendEvent,
   RinFrontendStatusPhase,
@@ -53,14 +54,6 @@ function assistantInterimText(message: any) {
       trim: true,
     }),
   ).trim();
-}
-
-function formatCompactionPassiveNotice(payload: any) {
-  if (safeString(payload?.type).trim() !== "compaction_end") return "";
-  if (payload?.aborted === true) return "";
-  const summary = safeString(payload?.result?.summary).trim();
-  if (summary) return summary;
-  return safeString(payload?.errorMessage).trim();
 }
 
 export type RinFrontendBackendEventTranslator = {
@@ -233,7 +226,9 @@ export function createRinFrontendBackendEventTranslator(
           const events: RinFrontendBackendEvent[] = [
             { type: "external_working_end" },
           ];
-          const notice = formatCompactionPassiveNotice(payload);
+          const notice = formatCompactionSummaryCollapsedText(
+            payload.tokensBefore ?? payload.result?.tokensBefore,
+          );
           if (notice) {
             events.push({
               type: "passive_notice",

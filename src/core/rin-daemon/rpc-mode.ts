@@ -1,3 +1,5 @@
+import { getLatestCompactionEntry } from "@earendil-works/pi-coding-agent";
+
 import { extractToolCallParts } from "../message-content.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { createInterruptedToolResultMessage } from "../rin-lib/interruption.js";
@@ -42,6 +44,19 @@ function createExtensionUiResponseParser(defaultValue: any) {
     if ("value" in (response || {})) return response.value;
     return defaultValue;
   };
+}
+
+function latestCompactionTokensBefore(session: any) {
+  const entries = Array.isArray(session?.entries) ? session.entries : [];
+  return getLatestCompactionEntry(entries as any)?.tokensBefore;
+}
+
+function withCompactionEventMetadata(session: any, event: any) {
+  if (!event || typeof event !== "object") return event;
+  if (event.type !== "compaction_end") return event;
+  if (event.tokensBefore !== undefined) return event;
+  const tokensBefore = latestCompactionTokensBefore(session);
+  return tokensBefore === undefined ? event : { ...event, tokensBefore };
 }
 
 function appendInterruptedToolResults(
@@ -747,7 +762,7 @@ export async function runCustomRpcMode(
 
     unsubscribeSessionEvents?.();
     unsubscribeSessionEvents = session.subscribe((event: unknown) => {
-      output(event);
+      output(withCompactionEventMetadata(session, event));
     });
   };
 
@@ -902,13 +917,9 @@ export async function runCustomRpcMode(
       case "compact":
         return run(id, type, async () => {
           const value = await session.compact(command.customInstructions);
-          const entries = Array.isArray(session.entries) ? session.entries : [];
-          const lastCompaction = [...entries]
-            .reverse()
-            .find((entry: any) => entry?.type === "compaction");
           return {
             ...(value && typeof value === "object" ? value : {}),
-            tokensBefore: lastCompaction?.tokensBefore,
+            tokensBefore: latestCompactionTokensBefore(session),
           };
         });
       case "set_auto_compaction":

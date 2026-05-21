@@ -22,7 +22,6 @@ const { getChatMessage, saveChatMessage } = await import(
 );
 
 const NOTICE_NO_CHANGE = "Self-improve review completed with no changes.";
-const COMPACTION_NOTICE = "Summary of conversation...";
 
 async function createController(chatKey = "telegram/1:2") {
   const tempDir = await fs.mkdtemp(
@@ -147,7 +146,7 @@ test("chat controller delivers passive notices as distinct short messages", asyn
   ]);
 });
 
-test("chat controller delivers compaction summaries as passive messages", async () => {
+test("chat controller delivers compact collapsed notice without summary text", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (chatId, content) => {
@@ -161,7 +160,8 @@ test("chat controller delivers compaction summaries as passive messages", async 
       type: "compaction_end",
       reason: "threshold",
       aborted: false,
-      result: { summary: "Summary of conversation..." },
+      tokensBefore: 108642,
+      result: { summary: "Summary of conversation must not reach chat" },
     },
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -173,12 +173,35 @@ test("chat controller delivers compaction summaries as passive messages", async 
         {
           type: "text",
           attrs: {
-            content: COMPACTION_NOTICE,
+            content:
+              "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
           },
         },
       ],
     },
   ]);
+});
+
+test("chat controller does not deliver compact summary when token count is unavailable", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (chatId, content) => {
+    deliveries.push({ chatId, content });
+    return [`compact-${deliveries.length}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: { summary: "Summary of conversation must not reach chat" },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller terminates the frontend session before disposing", async () => {

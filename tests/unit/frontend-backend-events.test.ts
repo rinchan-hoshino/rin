@@ -16,7 +16,6 @@ const sdk = await import(
 
 const NOTICE_NO_CHANGE = "Self-improve review completed with no changes.";
 const NOTICE_CHANGED = "Self-improve review updated demo.";
-const COMPACTION_NOTICE = "Summary of conversation...";
 
 test("frontend backend event translator exposes status as a shared frontend event", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
@@ -106,7 +105,7 @@ test("frontend backend event translator exposes self-improve review events as pa
   );
 });
 
-test("frontend backend event translator exposes compaction summaries as passive notices", () => {
+test("frontend backend event translator exposes compact collapsed notice without summary text", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -114,16 +113,31 @@ test("frontend backend event translator exposes compaction summaries as passive 
       type: "compaction_end",
       reason: "threshold",
       aborted: false,
-      result: { summary: "Summary of conversation..." },
+      tokensBefore: 108642,
+      result: { summary: "Summary of conversation must not reach chat" },
     }),
     [
       { type: "external_working_end" },
       {
         type: "passive_notice",
-        text: COMPACTION_NOTICE,
+        text: "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
         level: "info",
       },
     ],
+  );
+});
+
+test("frontend backend event translator does not expose compact summary when token count is unavailable", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: { summary: "Summary of conversation must not reach chat" },
+    }),
+    [{ type: "external_working_end" }],
   );
 });
 
