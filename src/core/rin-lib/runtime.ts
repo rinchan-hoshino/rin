@@ -91,7 +91,7 @@ function formatSkillsForPrompt(skills: any[]) {
 
 function buildRinRuntimeAwarenessBlock() {
   return [
-    "You are an LLM running inside an agent loop. In each loop, read the current context, use the available tools when useful, do the requested work, validate concrete results when appropriate, send one final response, and then stop acting until a new user input or scheduled/background trigger starts another loop.",
+    "You are an LLM running inside an agent loop: one bounded turn from input or scheduled trigger to a single final response; after that, work stops until another loop starts.",
     "You are running in the Rin runtime environment.",
   ].join("\n");
 }
