@@ -32,7 +32,9 @@ import { applyRinTuiOverrides } from "./upstream-overrides.js";
 type TuiInteractiveOptions = Pick<
   InteractiveModeOptions,
   "initialMessage" | "initialMessages" | "verbose"
->;
+> & {
+  rinStartupWarnings?: string[];
+};
 
 type StartTuiOptions = {
   additionalExtensionPaths?: string[];
@@ -77,6 +79,14 @@ export function isRecoverableRpcStartupError(error: unknown) {
     RPC_TUI_STARTUP_CONNECT_ERROR_RE.test(message) ||
     RPC_TUI_STARTUP_TRANSIENT_ERROR_RE.test(message)
   );
+}
+
+export function formatTuiMaintenanceModeNotice() {
+  return [
+    "Rin daemon is unavailable.",
+    "Entering temporary maintenance mode.",
+    "Some features may be unavailable or not match daemon/RPC behavior.",
+  ].join("\n");
 }
 
 export function formatTuiMaintenanceFallbackNotice(error: unknown) {
@@ -257,6 +267,18 @@ async function startStdTui(
   );
 }
 
+async function startMaintenanceTui(
+  resourceOptions: Partial<TuiResourceOptions>,
+  profile: ReturnType<typeof startupProfiler>,
+  interactiveOptions: TuiInteractiveOptions,
+  startupWarning: string = formatTuiMaintenanceModeNotice(),
+) {
+  await startStdTui(resourceOptions, profile, {
+    ...interactiveOptions,
+    rinStartupWarnings: [startupWarning],
+  });
+}
+
 async function startRpcTui(
   resourceOptions: Partial<TuiResourceOptions>,
   profile: ReturnType<typeof startupProfiler>,
@@ -333,7 +355,7 @@ export async function startTui(options: StartTuiOptions = {}) {
   await applyRinTuiOverrides();
 
   if (maintenanceMode) {
-    await startStdTui(resourceOptions, profile, interactiveOptions);
+    await startMaintenanceTui(resourceOptions, profile, interactiveOptions);
     return;
   }
 
@@ -341,9 +363,13 @@ export async function startTui(options: StartTuiOptions = {}) {
     await startRpcTui(resourceOptions, profile, interactiveOptions);
   } catch (error) {
     if (!isRecoverableRpcStartupError(error)) throw error;
-    console.error(formatTuiMaintenanceFallbackNotice(error));
     applyTuiRuntimeRole(true);
     profile.mark("mode=maintenance-after-rpc-startup-failure");
-    await startStdTui(resourceOptions, profile, interactiveOptions);
+    await startMaintenanceTui(
+      resourceOptions,
+      profile,
+      interactiveOptions,
+      formatTuiMaintenanceFallbackNotice(error),
+    );
   }
 }

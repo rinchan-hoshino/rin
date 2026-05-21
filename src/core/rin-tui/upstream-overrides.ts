@@ -822,6 +822,9 @@ export async function applyRinTuiOverrides() {
     interactiveModeProto.run = async function runWithRinUpdateNotices() {
       await this.init();
       scheduleRinUpdateNotificationWhenReady(this);
+      for (const warning of this.options?.rinStartupWarnings || []) {
+        if (warning) this.showWarning(warning);
+      }
       this.checkTmuxKeyboardSetup?.().then((warning: string | undefined) => {
         if (warning) this.showWarning(warning);
       });

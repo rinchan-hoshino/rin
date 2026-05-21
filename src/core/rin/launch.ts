@@ -118,9 +118,8 @@ export async function launchDefaultRin(parsed: ParsedArgs) {
       `rin_not_installed: run rin-install first or pass --user/-u explicitly (expected ${installConfigPath()})`,
     );
   }
-  const { repoRoot, targetUser, runtimeEnv, tuiArgv, maintenanceModeNotice } =
+  const { repoRoot, targetUser, runtimeEnv, tuiArgv } =
     await resolveLaunchContext(parsed);
-  if (maintenanceModeNotice) console.error(maintenanceModeNotice);
 
   const code = await runTargetCommand(
     targetUser,

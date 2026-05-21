@@ -55,6 +55,17 @@ test("tui launcher resolves interactive startup options", () => {
   );
 });
 
+test("tui launcher formats its own maintenance mode warning", () => {
+  assert.match(
+    launcher.formatTuiMaintenanceModeNotice(),
+    /Rin daemon is unavailable/,
+  );
+  assert.match(
+    launcher.formatTuiMaintenanceModeNotice(),
+    /Entering temporary maintenance mode/,
+  );
+});
+
 test("tui launcher parses pi extension resource options without leaking paths into prompts", () => {
   const parsed = cliOptions.parseTuiCliOptions(
     [

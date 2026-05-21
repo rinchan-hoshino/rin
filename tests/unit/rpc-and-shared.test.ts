@@ -27,7 +27,6 @@ const installPaths = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "paths.js"))
     .href
 );
-
 test("rpc helpers build success and failure envelopes", () => {
   assert.deepEqual(rpc.ok("1", "get_state", { ok: true }), {
     id: "1",
