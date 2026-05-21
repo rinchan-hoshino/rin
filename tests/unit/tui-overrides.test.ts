@@ -171,6 +171,49 @@ test("startup header override replaces upstream Pi branding with Rin", async () 
   );
 });
 
+test("async Rin update notice fills its startup placeholder instead of appending later", () => {
+  const chatContainer = new piTuiModule.Container();
+  const renderText = () =>
+    chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
+  let renderRequests = 0;
+  const instance = {
+    chatContainer,
+    ui: {
+      requestRender() {
+        renderRequests += 1;
+      },
+    },
+  };
+
+  const placeholder =
+    overrides.insertRinUpdateNotificationPlaceholder(instance);
+  chatContainer.addChild(new piTuiModule.Text("startup line", 1, 0));
+  chatContainer.addChild(new piTuiModule.Text("later async output", 1, 0));
+
+  assert.equal(renderText(), " startup line\n later async output");
+
+  overrides.showRinUpdateNotification(
+    instance,
+    {
+      version: "1.2.3",
+      channel: "stable",
+      currentVersion: "1.2.2",
+      command: "rin update",
+    },
+    placeholder,
+  );
+
+  const rendered = renderText();
+  assert.ok(
+    rendered.indexOf("Rin update available: 1.2.3") <
+      rendered.indexOf("startup line"),
+  );
+  assert.ok(
+    rendered.indexOf("startup line") < rendered.indexOf("later async output"),
+  );
+  assert.equal(renderRequests, 1);
+});
+
 test("update overrides replace startup update path and keep single changelog version state", async () => {
   await overrides.applyRinTuiOverrides();
 
@@ -369,7 +412,7 @@ test("loader stop clears render interval", () => {
   assert.ok(renders >= 1);
 });
 
-test("rpc frontend startup statuses use an animated loader until working starts", async () => {
+test("rpc frontend startup statuses use one animated loader until working starts", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -450,6 +493,17 @@ test("rpc frontend startup statuses use an animated loader until working starts"
   assert.match(startupLines[1], /Starting\.\.\./);
   assert.equal(additions, 1);
   assert.ok(renders >= 1);
+
+  const rendersAfterStarting = renders;
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_frontend_status",
+    phase: "starting",
+    label: "Starting",
+    connected: true,
+  });
+  assert.equal(instance.statusContainer.child, startupStatus);
+  assert.equal(additions, 1);
+  assert.equal(renders, rendersAfterStarting);
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_frontend_status",
@@ -810,6 +864,7 @@ test("rpc session resync rebinds runtime state and redraws history directly", as
     renderSessionContext(_context, options) {
       directHistoryRenders += 1;
       assert.deepEqual(options, { updateFooter: true, populateHistory: true });
+      this.ui.requestRender();
     },
     statusContainer: {
       clear() {},
@@ -833,7 +888,7 @@ test("rpc session resync rebinds runtime state and redraws history directly", as
   assert.equal(runtimeChanges, 1);
   assert.equal(initialStateRenders, 0);
   assert.equal(directHistoryRenders, 1);
-  assert.ok(renders >= 1);
+  assert.equal(renders, 1);
 });
 
 test("rpc session resync redraw does not replay initial compaction status notice", async () => {
@@ -1041,7 +1096,9 @@ test("rpc session resync clears pending local user echo", async () => {
     },
     updatePendingMessagesDisplay() {},
     handleRuntimeSessionChange: async () => {},
-    renderSessionContext() {},
+    renderSessionContext() {
+      this.ui.requestRender();
+    },
     sessionManager: {
       buildSessionContext() {
         return { messages: [] };

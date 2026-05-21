@@ -46,7 +46,7 @@ Keep installed-runtime maintenance separate from repo-checkout maintenance. Upda
 - Agent-managed skills live under `~/.rin/self_improve/skills` and should hold reusable procedures, playbooks, examples, domain facts, and compact indexes.
 - `search_memory` recalls archived session history when original wording, evidence, or cross-session continuity matters.
 - Memory recall summarizes matched sessions with the active model at fixed `low` thinking.
-- Periodic memory review runs every `selfImprove.reviewEveryTurns` real agent final messages and defaults to `8`; review also runs synchronously before compaction and on real session shutdown. Idle daemon worker sleep is not session shutdown and does not trigger shutdown memory maintenance.
+- Periodic memory review runs every `selfImprove.reviewEveryTurns` real agent final messages and defaults to `5`; review also runs on real session shutdown. Idle daemon worker sleep is not session shutdown and does not trigger shutdown memory maintenance.
 - A hidden built-in nightly task performs sleep-style self-improve consolidation.
 - Not all self-improve content is injected into the prompt automatically.
 

@@ -341,7 +341,7 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
-test("chat controller follows SDK overflow continuation instead of delivering raw error", async () => {
+test("chat controller surfaces SDK overflow errors instead of following continuation markers", async () => {
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -434,10 +434,11 @@ test("chat controller follows SDK overflow continuation instead of delivering ra
     },
   };
 
-  const result = await controller.runTurn({ text: "hello", attachments: [] });
-
-  assert.equal(result.finalText, "continued answer");
-  assert.deepEqual(deliveries, ["continued answer"]);
+  await assert.rejects(
+    () => controller.runTurn({ text: "hello", attachments: [] }),
+    /context_length_exceeded/,
+  );
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller resets chat prompt sessions through the session settings reload path", async () => {
@@ -3016,12 +3017,17 @@ test("chat controller preserves a bound session after transient prompt timeout",
     syncPendingCount() {},
     emitFrontendStatus() {},
     sessionManager: {
-      getSessionFile: () => "/tmp/stale-chat.jsonl",
+      getSessionFile: () =>
+        path.join(controller.agentDir, "sessions", "stale-chat.jsonl"),
       getSessionId: () => "session-stale",
       getSessionName: () => controller.chatKey,
     },
     ensureSessionReady: async () => ({
-      sessionFile: "/tmp/stale-chat.jsonl",
+      sessionFile: path.join(
+        controller.agentDir,
+        "sessions",
+        "stale-chat.jsonl",
+      ),
       sessionId: "session-stale",
     }),
     prompt: async () => {

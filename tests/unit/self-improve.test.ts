@@ -277,126 +277,16 @@ test("automatic self-improve handlers run periodic reviews synchronously", async
       },
     };
 
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       await messageEnd({ message: { role: "user" } }, ctx);
       await messageEnd({ message: assistantFinal() }, ctx);
     }
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].sessionFile, managedSessionFile);
-    assert.equal(calls[0].snapshotKey, "review:8");
+    assert.equal(calls[0].snapshotKey, "review:5");
     assert.equal(calls[0].trigger, "self_improve:periodic_review");
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
-  });
-});
-
-test("compaction self-improve review completes synchronously before routine threshold compaction", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const promptPath = path.join(
-      selfImproveRoot(root),
-      "prompts",
-      "agent_profile.md",
-    );
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runMemoryMaintenanceJobNow(job) {
-        calls.push({
-          trigger: job.trigger,
-          snapshotKey: job.snapshotKey,
-          leafId: job.leafId,
-        });
-        await fs.mkdir(path.dirname(promptPath), { recursive: true });
-        await fs.writeFile(promptPath, "sync compaction prompt\n", "utf8");
-        return { status: "completed" };
-      },
-    });
-    const beforeCompact = definition.hooks.session_before_compact[0];
-    const sessionFile = path.join(root, "sessions", "threshold-compact.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      sessionManager: {
-        getSessionId: () => "threshold-compact-review-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-threshold-compact",
-        isPersisted: () => true,
-      },
-    };
-
-    await beforeCompact(
-      { type: "session_before_compact", reason: "threshold" },
-      ctx,
-    );
-
-    assert.deepEqual(calls, [
-      {
-        trigger: "self_improve:session_compaction_review",
-        snapshotKey: "compact:leaf-threshold-compact",
-        leafId: "leaf-threshold-compact",
-      },
-    ]);
-    assert.equal(
-      await fs.readFile(promptPath, "utf8"),
-      "sync compaction prompt\n",
-    );
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
-  });
-});
-
-test("compaction self-improve review records a pending core notice event", async () => {
-  await withTempRoot(async (root) => {
-    const notices = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runMemoryMaintenanceJobNow() {
-        return {
-          status: "completed",
-          result: {
-            changedFiles: [
-              { path: path.join(root, "self_improve", "skills", "demo.md") },
-            ],
-          },
-        };
-      },
-    });
-    const beforeCompact = definition.hooks.session_before_compact[0];
-    const sessionFile = path.join(root, "sessions", "notice-compact.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "{}\n", "utf8");
-    const ctx = {
-      agentDir: root,
-      emitEvent(event) {
-        notices.push(event);
-      },
-      sessionManager: {
-        getSessionId: () => "notice-compact-review-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-notice-compact",
-        isPersisted: () => true,
-      },
-    };
-
-    await beforeCompact(
-      { type: "session_before_compact", reason: "threshold" },
-      ctx,
-    );
-
-    assert.deepEqual(notices, []);
-    assert.deepEqual(
-      await asyncJobs.takePendingMemoryMaintenanceNotices({
-        agentDir: root,
-        sessionFile,
-      }),
-      [NOTICE_CHANGED_SKILL_ONE],
-    );
   });
 });
 
@@ -422,7 +312,7 @@ test("periodic self-improve review emits the completed result as a core notice e
     const messageEnd = definition.hooks.message_end[0];
     const sessionFile = path.join(root, "sessions", "notice-periodic.jsonl");
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await writeSessionWithAssistantFinals(sessionFile, 8);
+    await writeSessionWithAssistantFinals(sessionFile, 5);
     const ctx = {
       agentDir: root,
       emitEvent(event) {
@@ -431,7 +321,7 @@ test("periodic self-improve review emits the completed result as a core notice e
       sessionManager: {
         getSessionId: () => "notice-periodic-review-session-test",
         getSessionFile: () => sessionFile,
-        getLeafId: () => "assistant-8",
+        getLeafId: () => "assistant-5",
         isPersisted: () => true,
       },
     };
@@ -440,43 +330,6 @@ test("periodic self-improve review emits the completed result as a core notice e
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     assert.deepEqual(notices, [NOTICE_CHANGED_SKILL_ONE]);
-  });
-});
-
-test("compaction self-improve review skips overflow recovery compaction", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runMemoryMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const beforeCompact = definition.hooks.session_before_compact[0];
-    const sessionFile = path.join(root, "sessions", "overflow-compact.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      sessionManager: {
-        getSessionId: () => "overflow-compact-review-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-overflow-compact",
-        isPersisted: () => true,
-      },
-    };
-
-    await beforeCompact(
-      { type: "session_before_compact", reason: "overflow" },
-      ctx,
-    );
-
-    assert.deepEqual(calls, []);
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
 
@@ -554,17 +407,17 @@ test("automatic self-improve review counts agent final messages, not user turns"
       },
     };
 
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       await messageEnd({ message: { role: "user" } }, ctx);
     }
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
 
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
     }
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:8");
+    assert.equal(calls[0].snapshotKey, "review:5");
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
@@ -608,12 +461,12 @@ test("automatic self-improve review reuses chat final-message detection for tool
     }
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
 
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
     }
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:8");
+    assert.equal(calls[0].snapshotKey, "review:5");
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
@@ -622,7 +475,7 @@ test("automatic self-improve review resumes from persisted session count after r
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "sessions", "persisted-count.jsonl");
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await writeSessionWithAssistantFinals(sessionFile, 9);
+    await writeSessionWithAssistantFinals(sessionFile, 6);
 
     const createContext = (sessionId, leafId) => ({
       agentDir: root,
@@ -646,12 +499,12 @@ test("automatic self-improve review resumes from persisted session count after r
       },
     });
     await firstDefinition.hooks.message_end[0](
-      { message: assistantFinal("done 9") },
-      createContext("persisted-count-session-test", "assistant-9"),
+      { message: assistantFinal("done 6") },
+      createContext("persisted-count-session-test", "assistant-6"),
     );
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
 
-    await writeSessionWithAssistantFinals(sessionFile, 16);
+    await writeSessionWithAssistantFinals(sessionFile, 10);
     const restartedDefinition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
@@ -663,12 +516,12 @@ test("automatic self-improve review resumes from persisted session count after r
       },
     });
     await restartedDefinition.hooks.message_end[0](
-      { message: assistantFinal("done 16") },
-      createContext("persisted-count-session-test-restarted", "assistant-16"),
+      { message: assistantFinal("done 10") },
+      createContext("persisted-count-session-test-restarted", "assistant-10"),
     );
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:16");
+    assert.equal(calls[0].snapshotKey, "review:10");
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
@@ -710,12 +563,12 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
     }
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
 
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 2; i += 1) {
       await messageEnd({ message: assistantFinal(`done ${i + 4}`) }, ctx);
     }
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:8");
+    assert.equal(calls[0].snapshotKey, "review:5");
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
@@ -825,7 +678,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
       },
     };
 
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       await messageEnd({ message: { role: "user" } }, ctx);
       await messageEnd({ message: assistantFinal() }, ctx);
     }
@@ -1019,7 +872,7 @@ test("queued maintenance drops invalid session jobs into history instead of bloc
       agentDir: root,
       sessionFile: path.join(root, "missing-session.jsonl"),
       trigger: "self_improve:periodic_review",
-      snapshotKey: "review:8",
+      snapshotKey: "review:5",
     });
 
     const result = await asyncJobs.processQueuedMemoryJobs(root);
@@ -1090,8 +943,8 @@ test("synchronous memory maintenance records terminal result without queueing", 
     const result = await asyncJobs.runMemoryMaintenanceJobNow({
       agentDir: root,
       sessionFile,
-      trigger: "self_improve:session_compaction_review",
-      snapshotKey: "compact:leaf-sync",
+      trigger: "self_improve:periodic_review",
+      snapshotKey: "review:leaf-sync",
     });
 
     assert.equal(result.status, "failed");
@@ -1104,7 +957,7 @@ test("synchronous memory maintenance records terminal result without queueing", 
     assert.equal(history.length, 1);
     assert.equal(history[0].kind, "self_improve_review");
     assert.equal(history[0].status, "failed");
-    assert.equal(history[0].snapshotKey, "compact:leaf-sync");
+    assert.equal(history[0].snapshotKey, "review:leaf-sync");
     assert.match(
       String(history[0].error || ""),
       /maintenance_job_invalid_session_file:/,

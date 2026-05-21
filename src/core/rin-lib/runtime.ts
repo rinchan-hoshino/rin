@@ -14,12 +14,6 @@ import {
   resolveRuntimeProfile,
   RIN_DIR_ENV,
 } from "./profile.js";
-import {
-  clearCompactionContinuationMarker,
-  consumeCompactionContinuationMarker,
-  getCompactionContinuationMarkerPath,
-  writeCompactionContinuationMarker,
-} from "./compaction-continuation.js";
 import memoryModule from "../memory/index.js";
 import selfImproveModule from "../self-improve/index.js";
 import taskModule from "../task/index.js";
@@ -376,29 +370,6 @@ export function clearSessionBaseSystemPrompt(
   applySessionBaseSystemPrompt(session, "");
 }
 
-const COMPACTION_CONTINUATION_BLOCK = [
-  "Context compacted; treat this as a routine internal checkpoint.",
-  "Resume the current task immediately from its current state.",
-  "Execute the next concrete step directly without narration.",
-  "If work remains, keep doing it.",
-].join("\n");
-
-function appendCompactionContinuationBlock(systemPrompt: string) {
-  const base = String(systemPrompt || "").trim();
-  return base
-    ? `${base}\n\n${COMPACTION_CONTINUATION_BLOCK}`
-    : COMPACTION_CONTINUATION_BLOCK;
-}
-
-export function consumeCompactionContinuationSystemPrompt(
-  session: any,
-  systemPrompt: string,
-) {
-  const marker = consumeCompactionContinuationMarker(session);
-  if (!marker) return systemPrompt;
-  return appendCompactionContinuationBlock(systemPrompt);
-}
-
 export function ensureSessionBaseSystemPrompt(session: any): string {
   if (!session || typeof session !== "object") return "";
   const state = session[LAZY_SYSTEM_PROMPT_STATE_KEY] as
@@ -476,12 +447,8 @@ function applyRinPromptBuilder(session: any) {
   if (originalPrompt) {
     session.prompt = async (text: string, options?: any) => {
       const basePrompt = ensureSessionBaseSystemPrompt(session);
-      const continuationPrompt = consumeCompactionContinuationSystemPrompt(
-        session,
-        basePrompt,
-      );
       const turnPrompt = appendPromptContextSystemPrompt(
-        continuationPrompt,
+        basePrompt,
         options?.promptContext,
       );
       if (turnPrompt === basePrompt) {
@@ -844,13 +811,6 @@ export function applyAutoReloadAfterCompaction(session: any) {
 }
 
 export {
-  clearCompactionContinuationMarker,
-  consumeCompactionContinuationMarker,
-  getCompactionContinuationMarkerPath,
-  writeCompactionContinuationMarker,
-};
-
-export {
   applyRuntimeProfileEnvironment,
   getRuntimeSessionDir,
   resolveRuntimeProfile,
@@ -1210,7 +1170,6 @@ export async function createConfiguredAgentSession(
         String(sessionStartEvent?.previousSessionFile || "") || undefined,
     });
     applyRinBackendToolExecutionLocks(result.session);
-    clearCompactionContinuationMarker(result.session);
 
     applyRinPromptBuilder(result.session);
     applyRinCompactionSettingsTuning(result.session);

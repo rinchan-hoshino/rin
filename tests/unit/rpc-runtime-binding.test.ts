@@ -78,6 +78,56 @@ test("rpc prompt routes extension slash commands using daemon catalog authority"
   );
 });
 
+test("rpc prompt routes frontend /new command to local new session", async () => {
+  const sent = [];
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      switch (payload.type) {
+        case "new_session":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/new.jsonl", sessionId: "new" },
+          });
+        case "get_state":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/new.jsonl", sessionId: "new" },
+          });
+        case "get_session_snapshot":
+          return Promise.resolve({ success: true, data: { entries: [] } });
+        default:
+          return Promise.resolve({ success: true, data: {} });
+      }
+    },
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+  });
+
+  await session.prompt("/new");
+
+  assert.equal(
+    sent.some((payload) => payload.type === "prompt"),
+    false,
+  );
+  assert.equal(
+    sent.some((payload) => payload.type === "run_command"),
+    false,
+  );
+  assert.equal(
+    sent.some((payload) => payload.type === "get_commands"),
+    false,
+  );
+  assert.equal(
+    sent.filter((payload) => payload.type === "new_session").length,
+    1,
+  );
+});
+
 test("rpc prompt routes daemon builtin slash commands without a side registry", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({

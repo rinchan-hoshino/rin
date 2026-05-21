@@ -594,7 +594,7 @@ test("rpc interactive session attaches a request tag to prompt turns by default"
   assert.match(String(calls[0]?.requestTag || ""), /^rin-tui-/);
 });
 
-test("rpc interactive session can terminate an attached worker without local session selectors", async () => {
+test("rpc interactive session can shut down or terminate an attached worker without local session selectors", async () => {
   const calls = [];
   const client = {
     isConnected: () => true,
@@ -606,10 +606,12 @@ test("rpc interactive session can terminate an attached worker without local ses
   const session = new RpcInteractiveSession(client);
   session.rpcConnected = true;
 
+  await session.shutdownSession();
   await session.terminateSession();
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.type, "terminate_session");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]?.type, "shutdown_session");
+  assert.equal(calls[1]?.type, "terminate_session");
 });
 
 test("rpc interactive session queues prompts while recovery is pending", async () => {

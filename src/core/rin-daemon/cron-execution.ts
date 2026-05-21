@@ -500,12 +500,7 @@ export async function executeCronTask(
         finishedAt: task.lastFinishedAt,
       }).catch(() => {});
     }
-    if (
-      !task.completedAt &&
-      !task.trigger.expression &&
-      !task.trigger.intervalMs &&
-      task.runCount >= 1
-    ) {
+    if (!task.completedAt && !task.trigger.expression && task.runCount >= 1) {
       task.completedAt = nowIso();
       task.completionReason = "once_completed";
       task.enabled = false;

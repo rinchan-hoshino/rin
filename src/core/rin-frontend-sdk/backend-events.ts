@@ -55,15 +55,6 @@ function assistantInterimText(message: any) {
   ).trim();
 }
 
-function isPiOverflowContinuation(payload: any) {
-  return (
-    safeString(payload?.type).trim() === "compaction_end" &&
-    safeString(payload?.reason).trim() === "overflow" &&
-    payload?.willRetry === true &&
-    payload?.aborted !== true
-  );
-}
-
 function formatCompactionPassiveNotice(payload: any) {
   if (safeString(payload?.type).trim() !== "compaction_end") return "";
   if (payload?.aborted === true) return "";
@@ -86,11 +77,12 @@ export function createRinFrontendBackendEventTranslator(
     options.commandResponses,
   );
   let latestAssistantText = "";
-  let nativeContinuationPending = false;
+  let latestAssistantFinalText = "";
   const deliveredAssistantInterimTexts = new Set<string>();
 
   const resetAssistantSegments = () => {
     latestAssistantText = "";
+    latestAssistantFinalText = "";
     deliveredAssistantInterimTexts.clear();
   };
 
@@ -158,10 +150,11 @@ export function createRinFrontendBackendEventTranslator(
           const session = normalizeSessionRef(payload);
           const finalText =
             safeString(payload.finalText).trim() ||
-            safeString(latestAssistantText).trim();
+            safeString(latestAssistantFinalText).trim();
           const events: RinFrontendBackendEvent[] = [];
           if (finalText) {
             latestAssistantText = finalText;
+            latestAssistantFinalText = finalText;
             events.push({
               type: "assistant_final",
               text: finalText,
@@ -182,9 +175,6 @@ export function createRinFrontendBackendEventTranslator(
           return events;
         }
         if (payload.event === "error") {
-          if (nativeContinuationPending) {
-            return [{ type: "turn_continuing", reason: "overflow" }];
-          }
           const session = normalizeSessionRef(payload);
           return [
             {
@@ -203,11 +193,11 @@ export function createRinFrontendBackendEventTranslator(
           resetAssistantSegments();
           return [{ type: "turn_accepted" }];
         case "agent_end":
-          if (!latestAssistantText || nativeContinuationPending) return [];
+          if (!latestAssistantFinalText) return [];
           return [
             {
               type: "turn_complete",
-              finalText: latestAssistantText,
+              finalText: latestAssistantFinalText,
             },
           ];
         case "message_update":
@@ -224,7 +214,7 @@ export function createRinFrontendBackendEventTranslator(
           const finalText = extractAssistantFinalText(payload.message);
           if (finalText) {
             latestAssistantText = finalText;
-            nativeContinuationPending = false;
+            latestAssistantFinalText = finalText;
             return [{ type: "assistant_final", text: finalText }];
           }
           const interim = takeInterim(assistantInterimText(payload.message));
@@ -250,13 +240,6 @@ export function createRinFrontendBackendEventTranslator(
               text: notice,
               level: "info",
             });
-          }
-          if (isPiOverflowContinuation(payload)) {
-            nativeContinuationPending = true;
-            events.push(
-              { type: "turn_accepted" },
-              { type: "turn_continuing", reason: "overflow" },
-            );
           }
           return events;
         }

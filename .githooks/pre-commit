@@ -15,6 +15,10 @@ format_targets="$({
 
 run_host_checks() {
   echo "rin local ci: running format, lint, test on host fallback..."
+  # Git exports repository-scoped variables to hooks. Host fallback tests create
+  # their own temporary repositories, so clear the outer hook context before
+  # running repo commands or nested git probes will target the committing repo.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
   if [[ -n "$format_targets" ]]; then
     mapfile -t format_target_args < <(printf '%s\n' "$format_targets" | sed '/^$/d')
     npm run format:check -- "${format_target_args[@]}"

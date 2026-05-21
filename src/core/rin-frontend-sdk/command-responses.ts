@@ -1,5 +1,6 @@
 import { isJsonRecord } from "../json-utils.js";
 import { safeString } from "../text-utils.js";
+import { formatCompactionSummaryCollapsedText } from "./compaction-summary-format.js";
 
 export type RinFrontendCommandResponses = {
   abort: string;
@@ -162,7 +163,8 @@ export function applyFrontendBuiltinCommandText(
       return {
         ...result,
         text:
-          !useConfiguredText && existingText ? existingText : responses.compact,
+          formatCompactionSummaryCollapsedText(result.tokensBefore) ||
+          responses.compact,
       };
     case "reload":
       return {

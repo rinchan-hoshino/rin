@@ -93,6 +93,7 @@ const SESSION_SCOPED_COMMAND_NAMES = [
   "attach_session",
   "select_session",
   "fork",
+  "shutdown_session",
   "terminate_session",
   "set_model",
   "set_session_name",

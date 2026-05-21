@@ -591,6 +591,85 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("restoreSessionWorker indexes the session only after switch_session succeeds", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker.mjs");
+  const startedPath = path.join(dir, "switch-started");
+  const releasePath = path.join(dir, "switch-release");
+  const sessionFile = "/tmp/restored-after-switch.jsonl";
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+process.stdin.setEncoding('utf8');
+let buffer='';
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  void (async () => {
+    while (true) {
+      const idx = buffer.indexOf('\n');
+      if (idx < 0) break;
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (!line.trim()) continue;
+      const command = JSON.parse(line);
+      if (command.type === 'switch_session') {
+        fs.writeFileSync(${JSON.stringify(startedPath)}, 'started');
+        while (!fs.existsSync(${JSON.stringify(releasePath)})) await sleep(10);
+      }
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: 'response',
+        command: command.type,
+        success: true,
+        data: { cancelled: false, sessionFile: command.sessionPath, sessionId: 'restored-session' },
+      }) + '\n');
+    }
+  })();
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  pool.restoreSessionWorker({ sessionFile });
+
+  for (let i = 0; i < 50; i += 1) {
+    try {
+      await fs.access(startedPath);
+      break;
+    } catch {
+      await sleep(10);
+    }
+  }
+  assert.equal(
+    pool
+      .getStatusSnapshot()
+      .workers.some((worker) => worker.sessionFile === sessionFile),
+    false,
+  );
+
+  await fs.writeFile(releasePath, "release");
+  for (let i = 0; i < 50; i += 1) {
+    if (
+      pool
+        .getStatusSnapshot()
+        .workers.some((worker) => worker.sessionFile === sessionFile)
+    ) {
+      break;
+    }
+    await sleep(10);
+  }
+  assert.equal(
+    pool
+      .getStatusSnapshot()
+      .workers.some((worker) => worker.sessionFile === sessionFile),
+    true,
+  );
+
+  pool.destroyAll();
+});
+
 test("attached session worker auto-recovers without dropping the daemon connection", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");

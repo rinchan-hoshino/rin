@@ -220,12 +220,12 @@ test("core todo reconstructs around interrupted todo tool results", async () => 
       toolName: "todo",
       details: {
         interrupted: true,
-        reason: "daemon_restart_or_disconnect",
+        reason: "daemon_exit",
       },
       content: [
         {
           type: "text",
-          text: "The tool was interrupted by a daemon restart or disconnect.",
+          text: "The tool was interrupted because the daemon exited.",
         },
       ],
     },

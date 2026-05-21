@@ -43,7 +43,6 @@ export type CronTaskTarget =
     };
 
 export type CronTaskTrigger = {
-  intervalMs?: number;
   startAt?: string;
   expression?: string;
   timezone?: "local";
@@ -152,17 +151,10 @@ function requireNonEmptyString(value: unknown, errorCode: string) {
 function normalizeTaskTrigger(trigger: CronTaskTrigger | undefined) {
   if (!trigger) throw new Error("cron_trigger_required");
   const expression = safeString((trigger as any).expression).trim();
-  const intervalMs = Number((trigger as any).intervalMs || 0);
   if (expression) {
     return {
       expression,
       timezone: "local" as const,
-    };
-  }
-  if (intervalMs > 0) {
-    return {
-      intervalMs: Math.max(1_000, intervalMs),
-      startAt: normalizeIso((trigger as any).startAt, "startAt"),
     };
   }
   return {
@@ -289,7 +281,7 @@ function createBuiltInPersonalityHeartbeatTask(
     name: "Personality heartbeat",
     enabled: true,
     thinkingLevel: "low",
-    trigger: { intervalMs: 5_000 },
+    trigger: { expression: "* * * * *", timezone: "local" },
     session: { mode: "dedicated" },
     target: {
       kind: "agent_prompt",
@@ -364,9 +356,7 @@ function mergeBuiltInTaskState(
           lastSkippedAt: existing.heartbeat?.lastSkippedAt,
         }
       : undefined,
-    nextRunAt:
-      safeString(existing.nextRunAt).trim() ||
-      computeNextRunAt(builtin, Date.now()),
+    nextRunAt: computeNextRunAt(builtin, Date.now()),
     running: false,
   };
   return merged;
@@ -528,7 +518,7 @@ export class CronScheduler {
       if (normalizedTarget.kind !== "agent_prompt") {
         throw new Error("cron_session_instruction_requires_agent_prompt");
       }
-      if (normalizedTrigger.expression || normalizedTrigger.intervalMs) {
+      if (normalizedTrigger.expression) {
         throw new Error("cron_session_instruction_requires_once");
       }
     }
@@ -665,7 +655,7 @@ export class CronScheduler {
     const task = this.tasks.get(taskId);
     assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
-    if (task.trigger.expression || task.trigger.intervalMs) {
+    if (task.trigger.expression) {
       throw new Error(`cron_task_not_once:${taskId}`);
     }
     const nextRunAt =
@@ -703,9 +693,7 @@ export class CronScheduler {
     task.runCount += 1;
     task.lastError = undefined;
     task.updatedAt = nowIso();
-    if (task.trigger.intervalMs) {
-      task.nextRunAt = computeNextRunAt(task, Date.now());
-    } else if (task.trigger.expression) {
+    if (task.trigger.expression) {
       task.nextRunAt = nextCronAt(task.trigger.expression, Date.now());
     } else {
       task.nextRunAt = undefined;
@@ -883,10 +871,6 @@ export class CronScheduler {
     const referenceTs = Date.now();
     if (task.trigger.expression) {
       task.nextRunAt = nextCronAt(task.trigger.expression, referenceTs);
-    } else if (task.trigger.intervalMs) {
-      task.nextRunAt = new Date(
-        referenceTs + Math.max(1_000, Number(task.trigger.intervalMs || 0)),
-      ).toISOString();
     } else {
       task.nextRunAt = undefined;
       task.completedAt = now;
@@ -899,7 +883,7 @@ export class CronScheduler {
   private async executeTask(task: CronTaskRecord) {
     try {
       await executeCronTask(task, this.options);
-      if (!task.completedAt && !task.trigger.intervalMs) {
+      if (!task.completedAt) {
         task.nextRunAt = computeNextRunAt(task, Date.now());
       }
       if (task.completedAt) this.terminateTaskSession(task);

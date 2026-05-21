@@ -25,6 +25,13 @@ export {
 } from "./backend-events.js";
 
 export {
+  formatCompactionSummaryCollapsedLine,
+  formatCompactionSummaryCollapsedText,
+  formatCompactionTokenCount,
+  type CompactionSummaryCollapsedTextOptions,
+} from "./compaction-summary-format.js";
+
+export {
   DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
   applyFrontendBuiltinCommandText,
   frontendCommandNameFromLine,
@@ -34,6 +41,21 @@ export {
   resolveRinFrontendCommandResponses,
   type RinFrontendCommandResponses,
 } from "./command-responses.js";
+
+export {
+  RIN_NON_INTERACTIVE_COMMAND_NAMES,
+  RIN_FRONTEND_SESSION_COMMANDS,
+  classifyRinFrontendCommand,
+  getRinNonInteractiveCommandInteractionPolicy,
+  getRinFrontendSessionCommandSpec,
+  isFrontendSessionCommandLine,
+  isRinNonInteractiveCommandExposed,
+  type RinFrontendCommandCatalogItem,
+  type RinFrontendCommandRoute,
+  type RinFrontendCommandRouteKind,
+  type RinNonInteractiveCommandInteractionPolicy,
+  type RinFrontendCommandSpec,
+} from "./command-dispatcher.js";
 
 export {
   RinFrontendTurnDriver,

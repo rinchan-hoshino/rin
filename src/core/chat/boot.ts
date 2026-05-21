@@ -10,6 +10,7 @@ import {
 } from "../platform/fs.js";
 import { createRinI18n } from "../i18n.js";
 import { DEFAULT_LANGUAGE_TAG } from "../language.js";
+import { RIN_NON_INTERACTIVE_COMMAND_NAMES } from "../rin-frontend-sdk/index.js";
 import { safeString } from "./chat-helpers.js";
 import { sendOutboxPayload } from "./transport.js";
 
@@ -18,22 +19,11 @@ export type ChatCommandRow = {
   description?: string;
 };
 
-const CHAT_COMMAND_NAMES = [
-  "help",
-  "abort",
-  "new",
-  "compact",
-  "reload",
-  "status",
-  "session",
-  "model",
-] as const;
-
 export function getChatCommandRows(
   languageTag = DEFAULT_LANGUAGE_TAG,
 ): ChatCommandRow[] {
   const descriptions = createRinI18n(languageTag).chatCommandDescriptions;
-  return CHAT_COMMAND_NAMES.map((name) => ({
+  return RIN_NON_INTERACTIVE_COMMAND_NAMES.map((name) => ({
     name,
     description: descriptions[name],
   }));

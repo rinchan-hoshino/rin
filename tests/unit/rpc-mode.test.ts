@@ -1630,7 +1630,7 @@ test(
 );
 
 test(
-  "rpc mode waits for recoverable websocket error continuation before completing",
+  "rpc mode surfaces websocket errors instead of waiting for continuation",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -1758,18 +1758,15 @@ test(
           }
         })
         .filter(Boolean);
-      const completion = events.find(
-        (event) =>
-          event.type === "rpc_turn_event" && event.event === "complete",
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
-      assert.equal(completion?.requestTag, "tag-1");
-      assert.equal(completion?.finalText, "recovered final");
+      assert.equal(error?.requestTag, "tag-1");
+      assert.match(String(error?.error || ""), /WebSocket closed 1009/);
       assert.equal(
         events.some(
           (event) =>
-            event.type === "rpc_turn_event" &&
-            event.event === "complete" &&
-            event.finalText === "WebSocket closed 1009",
+            event.type === "rpc_turn_event" && event.event === "complete",
         ),
         false,
       );
@@ -1781,7 +1778,7 @@ test(
 );
 
 test(
-  "rpc mode waits for Pi overflow continuation before surfacing context errors",
+  "rpc mode surfaces context errors instead of following overflow continuation markers",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -1917,15 +1914,15 @@ test(
           }
         })
         .filter(Boolean);
-      const completion = emitted.find(
-        (event) =>
-          event.type === "rpc_turn_event" && event.event === "complete",
+      const error = emitted.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
-      assert.equal(completion?.requestTag, "tag-1");
-      assert.equal(completion?.finalText, "continued final");
+      assert.equal(error?.requestTag, "tag-1");
+      assert.match(String(error?.error || ""), /context_length_exceeded/);
       assert.equal(
         emitted.some(
-          (event) => event.type === "rpc_turn_event" && event.event === "error",
+          (event) =>
+            event.type === "rpc_turn_event" && event.event === "complete",
         ),
         false,
       );
@@ -3335,11 +3332,11 @@ test(
       assert.equal(calls[0][1].isError, true);
       assert.equal(
         calls[0][1].content[0].text,
-        "The tool was interrupted by a daemon restart or disconnect.",
+        "The tool was interrupted because the daemon exited.",
       );
       assert.deepEqual(calls[0][1].details, {
         interrupted: true,
-        reason: "daemon_restart_or_disconnect",
+        reason: "daemon_exit",
       });
       assert.deepEqual(calls[1], ["continue"]);
       assert.equal(stateMessages.length, 2);

@@ -66,21 +66,6 @@ function computeOnceNextRunAt(
   return new Date(runTs).toISOString();
 }
 
-function computeIntervalNextRunAt(
-  trigger: CronTaskTrigger,
-  lastStartedAt: string | undefined,
-  referenceTs: number,
-) {
-  const intervalMs = Math.max(1_000, Number(trigger.intervalMs || 0));
-  if (lastStartedAt) {
-    return new Date(Date.parse(lastStartedAt) + intervalMs).toISOString();
-  }
-  const startTs = trigger.startAt ? Date.parse(trigger.startAt) : referenceTs;
-  return new Date(
-    Number.isFinite(startTs) ? startTs : referenceTs,
-  ).toISOString();
-}
-
 export function normalizeIso(value: unknown, field: string) {
   const text = normalizeCronText(value);
   if (!text) return undefined;
@@ -159,14 +144,6 @@ export function computeNextRunAt(task: CronTaskRecord, referenceTs: number) {
 
   if (task.trigger.expression) {
     return nextCronAt(task.trigger.expression, referenceTs);
-  }
-
-  if (task.trigger.intervalMs) {
-    return computeIntervalNextRunAt(
-      task.trigger,
-      task.lastStartedAt,
-      referenceTs,
-    );
   }
 
   return computeOnceNextRunAt(task.trigger, task.runCount, referenceTs);

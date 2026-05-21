@@ -7,6 +7,7 @@ import {
   RinFrontendTurnDriver,
   applyFrontendBuiltinCommandText,
   frontendCommandNameFromLine,
+  getRinNonInteractiveCommandInteractionPolicy,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
 import {
@@ -121,6 +122,20 @@ function shouldResetDriverOnTransientTurnError(
   const message = safeString((error as any)?.message || error).trim();
   return /rin_timeout:(?:prompt|get_session_snapshot|select_session)\b|rin_no_attached_session\b/.test(
     message,
+  );
+}
+
+function resolveComparableSessionFile(agentDir: string, sessionFile: unknown) {
+  const value = safeString(sessionFile).trim();
+  if (!value) return "";
+  return resolveStoredSessionFile(agentDir, value) || value;
+}
+
+function sameSessionFile(agentDir: string, left: unknown, right: unknown) {
+  const resolvedLeft = resolveComparableSessionFile(agentDir, left);
+  const resolvedRight = resolveComparableSessionFile(agentDir, right);
+  return Boolean(
+    resolvedLeft && resolvedRight && resolvedLeft === resolvedRight,
   );
 }
 
@@ -620,6 +635,17 @@ export class ChatController {
     return this.state.sessionFile;
   }
 
+  private assertRestoredTurnStayedOnSession(
+    restoreSessionFile: string,
+    resultSessionFile: unknown,
+  ) {
+    if (!restoreSessionFile) return;
+    if (sameSessionFile(this.agentDir, restoreSessionFile, resultSessionFile)) {
+      return;
+    }
+    throw new Error("chat_restored_session_mismatch");
+  }
+
   private resolveSessionFileForUse(sessionFile?: string) {
     return (
       resolveStoredSessionFile(this.agentDir, sessionFile) ||
@@ -909,7 +935,9 @@ export class ChatController {
         incomingMessageId,
       );
     }
-    const skipSessionRecovery = commandName === "new";
+    const commandPolicy =
+      getRinNonInteractiveCommandInteractionPolicy(commandName);
+    const skipSessionRecovery = commandPolicy.skipSessionRecovery;
     // Slash commands are controls; reply-bound session files belong to prompt turns only.
     const explicitSessionFile = "";
     const restoreSessionFile = skipSessionRecovery
@@ -924,7 +952,7 @@ export class ChatController {
     this.lastActivityAt = Date.now();
     this.setActiveCommandTurnInput({ incomingMessageId, replyToMessageId });
     await this.connect({ restoreSession: !skipSessionRecovery });
-    if (["abort", "new", "compact", "reload"].includes(commandName)) {
+    if (commandPolicy.acceptInboundBeforeExecution) {
       this.markAcceptedMessage(incomingMessageId);
     }
     try {
@@ -1026,6 +1054,10 @@ export class ChatController {
         source: "chat-bridge",
         streamingBehavior: "steer",
       });
+      this.assertRestoredTurnStayedOnSession(
+        restoreSessionFile,
+        result.sessionFile || this.driver.currentSessionFile(),
+      );
       this.updateStoredSessionFile(
         result.sessionFile,
         this.driver.currentSessionFile(),
@@ -1089,6 +1121,10 @@ export class ChatController {
           promptContext: input.promptMeta,
           source: "chat-bridge",
         });
+        this.assertRestoredTurnStayedOnSession(
+          restoreSessionFile,
+          result.sessionFile || this.driver.currentSessionFile(),
+        );
         this.updateStoredSessionFile(
           result.sessionFile,
           this.driver.currentSessionFile(),
@@ -1147,7 +1183,7 @@ export class ChatController {
         );
         if (transientSessionFailure) {
           this.driver.dispose();
-        } else {
+        } else if (errorMessage !== "chat_restored_session_mismatch") {
           const errorSessionFile = this.updateStoredSessionFile(
             errorSession.sessionFile,
             this.driver.currentSessionFile(),

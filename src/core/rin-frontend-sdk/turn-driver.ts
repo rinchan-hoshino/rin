@@ -114,6 +114,12 @@ function isRecoverableConnectionError(error: unknown) {
   );
 }
 
+function sameFrontendSessionFile(left: unknown, right: unknown) {
+  const leftText = safeString(left).trim();
+  const rightText = safeString(right).trim();
+  return Boolean(leftText && rightText && leftText === rightText);
+}
+
 export class RinFrontendTurnDriver {
   private readonly clientFactory: () => RinFrontendTurnClient;
   private readonly promptSource: string;
@@ -137,7 +143,6 @@ export class RinFrontendTurnDriver {
     sessionFile?: string;
     baselineMessages: unknown[];
   } | null = null;
-  private nativeContinuationPending = false;
 
   constructor(options: {
     clientFactory: () => RinFrontendTurnClient;
@@ -218,6 +223,16 @@ export class RinFrontendTurnDriver {
     ).trim();
   }
 
+  private assertTargetSessionReady(
+    requestedSessionFile: string,
+    actualSessionFile: unknown,
+  ) {
+    if (!requestedSessionFile) return;
+    if (sameFrontendSessionFile(requestedSessionFile, actualSessionFile))
+      return;
+    throw new Error("frontend_session_restore_mismatch");
+  }
+
   private async getStateForSession(sessionFile?: string) {
     if (!this.client) return this.frontendState;
     const wanted = safeString(sessionFile || "").trim();
@@ -268,7 +283,6 @@ export class RinFrontendTurnDriver {
 
   private startLiveTurn(requestTag?: string) {
     if (this.liveTurn) throw new Error("frontend_turn_already_running");
-    this.nativeContinuationPending = false;
     let resolve!: (value: any) => void;
     let reject!: (error: Error) => void;
     const liveTurn = {
@@ -555,6 +569,10 @@ export class RinFrontendTurnDriver {
     const targetSessionFile = this.sessionFileFromReady(
       ready,
       sessionFile || restoreSessionFile,
+    );
+    this.assertTargetSessionReady(
+      sessionFile || restoreSessionFile,
+      targetSessionFile,
     );
     const data: any = compactCommand.compact
       ? await this.client.compact(compactCommand.customInstructions, {
@@ -885,6 +903,10 @@ export class RinFrontendTurnDriver {
       ready,
       sessionFile || restoreSessionFile,
     );
+    this.assertTargetSessionReady(
+      sessionFile || restoreSessionFile,
+      targetSessionFile,
+    );
     if (input.resetModelOptionsFromSettings) {
       await this.resetModelOptionsFromSettings(targetSessionFile);
     }
@@ -950,6 +972,10 @@ export class RinFrontendTurnDriver {
     const targetSessionFile = this.sessionFileFromReady(
       ready,
       sessionFile || restoreSessionFile,
+    );
+    this.assertTargetSessionReady(
+      sessionFile || restoreSessionFile,
+      targetSessionFile,
     );
     if (input.resetModelOptionsFromSettings) {
       await this.resetModelOptionsFromSettings(targetSessionFile);
@@ -1157,12 +1183,6 @@ export class RinFrontendTurnDriver {
         this.frontendState.turnActive = true;
         this.emit({ type: "turn_accepted" });
         return;
-      case "turn_continuing":
-        this.nativeContinuationPending = true;
-        this.frontendState.turnActive = true;
-        this.frontendState.isStreaming = true;
-        this.setFrontendPhase("working");
-        return;
       case "passive_notice":
         this.emit({
           type: "passive_notice",
@@ -1209,7 +1229,6 @@ export class RinFrontendTurnDriver {
           return;
         }
         this.latestAssistantText = finalText;
-        this.nativeContinuationPending = false;
         this.updateFrontendStateFrom(event);
         this.setFrontendPhase("idle");
         this.liveTurn.resolve({
@@ -1221,12 +1240,6 @@ export class RinFrontendTurnDriver {
         return;
       }
       case "turn_error": {
-        if (this.nativeContinuationPending) {
-          this.frontendState.turnActive = true;
-          this.frontendState.isStreaming = true;
-          this.setFrontendPhase("working");
-          return;
-        }
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.setFrontendPhase("idle");

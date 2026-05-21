@@ -152,7 +152,7 @@ test("rpc session events do not refresh whole state on every stream update", asy
   ]);
 });
 
-test("rpc session events keep TUI turns alive through Pi overflow continuation", async () => {
+test("rpc session events do not keep TUI turns alive for overflow continuation markers", async () => {
   const seen = [];
   let refreshMessages = 0;
   let refreshMessagesAndSession = 0;
@@ -189,8 +189,7 @@ test("rpc session events keep TUI turns alive through Pi overflow continuation",
     },
   );
   assert.equal(target.remoteTurnRunning, true);
-  assert.equal(target.awaitingNativeOverflowContinuation, true);
-  assert.equal(refreshMessages, 0);
+  assert.equal(refreshMessages, 1);
 
   await events.handleRpcSessionEvent(
     target,
@@ -202,8 +201,8 @@ test("rpc session events keep TUI turns alive through Pi overflow continuation",
       refreshMessagesAndSession += 1;
     },
   );
-  assert.equal(target.remoteTurnRunning, true);
-  assert.equal(target.activeTurn?.mode, "prompt");
+  assert.equal(target.remoteTurnRunning, false);
+  assert.equal(target.activeTurn, null);
 
   await events.handleRpcSessionEvent(
     target,
@@ -233,9 +232,7 @@ test("rpc session events keep TUI turns alive through Pi overflow continuation",
       refreshMessagesAndSession += 1;
     },
   );
-  assert.equal(target.remoteTurnRunning, true);
-  assert.equal(target.awaitingNativeOverflowContinuation, false);
-  assert.equal(target.nativeContinuationPending, true);
+  assert.equal(target.remoteTurnRunning, false);
 
   await events.handleRpcSessionEvent(
     target,
@@ -248,7 +245,7 @@ test("rpc session events keep TUI turns alive through Pi overflow continuation",
     },
   );
   assert.equal(target.remoteTurnRunning, true);
-  assert.equal(target.activeTurn?.mode, "prompt");
+  assert.equal(target.activeTurn, null);
 
   await events.handleRpcSessionEvent(
     target,
@@ -269,16 +266,15 @@ test("rpc session events keep TUI turns alive through Pi overflow continuation",
   assert.equal(target.isStreaming, false);
   assert.equal(target.activeTurn, null);
   assert.equal(refreshMessagesAndSession, 3);
-  assert.equal(
-    seen.some(
-      (event) =>
-        event.type === "message_end" &&
-        event.message?.errorMessage === "context_length_exceeded",
-    ),
-    false,
-  );
   assert.deepEqual(seen, [
-    { type: "frontend_status_refresh", force: true },
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "context_length_exceeded",
+      },
+    },
     { type: "agent_end" },
     { type: "compaction_start", reason: "overflow" },
     { type: "frontend_status_refresh", force: true },

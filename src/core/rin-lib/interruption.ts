@@ -1,8 +1,7 @@
-export const DAEMON_RESTART_OR_DISCONNECT_REASON =
-  "daemon_restart_or_disconnect";
+export const DAEMON_EXIT_REASON = "daemon_exit";
 
 export const INTERRUPTED_TOOL_TEXT =
-  "The tool was interrupted by a daemon restart or disconnect.";
+  "The tool was interrupted because the daemon exited.";
 
 export function createInterruptedToolResultPayload() {
   return {
@@ -14,7 +13,7 @@ export function createInterruptedToolResultPayload() {
     ],
     details: {
       interrupted: true,
-      reason: DAEMON_RESTART_OR_DISCONNECT_REASON,
+      reason: DAEMON_EXIT_REASON,
     },
   };
 }

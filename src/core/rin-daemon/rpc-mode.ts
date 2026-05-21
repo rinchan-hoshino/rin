@@ -310,77 +310,6 @@ async function waitForSessionPostAgentEvents(session: any) {
   await settleTurnCompletionEvents();
 }
 
-function isRecoverableTurnErrorMessage(message: any) {
-  if (safeString(message?.role).trim() !== "assistant") return false;
-  if (safeString(message?.stopReason).trim() !== "error") return false;
-  const errorMessage = safeString(message?.errorMessage).trim();
-  return /\bWebSocket closed\s+1009\b/i.test(errorMessage) ||
-    /\bWebSocket (?:error|closed)\b/i.test(errorMessage)
-    ? true
-    : false;
-}
-
-function isPiOverflowContinuationEvent(event: any) {
-  return (
-    safeString(event?.type).trim() === "compaction_end" &&
-    safeString(event?.reason).trim() === "overflow" &&
-    event?.willRetry === true &&
-    event?.aborted !== true
-  );
-}
-
-async function waitForRecoverableTurnContinuation(
-  session: any,
-  input: { lastAssistantMessage: any; piContinuationPending?: boolean },
-  timeoutMs = 1500,
-) {
-  const shouldWait =
-    input.piContinuationPending ||
-    isRecoverableTurnErrorMessage(input.lastAssistantMessage);
-  if (!shouldWait) return false;
-
-  return await new Promise<boolean>((resolve) => {
-    let settled = false;
-    const cleanup: {
-      timeout?: NodeJS.Timeout;
-      unsubscribe?: () => void;
-    } = {};
-    const finish = (value: boolean) => {
-      if (settled) return;
-      settled = true;
-      if (cleanup.timeout) clearTimeout(cleanup.timeout);
-      cleanup.unsubscribe?.();
-      resolve(value);
-    };
-
-    const rawUnsubscribe = session.subscribe?.((event: any) => {
-      const type = safeString(event?.type).trim();
-      if (
-        type === "compaction_start" ||
-        type === "agent_start" ||
-        isPiOverflowContinuationEvent(event)
-      ) {
-        finish(true);
-        return;
-      }
-      if (
-        type === "message_end" &&
-        event?.message?.role === "assistant" &&
-        event.message !== input.lastAssistantMessage
-      ) {
-        finish(true);
-      }
-    });
-    cleanup.unsubscribe =
-      typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
-
-    setImmediate(() => {
-      if (session?.isStreaming || session?.isCompacting) finish(true);
-    });
-    cleanup.timeout = setTimeout(() => finish(false), timeoutMs);
-  });
-}
-
 export async function runCustomRpcMode(
   runtimeOrSession: any,
   deps: {
@@ -639,11 +568,7 @@ export async function runCustomRpcMode(
   const startTurnTask = (requestTag: string, task: () => Promise<void>) => {
     const turnSession = getSession();
     let lastCompletedAssistantMessage: any = null;
-    let piContinuationPending = false;
     const rawUnsubscribeTurnSession = turnSession.subscribe?.((event: any) => {
-      if (isPiOverflowContinuationEvent(event)) {
-        piContinuationPending = true;
-      }
       if (event?.type !== "message_end") return;
       if (event?.message?.role !== "assistant") return;
       lastCompletedAssistantMessage = event.message;
@@ -669,32 +594,14 @@ export async function runCustomRpcMode(
         } catch (error) {
           taskError = error;
         }
-        for (let recoveryChecks = 0; ; recoveryChecks += 1) {
-          await waitForSessionPostAgentEvents(turnSession);
-          if (recoveryChecks >= 3) break;
-          const recoveryStarted = await waitForRecoverableTurnContinuation(
-            turnSession,
-            {
-              lastAssistantMessage: lastCompletedAssistantMessage,
-              piContinuationPending,
-            },
-          );
-          piContinuationPending = false;
-          if (!recoveryStarted) break;
-          taskError = null;
-        }
+        await waitForSessionPostAgentEvents(turnSession);
         const completion = resolveTurnCompletion({
           messages: lastCompletedAssistantMessage
             ? [lastCompletedAssistantMessage]
             : [],
         });
         if (!completion.finalText) {
-          if (
-            taskError &&
-            !isRecoverableTurnErrorMessage(lastCompletedAssistantMessage)
-          ) {
-            throw taskError;
-          }
+          if (taskError) throw taskError;
           const failureMessage = resolveTurnFailureMessage(
             turnSession,
             lastCompletedAssistantMessage
@@ -993,7 +900,17 @@ export async function runCustomRpcMode(
       case "set_follow_up_mode":
         return run(id, type, () => session.setFollowUpMode(command.mode));
       case "compact":
-        return run(id, type, () => session.compact(command.customInstructions));
+        return run(id, type, async () => {
+          const value = await session.compact(command.customInstructions);
+          const entries = Array.isArray(session.entries) ? session.entries : [];
+          const lastCompaction = [...entries]
+            .reverse()
+            .find((entry: any) => entry?.type === "compaction");
+          return {
+            ...(value && typeof value === "object" ? value : {}),
+            tokensBefore: lastCompaction?.tokensBefore,
+          };
+        });
       case "set_auto_compaction":
         return run(id, type, () =>
           session.setAutoCompactionEnabled(Boolean(command.enabled)),
