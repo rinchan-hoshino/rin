@@ -172,6 +172,7 @@ test("startup header override replaces upstream Pi branding with Rin", async () 
 });
 
 test("async Rin update notice fills its startup placeholder instead of appending later", () => {
+  themeModule.initTheme("dark", false);
   const chatContainer = new piTuiModule.Container();
   const renderText = () =>
     chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
@@ -204,6 +205,8 @@ test("async Rin update notice fills its startup placeholder instead of appending
   );
 
   const rendered = renderText();
+  assert.ok(rendered.includes(`${ESC}[`));
+  assert.ok(rendered.includes("mWarning: Rin update available: 1.2.3"));
   assert.ok(
     rendered.indexOf("Rin update available: 1.2.3") <
       rendered.indexOf("startup line"),

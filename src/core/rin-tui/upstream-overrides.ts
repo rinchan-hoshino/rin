@@ -363,6 +363,10 @@ function formatRinUpdateNotificationText(notice: RinUpdateNotice) {
   ].join("\n");
 }
 
+function formatRinUpdateWarningText(text: string) {
+  return theme.fg("warning", `Warning: ${text}`);
+}
+
 export class DeferredRinUpdateNotification {
   private readonly spacer = new Spacer(1);
   private readonly text = new Text("", 1, 0);
@@ -385,7 +389,6 @@ export class DeferredRinUpdateNotification {
 }
 
 export function insertRinUpdateNotificationPlaceholder(instance: any) {
-  if (typeof instance?.chatContainer?.addChild !== "function") return undefined;
   const placeholder = new DeferredRinUpdateNotification();
   instance.chatContainer.addChild(placeholder);
   return placeholder;
@@ -394,20 +397,10 @@ export function insertRinUpdateNotificationPlaceholder(instance: any) {
 export function showRinUpdateNotification(
   instance: any,
   notice: RinUpdateNotice,
-  placeholder?: DeferredRinUpdateNotification,
+  placeholder: DeferredRinUpdateNotification,
 ) {
   const text = formatRinUpdateNotificationText(notice);
-  if (placeholder) {
-    placeholder.setText(`Warning: ${text}`);
-    instance?.ui?.requestRender?.();
-    return;
-  }
-  if (typeof instance?.showWarning === "function") {
-    instance.showWarning(text);
-    return;
-  }
-  instance?.chatContainer?.addChild?.(new Spacer(1));
-  instance?.chatContainer?.addChild?.(new Text(`Warning: ${text}`, 1, 0));
+  placeholder.setText(formatRinUpdateWarningText(text));
   instance?.ui?.requestRender?.();
 }
 
@@ -420,7 +413,7 @@ function scheduleRinUpdateNotificationWhenReady(instance: any) {
 
 async function showRinUpdateNotificationWhenReady(
   instance: any,
-  placeholder?: DeferredRinUpdateNotification,
+  placeholder: DeferredRinUpdateNotification,
 ) {
   try {
     const notice = await checkForRinUpdateNotice();
