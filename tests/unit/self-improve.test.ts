@@ -113,6 +113,12 @@ const NOTICE_CHANGED_PROMPT_SKILL = {
   targets: ["core_doctrine", "demo"],
   changedCount: 2,
 };
+const NOTICE_CHANGED_MEMORY_INDEX_ONCE = {
+  type: "self_improve_review_notice",
+  status: "completed",
+  targets: ["memory-index", "short-term-memory"],
+  changedCount: 3,
+};
 const NOTICE_NO_CHANGE = {
   type: "self_improve_review_notice",
   status: "completed",
@@ -643,6 +649,21 @@ test("self-improve review notices stay structured and distinct", () => {
       ],
     }),
     NOTICE_CHANGED_PROMPT_SKILL,
+  );
+  assert.deepEqual(
+    asyncJobs.buildMemoryMaintenanceNotice({
+      status: "completed",
+      changedFiles: [
+        {
+          path: "/tmp/rin/self_improve/skills/memory-index/transactions/2026-05/foo.md",
+        },
+        {
+          path: "/tmp/rin/self_improve/skills/memory-index/transactions/2026-05/bar.md",
+        },
+        { path: "/tmp/rin/self_improve/skills/short-term-memory/SKILL.md" },
+      ],
+    }),
+    NOTICE_CHANGED_MEMORY_INDEX_ONCE,
   );
   assert.deepEqual(
     asyncJobs.buildMemoryMaintenanceNotice({ status: "completed" }),

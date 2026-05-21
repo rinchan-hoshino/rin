@@ -413,11 +413,7 @@ function shortTargetName(value: string, maxLength = 42) {
 function changedFileTarget(filePath: string) {
   const relative = selfImproveRelativePath(filePath);
   const parts = relative.split("/").filter(Boolean);
-  if (parts[0] === "prompts" && parts[1]) return shortTargetName(parts[1]);
-  if (parts[0] === "skills" && parts[1]) {
-    if (parts[1] === "memory-index" && parts.includes("transactions")) {
-      return shortTargetName(parts.at(-1) || parts[1]);
-    }
+  if ((parts[0] === "prompts" || parts[0] === "skills") && parts[1]) {
     return shortTargetName(parts[1]);
   }
   return shortTargetName(parts.at(-1) || relative, 32);
