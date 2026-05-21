@@ -16,6 +16,8 @@ Treat explicit owner corrections, frustration, repeated reminders, and failed pr
 
 Add or keep durable memory only when it improves future routing, decisions, execution, or recall. Preserve original evidence in transcript memory unless a compact memory-index pointer will materially improve future lookup.
 
+Memory-index extraction should preserve topic cohesion. When new evidence belongs to an existing durable topic, update that topic's existing transaction and monthly index line with dated bullets, date ranges, and keywords. Create a new memory-index transaction only for a genuinely distinct topic or for superseding chronology that must stay separate.
+
 Do not turn a memory review into a runtime feature proposal: do not add new built-in tools, prompt contracts, or user-visible workflow requirements unless the owner explicitly asks for that product change.
 
 ## Review workflow
@@ -28,9 +30,10 @@ Do not turn a memory review into a runtime feature proposal: do not add new buil
    - emotion: strong correction, frustration, risk, preference, blocker, or failed prior behavior;
    - repetition: repeated in evidence or confirmed by existing memory.
 5. Choose the smallest correct destination using the destination priority below.
-6. Rewrite the destination compactly. Replace or remove stale, lower-priority, conflicting, or duplicate lines instead of appending another rule.
-7. Prune stale short-term records and move misplaced material to the smallest correct destination.
-8. Validate skill frontmatter after editing skills.
+6. Before creating a memory-index transaction, scan the relevant monthly index for an existing entry with the same domain, object, error, decision, or work thread. Merge into that existing topic transaction when it is the same topic.
+7. Rewrite the destination compactly. Replace or remove stale, lower-priority, conflicting, or duplicate lines instead of appending another rule.
+8. Prune stale short-term records and move misplaced material to the smallest correct destination.
+9. Validate skill frontmatter after editing skills.
 
 ## Review priorities
 
@@ -41,7 +44,7 @@ Apply these destination priorities before creating or expanding memory:
 3. Umbrella skill: if no current skill applies but an umbrella skill covers the class of work, patch the umbrella skill.
 4. Skill `references/`: if detailed reusable evidence, examples, command traces, or longer notes are needed, put them under the owning skill's `references/` directory and keep `SKILL.md` concise.
 5. New reusable skill: create a new ordinary skill only when no current or umbrella skill is a clean home and the lesson is a reusable class-level workflow, domain, or playbook.
-6. Time-based memory: put active temporary continuity in `short-term-memory`; put historical evidence, chronology, provenance, or transaction context in `memory-index`.
+6. Time-based memory: put active temporary continuity in `short-term-memory`; put historical evidence, chronology, provenance, or transaction context in `memory-index`. For `memory-index`, prefer one evolving topic transaction over multiple per-conversation entries for the same topic.
 7. No write: if no durable memory change is useful, report a no-op with one concise reason.
 
 Use this destination map when selecting a target:
@@ -86,7 +89,7 @@ Use `references/` under the owning skill for detailed reusable evidence, example
 Use these fixed destinations under `<agentDir>/self_improve/skills`:
 
 - `short-term-memory/SKILL.md`: the only short-term memory skill. It contains all active short-term event records.
-- `memory-index/SKILL.md`: the only discoverable memory-index entry skill. It routes to monthly index directories under `memory-index/YYYY-MM/`. Each monthly directory contains its own `SKILL.md` index file, and each monthly index entry points to one memory transaction file such as `memory-index/YYYY-MM/transactions/YYYY-MM-DD-topic.md`.
+- `memory-index/SKILL.md`: the only discoverable memory-index entry skill. It routes to monthly index directories under `memory-index/YYYY-MM/`. Each monthly directory contains its own `SKILL.md` index file, and each monthly index entry points to one memory transaction file such as `memory-index/YYYY-MM/transactions/YYYY-MM-DD-topic.md`. Transaction files are durable topic buckets with dated evidence; merge repeated same-topic evidence into the existing transaction and update the monthly index date range/keywords.
 - `people-and-relationships/SKILL.md`: semantic memory for named people, preferred titles and forms of address, and relationships. Update it whenever a memory item depends on who a person is, how they should be addressed, or how people relate.
 - `object-relationships/SKILL.md`: semantic memory for non-person entities and relationships among them. Update it whenever a memory item depends on what things are or how they relate.
 
@@ -118,6 +121,7 @@ Use this checklist in every review:
 - content filed under the wrong skill;
 - stale entries inside `short-term-memory/SKILL.md`;
 - missing monthly `memory-index` entries or transaction pointers for important lookup evidence;
+- near-duplicate same-topic `memory-index` transaction files that should be merged into one topic transaction with dated bullets;
 - missing or stale `people-and-relationships` entries for person/title/relationship context;
 - missing or stale `object-relationships` entries for non-person entity or relationship context;
 - verbose historical wording that can become compact guidance;

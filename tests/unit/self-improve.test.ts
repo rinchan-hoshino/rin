@@ -705,6 +705,7 @@ test("self-improve maintenance manual codifies review rules", async () => {
   assert.match(manual, /umbrella skill: a broader existing skill/);
   assert.match(manual, /skill `references\/`: detailed reusable evidence/);
   assert.match(manual, /historical evidence, chronology, provenance/);
+  assert.match(manual, /preserve topic cohesion/);
   assert.match(manual, /do not add new built-in tools, prompt contracts/);
   assert.doesNotMatch(manual, /Passive observability/);
   assert.doesNotMatch(manual, /\u{1f4a1}/u);
