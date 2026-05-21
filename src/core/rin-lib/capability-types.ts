@@ -7,6 +7,7 @@ export type RinCapabilityOptions = {
   readonly agentDir: string;
   readonly getThinkingLevel: () => ThinkingLevel;
   readonly sendMessage: (message: any, options?: any) => void;
+  readonly emitEvent?: (event: any) => void;
 };
 
 export type RinCapabilityDefinition = {
@@ -32,4 +33,5 @@ export type RinCapabilityContext = {
   compact: (options?: any) => void;
   getSystemPrompt: () => string;
   getThinkingLevel: () => ThinkingLevel;
+  emitEvent: (event: any) => void;
 };

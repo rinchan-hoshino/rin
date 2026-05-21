@@ -97,15 +97,32 @@ function historyPath(root) {
   return selfImprovePaths.maintenanceHistoryPath(root);
 }
 
-const NOTICE_QUEUED =
-  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u5df2\u6392\u961f";
-const NOTICE_CHANGED_SKILL_ONE =
-  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u66f4\u65b0 demo";
-const NOTICE_CHANGED_PROMPT_SKILL =
-  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u66f4\u65b0 core_doctrine\u3001demo";
-const NOTICE_NO_CHANGE =
-  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u65e0\u53d8\u66f4";
-const NOTICE_FAILED = "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u5931\u8d25";
+const NOTICE_QUEUED = {
+  type: "self_improve_review_notice",
+  status: "queued",
+};
+const NOTICE_CHANGED_SKILL_ONE = {
+  type: "self_improve_review_notice",
+  status: "completed",
+  targets: ["demo"],
+  changedCount: 1,
+};
+const NOTICE_CHANGED_PROMPT_SKILL = {
+  type: "self_improve_review_notice",
+  status: "completed",
+  targets: ["core_doctrine", "demo"],
+  changedCount: 2,
+};
+const NOTICE_NO_CHANGE = {
+  type: "self_improve_review_notice",
+  status: "completed",
+  targets: [],
+  changedCount: 0,
+};
+const NOTICE_FAILED = {
+  type: "self_improve_review_notice",
+  status: "failed",
+};
 
 function selfImproveRoot(root) {
   return selfImprovePaths.resolveSelfImproveRoot(root);
@@ -273,7 +290,7 @@ test("automatic self-improve handlers run periodic reviews synchronously", async
   });
 });
 
-test("periodic self-improve review emits the completed result as a passive notice", async () => {
+test("periodic self-improve review emits the completed result as a core notice event", async () => {
   await withTempRoot(async (root) => {
     const notices = [];
     const definition = selfImproveIndex.default({
@@ -298,10 +315,8 @@ test("periodic self-improve review emits the completed result as a passive notic
     await writeSessionWithAssistantFinals(sessionFile, 5);
     const ctx = {
       agentDir: root,
-      ui: {
-        notify(message, level) {
-          notices.push({ message, level });
-        },
+      emitEvent(event) {
+        notices.push(event);
       },
       sessionManager: {
         getSessionId: () => "notice-periodic-review-session-test",
@@ -311,11 +326,10 @@ test("periodic self-improve review emits the completed result as a passive notic
       },
     };
 
-    await messageEnd({ message: assistantFinal("done 5") }, ctx);
+    await messageEnd({ message: assistantFinal("done 8") }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 5));
 
-    assert.deepEqual(notices, [
-      { message: NOTICE_CHANGED_SKILL_ONE, level: "info" },
-    ]);
+    assert.deepEqual(notices, [NOTICE_CHANGED_SKILL_ONE]);
   });
 });
 
@@ -559,13 +573,13 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
   });
 });
 
-test("self-improve passive notices stay short and distinct", () => {
-  assert.equal(
-    asyncJobs.formatMemoryMaintenancePassiveNotice({ status: "queued" }),
+test("self-improve review notices stay structured and distinct", () => {
+  assert.deepEqual(
+    asyncJobs.buildMemoryMaintenanceNotice({ status: "queued" }),
     NOTICE_QUEUED,
   );
-  assert.equal(
-    asyncJobs.formatMemoryMaintenancePassiveNotice({
+  assert.deepEqual(
+    asyncJobs.buildMemoryMaintenanceNotice({
       status: "completed",
       changedFiles: [
         { path: "/tmp/rin/self_improve/prompts/core_doctrine.md" },
@@ -574,12 +588,12 @@ test("self-improve passive notices stay short and distinct", () => {
     }),
     NOTICE_CHANGED_PROMPT_SKILL,
   );
-  assert.equal(
-    asyncJobs.formatMemoryMaintenancePassiveNotice({ status: "completed" }),
+  assert.deepEqual(
+    asyncJobs.buildMemoryMaintenanceNotice({ status: "completed" }),
     NOTICE_NO_CHANGE,
   );
-  assert.equal(
-    asyncJobs.formatMemoryMaintenancePassiveNotice({ status: "failed" }),
+  assert.deepEqual(
+    asyncJobs.buildMemoryMaintenanceNotice({ status: "failed" }),
     NOTICE_FAILED,
   );
 });
@@ -702,7 +716,7 @@ test("session reload does not trigger self-improve shutdown maintenance", async 
   });
 });
 
-test("real session shutdown triggers self-improve review maintenance without a frontend notice", async () => {
+test("real session shutdown queues self-improve review maintenance without a core notice", async () => {
   await withTempRoot(async (root) => {
     const notices = [];
     const definition = selfImproveIndex.default({
@@ -717,10 +731,8 @@ test("real session shutdown triggers self-improve review maintenance without a f
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
-      ui: {
-        notify(message, level) {
-          notices.push({ message, level });
-        },
+      emitEvent(event) {
+        notices.push(event);
       },
       sessionManager: {
         getSessionId: () => "persisted-shutdown-session-test",

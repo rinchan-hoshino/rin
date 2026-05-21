@@ -18,6 +18,13 @@ const CHAT_COMMAND_RESPONSE_I18N_IDS = {
   newCancelled: "chat.commandResponses.newCancelled",
   compact: "chat.commandResponses.compact",
   reload: "chat.commandResponses.reload",
+  selfImproveReviewQueued: "chat.selfImproveReview.queued",
+  selfImproveReviewSkipped: "chat.selfImproveReview.skipped",
+  selfImproveReviewFailed: "chat.selfImproveReview.failed",
+  selfImproveReviewNoChange: "chat.selfImproveReview.noChange",
+  selfImproveReviewChanged: "chat.selfImproveReview.changed",
+  selfImproveReviewChangedWithMore: "chat.selfImproveReview.changedWithMore",
+  selfImproveReviewChangedCount: "chat.selfImproveReview.changedCount",
 } satisfies Record<keyof RinFrontendCommandResponses, string>;
 
 function chatCommandResponsesFromI18nCatalog(catalog: RinI18nCatalog) {

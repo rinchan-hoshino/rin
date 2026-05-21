@@ -14,6 +14,36 @@ const capabilitySession = await import(
   ).href
 );
 
+test("Rin core capability events reach session subscribers without extension UI", async () => {
+  const capabilitySet = capabilitySession.createRinCapabilitySet({
+    cwd: "/tmp/rin-capability-session-test",
+    agentDir: "/tmp/rin-capability-session-test",
+    definitions: [],
+  });
+  const nativeListeners = new Set<(event: any) => void>();
+  const session = {
+    subscribe(listener: (event: any) => void) {
+      nativeListeners.add(listener);
+      return () => nativeListeners.delete(listener);
+    },
+  };
+
+  await capabilitySession.attachRinCapabilitiesToSession(session, {
+    capabilitySet,
+  });
+
+  const seen: any[] = [];
+  session.subscribe((event: any) => seen.push(event));
+  capabilitySet.createContext().emitEvent({
+    type: "self_improve_review_notice",
+    status: "completed",
+  });
+
+  assert.deepEqual(seen, [
+    { type: "self_improve_review_notice", status: "completed" },
+  ]);
+});
+
 test("Rin compaction hooks are exposed through Pi's native before-compact span", async () => {
   const calls: string[] = [];
   const capabilitySet = capabilitySession.createRinCapabilitySet({

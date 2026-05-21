@@ -14,8 +14,7 @@ const { RinFrontendTurnDriver } = await import(
   ).href
 );
 
-const NOTICE_NO_CHANGE =
-  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u65e0\u53d8\u66f4";
+const NOTICE_NO_CHANGE = "Self-improve review completed with no changes.";
 
 function createDriver() {
   const client = createFrontendClient();
@@ -187,12 +186,12 @@ test("frontend SDK turn driver forwards passive notices without changing phase",
   driver.subscribe((event: any) => seen.push(event));
 
   await driver.handleClientEvent({
-    type: "extension_ui_request",
+    type: "ui",
     payload: {
-      type: "extension_ui_request",
-      method: "notify",
-      message: NOTICE_NO_CHANGE,
-      notifyType: "info",
+      type: "self_improve_review_notice",
+      status: "completed",
+      targets: [],
+      changedCount: 0,
     },
   });
 
@@ -204,6 +203,26 @@ test("frontend SDK turn driver forwards passive notices without changing phase",
     },
   ]);
   assert.equal(driver.frontendPhase, "idle");
+});
+
+test("frontend SDK turn driver flushes pending self-improve notices on connect", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+
+  await driver.connect();
+
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "request"),
+    [
+      {
+        type: "request",
+        command: {
+          type: "flush_self_improve_notices",
+          sessionFile: undefined,
+        },
+      },
+    ],
+  );
 });
 
 test("frontend SDK turn driver runs turns through a frontend client", async () => {
@@ -227,7 +246,10 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
       .map((call: any) => call.type),
     ["newSession", "prompt"],
   );
-  assert.equal(client.calls[0].options.managedSessionLeaf, "telegram/1:2");
+  const newSessionCall = client.calls.find(
+    (call: any) => call.type === "newSession",
+  );
+  assert.equal(newSessionCall.options.managedSessionLeaf, "telegram/1:2");
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "hello");
   assert.equal(promptCall.options.sessionFile, "/tmp/frontend-managed.jsonl");
@@ -271,10 +293,13 @@ test("frontend SDK turn driver uses configured built-in command responses", asyn
   });
 
   assert.equal(result.text, "\u5df2\u5f00\u59cb\u65b0\u4f1a\u8bdd\u3002");
-  assert.deepEqual(client.calls[0], {
-    type: "newSession",
-    options: { managedSessionLeaf: "chat" },
-  });
+  assert.deepEqual(
+    client.calls.find((call: any) => call.type === "newSession"),
+    {
+      type: "newSession",
+      options: { managedSessionLeaf: "chat" },
+    },
+  );
 });
 
 test("frontend SDK turn driver reports an explicit missing session target", async () => {
@@ -547,10 +572,11 @@ test("frontend SDK turn driver steers through native prompt streamingBehavior", 
   });
 
   assert.equal(result.steered, true);
-  assert.equal(client.calls[0].type, "prompt");
-  assert.equal(client.calls[0].text, "steer now");
-  assert.equal(client.calls[0].options.streamingBehavior, "steer");
-  assert.equal(client.calls[0].options.source, "chat-bridge");
+  const promptCall = client.calls.find((call: any) => call.type === "prompt");
+  assert.equal(promptCall.type, "prompt");
+  assert.equal(promptCall.text, "steer now");
+  assert.equal(promptCall.options.streamingBehavior, "steer");
+  assert.equal(promptCall.options.source, "chat-bridge");
 });
 
 test("frontend SDK turn driver does not leak growing final-answer prefixes as interim", async () => {

@@ -7,6 +7,7 @@ import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
+import { takePendingMemoryMaintenanceNotices } from "../self-improve/async-jobs.js";
 import { safeString } from "../text-utils.js";
 import {
   getCommandArgumentCompletions,
@@ -752,6 +753,21 @@ export async function runCustomRpcMode(
 
   await bindCurrentSession();
 
+  const flushPendingSelfImproveNotices = async (sessionFile?: string) => {
+    const profile = resolveRuntimeProfile({
+      cwd:
+        safeString(runtime.cwd || getSession()?.sessionManager?.getCwd?.()) ||
+        process.cwd(),
+      agentDir: safeString(runtime.services?.agentDir).trim() || undefined,
+    });
+    const notices = await takePendingMemoryMaintenanceNotices({
+      agentDir: profile.agentDir,
+      sessionFile,
+    });
+    for (const notice of notices) output(notice);
+    return notices.length;
+  };
+
   const handleCommand = async (command: any) => {
     const session = getSession();
     const id = command?.id;
@@ -821,6 +837,12 @@ export async function runCustomRpcMode(
           type,
           getSessionState(session, { turnActive: isTurnActive() }),
         );
+      case "flush_self_improve_notices":
+        return run(id, type, async () => ({
+          flushed: await flushPendingSelfImproveNotices(
+            safeString(command.sessionFile).trim() || undefined,
+          ),
+        }));
       case "get_state":
         return done(
           id,
@@ -1063,6 +1085,7 @@ export async function runCustomRpcMode(
                     : undefined,
                 );
             await bindCurrentSession();
+            await flushPendingSelfImproveNotices();
             const rebound = getSession();
             return {
               cancelled: Boolean(value?.cancelled),
@@ -1080,6 +1103,7 @@ export async function runCustomRpcMode(
           () =>
             runtime.switchSession(sessionFile).then(async (value: any) => {
               await bindCurrentSession();
+              await flushPendingSelfImproveNotices();
               return value;
             }),
           (value) => ({ cancelled: Boolean(value?.cancelled) }),

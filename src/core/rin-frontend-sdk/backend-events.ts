@@ -5,6 +5,11 @@ import {
   extractTextBeforeFirstToolCall,
 } from "../message-content.js";
 import { safeString } from "../text-utils.js";
+import {
+  formatSelfImproveReviewNotice,
+  resolveRinFrontendCommandResponses,
+  type RinFrontendCommandResponses,
+} from "./command-responses.js";
 import type {
   RinFrontendBackendEvent,
   RinFrontendStatusPhase,
@@ -63,7 +68,14 @@ export type RinFrontendBackendEventTranslator = {
   resetAssistantSegments(): void;
 };
 
-export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEventTranslator {
+export function createRinFrontendBackendEventTranslator(
+  options: {
+    commandResponses?: Partial<RinFrontendCommandResponses>;
+  } = {},
+): RinFrontendBackendEventTranslator {
+  const commandResponses = resolveRinFrontendCommandResponses(
+    options.commandResponses,
+  );
   let latestAssistantText = "";
   let latestAssistantFinalText = "";
   const deliveredAssistantInterimTexts = new Set<string>();
@@ -113,19 +125,16 @@ export function createRinFrontendBackendEventTranslator(): RinFrontendBackendEve
         ];
       }
 
-      if (payload.type === "extension_ui_request") {
-        const method = safeString(payload.method).trim();
-        if (method === "notify") {
-          const text = safeString(payload.message).trim();
-          if (!text || !text.startsWith("💡 自我整理：")) return [];
-          const notifyType = safeString(payload.notifyType).trim();
-          const level =
-            notifyType === "warning" || notifyType === "error"
-              ? notifyType
-              : "info";
-          return [{ type: "passive_notice", text, level }];
-        }
-        return [];
+      if (payload.type === "extension_ui_request") return [];
+
+      if (payload.type === "self_improve_review_notice") {
+        return [
+          {
+            type: "passive_notice",
+            text: formatSelfImproveReviewNotice(payload, commandResponses),
+            level: payload.status === "failed" ? "error" : "info",
+          },
+        ];
       }
 
       if (payload.type === "rpc_turn_event") {

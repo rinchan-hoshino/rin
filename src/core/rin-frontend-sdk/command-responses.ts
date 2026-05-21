@@ -8,6 +8,13 @@ export type RinFrontendCommandResponses = {
   newCancelled: string;
   compact: string;
   reload: string;
+  selfImproveReviewQueued: string;
+  selfImproveReviewSkipped: string;
+  selfImproveReviewFailed: string;
+  selfImproveReviewNoChange: string;
+  selfImproveReviewChanged: string;
+  selfImproveReviewChangedWithMore: string;
+  selfImproveReviewChangedCount: string;
 };
 
 export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses =
@@ -17,6 +24,14 @@ export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses
     newCancelled: "Session switch cancelled.",
     compact: "Compacted session.",
     reload: "Reloaded extensions, prompts, skills, and themes.",
+    selfImproveReviewQueued: "Self-improve review queued.",
+    selfImproveReviewSkipped: "Self-improve review skipped.",
+    selfImproveReviewFailed: "Self-improve review failed.",
+    selfImproveReviewNoChange: "Self-improve review completed with no changes.",
+    selfImproveReviewChanged: "Self-improve review updated {targets}.",
+    selfImproveReviewChangedWithMore:
+      "Self-improve review updated {targets} and {count} more.",
+    selfImproveReviewChangedCount: "Self-improve review updated {count} files.",
   };
 
 export function resolveRinFrontendCommandResponses(
@@ -34,6 +49,55 @@ export function resolveRinFrontendCommandResponses(
       },
     ),
   ) as RinFrontendCommandResponses;
+}
+
+function replaceTemplateValues(
+  template: string,
+  values: Record<string, string>,
+) {
+  return Object.entries(values).reduce(
+    (text, [key, value]) => text.replaceAll(`{${key}}`, value),
+    template,
+  );
+}
+
+export function formatSelfImproveReviewNotice(
+  input: unknown,
+  responses: RinFrontendCommandResponses = resolveRinFrontendCommandResponses(),
+) {
+  const notice = isJsonRecord(input) ? input : {};
+  const status = safeString(notice.status).trim();
+  if (status === "queued") return responses.selfImproveReviewQueued;
+  if (status === "failed") return responses.selfImproveReviewFailed;
+  if (status === "skipped") return responses.selfImproveReviewSkipped;
+  const targets = Array.isArray(notice.targets)
+    ? notice.targets.map((item) => safeString(item).trim()).filter(Boolean)
+    : [];
+  const hiddenTargetCount = Math.max(
+    0,
+    Math.floor(Number(notice.hiddenTargetCount || 0)) || 0,
+  );
+  const changedCount = Math.max(
+    0,
+    Math.floor(Number(notice.changedCount || 0)) || 0,
+  );
+  if (targets.length && hiddenTargetCount > 0) {
+    return replaceTemplateValues(responses.selfImproveReviewChangedWithMore, {
+      targets: targets.join(", "),
+      count: String(hiddenTargetCount),
+    });
+  }
+  if (targets.length) {
+    return replaceTemplateValues(responses.selfImproveReviewChanged, {
+      targets: targets.join(", "),
+    });
+  }
+  if (changedCount > 0) {
+    return replaceTemplateValues(responses.selfImproveReviewChangedCount, {
+      count: String(changedCount),
+    });
+  }
+  return responses.selfImproveReviewNoChange;
 }
 
 export function frontendCommandNameFromLine(commandLine: string) {

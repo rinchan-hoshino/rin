@@ -1137,6 +1137,9 @@ export async function createConfiguredAgentSession(
             ?.sendCustomMessage?.(message, messageOptions)
             .catch?.(() => {});
         },
+        emitEvent: (event) => {
+          sessionRef.current?.__rinEmitCoreEvent?.(event);
+        },
       }),
     });
 

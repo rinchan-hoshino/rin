@@ -89,6 +89,17 @@ export async function submitNativeFrontendPromptTurn(
   await client.prompt(input.text, promptOptions);
 }
 
+export async function flushPendingSelfImproveNotices(
+  client: Pick<RinFrontendClient, "isConnected" | "request">,
+  sessionFile?: string,
+) {
+  if (!client.isConnected()) return;
+  await client.request({
+    type: "flush_self_improve_notices",
+    sessionFile: safeString(sessionFile || "").trim() || undefined,
+  });
+}
+
 function isAgentAlreadyProcessingError(error: unknown) {
   return safeString((error as any)?.message || error).includes(
     "Agent is already processing.",
@@ -121,8 +132,7 @@ export class RinFrontendTurnDriver {
     resolve: (value: any) => void;
     reject: (error: Error) => void;
   } | null = null;
-  private readonly backendEventTranslator =
-    createRinFrontendBackendEventTranslator();
+  private readonly backendEventTranslator;
   latestAssistantText = "";
   assistantFinalReplyCommitted = false;
   frontendPhase: RinFrontendTurnPhase = "idle";
@@ -144,6 +154,9 @@ export class RinFrontendTurnDriver {
     this.commandResponses = resolveRinFrontendCommandResponses(
       options.commandResponses,
     );
+    this.backendEventTranslator = createRinFrontendBackendEventTranslator({
+      commandResponses: this.commandResponses,
+    });
   }
 
   subscribe(listener: (event: RinFrontendTurnDriverEvent) => void) {
@@ -173,9 +186,11 @@ export class RinFrontendTurnDriver {
     ).trim();
     if (wantedSessionFile) {
       await this.selectSessionTarget(wantedSessionFile);
+      await this.flushPendingSelfImproveNotices().catch(() => {});
       return;
     }
     await this.refreshFrontendState().catch(() => {});
+    await this.flushPendingSelfImproveNotices().catch(() => {});
   }
 
   dispose() {
@@ -423,6 +438,11 @@ export class RinFrontendTurnDriver {
     throw new Error("rin_disconnected:rpc_turn_queued_offline");
   }
 
+  private async flushPendingSelfImproveNotices(sessionFile?: string) {
+    if (!this.client) return;
+    await flushPendingSelfImproveNotices(this.client, sessionFile);
+  }
+
   private async selectSessionTarget(sessionFile?: string) {
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return { changed: false };
@@ -470,6 +490,7 @@ export class RinFrontendTurnDriver {
       await this.refreshFrontendState(this.currentSessionFile()).catch(
         () => {},
       );
+      await this.flushPendingSelfImproveNotices().catch(() => {});
     } else if (wanted) {
       await this.selectSessionTarget(wanted);
     }
@@ -521,6 +542,9 @@ export class RinFrontendTurnDriver {
       await this.refreshFrontendState(this.currentSessionFile()).catch(
         () => {},
       );
+      if (!value?.cancelled) {
+        await this.flushPendingSelfImproveNotices().catch(() => {});
+      }
       return {
         handled: true,
         cancelled: Boolean(value?.cancelled),

@@ -59,6 +59,7 @@ export {
 
 export {
   RinFrontendTurnDriver,
+  flushPendingSelfImproveNotices,
   submitNativeFrontendPromptTurn,
   type RinFrontendPromptTurnInput,
   type RinFrontendTurnClient,

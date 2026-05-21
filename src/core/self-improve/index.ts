@@ -6,10 +6,12 @@ import { existsSync, readFileSync } from "fs";
 import { isAssistantFinalMessage } from "../message-content.js";
 
 import {
+  appendPendingMemoryMaintenanceNotice,
+  buildMemoryMaintenanceNotice,
   enqueueMemoryMaintenanceJob,
-  formatMemoryMaintenancePassiveNotice,
   runMemoryMaintenanceJobNow,
   spawnQueuedMemoryWorker,
+  takePendingMemoryMaintenanceNotices,
 } from "./async-jobs.js";
 import {
   formatSelfImproveAgentResult,
@@ -152,12 +154,36 @@ function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
   };
 }
 
-function notifySelfImproveReview(ctx: any, message: string) {
-  const text = String(message || "").trim();
-  if (!text) return;
+function emitSelfImproveReviewNotice(ctx: any, notice: unknown) {
   try {
-    ctx?.ui?.notify?.(text, "info");
+    ctx?.emitEvent?.(notice);
   } catch {}
+}
+
+async function recordSelfImproveReviewNotice(
+  ctx: any,
+  job: ReturnType<typeof resolveReviewJob>,
+  notice: unknown,
+) {
+  if (!job || !notice || typeof notice !== "object") return;
+  await appendPendingMemoryMaintenanceNotice({
+    agentDir: job.agentDir,
+    sessionFile: job.sessionFile,
+    notice: notice as any,
+  });
+}
+
+async function flushSelfImproveReviewNotices(
+  ctx: any,
+  options: { sessionFile?: string } = {},
+) {
+  const agentDir = String(ctx?.agentDir || "").trim();
+  if (!agentDir) return;
+  const notices = await takePendingMemoryMaintenanceNotices({
+    agentDir,
+    sessionFile: options.sessionFile,
+  });
+  for (const notice of notices) emitSelfImproveReviewNotice(ctx, notice);
 }
 
 async function enqueueSelfImproveReview(
@@ -170,9 +196,10 @@ async function enqueueSelfImproveReview(
   await enqueueMemoryMaintenanceJob(job);
   const spawned = spawnQueuedMemoryWorker(job.agentDir);
   if (!options.notifyQueued) return;
-  notifySelfImproveReview(
+  await recordSelfImproveReviewNotice(
     ctx,
-    formatMemoryMaintenancePassiveNotice({
+    job,
+    buildMemoryMaintenanceNotice({
       status: spawned ? "queued" : "skipped",
       skipped: spawned ? "" : "worker-unavailable",
     }),
@@ -188,25 +215,24 @@ async function processSelfImproveReviewNow(
   if (!job) return;
   try {
     const result = await runner(job);
-    notifySelfImproveReview(
+    await recordSelfImproveReviewNotice(
       ctx,
-      String(
-        (result as any)?.passiveNotice ||
-          formatMemoryMaintenancePassiveNotice({
-            status: (result as any)?.status,
-            changedFiles: (result as any)?.result?.changedFiles,
-            skipped: (result as any)?.skipped,
-          }),
-      ),
+      job,
+      (result as any)?.notice ||
+        buildMemoryMaintenanceNotice({
+          status: (result as any)?.status,
+          changedFiles: (result as any)?.result?.changedFiles,
+          skipped: (result as any)?.skipped,
+        }),
     );
     return result;
   } catch (error: any) {
     const result = {
       status: "failed",
       error: String(error?.message || error || "maintenance_job_failed"),
-      passiveNotice: formatMemoryMaintenancePassiveNotice({ status: "failed" }),
+      notice: buildMemoryMaintenanceNotice({ status: "failed" }),
     };
-    notifySelfImproveReview(ctx, result.passiveNotice);
+    await recordSelfImproveReviewNotice(ctx, job, result.notice);
     return result;
   }
 }
@@ -252,6 +278,9 @@ export default function selfImproveModule(
             );
             state.lastQueuedMessage = state.finalMessages;
           }
+          await flushSelfImproveReviewNotices(ctx, {
+            sessionFile: meta.sessionFile,
+          });
         },
       ],
       session_shutdown: [
