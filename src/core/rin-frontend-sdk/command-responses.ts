@@ -51,6 +51,8 @@ export function resolveRinFrontendCommandResponses(
   ) as RinFrontendCommandResponses;
 }
 
+const SELF_IMPROVE_REVIEW_NOTICE_PREFIX = "💡 ";
+
 function replaceTemplateValues(
   template: string,
   values: Record<string, string>,
@@ -61,15 +63,30 @@ function replaceTemplateValues(
   );
 }
 
+function prefixSelfImproveReviewNotice(text: string) {
+  const trimmed = safeString(text).trim();
+  if (!trimmed) return SELF_IMPROVE_REVIEW_NOTICE_PREFIX.trim();
+  if (trimmed.startsWith(SELF_IMPROVE_REVIEW_NOTICE_PREFIX.trim())) {
+    return trimmed;
+  }
+  return `${SELF_IMPROVE_REVIEW_NOTICE_PREFIX}${trimmed}`;
+}
+
 export function formatSelfImproveReviewNotice(
   input: unknown,
   responses: RinFrontendCommandResponses = resolveRinFrontendCommandResponses(),
 ) {
   const notice = isJsonRecord(input) ? input : {};
   const status = safeString(notice.status).trim();
-  if (status === "queued") return responses.selfImproveReviewQueued;
-  if (status === "failed") return responses.selfImproveReviewFailed;
-  if (status === "skipped") return responses.selfImproveReviewSkipped;
+  if (status === "queued") {
+    return prefixSelfImproveReviewNotice(responses.selfImproveReviewQueued);
+  }
+  if (status === "failed") {
+    return prefixSelfImproveReviewNotice(responses.selfImproveReviewFailed);
+  }
+  if (status === "skipped") {
+    return prefixSelfImproveReviewNotice(responses.selfImproveReviewSkipped);
+  }
   const targets = Array.isArray(notice.targets)
     ? notice.targets.map((item) => safeString(item).trim()).filter(Boolean)
     : [];
@@ -82,22 +99,28 @@ export function formatSelfImproveReviewNotice(
     Math.floor(Number(notice.changedCount || 0)) || 0,
   );
   if (targets.length && hiddenTargetCount > 0) {
-    return replaceTemplateValues(responses.selfImproveReviewChangedWithMore, {
-      targets: targets.join(", "),
-      count: String(hiddenTargetCount),
-    });
+    return prefixSelfImproveReviewNotice(
+      replaceTemplateValues(responses.selfImproveReviewChangedWithMore, {
+        targets: targets.join(", "),
+        count: String(hiddenTargetCount),
+      }),
+    );
   }
   if (targets.length) {
-    return replaceTemplateValues(responses.selfImproveReviewChanged, {
-      targets: targets.join(", "),
-    });
+    return prefixSelfImproveReviewNotice(
+      replaceTemplateValues(responses.selfImproveReviewChanged, {
+        targets: targets.join(", "),
+      }),
+    );
   }
   if (changedCount > 0) {
-    return replaceTemplateValues(responses.selfImproveReviewChangedCount, {
-      count: String(changedCount),
-    });
+    return prefixSelfImproveReviewNotice(
+      replaceTemplateValues(responses.selfImproveReviewChangedCount, {
+        count: String(changedCount),
+      }),
+    );
   }
-  return responses.selfImproveReviewNoChange;
+  return prefixSelfImproveReviewNotice(responses.selfImproveReviewNoChange);
 }
 
 export function frontendCommandNameFromLine(commandLine: string) {

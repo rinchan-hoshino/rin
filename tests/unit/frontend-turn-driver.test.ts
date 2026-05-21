@@ -14,7 +14,7 @@ const { RinFrontendTurnDriver } = await import(
   ).href
 );
 
-const NOTICE_NO_CHANGE = "Self-improve review completed with no changes.";
+const NOTICE_NO_CHANGE = "💡 Self-improve review completed with no changes.";
 
 function createDriver() {
   const client = createFrontendClient();

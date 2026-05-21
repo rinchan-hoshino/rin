@@ -14,8 +14,8 @@ const sdk = await import(
   ).href
 );
 
-const NOTICE_NO_CHANGE = "Self-improve review completed with no changes.";
-const NOTICE_CHANGED = "Self-improve review updated demo.";
+const NOTICE_NO_CHANGE = "💡 Self-improve review completed with no changes.";
+const NOTICE_CHANGED = "💡 Self-improve review updated demo.";
 
 test("frontend backend event translator exposes status as a shared frontend event", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();

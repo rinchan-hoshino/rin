@@ -564,8 +564,8 @@ export async function startChatBridge(
       chatKey: decision.chatKey,
       chatName:
         pickChatName(session) ||
-        (getChatType(session) === "private" ? pickSenderNickname(session) : ""),
-      chatType: getChatType(session),
+        (decision.chatType === "private" ? pickSenderNickname(session) : ""),
+      chatType: decision.chatType,
       userId: pickUserId(session),
       nickname: pickSenderNickname(session),
       groupNickname: pickSenderGroupNickname(session) || undefined,

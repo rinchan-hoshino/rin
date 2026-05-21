@@ -44,6 +44,7 @@ export type InboundAttachmentFailure = {
 export type ChatState = {
   chatKey: string;
   sessionFile?: string;
+  chatType?: "private" | "group";
 };
 
 export const CHAT_WORKING_NOTICE_TEXT = "Working...";

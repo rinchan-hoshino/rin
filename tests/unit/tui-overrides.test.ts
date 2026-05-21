@@ -217,6 +217,42 @@ test("async Rin update notice fills its startup placeholder instead of appending
   assert.equal(renderRequests, 1);
 });
 
+test("self-improve notices render as chat custom messages", () => {
+  themeModule.initTheme("dark", false);
+  const chatContainer = new piTuiModule.Container();
+  let renderRequests = 0;
+  let footerInvalidations = 0;
+  const instance = {
+    chatContainer,
+    footer: {
+      invalidate() {
+        footerInvalidations += 1;
+      },
+    },
+    ui: {
+      requestRender() {
+        renderRequests += 1;
+      },
+    },
+  };
+
+  assert.equal(
+    overrides.showSelfImproveReviewNotice(instance, {
+      type: "self_improve_review_notice",
+      status: "completed",
+      targets: [],
+      changedCount: 0,
+    }),
+    true,
+  );
+
+  const rendered = chatContainer.render(100).join("\n");
+  assert.match(rendered, /\[self-improve\]/);
+  assert.match(rendered, /💡 Self-improve review completed with no changes\./);
+  assert.equal(renderRequests, 1);
+  assert.equal(footerInvalidations, 1);
+});
+
 test("update overrides replace startup update path and keep single changelog version state", async () => {
   await overrides.applyRinTuiOverrides();
 

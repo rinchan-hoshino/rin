@@ -42,6 +42,7 @@ import {
   markProcessedChatMessage,
   safeString,
 } from "./chat-helpers.js";
+import { listChatMessages } from "./message-store.js";
 import { restorePromptParts, sendOutboxPayload } from "./transport.js";
 import {
   formatChatRuntimeErrorForUser,
@@ -207,6 +208,8 @@ export class ChatController {
         deps.frontendClientFactory || (() => new RinDaemonFrontendClient()),
       promptSource: "chat-bridge",
       commandResponses: this.getCommandResponses(),
+      selfImproveNoticeSessionFiles: () =>
+        this.selfImproveNoticeSessionFilesForChat(),
     });
     this.driver.subscribe((event) => {
       void this.handleFrontendEvent(event).catch(() => {});
@@ -257,6 +260,9 @@ export class ChatController {
       this.state.sessionFile,
     );
     if (storedSessionFile) nextState.sessionFile = storedSessionFile;
+    if (this.state.chatType === "private" || this.state.chatType === "group") {
+      nextState.chatType = this.state.chatType;
+    }
     this.state = nextState;
     writeJsonFile(this.statePath, nextState);
   }
@@ -666,6 +672,41 @@ export class ChatController {
     return this.currentSessionFile() ? undefined : MANAGED_CHAT_SESSION_LEAF;
   }
 
+  private selfImproveNoticeSessionFilesForChat() {
+    if (this.chatTypeForNoticeScope() === "private") return undefined;
+    const files = new Set<string>();
+    for (const candidate of [this.state.sessionFile]) {
+      const resolved = this.resolveSessionFileForUse(candidate);
+      if (resolved) files.add(resolved);
+    }
+    for (const item of listChatMessages(this.agentDir)) {
+      if (item.chatKey !== this.chatKey) continue;
+      const resolved = this.resolveSessionFileForUse(item.sessionFile);
+      if (resolved) files.add(resolved);
+    }
+    return [...files];
+  }
+
+  private chatTypeForNoticeScope() {
+    if (this.state.chatType === "private" || this.state.chatType === "group") {
+      return this.state.chatType;
+    }
+    const stored = listChatMessages(this.agentDir)
+      .filter((item) => item.chatKey === this.chatKey)
+      .sort((left, right) =>
+        safeString(right.receivedAt).localeCompare(safeString(left.receivedAt)),
+      )
+      .find((item) => item.chatType === "private" || item.chatType === "group");
+    return stored?.chatType || "group";
+  }
+
+  private rememberPromptChatType(promptMeta?: PromptContextMeta) {
+    const chatType = safeString((promptMeta as any)?.chatType).trim();
+    if (chatType === "private" || chatType === "group") {
+      this.state.chatType = chatType;
+    }
+  }
+
   private markAcceptedMessage(messageId?: string) {
     if (!this.affectChatBinding) return;
     const nextMessageId = safeString(messageId || "").trim();
@@ -888,6 +929,7 @@ export class ChatController {
     _sessionFile = "",
     promptMeta?: PromptContextMeta,
   ) {
+    this.rememberPromptChatType(promptMeta);
     const commandName = frontendCommandNameFromLine(commandLine);
     const hadActiveTurn = this.hasActiveTurn();
     const abortingActiveTurn = commandName === "abort" && hadActiveTurn;
@@ -1018,6 +1060,7 @@ export class ChatController {
     },
     mode: "prompt" | "steer" = "prompt",
   ) {
+    this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
     if (mode === "steer" && this.canSteerActiveTurn()) {
       await this.beginVisibleProcessingTurn({

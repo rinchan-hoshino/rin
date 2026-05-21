@@ -1,4 +1,5 @@
 import {
+  CustomMessageComponent,
   DynamicBorder,
   FooterComponent,
   InteractiveMode,
@@ -29,6 +30,7 @@ import {
   type RinUpdateNotice,
 } from "../rin-lib/update-notices.js";
 import { extractMessageText } from "../message-content.js";
+import { formatSelfImproveReviewNotice } from "../rin-frontend-sdk/command-responses.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 import {
   getRinTuiRuntimeRole,
@@ -392,6 +394,28 @@ export function insertRinUpdateNotificationPlaceholder(instance: any) {
   const placeholder = new DeferredRinUpdateNotification();
   instance.chatContainer.addChild(placeholder);
   return placeholder;
+}
+
+export function showSelfImproveReviewNotice(instance: any, event: any) {
+  const text = formatSelfImproveReviewNotice(event);
+  if (!text) return false;
+  if (typeof instance?.chatContainer?.addChild !== "function") return false;
+  const component = new CustomMessageComponent(
+    {
+      role: "custom",
+      customType: "self-improve",
+      content: text,
+      display: true,
+      details: event,
+      timestamp: Date.now(),
+    },
+    undefined,
+    instance.getMarkdownThemeWithSettings?.(),
+  );
+  instance.chatContainer.addChild(component);
+  instance.footer?.invalidate?.();
+  instance.ui?.requestRender?.();
+  return true;
 }
 
 export function showRinUpdateNotification(
@@ -1002,6 +1026,11 @@ export async function applyRinTuiOverrides() {
         }
         redrawCurrentSessionHistoryAfterRpcResync(this);
         syncRpcPiLoader(this);
+        return;
+      }
+
+      if (event?.type === "self_improve_review_notice") {
+        showSelfImproveReviewNotice(this, event);
         return;
       }
 

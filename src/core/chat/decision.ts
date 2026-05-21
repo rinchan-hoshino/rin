@@ -204,6 +204,7 @@ export async function shouldProcessText(
       allow: false,
       text: "",
       chatKey: "",
+      chatType: "group" as const,
       trust: "OTHER",
     };
 
@@ -224,5 +225,11 @@ export async function shouldProcessText(
       commandLike: false,
     });
 
-  return { allow, text, chatKey: context.chatKey, trust: context.trust };
+  return {
+    allow,
+    text,
+    chatKey: context.chatKey,
+    chatType,
+    trust: context.trust,
+  };
 }

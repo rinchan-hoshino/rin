@@ -107,6 +107,7 @@ test("chat decision treats two-member owner groups as private-like", async () =>
 
   assert.equal(result.allow, true);
   assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
+  assert.equal(result.chatType, "private");
   assert.equal(result.trust, "OWNER");
 });
 
@@ -136,6 +137,7 @@ test("chat decision treats Feishu owner-only groups as private-like", async () =
   assert.deepEqual(calls, ["oc_owner_only"]);
   assert.equal(result.allow, true);
   assert.equal(result.chatKey, "lark:oc_owner_only");
+  assert.equal(result.chatType, "private");
   assert.equal(result.trust, "OWNER");
 });
 

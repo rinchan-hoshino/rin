@@ -775,7 +775,10 @@ export async function runCustomRpcMode(
 
   await bindCurrentSession();
 
-  const flushPendingSelfImproveNotices = async (sessionFile?: string) => {
+  const flushPendingSelfImproveNotices = async (
+    sessionFile?: string,
+    sessionFiles?: string[],
+  ) => {
     const profile = resolveRuntimeProfile({
       cwd:
         safeString(runtime.cwd || getSession()?.sessionManager?.getCwd?.()) ||
@@ -785,6 +788,7 @@ export async function runCustomRpcMode(
     const notices = await takePendingMemoryMaintenanceNotices({
       agentDir: profile.agentDir,
       sessionFile,
+      sessionFiles,
     });
     for (const notice of notices) output(notice);
     return notices.length;
@@ -865,6 +869,11 @@ export async function runCustomRpcMode(
         return run(id, type, async () => ({
           flushed: await flushPendingSelfImproveNotices(
             safeString(command.sessionFile).trim() || undefined,
+            Array.isArray(command.sessionFiles)
+              ? command.sessionFiles.map((item: unknown) =>
+                  safeString(item).trim(),
+                )
+              : undefined,
           ),
         }));
       case "get_state":

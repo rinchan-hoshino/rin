@@ -92,11 +92,18 @@ export async function submitNativeFrontendPromptTurn(
 export async function flushPendingSelfImproveNotices(
   client: Pick<RinFrontendClient, "isConnected" | "request">,
   sessionFile?: string,
+  options: { sessionFiles?: string[] } = {},
 ) {
   if (!client.isConnected()) return;
+  const sessionFiles = Array.isArray(options.sessionFiles)
+    ? options.sessionFiles
+        .map((item) => safeString(item).trim())
+        .filter(Boolean)
+    : undefined;
   await client.request({
     type: "flush_self_improve_notices",
     sessionFile: safeString(sessionFile || "").trim() || undefined,
+    ...(sessionFiles ? { sessionFiles } : {}),
   });
 }
 
@@ -124,6 +131,7 @@ export class RinFrontendTurnDriver {
   private readonly clientFactory: () => RinFrontendTurnClient;
   private readonly promptSource: string;
   private readonly commandResponses: RinFrontendCommandResponses;
+  private readonly selfImproveNoticeSessionFiles?: () => string[] | undefined;
   client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
@@ -148,12 +156,14 @@ export class RinFrontendTurnDriver {
     clientFactory: () => RinFrontendTurnClient;
     promptSource?: string;
     commandResponses?: Partial<RinFrontendCommandResponses>;
+    selfImproveNoticeSessionFiles?: () => string[] | undefined;
   }) {
     this.clientFactory = options.clientFactory;
     this.promptSource = safeString(options.promptSource).trim() || "frontend";
     this.commandResponses = resolveRinFrontendCommandResponses(
       options.commandResponses,
     );
+    this.selfImproveNoticeSessionFiles = options.selfImproveNoticeSessionFiles;
     this.backendEventTranslator = createRinFrontendBackendEventTranslator({
       commandResponses: this.commandResponses,
     });
@@ -440,7 +450,11 @@ export class RinFrontendTurnDriver {
 
   private async flushPendingSelfImproveNotices(sessionFile?: string) {
     if (!this.client) return;
-    await flushPendingSelfImproveNotices(this.client, sessionFile);
+    await flushPendingSelfImproveNotices(this.client, sessionFile, {
+      sessionFiles: sessionFile
+        ? undefined
+        : this.selfImproveNoticeSessionFiles?.(),
+    });
   }
 
   private async selectSessionTarget(sessionFile?: string) {

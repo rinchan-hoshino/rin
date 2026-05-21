@@ -21,7 +21,7 @@ const { getChatMessage, saveChatMessage } = await import(
     .href
 );
 
-const NOTICE_NO_CHANGE = "Self-improve review completed with no changes.";
+const NOTICE_NO_CHANGE = "💡 Self-improve review completed with no changes.";
 
 async function createController(chatKey = "telegram/1:2") {
   const tempDir = await fs.mkdtemp(
@@ -142,6 +142,90 @@ test("chat controller delivers passive notices as distinct short messages", asyn
     {
       chatId: "2",
       content: [{ type: "text", attrs: { content: NOTICE_NO_CHANGE } }],
+    },
+  ]);
+});
+
+test("chat controller scopes pending self-improve notices outside private chats", async () => {
+  async function createScopedController(chatKey) {
+    const tempDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "rin-chat-notice-scope-"),
+    );
+    const dataDir = path.join(tempDir, "data");
+    await fs.mkdir(dataDir, { recursive: true });
+    const requests = [];
+    const client = {
+      async connect() {},
+      async disconnect() {},
+      isConnected() {
+        return true;
+      },
+      subscribe() {
+        return () => {};
+      },
+      async getState() {
+        return { sessionFile: "/tmp/current.jsonl" };
+      },
+      async resumeSession() {},
+      async request(command) {
+        requests.push(command);
+        return {};
+      },
+    };
+    const controller = new ChatController({}, dataDir, chatKey, {
+      logger: { info() {}, warn() {} },
+      h: {
+        text(content) {
+          return { type: "text", attrs: { content } };
+        },
+      },
+      frontendClientFactory: () => client,
+    });
+    return { controller, requests, agentDir: tempDir };
+  }
+
+  const group = await createScopedController("telegram/1:-100");
+  group.controller.state.sessionFile = "/tmp/group-current.jsonl";
+  saveChatMessage(group.agentDir, {
+    chatKey: "telegram/1:-100",
+    messageId: "group-old",
+    role: "user",
+    platform: "telegram",
+    botId: "1",
+    chatId: "-100",
+    chatType: "group",
+    receivedAt: new Date().toISOString(),
+    sessionFile: "/tmp/group-old.jsonl",
+  });
+  saveChatMessage(group.agentDir, {
+    chatKey: "telegram/1:200",
+    messageId: "other-private",
+    role: "user",
+    platform: "telegram",
+    botId: "1",
+    chatId: "200",
+    chatType: "private",
+    receivedAt: new Date().toISOString(),
+    sessionFile: "/tmp/other-private.jsonl",
+  });
+
+  await group.controller.connect({ restoreSession: false });
+
+  assert.deepEqual(group.requests, [
+    {
+      type: "flush_self_improve_notices",
+      sessionFile: undefined,
+      sessionFiles: ["/tmp/group-current.jsonl", "/tmp/group-old.jsonl"],
+    },
+  ]);
+
+  const privateChat = await createScopedController("telegram/1:200");
+  privateChat.controller.state.chatType = "private";
+  await privateChat.controller.connect({ restoreSession: false });
+  assert.deepEqual(privateChat.requests, [
+    {
+      type: "flush_self_improve_notices",
+      sessionFile: undefined,
     },
   ]);
 });

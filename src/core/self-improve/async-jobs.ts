@@ -155,17 +155,29 @@ export async function appendPendingMemoryMaintenanceNotice(input: {
 export async function takePendingMemoryMaintenanceNotices(input: {
   agentDir: string;
   sessionFile?: string;
+  sessionFiles?: string[];
 }) {
   const agentDir = resolveAgentDir(input.agentDir);
   if (!agentDir) return [];
   const sessionFile = resolveSessionFile(input.sessionFile);
+  const sessionFiles = Array.isArray(input.sessionFiles)
+    ? new Set(
+        input.sessionFiles
+          .map((item) => resolveSessionFile(item))
+          .filter(Boolean),
+      )
+    : null;
   const notices = loadPendingNotices(agentDir);
   const taken: PendingMemoryMaintenanceNotice[] = [];
   const remaining: PendingMemoryMaintenanceNotice[] = [];
   for (const notice of notices) {
+    const noticeSessionFile = resolveSessionFile(notice.sessionFile);
     if (
-      !sessionFile ||
-      resolveSessionFile(notice.sessionFile) === sessionFile
+      sessionFile
+        ? noticeSessionFile === sessionFile
+        : sessionFiles
+          ? sessionFiles.has(noticeSessionFile)
+          : true
     ) {
       taken.push(notice);
     } else {
