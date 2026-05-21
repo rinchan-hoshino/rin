@@ -1530,35 +1530,3 @@ test("signal handler override ignores SIGINT while the TUI is stopped", async ()
     process.off = originalOff;
   }
 });
-
-test("startup extension labels use local package names from source info", async () => {
-  await overrides.applyRinTuiOverrides();
-  const extension = {
-    path: "/tmp/rin-ext/dist/index.js",
-    sourceInfo: {
-      path: "/tmp/rin-ext/dist/index.js",
-      source: "local",
-      scope: "user",
-      origin: "top-level",
-      baseDir: "/tmp/rin-ext",
-      packageName: "@rinchanai/rin-github-issue-bridge",
-      packageRoot: "/tmp/rin-ext",
-    },
-  };
-  const proto = codingAgentModule.InteractiveMode.prototype as any;
-
-  assert.equal(proto.isPackageSource.call({}, extension.sourceInfo), true);
-  assert.deepEqual(proto.getCompactExtensionLabels.call(proto, [extension]), [
-    "@rinchanai/rin-github-issue-bridge:dist",
-  ]);
-  const groups = proto.buildScopeGroups.call(
-    {
-      getScopeGroup: proto.getScopeGroup,
-      isPackageSource: proto.isPackageSource,
-    },
-    [extension],
-  );
-  assert.deepEqual(Array.from(groups[0].packages.keys()), [
-    "@rinchanai/rin-github-issue-bridge",
-  ]);
-});

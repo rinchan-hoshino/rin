@@ -66,18 +66,6 @@ function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
 }
 
-function packageExtensionLabel(sourceInfo: any) {
-  const packageName = String(sourceInfo?.packageName || "").trim();
-  return packageName || undefined;
-}
-
-function packageExtensionGroupKey(sourceInfo: any) {
-  return (
-    packageExtensionLabel(sourceInfo) ||
-    String(sourceInfo?.packageRoot || sourceInfo?.source || "").trim()
-  );
-}
-
 function currentRuntimeModeLabel() {
   const role = getRinTuiRuntimeRole();
   if (role === RIN_TUI_RPC_FRONTEND_ROLE) return "daemon";
@@ -797,58 +785,6 @@ export async function applyRinTuiOverrides() {
       }
       return nextLines;
     };
-  }
-
-  const originalIsPackageSource = interactiveModeProto?.isPackageSource;
-  if (typeof originalIsPackageSource === "function") {
-    interactiveModeProto.isPackageSource =
-      function isPackageSourceWithLocalPackages(sourceInfo: any) {
-        return (
-          Boolean(packageExtensionLabel(sourceInfo)) ||
-          originalIsPackageSource.call(this, sourceInfo)
-        );
-      };
-  }
-
-  const originalGetCompactPackageSourceLabel =
-    interactiveModeProto?.getCompactPackageSourceLabel;
-  if (typeof originalGetCompactPackageSourceLabel === "function") {
-    interactiveModeProto.getCompactPackageSourceLabel =
-      function getCompactPackageSourceLabelWithLocalPackages(sourceInfo: any) {
-        return (
-          packageExtensionLabel(sourceInfo) ||
-          originalGetCompactPackageSourceLabel.call(this, sourceInfo)
-        );
-      };
-  }
-
-  const originalBuildScopeGroups = interactiveModeProto?.buildScopeGroups;
-  if (typeof originalBuildScopeGroups === "function") {
-    interactiveModeProto.buildScopeGroups =
-      function buildScopeGroupsWithLocalPackages(
-        items: Array<{ path: string; sourceInfo?: any }>,
-      ) {
-        const groups: any = {
-          user: { scope: "user", paths: [], packages: new Map() },
-          project: { scope: "project", paths: [], packages: new Map() },
-          path: { scope: "path", paths: [], packages: new Map() },
-        };
-        for (const item of items || []) {
-          const groupKey = this.getScopeGroup(item.sourceInfo);
-          const group = groups[groupKey] || groups.path;
-          if (this.isPackageSource(item.sourceInfo)) {
-            const source = packageExtensionGroupKey(item.sourceInfo);
-            const list = group.packages.get(source) || [];
-            list.push(item);
-            group.packages.set(source, list);
-          } else {
-            group.paths.push(item);
-          }
-        }
-        return [groups.project, groups.user, groups.path].filter(
-          (group) => group.paths.length > 0 || group.packages.size > 0,
-        );
-      };
   }
 
   const originalInit = interactiveModeProto?.init;
