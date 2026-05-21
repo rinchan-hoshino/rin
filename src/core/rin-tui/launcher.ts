@@ -175,6 +175,30 @@ function applyTuiRuntimeRole(maintenanceMode: boolean) {
   );
 }
 
+export async function prepareRpcSessionWorkerForInteractiveStartup(
+  rpcSession: Pick<
+    RpcInteractiveSession,
+    | "prepareForInteractiveStartup"
+    | "connect"
+    | "ensureSessionReady"
+    | "settingsManager"
+  >,
+  interactiveOptions: TuiInteractiveOptions,
+  profile: Pick<ReturnType<typeof startupProfiler>, "mark">,
+) {
+  await rpcSession.prepareForInteractiveStartup();
+  applyQuietStartupVersionCheckEnv(
+    rpcSession.settingsManager,
+    interactiveOptions,
+  );
+  await waitForRpcStartupStep(rpcSession.connect(), "rpc_connect");
+  await waitForRpcStartupStep(
+    rpcSession.ensureSessionReady(),
+    "rpc_session_ready",
+  );
+  profile.mark("rpc-session-created");
+}
+
 async function runInteractiveMode(
   runtime: ConstructorParameters<typeof InteractiveMode>[0],
   interactiveOptions: TuiInteractiveOptions,
@@ -243,7 +267,11 @@ async function startRpcTui(
   let runtimeHost: { dispose(): Promise<void> } | undefined;
   let interactiveMode: InteractiveMode | undefined;
   try {
-    await rpcSession.prepareForInteractiveStartup();
+    await prepareRpcSessionWorkerForInteractiveStartup(
+      rpcSession,
+      interactiveOptions,
+      profile,
+    );
     runtimeHost = createFrontendSdkRuntimeWrapper(
       createRpcRuntimeHost(rpcSession),
     );
@@ -253,19 +281,6 @@ async function startRpcTui(
       interactiveOptions,
     );
     await (interactiveMode as any).init();
-    applyQuietStartupVersionCheckEnv(
-      rpcSession.settingsManager,
-      interactiveOptions,
-    );
-    await waitForRpcStartupStep(rpcSession.connect(), "rpc_connect");
-    await waitForRpcStartupStep(
-      rpcSession.ensureSessionReady(),
-      "rpc_session_ready",
-    );
-    profile.mark("rpc-session-created");
-    await (interactiveMode as any).rebindCurrentSession?.();
-    (interactiveMode as any).renderCurrentSessionState?.();
-    (interactiveMode as any).ui?.requestRender?.();
   } catch (error) {
     interactiveMode?.stop?.();
     if (runtimeHost) {

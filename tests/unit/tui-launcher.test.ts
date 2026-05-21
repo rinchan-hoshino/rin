@@ -110,6 +110,37 @@ test("rpc tui reuses a pre-initialized interactive mode without starting it twic
   assert.equal(runCalled, true);
 });
 
+test("rpc startup prepares the daemon worker before interactive mode init", async () => {
+  const calls: string[] = [];
+  await launcher.prepareRpcSessionWorkerForInteractiveStartup(
+    {
+      settingsManager: { getQuietStartup: () => true },
+      async prepareForInteractiveStartup() {
+        calls.push("prepare");
+      },
+      async connect() {
+        calls.push("connect");
+      },
+      async ensureSessionReady() {
+        calls.push("ensureSessionReady");
+      },
+    },
+    { verbose: true },
+    {
+      mark(label: string) {
+        calls.push(`mark:${label}`);
+      },
+    },
+  );
+
+  assert.deepEqual(calls, [
+    "prepare",
+    "connect",
+    "ensureSessionReady",
+    "mark:rpc-session-created",
+  ]);
+});
+
 test("tui launcher clears the visible viewport before taking over the terminal", () => {
   const writes: string[] = [];
   launcher.clearVisibleTerminalForTuiStartup({
