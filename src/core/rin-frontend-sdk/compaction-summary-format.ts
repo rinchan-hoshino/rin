@@ -1,9 +1,24 @@
 const DEFAULT_EXPAND_KEY_TEXT = "ctrl+o";
+const DEFAULT_LINE_TEMPLATE =
+  "Compacted from {tokens} tokens ({expandKey} to expand)";
+const DEFAULT_TEXT_TEMPLATE = "[compaction]\n\n{summary}";
 
 export type CompactionSummaryCollapsedTextOptions = {
   expandKeyText?: string;
   includeLabel?: boolean;
+  lineTemplate?: string;
+  textTemplate?: string;
 };
+
+function replaceTemplateValues(
+  template: string,
+  values: Record<string, string>,
+) {
+  return Object.entries(values).reduce(
+    (text, [key, value]) => text.replaceAll(`{${key}}`, value),
+    template,
+  );
+}
 
 export function formatCompactionTokenCount(tokensBefore: unknown) {
   const value = Number(tokensBefore);
@@ -19,7 +34,10 @@ export function formatCompactionSummaryCollapsedLine(
   if (!tokenText) return "";
   const expandKeyText =
     String(options.expandKeyText || "").trim() || DEFAULT_EXPAND_KEY_TEXT;
-  return `Compacted from ${tokenText} tokens (${expandKeyText} to expand)`;
+  return replaceTemplateValues(
+    String(options.lineTemplate || "").trim() || DEFAULT_LINE_TEMPLATE,
+    { tokens: tokenText, expandKey: expandKeyText },
+  );
 }
 
 export function formatCompactionSummaryCollapsedText(
@@ -28,5 +46,9 @@ export function formatCompactionSummaryCollapsedText(
 ) {
   const line = formatCompactionSummaryCollapsedLine(tokensBefore, options);
   if (!line) return "";
-  return options.includeLabel === false ? line : `[compaction]\n\n${line}`;
+  if (options.includeLabel === false) return line;
+  return replaceTemplateValues(
+    String(options.textTemplate || "").trim() || DEFAULT_TEXT_TEMPLATE,
+    { summary: line },
+  );
 }

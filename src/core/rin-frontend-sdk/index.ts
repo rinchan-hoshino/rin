@@ -34,6 +34,7 @@ export {
 export {
   DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
   applyFrontendBuiltinCommandText,
+  formatSelfImproveReviewNotice,
   frontendCommandNameFromLine,
   isFrontendAbortCommand,
   isFrontendNewSessionCommand,

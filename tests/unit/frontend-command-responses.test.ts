@@ -67,6 +67,39 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
     ).text,
     "Compaction already in progress.",
   );
+  const localizedResponses = sdk.resolveRinFrontendCommandResponses({
+    compactionBusy: "Already compacting.",
+    compactionSummaryLine: "Shrunk {tokens}; open with {expandKey}.",
+    compactionSummaryText: "COMPACT: {summary}",
+    selfImproveReviewChangedWithMore: "Reviewed {targets} plus {count} hidden.",
+  });
+  assert.equal(
+    sdk.applyFrontendBuiltinCommandText(
+      "compact",
+      { compactionBusy: true },
+      localizedResponses,
+    ).text,
+    "Already compacting.",
+  );
+  assert.equal(
+    sdk.applyFrontendBuiltinCommandText(
+      "compact",
+      { tokensBefore: 108642 },
+      localizedResponses,
+    ).text,
+    "COMPACT: Shrunk 108,642; open with ctrl+o.",
+  );
+  assert.equal(
+    sdk.formatSelfImproveReviewNotice(
+      {
+        status: "completed",
+        targets: ["skills/demo.md"],
+        hiddenTargetCount: 2,
+      },
+      localizedResponses,
+    ),
+    "💡 Reviewed skills/demo.md plus 2 hidden.",
+  );
   assert.equal(
     sdk.applyFrontendBuiltinCommandText("reload", {}, responses).text,
     "loaded",

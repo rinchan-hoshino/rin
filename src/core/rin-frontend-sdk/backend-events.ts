@@ -228,6 +228,10 @@ export function createRinFrontendBackendEventTranslator(
           ];
           const notice = formatCompactionSummaryCollapsedText(
             payload.tokensBefore ?? payload.result?.tokensBefore,
+            {
+              lineTemplate: commandResponses.compactionSummaryLine,
+              textTemplate: commandResponses.compactionSummaryText,
+            },
           );
           if (notice) {
             events.push({

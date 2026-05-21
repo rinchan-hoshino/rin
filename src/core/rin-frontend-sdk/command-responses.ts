@@ -8,6 +8,9 @@ export type RinFrontendCommandResponses = {
   newCancelled: string;
   compact: string;
   reload: string;
+  compactionBusy: string;
+  compactionSummaryLine: string;
+  compactionSummaryText: string;
   selfImproveReviewQueued: string;
   selfImproveReviewSkipped: string;
   selfImproveReviewFailed: string;
@@ -24,6 +27,10 @@ export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses
     newCancelled: "Session switch cancelled.",
     compact: "Compacted session.",
     reload: "Reloaded extensions, prompts, skills, and themes.",
+    compactionBusy: "Compaction already in progress.",
+    compactionSummaryLine:
+      "Compacted from {tokens} tokens ({expandKey} to expand)",
+    compactionSummaryText: "[compaction]\n\n{summary}",
     selfImproveReviewQueued: "Self-improve review queued.",
     selfImproveReviewSkipped: "Self-improve review skipped.",
     selfImproveReviewFailed: "Self-improve review failed.",
@@ -180,14 +187,16 @@ export function applyFrontendBuiltinCommandText(
       if (result.compactionBusy) {
         return {
           ...result,
-          text: existingText || "Compaction already in progress.",
+          text: existingText || responses.compactionBusy,
         };
       }
       return {
         ...result,
         text:
-          formatCompactionSummaryCollapsedText(result.tokensBefore) ||
-          responses.compact,
+          formatCompactionSummaryCollapsedText(result.tokensBefore, {
+            lineTemplate: responses.compactionSummaryLine,
+            textTemplate: responses.compactionSummaryText,
+          }) || responses.compact,
       };
     case "reload":
       return {

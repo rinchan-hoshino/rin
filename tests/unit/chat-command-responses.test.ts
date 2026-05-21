@@ -72,3 +72,36 @@ test("generic i18n catalog accepts nested message keys", async () => {
   assert.equal(responses.reload, "Reloaded from i18n catalog.");
   assert.equal(responses.new, "Started a new session.");
 });
+
+test("chat i18n exposes dynamic compact and self-improve review templates", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-command-copy-"),
+  );
+  await fs.writeFile(
+    rinI18n.rinI18nPath(agentDir),
+    JSON.stringify({
+      chat: {
+        compaction: {
+          busy: "Already compacting.",
+          summaryLine: "Shrunk {tokens}; open with {expandKey}.",
+          summaryText: "COMPACT: {summary}",
+        },
+        selfImproveReview: {
+          changedWithMore: "Reviewed {targets} plus {count} hidden.",
+        },
+      },
+    }),
+  );
+
+  const responses = commandResponses.readChatCommandResponses(agentDir);
+  assert.equal(responses.compactionBusy, "Already compacting.");
+  assert.equal(
+    responses.compactionSummaryLine,
+    "Shrunk {tokens}; open with {expandKey}.",
+  );
+  assert.equal(responses.compactionSummaryText, "COMPACT: {summary}");
+  assert.equal(
+    responses.selfImproveReviewChangedWithMore,
+    "Reviewed {targets} plus {count} hidden.",
+  );
+});
