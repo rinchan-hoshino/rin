@@ -266,17 +266,18 @@ export default function selfImproveModule(
             state.initialized = true;
           }
           if (state.finalMessages - state.lastQueuedMessage >= interval) {
+            const reviewFinalMessages = state.finalMessages;
+            state.lastQueuedMessage = reviewFinalMessages;
             await processSelfImproveReviewNow(
               ctx,
               {
                 sessionFile: meta.sessionFile,
                 leafId: meta.leafId,
                 trigger: "self_improve:periodic_review",
-                snapshotKey: `review:${state.finalMessages}`,
+                snapshotKey: `review:${reviewFinalMessages}`,
               },
               runMemoryMaintenanceNow,
             );
-            state.lastQueuedMessage = state.finalMessages;
           }
           await flushSelfImproveReviewNotices(ctx, {
             sessionFile: meta.sessionFile,

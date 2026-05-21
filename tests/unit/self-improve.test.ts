@@ -471,6 +471,62 @@ test("automatic self-improve review reuses chat final-message detection for tool
   });
 });
 
+test("automatic self-improve review records its watermark before awaiting maintenance", async () => {
+  await withTempRoot(async (root) => {
+    const calls = [];
+    let resolveMaintenanceStarted;
+    const maintenanceStarted = new Promise((resolve) => {
+      resolveMaintenanceStarted = resolve;
+    });
+    let releaseMaintenance;
+    const releaseSignal = new Promise((resolve) => {
+      releaseMaintenance = resolve;
+    });
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+      async runMemoryMaintenanceJobNow(job) {
+        calls.push(job);
+        resolveMaintenanceStarted();
+        await releaseSignal;
+        return { status: "completed" };
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const sessionFile = path.join(
+      root,
+      "sessions",
+      "watermark-before-await.jsonl",
+    );
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await writeSessionWithAssistantFinals(sessionFile, 5);
+    const ctx = (leafId) => ({
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "watermark-before-await-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => leafId,
+        isPersisted: () => true,
+      },
+    });
+
+    const first = messageEnd(
+      { message: assistantFinal("done 5") },
+      ctx("assistant-5"),
+    );
+    await maintenanceStarted;
+    await writeSessionWithAssistantFinals(sessionFile, 6);
+    await messageEnd({ message: assistantFinal("done 6") }, ctx("assistant-6"));
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].snapshotKey, "review:5");
+    releaseMaintenance();
+    await first;
+  });
+});
+
 test("automatic self-improve review resumes from persisted session count after restart", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "sessions", "persisted-count.jsonl");
