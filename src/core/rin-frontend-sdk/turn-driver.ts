@@ -16,6 +16,7 @@ import { sleep } from "../platform/process.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
+import { handleRinRpcSessionEvent } from "./rpc-session-events.js";
 import type {
   RinFrontendBackendEvent,
   RinFrontendClient,
@@ -390,6 +391,15 @@ export class RinFrontendTurnDriver {
       sessionFile: this.currentSessionFile() || undefined,
     });
     return true;
+  }
+
+  private async resolveLiveTurnFromSessionMessages(sessionFile?: string) {
+    const messages = await this.getMessagesForSession(sessionFile).catch(
+      () => [],
+    );
+    return (
+      Array.isArray(messages) && this.resolveLiveTurnFromMessages(messages)
+    );
   }
 
   private async recoverLiveTurnAfterDisconnect(error?: unknown) {
@@ -1171,6 +1181,46 @@ export class RinFrontendTurnDriver {
       if (this.liveTurn) void this.recoverLiveTurnAfterDisconnect(event.name);
       return;
     }
+    if (event.type === "ui") {
+      const payload: any = event.payload;
+      if (
+        payload?.type === "agent_start" ||
+        payload?.type === "agent_end" ||
+        payload?.type === "worker_exit" ||
+        payload?.type === "session_recovering" ||
+        payload?.type === "session_recovered" ||
+        payload?.type === "queue_update" ||
+        (payload?.type === "rpc_turn_event" &&
+          (payload.event === "start" ||
+            payload.event === "heartbeat" ||
+            payload.event === "complete" ||
+            payload.event === "error"))
+      ) {
+        await handleRinRpcSessionEvent(
+          {
+            setRemoteTurnRunning: (running: boolean) => {
+              this.frontendState.turnActive = running;
+              this.frontendState.isStreaming = running;
+              this.setFrontendPhase(running ? "working" : "idle");
+            },
+            emitFrontendStatus: () => {},
+            emitEvent: () => {},
+          },
+          payload,
+          {
+            refreshMessages: async () => {},
+            refreshMessagesAndSession: async () => {
+              await this.refreshFrontendState(this.currentSessionFile()).catch(
+                () => ({}),
+              );
+              await this.resolveLiveTurnFromSessionMessages(
+                this.currentSessionFile(),
+              );
+            },
+          },
+        );
+      }
+    }
     const backendEvents =
       event.type === "backend_event"
         ? [event.payload as RinFrontendBackendEvent]
@@ -1235,15 +1285,20 @@ export class RinFrontendTurnDriver {
         const current = safeString(this.liveTurn.requestTag || "").trim();
         const incoming = safeString(event.requestTag || "").trim();
         if (current && incoming && current !== incoming) return;
+        this.updateFrontendStateFrom(event);
         const finalText =
           safeString(event.finalText).trim() ||
           safeString(this.latestAssistantText).trim();
         if (!finalText) {
+          if (
+            await this.resolveLiveTurnFromSessionMessages(event.sessionFile)
+          ) {
+            return;
+          }
           this.failLiveTurn(new Error("rpc_turn_final_output_missing"));
           return;
         }
         this.latestAssistantText = finalText;
-        this.updateFrontendStateFrom(event);
         this.setFrontendPhase("idle");
         this.liveTurn.resolve({
           finalText,
@@ -1256,8 +1311,14 @@ export class RinFrontendTurnDriver {
       case "turn_error": {
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
-        this.setFrontendPhase("idle");
         this.updateFrontendStateFrom(event);
+        if (
+          safeString(event.error).trim() === "rpc_turn_final_output_missing" &&
+          (await this.resolveLiveTurnFromSessionMessages(event.sessionFile))
+        ) {
+          return;
+        }
+        this.setFrontendPhase("idle");
         const error = new Error(event.error) as Error & {
           sessionId?: string;
           sessionFile?: string;

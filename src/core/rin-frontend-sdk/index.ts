@@ -58,6 +58,12 @@ export {
 } from "./command-dispatcher.js";
 
 export {
+  handleRinRpcSessionEvent,
+  type RinRpcSessionEventRefresh,
+  type RinRpcSessionEventTarget,
+} from "./rpc-session-events.js";
+
+export {
   RinFrontendTurnDriver,
   flushPendingSelfImproveNotices,
   submitNativeFrontendPromptTurn,

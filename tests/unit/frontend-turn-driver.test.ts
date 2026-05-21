@@ -760,6 +760,69 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
   );
 });
 
+test("frontend SDK turn driver aligns with TUI by resolving agent_end from session messages", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.getMessages = async () => [
+    { role: "user", content: "hello" },
+    { role: "assistant", content: "final after agent_end" },
+  ];
+  client.prompt = async () => {
+    await emitDriverEvent(driver, { type: "agent_start" });
+    await emitDriverEvent(driver, { type: "agent_end" });
+  };
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "final after agent_end");
+});
+
+test("frontend SDK turn driver resolves completion without finalText from session messages", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.getMessages = async () => [
+    { role: "user", content: "hello" },
+    { role: "assistant", content: "final from refreshed messages" },
+  ];
+  client.prompt = async (_text: string, options: any = {}) => {
+    await emitDriverEvent(driver, { type: "agent_start" });
+    await emitDriverEvent(driver, { type: "agent_end" });
+    await emitRpcTurnComplete(driver, options.requestTag, "");
+  };
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "final from refreshed messages");
+  assert.deepEqual(result.result, {
+    messages: [{ type: "text", text: "final from refreshed messages" }],
+  });
+});
+
+test("frontend SDK turn driver treats missing-final rpc error like TUI completion when messages contain final", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.getMessages = async () => [
+    { role: "user", content: "hello" },
+    { role: "assistant", content: "final despite rpc sentinel" },
+  ];
+  client.prompt = async (_text: string, options: any = {}) => {
+    await emitDriverEvent(driver, { type: "agent_start" });
+    await emitDriverEvent(driver, { type: "agent_end" });
+    await emitDriverEvent(driver, {
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag: options.requestTag,
+      error: "rpc_turn_final_output_missing",
+      sessionId: "session-driver",
+      sessionFile: "/tmp/chat-driver.jsonl",
+    });
+  };
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "final despite rpc sentinel");
+});
+
 test("frontend SDK turn driver does not emit text-only assistant messages as interim", async () => {
   const driver = createDriver();
   const interimTexts: string[] = [];

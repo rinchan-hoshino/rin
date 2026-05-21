@@ -2741,7 +2741,7 @@ test("chat controller reuses an observed completed assistant message when rpc fi
   ]);
 });
 
-test("chat controller rejects rpc completion without canonical finalText", async () => {
+test("chat controller aligns with TUI by resolving rpc completion without finalText from session messages", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -2780,17 +2780,20 @@ test("chat controller rejects rpc completion without canonical finalText", async
     switchSession: async () => {},
   };
 
-  await assert.rejects(
-    controller.runTurn({
-      text: "hello",
-      attachments: [],
-      incomingMessageId: "m-turn-missing-final",
-      replyToMessageId: "m-turn-missing-final",
-    }),
-    /rpc_turn_final_output_missing/,
-  );
+  const result = await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-turn-missing-final",
+    replyToMessageId: "m-turn-missing-final",
+  });
 
-  assert.deepEqual(deliveries, []);
+  assert.equal(result.finalText, "canonical session text");
+  assert.deepEqual(deliveries, [
+    {
+      text: "canonical session text",
+      replyToMessageId: "m-turn-missing-final",
+    },
+  ]);
 });
 
 test("chat controller switches to a linked reply session before sending the prompt", async () => {

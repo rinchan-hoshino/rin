@@ -305,6 +305,61 @@ async function createManagedNewSession(
   return { cancelled: false };
 }
 
+function messageTimestampMs(message: any) {
+  const raw = message?.timestamp ?? message?.message?.timestamp;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  const parsed = Date.parse(safeString(raw));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function collectTurnCompletionMessages(
+  session: any,
+  options: {
+    lastCompletedAssistantMessage?: any;
+    baselineSessionMessageCount?: number;
+    baselineAgentMessageCount?: number;
+    turnStartedAtMs?: number;
+  } = {},
+) {
+  const messages: any[] = [];
+  const seen = new Set<any>();
+  const add = (message: any) => {
+    if (!message || typeof message !== "object" || seen.has(message)) return;
+    const timestamp = messageTimestampMs(message);
+    if (
+      timestamp > 0 &&
+      typeof options.turnStartedAtMs === "number" &&
+      timestamp < options.turnStartedAtMs - 1000
+    ) {
+      return;
+    }
+    seen.add(message);
+    messages.push(message);
+  };
+
+  const sessionMessages = Array.isArray(session?.messages)
+    ? session.messages
+    : [];
+  const sessionStart =
+    typeof options.baselineSessionMessageCount === "number"
+      ? Math.max(0, options.baselineSessionMessageCount)
+      : sessionMessages.length;
+  for (const message of sessionMessages.slice(sessionStart)) add(message);
+
+  const agentMessages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  const agentStart =
+    typeof options.baselineAgentMessageCount === "number"
+      ? Math.max(0, options.baselineAgentMessageCount)
+      : agentMessages.length;
+  for (const message of agentMessages.slice(agentStart)) add(message);
+
+  add(options.lastCompletedAssistantMessage);
+  return messages;
+}
+
 function resolveTurnFailureMessage(session: any, messages: any[]) {
   const stateError = safeString(session?.agent?.state?.errorMessage).trim();
   if (stateError) return stateError;
@@ -589,6 +644,15 @@ export async function runCustomRpcMode(
   };
   const startTurnTask = (requestTag: string, task: () => Promise<void>) => {
     const turnSession = getSession();
+    const baselineSessionMessageCount = Array.isArray(turnSession?.messages)
+      ? turnSession.messages.length
+      : undefined;
+    const baselineAgentMessageCount = Array.isArray(
+      turnSession?.agent?.state?.messages,
+    )
+      ? turnSession.agent.state.messages.length
+      : undefined;
+    const turnStartedAtMs = Date.now();
     let lastCompletedAssistantMessage: any = null;
     const rawUnsubscribeTurnSession = turnSession.subscribe?.((event: any) => {
       if (event?.type !== "message_end") return;
@@ -617,18 +681,20 @@ export async function runCustomRpcMode(
           taskError = error;
         }
         await waitForSessionPostAgentEvents(turnSession);
+        const turnMessages = collectTurnCompletionMessages(turnSession, {
+          lastCompletedAssistantMessage,
+          baselineSessionMessageCount,
+          baselineAgentMessageCount,
+          turnStartedAtMs,
+        });
         const completion = resolveTurnCompletion({
-          messages: lastCompletedAssistantMessage
-            ? [lastCompletedAssistantMessage]
-            : [],
+          messages: turnMessages,
         });
         if (!completion.finalText) {
           if (taskError) throw taskError;
           const failureMessage = resolveTurnFailureMessage(
             turnSession,
-            lastCompletedAssistantMessage
-              ? [lastCompletedAssistantMessage]
-              : [],
+            turnMessages,
           );
           throw new Error(failureMessage || "rpc_turn_final_output_missing");
         }
