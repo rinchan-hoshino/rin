@@ -4,6 +4,8 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { enrichResolvedExtensionResources } from "./extension-resource-metadata.js";
+
 function text(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
@@ -97,64 +99,39 @@ async function importExtensionModule(extensionPath: string) {
   return await import(pathToFileURL(extensionPath).href);
 }
 
-function isExtensionFile(name: string) {
-  return name.endsWith(".ts") || name.endsWith(".js");
-}
+type ExtensionResource = {
+  path: string;
+  enabled?: boolean;
+  metadata?: {
+    source?: string;
+    scope?: string;
+    origin?: string;
+    baseDir?: string;
+    packageName?: string;
+    packageRoot?: string;
+  };
+};
 
-function resolvePackageEntry(dir: string) {
-  const pkg = readJson(path.join(dir, "package.json"));
-  if (!pkg || typeof pkg !== "object") return [];
-  const entries = Array.isArray(pkg.pi?.extensions) ? pkg.pi.extensions : [];
-  return entries
-    .map((entry) => resolvePath(text(entry), dir))
-    .filter((entry) => fs.existsSync(entry));
-}
-
-function resolveExtensionEntries(inputPath: string): string[] {
-  if (!fs.existsSync(inputPath)) return [inputPath];
-  const stat = fs.statSync(inputPath);
-  if (!stat.isDirectory()) return [inputPath];
-
-  const packageEntries = resolvePackageEntry(inputPath);
-  if (packageEntries.length) return packageEntries;
-
-  const indexTs = path.join(inputPath, "index.ts");
-  const indexJs = path.join(inputPath, "index.js");
-  if (fs.existsSync(indexTs)) return [indexTs];
-  if (fs.existsSync(indexJs)) return [indexJs];
-
-  return fs.readdirSync(inputPath, { withFileTypes: true }).flatMap((entry) => {
-    const entryPath = path.join(inputPath, entry.name);
-    if (
-      (entry.isFile() || entry.isSymbolicLink()) &&
-      isExtensionFile(entry.name)
-    ) {
-      return [entryPath];
-    }
-    if (!(entry.isDirectory() || entry.isSymbolicLink())) return [];
-    const nestedPackageEntries = resolvePackageEntry(entryPath);
-    if (nestedPackageEntries.length) return nestedPackageEntries;
-    const nestedIndexTs = path.join(entryPath, "index.ts");
-    const nestedIndexJs = path.join(entryPath, "index.js");
-    if (fs.existsSync(nestedIndexTs)) return [nestedIndexTs];
-    if (fs.existsSync(nestedIndexJs)) return [nestedIndexJs];
-    return [];
-  });
-}
-
-function createSourceInfo(extensionPath: string) {
+function createSourceInfo(resource: ExtensionResource) {
+  const metadata = resource.metadata || {};
   return {
-    path: extensionPath,
-    source: "local",
-    baseDir: path.dirname(extensionPath),
+    path: resource.path,
+    source: metadata.source || "local",
+    scope: metadata.scope,
+    origin: metadata.origin,
+    baseDir: metadata.baseDir || path.dirname(resource.path),
+    ...(metadata.packageName ? { packageName: metadata.packageName } : {}),
+    ...(metadata.packageRoot ? { packageRoot: metadata.packageRoot } : {}),
   };
 }
 
-function createExtension(extensionPath: string) {
+function createExtension(resource: ExtensionResource) {
+  const sourceInfo = createSourceInfo(resource);
   return {
-    path: extensionPath,
-    resolvedPath: extensionPath,
-    sourceInfo: createSourceInfo(extensionPath),
+    name: sourceInfo.packageName || path.basename(resource.path),
+    path: resource.path,
+    resolvedPath: resource.path,
+    sourceInfo,
     handlers: new Map(),
     tools: new Map(),
     messageRenderers: new Map(),
@@ -255,10 +232,10 @@ function createExtensionApi(
 }
 
 async function loadRinExtension(
-  extensionPath: string,
+  resource: ExtensionResource,
   options: { cwd: string; agentDir: string },
 ) {
-  const moduleValue = await importExtensionModule(extensionPath);
+  const moduleValue = await importExtensionModule(resource.path);
   const factory =
     typeof moduleValue === "function"
       ? moduleValue
@@ -266,7 +243,7 @@ async function loadRinExtension(
         ? moduleValue.default
         : undefined;
   if (typeof factory !== "function") return undefined;
-  const extension = createExtension(extensionPath);
+  const extension = createExtension(resource);
   await factory(createExtensionApi(extension, options));
   return extension;
 }
@@ -277,10 +254,20 @@ function unique(values: string[]) {
   ];
 }
 
-function enabledPaths(resources: any[]) {
-  return resources
-    .filter((entry) => entry?.enabled)
-    .map((entry) => text(entry.path));
+function enabledResources(resources: ExtensionResource[]) {
+  return resources.filter((entry) => entry?.enabled);
+}
+
+function uniqueResources(resources: ExtensionResource[]) {
+  const seen = new Set<string>();
+  const result: ExtensionResource[] = [];
+  for (const resource of resources) {
+    const key = path.resolve(text(resource.path));
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(resource);
+  }
+  return result;
 }
 
 export function createRinDefaultResourceLoader(PiAgentRuntime: any) {
@@ -313,24 +300,24 @@ export function createRinDefaultResourceLoader(PiAgentRuntime: any) {
       const configuredSources = this.rinNoExtensions
         ? { extensions: [] }
         : await this.rinPackageManager.resolve();
-      const extensionPaths = unique([
-        ...enabledPaths(cliSources.extensions || []),
-        ...enabledPaths(configuredSources.extensions || []),
-      ]);
+      const extensionResources = uniqueResources(
+        enrichResolvedExtensionResources([
+          ...enabledResources(cliSources.extensions || []),
+          ...enabledResources(configuredSources.extensions || []),
+        ]),
+      );
       const loaded = [];
       const errors = [];
-      for (const extensionPath of extensionPaths.flatMap((entry) =>
-        resolveExtensionEntries(resolvePath(entry, this.cwd)),
-      )) {
+      for (const resource of extensionResources) {
         try {
-          const extension = await loadRinExtension(extensionPath, {
+          const extension = await loadRinExtension(resource, {
             cwd: this.cwd,
             agentDir: this.agentDir,
           });
           if (extension) loaded.push(extension);
         } catch (error: any) {
           errors.push({
-            path: extensionPath,
+            path: resource.path,
             error: `Failed to load extension: ${error?.message || error}`,
           });
         }

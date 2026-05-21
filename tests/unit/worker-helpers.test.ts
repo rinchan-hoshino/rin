@@ -88,6 +88,7 @@ test("worker helpers split command args and format stats", () => {
 
 test("worker helpers expose resource diagnostics from the active session", () => {
   const skillPath = "/tmp/rin-test/self_improve/skills/broken/SKILL.md";
+  const extensionPath = "/tmp/rin-test/extensions/demo/dist/index.js";
   const diagnostics = workerHelpers.getResourceDiagnostics({
     resourceLoader: {
       getSkills: () => ({
@@ -116,7 +117,22 @@ test("worker helpers expose resource diagnostics from the active session", () =>
       }),
       getPrompts: () => ({ prompts: [], diagnostics: [] }),
       getThemes: () => ({ themes: [], diagnostics: [] }),
-      getExtensions: () => ({ extensions: [], errors: [] }),
+      getExtensions: () => ({
+        extensions: [
+          {
+            name: "demo-extension",
+            path: extensionPath,
+            sourceInfo: {
+              path: extensionPath,
+              source: "local",
+              baseDir: "/tmp/rin-test/extensions/demo/dist",
+              packageName: "demo-extension",
+              packageRoot: "/tmp/rin-test/extensions/demo",
+            },
+          },
+        ],
+        errors: [],
+      }),
     },
   });
 
@@ -133,6 +149,17 @@ test("worker helpers expose resource diagnostics from the active session", () =>
     scope: "user",
     origin: "top-level",
     baseDir: "/tmp/rin-test",
+  });
+  assert.deepEqual(diagnostics.extensions.extensions[0], {
+    name: "demo-extension",
+    path: extensionPath,
+    sourceInfo: {
+      path: extensionPath,
+      source: "local",
+      baseDir: "/tmp/rin-test/extensions/demo/dist",
+      packageName: "demo-extension",
+      packageRoot: "/tmp/rin-test/extensions/demo",
+    },
   });
 });
 

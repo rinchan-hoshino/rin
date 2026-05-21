@@ -34,6 +34,14 @@ async function writeExtensionPackage(dir: string) {
     pi: { extensions: ["dist/index.js"] },
   });
   await fs.mkdir(path.join(dir, "dist"), { recursive: true });
+  await fs.mkdir(path.join(dir, "src"), { recursive: true });
+  await fs.writeFile(
+    path.join(dir, "src", "index.ts"),
+    `export default function extension(ctx) {
+      ctx.registerTool({ name: "wrong_src_tool", description: "src should not load when pi.extensions selects dist", parameters: { type: "object", properties: {} }, execute() { return { content: [{ type: "text", text: "src" }] }; } });
+    }\n`,
+    "utf8",
+  );
   await fs.writeFile(
     path.join(dir, "dist", "index.js"),
     `export default function extension(ctx) {
@@ -74,6 +82,13 @@ test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface"
     await resourceLoader.reload();
     const result = resourceLoader.getExtensions();
     assert.deepEqual(result.errors, []);
+    assert.equal(result.extensions[0]?.name, "rin-extension-loader-test");
+    assert.equal(
+      result.extensions[0]?.sourceInfo?.packageName,
+      "rin-extension-loader-test",
+    );
+    assert.equal(result.extensions[0]?.sourceInfo?.packageRoot, extensionDir);
+    assert.equal(result.extensions.length, 1);
     const tools = result.extensions.flatMap((extension: any) =>
       Array.from(extension.tools.values()).map((tool: any) => tool.definition),
     );
@@ -82,6 +97,46 @@ test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface"
     );
     assert.ok(tool);
     assert.equal(tool.description, path.join(agentDir, "data"));
+    assert.ok(
+      !tools.some((item: any) => item.name === "wrong_src_tool"),
+      "package internals must not be loaded as separate extensions",
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("single-file Rin extensions keep file-name fallback identity", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-ext-file-"));
+  const extensionPath = path.join(agentDir, "file-extension.ts");
+  try {
+    await fs.writeFile(
+      extensionPath,
+      `export default function extension(ctx) {
+        ctx.registerTool({ name: "single_file_tool", description: "single file", parameters: { type: "object", properties: {} }, execute() { return { content: [{ type: "text", text: "ok" }] }; } });
+      }\n`,
+      "utf8",
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: [extensionPath],
+    });
+
+    const PiAgentRuntime = await loaderModule.loadRinAgentRuntime();
+    const settingsManager = PiAgentRuntime.SettingsManager.create(
+      agentDir,
+      agentDir,
+    );
+    const resourceLoader = new PiAgentRuntime.DefaultResourceLoader({
+      cwd: agentDir,
+      agentDir,
+      settingsManager,
+    });
+
+    await resourceLoader.reload();
+    const result = resourceLoader.getExtensions();
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.extensions[0]?.name, "file-extension.ts");
+    assert.equal(result.extensions[0]?.sourceInfo?.packageName, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -106,6 +161,8 @@ test("configured Rin sessions use the Rin extension loader through agent service
     try {
       const result = configured.session.resourceLoader.getExtensions();
       assert.deepEqual(result.errors, []);
+      assert.equal(result.extensions[0]?.name, "rin-extension-loader-test");
+      assert.equal(result.extensions.length, 1);
       const tools = result.extensions.flatMap((extension: any) =>
         Array.from(extension.tools.values()).map(
           (tool: any) => tool.definition,
@@ -114,6 +171,7 @@ test("configured Rin sessions use the Rin extension loader through agent service
       assert.ok(
         tools.some((item: any) => item.name === "rin_extension_loader_tool"),
       );
+      assert.ok(!tools.some((item: any) => item.name === "wrong_src_tool"));
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});
     }
