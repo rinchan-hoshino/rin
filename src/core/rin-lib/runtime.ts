@@ -7,7 +7,7 @@ import {
   buildConfiguredLanguageSystemPrompt,
   readConfiguredLanguageFromSettings,
 } from "../language.js";
-import { loadPiAgentRuntime } from "./loader.js";
+import { loadRinAgentRuntime } from "./agent-runtime.js";
 import {
   applyRuntimeProfileEnvironment,
   getRuntimeSessionDir,
@@ -1043,7 +1043,7 @@ export async function createConfiguredAgentSession(
     thinkingLevel?: any;
   } = {},
 ) {
-  const agentRuntimeModule = await loadPiAgentRuntime();
+  const agentRuntimeModule = await loadRinAgentRuntime();
   const {
     createAgentSessionRuntime,
     createAgentSessionServices,

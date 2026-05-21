@@ -3,7 +3,7 @@ import path from "node:path";
 import { spinner, text } from "@clack/prompts";
 
 import { computeAvailableThinkingLevels } from "../model-thinking-levels.js";
-import { loadPiAgentRuntime } from "../rin-lib/loader.js";
+import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
 import { installAuthPath } from "./paths.js";
 import { runInstallerProgress } from "./progress.js";
@@ -17,7 +17,7 @@ export async function loadModelChoices(
     fallback,
   ) => fallback,
 ) {
-  const agentRuntimeModule = await loadPiAgentRuntime();
+  const agentRuntimeModule = await loadRinAgentRuntime();
   const { AuthStorage, ModelRegistry } = agentRuntimeModule as any;
   const authPath = installDir ? installAuthPath(installDir) : "";
   const existingAuth = authPath ? readJsonFile<any>(authPath, {}) : {};
@@ -57,7 +57,7 @@ export async function createInstallerAuthStorage(
   installDir: string,
   readJsonFile: <T>(filePath: string, fallback: T) => T,
 ) {
-  const agentRuntimeModule = await loadPiAgentRuntime();
+  const agentRuntimeModule = await loadRinAgentRuntime();
   const { AuthStorage } = agentRuntimeModule as any;
   const authPath = installAuthPath(installDir);
   const existing = readJsonFile<any>(authPath, {});

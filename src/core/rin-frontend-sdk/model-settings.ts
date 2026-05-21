@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
-import { loadPiAgentRuntime } from "../rin-lib/loader.js";
+import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
 import {
   applyRinSettingsDefaults,
   resolveRuntimeProfile,
@@ -57,7 +57,7 @@ async function runRpcModelMutation(
 export async function getPersistentSettingsManager() {
   if (!persistentSettingsManagerPromise) {
     persistentSettingsManagerPromise = (async () => {
-      const agentRuntimeModule: any = await loadPiAgentRuntime();
+      const agentRuntimeModule: any = await loadRinAgentRuntime();
       const SettingsManager = agentRuntimeModule?.SettingsManager;
       if (!SettingsManager?.create) {
         throw new Error("rin_missing_settings_manager");

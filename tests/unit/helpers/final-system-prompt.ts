@@ -14,8 +14,10 @@ const runtimeMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"))
     .href
 );
-const loaderMod = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "loader.js")).href
+const agentRuntimeMod = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-lib", "agent-runtime.js"),
+  ).href
 );
 
 export async function buildFinalAppSystemPrompt(options = {}) {
@@ -26,7 +28,7 @@ export async function buildFinalAppSystemPrompt(options = {}) {
   const prompt = options.prompt || "";
   const images = options.images;
 
-  const agentRuntimeModule = await loaderMod.loadPiAgentRuntime();
+  const agentRuntimeModule = await agentRuntimeMod.loadRinAgentRuntime();
   const { SessionManager } = agentRuntimeModule;
   const sessionManager = SessionManager.inMemory(cwd);
 

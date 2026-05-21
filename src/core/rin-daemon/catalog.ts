@@ -6,7 +6,7 @@ import {
   createRinCapabilityDefinitions,
   resolveRuntimeProfile,
 } from "../rin-lib/runtime.js";
-import { loadPiAgentRuntime } from "../rin-lib/loader.js";
+import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
 import { createRinCapabilitySet } from "../rin-lib/capability-session.js";
 import {
   collectRuntimeSlashCommands,
@@ -81,7 +81,7 @@ async function cleanupCatalogContext(context: CatalogContext | undefined) {
 async function createCatalogContext(
   options: CatalogOptions = {},
 ): Promise<CatalogContext> {
-  const agentRuntimeModule = await loadPiAgentRuntime();
+  const agentRuntimeModule = await loadRinAgentRuntime();
   const {
     AuthStorage,
     DefaultResourceLoader,

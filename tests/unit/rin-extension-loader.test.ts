@@ -11,7 +11,9 @@ const rootDir = path.resolve(
   "..",
 );
 const loaderModule = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "loader.js")).href
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-lib", "agent-runtime.js"),
+  ).href
 );
 const runtimeModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"))
@@ -43,6 +45,19 @@ async function writeExtensionPackage(dir: string) {
   );
 }
 
+test("Rin agent runtime keeps raw Pi and composed Rin resource loaders separate", async () => {
+  const rawPiRuntime = await loaderModule.loadPiAgentRuntime();
+  const rinRuntime = await loaderModule.loadRinAgentRuntime();
+  assert.notEqual(
+    rinRuntime.DefaultResourceLoader,
+    rawPiRuntime.DefaultResourceLoader,
+  );
+  assert.notEqual(
+    rinRuntime.createAgentSessionServices,
+    rawPiRuntime.createAgentSessionServices,
+  );
+});
+
 test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-ext-loader-"));
   const extensionDir = path.join(agentDir, "extension");
@@ -52,7 +67,7 @@ test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface"
       extensions: [extensionDir],
     });
 
-    const PiAgentRuntime = await loaderModule.loadPiAgentRuntime();
+    const PiAgentRuntime = await loaderModule.loadRinAgentRuntime();
     const settingsManager = PiAgentRuntime.SettingsManager.create(
       agentDir,
       agentDir,
