@@ -14,8 +14,8 @@ const sdk = await import(
   ).href
 );
 
-const NOTICE_NO_CHANGE =
-  "\u{1f4a1} \u81ea\u6211\u6574\u7406\uff1a\u65e0\u53d8\u66f4";
+const NOTICE_NO_CHANGE = "Self-improve review completed with no changes.";
+const NOTICE_CHANGED = "Self-improve review updated demo.";
 const COMPACTION_NOTICE = "Summary of conversation...";
 
 test("frontend backend event translator exposes status as a shared frontend event", () => {
@@ -59,23 +59,35 @@ test("frontend backend event translator exposes compaction review as external wo
   ]);
 });
 
-test("frontend backend event translator exposes notify requests as passive notices", () => {
+test("frontend backend event translator exposes self-improve review events as passive notices", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
     translator.translate({
-      type: "extension_ui_request",
-      payload: {
-        type: "extension_ui_request",
-        method: "notify",
-        message: NOTICE_NO_CHANGE,
-        notifyType: "info",
-      },
+      type: "self_improve_review_notice",
+      status: "completed",
+      targets: [],
+      changedCount: 0,
     }),
     [
       {
         type: "passive_notice",
         text: NOTICE_NO_CHANGE,
+        level: "info",
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "self_improve_review_notice",
+      status: "completed",
+      targets: ["demo"],
+      changedCount: 1,
+    }),
+    [
+      {
+        type: "passive_notice",
+        text: NOTICE_CHANGED,
         level: "info",
       },
     ],

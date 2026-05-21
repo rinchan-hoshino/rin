@@ -34,6 +34,7 @@ import {
   getLastAssistantText,
   getPersistentSettingsManager,
   getSessionBranch,
+  flushPendingSelfImproveNotices,
   parseFrontendCompactCommand,
   persistRpcSettingsMutation,
   resolveRinFrontendCommandResponses,
@@ -451,6 +452,7 @@ export class RpcInteractiveSession {
       await this.client.connect();
       this.setRpcConnected(true);
       await this.refreshState(REFRESH_MESSAGES_AND_SESSION).catch(() => {});
+      await flushPendingSelfImproveNotices(this.client).catch(() => {});
       await this.modelRegistry.sync().catch(() => {});
     } catch (error) {
       this.handleConnectionLost();
@@ -606,6 +608,9 @@ export class RpcInteractiveSession {
         resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
       });
       await this.refreshState(REFRESH_ALL);
+      if (!data?.cancelled) {
+        await flushPendingSelfImproveNotices(this.client).catch(() => {});
+      }
       return !Boolean(data?.cancelled);
     } finally {
       this.setSessionOperationPending(false);
@@ -620,6 +625,9 @@ export class RpcInteractiveSession {
         resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
       });
       await this.refreshState(REFRESH_ALL);
+      if (!data?.cancelled) {
+        await flushPendingSelfImproveNotices(this.client).catch(() => {});
+      }
       return !Boolean(data?.cancelled);
     } finally {
       this.setSessionOperationPending(false);

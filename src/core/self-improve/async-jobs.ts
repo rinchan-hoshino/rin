@@ -22,6 +22,8 @@ import {
   selfImproveStateDir,
 } from "./paths.js";
 
+const PENDING_NOTICES_FILE = "pending-notices.json";
+
 export type MaintenanceJob = {
   id: string;
   kind: "self_improve_review";
@@ -43,6 +45,24 @@ type MaintenanceChangedFile = {
   change: "created" | "updated" | "deleted";
 };
 
+export type MemoryMaintenanceNotice = {
+  type: "self_improve_review_notice";
+  status: "queued" | "completed" | "failed" | "skipped";
+  skipped?: string;
+  targets?: string[];
+  hiddenTargetCount?: number;
+  changedCount?: number;
+};
+
+export type PendingMemoryMaintenanceNotice = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  agentDir: string;
+  sessionFile: string;
+  notice: MemoryMaintenanceNotice;
+};
+
 type MaintenanceHistoryRecord = {
   id: string;
   kind: MaintenanceJob["kind"];
@@ -58,7 +78,6 @@ type MaintenanceHistoryRecord = {
   error?: string;
   outputPreview?: string;
   changedFiles?: MaintenanceChangedFile[];
-  passiveNotice?: string;
 };
 
 function resolveAgentDir(value: unknown) {
@@ -82,6 +101,79 @@ function normalizeAdditionalExtensionPaths(value: unknown) {
 
 async function ensureStateDir(agentDir: string) {
   await fs.mkdir(selfImproveStateDir(agentDir), { recursive: true });
+}
+
+function pendingNoticesPath(agentDir: string) {
+  return path.join(selfImproveStateDir(agentDir), PENDING_NOTICES_FILE);
+}
+
+function loadPendingNotices(
+  agentDir: string,
+): PendingMemoryMaintenanceNotice[] {
+  const root = resolveAgentDir(agentDir);
+  if (!root) return [];
+  const parsed = readJsonFile<unknown>(pendingNoticesPath(root), []);
+  return asArray<PendingMemoryMaintenanceNotice>(parsed).filter(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      safeString((item as any).sessionFile).trim() &&
+      safeString((item as any).notice?.type).trim() ===
+        "self_improve_review_notice",
+  );
+}
+
+async function savePendingNotices(
+  agentDir: string,
+  notices: PendingMemoryMaintenanceNotice[],
+) {
+  await ensureStateDir(agentDir);
+  writeJsonAtomic(pendingNoticesPath(agentDir), notices);
+}
+
+export async function appendPendingMemoryMaintenanceNotice(input: {
+  agentDir: string;
+  sessionFile: string;
+  notice: MemoryMaintenanceNotice;
+}) {
+  const agentDir = resolveAgentDir(input.agentDir);
+  const sessionFile = resolveSessionFile(input.sessionFile);
+  if (!agentDir || !sessionFile) return;
+  const now = nowIso();
+  const notices = loadPendingNotices(agentDir);
+  notices.push({
+    id: `maintenance_notice_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: now,
+    updatedAt: now,
+    agentDir,
+    sessionFile,
+    notice: input.notice,
+  });
+  await savePendingNotices(agentDir, notices);
+}
+
+export async function takePendingMemoryMaintenanceNotices(input: {
+  agentDir: string;
+  sessionFile?: string;
+}) {
+  const agentDir = resolveAgentDir(input.agentDir);
+  if (!agentDir) return [];
+  const sessionFile = resolveSessionFile(input.sessionFile);
+  const notices = loadPendingNotices(agentDir);
+  const taken: PendingMemoryMaintenanceNotice[] = [];
+  const remaining: PendingMemoryMaintenanceNotice[] = [];
+  for (const notice of notices) {
+    if (
+      !sessionFile ||
+      resolveSessionFile(notice.sessionFile) === sessionFile
+    ) {
+      taken.push(notice);
+    } else {
+      remaining.push(notice);
+    }
+  }
+  if (taken.length) await savePendingNotices(agentDir, remaining);
+  return taken.map((entry) => entry.notice);
 }
 
 async function loadQueue(agentDir: string): Promise<MaintenanceJob[]> {
@@ -319,7 +411,7 @@ function changedFileTarget(filePath: string) {
   return shortTargetName(parts.at(-1) || relative, 32);
 }
 
-function summarizeChangedFiles(changedFiles: MaintenanceChangedFile[]) {
+function summarizeChangedTargets(changedFiles: MaintenanceChangedFile[]) {
   const targets: string[] = [];
   const seen = new Set<string>();
   for (const file of changedFiles) {
@@ -329,9 +421,10 @@ function summarizeChangedFiles(changedFiles: MaintenanceChangedFile[]) {
     targets.push(target);
   }
   const visible = targets.slice(0, 3);
-  const hiddenCount = Math.max(0, targets.length - visible.length);
-  if (hiddenCount > 0) visible.push(`+${hiddenCount}`);
-  return visible.join("、");
+  return {
+    targets: visible,
+    hiddenTargetCount: Math.max(0, targets.length - visible.length),
+  };
 }
 
 function normalizeErrorMessage(error: unknown) {
@@ -340,25 +433,41 @@ function normalizeErrorMessage(error: unknown) {
   ).trim();
 }
 
-export function formatMemoryMaintenancePassiveNotice(input: {
+export function buildMemoryMaintenanceNotice(input: {
   status?: string;
   changedFiles?: unknown;
   changedCount?: number;
   skipped?: string;
-}): string {
+}): MemoryMaintenanceNotice {
   const status = safeString(input.status).trim();
-  if (status === "queued") return "💡 自我整理：已排队";
-  if (status === "failed") return "💡 自我整理：失败";
   const skipped = safeString(input.skipped).trim();
-  if (status === "skipped" || skipped) return "💡 自我整理：跳过";
+  if (status === "queued") {
+    return { type: "self_improve_review_notice", status: "queued" };
+  }
+  if (status === "failed") {
+    return { type: "self_improve_review_notice", status: "failed" };
+  }
+  if (status === "skipped" || skipped) {
+    return {
+      type: "self_improve_review_notice",
+      status: "skipped",
+      skipped: skipped || undefined,
+    };
+  }
   const changedFiles = normalizeChangedFiles(input.changedFiles);
-  const summary = summarizeChangedFiles(changedFiles);
-  if (summary) return `💡 自我整理：更新 ${summary}`;
+  const summary = summarizeChangedTargets(changedFiles);
   const changedCount = Number.isFinite(input.changedCount)
     ? Math.max(0, Math.floor(Number(input.changedCount)))
-    : 0;
-  if (changedCount > 0) return `💡 自我整理：更新 other ${changedCount}`;
-  return "💡 自我整理：无变更";
+    : changedFiles.length;
+  return {
+    type: "self_improve_review_notice",
+    status: "completed",
+    targets: summary.targets,
+    ...(summary.hiddenTargetCount
+      ? { hiddenTargetCount: summary.hiddenTargetCount }
+      : {}),
+    changedCount,
+  };
 }
 
 async function appendHistoryRecord(
@@ -408,7 +517,14 @@ export async function runMemoryMaintenanceJobNow(
   });
   const handle = await acquireWorkerLockWithWait(job.agentDir);
   if (!handle) {
-    return { status: "skipped", skipped: "locked" };
+    return {
+      status: "skipped",
+      skipped: "locked",
+      notice: buildMemoryMaintenanceNotice({
+        status: "skipped",
+        skipped: "locked",
+      }),
+    };
   }
 
   const startedAt = nowIso();
@@ -419,11 +535,6 @@ export async function runMemoryMaintenanceJobNow(
       const finishedAt = nowIso();
       const changedFiles = normalizeChangedFiles((result as any)?.changedFiles);
       const skipped = safeString((result as any)?.skipped).trim() || undefined;
-      const passiveNotice = formatMemoryMaintenancePassiveNotice({
-        status: "completed",
-        changedFiles,
-        skipped,
-      });
       await appendHistoryRecord(job.agentDir, {
         id: job.id,
         kind: job.kind,
@@ -442,13 +553,18 @@ export async function runMemoryMaintenanceJobNow(
           ) || undefined,
         changedFiles,
       });
-      return { status: "completed", result, passiveNotice };
+      return {
+        status: "completed",
+        result,
+        notice: buildMemoryMaintenanceNotice({
+          status: "completed",
+          changedFiles,
+          skipped,
+        }),
+      };
     } catch (error: unknown) {
       const finishedAt = nowIso();
       const message = normalizeErrorMessage(error);
-      const passiveNotice = formatMemoryMaintenancePassiveNotice({
-        status: "failed",
-      });
       await appendHistoryRecord(job.agentDir, {
         id: job.id,
         kind: job.kind,
@@ -462,7 +578,11 @@ export async function runMemoryMaintenanceJobNow(
         attempts: 1,
         error: message,
       });
-      return { status: "failed", error: message, passiveNotice };
+      return {
+        status: "failed",
+        error: message,
+        notice: buildMemoryMaintenanceNotice({ status: "failed" }),
+      };
     }
   } finally {
     await releaseWorkerLock(job.agentDir, handle);
@@ -491,11 +611,6 @@ export async function processQueuedMemoryJobs(agentDir: string) {
         );
         const skipped =
           safeString((result as any)?.skipped).trim() || undefined;
-        const passiveNotice = formatMemoryMaintenancePassiveNotice({
-          status: "completed",
-          changedFiles,
-          skipped,
-        });
         await removeMatchingJobs(resolvedAgentDir, job);
         await appendHistoryRecord(resolvedAgentDir, {
           id: job.id,
@@ -512,6 +627,15 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           outputPreview: truncateText((result as any)?.output) || undefined,
           changedFiles,
         });
+        await appendPendingMemoryMaintenanceNotice({
+          agentDir: resolvedAgentDir,
+          sessionFile: job.sessionFile,
+          notice: buildMemoryMaintenanceNotice({
+            status: "completed",
+            changedFiles,
+            skipped,
+          }),
+        });
         processed += 1;
         allChangedFiles.push(...changedFiles);
       } catch (error: unknown) {
@@ -519,9 +643,6 @@ export async function processQueuedMemoryJobs(agentDir: string) {
         const message = normalizeErrorMessage(error);
         const attempts = Math.max(1, Number(job.attempts || 0) + 1);
         await removeMatchingJobs(resolvedAgentDir, job);
-        const passiveNotice = formatMemoryMaintenancePassiveNotice({
-          status: "failed",
-        });
         await appendHistoryRecord(resolvedAgentDir, {
           id: job.id,
           kind: job.kind,
@@ -535,6 +656,11 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           attempts,
           error: message,
         });
+        await appendPendingMemoryMaintenanceNotice({
+          agentDir: resolvedAgentDir,
+          sessionFile: job.sessionFile,
+          notice: buildMemoryMaintenanceNotice({ status: "failed" }),
+        });
         failed += 1;
       }
     }
@@ -543,7 +669,7 @@ export async function processQueuedMemoryJobs(agentDir: string) {
       processed,
       failed,
       retried: 0,
-      passiveNotice: formatMemoryMaintenancePassiveNotice({
+      notice: buildMemoryMaintenanceNotice({
         status: failed > 0 ? "failed" : "completed",
         changedFiles: allChangedFiles,
       }),

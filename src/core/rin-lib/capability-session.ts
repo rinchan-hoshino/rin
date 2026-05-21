@@ -16,6 +16,7 @@ type RegisteredTool = {
 
 type CoreActions = {
   sendMessage: (message: any, options?: any) => void;
+  emitEvent: (event: any) => void;
   sendUserMessage: (content: any, options?: any) => void;
   appendEntry: <T = unknown>(customType: string, data?: T) => void;
   setSessionName: (name: string) => void;
@@ -92,6 +93,7 @@ const noOpUIContext = {
 
 const noOpCoreActions: CoreActions = {
   sendMessage: () => {},
+  emitEvent: () => {},
   sendUserMessage: () => {},
   appendEntry: () => {},
   setSessionName: () => {},
@@ -170,6 +172,7 @@ export function createRinCapabilitySet(options: {
       compact: (compactOptions?: any) => contextActions.compact(compactOptions),
       getSystemPrompt: () => contextActions.getSystemPrompt(),
       getThinkingLevel: () => coreActions.getThinkingLevel(),
+      emitEvent: (event: any) => coreActions.emitEvent(event),
     };
   };
 
@@ -294,6 +297,45 @@ function withRinEventMetadata(event: any, session: any) {
   };
 }
 
+const RIN_CORE_EVENT_EMITTER_PATCH_KEY = Symbol.for(
+  "rin.coreEventEmitterPatch",
+);
+
+type RinCoreEventEmitterPatchState = {
+  listeners: Set<(event: any) => void>;
+  originalSubscribe: (listener: (event: any) => void) => () => void;
+};
+
+function patchRinCoreEventEmitter(session: any) {
+  if (!session || typeof session !== "object") return;
+  const existing = session[RIN_CORE_EVENT_EMITTER_PATCH_KEY] as
+    | RinCoreEventEmitterPatchState
+    | undefined;
+  if (existing) return;
+  if (typeof session.subscribe !== "function") return;
+
+  const state: RinCoreEventEmitterPatchState = {
+    listeners: new Set(),
+    originalSubscribe: session.subscribe.bind(session),
+  };
+  session[RIN_CORE_EVENT_EMITTER_PATCH_KEY] = state;
+  session.subscribe = (listener: (event: any) => void) => {
+    state.listeners.add(listener);
+    const unsubscribeOriginal = state.originalSubscribe(listener);
+    return () => {
+      state.listeners.delete(listener);
+      unsubscribeOriginal?.();
+    };
+  };
+  session.__rinEmitCoreEvent = (event: any) => {
+    for (const listener of Array.from(state.listeners)) {
+      try {
+        listener(event);
+      } catch {}
+    }
+  };
+}
+
 function patchRinCapabilityExtensionRunner(
   session: any,
   capabilitySet: RinCapabilitySet,
@@ -365,6 +407,9 @@ function bindCapabilitySetToSession(
     {
       sendMessage: (message, options) => {
         session.sendCustomMessage?.(message, options).catch?.(() => {});
+      },
+      emitEvent: (event) => {
+        session.__rinEmitCoreEvent?.(event);
       },
       sendUserMessage: (content, options) => {
         session.sendUserMessage?.(content, options).catch?.(() => {});
@@ -462,6 +507,7 @@ export async function attachRinCapabilitiesToSession(
   },
 ) {
   const capabilitySet = options.capabilitySet;
+  patchRinCoreEventEmitter(session);
   bindCapabilitySetToSession(capabilitySet, session);
   patchRinCapabilityExtensionRunner(session, capabilitySet);
   subscribeRinCapabilityEvents(session, capabilitySet);
