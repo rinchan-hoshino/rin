@@ -152,6 +152,92 @@ test("rpc session events do not refresh whole state on every stream update", asy
   ]);
 });
 
+test("rpc compaction refresh redraws footer after the session snapshot lands", async () => {
+  const statuses: any[] = [];
+  let snapshotCompacted = false;
+  const oldAssistant = {
+    role: "assistant",
+    content: [{ type: "text", text: "before compaction" }],
+    usage: { input: 900, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+  const entriesBefore = [
+    { type: "message", id: "user1", parentId: null, message: { role: "user" } },
+    {
+      type: "message",
+      id: "assistant1",
+      parentId: "user1",
+      message: oldAssistant,
+    },
+  ];
+  const entriesAfter = [
+    ...entriesBefore,
+    {
+      type: "compaction",
+      id: "compact1",
+      parentId: "assistant1",
+      summary: "summary",
+      firstKeptEntryId: "assistant1",
+      tokensBefore: 900,
+    },
+  ];
+  const session = new runtime.RpcInteractiveSession({
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+    async send(command: any) {
+      if (command.type === "get_state") {
+        return {
+          success: true,
+          data: {
+            model: { id: "demo", contextWindow: 1000 },
+            turnActive: true,
+          },
+        };
+      }
+      if (command.type === "get_session_snapshot") {
+        return {
+          success: true,
+          data: {
+            entries: snapshotCompacted ? entriesAfter : entriesBefore,
+            leafId: snapshotCompacted ? "compact1" : "assistant1",
+          },
+        };
+      }
+      return { success: true, data: {} };
+    },
+  });
+  session.rpcConnected = true;
+  session.startupPending = false;
+  session.model = { id: "demo", contextWindow: 1000 };
+  session.entries = entriesBefore;
+  session.entryById = new Map(
+    entriesBefore.map((entry: any) => [entry.id, entry]),
+  );
+  session.leafId = "assistant1";
+  session.messages = [oldAssistant];
+  session.state.messages = session.messages;
+  session.state.model = session.model;
+  session.subscribe((event: any) => {
+    if (event.type === "rpc_frontend_status") statuses.push(event);
+  });
+
+  assert.equal(session.getContextUsage().percent, 90);
+  snapshotCompacted = true;
+  await session.handleRpcEvent({
+    type: "compaction_end",
+    reason: "threshold",
+    aborted: false,
+  });
+  await session.refreshLoopPromise;
+
+  assert.equal(session.getContextUsage().percent, null);
+  assert.equal(statuses.at(-1)?.phase, "working");
+  assert.ok(statuses.length >= 2);
+});
+
 test("rpc session events do not keep TUI turns alive for overflow continuation markers", async () => {
   const seen = [];
   let refreshMessages = 0;

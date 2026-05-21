@@ -1073,8 +1073,8 @@ export class RpcInteractiveSession {
     void handleRpcSessionEvent(
       this as any,
       payload,
-      () => this.queueRefreshState(REFRESH_MESSAGES),
-      () => this.queueRefreshState(REFRESH_MESSAGES_AND_SESSION),
+      () => this.queueRefreshStateAndRender(REFRESH_MESSAGES),
+      () => this.queueRefreshStateAndRender(REFRESH_MESSAGES_AND_SESSION),
     );
   }
 
@@ -1664,6 +1664,12 @@ export class RpcInteractiveSession {
       this.refreshLoopPromise = null;
     });
     return this.refreshLoopPromise;
+  }
+
+  private queueRefreshStateAndRender(flags: RefreshFlags = {}) {
+    return this.queueRefreshState(flags).then(() => {
+      this.emitFrontendStatus(true);
+    });
   }
 
   private applyState(state: any) {
