@@ -121,7 +121,7 @@ test("rpc tui reuses a pre-initialized interactive mode without starting it twic
   assert.equal(runCalled, true);
 });
 
-test("rpc startup prepares the daemon worker before interactive mode init", async () => {
+test("rpc startup prepares the daemon worker without flushing notices before UI init", async () => {
   const calls: string[] = [];
   await launcher.prepareRpcSessionWorkerForInteractiveStartup(
     {
@@ -129,8 +129,10 @@ test("rpc startup prepares the daemon worker before interactive mode init", asyn
       async prepareForInteractiveStartup() {
         calls.push("prepare");
       },
-      async connect() {
-        calls.push("connect");
+      async connect(options: any) {
+        calls.push(
+          `connect:${options?.flushPendingSelfImproveNotices === false}`,
+        );
       },
       async ensureSessionReady() {
         calls.push("ensureSessionReady");
@@ -146,10 +148,31 @@ test("rpc startup prepares the daemon worker before interactive mode init", asyn
 
   assert.deepEqual(calls, [
     "prepare",
-    "connect",
+    "connect:true",
     "ensureSessionReady",
     "mark:rpc-session-created",
   ]);
+});
+
+test("rpc startup flushes pending self-improve notices after interactive mode init", async () => {
+  const calls: string[] = [];
+  const interactiveMode = {
+    async init() {
+      calls.push("init");
+    },
+  };
+  const rpcSession = {
+    async flushPendingSelfImproveNotices() {
+      calls.push("flush");
+    },
+  };
+
+  await launcher.initializeRpcInteractiveModeForStartup(
+    interactiveMode,
+    rpcSession,
+  );
+
+  assert.deepEqual(calls, ["init", "flush"]);
 });
 
 test("tui launcher clears the visible viewport before taking over the terminal", () => {

@@ -201,7 +201,10 @@ export async function prepareRpcSessionWorkerForInteractiveStartup(
     rpcSession.settingsManager,
     interactiveOptions,
   );
-  await waitForRpcStartupStep(rpcSession.connect(), "rpc_connect");
+  await waitForRpcStartupStep(
+    rpcSession.connect({ flushPendingSelfImproveNotices: false }),
+    "rpc_connect",
+  );
   await waitForRpcStartupStep(
     rpcSession.ensureSessionReady(),
     "rpc_session_ready",
@@ -220,6 +223,14 @@ async function runInteractiveMode(
     interactiveMode.stop?.();
     throw error;
   }
+}
+
+export async function initializeRpcInteractiveModeForStartup(
+  interactiveMode: InteractiveMode,
+  rpcSession: Pick<RpcInteractiveSession, "flushPendingSelfImproveNotices">,
+) {
+  await (interactiveMode as any).init();
+  await rpcSession.flushPendingSelfImproveNotices().catch(() => {});
 }
 
 export async function runPreinitializedInteractiveMode(
@@ -302,7 +313,7 @@ async function startRpcTui(
       runtimeHost as any,
       interactiveOptions,
     );
-    await (interactiveMode as any).init();
+    await initializeRpcInteractiveModeForStartup(interactiveMode, rpcSession);
   } catch (error) {
     interactiveMode?.stop?.();
     if (runtimeHost) {

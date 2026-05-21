@@ -414,7 +414,7 @@ export class RpcInteractiveSession {
     );
   }
 
-  async connect() {
+  async connect(options: { flushPendingSelfImproveNotices?: boolean } = {}) {
     this.disposed = false;
     this.startupPending = true;
     this.emitFrontendStatus(true);
@@ -450,7 +450,9 @@ export class RpcInteractiveSession {
       await this.client.connect();
       this.setRpcConnected(true);
       await this.refreshState(REFRESH_MESSAGES_AND_SESSION).catch(() => {});
-      await flushPendingSelfImproveNotices(this.client).catch(() => {});
+      if (options.flushPendingSelfImproveNotices !== false) {
+        await this.flushPendingSelfImproveNotices().catch(() => {});
+      }
       await this.modelRegistry.sync().catch(() => {});
     } catch (error) {
       this.handleConnectionLost();
@@ -459,6 +461,10 @@ export class RpcInteractiveSession {
       this.startupPending = false;
       this.emitFrontendStatus(true);
     }
+  }
+
+  async flushPendingSelfImproveNotices() {
+    await flushPendingSelfImproveNotices(this.client);
   }
 
   async disconnect() {
