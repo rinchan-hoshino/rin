@@ -8,7 +8,7 @@ import {
   ParsedArgs,
   safeString,
 } from "./shared.js";
-import { loadRinCodingAgent } from "../rin-lib/loader.js";
+import { loadPiAgentRuntime } from "../rin-lib/loader.js";
 import { nowIso } from "../time-utils.js";
 import { formatReportTime, renderReportTable } from "./report-format.js";
 import type { TokenUsageQueryOptions } from "../token-usage/store.js";
@@ -492,8 +492,8 @@ async function refreshProviderCredential(
   const authPath = getAuthPath(agentDir);
   if (!authPath || !fs.existsSync(authPath)) return credential;
   try {
-    const codingAgentModule = await loadRinCodingAgent();
-    const { AuthStorage } = codingAgentModule as any;
+    const agentRuntimeModule = await loadPiAgentRuntime();
+    const { AuthStorage } = agentRuntimeModule as any;
     const authStorage = AuthStorage.create(authPath);
     const apiKey = await authStorage.getApiKey?.(provider, {
       includeFallback: false,

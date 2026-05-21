@@ -7,7 +7,7 @@ import {
   buildConfiguredLanguageSystemPrompt,
   readConfiguredLanguageFromSettings,
 } from "../language.js";
-import { loadRinCodingAgent } from "./loader.js";
+import { loadPiAgentRuntime } from "./loader.js";
 import {
   applyRuntimeProfileEnvironment,
   getRuntimeSessionDir,
@@ -1037,14 +1037,14 @@ export async function createConfiguredAgentSession(
     thinkingLevel?: any;
   } = {},
 ) {
-  const codingAgentModule = await loadRinCodingAgent();
+  const agentRuntimeModule = await loadPiAgentRuntime();
   const {
     createAgentSessionRuntime,
     createAgentSessionServices,
     createAgentSessionFromServices,
     SettingsManager,
     SessionManager,
-  } = codingAgentModule as any;
+  } = agentRuntimeModule as any;
 
   const { cwd, agentDir } = resolveRuntimeProfile({
     cwd: options.cwd,

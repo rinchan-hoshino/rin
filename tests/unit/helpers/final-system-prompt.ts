@@ -26,8 +26,8 @@ export async function buildFinalAppSystemPrompt(options = {}) {
   const prompt = options.prompt || "";
   const images = options.images;
 
-  const codingAgentModule = await loaderMod.loadRinCodingAgent();
-  const { SessionManager } = codingAgentModule;
+  const agentRuntimeModule = await loaderMod.loadPiAgentRuntime();
+  const { SessionManager } = agentRuntimeModule;
   const sessionManager = SessionManager.inMemory(cwd);
 
   const previousRinDir = process.env.RIN_DIR;

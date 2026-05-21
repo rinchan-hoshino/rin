@@ -1,38 +1,47 @@
-import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
+import * as PiAgentRuntime from "@earendil-works/pi-coding-agent";
 
 import * as Changelog from "./changelog.js";
+import { createRinDefaultResourceLoader } from "./extension-loader.js";
 
-export async function loadRinCodingAgent() {
-  return PiCodingAgent;
+let rinAgentRuntimeModule: any;
+
+export async function loadPiAgentRuntime() {
+  rinAgentRuntimeModule ??= {
+    ...PiAgentRuntime,
+    DefaultResourceLoader: createRinDefaultResourceLoader(PiAgentRuntime),
+  };
+  return rinAgentRuntimeModule;
 }
 
 export async function loadRinSessionManagerModule() {
-  return { SessionManager: PiCodingAgent.SessionManager };
+  return { SessionManager: PiAgentRuntime.SessionManager };
 }
 
 export async function loadRinInteractiveModeModule() {
-  return { InteractiveMode: PiCodingAgent.InteractiveMode };
+  return { InteractiveMode: PiAgentRuntime.InteractiveMode };
 }
 
 export async function loadRinInteractiveFooterModule() {
-  return { FooterComponent: PiCodingAgent.FooterComponent };
+  return { FooterComponent: PiAgentRuntime.FooterComponent };
 }
 
 export async function loadRinInteractiveThemeModule() {
   return {
-    theme: PiCodingAgent.Theme,
-    initTheme: PiCodingAgent.initTheme,
+    theme: PiAgentRuntime.Theme,
+    initTheme: PiAgentRuntime.initTheme,
   };
 }
 
 export async function loadRinSessionSelectorModule() {
-  return { SessionSelectorComponent: PiCodingAgent.SessionSelectorComponent };
+  return {
+    SessionSelectorComponent: PiAgentRuntime.SessionSelectorComponent,
+  };
 }
 
 export async function loadRinChangelogModule() {
   return Changelog;
 }
 
-export function resolveRinCodingAgentDistDir() {
+export function resolvePiAgentRuntimeDistDir() {
   return undefined;
 }
