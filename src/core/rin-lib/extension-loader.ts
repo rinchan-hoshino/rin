@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 function text(value: unknown) {
@@ -31,9 +32,17 @@ function readJson(filePath: string) {
   }
 }
 
-async function importExtensionModule(extensionPath: string) {
-  if (extensionPath.endsWith(".ts")) {
-    const piRoot = path.resolve(
+const requireFromHere = createRequire(import.meta.url);
+
+function resolveJitiStaticPath() {
+  try {
+    return path.join(
+      path.dirname(requireFromHere.resolve("jiti/package.json")),
+      "lib",
+      "jiti-static.mjs",
+    );
+  } catch {
+    return path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       "..",
       "..",
@@ -41,12 +50,48 @@ async function importExtensionModule(extensionPath: string) {
       "node_modules",
       "@earendil-works",
       "pi-coding-agent",
+      "node_modules",
+      "jiti",
+      "lib",
+      "jiti-static.mjs",
     );
-    const jitiUrl = pathToFileURL(
-      path.join(piRoot, "node_modules", "jiti", "lib", "jiti-static.mjs"),
-    ).href;
-    const { createJiti } = await import(jitiUrl);
-    const jiti = createJiti(import.meta.url, { moduleCache: false });
+  }
+}
+
+function resolveJitiAliases() {
+  const pkg = readJson(
+    path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "package.json",
+    ),
+  );
+  const names = Object.keys({
+    ...(pkg?.dependencies || {}),
+    ...(pkg?.devDependencies || {}),
+  });
+  return Object.fromEntries(
+    names.flatMap((name) => {
+      try {
+        return [[name, requireFromHere.resolve(name)]];
+      } catch {
+        return [];
+      }
+    }),
+  );
+}
+
+async function importExtensionModule(extensionPath: string) {
+  if (extensionPath.endsWith(".ts")) {
+    const { createJiti } = await import(
+      pathToFileURL(resolveJitiStaticPath()).href
+    );
+    const jiti = createJiti(import.meta.url, {
+      moduleCache: false,
+      alias: resolveJitiAliases(),
+    });
     return await jiti.import(extensionPath, { default: true });
   }
   return await import(pathToFileURL(extensionPath).href);
