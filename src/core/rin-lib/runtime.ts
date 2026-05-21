@@ -89,6 +89,13 @@ function formatSkillsForPrompt(skills: any[]) {
   return lines.join("\n");
 }
 
+function buildRinRuntimeAwarenessBlock() {
+  return [
+    "You are an LLM running inside an agent loop. In each loop, read the current context, use the available tools when useful, do the requested work, validate concrete results when appropriate, send one final response, and then stop acting until a new user input or scheduled/background trigger starts another loop.",
+    "You are running in the Rin runtime environment.",
+  ].join("\n");
+}
+
 function buildRinDocsBlock(agentDir: string) {
   const rinRoot = path.join(agentDir, "docs", "rin");
   const rinDocsRoot = path.join(rinRoot, "docs");
@@ -200,6 +207,7 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
   const loadedSkills = session._resourceLoader.getSkills().skills;
   const loadedContextFiles =
     session._resourceLoader.getAgentsFiles().agentsFiles;
+  const runtimeAwarenessBlock = buildRinRuntimeAwarenessBlock();
   const docsBlock = buildRinDocsBlock(promptAgentDir);
   const configuredLanguageBlock = buildConfiguredLanguageSystemPrompt(
     readConfiguredLanguageFromSettings(promptAgentDir),
@@ -242,7 +250,7 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
     prompt,
     readPersistedSessionSystemPromptBlocks(session),
   );
-  return `${PROMPT_PREFIX}\n\n${prompt}`.trimEnd();
+  return `${PROMPT_PREFIX}\n${runtimeAwarenessBlock}\n\n${prompt}`.trimEnd();
 }
 
 const LAZY_SYSTEM_PROMPT_STATE_KEY = Symbol.for("rin.lazySystemPromptState");

@@ -180,6 +180,82 @@ test("chat transport stores summarized content for non-text part deliveries", as
   });
 });
 
+test("chat transport forwards text delivery kind to adapters", async () => {
+  await withTempDir(async (dir) => {
+    const sends = [];
+    await transport.sendOutboxPayload(
+      {
+        bots: [
+          {
+            platform: "telegram",
+            selfId: "1",
+            async sendMessage(chatId, content, options) {
+              sends.push({ chatId, content, options });
+              return ["m-kind"];
+            },
+          },
+        ],
+      },
+      dir,
+      {
+        type: "text_delivery",
+        chatKey: "telegram/1:2",
+        deliveryKind: "passive_notice",
+        text: "notice",
+      },
+      Object.assign((type, attrs) => ({ type, attrs }), {
+        text(content) {
+          return { type: "text", attrs: { content } };
+        },
+        quote(id) {
+          return { type: "quote", attrs: { id } };
+        },
+      }),
+    );
+
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0].chatId, "2");
+    assert.deepEqual(sends[0].options, { deliveryKind: "passive_notice" });
+  });
+});
+
+test("chat transport defaults text delivery kind to final", async () => {
+  await withTempDir(async (dir) => {
+    const sends = [];
+    await transport.sendOutboxPayload(
+      {
+        bots: [
+          {
+            platform: "telegram",
+            selfId: "1",
+            async sendMessage(chatId, content, options) {
+              sends.push({ chatId, content, options });
+              return ["m-kind-default"];
+            },
+          },
+        ],
+      },
+      dir,
+      {
+        type: "text_delivery",
+        chatKey: "telegram/1:2",
+        text: "final",
+      },
+      Object.assign((type, attrs) => ({ type, attrs }), {
+        text(content) {
+          return { type: "text", attrs: { content } };
+        },
+        quote(id) {
+          return { type: "quote", attrs: { id } };
+        },
+      }),
+    );
+
+    assert.equal(sends.length, 1);
+    assert.deepEqual(sends[0].options, { deliveryKind: "final" });
+  });
+});
+
 test("chat transport keeps tool and task text deliveries sessionless", async () => {
   await withTempDir(async (dir) => {
     await transport.sendOutboxPayload(

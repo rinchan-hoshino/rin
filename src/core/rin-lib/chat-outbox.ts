@@ -41,6 +41,8 @@ export type ChatMessagePart =
       mimeType?: string;
     };
 
+export type ChatDeliveryKind = "final" | "interim" | "passive_notice";
+
 export type ChatOutboxPayload =
   | {
       type: "text_delivery";
@@ -49,6 +51,7 @@ export type ChatOutboxPayload =
       taskId?: string;
       runId?: string;
       requestId?: string;
+      deliveryKind?: ChatDeliveryKind;
       text: string;
       replyToMessageId?: string;
       sessionId?: string;

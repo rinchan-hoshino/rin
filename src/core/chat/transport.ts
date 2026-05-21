@@ -273,9 +273,14 @@ function looksLikeMarkdown(text: string) {
   );
 }
 
-async function sendChatNodes(app: any, chatKey: string, nodes: any[]) {
+async function sendChatNodes(
+  app: any,
+  chatKey: string,
+  nodes: any[],
+  options: Record<string, any> = {},
+) {
   const { parsed, bot } = requireChatTarget(app, chatKey);
-  return await sendBotMessage(bot, parsed.chatId, nodes);
+  return await sendBotMessage(bot, parsed.chatId, nodes, options);
 }
 
 function normalizeOutboxChatKey(chatKey: string) {
@@ -303,8 +308,15 @@ function normalizeDeliveredMessageIds(result: unknown) {
   return messageIds;
 }
 
-async function sendBotMessage(bot: any, chatId: string, content: any) {
-  return normalizeDeliveredMessageIds(await bot.sendMessage(chatId, content));
+async function sendBotMessage(
+  bot: any,
+  chatId: string,
+  content: any,
+  options: Record<string, any> = {},
+) {
+  return normalizeDeliveredMessageIds(
+    await bot.sendMessage(chatId, content, options),
+  );
 }
 
 function resolveSessionContext(
@@ -463,6 +475,7 @@ export async function sendText(
   text: string,
   h: any,
   replyToMessageId = "",
+  options: Record<string, any> = {},
 ) {
   return await sendChatNodes(
     app,
@@ -472,6 +485,7 @@ export async function sendText(
         ? markdownNode(h, safeString(text))
         : h.text(safeString(text)),
     ]),
+    options,
   );
 }
 
@@ -592,12 +606,14 @@ export async function sendOutboxPayload(
       payload.sessionBinding === "conversation"
         ? normalizeSessionRef(payload)
         : { sessionFile: undefined };
+    const deliveryKind = safeString(payload.deliveryKind).trim() || "final";
     const deliveryResult = await sendText(
       app,
       chatKey,
       text,
       h,
       replyToMessageId,
+      { deliveryKind },
     );
     return finalizeDeliveredAssistantOutput(agentDir, {
       chatKey,
@@ -626,7 +642,9 @@ export async function sendOutboxPayload(
   ).filter(Boolean);
   if (!nodes.length) throw new Error("chat_outbox_empty_message");
 
-  const deliveryResult = await sendChatNodes(app, chatKey, nodes);
+  const deliveryResult = await sendChatNodes(app, chatKey, nodes, {
+    deliveryKind: "final",
+  });
 
   return finalizeDeliveredAssistantOutput(agentDir, {
     chatKey,

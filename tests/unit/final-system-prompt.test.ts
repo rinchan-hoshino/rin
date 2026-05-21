@@ -75,6 +75,21 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     false,
   );
 
+  assert.ok(
+    baseSystemPrompt.startsWith(
+      "As the assistant, you must fulfill the user's requests.\nYou are an LLM running inside an agent loop.",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "send one final response, and then stop acting until a new user input or scheduled/background trigger starts another loop",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "You are running in the Rin runtime environment.",
+    ),
+  );
   assert.ok(baseSystemPrompt.includes("Rin and Pi documentation:"));
   assert.ok(
     baseSystemPrompt.includes(

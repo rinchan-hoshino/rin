@@ -62,6 +62,7 @@ type ChatTurnMeta = {
 type ChatTextDelivery = {
   type: "text_delivery";
   chatKey: string;
+  deliveryKind?: "final" | "interim" | "passive_notice";
   text: string;
   replyToMessageId?: string;
   sessionFile?: string;
@@ -745,6 +746,7 @@ export class ChatController {
     return {
       type: "text_delivery",
       chatKey: this.chatKey,
+      deliveryKind: "final",
       text,
       replyToMessageId:
         safeString(input.replyToMessageId || "").trim() || undefined,
@@ -830,6 +832,7 @@ export class ChatController {
           type: "text_delivery",
           createdAt: nowIso(),
           chatKey: this.chatKey,
+          deliveryKind: "interim",
           text: `${INTERIM_PREFIX}${trimmed}`,
           replyToMessageId: replyToMessageId || undefined,
           ...(this.affectChatBinding
@@ -860,6 +863,7 @@ export class ChatController {
           type: "text_delivery",
           createdAt: nowIso(),
           chatKey: this.chatKey,
+          deliveryKind: "passive_notice",
           text: trimmed,
         },
         this.h,
