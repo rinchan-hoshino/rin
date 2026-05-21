@@ -4,10 +4,6 @@ import { createRinDefaultResourceLoader } from "./extension-loader.js";
 
 let rinAgentRuntimeModule: any;
 
-export async function loadPiAgentRuntime() {
-  return PiAgentRuntime;
-}
-
 function applyExtensionFlagValues(
   extensionsResult: any,
   extensionFlagValues: Map<string, boolean | string> | undefined,

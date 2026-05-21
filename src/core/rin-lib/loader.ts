@@ -1,7 +1,7 @@
 import * as PiAgentRuntime from "@earendil-works/pi-coding-agent";
 
 import * as Changelog from "./changelog.js";
-export { loadPiAgentRuntime, loadRinAgentRuntime } from "./agent-runtime.js";
+export { loadRinAgentRuntime } from "./agent-runtime.js";
 
 export async function loadRinSessionManagerModule() {
   return { SessionManager: PiAgentRuntime.SessionManager };
@@ -30,8 +30,4 @@ export async function loadRinSessionSelectorModule() {
 
 export async function loadRinChangelogModule() {
   return Changelog;
-}
-
-export function resolvePiAgentRuntimeDistDir() {
-  return undefined;
 }

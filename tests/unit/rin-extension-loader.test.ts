@@ -45,17 +45,10 @@ async function writeExtensionPackage(dir: string) {
   );
 }
 
-test("Rin agent runtime keeps raw Pi and composed Rin resource loaders separate", async () => {
-  const rawPiRuntime = await loaderModule.loadPiAgentRuntime();
+test("Rin agent runtime owns the composed resource loading boundary", async () => {
   const rinRuntime = await loaderModule.loadRinAgentRuntime();
-  assert.notEqual(
-    rinRuntime.DefaultResourceLoader,
-    rawPiRuntime.DefaultResourceLoader,
-  );
-  assert.notEqual(
-    rinRuntime.createAgentSessionServices,
-    rawPiRuntime.createAgentSessionServices,
-  );
+  assert.equal(typeof rinRuntime.DefaultResourceLoader, "function");
+  assert.equal(typeof rinRuntime.createAgentSessionServices, "function");
 });
 
 test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface", async () => {
