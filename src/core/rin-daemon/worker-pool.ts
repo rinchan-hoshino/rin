@@ -710,6 +710,10 @@ export class WorkerPool {
       });
     });
 
+    child.stdin.on("error", (error) => {
+      this.handleWorkerStdinFailure(worker, error);
+    });
+
     child.on("exit", (code, signal) => {
       const liveConnections = new Set<ConnectionState>(worker.connections);
       for (const pending of worker.pendingResponses.values()) {
@@ -969,36 +973,101 @@ export class WorkerPool {
     return this.internalCommandTimeoutMs;
   }
 
+  private isWorkerStdinWritable(worker: WorkerHandle) {
+    const stdin = worker.child.stdin;
+    return (
+      this.workers.has(worker) &&
+      worker.child.exitCode === null &&
+      worker.child.signalCode === null &&
+      !stdin.destroyed &&
+      !stdin.writableEnded &&
+      !stdin.writableFinished &&
+      stdin.writable !== false
+    );
+  }
+
+  private handleWorkerStdinFailure(worker: WorkerHandle, error: Error) {
+    if (!this.workers.has(worker)) return;
+    for (const pending of Array.from(worker.pendingResponses.values())) {
+      pending.finalize?.();
+      if (pending.reject) {
+        pending.reject(error);
+      } else if (pending.connection) {
+        writeLine(
+          pending.connection.socket,
+          responseError(pending.id, pending.commandType, "rin_worker_exit"),
+        );
+      }
+    }
+    worker.pendingResponses.clear();
+    worker.ignoredResponseIds.clear();
+    this.destroyWorker(worker);
+  }
+
+  private rejectInternalCommandWrite(
+    worker: WorkerHandle,
+    id: string,
+    finalize: () => void,
+    reject: (error: Error) => void,
+    error: unknown,
+  ) {
+    worker.pendingResponses.delete(id);
+    worker.ignoredResponseIds.add(id);
+    finalize();
+    const normalized =
+      error instanceof Error ? error : new Error(String(error));
+    reject(normalized);
+    this.destroyWorker(worker);
+  }
+
   private async sendInternalCommand(worker: WorkerHandle, command: any) {
     const id = `rin_internal_${++this.internalRequestSeq}`;
     return await new Promise<any>((resolve, reject) => {
+      const commandType = String(command?.type || "unknown");
       const timeout = setTimeout(() => {
         worker.pendingResponses.delete(id);
         worker.ignoredResponseIds.add(id);
         this.maybeReleaseWorker(worker);
-        reject(
-          new Error(
-            `rin_internal_timeout:${String(command?.type || "unknown")}`,
-          ),
-        );
+        reject(new Error(`rin_internal_timeout:${commandType}`));
       }, this.getInternalCommandTimeoutMs(command));
       timeout.unref?.();
 
       const finalize = () => clearTimeout(timeout);
       worker.pendingResponses.set(id, {
         id,
-        commandType: String(command?.type || "unknown"),
+        commandType,
         resolve,
         reject,
         finalize,
       });
+
+      if (!this.isWorkerStdinWritable(worker)) {
+        this.rejectInternalCommandWrite(
+          worker,
+          id,
+          finalize,
+          reject,
+          new Error(`rin_worker_stdin_unavailable:${commandType}`),
+        );
+        return;
+      }
+
       try {
-        worker.child.stdin.write(`${JSON.stringify({ ...command, id })}\n`);
+        worker.child.stdin.write(
+          `${JSON.stringify({ ...command, id })}\n`,
+          (error?: Error | null) => {
+            if (!error) return;
+            this.rejectInternalCommandWrite(
+              worker,
+              id,
+              finalize,
+              reject,
+              error,
+            );
+          },
+        );
       } catch (error: any) {
-        worker.pendingResponses.delete(id);
-        worker.ignoredResponseIds.add(id);
-        finalize();
-        reject(error instanceof Error ? error : new Error(String(error)));
+        this.rejectInternalCommandWrite(worker, id, finalize, reject, error);
       }
     });
   }

@@ -896,6 +896,83 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("internal worker commands reject closed stdin without unhandled stream errors", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker.mjs");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 50,
+    internalCommandTimeoutMs: 200,
+  });
+  const worker = pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    { type: "new_session" },
+  );
+
+  worker.child.stdin.end();
+  await new Promise((resolve) => worker.child.stdin.once("finish", resolve));
+
+  await assert.rejects(
+    pool.sendInternalCommand(worker, {
+      type: "switch_session",
+      sessionPath: "/tmp/closed-stdin.jsonl",
+    }),
+    /rin_worker_stdin_unavailable:switch_session/,
+  );
+
+  assert.equal(worker.pendingResponses.size, 0);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("internal worker commands handle async stdin write errors", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker.mjs");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 50,
+    internalCommandTimeoutMs: 200,
+  });
+  const worker = pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    { type: "new_session" },
+  );
+
+  const originalWrite = worker.child.stdin.write.bind(worker.child.stdin);
+  worker.child.stdin.write = ((chunk: any, callback?: any) => {
+    const error = new Error("synthetic async stdin failure");
+    queueMicrotask(() => callback?.(error));
+    return true;
+  }) as typeof worker.child.stdin.write;
+
+  await assert.rejects(
+    pool.sendInternalCommand(worker, {
+      type: "switch_session",
+      sessionPath: "/tmp/async-write-error.jsonl",
+    }),
+    /synthetic async stdin failure/,
+  );
+
+  worker.child.stdin.write = originalWrite;
+  assert.equal(worker.pendingResponses.size, 0);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("switch_session internal commands can outlive the generic internal timeout", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");
