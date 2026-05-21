@@ -354,13 +354,54 @@ function redrawCurrentSessionHistoryAfterRpcResync(instance: any) {
   });
 }
 
-function showRinUpdateNotification(instance: any, notice: RinUpdateNotice) {
+function formatRinUpdateNotificationText(notice: RinUpdateNotice) {
   const channelPrefix = notice.channel === "stable" ? "" : `${notice.channel} `;
-  const text = [
+  return [
     `Rin ${channelPrefix}update available: ${notice.version}`,
     `Run: ${notice.command}`,
     `Changelog: ${getRinChangelogUrl()}`,
   ].join("\n");
+}
+
+export class DeferredRinUpdateNotification {
+  private readonly spacer = new Spacer(1);
+  private readonly text = new Text("", 1, 0);
+  private active = false;
+
+  setText(text: string) {
+    this.active = true;
+    this.text.setText(text);
+  }
+
+  invalidate() {
+    this.spacer.invalidate?.();
+    this.text.invalidate?.();
+  }
+
+  render(width: number) {
+    if (!this.active) return [];
+    return [...this.spacer.render(width), ...this.text.render(width)];
+  }
+}
+
+export function insertRinUpdateNotificationPlaceholder(instance: any) {
+  if (typeof instance?.chatContainer?.addChild !== "function") return undefined;
+  const placeholder = new DeferredRinUpdateNotification();
+  instance.chatContainer.addChild(placeholder);
+  return placeholder;
+}
+
+export function showRinUpdateNotification(
+  instance: any,
+  notice: RinUpdateNotice,
+  placeholder?: DeferredRinUpdateNotification,
+) {
+  const text = formatRinUpdateNotificationText(notice);
+  if (placeholder) {
+    placeholder.setText(`Warning: ${text}`);
+    instance?.ui?.requestRender?.();
+    return;
+  }
   if (typeof instance?.showWarning === "function") {
     instance.showWarning(text);
     return;
@@ -371,10 +412,16 @@ function showRinUpdateNotification(instance: any, notice: RinUpdateNotice) {
 }
 
 function scheduleRinUpdateNotificationWhenReady(instance: any) {
-  void sleep(0).then(() => showRinUpdateNotificationWhenReady(instance));
+  const placeholder = insertRinUpdateNotificationPlaceholder(instance);
+  void sleep(0).then(() =>
+    showRinUpdateNotificationWhenReady(instance, placeholder),
+  );
 }
 
-async function showRinUpdateNotificationWhenReady(instance: any) {
+async function showRinUpdateNotificationWhenReady(
+  instance: any,
+  placeholder?: DeferredRinUpdateNotification,
+) {
   try {
     const notice = await checkForRinUpdateNotice();
     if (!notice) return;
@@ -382,7 +429,7 @@ async function showRinUpdateNotificationWhenReady(instance: any) {
       if (instance?.isInitialized) break;
       await sleep(50);
     }
-    showRinUpdateNotification(instance, notice);
+    showRinUpdateNotification(instance, notice, placeholder);
   } catch {
     // Update checks must never block the TUI.
   }
