@@ -917,7 +917,7 @@ test("cron task condition false skips execution and schedules the next tick", as
       trigger: { expression: "* * * * *", timezone: "local" },
       session: { mode: "none" },
       target: { kind: "agent_prompt", prompt: "run" },
-      condition: { kind: "agent_code", code: "false" },
+      condition: { code: "false" },
     });
     const skipped = scheduler.runTaskNow("cron_condition_false");
     assert.equal(runTurnCount, 0);
@@ -932,7 +932,7 @@ test("cron task condition false skips execution and schedules the next tick", as
   }
 });
 
-test("cron task condition true allows execution", async () => {
+test("cron task condition true allows TypeScript execution", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   let runTurnCount = 0;
   const scheduler = new cronMod.CronScheduler({
@@ -952,8 +952,7 @@ test("cron task condition true allows execution", async () => {
       session: { mode: "none" },
       target: { kind: "agent_prompt", prompt: "run" },
       condition: {
-        kind: "agent_code",
-        code: "return context.task.id === 'cron_condition_true'",
+        code: "(context: { task: { id: string } }) => context.task.id === 'cron_condition_true'",
       },
     });
     const started = scheduler.runTaskNow("cron_condition_true");

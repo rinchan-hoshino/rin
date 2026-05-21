@@ -1,34 +1,52 @@
 # Scheduled Tasks
 
-Rin scheduled tasks are daemon-owned background jobs. Use them for reminders, delayed follow-ups, periodic checks, cron jobs, and recurring agent automation.
+Rin scheduled tasks are daemon-owned background jobs. They are the default way to reduce human-in-the-loop load when work should happen later, repeatedly, conditionally, or after the current agent turn ends.
 
-## Quick path
+Use scheduled tasks for reminders, delayed follow-ups, periodic checks, cron jobs, recurring agent automation, run-now starts of saved jobs, and conditional background checks. Do not replace them with systemd timers, ad-hoc sleeps, hidden final-message promises, or manual “I will check later” claims.
 
-1. Identify the operation: create, inspect, update, reschedule a one-time task, run now, complete, pause, resume, delete, or conditional execution.
-2. Use Rin scheduled tasks instead of systemd timers for user reminders and agent automation.
-3. Use task `condition` when a schedule should wake only if agent-authored code returns true.
-4. Use the local agent SDK for scheduled-task create, inspect, update, one-time reschedule, complete, delete, pause, resume, and run-now operations.
-5. Use `rin status` or `rin status --json` for a redacted activity overview.
-6. Do not construct raw daemon RPC payloads for normal task work.
-7. After changing or starting a task, re-read daemon-visible state and verify the fields in the checklist below.
+## Agent decision rule
 
-Read `~/.rin/docs/rin/docs/agent-sdk.md` for the shared SDK import snippet. In examples below, `rin` is the SDK instance returned by `createRinAgentSdk()`.
+When a request contains any of these shapes, consider scheduled tasks before answering with a manual plan:
 
-Do not edit `~/.rin/data/cron/tasks.json` while the daemon is running unless you are doing offline recovery; the running daemon is authoritative.
+- **Time trigger:** “remind me”, “later”, “tomorrow”, “at 8:30”, “every morning”, “每小时/每天/每周”.
+- **Polling/checking:** “keep an eye on it”, “check until”, “if it changes”, “有结果再告诉我”.
+- **Recurring work:** daily briefings, health checks, cleanup passes, status reports, backups, account audits, quant reviews, release/watchdog checks.
+- **Human-loop reduction:** anything that would otherwise require the owner to come back, ask again, or remember the next step.
+- **Existing task operations:** inspect, update, pause, resume, complete, delete, reschedule, or run now.
 
-## Required verification
+If the desired time, chat target, authority, or irreversible action is unclear, ask only for that missing boundary. If the boundary is clear and safe, create or update the task and verify it.
 
-After changing tasks:
+## Read before operating
 
-1. Re-read the task with `rin.tasks.get(taskId)` when it should still exist, or list tasks with `rin.tasks.list()` when it may be deleted.
-2. Check `rin status --json` when liveness or next-run timing matters.
-3. Confirm `enabled`, `nextRunAt`, `trigger`, `condition`, `session.mode`, `thinkingLevel`, `target.kind`, and `chatKey` match the user's request.
-4. For conditional tasks, verify `condition.lastEvaluatedAt` and `condition.lastResult` after a run-now or due tick.
-5. For pause/delete/complete operations, verify progress stopped if there was an active run; status alone may show only scheduler state, not a spawned worker that already started.
+1. Read `~/.rin/docs/rin/docs/agent-sdk.md` for the SDK import and helper names.
+2. Use the local Rin Agent SDK for normal task operations; do not construct raw `cron_*` daemon RPC payloads by hand.
+3. Use `rin status` or `rin status --json` for a redacted liveness overview.
+4. Do not edit `~/.rin/data/cron/tasks.json` while the daemon is running unless doing explicit offline recovery; the running daemon is authoritative.
 
-## Task shape reference
+## Operation workflow
 
-A task record has these main fields:
+1. Classify the operation: create, inspect, update, run now, reschedule one-time, pause, resume, complete, or delete.
+2. Choose the smallest task shape that preserves the user-visible contract.
+3. Use `rin.tasks.*` from the Agent SDK.
+4. Re-read the task or list after the write.
+5. When timing/liveness matters, check `rin status --json`.
+6. Verify the fields below before reporting success.
+
+Required verification after a create/update/run-state change:
+
+- `id`, `name`, `enabled`, `completedAt`, `pausedAt`
+- `trigger`, `nextRunAt`, and local-time expectation
+- `condition` plus `condition.lastEvaluatedAt` / `condition.lastResult` after a run-now or due tick
+- `session.mode`, `dedicatedSessionFile` when dedicated
+- `target.kind`, prompt/command intent, `chatKey`
+- `model`, `thinkingLevel`
+- `termination`, `runCount`, `lastStartedAt`, `lastFinishedAt`, `lastResultText`, `lastError`
+
+For pause/delete/complete, also verify any active run stopped or no longer has a live producer; scheduler state alone may not prove a child turn has ended.
+
+## Task record reference
+
+A task record has these main fields. Some runtime fields are output-only and are filled by the scheduler.
 
 ```ts
 type Task = {
@@ -39,16 +57,21 @@ type Task = {
   model?: string;
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   trigger: {
-    runAt?: string;
-    startAt?: string;
+    // recurring cron trigger
     expression?: string;
     timezone?: "local";
+
+    // one-time trigger; startAt is accepted as an input alias for runAt
+    runAt?: string;
+    startAt?: string;
   };
   termination?: { maxRuns?: number; stopAt?: string } | null;
   condition?: {
-    kind: "agent_code";
     code: string;
     timeoutMs?: number;
+    lastEvaluatedAt?: string;
+    lastResult?: boolean;
+    lastOutput?: string;
   } | null;
   session?:
     | { mode: "none" | "dedicated" }
@@ -56,33 +79,77 @@ type Task = {
   target:
     | { kind: "agent_prompt"; prompt: string; continuationPrompt?: string }
     | { kind: "shell_command"; command: string };
+
+  // output-only lifecycle state
+  createdAt?: string;
+  updatedAt?: string;
+  nextRunAt?: string;
+  completedAt?: string;
+  completionReason?: string;
+  pausedAt?: string;
+  runCount?: number;
+  running?: boolean;
+  lastStartedAt?: string;
+  lastFinishedAt?: string;
+  lastResultText?: string;
+  lastError?: string;
+  dedicatedSessionFile?: string;
 };
 ```
 
-Trigger rules:
+## Triggers
 
-- one-time task: `trigger.runAt` as an ISO timestamp
-- recurring task: `trigger.expression` with a standard five-field cron expression, evaluated in local time
+### One-time trigger
 
-Session rules:
+Use `trigger.runAt` with an ISO timestamp. `startAt` is accepted as an input alias and is normalized to `runAt`.
 
-- `session.mode: "none"` is default and best for reminders, shell checks, and independent prompts.
-- `session.mode: "dedicated"` keeps a stable managed session under `~/.rin/sessions/managed/task/<task-id>.jsonl`; use it only when future runs need prior context.
-- `session.mode: "session_instruction"` inserts the `agent_prompt` into the existing chat session identified by `session.sessionFile`.
-- Dedicated agent tasks use `target.prompt` for the first run and `target.continuationPrompt` for later runs when provided.
+```js
+const trigger = { runAt: "2026-05-08T13:30:00+08:00" };
+```
 
-Target rules:
+One-time tasks complete after their first target execution. If a one-time task is skipped by a false condition, Rin marks it completed with `completionReason: "condition_false"`.
 
-- `agent_prompt` runs an agent turn. With `session.mode: "none"` or `"dedicated"`, it uses a task session; with `session.mode: "session_instruction"`, it inserts the prompt into the existing chat session.
-- `session_instruction` mode must be a one-time `runAt` task, must not set `chatKey`, and marks runtime prompt metadata as an agent-initiated scheduled task without adding task metadata to the system prompt.
-- `shell_command` runs a shell command and stores summarized output.
-- `chatKey` binds agent-task delivery to a chat bridge target when `agent_prompt` or `shell_command` should reply there.
+### Recurring trigger
+
+Use a standard five-field cron expression evaluated in Rin local time. Include `timezone: "local"` for clarity.
+
+```js
+const trigger = { expression: "30 8 * * *", timezone: "local" };
+```
+
+Recurring tasks schedule the next tick after run-now, normal execution, or a false condition.
+
+## Termination
+
+Use `termination` to let a recurring task stop itself without a later manual cleanup.
+
+```js
+termination: { maxRuns: 7, stopAt: "2026-06-01T00:00:00+08:00" }
+```
+
+- `maxRuns` is clamped to at least `1` and completes the task when `runCount` reaches it.
+- `stopAt` is normalized as an ISO timestamp and completes the task after that time.
+- Set `termination: null` in `upsert()` to remove an existing termination rule.
 
 ## Conditional execution
 
-A scheduled task can include `condition` when the schedule should wake only after agent-authored JavaScript returns true. When the condition returns false, Rin records the evaluation, leaves `runCount` unchanged, does not run the target, and schedules the next tick.
+Use `condition` when the schedule should wake only if agent-authored TypeScript returns true. This is the main tool for reducing unnecessary model turns.
 
-The condition runs in a short-lived Node process. The code may be a JavaScript expression, a function body using `return`, or a function/async function value. It receives one argument named `context`:
+When the condition returns false:
+
+- Rin records `condition.lastEvaluatedAt`, `condition.lastResult: false`, and `condition.lastOutput`.
+- The target does not run.
+- `runCount` does not increase.
+- A recurring task schedules the next tick.
+- A one-time task completes as `condition_false`.
+
+The condition runs in a short-lived Node process. Code may be:
+
+- a TypeScript expression: `context.task.runCount === 0`
+- a function body with `return`: `return context.task.runCount === 0`
+- a function or async function value: `async (context) => true`
+
+Context shape:
 
 ```ts
 type ConditionContext = {
@@ -100,29 +167,94 @@ type ConditionContext = {
 };
 ```
 
-Example conditional task:
+Timeout defaults to 5000 ms and is clamped to 100–60000 ms.
+
+Example:
 
 ```js
 await rin.tasks.upsert({
-  name: "Run only after first successful check",
+  id: "cron_watch_until_clean",
+  name: "Watch until check passes",
   enabled: true,
   trigger: { expression: "*/30 * * * *", timezone: "local" },
   condition: {
-    kind: "agent_code",
-    code: "return context.task.runCount === 0 || !context.task.lastError",
+    code: "return context.task.runCount === 0 || Boolean(context.task.lastError)",
     timeoutMs: 5000,
   },
   session: { mode: "none" },
   target: {
     kind: "agent_prompt",
-    prompt: "Check the thing and report only changes.",
+    prompt:
+      "Run the documented check. Report only if action is needed or fixed.",
   },
 });
 ```
 
 Set `condition: null` to remove an existing condition.
 
+## Sessions
+
+### `session.mode: "none"`
+
+Default and preferred for independent reminders, simple checks, shell diagnostics, and polished chat reports that do not need cross-run memory.
+
+Behavior:
+
+- Agent tasks run in a managed task session for that run.
+- Rin disposes/shuts down the no-session turn after completion, except special self-improve maintenance tasks.
+- If `chatKey` is set, the final task result is sent to that chat and may preserve a chat-bound session file for quote/resume context.
+
+### `session.mode: "dedicated"`
+
+Use only when future runs need prior task context. Rin derives the session path from the task id:
+
+```text
+~/.rin/sessions/managed/task/<task-id>.jsonl
+```
+
+Behavior:
+
+- First run uses `target.prompt`.
+- Later runs use `target.continuationPrompt` when provided; otherwise they reuse `target.prompt`.
+- The dedicated session persists across runs.
+
+Avoid dedicated sessions for routine reports unless the task truly benefits from history; stale context can add noise.
+
+### `session.mode: "session_instruction"`
+
+Use for a one-time follow-up inserted into an existing chat session.
+
+Requirements enforced by the scheduler:
+
+- `target.kind` must be `"agent_prompt"`.
+- Trigger must be one-time `runAt`/`startAt`, not a recurring cron expression.
+- Do not set `chatKey`; Rin derives the chat binding from the stored session file.
+- `session.sessionFile` must point to an existing stored session with a chat binding.
+
+Runtime prompt metadata marks this as an agent-initiated scheduled task without adding task metadata to the normal system prompt.
+
+## Targets and delivery
+
+### `target.kind: "agent_prompt"`
+
+Runs an agent turn. Use this for owner-facing reports, summaries, checks that need reasoning, and any task that should produce polished chat text.
+
+- `chatKey` binds delivery to a chat bridge target.
+- `model` and `thinkingLevel` override the run when present.
+- Rin stores a summarized final result in `lastResultText`.
+- If the agent turn has no canonical final assistant text, the task records `lastError`.
+
+### `target.kind: "shell_command"`
+
+Runs a shell command from the Rin user home directory using configured shell, `/bin/bash`, PATH `bash`, or `sh` fallback.
+
+Use this for machine-style diagnostics and stable scripts. If the owner expects a polished report, prefer an `agent_prompt` task that runs the script and summarizes the result, because shell delivery includes machine fields like `Command`, `Exit`, `stdout`, and `stderr`.
+
+Shell stdout/stderr are summarized before storage/delivery.
+
 ## SDK operations
+
+Import the SDK as shown in `agent-sdk.md`; examples below assume `const rin = createRinAgentSdk()`.
 
 List tasks:
 
@@ -140,7 +272,8 @@ Create a one-time reminder:
 
 ```js
 await rin.tasks.upsert({
-  name: "Send reminder",
+  id: "cron_drink_water_once",
+  name: "Send water reminder",
   enabled: true,
   thinkingLevel: "low",
   trigger: { runAt: "2026-05-08T13:30:00+08:00" },
@@ -152,27 +285,44 @@ await rin.tasks.upsert({
 });
 ```
 
-Create a recurring agent task:
+Create a recurring chat report:
 
 ```js
 await rin.tasks.upsert({
   id: "cron_daily_brief",
   name: "Daily brief",
   enabled: true,
+  chatKey: "telegram/123456:7890",
   thinkingLevel: "medium",
   trigger: { expression: "30 8 * * *", timezone: "local" },
-  session: { mode: "dedicated" },
+  session: { mode: "none" },
   target: {
     kind: "agent_prompt",
     prompt:
-      "Prepare today's brief using the current facts and send it to the configured chat.",
-    continuationPrompt:
-      "Prepare today's brief. Reuse prior task context only when it is still relevant.",
+      "Prepare today's brief using fresh facts. Send only the concise brief.",
   },
 });
 ```
 
-Create a current-session instruction task:
+Create a dedicated recurring task:
+
+```js
+await rin.tasks.upsert({
+  id: "cron_weekly_watch",
+  name: "Weekly watch with memory",
+  enabled: true,
+  trigger: { expression: "0 9 * * 1", timezone: "local" },
+  session: { mode: "dedicated" },
+  target: {
+    kind: "agent_prompt",
+    prompt: "Start the weekly watch ledger and report the first status.",
+    continuationPrompt:
+      "Continue the weekly watch ledger. Report only meaningful changes.",
+  },
+});
+```
+
+Create a current-session follow-up:
 
 ```js
 await rin.tasks.upsert({
@@ -207,21 +357,21 @@ await rin.tasks.upsert({
 
 Update an existing task:
 
-Use `rin.tasks.upsert()` with the same `task.id`. Include the fields you intend to change; omitted fields reuse the existing task values.
-
 ```js
 await rin.tasks.upsert({
   id: "cron_daily_brief",
   thinkingLevel: "low",
+  condition: null,
   target: {
     kind: "agent_prompt",
     prompt: "Prepare a shorter daily brief.",
-    continuationPrompt: "Prepare a shorter daily brief.",
   },
 });
 ```
 
-Run now, pause, or resume a task:
+`upsert()` merges with the existing task when `id` matches. Include fields you intend to change. Use `null` only for fields that explicitly support removal (`chatKey`, `termination`, `condition`).
+
+Run now, pause, or resume:
 
 ```js
 await rin.tasks.run("cron_daily_brief");
@@ -229,19 +379,72 @@ await rin.tasks.pause("cron_daily_brief");
 await rin.tasks.resume("cron_daily_brief");
 ```
 
-`rin.tasks.run()` manually starts the existing task record through the scheduler path, including built-in tasks; it does not clone the task or change its definition.
+`rin.tasks.run()` starts the existing task record through the scheduler path. It does not clone the task or change its definition. It still evaluates `condition`.
 
 Reschedule and activate a one-time task:
 
 ```js
-await rin.tasks.rescheduleOnce("cron_follow_up", "2026-05-08T15:00:00+08:00");
+await rin.tasks.rescheduleOnce(
+  "cron_follow_up_here",
+  "2026-05-08T15:00:00+08:00",
+);
 ```
 
-Use `rin.tasks.rescheduleOnce()` when a one-time task needs to set its own next `runAt` while it is executing, or when a completed/paused one-time task should run again. It updates `trigger.runAt`, sets `nextRunAt`, clears completed/paused state, and enables the task. It is only for one-time tasks; use `rin.tasks.upsert()` for recurring trigger changes.
+`rescheduleOnce()` is only for one-time tasks. It sets `trigger.runAt`, sets `nextRunAt`, clears `completedAt` / `completionReason` / `pausedAt`, and enables the task. Use `upsert()` for recurring trigger changes.
 
-Complete or delete a task:
+Complete or delete:
 
 ```js
 await rin.tasks.complete("cron_daily_brief", "finished");
 await rin.tasks.delete("cron_daily_brief");
 ```
+
+- `complete()` keeps a completed record with `completionReason` and disables future runs.
+- `delete()` removes the record.
+- Both terminate the task's active chat turn when applicable.
+
+## Built-in tasks
+
+Rin installs some daemon-owned built-in tasks, such as daily memory-index repair and self-improve sleep consolidation. Built-in task definitions are protected from mutation/deletion by normal task APIs. `rin status --json` exposes built-in counts and redacted scheduler state; normal SDK list/get focuses on agent-created tasks.
+
+Do not recreate a built-in task as an agent task. If a built-in seems broken, diagnose the daemon/source boundary.
+
+## Design patterns
+
+### Prefer automation over future promises
+
+Bad:
+
+```text
+I will check this tomorrow.
+```
+
+Good:
+
+```text
+Created cron_follow_up_here for 2026-05-08 15:00 local time and verified nextRunAt.
+```
+
+### Prefer `agent_prompt` for user-facing reports
+
+Use `shell_command` when raw machine output is acceptable. Use `agent_prompt` when the final recipient should receive a short domain summary.
+
+### Prefer `condition` for cheap gates
+
+If a task only needs a model when an external state changes, put the cheap state test in `condition` or in a lightweight script called by an `agent_prompt` task. This prevents empty periodic model turns.
+
+### Prefer `session.mode: "none"` unless continuity is required
+
+Dedicated sessions are powerful but add persistent context. Use them only when the task's next run really needs the previous run's reasoning or ledger.
+
+### Give tasks stable, descriptive ids
+
+Use ids like `cron_daily_brief`, `cron_qmt_evening_review`, or `cron_follow_up_here`. Avoid random ids unless the task is truly disposable.
+
+## Troubleshooting
+
+- Task did not run: inspect `enabled`, `completedAt`, `pausedAt`, `nextRunAt`, `condition.lastResult`, `lastError`, and `rin status --json`.
+- Run-now returned but no report arrived: inspect `running`, `lastStartedAt`, active chat turn, `lastError`, and the target `chatKey`.
+- Recurring task is noisy: add `condition`, lower `thinkingLevel`, or change prompt to report only changes.
+- Report formatting is too raw: replace `shell_command` delivery with an `agent_prompt` wrapper.
+- Current-session follow-up fails: verify the `sessionFile` exists and has a stored chat binding; do not add `chatKey` to `session_instruction` tasks.
