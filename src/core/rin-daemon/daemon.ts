@@ -317,17 +317,6 @@ export async function startDaemon(
         task: cronScheduler.runTaskNow(taskIdFromCommand(command)),
       },
     }),
-    heartbeat_append_info: (command) => ({
-      data: cronScheduler.appendHeartbeatInfo(command.entry || {}),
-    }),
-    heartbeat_mark_read: (command) => ({
-      data: cronScheduler.markHeartbeatInfoRead({
-        taskId: taskIdFromCommand(command),
-        entryIds: Array.isArray(command.entryIds) ? command.entryIds : [],
-        result: String(command.result || ""),
-        actorId: String(command.actorId || taskIdFromCommand(command)),
-      }),
-    }),
   };
 
   const selfHandleCommand = async (

@@ -222,16 +222,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
 
   background_extension_entrypoint_missing: () =>
     "Background extension is missing a Rin extension entry point. Export a Rin extension factory or background service and restart Rin.",
-  heartbeat_chatKey_required: () =>
-    "Heartbeat chat intake needs a chat key. Configure a concrete chat key and retry.",
-  heartbeat_entry_ids_required: () =>
-    "Heartbeat read marking needs at least one inbox entry id. Select an unread heartbeat entry and retry.",
-  heartbeat_inbox_entry_ids_required: () =>
-    "Heartbeat read marking needs at least one inbox entry id. Select an unread heartbeat entry and retry.",
-  heartbeat_inbox_title_required: () =>
-    "Heartbeat inbox entries need a title. Add a concise title and retry.",
-  heartbeat_task_id_required: () =>
-    "Heartbeat read marking needs the heartbeat task id from the heartbeat context. Use that id and retry.",
 
   python_not_found: () =>
     "Web search needs Python to start the local SearXNG sidecar. Install Python 3 and retry.",

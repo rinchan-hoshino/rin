@@ -133,6 +133,5 @@ Keep the change minimal:
 - do not run in std/maintenance mode
 - may register chat adapters with `ctx.registerChatAdapter(...)`
 - may register external memory providers with `ctx.registerMemoryProvider(...)`; providers can implement `search`, `listRecent`, and `write`, and can return remote `reference` or `url` values instead of local transcript paths
-- may append personality heartbeat inbox information with `ctx.heartbeat.appendInfo(...)`
 
 Configure background services only when the user intentionally wants a background extension such as an external event bridge or a trusted memory backend. Keep the normal chat adapters under `settings.json -> chat`, not background services.

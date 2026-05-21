@@ -898,34 +898,7 @@ test("cron execution shell task returns summarized success body", async () => {
   assert.ok(text.includes("stdout:"));
 });
 
-test("personality heartbeat is a hidden dedicated standard cron task", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const scheduler = new cronMod.CronScheduler({ agentDir });
-  try {
-    scheduler.start();
-    assert.equal(
-      scheduler
-        .listTasks()
-        .some((task) => task.id === "builtin_personality_heartbeat"),
-      false,
-    );
-    const task = scheduler.getTask("builtin_personality_heartbeat", {
-      includeBuiltIn: true,
-    });
-    assert.ok(task);
-    assert.equal(task.builtIn, true);
-    assert.equal(task.trigger.expression, "* * * * *");
-    assert.equal(task.session.mode, "dedicated");
-    assert.equal(task.heartbeat.inbox, "root");
-    assert.match(task.target.prompt, /root personality heartbeat agent/);
-    assert.match(task.target.prompt, /manage sub-persona heartbeat agents/);
-  } finally {
-    scheduler.stop();
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("empty personality heartbeat ticks reschedule without running the agent", async () => {
+test("cron task condition false skips execution and schedules the next tick", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   let runTurnCount = 0;
   const scheduler = new cronMod.CronScheduler({
@@ -939,11 +912,19 @@ test("empty personality heartbeat ticks reschedule without running the agent", a
   });
   try {
     scheduler.start();
-    const skipped = scheduler.runTaskNow("builtin_personality_heartbeat");
+    scheduler.upsertTask({
+      id: "cron_condition_false",
+      trigger: { expression: "* * * * *", timezone: "local" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "run" },
+      condition: { kind: "agent_code", code: "false" },
+    });
+    const skipped = scheduler.runTaskNow("cron_condition_false");
     assert.equal(runTurnCount, 0);
     assert.equal(skipped.runCount, 0);
     assert.equal(skipped.running, false);
-    assert.ok(skipped.heartbeat.lastSkippedAt);
+    assert.equal(skipped.condition.lastResult, false);
+    assert.equal(skipped.lastResultText, "condition_false");
     assert.ok(Date.parse(skipped.nextRunAt) > Date.now());
   } finally {
     scheduler.stop();
@@ -951,60 +932,35 @@ test("empty personality heartbeat ticks reschedule without running the agent", a
   }
 });
 
-test("personality heartbeat injects unread inbox entries into the dedicated prompt", async () => {
+test("cron task condition true allows execution", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const calls = [];
+  let runTurnCount = 0;
   const scheduler = new cronMod.CronScheduler({
     agentDir,
     chat: {
-      runTurn: async (payload) => {
-        calls.push(payload);
-        return { finalText: "done" };
+      runTurn: async () => {
+        runTurnCount += 1;
+        return { finalText: "ran" };
       },
     },
   });
   try {
     scheduler.start();
-    scheduler.appendHeartbeatInfo({
-      id: "entry_42",
-      source: "extension",
-      title: "Review new chat information",
-      content: "Check only enough context to delegate if needed.",
+    scheduler.upsertTask({
+      id: "cron_condition_true",
+      trigger: { expression: "* * * * *", timezone: "local" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "run" },
+      condition: {
+        kind: "agent_code",
+        code: "return context.task.id === 'cron_condition_true'",
+      },
     });
-
-    const started = scheduler.runTaskNow("builtin_personality_heartbeat");
+    const started = scheduler.runTaskNow("cron_condition_true");
     assert.equal(started.runCount, 1);
-    for (let i = 0; i < 50; i += 1) {
-      if (
-        !scheduler.getTask("builtin_personality_heartbeat", {
-          includeBuiltIn: true,
-        })?.running
-      )
-        break;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-
-    assert.equal(calls.length, 1);
-    assert.equal(
-      calls[0].sessionFile.endsWith("builtin_personality_heartbeat.jsonl"),
-      true,
-    );
-    assert.match(calls[0].text, /Heartbeat inbox context:/);
-    assert.match(
-      calls[0].text,
-      /heartbeatTaskId: builtin_personality_heartbeat/,
-    );
-    assert.match(calls[0].text, /entryId: entry_42/);
-    assert.match(calls[0].text, /Review new chat information/);
-    assert.match(calls[0].text, /mark_heartbeat_info_read/);
-
-    const marked = scheduler.markHeartbeatInfoRead({
-      taskId: "builtin_personality_heartbeat",
-      entryIds: ["entry_42"],
-      result: "reviewed",
-    });
-    assert.equal(marked.entries[0].status, "read");
-    assert.equal(marked.entries[0].result, "reviewed");
+    assert.equal(started.condition.lastResult, true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(runTurnCount, 1);
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });

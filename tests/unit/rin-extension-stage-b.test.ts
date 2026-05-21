@@ -33,10 +33,6 @@ const chatRuntime = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
     .href
 );
-const heartbeatInbox = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "heartbeat", "inbox.js"))
-    .href
-);
 const bundledExtensions = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-bundled-extensions.js"))
     .href
@@ -582,63 +578,6 @@ export default function extension(rin) {
       await fs.readFile(markerPath, "utf8"),
       "search:remote originals:3\nrecent:2\nwrite:assistant:raw text delivered to the external provider\n",
     );
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-    await fs.rm(packageDir, { recursive: true, force: true });
-  }
-});
-
-test("stage B background extension manager exposes heartbeat inbox append API", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-background-heartbeat-"),
-  );
-  const packageDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-background-heartbeat-pkg-"),
-  );
-  try {
-    await writeProviderPackage(
-      packageDir,
-      "rin-background-heartbeat-test",
-      `export default function extension(rin) {
-  rin.registerBackgroundService({
-    start(ctx) {
-      ctx.heartbeat.appendInfo({
-        id: "heartbeat-ext-entry",
-        title: "Review external event",
-        content: "A trusted source delivered new information.",
-        metadata: { kind: "demo" },
-      });
-    },
-  });
-}
-`,
-    );
-    await writeJson(path.join(agentDir, "settings.json"), {
-      extensions: [packageDir],
-    });
-
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
-      cwd: agentDir,
-      agentDir,
-      logger: { warn: () => {} },
-    });
-    const started = await manager.start();
-    await manager.stop();
-
-    assert.deepEqual(started, [
-      {
-        name: "rin-background-heartbeat-test",
-        packageName: "rin-background-heartbeat-test",
-      },
-    ]);
-    const entries = heartbeatInbox.listUnreadHeartbeatInboxEntries(agentDir);
-    assert.equal(entries.length, 1);
-    assert.equal(entries[0].id, "heartbeat-ext-entry");
-    assert.equal(entries[0].source, "extension");
-    assert.deepEqual(entries[0].metadata, {
-      extension: "rin-background-heartbeat-test",
-      kind: "demo",
-    });
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
     await fs.rm(packageDir, { recursive: true, force: true });
