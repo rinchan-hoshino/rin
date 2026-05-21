@@ -185,6 +185,13 @@ async function resetSessionModelOptionsFromSettings(session: any) {
   };
 }
 
+async function forceFlushSessionFile(session: any) {
+  const manager = session?.sessionManager;
+  const rewriteFile = manager?._rewriteFile;
+  if (typeof rewriteFile !== "function") return;
+  await Promise.resolve(rewriteFile.call(manager));
+}
+
 async function resumeInterruptedTurn(
   session: any,
   options: { persistInterruptionMessage?: boolean } = {},
@@ -822,12 +829,14 @@ export async function runCustomRpcMode(
         });
       case "shutdown_session":
         await runtime.dispose();
+        await forceFlushSessionFile(session);
         output(done(id, type, { shutdown: true }));
         return process.exit(0);
       case "sleep_session":
         try {
           await session.abort();
         } catch {}
+        await forceFlushSessionFile(session);
         session.dispose();
         output(done(id, type, { sleeping: true }));
         return process.exit(0);

@@ -53,6 +53,11 @@ test(
         dispose: () => {
           calls.push("session.dispose");
         },
+        sessionManager: {
+          _rewriteFile: () => {
+            calls.push("session.flush");
+          },
+        },
       };
       const runtime = {
         session,
@@ -77,7 +82,81 @@ test(
       );
       await wait(20);
 
-      assert.deepEqual(calls, ["session.abort", "session.dispose"]);
+      assert.deepEqual(calls, [
+        "session.abort",
+        "session.flush",
+        "session.dispose",
+      ]);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+      process.exit = processExit;
+    }
+  },
+);
+
+test(
+  "rpc mode shutdown_session disposes runtime and flushes the session file",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const processExit = process.exit;
+    const handlers = new Map();
+    const calls: string[] = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function () {
+      return true;
+    };
+    process.exit = (() => {
+      throw new Error("process_exit_mock");
+    }) as unknown as typeof process.exit;
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        sessionManager: {
+          _rewriteFile: () => {
+            calls.push("session.flush");
+          },
+        },
+      };
+      const runtime = {
+        session,
+        dispose: async () => {
+          calls.push("runtime.dispose");
+        },
+      };
+
+      void runCustomRpcMode(runtime, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "shutdown_session" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      assert.deepEqual(calls, ["runtime.dispose", "session.flush"]);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
