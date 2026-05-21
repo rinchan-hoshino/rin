@@ -3332,11 +3332,11 @@ test(
       assert.equal(calls[0][1].isError, true);
       assert.equal(
         calls[0][1].content[0].text,
-        "The tool was interrupted by a daemon restart or disconnect.",
+        "The tool was interrupted because the daemon exited.",
       );
       assert.deepEqual(calls[0][1].details, {
         interrupted: true,
-        reason: "daemon_restart_or_disconnect",
+        reason: "daemon_exit",
       });
       assert.deepEqual(calls[1], ["continue"]);
       assert.equal(stateMessages.length, 2);
