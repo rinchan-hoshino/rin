@@ -226,9 +226,7 @@ export function createRinFrontendBackendEventTranslator(
             { type: "external_working_start" },
           ];
         case "compaction_end": {
-          const events: RinFrontendBackendEvent[] = [
-            { type: "external_working_end" },
-          ];
+          const events: RinFrontendBackendEvent[] = [];
           const notice = formatCompactionSummaryCollapsedText(
             payload.tokensBefore ?? payload.result?.tokensBefore,
             {
@@ -243,8 +241,11 @@ export function createRinFrontendBackendEventTranslator(
               type: "passive_notice",
               text: notice,
               level: "info",
+              deferDuringTurn: false,
+              noticeKind: "compaction_end",
             });
           }
+          events.push({ type: "external_working_end" });
           return events;
         }
         default:

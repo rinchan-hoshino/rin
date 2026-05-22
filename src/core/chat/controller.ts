@@ -161,6 +161,11 @@ export class ChatController {
   activeWorkingIndicators: WorkingIndicator[] = [];
   workingIndicatorTick = 0;
   currentTurn: ChatTurnMeta | null = null;
+  compactionTurn: ChatTurnMeta | null = null;
+  compactionWorkingIndicators: WorkingIndicator[] = [];
+  compactionReactionTick = 0;
+  lastCompactionReactionAt = 0;
+  compactionIndicatorTick = 0;
   activeCommandTurnInput: {
     incomingMessageId?: string;
     replyToMessageId?: string;
@@ -245,7 +250,10 @@ export class ChatController {
   dispose() {
     this.lastActivityAt = Date.now();
     void this.clearWorkingReaction().catch(() => {});
+    void this.clearCompactionWorkingReaction().catch(() => {});
     this.currentTurn = null;
+    this.compactionTurn = null;
+    this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
@@ -273,7 +281,10 @@ export class ChatController {
     this.turnAbortRequested = false;
     this.stagedDelivery = null;
     await this.clearWorkingReaction().catch(() => {});
+    await this.clearCompactionWorkingReaction().catch(() => {});
     this.currentTurn = null;
+    this.compactionTurn = null;
+    this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
     this.backendAcceptedIncomingMessageId = "";
     this.saveState();
@@ -392,6 +403,15 @@ export class ChatController {
     };
   }
 
+  private compactionWorkingIndicatorContext(extra: Record<string, any> = {}) {
+    return this.workingIndicatorContext({
+      messageId: this.compactionTurn?.incomingMessageId || undefined,
+      replyToMessageId: this.compactionTurn?.replyToMessageId || undefined,
+      tick: this.compactionIndicatorTick,
+      ...extra,
+    });
+  }
+
   private getWorkingIndicators() {
     const parsed = parseChatKey(this.chatKey);
     if (!parsed) return [];
@@ -467,6 +487,78 @@ export class ChatController {
           ),
         ),
     );
+    return results.some(Boolean);
+  }
+
+  private async clearCompactionWorkingReaction() {
+    const indicators = this.compactionWorkingIndicators.length
+      ? this.compactionWorkingIndicators
+      : this.getWorkingIndicators();
+    this.compactionWorkingIndicators = [];
+    this.compactionReactionTick = 0;
+    this.lastCompactionReactionAt = 0;
+    this.compactionIndicatorTick = 0;
+    const context = this.compactionWorkingIndicatorContext({ event: "end" });
+    const results = await Promise.all(
+      indicators.map((indicator) =>
+        this.callWorkingIndicator(indicator, "end", context).catch(() => false),
+      ),
+    );
+    return results.some(Boolean);
+  }
+
+  private async startCompactionWorkingMarker() {
+    if (!this.deliveryEnabled) return false;
+    const indicators = this.getWorkingIndicators();
+    this.compactionWorkingIndicators = indicators;
+    const context = this.compactionWorkingIndicatorContext({ event: "start" });
+    const results = await Promise.all(
+      indicators
+        .filter((indicator) => workingIndicatorKind(indicator) === "marker")
+        .map((indicator) =>
+          this.callWorkingIndicator(indicator, "start", context).catch(
+            () => false,
+          ),
+        ),
+    );
+    return results.some(Boolean);
+  }
+
+  private async pollCompactionTyping() {
+    if (!this.deliveryEnabled || !this.compactionTurn) return false;
+    const indicators = this.compactionWorkingIndicators.length
+      ? this.compactionWorkingIndicators
+      : this.getWorkingIndicators();
+    this.compactionWorkingIndicators = indicators;
+    const now = Date.now();
+    const messageId = safeString(
+      this.compactionTurn.incomingMessageId || "",
+    ).trim();
+    const reactionDue =
+      Boolean(messageId) &&
+      (this.lastCompactionReactionAt <= 0 ||
+        now - this.lastCompactionReactionAt >= WORKING_REACTION_INTERVAL_MS);
+    const context = this.compactionWorkingIndicatorContext({
+      event: "tick",
+      tick: this.compactionIndicatorTick,
+      reactionDue,
+      reactionTick: this.compactionReactionTick,
+      reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
+    });
+    const results = await Promise.all(
+      indicators
+        .filter((indicator) => workingIndicatorKind(indicator) === "polling")
+        .map((indicator) =>
+          this.callWorkingIndicator(indicator, "tick", context).catch(
+            () => false,
+          ),
+        ),
+    );
+    this.compactionIndicatorTick += 1;
+    if (reactionDue) {
+      this.lastCompactionReactionAt = now;
+      this.compactionReactionTick += 1;
+    }
     return results.some(Boolean);
   }
 
@@ -874,6 +966,11 @@ export class ChatController {
     }
   }
 
+  private async finishCompactionNotice() {
+    await this.clearCompactionWorkingReaction().catch(() => false);
+    this.compactionTurn = null;
+  }
+
   private async deliverCompactionStartNotice(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
@@ -893,12 +990,14 @@ export class ChatController {
       );
       const messageId = safeString(messageIds?.[0]).trim();
       if (messageId) {
-        this.setCurrentTurn({
+        this.compactionTurn = {
+          startedAt: Date.now(),
           incomingMessageId: messageId,
-          replyToMessageId: this.currentReplyToMessageId() || undefined,
-        });
-        const marker = this.startWorkingMarker().catch(() => false);
-        const poll = this.pollTyping().catch(() => false);
+          replyToMessageId: messageId,
+          workingNoticeSent: false,
+        };
+        const marker = this.startCompactionWorkingMarker().catch(() => false);
+        const poll = this.pollCompactionTyping().catch(() => false);
         await Promise.race([
           Promise.all([marker, poll]),
           new Promise((resolve) => setImmediate(resolve)),
@@ -1299,6 +1398,7 @@ export class ChatController {
 
   async housekeep() {
     await this.pollTyping().catch(() => {});
+    await this.pollCompactionTyping().catch(() => {});
     await this.sleepIfIdle().catch(() => false);
   }
 
@@ -1337,6 +1437,9 @@ export class ChatController {
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
         return;
       case "passive_notice":
+        if (event.noticeKind === "compaction_end") {
+          await this.finishCompactionNotice();
+        }
         await this.deliverPassiveNotice(event.text);
         return;
       case "compaction_start_notice":

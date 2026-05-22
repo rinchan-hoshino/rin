@@ -83,6 +83,8 @@ export type RinFrontendBackendEvent =
       type: "passive_notice";
       text: string;
       level?: "info" | "warning" | "error";
+      deferDuringTurn?: boolean;
+      noticeKind?: "compaction_end";
     }
   | { type: "compaction_start_notice"; text: string }
   | { type: "external_working_start" }

@@ -129,12 +129,14 @@ test("frontend backend event translator exposes compact collapsed notice without
       result: { summary: "Summary of conversation must not reach chat" },
     }),
     [
-      { type: "external_working_end" },
       {
         type: "passive_notice",
         text: "[compaction]\n\nCompacted from 108,642 tokens",
         level: "info",
+        deferDuringTurn: false,
+        noticeKind: "compaction_end",
       },
+      { type: "external_working_end" },
     ],
   );
 });
@@ -153,12 +155,14 @@ test("frontend backend event translator adds expand hint only when the caller su
       result: { summary: "Summary of conversation must not reach chat" },
     }),
     [
-      { type: "external_working_end" },
       {
         type: "passive_notice",
         text: "[compaction]\n\nCompacted from 255,166 tokens (ctrl+o to expand)",
         level: "info",
+        deferDuringTurn: false,
+        noticeKind: "compaction_end",
       },
+      { type: "external_working_end" },
     ],
   );
 });

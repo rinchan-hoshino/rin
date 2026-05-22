@@ -49,6 +49,7 @@ export type RinFrontendPassiveNoticeEvent = {
   type: "passive_notice";
   text: string;
   level?: "info" | "warning" | "error";
+  noticeKind?: "compaction_end";
 };
 
 export type RinFrontendTurnDriverEvent =
@@ -374,8 +375,10 @@ export class RinFrontendTurnDriver {
 
   private emitPassiveNoticeAtPullCheckpoint(
     event: RinFrontendPassiveNoticeEvent,
+    options: { deferDuringTurn?: boolean } = {},
   ) {
     if (
+      options.deferDuringTurn !== false &&
       !shouldPullSelfImproveNoticesForTurnState({
         liveTurn: this.liveTurn,
         isStreaming: Boolean(this.frontendState.isStreaming),
@@ -1273,11 +1276,15 @@ export class RinFrontendTurnDriver {
         this.emit({ type: "turn_accepted" });
         return;
       case "passive_notice":
-        this.emitPassiveNoticeAtPullCheckpoint({
-          type: "passive_notice",
-          text: event.text,
-          level: event.level,
-        });
+        this.emitPassiveNoticeAtPullCheckpoint(
+          {
+            type: "passive_notice",
+            text: event.text,
+            level: event.level,
+            ...(event.noticeKind ? { noticeKind: event.noticeKind } : {}),
+          },
+          { deferDuringTurn: event.deferDuringTurn },
+        );
         return;
       case "compaction_start_notice":
         this.emit({ type: "compaction_start_notice", text: event.text });

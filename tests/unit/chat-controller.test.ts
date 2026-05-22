@@ -911,7 +911,8 @@ test("chat controller sends compaction start notice and reacts on that notice", 
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(controller.currentTurn?.incomingMessageId, "m-out-1");
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.compactionTurn?.incomingMessageId, "m-out-1");
   assert.deepEqual(deliveries, [
     { text: "Compacting...", kind: "passive_notice" },
   ]);
@@ -930,6 +931,66 @@ test("chat controller sends compaction start notice and reacts on that notice", 
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(controller.currentTurn, null);
+  assert.equal(controller.compactionTurn, null);
+  assert.deepEqual(reactions, [
+    ["create", "2", "m-out-1", "🤔"],
+    ["delete", "2", "m-out-1", "🤔", "1"],
+  ]);
+  assert.deepEqual(deliveries, [
+    { text: "Compacting...", kind: "passive_notice" },
+    { text: "Compacted from 108,642 tokens", kind: "passive_notice" },
+  ]);
+});
+
+test("chat controller keeps compaction notice independent from the underlying chat turn", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  const reactions = [];
+  const deliveries = [];
+  let nextMessageId = 1;
+  controller.app.bots[0].workingIndicators = [
+    testPollingIndicator(actions, reactions),
+  ];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .filter(Boolean)
+      .join(" ");
+    deliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-out-${nextMessageId++}`];
+  };
+  controller.driver.frontendPhase = "working";
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-owner",
+    replyToMessageId: "m-owner",
+    workingNoticeSent: false,
+  };
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-owner");
+  assert.equal(controller.compactionTurn?.incomingMessageId, "m-out-1");
+  assert.deepEqual(reactions, [["create", "2", "m-out-1", "🤔"]]);
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      tokensBefore: 108642,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-owner");
+  assert.equal(controller.compactionTurn, null);
   assert.deepEqual(reactions, [
     ["create", "2", "m-out-1", "🤔"],
     ["delete", "2", "m-out-1", "🤔", "1"],
