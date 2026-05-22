@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { sleep } from "../platform/process.js";
 import type { RpcSocketLike } from "../platform/rpc-socket.js";
+import { setRunningWorkerSession } from "./running-workers.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import {
@@ -128,6 +129,7 @@ export class WorkerPool {
       switchSessionCommandTimeoutMs?: number;
       resourceOptions?: Record<string, unknown>;
       resourceOptionsDir?: string;
+      agentDir?: string;
     },
   ) {
     this.gcIdleMs = Math.max(0, Number(options.gcIdleMs ?? 30_000));
@@ -194,6 +196,9 @@ export class WorkerPool {
     if (!this.workers.has(worker)) return;
     worker.gracefulShutdownRequested = true;
     this.workers.delete(worker);
+    if (!this.shuttingDown || !this.isWorkerRunning(worker)) {
+      this.clearRunningWorkerRecord(worker);
+    }
     this.deleteWorkerSessionRefs(worker);
     for (const connection of Array.from(worker.connections)) {
       if (connection.attachedWorker === worker) {
@@ -261,6 +266,7 @@ export class WorkerPool {
         connection,
       });
     }
+    this.syncRunningWorkerRecord(worker);
     this.writeWorkerStdin(worker, command, (error) => {
       this.handleWorkerStdinFailure(worker, error);
     });
@@ -451,7 +457,7 @@ export class WorkerPool {
       if (worker.gracefulShutdownRequested) continue;
       const selector = this.getWorkerSelector(worker);
       if (!selector.sessionFile) continue;
-      const resumeTurn = hasResumableWorkerActivity(worker);
+      const resumeTurn = this.isWorkerRunning(worker);
       const existing = restorable.get(selector.sessionFile);
       if (existing) {
         existing.resumeTurn ||= resumeTurn;
@@ -508,7 +514,6 @@ export class WorkerPool {
   }
 
   async shutdown(graceMs: number) {
-    const restorable = this.getRestorableSessionSelectors();
     this.beginShutdown();
     const deadline = Date.now() + Math.max(0, graceMs);
     while (this.workers.size > 0 && Date.now() < deadline) {
@@ -518,7 +523,6 @@ export class WorkerPool {
       }
     }
     this.destroyAll();
-    return restorable;
   }
 
   private updateWorkerMetadata(worker: WorkerHandle, payload: any) {
@@ -546,24 +550,30 @@ export class WorkerPool {
     if (payload.type === "agent_start") {
       worker.turnActive = true;
       worker.isStreaming = true;
+      this.syncRunningWorkerRecord(worker);
     }
     if (payload.type === "agent_end") {
       worker.turnActive = false;
       worker.isStreaming = false;
+      this.syncRunningWorkerRecord(worker);
       this.maybeReleaseWorker(worker);
     }
     if (payload.type === "rin_working_start") {
       worker.rinWorking = true;
+      this.syncRunningWorkerRecord(worker);
     }
     if (payload.type === "rin_working_end") {
       worker.rinWorking = false;
+      this.syncRunningWorkerRecord(worker);
       this.maybeReleaseWorker(worker);
     }
     if (payload.type === "compaction_start") {
       worker.isCompacting = true;
+      this.syncRunningWorkerRecord(worker);
     }
     if (payload.type === "compaction_end") {
       worker.isCompacting = false;
+      this.syncRunningWorkerRecord(worker);
       this.maybeReleaseWorker(worker);
     }
     if (
@@ -571,6 +581,7 @@ export class WorkerPool {
       (payload.event === "start" || payload.event === "heartbeat")
     ) {
       worker.turnActive = true;
+      this.syncRunningWorkerRecord(worker);
     }
     if (
       payload.type === "rpc_turn_event" &&
@@ -578,6 +589,7 @@ export class WorkerPool {
     ) {
       worker.turnActive = false;
       worker.isStreaming = false;
+      this.syncRunningWorkerRecord(worker);
       this.maybeReleaseWorker(worker);
     }
     if (payload.type === "rpc_turn_event" && payload.event === "complete") {
@@ -677,6 +689,7 @@ export class WorkerPool {
         ) {
           const pending = worker.pendingResponses.get(String(payload.id))!;
           worker.pendingResponses.delete(String(payload.id));
+          this.syncRunningWorkerRecord(worker);
           if (pending.connection) {
             this.rememberSessionSelection(
               pending.connection,
@@ -877,6 +890,7 @@ export class WorkerPool {
     }
     worker.sessionFile = selector.sessionFile;
     worker.sessionId = selector.sessionId;
+    this.syncRunningWorkerRecord(worker);
     if (worker.sessionFile) {
       this.workersBySessionFile.set(worker.sessionFile, worker);
     }
@@ -884,6 +898,34 @@ export class WorkerPool {
     for (const connection of worker.connections) {
       this.rememberSessionSelection(connection, selector);
     }
+  }
+
+  private isWorkerRunning(worker: WorkerHandle) {
+    return Boolean(
+      worker.turnActive ||
+      worker.isStreaming ||
+      worker.isCompacting ||
+      worker.rinWorking ||
+      Array.from(worker.pendingResponses.values()).some((pending) =>
+        RESUMABLE_COMMAND_TYPES.has(pending.commandType),
+      ),
+    );
+  }
+
+  private syncRunningWorkerRecord(worker: WorkerHandle) {
+    const sessionFile = this.getWorkerSelector(worker).sessionFile;
+    if (!sessionFile) return;
+    setRunningWorkerSession(
+      this.options.agentDir,
+      sessionFile,
+      this.isWorkerRunning(worker),
+    );
+  }
+
+  private clearRunningWorkerRecord(worker: WorkerHandle) {
+    const sessionFile = this.getWorkerSelector(worker).sessionFile;
+    if (!sessionFile) return;
+    setRunningWorkerSession(this.options.agentDir, sessionFile, false);
   }
 
   private shouldRecoverWorker(
@@ -1051,6 +1093,7 @@ export class WorkerPool {
     const timeout = setTimeout(() => {
       worker.pendingResponses.delete(id);
       worker.ignoredResponseIds.add(id);
+      this.syncRunningWorkerRecord(worker);
       this.maybeReleaseWorker(worker);
       rejectCommand(new Error(`rin_internal_timeout:${commandType}`));
     }, this.getInternalCommandTimeoutMs(command));

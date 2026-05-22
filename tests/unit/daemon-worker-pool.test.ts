@@ -294,6 +294,78 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("resumable worker commands persist a running record until they finish", async () => {
+  const dir = await makeTempDir("rin-worker-pool-running-");
+  const workerPath = path.join(dir, "worker.mjs");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(dir, "data", "running-workers.json");
+  await fs.writeFile(
+    workerPath,
+    String.raw`process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: 'response',
+        command: command.type,
+        success: true,
+        data: { sessionFile: command.sessionFile, sessionId: 'active' },
+      }) + '\n');
+    }, 100);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 50,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  worker.sessionFile = sessionFile;
+  pool.requestWorker(
+    worker,
+    connection,
+    { id: "prompt-1", type: "prompt", sessionFile },
+    true,
+  );
+
+  const runningState = JSON.parse(await fs.readFile(statePath, "utf8"));
+  assert.deepEqual(runningState, {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+  });
+
+  await sleep(180);
+
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [],
+  });
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("detached worker survives eviction while response is pending", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");

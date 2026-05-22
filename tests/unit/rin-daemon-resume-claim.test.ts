@@ -560,22 +560,21 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-test("daemon auto-resumes interrupted session logs on startup without frontend help", async () => {
+test("daemon auto-resumes sessions recorded as running before restart", async () => {
   const agentDir = await makeTempDir("rin-daemon-resume-");
   const socketPath = path.join(agentDir, "daemon.sock");
   const workerPath = path.join(agentDir, "fake-worker.js");
   const logPath = path.join(agentDir, "commands.log");
   const sessionFile = path.join(agentDir, "sessions", "active-session.jsonl");
   await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.mkdir(path.join(agentDir, "data"), { recursive: true });
+  await fs.writeFile(sessionFile, "");
   await fs.writeFile(
-    sessionFile,
-    [
-      JSON.stringify({
-        type: "message",
-        message: { role: "user", content: "continue this turn" },
-      }),
-      "",
-    ].join("\n"),
+    path.join(agentDir, "data", "running-workers.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      sessionFiles: [sessionFile],
+    })}\n`,
   );
   await fs.writeFile(
     workerPath,

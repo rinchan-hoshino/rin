@@ -26,7 +26,6 @@ import {
 import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
-  getRuntimeSessionDir,
 } from "../rin-lib/runtime.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 import { getWebSearchStatus } from "../rin-web-search/service.js";
@@ -42,8 +41,8 @@ import {
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
 import { RinBackgroundExtensionManager } from "./extensions.js";
-import { listContinuableInterruptedTurnSessionFiles } from "../session/turn-state.js";
 import { runDueSessionTtlMaintenance } from "../session/ttl.js";
+import { listRunningWorkerSessionFiles } from "./running-workers.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 
@@ -130,6 +129,7 @@ export async function startDaemon(
     gcIdleMs: options.workerGcIdleMs,
     sweepIntervalMs: options.workerSweepIntervalMs,
     resourceOptionsDir: path.join(runtime.agentDir, "data", "worker-options"),
+    agentDir: runtime.agentDir,
     onWorkerSpawn: (requester, worker) => {
       if (requester)
         writeLine(requester.socket, {
@@ -647,10 +647,7 @@ export async function startDaemon(
   console.log(`rin daemon bridge listening on ${bridgeSocketPath}`);
 
   clearLegacyRestartState(runtime.agentDir);
-  const sessionDir = getRuntimeSessionDir(runtime.cwd, runtime.agentDir);
-  for (const sessionFile of listContinuableInterruptedTurnSessionFiles(
-    sessionDir,
-  )) {
+  for (const sessionFile of listRunningWorkerSessionFiles(runtime.agentDir)) {
     try {
       workerPool.continueInterruptedTurnSessionWorker({
         sessionFile,
