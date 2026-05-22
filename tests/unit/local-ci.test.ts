@@ -88,18 +88,16 @@ test("local CI runner preserves staged format target filtering", () => {
   assert.match(runner, /No staged files need format checking\./);
 });
 
-test("pre-commit falls back to host checks when docker cannot start containers", () => {
+test("pre-commit runs only the containerized local CI", () => {
   const hook = readRepoFile(".githooks/pre-commit");
 
   assertOrdered(hook, [
-    "run_host_checks()",
-    "npm run format:check",
-    "npm run lint",
-    "npm test",
+    'docker build -f .ci/local-ci/Dockerfile -t "$image_tag" .',
+    'git archive --format=tar "$tree_id" >"$archive_file"',
+    "docker run --rm --network none",
   ]);
-  assert.match(hook, /failed to create TTRPC connection/);
-  assert.match(
-    hook,
-    /docker cannot start containers in this environment; falling back to host checks/,
-  );
+  assert.doesNotMatch(hook, /run_host_checks/);
+  assert.doesNotMatch(hook, /fallback/i);
+  assert.doesNotMatch(hook, /npm run lint/);
+  assert.doesNotMatch(hook, /npm test/);
 });
