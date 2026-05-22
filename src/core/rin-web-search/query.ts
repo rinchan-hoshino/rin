@@ -387,7 +387,7 @@ function buildSearxngUrl(
   url.searchParams.set("q", buildSearchQuery(request));
   url.searchParams.set("format", "json");
   url.searchParams.set("language", request.language);
-  url.searchParams.set("safesearch", "1");
+  url.searchParams.set("safesearch", "0");
   url.searchParams.set("pageno", "1");
   url.searchParams.set("categories", "general");
   url.searchParams.set("engines", engine);

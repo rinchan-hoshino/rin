@@ -30,6 +30,7 @@ import {
   waitForSocket,
 } from "./service.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
+import { prepareSearxngRuntime } from "../rin-web-search/service.js";
 import {
   describeOwnership,
   findSystemUser,
@@ -125,6 +126,7 @@ async function applyInstalledRuntime(
     useElevatedWrite,
     serviceDeps,
   );
+  await prepareSearxngRuntime(installDir);
   reconcileSystemdUserService(
     targetUser,
     installDir,

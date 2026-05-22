@@ -182,6 +182,7 @@ test("web search maps freshness to SearXNG sidecar query parameters", async () =
     assert.equal(searxngUrl.pathname, "/search");
     assert.equal(searxngUrl.searchParams.get("format"), "json");
     assert.equal(searxngUrl.searchParams.get("engines"), "google");
+    assert.equal(searxngUrl.searchParams.get("safesearch"), "0");
     assert.equal(searxngUrl.searchParams.get("time_range"), "week");
   } finally {
     globalThis.fetch = originalFetch;
@@ -243,6 +244,26 @@ test("web search service reports SearXNG sidecar runtime status by default", () 
   assert.equal(status.runtime.providerCount, 3);
   assert.deepEqual(status.runtime.providers, ["google", "bing", "duckduckgo"]);
   assert.deepEqual(status.instances, []);
+});
+
+test("web search service does not install SearXNG during a search call", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-web-search-"));
+  try {
+    await assert.rejects(
+      () =>
+        service.searchWeb(
+          { q: "rinchanai", limit: 2 },
+          { stateRoot: agentDir },
+        ),
+      /web_search_sidecar_unavailable/,
+    );
+    await assert.rejects(
+      () => fs.stat(path.join(agentDir, "data", "web-search", "runtime")),
+      /ENOENT/,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("web search service reuses Rin-managed sidecar state", async () => {

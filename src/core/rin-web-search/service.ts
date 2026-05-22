@@ -505,12 +505,54 @@ function ensureSearxngRuntimeInstalled(
   return { sourceDir, pythonBin, pipBin, reused: false };
 }
 
+function readInstalledSearxngRuntime(stateRoot: string): SearxngRuntimeInstall {
+  const sourceDir = runtimeSourceDirForState(stateRoot);
+  const pythonBin = runtimePythonBinForState(stateRoot);
+  const pipBin = runtimePipBinForState(stateRoot);
+  const current = readRuntimeBootstrapState(stateRoot);
+  if (
+    current?.ready &&
+    hasSearxngSourceTree(sourceDir) &&
+    fs.existsSync(pythonBin) &&
+    fs.existsSync(pipBin)
+  ) {
+    return { sourceDir, pythonBin, pipBin, reused: true };
+  }
+  throw new Error("web_search_runtime_not_installed");
+}
+
 function createInstanceId(prefix = "ws"): string {
   const rand = crypto.randomBytes(6).toString("hex");
   return `${prefix}-${process.pid}-${rand}`;
 }
 
-async function ensureSearxngSidecar(
+async function prepareSearxngRuntime(
+  stateRoot: string,
+  options: EnsureSearxngSidecarOptions = {},
+) {
+  const release = await acquireProcessLock(
+    runtimeLockPathForState(stateRoot),
+  ).catch((error: unknown) => {
+    throw new Error(
+      String(
+        error instanceof Error
+          ? error.message
+          : error ||
+              `web_search_lock_timeout:${runtimeLockPathForState(stateRoot)}`,
+      ),
+    );
+  });
+  try {
+    const runtime = ensureSearxngRuntimeInstalled(stateRoot, options.logger);
+    return { ok: true as const, ...runtime };
+  } finally {
+    try {
+      release();
+    } catch {}
+  }
+}
+
+async function startSearxngSidecar(
   stateRoot: string,
   options: EnsureSearxngSidecarOptions = {},
 ) {
@@ -544,7 +586,7 @@ async function ensureSearxngSidecar(
       reuseAnySearxngInstance(stateRoot);
     if (lockedExisting) return lockedExisting;
 
-    const runtime = ensureSearxngRuntimeInstalled(stateRoot, logger);
+    const runtime = readInstalledSearxngRuntime(stateRoot);
     const port = await getFreePort();
     baseUrl = `http://127.0.0.1:${port}`;
     const settingsPath = writeSearxngSettingsForInstance(
@@ -687,10 +729,11 @@ async function cleanupOrphanSearxngSidecars(
 
 async function resolveSearxngSearchBaseUrl(options: SearchWebOptions) {
   const stateRoot = trimString(options.stateRoot) || defaultStateRoot();
-  const sidecar = await ensureSearxngSidecar(stateRoot, {
-    logger: options.logger,
-    instanceId: trimString(options.instanceId) || defaultInstanceId(),
-  });
+  const instanceId = trimString(options.instanceId) || defaultInstanceId();
+  const sidecar =
+    reuseStoredSearxngInstance(stateRoot, instanceId) ||
+    reuseAnySearxngInstance(stateRoot);
+  if (!sidecar?.baseUrl) throw new Error("web_search_sidecar_unavailable");
   return sidecar.baseUrl;
 }
 
@@ -735,7 +778,8 @@ function getWebSearchStatus(stateRoot: string) {
 
 export {
   cleanupOrphanSearxngSidecars,
-  ensureSearxngSidecar,
+  prepareSearxngRuntime,
+  startSearxngSidecar,
   getWebSearchStatus,
   stopSearxngSidecar,
   searchWeb,

@@ -24,7 +24,7 @@ import {
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
 import {
   cleanupOrphanSearxngSidecars,
-  ensureSearxngSidecar,
+  startSearxngSidecar,
   stopSearxngSidecar,
 } from "../../core/rin-web-search/service.js";
 import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/index.js";
@@ -59,7 +59,7 @@ async function main() {
     if (webSearchEnsureInFlight) return await webSearchEnsureInFlight;
     webSearchEnsureInFlight = (async () => {
       await cleanupOrphanSearxngSidecars(runtime.agentDir).catch(() => {});
-      await ensureSearxngSidecar(runtime.agentDir, {
+      await startSearxngSidecar(runtime.agentDir, {
         instanceId: webSearchInstanceId,
         logger: console,
       }).catch(() => {});

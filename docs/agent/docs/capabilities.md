@@ -131,7 +131,7 @@ Use only trusted package names and versions. Packages may be installed or update
 
 Use fresh web search for latest, time-sensitive, version-sensitive, or otherwise changeable information. When `q` is an HTTP(S) URL, `web_search` fetches that page directly with a browser-like user agent and extracts readable content.
 
-Default web search uses a Rin-managed local SearXNG sidecar so users can search without provider API keys, external search setup, or a Rin-managed search service. The daemon keeps the sidecar warm when possible; std/maintenance sessions can start or reuse it lazily. The sidecar runs on loopback, stores its runtime, state, and generated settings under Rin's own `data/web-search` directory, and does not write into the user's project files.
+Default web search uses a Rin-managed local SearXNG sidecar so users can search without provider API keys, external search setup, or a Rin-managed search service. The installer prepares the SearXNG runtime; the daemon starts and keeps the sidecar warm; web-search calls use an already-running sidecar and never install SearXNG. The sidecar runs on loopback, stores its runtime, state, and generated settings under Rin's own `data/web-search` directory, and does not write into the user's project files.
 
 ## Runtime status and token usage
 

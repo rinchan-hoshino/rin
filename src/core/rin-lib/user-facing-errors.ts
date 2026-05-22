@@ -444,7 +444,9 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   web_search_runtime_fetch_tools_not_found: () =>
     "Web search needs git, or curl/wget plus tar, to install the local SearXNG sidecar. Install the missing tool and retry.",
   web_search_runtime_source_invalid: () =>
-    "The local SearXNG search runtime is incomplete. Restart Rin so it can rebuild the search sidecar.",
+    "The local SearXNG search runtime is incomplete. Re-run the Rin installer or run rin doctor.",
+  web_search_runtime_not_installed: () =>
+    "The local SearXNG search runtime is not installed. Re-run the Rin installer or run rin doctor.",
   web_search_sidecar_unavailable: () =>
     "The local SearXNG search sidecar is not available yet. Restart Rin or run rin doctor.",
 
