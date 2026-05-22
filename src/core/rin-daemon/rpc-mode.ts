@@ -612,9 +612,15 @@ export async function runCustomRpcMode(
     event: string,
     requestTag: string,
     payload: Record<string, unknown> = {},
+    force = false,
   ) => {
-    if (!requestTag) return;
-    output({ type: "rpc_turn_event", event, requestTag, ...payload });
+    if (!requestTag && !force) return;
+    output({
+      type: "rpc_turn_event",
+      event,
+      ...(requestTag ? { requestTag } : {}),
+      ...payload,
+    });
   };
   const abortCurrentSessionForReplacement = async () => {
     const current = getSession();
@@ -624,7 +630,11 @@ export async function runCustomRpcMode(
     }
     await current.abort();
   };
-  const startTurnTask = (requestTag: string, task: () => Promise<void>) => {
+  const startTurnTask = (
+    requestTag: string,
+    task: () => Promise<void>,
+    options: { forceTurnEvents?: boolean } = {},
+  ) => {
     const turnSession = getSession();
     const baselineSessionMessageCount = Array.isArray(turnSession?.messages)
       ? turnSession.messages.length
@@ -646,15 +656,30 @@ export async function runCustomRpcMode(
         ? rawUnsubscribeTurnSession
         : undefined;
     const promise = (async () => {
-      emitTurnEvent("start", requestTag);
-      const heartbeatTimer = requestTag
-        ? setInterval(() => {
-            emitTurnEvent("heartbeat", requestTag, {
-              sessionFile: turnSession.sessionFile,
-              sessionId: turnSession.sessionId,
-            });
-          }, TURN_HEARTBEAT_INTERVAL_MS)
-        : null;
+      const forceTurnEvents = options.forceTurnEvents === true;
+      emitTurnEvent(
+        "start",
+        requestTag,
+        {
+          sessionFile: turnSession.sessionFile,
+          sessionId: turnSession.sessionId,
+        },
+        forceTurnEvents,
+      );
+      const heartbeatTimer =
+        requestTag || forceTurnEvents
+          ? setInterval(() => {
+              emitTurnEvent(
+                "heartbeat",
+                requestTag,
+                {
+                  sessionFile: turnSession.sessionFile,
+                  sessionId: turnSession.sessionId,
+                },
+                forceTurnEvents,
+              );
+            }, TURN_HEARTBEAT_INTERVAL_MS)
+          : null;
       try {
         let taskError: any = null;
         try {
@@ -680,16 +705,26 @@ export async function runCustomRpcMode(
           );
           throw new Error(failureMessage || "rpc_turn_final_output_missing");
         }
-        emitTurnEvent("complete", requestTag, {
-          sessionFile: turnSession.sessionFile,
-          sessionId: turnSession.sessionId,
-          finalText: completion.finalText,
-          result: completion.result,
-        });
+        emitTurnEvent(
+          "complete",
+          requestTag,
+          {
+            sessionFile: turnSession.sessionFile,
+            sessionId: turnSession.sessionId,
+            finalText: completion.finalText,
+            result: completion.result,
+          },
+          forceTurnEvents,
+        );
       } catch (error: any) {
-        emitTurnEvent("error", requestTag, {
-          error: String(error?.message || error || "rpc_turn_failed"),
-        });
+        emitTurnEvent(
+          "error",
+          requestTag,
+          {
+            error: String(error?.message || error || "rpc_turn_failed"),
+          },
+          forceTurnEvents,
+        );
         throw error;
       } finally {
         unsubscribeTurnSession?.();
@@ -713,7 +748,7 @@ export async function runCustomRpcMode(
           try {
             await activeTurnPromise;
           } catch {}
-          startTurnTask(requestTag, task);
+          startTurnTask(requestTag, task, { forceTurnEvents: true });
         },
         async () => {
           const session = getSession();
@@ -722,7 +757,7 @@ export async function runCustomRpcMode(
           try {
             await activeTurnPromise;
           } catch {}
-          startTurnTask(requestTag, task);
+          startTurnTask(requestTag, task, { forceTurnEvents: true });
         },
       )
       .catch(() => {});

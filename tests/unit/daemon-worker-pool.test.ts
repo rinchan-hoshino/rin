@@ -821,6 +821,59 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("worker events are forwarded only to matching selected session", async () => {
+  const dir = await makeTempDir("rin-worker-pool-session-filter-");
+  const workerPath = path.join(dir, "worker.mjs");
+  const sessionA = path.join(dir, "a.jsonl");
+  const sessionB = path.join(dir, "b.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `process.stdin.resume();
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(chunk: string) {
+        writes.push(String(chunk));
+      },
+    },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  worker.sessionFile = sessionA;
+  pool.attachWorker(connection, worker);
+  connection.sessionFile = sessionB;
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({ type: "rpc_turn_event", event: "complete", sessionFile: sessionA })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({ type: "rpc_turn_event", event: "complete", sessionFile: sessionB })}\n`,
+  );
+  await sleep(20);
+
+  const forwarded = writes
+    .join("")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  assert.equal(forwarded.length, 1);
+  assert.equal(forwarded[0].sessionFile, sessionB);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("selectSession with only sessionId ignores stale remembered sessionFile", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");

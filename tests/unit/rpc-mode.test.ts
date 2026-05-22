@@ -3560,6 +3560,111 @@ test(
 );
 
 test(
+  "rpc mode resume_interrupted_turn emits liveness events without requestTag",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        sessionId: "session-1",
+        sessionFile: "/tmp/session-1.jsonl",
+        isStreaming: false,
+        isCompacting: false,
+        messages: [],
+        agent: { state: { messages: [] } },
+        subscribe: () => () => {},
+        appendMessage: () => {},
+        continue: async () => {},
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+        bindExtensions: async () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "2", type: "resume_interrupted_turn", source: "daemon-restart" })}\n`,
+        ),
+      );
+      await wait(10);
+
+      const events = lines
+        .join("")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const start = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "start",
+      );
+      const finished = events.find(
+        (event) =>
+          event.type === "rpc_turn_event" &&
+          (event.event === "complete" || event.event === "error"),
+      );
+      assert.ok(start);
+      assert.equal(start.requestTag, undefined);
+      assert.ok(finished);
+      assert.equal(finished.requestTag, undefined);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode session bind does not auto-resume an interrupted turn",
   { concurrency: false },
   async () => {

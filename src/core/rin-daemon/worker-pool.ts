@@ -593,7 +593,9 @@ export class WorkerPool {
       this.maybeReleaseWorker(worker);
     }
     if (payload.type === "rpc_turn_event" && payload.event === "complete") {
-      this.setWorkerSessionRefs(worker, sessionSelectorFromState(payload));
+      this.setWorkerSessionRefs(worker, sessionSelectorFromState(payload), {
+        syncConnections: false,
+      });
     }
   }
 
@@ -665,7 +667,7 @@ export class WorkerPool {
           payload = JSON.parse(line);
         } catch {
           for (const connection of worker.connections) {
-            if (!connection.socket.destroyed) {
+            if (this.shouldForwardWorkerPayload(connection, worker, {})) {
               connection.socket.write(`${line}\n`);
             }
           }
@@ -704,7 +706,9 @@ export class WorkerPool {
         }
 
         for (const connection of worker.connections) {
-          writeLine(connection.socket, payload);
+          if (this.shouldForwardWorkerPayload(connection, worker, payload)) {
+            writeLine(connection.socket, payload);
+          }
         }
       });
     });
@@ -712,7 +716,9 @@ export class WorkerPool {
     child.stderr.on("data", (chunk) => {
       parseJsonl(String(chunk), worker.stderrBuffer, (line) => {
         for (const connection of worker.connections) {
-          writeLine(connection.socket, { type: "stderr", line });
+          if (this.shouldForwardWorkerPayload(connection, worker, {})) {
+            writeLine(connection.socket, { type: "stderr", line });
+          }
         }
       });
     });
@@ -766,6 +772,24 @@ export class WorkerPool {
     });
 
     return worker;
+  }
+
+  private shouldForwardWorkerPayload(
+    connection: ConnectionState,
+    worker: WorkerHandle,
+    payload: any,
+  ) {
+    if (connection.socket.destroyed) return false;
+    const connectionSelector = this.getConnectionSelector(connection);
+    const payloadSelector = sessionSelectorFromState(payload);
+    const expectedSelector = hasSessionSelector(payloadSelector)
+      ? payloadSelector
+      : this.getWorkerSelector(worker);
+    if (!hasSessionSelector(expectedSelector)) return true;
+    if (!hasSessionSelector(connectionSelector)) {
+      return connection.attachedWorker === worker;
+    }
+    return sessionMatchesSelector(expectedSelector, connectionSelector);
   }
 
   private attachWorker(connection: ConnectionState, worker: WorkerHandle) {
@@ -872,7 +896,11 @@ export class WorkerPool {
     worker.sessionId = undefined;
   }
 
-  private setWorkerSessionRefs(worker: WorkerHandle, next: SessionSelector) {
+  private setWorkerSessionRefs(
+    worker: WorkerHandle,
+    next: SessionSelector,
+    options: { syncConnections?: boolean } = {},
+  ) {
     const selector = sessionSelectorFromState(next);
     if (
       worker.sessionFile &&
@@ -895,6 +923,7 @@ export class WorkerPool {
       this.workersBySessionFile.set(worker.sessionFile, worker);
     }
     if (worker.sessionId) this.workersBySessionId.set(worker.sessionId, worker);
+    if (options.syncConnections === false) return;
     for (const connection of worker.connections) {
       this.rememberSessionSelection(connection, selector);
     }
