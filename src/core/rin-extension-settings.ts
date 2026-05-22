@@ -11,6 +11,7 @@ export type RinBackgroundExtensionConfig = {
   version: string;
   config: Record<string, any>;
   optional?: boolean;
+  modulePath?: string;
 };
 
 export type RinExtensionConfigOptions = {
@@ -47,49 +48,6 @@ function normalizeBackgroundExtensionConfig(
   };
 }
 
-function stripExtensionMarker(value: string) {
-  const text = safeString(value).trim();
-  if (!text || text.startsWith("!") || text.startsWith("-")) return "";
-  return text.startsWith("+") ? text.slice(1).trim() : text;
-}
-
-function resolveLocalExtensionPath(entry: unknown, cwd: string) {
-  const text = stripExtensionMarker(safeString(entry));
-  if (!text) return "";
-  if (
-    !text.startsWith(".") &&
-    !text.startsWith("/") &&
-    !text.startsWith("file:")
-  ) {
-    return "";
-  }
-  const rawPath = text.startsWith("file:") ? text.slice("file:".length) : text;
-  const resolved = path.resolve(cwd || process.cwd(), rawPath);
-  if (!fs.existsSync(resolved)) return "";
-  return fs.statSync(resolved).isDirectory()
-    ? resolved
-    : path.dirname(resolved);
-}
-
-function normalizeDirectBackgroundExtensionConfig(
-  entry: unknown,
-  cwd: string,
-): RinBackgroundExtensionConfig | null {
-  const extensionPath = resolveLocalExtensionPath(entry, cwd);
-  if (!extensionPath) return null;
-  const packageJsonPath = path.join(extensionPath, "package.json");
-  const packageJson = readJsonFile<any>(packageJsonPath, null);
-  const packageName = safeString(packageJson?.name).trim();
-  if (!packageName) return null;
-  return {
-    name: packageName.replace(/^@/, "").replace(/[^A-Za-z0-9._-]+/g, "-"),
-    packageName,
-    version: `file:${extensionPath}`,
-    config: {},
-    optional: true,
-  };
-}
-
 export function listRinBackgroundExtensionConfigs(
   settings: unknown,
   options: RinExtensionConfigOptions = {},
@@ -101,20 +59,7 @@ export function listRinBackgroundExtensionConfigs(
   const configuredExtensions = configured
     .map((entry) => normalizeBackgroundExtensionConfig(entry))
     .filter((entry): entry is RinBackgroundExtensionConfig => Boolean(entry));
-  const directExtensions =
-    isJsonRecord(settings) && Array.isArray(settings.extensions)
-      ? settings.extensions
-          .map((entry) =>
-            normalizeDirectBackgroundExtensionConfig(
-              entry,
-              safeString(options.cwd).trim() || process.cwd(),
-            ),
-          )
-          .filter((entry): entry is RinBackgroundExtensionConfig =>
-            Boolean(entry),
-          )
-      : [];
-  return [...configuredExtensions, ...directExtensions];
+  return configuredExtensions;
 }
 
 export function getRinExtensionRuntimeRoot(agentDir: string): string {

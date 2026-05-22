@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   ensureRuntimeImporter,
@@ -11,6 +11,7 @@ import {
   readRuntimeSettings,
   type RinBackgroundExtensionConfig,
 } from "../rin-extension-settings.js";
+import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
 import type {
   ChatRuntimeExternalAdapterEntry,
   ChatRuntimeExternalAdapterProvider,
@@ -180,6 +181,7 @@ export function ensureBackgroundExtensionDependencies(
 ) {
   const dependencies = Object.fromEntries(
     entries
+      .filter((entry) => !entry.modulePath)
       .map((entry) => [entry.packageName, entry.version || "latest"] as const)
       .sort(([a], [b]) => a.localeCompare(b)),
   );
@@ -224,10 +226,86 @@ function pickBackgroundServiceProvider(
   return null;
 }
 
+const requireFromHere = createRequire(import.meta.url);
+
+function readJson(filePath: string) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveJitiStaticPath() {
+  try {
+    return path.join(
+      path.dirname(requireFromHere.resolve("jiti/package.json")),
+      "lib",
+      "jiti-static.mjs",
+    );
+  } catch {
+    return path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent",
+      "node_modules",
+      "jiti",
+      "lib",
+      "jiti-static.mjs",
+    );
+  }
+}
+
+function resolveJitiAliases() {
+  const pkg = readJson(
+    path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "package.json",
+    ),
+  );
+  const names = Object.keys({
+    ...(pkg?.dependencies || {}),
+    ...(pkg?.devDependencies || {}),
+  });
+  return Object.fromEntries(
+    names.flatMap((name) => {
+      try {
+        return [[name, requireFromHere.resolve(name)]];
+      } catch {
+        return [];
+      }
+    }),
+  );
+}
+
+async function importBackgroundExtensionPath(modulePath: string) {
+  if (modulePath.endsWith(".ts")) {
+    const { createJiti } = await import(
+      pathToFileURL(resolveJitiStaticPath()).href
+    );
+    const jiti = createJiti(import.meta.url, {
+      moduleCache: false,
+      alias: resolveJitiAliases(),
+    });
+    return await jiti.import(modulePath, { default: true });
+  }
+  return await import(pathToFileURL(modulePath).href);
+}
+
 async function importBackgroundExtensionModule(
   runtimeRoot: string,
-  packageName: string,
+  entry: RinBackgroundExtensionConfig,
 ) {
+  if (entry.modulePath)
+    return await importBackgroundExtensionPath(entry.modulePath);
+  const { packageName } = entry;
   try {
     const importerPath = ensureRuntimeImporter(
       runtimeRoot,
@@ -316,6 +394,93 @@ function createWorkerLogger(
   };
 }
 
+function normalizeEntryName(value: string) {
+  return safeString(value)
+    .trim()
+    .replace(/^@/, "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-");
+}
+
+function nearestPackageRoot(startPath: string) {
+  let dir =
+    fs.existsSync(startPath) && fs.statSync(startPath).isDirectory()
+      ? startPath
+      : path.dirname(startPath);
+  while (true) {
+    if (fs.existsSync(path.join(dir, "package.json"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return path.dirname(startPath);
+    dir = parent;
+  }
+}
+
+function backgroundEntryFromResolvedExtension(
+  entry: any,
+): RinBackgroundExtensionConfig | null {
+  if (!entry?.enabled) return null;
+  const modulePath = safeString(entry.path).trim();
+  if (!modulePath) return null;
+  const baseDir =
+    safeString(entry.metadata?.baseDir).trim() ||
+    nearestPackageRoot(modulePath);
+  const pkg = readJson(path.join(baseDir, "package.json"));
+  const metadataSource = safeString(entry.metadata?.source).trim();
+  const packageName =
+    safeString(pkg?.name).trim() ||
+    (entry.metadata?.origin === "package" && metadataSource !== "auto"
+      ? metadataSource
+      : "") ||
+    modulePath;
+  return {
+    name:
+      packageName === modulePath
+        ? normalizeEntryName(path.basename(modulePath))
+        : normalizeEntryName(packageName) ||
+          normalizeEntryName(path.basename(modulePath)),
+    packageName,
+    version: "",
+    config: {},
+    optional: true,
+    modulePath,
+  };
+}
+
+async function listPiResolvedBackgroundExtensionConfigs(options: {
+  cwd: string;
+  agentDir: string;
+}): Promise<RinBackgroundExtensionConfig[]> {
+  const agentRuntimeModule = await loadRinAgentRuntime();
+  const { DefaultPackageManager, SettingsManager } = agentRuntimeModule as any;
+  const settingsManager = SettingsManager.create(options.cwd, options.agentDir);
+  const packageManager = new DefaultPackageManager({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    settingsManager,
+  });
+  const resolved = await packageManager.resolve();
+  return (resolved.extensions || [])
+    .map((entry: any) => backgroundEntryFromResolvedExtension(entry))
+    .filter(
+      (
+        entry: RinBackgroundExtensionConfig | null,
+      ): entry is RinBackgroundExtensionConfig => Boolean(entry),
+    );
+}
+
+function dedupeBackgroundEntries(entries: RinBackgroundExtensionConfig[]) {
+  const seen = new Set<string>();
+  const result: RinBackgroundExtensionConfig[] = [];
+  for (const entry of entries) {
+    const key = entry.modulePath
+      ? `module:${path.resolve(entry.modulePath)}`
+      : `package:${entry.packageName}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(entry);
+  }
+  return result;
+}
+
 export class RinBackgroundExtensionManager {
   private readonly workers: RunningWorker[] = [];
   private readonly chatAdapters: ChatRuntimeExternalAdapterEntry[] = [];
@@ -332,10 +497,26 @@ export class RinBackgroundExtensionManager {
   async start() {
     this.chatAdapters.length = 0;
     this.memoryProviders.length = 0;
-    const entries = listRinBackgroundExtensionConfigs(
+    const explicitEntries = listRinBackgroundExtensionConfigs(
       readRuntimeSettings(this.options.agentDir),
       { cwd: this.options.cwd },
     );
+    let piResolvedEntries: RinBackgroundExtensionConfig[] = [];
+    try {
+      piResolvedEntries = await listPiResolvedBackgroundExtensionConfigs(
+        this.options,
+      );
+    } catch (error: any) {
+      this.options.logger?.warn?.(
+        `background extension package resolution failed err=${safeString(
+          error?.message || error,
+        )}`,
+      );
+    }
+    const entries = dedupeBackgroundEntries([
+      ...explicitEntries,
+      ...piResolvedEntries,
+    ]);
     if (!entries.length) return [];
     let runtimeRoot: string;
     try {
@@ -356,7 +537,7 @@ export class RinBackgroundExtensionManager {
       try {
         const moduleValue = await importBackgroundExtensionModule(
           runtimeRoot,
-          entry.packageName,
+          entry,
         );
         const controller = new AbortController();
         const tasks = new Set<Promise<void>>();

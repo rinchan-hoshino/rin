@@ -477,6 +477,122 @@ export default function extension(rin) {
   }
 });
 
+test("stage B background extension manager loads local pi packages from settings.packages", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-background-package-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-background-package-pkg-"),
+  );
+  const markerPath = path.join(agentDir, "package-adapter.log");
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-background-package-test",
+      `throw new Error("package main should not be imported for pi manifest extensions");\n`,
+      { pi: { extensions: ["bridge.js"] } },
+    );
+    await fs.writeFile(
+      path.join(packageDir, "bridge.js"),
+      `import fs from "node:fs";
+const markerPath = ${JSON.stringify(markerPath)};
+export default function extension(rin) {
+  rin.registerChatAdapter(() => ({
+    adapter: { async start() { fs.appendFileSync(markerPath, "package-start\\n"); }, async stop() {} },
+    bot: { platform: "package-test", selfId: "bot-1", status: 1, async sendMessage() { return []; } },
+  }), { key: "package-test" });
+}
+`,
+      "utf8",
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      packages: [packageDir],
+    });
+
+    const warnings: string[] = [];
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: (message: string) => warnings.push(String(message)) },
+    });
+    const started = await manager.start();
+
+    assert.deepEqual(started, [
+      {
+        name: "rin-background-package-test",
+        packageName: "rin-background-package-test",
+      },
+    ]);
+    assert.deepEqual(warnings, []);
+    assert.equal(manager.getChatAdapterProviders()[0]?.key, "package-test");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
+
+test("stage B background extension manager honors pi package extension filters", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-background-package-filter-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-background-package-filter-pkg-"),
+  );
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-background-package-filter-test",
+      `export default function extension(rin) { rin.registerChatAdapter(() => ({ adapter: { start() {}, stop() {} }, bot: { platform: "filtered", selfId: "bot", status: 1, async sendMessage() { return []; } } }), { key: "filtered" }); }\n`,
+      { pi: { extensions: ["index.js"] } },
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      packages: [{ source: packageDir, extensions: [] }],
+    });
+
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: () => {} },
+    });
+
+    assert.deepEqual(await manager.start(), []);
+    assert.deepEqual(manager.getChatAdapterProviders(), []);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
+
+test("stage B background extension manager loads auto-discovered pi extensions", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-background-auto-"),
+  );
+  try {
+    const extensionDir = path.join(agentDir, "extensions", "auto-bg");
+    await fs.mkdir(extensionDir, { recursive: true });
+    await fs.writeFile(
+      path.join(extensionDir, "index.js"),
+      `export default function extension(rin) { rin.registerBackgroundService({ start() {} }); }\n`,
+      "utf8",
+    );
+
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: () => {} },
+    });
+
+    assert.deepEqual(await manager.start(), [
+      {
+        name: "index.js",
+        packageName: path.join(extensionDir, "index.js"),
+      },
+    ]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("stage B background extension manager exposes memory provider API for non-local originals", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-memory-provider-"),
