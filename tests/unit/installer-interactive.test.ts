@@ -407,6 +407,28 @@ test("installer steps show progress after user input before work runs", () => {
   assert.match(sources, /refreshingInstalledTargetMessage/);
 });
 
+test("core update stops runtime and skips web search preparation while fresh install keeps preparation", () => {
+  const source = readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "finalize.ts"),
+    "utf8",
+  );
+  const updateBlock = source.slice(
+    source.indexOf("export async function finalizeCoreUpdate"),
+    source.indexOf("export async function finalizeInstallPlan"),
+  );
+  const installBlock = source.slice(
+    source.indexOf("export async function finalizeInstallPlan"),
+  );
+
+  assert.match(source, /if \(options\.stopRuntimeBeforePublish\)/);
+  assert.match(source, /stopInstalledWebSearchSidecars\(installDir\)/);
+  assert.match(source, /if \(options\.prepareWebSearchRuntime !== false\)/);
+  assert.match(updateBlock, /stopRuntimeBeforePublish: true/);
+  assert.match(updateBlock, /prepareWebSearchRuntime: false/);
+  assert.doesNotMatch(installBlock, /stopRuntimeBeforePublish: true/);
+  assert.doesNotMatch(installBlock, /prepareWebSearchRuntime: false/);
+});
+
 test("installer i18n source keeps localized copy in one display table", () => {
   const source = readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "i18n.ts"),

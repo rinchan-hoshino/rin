@@ -509,7 +509,7 @@ export function collectDaemonFailureDetails(
 export function reconcileSystemdUserService(
   targetUser: string,
   installDir: string,
-  action: "start" | "restart",
+  action: "start" | "stop" | "restart",
   elevated = false,
   deps: { findSystemUser: (user: string) => any },
 ) {

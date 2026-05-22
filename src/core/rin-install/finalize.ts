@@ -30,7 +30,11 @@ import {
   waitForSocket,
 } from "./service.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
-import { prepareSearxngRuntime } from "../rin-web-search/service.js";
+import {
+  getWebSearchStatus,
+  prepareSearxngRuntime,
+  stopSearxngSidecar,
+} from "../rin-web-search/service.js";
 import {
   describeOwnership,
   findSystemUser,
@@ -39,10 +43,22 @@ import {
   targetHomeForUser,
 } from "./users.js";
 
+async function stopInstalledWebSearchSidecars(installDir: string) {
+  const status = getWebSearchStatus(installDir);
+  const instances = Array.isArray(status.instances) ? status.instances : [];
+  for (const instance of instances) {
+    const instanceId = String(instance?.instanceId || "").trim();
+    if (!instanceId) continue;
+    await stopSearxngSidecar(installDir, { instanceId });
+  }
+}
+
 async function applyInstalledRuntime(
   options: FinalizeInstallOptions & {
     persistInstallerState?: boolean;
     daemonFailureCode: string;
+    prepareWebSearchRuntime?: boolean;
+    stopRuntimeBeforePublish?: boolean;
   },
 ) {
   const currentUser =
@@ -70,6 +86,17 @@ async function applyInstalledRuntime(
   const useElevatedWrite = shouldUseElevatedWrite(targetUser, ownership);
   const useElevatedService = installServiceNow && targetUser !== currentUser;
   const serviceDeps = { findSystemUser, targetHomeForUser };
+
+  if (options.stopRuntimeBeforePublish) {
+    reconcileSystemdUserService(
+      targetUser,
+      installDir,
+      "stop",
+      useElevatedWrite,
+      { findSystemUser },
+    );
+    await stopInstalledWebSearchSidecars(installDir);
+  }
 
   const previousReleaseName = currentInstalledReleaseName(
     installDir,
@@ -126,7 +153,9 @@ async function applyInstalledRuntime(
     useElevatedWrite,
     serviceDeps,
   );
-  await prepareSearxngRuntime(installDir);
+  if (options.prepareWebSearchRuntime !== false) {
+    await prepareSearxngRuntime(installDir);
+  }
   reconcileSystemdUserService(
     targetUser,
     installDir,
@@ -270,6 +299,8 @@ export async function finalizeCoreUpdate(options: {
   const result = await applyInstalledRuntime({
     ...options,
     persistInstallerState: false,
+    stopRuntimeBeforePublish: true,
+    prepareWebSearchRuntime: false,
     daemonFailureCode: "rin_core_update_daemon_not_ready",
   });
   return { ...result, mode: "core-only" as const };
