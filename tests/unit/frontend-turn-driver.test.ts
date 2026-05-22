@@ -156,6 +156,7 @@ test("external compaction review work drives the frontend working phase", async 
   assert.deepEqual(seen, [
     { type: "frontend_status", phase: "working" },
     { type: "frontend_status", phase: "idle" },
+    { type: "compaction_start_notice", text: "Compacting..." },
     { type: "frontend_status", phase: "working" },
     { type: "frontend_status", phase: "idle" },
   ]);

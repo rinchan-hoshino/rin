@@ -874,6 +874,42 @@ export class ChatController {
     }
   }
 
+  private async deliverCompactionStartNotice(text: string) {
+    const trimmed = safeString(text).trim();
+    if (!trimmed) return false;
+    if (!this.deliveryEnabled) return true;
+    try {
+      const messageIds = await sendOutboxPayload(
+        this.app,
+        this.agentDir,
+        {
+          type: "text_delivery",
+          createdAt: nowIso(),
+          chatKey: this.chatKey,
+          deliveryKind: "passive_notice",
+          text: trimmed,
+        },
+        this.h,
+      );
+      const messageId = safeString(messageIds?.[0]).trim();
+      if (messageId) {
+        this.setCurrentTurn({
+          incomingMessageId: messageId,
+          replyToMessageId: this.currentReplyToMessageId() || undefined,
+        });
+        const marker = this.startWorkingMarker().catch(() => false);
+        const poll = this.pollTyping().catch(() => false);
+        await Promise.race([
+          Promise.all([marker, poll]),
+          new Promise((resolve) => setImmediate(resolve)),
+        ]);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async terminateSession() {
     this.lastActivityAt = Date.now();
     const wanted = this.getRecoverableSessionFile();
@@ -1302,6 +1338,9 @@ export class ChatController {
         return;
       case "passive_notice":
         await this.deliverPassiveNotice(event.text);
+        return;
+      case "compaction_start_notice":
+        await this.deliverCompactionStartNotice(event.text);
         return;
       case "assistant_interim":
         await this.deliverAssistantInterim(event.text);

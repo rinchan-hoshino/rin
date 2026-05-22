@@ -9,6 +9,7 @@ export type RinFrontendCommandResponses = {
   compact: string;
   reload: string;
   compactionBusy: string;
+  compactionStart: string;
   compactionSummaryLine: string;
   compactionSummaryText: string;
   selfImproveReviewQueued: string;
@@ -28,6 +29,7 @@ export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses
     compact: "Compacted session.",
     reload: "Reloaded extensions, prompts, skills, and themes.",
     compactionBusy: "Compaction already in progress.",
+    compactionStart: "Compacting...",
     compactionSummaryLine: "Compacted from {tokens} tokens",
     compactionSummaryText: "[compaction]\n\n{summary}",
     selfImproveReviewQueued: "Self-improve review queued.",

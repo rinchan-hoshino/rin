@@ -215,7 +215,13 @@ export function createRinFrontendBackendEventTranslator(
         case "tool_execution_end":
           return [{ type: "turn_accepted" }];
         case "compaction_start":
-          return [{ type: "external_working_start" }];
+          return [
+            {
+              type: "compaction_start_notice",
+              text: commandResponses.compactionStart,
+            },
+            { type: "external_working_start" },
+          ];
         case "compaction_end": {
           const events: RinFrontendBackendEvent[] = [
             { type: "external_working_end" },

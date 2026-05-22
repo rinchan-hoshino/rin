@@ -879,6 +879,59 @@ test("chat controller starts command reactions from frontend working status", as
   assert.deepEqual(deliveries, ["Compacted session."]);
 });
 
+test("chat controller sends compaction start notice and reacts on that notice", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  const reactions = [];
+  const deliveries = [];
+  let nextMessageId = 1;
+  controller.app.bots[0].workingIndicators = [
+    testPollingIndicator(actions, reactions),
+  ];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .filter(Boolean)
+      .join(" ");
+    deliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-out-${nextMessageId++}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-out-1");
+  assert.deepEqual(deliveries, [
+    { text: "Compacting...", kind: "passive_notice" },
+  ]);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [["create", "2", "m-out-1", "🤔"]]);
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      tokensBefore: 108642,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.currentTurn, null);
+  assert.deepEqual(reactions, [
+    ["create", "2", "m-out-1", "🤔"],
+    ["delete", "2", "m-out-1", "🤔", "1"],
+  ]);
+  assert.deepEqual(deliveries, [
+    { text: "Compacting...", kind: "passive_notice" },
+    { text: "Compacted from 108,642 tokens", kind: "passive_notice" },
+  ]);
+});
+
 test("chat controller does not create processing turns for slash commands", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];

@@ -96,6 +96,7 @@ test("chat i18n exposes dynamic compact and self-improve review templates", asyn
       chat: {
         compaction: {
           busy: "Already compacting.",
+          start: "Shrinking now...",
           summaryLine: "Shrunk {tokens}; open with {expandKey}.",
           summaryText: "COMPACT: {summary}",
         },
@@ -108,6 +109,7 @@ test("chat i18n exposes dynamic compact and self-improve review templates", asyn
 
   const responses = commandResponses.readChatCommandResponses(agentDir);
   assert.equal(responses.compactionBusy, "Already compacting.");
+  assert.equal(responses.compactionStart, "Shrinking now...");
   assert.equal(
     responses.compactionSummaryLine,
     "Shrunk {tokens}; open with {expandKey}.",

@@ -84,6 +84,7 @@ export type RinFrontendBackendEvent =
       text: string;
       level?: "info" | "warning" | "error";
     }
+  | { type: "compaction_start_notice"; text: string }
   | { type: "external_working_start" }
   | { type: "external_working_end" }
   | { type: "assistant_stream"; text: string }

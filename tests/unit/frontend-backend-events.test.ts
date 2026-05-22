@@ -50,6 +50,7 @@ test("frontend backend event translator exposes compaction review as external wo
     { type: "external_working_end" },
   ]);
   assert.deepEqual(translator.translate({ type: "compaction_start" }), [
+    { type: "compaction_start_notice", text: "Compacting..." },
     { type: "external_working_start" },
   ]);
   assert.deepEqual(translator.translate({ type: "compaction_end" }), [
@@ -218,6 +219,7 @@ test("frontend backend event translator does not complete turns from interim tex
   );
   assert.deepEqual(translator.translate({ type: "agent_end" }), []);
   assert.deepEqual(translator.translate({ type: "compaction_start" }), [
+    { type: "compaction_start_notice", text: "Compacting..." },
     { type: "external_working_start" },
   ]);
   assert.deepEqual(translator.translate({ type: "compaction_end" }), [

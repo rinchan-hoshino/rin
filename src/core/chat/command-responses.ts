@@ -33,6 +33,7 @@ const CHAT_COMMAND_RESPONSE_I18N_IDS = {
   compact: "chat.commandResponses.compact",
   reload: "chat.commandResponses.reload",
   compactionBusy: "chat.compaction.busy",
+  compactionStart: "chat.compaction.start",
   compactionSummaryLine: "chat.compaction.summaryLine",
   compactionSummaryText: "chat.compaction.summaryText",
   selfImproveReviewQueued: "chat.selfImproveReview.queued",

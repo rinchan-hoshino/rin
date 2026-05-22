@@ -52,6 +52,7 @@ export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "turn_accepted" }
   | RinFrontendPassiveNoticeEvent
+  | { type: "compaction_start_notice"; text: string }
   | { type: "assistant_interim"; text: string };
 
 export type RinFrontendTurnClient = RinFrontendClient & {
@@ -1254,6 +1255,9 @@ export class RinFrontendTurnDriver {
           text: event.text,
           level: event.level,
         });
+        return;
+      case "compaction_start_notice":
+        this.emit({ type: "compaction_start_notice", text: event.text });
         return;
       case "external_working_start":
         this.externalWorkingDepth += 1;
