@@ -30,6 +30,7 @@ import {
   waitForSocket,
 } from "./service.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
+import { preparePiManagedToolsForInstall } from "./pi-tools.js";
 import {
   getWebSearchStatus,
   prepareSearxngRuntime,
@@ -131,8 +132,14 @@ async function applyInstalledRuntime(
     useElevatedWrite,
     serviceDeps,
   );
+  await preparePiManagedToolsForInstall({
+    currentUser,
+    targetUser,
+    targetHome: targetHomeForUser(targetUser),
+    installDir,
+  });
   if (options.prepareWebSearchRuntime !== false) {
-    await prepareSearxngRuntime(installDir);
+    await prepareSearxngRuntime(installDir).catch(() => undefined);
   }
   reconcileSystemdUserService(
     targetUser,

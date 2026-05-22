@@ -7,6 +7,13 @@ import {
   SessionManager,
   SessionSelectorComponent,
 } from "@earendil-works/pi-coding-agent";
+import { APP_NAME } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/config.js";
+import {
+  formatKeyText,
+  keyText,
+  rawKeyHint,
+} from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/keybinding-hints.js";
+import { getToolPath } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js";
 import {
   Loader,
   Markdown,
@@ -17,7 +24,10 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 
-import { theme } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import {
+  onThemeChange,
+  theme,
+} from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 
 import { sleep } from "../platform/process.js";
 import {
@@ -62,6 +72,26 @@ const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "sending",
 ]);
 const TODO_TOOL_COALESCE_EVENTS = new Set(["tool_execution_end", "agent_end"]);
+
+class RinStartupExpandableText extends Text {
+  constructor(
+    private getCollapsedText: () => string,
+    private getExpandedText: () => string,
+    expanded = false,
+    paddingX = 0,
+    paddingY = 0,
+  ) {
+    super(
+      expanded ? getExpandedText() : getCollapsedText(),
+      paddingX,
+      paddingY,
+    );
+  }
+
+  setExpanded(expanded: boolean) {
+    this.setText(expanded ? this.getExpandedText() : this.getCollapsedText());
+  }
+}
 
 function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
@@ -727,6 +757,126 @@ export function applyRinStartupHeaderBranding(instance: any) {
   return false;
 }
 
+export async function initializePiInteractiveModeWithoutManagedToolEnsure(
+  instance: any,
+) {
+  if (instance.isInitialized) return;
+  instance.registerSignalHandlers();
+  instance.changelogMarkdown = instance.getChangelogForDisplay();
+  instance.fdPath = getToolPath("fd") ?? undefined;
+
+  if (
+    instance.session.scopedModels.length > 0 &&
+    (instance.options.verbose || !instance.settingsManager.getQuietStartup())
+  ) {
+    const modelList = instance.session.scopedModels
+      .map((scopedModel: any) => {
+        const thinkingStr = scopedModel.thinkingLevel
+          ? `:${scopedModel.thinkingLevel}`
+          : "";
+        return `${scopedModel.model.id}${thinkingStr}`;
+      })
+      .join(", ");
+    const cycleKeys = instance.keybindings.getKeys("app.model.cycleForward");
+    const cycleHint =
+      cycleKeys.length > 0
+        ? theme.fg(
+            "muted",
+            ` (${formatKeyText(cycleKeys.join("/"), { capitalize: true })} to cycle)`,
+          )
+        : "";
+    console.log(theme.fg("dim", `Model scope: ${modelList}${cycleHint}`));
+  }
+
+  instance.ui.addChild(instance.headerContainer);
+  if (instance.options.verbose || !instance.settingsManager.getQuietStartup()) {
+    const logo =
+      theme.bold(theme.fg("accent", APP_NAME)) +
+      theme.fg("dim", ` v${instance.version}`);
+    const hint = (keybinding: string, description: string) =>
+      keyHint(keybinding as any, description);
+    const key = (keybinding: string) => keyText(keybinding as any);
+    const expandedInstructions = [
+      hint("app.interrupt", "to interrupt"),
+      hint("app.clear", "to clear"),
+      rawKeyHint(`${key("app.clear")} twice`, "to exit"),
+      hint("app.exit", "to exit (empty)"),
+      hint("app.suspend", "to suspend"),
+      keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
+      hint("app.thinking.cycle", "to cycle thinking level"),
+      rawKeyHint(
+        `${key("app.model.cycleForward")}/${key("app.model.cycleBackward")}`,
+        "to cycle models",
+      ),
+      hint("app.model.select", "to select model"),
+      hint("app.tools.expand", "to expand tools"),
+      hint("app.thinking.toggle", "to expand thinking"),
+      hint("app.editor.external", "for external editor"),
+      rawKeyHint("/", "for commands"),
+      rawKeyHint("!", "to run bash"),
+      rawKeyHint("!!", "to run bash (no context)"),
+      hint("app.message.followUp", "to queue follow-up"),
+      hint("app.message.dequeue", "to edit all queued messages"),
+      hint("app.clipboard.pasteImage", "to paste image"),
+      rawKeyHint("drop files", "to attach"),
+    ].join("\n");
+    const compactInstructions = [
+      hint("app.interrupt", "interrupt"),
+      rawKeyHint(`${key("app.clear")}/${key("app.exit")}`, "clear/exit"),
+      rawKeyHint("/", "commands"),
+      rawKeyHint("!", "bash"),
+      hint("app.tools.expand", "more"),
+    ].join(theme.fg("muted", " · "));
+    const compactOnboarding = theme.fg(
+      "dim",
+      `Press ${key("app.tools.expand")} to show full startup help and loaded resources.`,
+    );
+    const onboarding = theme.fg(
+      "dim",
+      "Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.",
+    );
+    instance.builtInHeader = new RinStartupExpandableText(
+      () =>
+        `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
+      () => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
+      instance.getStartupExpansionState(),
+      1,
+      0,
+    );
+    instance.headerContainer.addChild(new Spacer(1));
+    instance.headerContainer.addChild(instance.builtInHeader);
+    instance.headerContainer.addChild(new Spacer(1));
+  } else {
+    instance.builtInHeader = new Text("", 0, 0);
+    instance.headerContainer.addChild(instance.builtInHeader);
+  }
+
+  instance.ui.addChild(instance.chatContainer);
+  instance.ui.addChild(instance.pendingMessagesContainer);
+  instance.ui.addChild(instance.statusContainer);
+  instance.renderWidgets();
+  instance.ui.addChild(instance.widgetContainerAbove);
+  instance.ui.addChild(instance.editorContainer);
+  instance.ui.addChild(instance.widgetContainerBelow);
+  instance.ui.addChild(instance.footer);
+  instance.ui.setFocus(instance.editor);
+  instance.setupKeyHandlers();
+  instance.setupEditorSubmitHandler();
+  instance.ui.start();
+  instance.isInitialized = true;
+  await instance.rebindCurrentSession();
+  instance.renderInitialMessages();
+  onThemeChange(() => {
+    instance.ui.invalidate();
+    instance.updateEditorBorderColor();
+    instance.ui.requestRender();
+  });
+  instance.footerDataProvider.onBranchChange(() => {
+    instance.ui.requestRender();
+  });
+  await instance.updateAvailableProviderCount();
+}
+
 function createSessionSelectorLoaders(instance: any) {
   if (!isRpcTransportControlled(instance)) {
     const loadSessions = () =>
@@ -807,7 +957,7 @@ export async function applyRinTuiOverrides() {
   const originalInit = interactiveModeProto?.init;
   if (typeof originalInit === "function") {
     interactiveModeProto.init = async function initWithRinStartupBranding() {
-      await originalInit.call(this);
+      await initializePiInteractiveModeWithoutManagedToolEnsure(this);
       applyRinStartupHeaderBranding(this);
     };
   }
