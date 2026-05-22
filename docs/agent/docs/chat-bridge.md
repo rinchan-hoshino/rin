@@ -23,6 +23,30 @@ The built-in direct runtime currently includes:
 - Read the local message store directly when you only need already stored chat context.
 - Update saved identity/trust data through the documented identity store or SDK path instead of a model tool.
 
+## Incoming turn policy
+
+By default, an allowed incoming chat message starts an agent turn after Rin stores the message. To make a chat record-only for external schedulers, heartbeat tasks, or manual processing, configure `settings.json -> chat.turnPolicy.byChatKey`:
+
+```json
+{
+  "chat": {
+    "turnPolicy": {
+      "default": "start_on_message",
+      "byChatKey": {
+        "telegram/123456:7890": "record_only"
+      }
+    }
+  }
+}
+```
+
+Modes:
+
+- `start_on_message`: default behavior; allowed incoming messages start an agent turn.
+- `record_only`: store inbound chat messages, but do not start an agent turn for normal messages in that chat. Chat commands are still handled by the command path.
+
+Use `record_only` only when another explicit path, such as a scheduled task or SDK call, will inspect stored messages and decide whether to respond.
+
 Agent SDK examples:
 
 ```js

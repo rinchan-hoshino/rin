@@ -33,6 +33,42 @@ test("chat settings helper drops stray legacy adapter settings without creating 
   assert.deepEqual(normalized, { keep: true });
 });
 
+test("chat turn policy defaults to starting turns on incoming messages", () => {
+  assert.equal(
+    chatSettings.resolveChatTurnPolicyMode({}, "telegram/123:456"),
+    "start_on_message",
+  );
+  assert.equal(
+    chatSettings.resolveChatTurnPolicyMode(
+      { chat: { turnPolicy: { default: "unknown" } } },
+      "telegram/123:456",
+    ),
+    "start_on_message",
+  );
+});
+
+test("chat turn policy supports record-only per chat key", () => {
+  const settings = {
+    chat: {
+      turnPolicy: {
+        default: "start_on_message",
+        byChatKey: {
+          "telegram/123:456": "record_only",
+        },
+      },
+    },
+  };
+
+  assert.equal(
+    chatSettings.resolveChatTurnPolicyMode(settings, "telegram/123:456"),
+    "record_only",
+  );
+  assert.equal(
+    chatSettings.resolveChatTurnPolicyMode(settings, "telegram/123:789"),
+    "start_on_message",
+  );
+});
+
 test("chat support ignores removed legacy adapter settings keys", () => {
   const config = support.buildChatConfigFromSettings({
     koishi: {

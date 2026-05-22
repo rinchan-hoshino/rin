@@ -50,6 +50,7 @@ import {
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { readChatCommandResponses } from "./command-responses.js";
+import { resolveChatTurnPolicyMode } from "./settings.js";
 import { appendChatLog } from "./chat-log.js";
 import {
   type ChatInboxItem,
@@ -642,6 +643,11 @@ export async function startChatBridge(
     const platform = safeString(session?.platform || "").trim();
     const decision = await shouldProcessText(session, elements, identity);
     if (!decision.allow) return { retry: false };
+    if (
+      resolveChatTurnPolicyMode(settings, decision.chatKey) === "record_only"
+    ) {
+      return { retry: false };
+    }
     return await handleAllowedChatTurnSession(
       session,
       elements,
@@ -744,7 +750,10 @@ export async function startChatBridge(
       queuedElements,
       identity,
     );
-    if (!decision.allow) {
+    if (
+      !decision.allow ||
+      resolveChatTurnPolicyMode(settings, decision.chatKey) === "record_only"
+    ) {
       return {
         run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
       };
