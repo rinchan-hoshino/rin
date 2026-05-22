@@ -441,9 +441,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       detail,
       ". Remove it or check the command help.",
     ),
-  sidecar_lock_timeout: () =>
-    "A local helper process is still preparing web search. Wait a moment and retry.",
-
   web_fetch_invalid_url: () => "Enter a valid HTTP or HTTPS URL.",
   web_search_failed: () =>
     "Web search failed. Check the network or search backend, then retry.",

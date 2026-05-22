@@ -98,10 +98,6 @@ export function instancesRootForState(stateRoot: string): string {
   return dataPathForState(stateRoot, INSTANCES_SEGMENT);
 }
 
-export function runtimeLockPathForState(stateRoot: string): string {
-  return runtimePathForState(stateRoot, "install.lock");
-}
-
 export function runtimeSourceDirForState(stateRoot: string): string {
   return runtimePathForState(stateRoot, "src");
 }

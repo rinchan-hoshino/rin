@@ -6,7 +6,6 @@ import os from "node:os";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
 import { ensurePrivateDir } from "../platform/fs.js";
-import { acquireProcessLock } from "../sidecar/common.js";
 import { isPidAlive, safeString, sleep } from "../platform/process.js";
 import {
   dataRootForState,
@@ -16,7 +15,6 @@ import {
   readInstanceState,
   readRuntimeBootstrapState,
   removeInstanceRoot,
-  runtimeLockPathForState,
   runtimeManagedPythonDirForState,
   runtimePipBinForState,
   runtimePythonBinForState,
@@ -693,26 +691,8 @@ async function prepareSearxngRuntime(
   stateRoot: string,
   options: EnsureSearxngSidecarOptions = {},
 ) {
-  const release = await acquireProcessLock(
-    runtimeLockPathForState(stateRoot),
-  ).catch((error: unknown) => {
-    throw new Error(
-      String(
-        error instanceof Error
-          ? error.message
-          : error ||
-              `web_search_lock_timeout:${runtimeLockPathForState(stateRoot)}`,
-      ),
-    );
-  });
-  try {
-    const runtime = ensureSearxngRuntimeInstalled(stateRoot, options.logger);
-    return { ok: true as const, ...runtime };
-  } finally {
-    try {
-      release();
-    } catch {}
-  }
+  const runtime = ensureSearxngRuntimeInstalled(stateRoot, options.logger);
+  return { ok: true as const, ...runtime };
 }
 
 async function startSearxngSidecar(
@@ -727,28 +707,10 @@ async function startSearxngSidecar(
     reuseAnySearxngInstance(stateRoot);
   if (existing) return existing;
 
-  const release = await acquireProcessLock(
-    runtimeLockPathForState(stateRoot),
-  ).catch((error: unknown) => {
-    throw new Error(
-      String(
-        error instanceof Error
-          ? error.message
-          : error ||
-              `web_search_lock_timeout:${runtimeLockPathForState(stateRoot)}`,
-      ),
-    );
-  });
-
   let child: ChildProcess | null = null;
   let baseUrl = "";
   let ready = false;
   try {
-    const lockedExisting =
-      reuseStoredSearxngInstance(stateRoot, instanceId) ||
-      reuseAnySearxngInstance(stateRoot);
-    if (lockedExisting) return lockedExisting;
-
     const runtime = readInstalledSearxngRuntime(stateRoot);
     const port = await getFreePort();
     baseUrl = `http://127.0.0.1:${port}`;
@@ -810,9 +772,6 @@ async function startSearxngSidecar(
       pid,
     };
   } finally {
-    try {
-      release();
-    } catch {}
     if (!ready) {
       if (child && isLivePid(child.pid)) {
         try {
