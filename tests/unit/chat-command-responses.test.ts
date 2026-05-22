@@ -53,6 +53,19 @@ test("chat command responses can be overridden from the generic i18n catalog", a
   assert.equal(responses.abort, "Aborted current operation.");
 });
 
+test("chat compaction defaults keep shared line copy but omit wrapper chrome", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-command-copy-"),
+  );
+
+  const responses = commandResponses.readChatCommandResponses(agentDir);
+  assert.equal(
+    responses.compactionSummaryLine,
+    "Compacted from {tokens} tokens",
+  );
+  assert.equal(responses.compactionSummaryText, "{summary}");
+});
+
 test("generic i18n catalog accepts nested message keys", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-command-copy-"),

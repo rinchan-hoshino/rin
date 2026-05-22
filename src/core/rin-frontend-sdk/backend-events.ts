@@ -64,6 +64,8 @@ export type RinFrontendBackendEventTranslator = {
 export function createRinFrontendBackendEventTranslator(
   options: {
     commandResponses?: Partial<RinFrontendCommandResponses>;
+    compactionExpandHintText?: string | false | null;
+    compactionExpandKeyText?: string;
   } = {},
 ): RinFrontendBackendEventTranslator {
   const commandResponses = resolveRinFrontendCommandResponses(
@@ -221,6 +223,8 @@ export function createRinFrontendBackendEventTranslator(
           const notice = formatCompactionSummaryCollapsedText(
             payload.tokensBefore ?? payload.result?.tokensBefore,
             {
+              expandHintText: options.compactionExpandHintText,
+              expandKeyText: options.compactionExpandKeyText,
               lineTemplate: commandResponses.compactionSummaryLine,
               textTemplate: commandResponses.compactionSummaryText,
             },

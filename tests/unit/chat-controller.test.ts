@@ -257,8 +257,7 @@ test("chat controller delivers compact collapsed notice without summary text", a
         {
           type: "text",
           attrs: {
-            content:
-              "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
+            content: "Compacted from 108,642 tokens",
           },
         },
       ],

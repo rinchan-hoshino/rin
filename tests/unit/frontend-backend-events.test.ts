@@ -13,7 +13,6 @@ const sdk = await import(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
-
 const NOTICE_NO_CHANGE = "💡 Self-improve review completed with no changes.";
 const NOTICE_CHANGED = "💡 Self-improve review updated demo.";
 
@@ -120,7 +119,31 @@ test("frontend backend event translator exposes compact collapsed notice without
       { type: "external_working_end" },
       {
         type: "passive_notice",
-        text: "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
+        text: "[compaction]\n\nCompacted from 108,642 tokens",
+        level: "info",
+      },
+    ],
+  );
+});
+
+test("frontend backend event translator adds expand hint only when the caller supplies one", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator({
+    compactionExpandKeyText: "ctrl+o",
+  });
+
+  assert.deepEqual(
+    translator.translate({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      tokensBefore: 255166,
+      result: { summary: "Summary of conversation must not reach chat" },
+    }),
+    [
+      { type: "external_working_end" },
+      {
+        type: "passive_notice",
+        text: "[compaction]\n\nCompacted from 255,166 tokens (ctrl+o to expand)",
         level: "info",
       },
     ],

@@ -34,6 +34,16 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
   assert.equal(sdk.isFrontendAbortCommand("/abort"), true);
   assert.equal(sdk.isFrontendNewSessionCommand("/new"), true);
 
+  assert.equal(
+    sdk.formatCompactionSummaryTitle(108642),
+    "Compacted from 108,642 tokens",
+  );
+  assert.equal(sdk.formatCompactionExpandHint(), "");
+  assert.equal(
+    sdk.formatCompactionExpandHint({ expandKeyText: "ctrl+o" }),
+    "(ctrl+o to expand)",
+  );
+
   const responses = sdk.resolveRinFrontendCommandResponses({
     compact: "done",
     reload: "loaded",
@@ -48,7 +58,7 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
       { text: "native compact summary must not leak", tokensBefore: 108642 },
       responses,
     ).text,
-    "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
+    "[compaction]\n\nCompacted from 108,642 tokens",
   );
   assert.equal(
     sdk.applyFrontendBuiltinCommandText(
@@ -56,6 +66,15 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
       { text: "native compact summary must not leak", tokensBefore: 108642 },
       responses,
       { preferConfiguredText: true },
+    ).text,
+    "[compaction]\n\nCompacted from 108,642 tokens",
+  );
+  assert.equal(
+    sdk.applyFrontendBuiltinCommandText(
+      "compact",
+      { tokensBefore: 108642 },
+      responses,
+      { compactionExpandKeyText: "ctrl+o" },
     ).text,
     "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
   );
@@ -69,7 +88,7 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
   );
   const localizedResponses = sdk.resolveRinFrontendCommandResponses({
     compactionBusy: "Already compacting.",
-    compactionSummaryLine: "Shrunk {tokens}; open with {expandKey}.",
+    compactionSummaryLine: "Shrunk {tokens}.",
     compactionSummaryText: "COMPACT: {summary}",
     selfImproveReviewChangedWithMore: "Reviewed {targets} plus {count} hidden.",
   });
@@ -87,7 +106,7 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
       { tokensBefore: 108642 },
       localizedResponses,
     ).text,
-    "COMPACT: Shrunk 108,642; open with ctrl+o.",
+    "COMPACT: Shrunk 108,642.",
   );
   assert.equal(
     sdk.formatSelfImproveReviewNotice(
@@ -106,14 +125,22 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
   );
 });
 
-test("chat command responses are aliases for the shared frontend SDK table", () => {
+test("chat command responses share frontend SDK shape with chat-specific wrapper chrome", () => {
   assert.equal(
-    chatResponses.DEFAULT_CHAT_COMMAND_RESPONSES,
-    sdk.DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
+    chatResponses.DEFAULT_CHAT_COMMAND_RESPONSES.compactionSummaryLine,
+    sdk.DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES.compactionSummaryLine,
+  );
+  assert.equal(
+    chatResponses.DEFAULT_CHAT_COMMAND_RESPONSES.compactionSummaryText,
+    "{summary}",
   );
   assert.deepEqual(
-    chatResponses.resolveChatCommandResponses({ new: "fresh" }),
-    sdk.resolveRinFrontendCommandResponses({ new: "fresh" }),
+    Object.keys(chatResponses.DEFAULT_CHAT_COMMAND_RESPONSES).sort(),
+    Object.keys(sdk.DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES).sort(),
+  );
+  assert.equal(
+    chatResponses.resolveChatCommandResponses({ new: "fresh" }).new,
+    "fresh",
   );
 });
 

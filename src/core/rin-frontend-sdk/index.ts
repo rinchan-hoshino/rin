@@ -25,8 +25,10 @@ export {
 } from "./backend-events.js";
 
 export {
+  formatCompactionExpandHint,
   formatCompactionSummaryCollapsedLine,
   formatCompactionSummaryCollapsedText,
+  formatCompactionSummaryTitle,
   formatCompactionTokenCount,
   type CompactionSummaryCollapsedTextOptions,
 } from "./compaction-summary-format.js";

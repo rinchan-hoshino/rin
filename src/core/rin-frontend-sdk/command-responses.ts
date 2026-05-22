@@ -28,8 +28,7 @@ export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses
     compact: "Compacted session.",
     reload: "Reloaded extensions, prompts, skills, and themes.",
     compactionBusy: "Compaction already in progress.",
-    compactionSummaryLine:
-      "Compacted from {tokens} tokens ({expandKey} to expand)",
+    compactionSummaryLine: "Compacted from {tokens} tokens",
     compactionSummaryText: "[compaction]\n\n{summary}",
     selfImproveReviewQueued: "Self-improve review queued.",
     selfImproveReviewSkipped: "Self-improve review skipped.",
@@ -170,7 +169,11 @@ export function applyFrontendBuiltinCommandText(
   commandName: string,
   data: unknown,
   responses: RinFrontendCommandResponses = resolveRinFrontendCommandResponses(),
-  options: { preferConfiguredText?: boolean } = {},
+  options: {
+    compactionExpandHintText?: string | false | null;
+    compactionExpandKeyText?: string;
+    preferConfiguredText?: boolean;
+  } = {},
 ) {
   const result = isJsonRecord(data) ? { ...data } : {};
   const existingText = safeString(result.text).trim();
@@ -194,6 +197,8 @@ export function applyFrontendBuiltinCommandText(
         ...result,
         text:
           formatCompactionSummaryCollapsedText(result.tokensBefore, {
+            expandHintText: options.compactionExpandHintText,
+            expandKeyText: options.compactionExpandKeyText,
             lineTemplate: responses.compactionSummaryLine,
             textTemplate: responses.compactionSummaryText,
           }) || responses.compact,
