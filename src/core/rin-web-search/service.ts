@@ -17,11 +17,14 @@ import {
   readRuntimeBootstrapState,
   removeInstanceRoot,
   runtimeLockPathForState,
+  runtimeManagedPythonDirForState,
   runtimePipBinForState,
   runtimePythonBinForState,
   runtimeRootForState,
   runtimeSourceDirForState,
   runtimeTmpDirForState,
+  runtimeUvBinForState,
+  runtimeUvDirForState,
   runtimeVenvDirForState,
   writeInstanceState,
   writeRuntimeBootstrapState,
@@ -40,6 +43,9 @@ const START_TIMEOUT_MS = 90_000;
 const START_POLL_INTERVAL_MS = 100;
 const HEALTHCHECK_TIMEOUT_MS = 1_500;
 const SEARXNG_HEALTH_PATH = "/healthz";
+const MIN_SEARXNG_PYTHON_MAJOR = 3;
+const MIN_SEARXNG_PYTHON_MINOR = 10;
+const MANAGED_PYTHON_VERSION = "3.12";
 const SEARXNG_ARCHIVE_URL =
   "https://github.com/searxng/searxng/archive/refs/heads/master.tar.gz";
 
@@ -232,6 +238,157 @@ function runCommandSync(
       `exit_${result.status}`,
   );
   throw new Error(`${path.basename(command)}:${detail}`);
+}
+
+function parsePythonVersion(value: string) {
+  const match = /^(\d+)\.(\d+)(?:\.(\d+))?/.exec(value.trim());
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3] || 0),
+  };
+}
+
+function isSearxngPythonSupported(python: string): boolean {
+  let versionText = "";
+  try {
+    const result = runCommandSync(python, [
+      "-c",
+      "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')",
+    ]);
+    versionText = safeText(result.stdout);
+  } catch {
+    return false;
+  }
+  const version = parsePythonVersion(versionText);
+  return Boolean(
+    version &&
+    (version.major > MIN_SEARXNG_PYTHON_MAJOR ||
+      (version.major === MIN_SEARXNG_PYTHON_MAJOR &&
+        version.minor >= MIN_SEARXNG_PYTHON_MINOR)),
+  );
+}
+
+function uvCommandEnv(stateRoot: string, tmpDir: string): NodeJS.ProcessEnv {
+  return {
+    ...runtimeCommandEnv(tmpDir),
+    UV_INSTALL_DIR: runtimeUvDirForState(stateRoot),
+    UV_PYTHON_INSTALL_DIR: runtimeManagedPythonDirForState(stateRoot),
+    UV_MANAGED_PYTHON: "1",
+    UV_NO_MODIFY_PATH: "1",
+  };
+}
+
+function installPrivateUv(
+  stateRoot: string,
+  tmpDir: string,
+  logger?: LoggerLike,
+): string {
+  const uvBin = runtimeUvBinForState(stateRoot);
+  if (fs.existsSync(uvBin)) return uvBin;
+
+  ensurePrivateDir(runtimeUvDirForState(stateRoot));
+  const env = uvCommandEnv(stateRoot, tmpDir);
+  if (process.platform === "win32") {
+    const powershell =
+      findExecutableOnPath("pwsh") || findExecutableOnPath("powershell");
+    if (!powershell)
+      throw new Error("web_search_runtime_fetch_tools_not_found");
+    logInfo(logger, "web-search: installing private uv helper");
+    runCommandSync(
+      powershell,
+      [
+        "-ExecutionPolicy",
+        "ByPass",
+        "-NoProfile",
+        "-Command",
+        "irm https://astral.sh/uv/install.ps1 | iex",
+      ],
+      { cwd: runtimeRootForState(stateRoot), env },
+    );
+  } else {
+    const shell = findExecutableOnPath("sh");
+    const curl = findExecutableOnPath("curl");
+    const wget = findExecutableOnPath("wget");
+    if (!shell || (!curl && !wget)) {
+      throw new Error("web_search_runtime_fetch_tools_not_found");
+    }
+    logInfo(logger, "web-search: installing private uv helper");
+    const command = curl
+      ? "curl -LsSf https://astral.sh/uv/install.sh | sh"
+      : "wget -qO- https://astral.sh/uv/install.sh | sh";
+    runCommandSync(shell, ["-c", command], {
+      cwd: runtimeRootForState(stateRoot),
+      env,
+    });
+  }
+
+  if (!fs.existsSync(uvBin)) throw new Error("uv_install_failed");
+  return uvBin;
+}
+
+function findUvForManagedPython(
+  stateRoot: string,
+  tmpDir: string,
+  logger?: LoggerLike,
+): string {
+  const privateUv = runtimeUvBinForState(stateRoot);
+  if (fs.existsSync(privateUv)) return privateUv;
+  return installPrivateUv(stateRoot, tmpDir, logger);
+}
+
+function ensureManagedSearxngPython(
+  stateRoot: string,
+  tmpDir: string,
+  logger?: LoggerLike,
+): string {
+  const current = readRuntimeBootstrapState(stateRoot);
+  if (
+    current?.managedPythonBin &&
+    fs.existsSync(current.managedPythonBin) &&
+    isSearxngPythonSupported(current.managedPythonBin)
+  ) {
+    return current.managedPythonBin;
+  }
+
+  ensurePrivateDir(runtimeManagedPythonDirForState(stateRoot));
+  const uvBin = findUvForManagedPython(stateRoot, tmpDir, logger);
+  const env = uvCommandEnv(stateRoot, tmpDir);
+  logInfo(
+    logger,
+    `web-search: installing private Python ${MANAGED_PYTHON_VERSION}`,
+  );
+  runCommandSync(uvBin, ["python", "install", MANAGED_PYTHON_VERSION], {
+    cwd: runtimeRootForState(stateRoot),
+    env,
+  });
+  const findResult = runCommandSync(
+    uvBin,
+    ["python", "find", MANAGED_PYTHON_VERSION],
+    { cwd: runtimeRootForState(stateRoot), env },
+  );
+  const python = safeText(findResult.stdout).split(/\r?\n/)[0]?.trim() || "";
+  if (!python || !fs.existsSync(python) || !isSearxngPythonSupported(python)) {
+    throw new Error("python_version_unsupported");
+  }
+  return python;
+}
+
+function findSearxngPython(
+  stateRoot: string,
+  tmpDir: string,
+  logger?: LoggerLike,
+): string {
+  const current = readRuntimeBootstrapState(stateRoot);
+  if (
+    current?.managedPythonBin &&
+    fs.existsSync(current.managedPythonBin) &&
+    isSearxngPythonSupported(current.managedPythonBin)
+  ) {
+    return current.managedPythonBin;
+  }
+  return ensureManagedSearxngPython(stateRoot, tmpDir, logger);
 }
 
 function runtimeCommandEnv(tmpDir: string): NodeJS.ProcessEnv {
@@ -456,23 +613,26 @@ function ensureSearxngRuntimeInstalled(
     current?.ready &&
     hasSearxngSourceTree(sourceDir) &&
     fs.existsSync(pythonBin) &&
-    fs.existsSync(pipBin)
+    fs.existsSync(pipBin) &&
+    isSearxngPythonSupported(pythonBin)
   ) {
     return { sourceDir, pythonBin, pipBin, reused: true };
+  }
+
+  if (fs.existsSync(pythonBin) && !isSearxngPythonSupported(pythonBin)) {
+    removePathIfExists(venvDir);
   }
 
   ensurePrivateDir(runtimeDir);
   ensurePrivateDir(tmpDir);
 
-  const python =
-    findExecutableOnPath("python3") || findExecutableOnPath("python");
-  if (!python) throw new Error("python_not_found");
+  const managedPythonBin = findSearxngPython(stateRoot, tmpDir, logger);
 
   ensureSearxngSourceInstalled(runtimeDir, sourceDir, tmpDir, logger);
 
   if (!fs.existsSync(pythonBin)) {
     logInfo(logger, "web-search: creating searxng virtualenv");
-    runCommandSync(python, ["-m", "venv", venvDir], {
+    runCommandSync(managedPythonBin, ["-m", "venv", venvDir], {
       cwd: runtimeDir,
       env: runtimeCommandEnv(tmpDir),
     });
@@ -499,6 +659,8 @@ function ensureSearxngRuntimeInstalled(
     sourceDir,
     pythonBin,
     pipBin,
+    managedPythonBin,
+    uvBin: runtimeUvBinForState(stateRoot),
     installedAt: new Date().toISOString(),
   };
   writeRuntimeBootstrapState(stateRoot, nextState);
@@ -514,7 +676,8 @@ function readInstalledSearxngRuntime(stateRoot: string): SearxngRuntimeInstall {
     current?.ready &&
     hasSearxngSourceTree(sourceDir) &&
     fs.existsSync(pythonBin) &&
-    fs.existsSync(pipBin)
+    fs.existsSync(pipBin) &&
+    isSearxngPythonSupported(pythonBin)
   ) {
     return { sourceDir, pythonBin, pipBin, reused: true };
   }

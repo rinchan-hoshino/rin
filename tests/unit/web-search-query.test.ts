@@ -266,6 +266,81 @@ test("web search service does not install SearXNG during a search call", async (
   }
 });
 
+test("web search runtime rejects an invalid managed Python before source install", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-web-search-"));
+  const uvPath = paths.runtimeUvBinForState(agentDir);
+  await fs.mkdir(path.dirname(uvPath), { recursive: true });
+  await fs.writeFile(
+    uvPath,
+    [
+      "#!/bin/sh",
+      'PY="$UV_PYTHON_INSTALL_DIR/cpython-3.9/bin/python"',
+      'if [ "$1 $2" = "python install" ]; then DIR="${PY%/*}"; /bin/mkdir -p "$DIR"; printf "%s\\n" "#!/bin/sh" "echo 3.9.6" > "$PY"; /bin/chmod +x "$PY"; exit 0; fi',
+      'if [ "$1 $2" = "python find" ]; then echo "$PY"; exit 0; fi',
+      "exit 1",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.chmod(uvPath, 0o755);
+  try {
+    await assert.rejects(
+      () => service.prepareSearxngRuntime(agentDir),
+      /python_version_unsupported/,
+    );
+    await assert.rejects(
+      () =>
+        fs.stat(
+          path.join(agentDir, "data", "web-search", "runtime", "searxng"),
+        ),
+      /ENOENT/,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("web search runtime installs Rin-managed Python with private uv before source install", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-web-search-"));
+  const uvPath = paths.runtimeUvBinForState(agentDir);
+  await fs.mkdir(path.dirname(uvPath), { recursive: true });
+  await fs.writeFile(
+    uvPath,
+    [
+      "#!/bin/sh",
+      'PY="$UV_PYTHON_INSTALL_DIR/cpython-3.12/bin/python"',
+      'if [ "$1 $2" = "python install" ]; then DIR="${PY%/*}"; /bin/mkdir -p "$DIR"; printf "%s\\n" "#!/bin/sh" "echo 3.12.4" > "$PY"; /bin/chmod +x "$PY"; exit 0; fi',
+      'if [ "$1 $2" = "python find" ]; then echo "$PY"; exit 0; fi',
+      "exit 1",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.chmod(uvPath, 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    await assert.rejects(
+      () => service.prepareSearxngRuntime(agentDir),
+      /web_search_runtime_fetch_tools_not_found/,
+    );
+    await fs.stat(
+      path.join(
+        agentDir,
+        "data",
+        "runtime",
+        "python",
+        "cpython-3.12",
+        "bin",
+        "python",
+      ),
+    );
+  } finally {
+    process.env.PATH = originalPath;
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("web search service reuses Rin-managed sidecar state", async () => {
   await withMockManagedSidecar(
     (request, response) => {

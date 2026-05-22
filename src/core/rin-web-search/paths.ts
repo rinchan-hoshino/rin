@@ -13,6 +13,8 @@ export type RuntimeBootstrapState = {
   sourceDir?: string;
   pythonBin?: string;
   pipBin?: string;
+  managedPythonBin?: string;
+  uvBin?: string;
   installedAt?: string;
 };
 
@@ -33,16 +35,30 @@ const INSTANCES_SEGMENT = "instances";
 const WINDOWS_VENV_BIN_DIR = "Scripts";
 const POSIX_VENV_BIN_DIR = "bin";
 
+function agentDataPathForState(
+  stateRoot: string,
+  ...segments: string[]
+): string {
+  return path.join(path.resolve(stateRoot), "data", ...segments);
+}
+
 function dataPathForState(stateRoot: string, ...segments: string[]): string {
-  return path.join(
-    path.resolve(stateRoot),
-    ...WEB_SEARCH_DATA_SEGMENTS,
+  return agentDataPathForState(
+    stateRoot,
+    ...WEB_SEARCH_DATA_SEGMENTS.slice(1),
     ...segments,
   );
 }
 
 function runtimePathForState(stateRoot: string, ...segments: string[]): string {
   return dataPathForState(stateRoot, RUNTIME_SEGMENT, ...segments);
+}
+
+function sharedRuntimePathForState(
+  stateRoot: string,
+  ...segments: string[]
+): string {
+  return agentDataPathForState(stateRoot, "runtime", ...segments);
 }
 
 function instancePathForState(
@@ -92,6 +108,28 @@ export function runtimeSourceDirForState(stateRoot: string): string {
 
 export function runtimeVenvDirForState(stateRoot: string): string {
   return runtimePathForState(stateRoot, "venv");
+}
+
+export function runtimeToolsDirForState(
+  stateRoot: string,
+  ...segments: string[]
+): string {
+  return sharedRuntimePathForState(stateRoot, "tools", ...segments);
+}
+
+export function runtimeUvDirForState(stateRoot: string): string {
+  return runtimeToolsDirForState(stateRoot, "uv");
+}
+
+export function runtimeUvBinForState(stateRoot: string): string {
+  return path.join(
+    runtimeUvDirForState(stateRoot),
+    process.platform === "win32" ? "uv.exe" : "uv",
+  );
+}
+
+export function runtimeManagedPythonDirForState(stateRoot: string): string {
+  return sharedRuntimePathForState(stateRoot, "python");
 }
 
 export function runtimeTmpDirForState(stateRoot: string): string {

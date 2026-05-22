@@ -224,7 +224,11 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Background extension is missing a Rin extension entry point. Export a Rin extension factory or background service and restart Rin.",
 
   python_not_found: () =>
-    "Web search needs Python to start the local SearXNG sidecar. Install Python 3 and retry.",
+    "Web search needs Python to start the local SearXNG sidecar. Install Python 3.10 or newer and retry.",
+  python_version_unsupported: () =>
+    "Web search could not prepare a Python 3.10 or newer runtime for the local SearXNG sidecar. Check the network and retry, or run rin doctor.",
+  uv_install_failed: () =>
+    "Web search could not install Rin's private Python helper. Check the network and retry, or run rin doctor.",
   qq_app_id_required: () =>
     "QQ adapter needs an app id before it can start. Add the app id and restart Rin.",
   qq_reaction_requires_channel_chat: () =>
@@ -256,6 +260,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       detail,
       ". Check the command output and retry.",
     ),
+  rin_installer_fd_install_dir_missing: () =>
+    "Rin installer needs an install directory before preparing managed search tools. Choose an install directory and retry.",
+  rin_installer_fd_manager_unavailable: () =>
+    "Rin installer could not prepare managed search tools. Retry the install; if it repeats, run rin doctor.",
   rin_container_name_required: () =>
     "Target operation needs a container name. Provide the container name and retry.",
   rin_daemon_failed: () =>
@@ -433,7 +441,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       detail,
       ". Remove it or check the command help.",
     ),
-
   sidecar_lock_timeout: () =>
     "A local helper process is still preparing web search. Wait a moment and retry.",
 
