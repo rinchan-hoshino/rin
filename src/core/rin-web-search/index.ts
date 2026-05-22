@@ -203,7 +203,7 @@ export default function webSearchModule(): RinCapabilityDefinition {
         promptSnippet: "Search or fetch a web page.",
         promptGuidelines: [
           "Use web_search proactively whenever web information may be relevant; better to search and confirm than to guess.",
-          "When q is an HTTP(S) URL, web_search gets the page directly and extracts readable content instead of running a search.",
+          "When q is an HTTP(S) URL, web_search gets the page directly and extracts readable content.",
         ],
         parameters: Type.Object({
           q: Type.String({
