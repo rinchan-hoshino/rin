@@ -1,5 +1,8 @@
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import {
   buildDesktopHostLaunch,
@@ -67,6 +70,24 @@ export type GuiInstallerFinalizePlan = {
 
 export type GuiInstallerHostLaunch = DesktopHostLaunch;
 
+function runtimeDesktopHostEntry() {
+  return path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "app",
+    "rin-desktop-host",
+    "main.js",
+  );
+}
+
+function defaultGuiInstallerHostCommand() {
+  const entry = runtimeDesktopHostEntry();
+  return fs.existsSync(entry)
+    ? `${process.execPath} ${entry}`
+    : "rin-desktop-host";
+}
+
 export function buildGuiInstallerHostLaunch(
   env: NodeJS.ProcessEnv = process.env,
 ): GuiInstallerHostLaunch {
@@ -74,6 +95,7 @@ export function buildGuiInstallerHostLaunch(
     env,
     ["RIN_INSTALLER_GUI_HOST", "RIN_GUI_NATIVE_HOST"],
     ["--stdio", "--installer"],
+    defaultGuiInstallerHostCommand(),
   );
 }
 

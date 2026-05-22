@@ -318,6 +318,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin native GUI command failed. Retry the action; if it repeats, restart Rin.",
   rin_native_gui_missing_session: () =>
     "Rin GUI could not find the requested session. Choose an existing session and retry.",
+  rin_native_gui_settings_path_missing: () =>
+    "Rin GUI could not locate the settings file. Restart Rin or reinstall it, then retry.",
   rin_new_session_cancelled: () => "New session creation was cancelled.",
   rin_nightly_selector_not_supported: () =>
     "This command does not support selecting the nightly channel here. Remove the nightly selector and retry.",

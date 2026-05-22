@@ -27,11 +27,15 @@ test("installer GUI starts by default only for Windows interactive installs", ()
   assert.equal(gui.shouldStartGuiInstaller(["--update"], "win32"), false);
 });
 
-test("installer GUI launcher uses the shared desktop host contract", () => {
-  assert.deepEqual(gui.buildGuiInstallerHostLaunch({}), {
-    command: "rin-desktop-host",
-    args: ["--stdio", "--installer"],
-  });
+test("installer GUI launcher resolves the bundled desktop host directly", () => {
+  const launch = gui.buildGuiInstallerHostLaunch({});
+  assert.equal(launch.command, process.execPath);
+  assert.ok(
+    launch.args[0].endsWith(
+      path.join("dist", "app", "rin-desktop-host", "main.js"),
+    ),
+  );
+  assert.deepEqual(launch.args.slice(1), ["--stdio", "--installer"]);
   assert.deepEqual(
     gui.buildGuiInstallerHostLaunch({
       RIN_GUI_NATIVE_HOST: "shared-host --channel beta",

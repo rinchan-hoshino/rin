@@ -38,18 +38,22 @@ test("GUI args expose no compatibility fallback switches", () => {
   }
 });
 
-test("native desktop launcher uses one reusable stdio host contract", () => {
-  assert.deepEqual(nativeDesktop.buildNativeDesktopHostLaunch({}), {
-    command: "rin-desktop-host",
-    args: ["--stdio"],
-  });
+test("native desktop launcher resolves the bundled stdio host directly", () => {
+  const launch = nativeDesktop.buildNativeDesktopHostLaunch({});
+  assert.equal(launch.command, process.execPath);
+  assert.ok(
+    launch.args[0].endsWith(
+      path.join("dist", "app", "rin-desktop-host", "main.js"),
+    ),
+  );
+  assert.deepEqual(launch.args.slice(1), ["--stdio", "--assistant"]);
   assert.deepEqual(
     nativeDesktop.buildNativeDesktopHostLaunch({
       RIN_GUI_NATIVE_HOST: "custom-host --theme dark",
     }),
     {
       command: "custom-host",
-      args: ["--theme", "dark", "--stdio"],
+      args: ["--theme", "dark", "--stdio", "--assistant"],
     },
   );
 });
@@ -66,11 +70,19 @@ test("Electron desktop host is the concrete GUI framework behind the host contra
   });
 
   assert.match(mainScript, /BrowserWindow/);
+  assert.match(mainScript, /alwaysOnTop: true/);
+  assert.match(mainScript, /skipTaskbar: true/);
   assert.match(mainScript, /ipcMain/);
   assert.match(preload, /contextBridge/);
   assert.match(preload, /ipcRenderer/);
+  assert.match(preload, /setMode/);
   assert.match(mainScript, /rin-command/);
+  assert.match(mainScript, /rin-window-mode/);
+  assert.match(mainScript, /setSize\(430, 640\)/);
   assert.match(mainScript, /rin-event/);
+  assert.match(mainScript, /Rin desktop assistant/);
+  assert.match(mainScript, /settings:get/);
+  assert.match(mainScript, /settings:save/);
   assert.match(mainScript, /sessions:list/);
   assert.match(mainScript, /models:list/);
   assert.match(mainScript, /commands:list/);

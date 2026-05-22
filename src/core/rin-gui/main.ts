@@ -1,3 +1,4 @@
+import { installSettingsPath } from "../rin-install/paths.js";
 import { RinDaemonFrontendClient } from "../rin-frontend-sdk/index.js";
 import {
   createTargetExecutionContext,
@@ -19,7 +20,10 @@ export async function runGui(parsed: ParsedArgs, rawArgv: string[] = []) {
   const client = new RinDaemonFrontendClient(context.socketPath);
   await client.connect();
   try {
-    await runNativeDesktopGui({ client });
+    await runNativeDesktopGui({
+      client,
+      settingsPath: installSettingsPath(context.installDir),
+    });
   } finally {
     await client.disconnect();
   }
