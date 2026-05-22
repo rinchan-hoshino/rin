@@ -392,6 +392,19 @@ test("release workflows retry main branch metadata pushes", () => {
   }
 });
 
+test("release workflows are manual executors without GitHub schedules", () => {
+  for (const workflow of [
+    "publish-nightly.yml",
+    "publish-beta.yml",
+    "publish-stable.yml",
+    "publish-hotfix.yml",
+  ]) {
+    const content = readWorkflow(workflow);
+    assert.match(content, /on:\n {2}workflow_dispatch:/);
+    assert.doesNotMatch(content, /\n {2}schedule:\n/);
+  }
+});
+
 test("release workflows require changelog entries before expensive publish gates", () => {
   const beta = readWorkflow("publish-beta.yml");
   assert.match(
