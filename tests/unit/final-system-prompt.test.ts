@@ -93,6 +93,8 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "Start with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md",
     ),
   );
+  assert.ok(baseSystemPrompt.includes("Session awareness guidance:"));
+  assert.ok(baseSystemPrompt.includes("docs/session-awareness.md"));
   assert.ok(baseSystemPrompt.includes("Scheduled task guidance:"));
   assert.ok(baseSystemPrompt.includes("use Rin scheduled tasks first"));
   assert.equal(baseSystemPrompt.includes("condition.kind"), false);

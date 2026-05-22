@@ -20,11 +20,13 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 ## Start here
 
 - `docs/execution-environment.md`: agent identity, agent loop, environment inspection, self-improvement memory, and user-environment boundaries.
+- `docs/session-awareness.md`: how to inspect what other sessions, processes, and scheduled/background tasks did recently or are doing now.
 - `docs/pi-overrides.md`: how to interpret upstream Pi docs inside Rin, including where Rin changes the meaning.
 
 ## Topic entrypoints
 
 - `docs/execution-environment.md`: how to understand the current agent runtime and what to verify before acting.
+- `docs/session-awareness.md`: how to avoid racing parallel sessions by checking active/recent Rin sessions, processes, worktrees, and background tasks.
 - `docs/runtime-layout.md`: runtime layout, stable paths, launcher ownership, and paths safe for agents to reference.
 - `docs/builtin-extensions.md`: builtin capabilities and default extra capabilities provided by Rin core.
 - `docs/capabilities.md`: compact agent-facing behavior and conventions for Rin features.
