@@ -43,6 +43,14 @@ const DEFAULT_PI_GUIDELINES = [
   "When using bash, explain meaningful findings instead of pasting excessive raw output",
 ];
 
+function formatCurrentDateForSystemPrompt() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function createRinCapabilityDefinitions(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition[] {
@@ -249,6 +257,7 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
     prompt,
     readPersistedSessionSystemPromptBlocks(session),
   );
+  prompt = `${prompt.trimEnd()}\nCurrent date: ${formatCurrentDateForSystemPrompt()}`;
   return `${PROMPT_PREFIX}\n${runtimeAwarenessBlock}\n\n${prompt}`.trimEnd();
 }
 

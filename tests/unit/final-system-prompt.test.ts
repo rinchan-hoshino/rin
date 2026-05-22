@@ -66,6 +66,8 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     await buildFinalAppSystemPrompt();
 
   assert.ok(baseSystemPrompt.includes("Available tools:"));
+  assert.match(baseSystemPrompt, /\nCurrent date: \d{4}-\d{2}-\d{2}$/);
+  assert.equal(baseSystemPrompt.includes("Current working directory:"), false);
   assert.ok(baseSystemPrompt.includes("- search_memory:"));
   assert.equal(baseSystemPrompt.includes("- save_prompts:"), false);
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
