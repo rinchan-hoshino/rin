@@ -247,7 +247,6 @@ type RefreshFlags = { messages?: boolean; models?: boolean; session?: boolean };
 type RpcFrontendPhase =
   | "idle"
   | "starting"
-  | "sending"
   | "compacting"
   | "working"
   | "connecting";
@@ -258,7 +257,6 @@ const RPC_FRONTEND_PHASE_LABELS: Record<
 > = {
   connecting: "Connecting",
   starting: "Starting",
-  sending: "Sending",
   compacting: "Compacting context",
   working: "Working",
 };
@@ -1222,8 +1220,7 @@ export class RpcInteractiveSession {
     }
     if (!this.rpcConnected || this.recoveryPending) return "connecting";
     if (this.isCompacting) return "compacting";
-    if (this.remoteTurnRunning) return "working";
-    if (this.activeTurn) return "sending";
+    if (this.remoteTurnRunning || this.activeTurn) return "working";
     return "idle";
   }
 

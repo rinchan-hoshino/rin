@@ -316,7 +316,6 @@ export class ChatController {
 
   hasActiveTurn() {
     return (
-      this.frontendPhase === "sending" ||
       this.frontendPhase === "working" ||
       this.awaitingTurnSettle ||
       this.driver.hasActiveTurn()
@@ -1418,7 +1417,7 @@ export class ChatController {
     if (!event || typeof event !== "object") return;
     switch (event.type) {
       case "frontend_status":
-        if (event.phase === "sending" || event.phase === "working") {
+        if (event.phase === "working") {
           const createdCommandTurn = this.ensureVisibleCommandTurn();
           this.markAcceptedMessage(this.currentIncomingMessageId());
           if (createdCommandTurn) await this.pollTyping().catch(() => false);

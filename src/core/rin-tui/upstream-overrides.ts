@@ -56,12 +56,6 @@ const CLEAR_SCROLLBACK_SEQUENCE = "\u001b[3J";
 const PRESERVE_SCROLLBACK_PATCH = Symbol.for(
   "rin.tui.preserve_scrollback_full_redraw",
 );
-const RPC_TRANSPORT_REAPPLY_EVENTS = new Set([
-  "agent_end",
-  "compaction_end",
-  "auto_retry_start",
-  "auto_retry_end",
-]);
 const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
 const STARTUP_INPUT_QUEUE_KEY = "__rinStartupInputQueue";
 const RPC_TRANSPORT_STATUS_COMPONENT_KEY = "__rinRpcTransportStatusComponent";
@@ -69,7 +63,7 @@ const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
 const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "starting",
   "connecting",
-  "sending",
+  "compacting",
 ]);
 const TODO_TOOL_COALESCE_EVENTS = new Set(["tool_execution_end", "agent_end"]);
 
@@ -235,25 +229,35 @@ function reattachExistingPiLoader(instance: any) {
   instance.ui.requestRender();
 }
 
-function syncRpcPiLoader(instance: any) {
+function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
   if (!isRpcTransportControlled(instance)) return;
-  const status = instance.session.getFrontendStatusEvent?.();
-  if (status?.phase === "working") {
+  const status = statusOverride ?? instance.session.getFrontendStatusEvent?.();
+  const phase = String(status?.phase || "");
+  if (phase === "working") {
     reattachExistingPiLoader(instance);
+    return;
   }
+  if (phase === "compacting" && instance?.autoCompactionLoader) {
+    stopRpcTransportStatusComponent(instance);
+    if (!statusContainerHasChild(instance, instance.autoCompactionLoader)) {
+      instance.statusContainer.clear();
+      instance.statusContainer.addChild(instance.autoCompactionLoader);
+    }
+    instance.ui.requestRender();
+    return;
+  }
+  if (RPC_TRANSPORT_STATUS_PHASES.has(phase)) {
+    showRpcTransportStatus(instance, status);
+    return;
+  }
+  const changed = stopRpcTransportStatusComponent(instance);
+  if (changed || phase === "idle") instance?.ui?.requestRender?.();
 }
 
 function syncLocalPiLoader(instance: any) {
   if (isRpcTransportControlled(instance)) return;
   if (!instance?.session?.isStreaming) return;
   reattachExistingPiLoader(instance);
-}
-
-function shouldReapplyRpcPiLoaderAfterEvent(instance: any, event: any) {
-  return (
-    isRpcTransportControlled(instance) &&
-    RPC_TRANSPORT_REAPPLY_EVENTS.has(String(event?.type || ""))
-  );
 }
 
 function shouldReapplyLocalPiLoaderAfterEvent(instance: any, event: any) {
@@ -430,7 +434,7 @@ export function insertRinUpdateNotificationPlaceholder(instance: any) {
 function selfImproveNoticeTurnState(instance: any) {
   const status = instance?.session?.getFrontendStatusEvent?.();
   return {
-    liveTurn: status?.phase === "sending" || status?.phase === "working",
+    liveTurn: status?.phase === "working",
     isStreaming: Boolean(instance?.session?.isStreaming || status?.isStreaming),
     turnActive: Boolean(status?.turnActive),
   };
@@ -1164,11 +1168,7 @@ export async function applyRinTuiOverrides() {
       }
 
       if (event?.type === "rpc_frontend_status") {
-        if (event.phase === "working") {
-          reattachExistingPiLoader(this);
-        } else {
-          showRpcTransportStatus(this, event);
-        }
+        syncRpcFrontendStatus(this, event);
         return;
       }
 
@@ -1192,7 +1192,7 @@ export async function applyRinTuiOverrides() {
           await this.handleRuntimeSessionChange();
         }
         redrawCurrentSessionHistoryAfterRpcResync(this);
-        syncRpcPiLoader(this);
+        syncRpcFrontendStatus(this);
         return;
       }
 
@@ -1203,10 +1203,6 @@ export async function applyRinTuiOverrides() {
 
       if (shouldSuppressLocalUserEcho(this, event)) return;
 
-      const shouldReapplyRpcPiLoader = shouldReapplyRpcPiLoaderAfterEvent(
-        this,
-        event,
-      );
       const shouldReapplyLocalPiLoader = shouldReapplyLocalPiLoaderAfterEvent(
         this,
         event,
@@ -1219,9 +1215,7 @@ export async function applyRinTuiOverrides() {
         ? coalesceTodoToolComponentsInContainer(this.chatContainer)
         : 0;
 
-      if (shouldReapplyRpcPiLoader) {
-        syncRpcPiLoader(this);
-      }
+      syncRpcFrontendStatus(this);
       if (shouldReapplyLocalPiLoader) {
         syncLocalPiLoader(this);
       }

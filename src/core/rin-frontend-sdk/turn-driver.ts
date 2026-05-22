@@ -34,7 +34,6 @@ export type RinFrontendTurnPhase =
   | "idle"
   | "connecting"
   | "starting"
-  | "sending"
   | "working";
 
 export type RinFrontendTurnResult = {

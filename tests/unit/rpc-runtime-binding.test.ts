@@ -1394,7 +1394,7 @@ test("rpc runtime applies daemon queue updates before the user message starts", 
   ]);
 });
 
-test("rpc runtime marks a connected prompt as sending before remote session setup finishes", async () => {
+test("rpc runtime marks a connected prompt as working before remote session setup finishes", async () => {
   const sent = [];
   let releaseEnsureRemoteSession;
   const session = new RpcInteractiveSession({
@@ -1437,16 +1437,16 @@ test("rpc runtime marks a connected prompt as sending before remote session setu
 
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
-    phase: "sending",
-    label: "Sending",
+    phase: "working",
+    label: "Working",
     connected: true,
   });
   assert.deepEqual(seen, [
     { type: "rpc_local_user_message", text: "hello" },
     {
       type: "rpc_frontend_status",
-      phase: "sending",
-      label: "Sending",
+      phase: "working",
+      label: "Working",
       connected: true,
     },
   ]);

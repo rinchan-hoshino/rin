@@ -108,8 +108,8 @@ test("rpc frontend status labels follow phase priority", () => {
   session.activeTurn = { mode: "prompt", message: "hello" };
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
-    phase: "sending",
-    label: "Sending",
+    phase: "working",
+    label: "Working",
     connected: true,
   });
 });

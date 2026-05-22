@@ -597,20 +597,6 @@ test("rpc frontend startup statuses use one animated loader until working starts
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_frontend_status",
-    phase: "sending",
-    label: "Sending",
-    connected: true,
-  });
-  assert.equal(instance.statusContainer.child, startupStatus);
-  assert.notEqual(startupStatus.intervalId, null);
-  assert.equal(startupStatus.message, "Sending...");
-  const sendingLines = startupStatus.render(40);
-  assert.equal(sendingLines[0], "");
-  assert.match(sendingLines[1], /Sending\.\.\./);
-  assert.equal(additions, 1);
-
-  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
-    type: "rpc_frontend_status",
     phase: "working",
     label: "Working",
     connected: true,
@@ -620,6 +606,86 @@ test("rpc frontend startup statuses use one animated loader until working starts
   assert.equal(instance.statusContainer.child, undefined);
   assert.equal(startupStatus.intervalId, null);
   assert.ok(clears >= 1);
+});
+
+test("rpc transport status remains visible after ordinary events while reconnecting", async () => {
+  await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
+
+  let additions = 0;
+  const instance = {
+    isInitialized: true,
+    settingsManager: settingsManagerWithoutTerminalProgress,
+    session: {
+      getFrontendStatusEvent() {
+        return {
+          type: "rpc_frontend_status",
+          phase: "connecting",
+          label: "Connecting",
+          connected: false,
+        };
+      },
+    },
+    statusContainer: {
+      child: undefined,
+      clear() {
+        this.child = undefined;
+      },
+      addChild(child) {
+        additions += 1;
+        this.child = child;
+      },
+    },
+    ui: {
+      requestRender() {},
+      terminal: { setProgress() {} },
+    },
+    footer: { invalidate() {} },
+    pendingTools: { clear() {} },
+    retryCountdown: undefined,
+    retryLoader: undefined,
+    loadingAnimation: undefined,
+    workingVisible: false,
+    createWorkingLoader() {
+      return new loaderModule.Loader(
+        this.ui,
+        (value) => value,
+        (value) => value,
+        "Working...",
+      );
+    },
+  };
+
+  try {
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "rpc_frontend_status",
+        phase: "connecting",
+        label: "Connecting",
+        connected: false,
+      },
+    );
+
+    const connectingStatus = instance.statusContainer.child;
+    assert.ok(connectingStatus);
+    assert.equal(connectingStatus.message, "Connecting...");
+
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "status",
+        level: "warning",
+        text: "Waiting daemon...",
+      },
+    );
+
+    assert.ok(instance.statusContainer.child);
+    assert.equal(instance.statusContainer.child.message, "Connecting...");
+    assert.equal(additions, 2);
+  } finally {
+    instance.statusContainer.child?.stop?.();
+  }
 });
 
 test("rpc working status only reattaches an existing Pi-owned loader", async () => {
@@ -1278,6 +1344,14 @@ test("rpc compaction start keeps the dedicated compaction loader", async () => {
         label: "Compacting context",
         connected: true,
       },
+    );
+
+    assert.equal(instance.loadingAnimation, undefined);
+    assert.equal(instance.statusContainer.child, compactionLoader);
+
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      { type: "status", level: "warning", text: "Still compacting..." },
     );
 
     assert.equal(instance.loadingAnimation, undefined);
