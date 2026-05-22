@@ -841,14 +841,22 @@ test("chat controller starts command reactions from frontend working status", as
     }),
     compact: async () => {
       commandStarted();
-      await controller.driver.handleClientEvent({
-        type: "backend_event",
-        payload: { type: "external_working_start" },
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "extension_ui_request",
+          method: "setWorkingVisible",
+          visible: true,
+        },
       });
       await releaseCommandPromise;
-      await controller.driver.handleClientEvent({
-        type: "backend_event",
-        payload: { type: "external_working_end" },
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "extension_ui_request",
+          method: "setWorkingVisible",
+          visible: false,
+        },
       });
       return {
         handled: true,
@@ -1412,6 +1420,14 @@ test("chat controller moves working indicators to the steering message", async (
     prompt: async (_text, options = {}) => {
       if (options.streamingBehavior === "steer") return;
       controller.session.isStreaming = true;
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "rpc_turn_event",
+          event: "start",
+          requestTag: options.requestTag,
+        },
+      });
       resolveFirstPromptStarted();
       await new Promise((resolve) => {
         releaseFirstPrompt = resolve;
@@ -1439,15 +1455,8 @@ test("chat controller moves working indicators to the steering message", async (
   );
 
   assert.equal(steerResult.steered, true);
-  assert.deepEqual(actions, [
-    { chat_id: "2", action: "typing" },
-    { chat_id: "2", action: "typing" },
-  ]);
-  assert.deepEqual(reactions, [
-    ["create", "2", "m-first", "🤔"],
-    ["delete", "2", "m-first", "🤔", "1"],
-    ["create", "2", "m-steer", "🤔"],
-  ]);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [["create", "2", "m-steer", "🤔"]]);
   assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
 
   releaseFirstPrompt();
@@ -1619,6 +1628,7 @@ test("chat controller polls typing and rotating reactions while a turn is active
   };
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
+  controller.driver.frontendState.turnActive = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
@@ -1672,6 +1682,7 @@ test("chat controller uses adapter reaction capability for lark working indicato
   };
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
+  controller.driver.frontendState.turnActive = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
@@ -1716,6 +1727,7 @@ test("chat controller uses discord typing and reaction capabilities together", a
   };
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
+  controller.driver.frontendState.turnActive = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [["typing", "channel-1"]]);
@@ -2390,6 +2402,36 @@ test("chat controller ignores dynamic onebot private working actions without exp
   assert.equal(await controller.pollTyping(), false);
   assert.deepEqual(internalActions, []);
   assert.deepEqual(deliveries, []);
+});
+
+test("chat controller does not type from local live turn state without worker activity", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        workingIndicators: [testPollingIndicator(actions, [])],
+        internal: {
+          async sendChatAction(payload) {
+            actions.push(payload);
+          },
+        },
+      },
+    ],
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-local",
+    workingNoticeSent: false,
+  };
+  controller.awaitingTurnSettle = true;
+  const liveTurn = controller.startLiveTurn();
+  liveTurn.promise.catch(() => {});
+
+  assert.equal(await controller.pollTyping(), false);
+  assert.deepEqual(actions, []);
 });
 
 test("chat controller does not keep typing from stale currentTurn metadata alone", async () => {

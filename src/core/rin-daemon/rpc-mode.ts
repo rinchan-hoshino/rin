@@ -338,24 +338,6 @@ function collectTurnCompletionMessages(
     messages.push(message);
   };
 
-  const sessionMessages = Array.isArray(session?.messages)
-    ? session.messages
-    : [];
-  const sessionStart =
-    typeof options.baselineSessionMessageCount === "number"
-      ? Math.max(0, options.baselineSessionMessageCount)
-      : sessionMessages.length;
-  for (const message of sessionMessages.slice(sessionStart)) add(message);
-
-  const agentMessages = Array.isArray(session?.agent?.state?.messages)
-    ? session.agent.state.messages
-    : [];
-  const agentStart =
-    typeof options.baselineAgentMessageCount === "number"
-      ? Math.max(0, options.baselineAgentMessageCount)
-      : agentMessages.length;
-  for (const message of agentMessages.slice(agentStart)) add(message);
-
   add(options.lastCompletedAssistantMessage);
   return messages;
 }

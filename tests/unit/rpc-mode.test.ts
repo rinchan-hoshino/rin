@@ -2541,7 +2541,7 @@ test(
 );
 
 test(
-  "rpc mode resolves final text from agent state before message_end is delivered",
+  "rpc mode rejects agent-state final text without message_end final signal",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2658,11 +2658,12 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
-      assert.equal(completion?.requestTag, "tag-1");
-      assert.equal(completion?.finalText, "final from stored session");
-      assert.deepEqual(completion?.result, {
-        messages: [{ type: "text", text: "final from stored session" }],
-      });
+      assert.equal(completion, undefined);
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      );
+      assert.equal(error?.requestTag, "tag-1");
+      assert.equal(error?.error, "rpc_turn_final_output_missing");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

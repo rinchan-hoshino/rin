@@ -19,7 +19,7 @@ import type {
 function eventPayload(event: unknown): any {
   const value: any = event;
   if (value?.type === "ui") return value.payload;
-  if (value?.type === "extension_ui_request") return value.payload;
+  if (value?.type === "extension_ui_request") return value.payload || value;
   return value;
 }
 
@@ -120,7 +120,14 @@ export function createRinFrontendBackendEventTranslator(
         ];
       }
 
-      if (payload.type === "extension_ui_request") return [];
+      if (payload.type === "extension_ui_request") {
+        if (payload.method === "setWorkingVisible") {
+          return [
+            { type: "working_visible", visible: Boolean(payload.visible) },
+          ];
+        }
+        return [];
+      }
 
       if (payload.type === "self_improve_review_notice") {
         return [
@@ -207,10 +214,6 @@ export function createRinFrontendBackendEventTranslator(
           const interim = takeInterim(assistantInterimText(payload.message));
           return interim ? [interim] : [];
         }
-        case "rin_working_start":
-          return [{ type: "external_working_start" }];
-        case "rin_working_end":
-          return [{ type: "external_working_end" }];
         case "tool_execution_start":
         case "tool_execution_end":
           return [{ type: "turn_accepted" }];

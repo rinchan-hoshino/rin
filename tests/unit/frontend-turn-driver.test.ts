@@ -143,11 +143,21 @@ function createFrontendClient() {
   };
 }
 
-test("external compaction review work drives the frontend working phase", async () => {
+test("Pi working and compaction events drive the frontend working phase", async () => {
   const driver = createDriver();
   const seen: any[] = [];
   driver.subscribe((event: any) => seen.push(event));
 
+  await emitDriverEvent(driver, {
+    type: "extension_ui_request",
+    method: "setWorkingVisible",
+    visible: true,
+  });
+  await emitDriverEvent(driver, {
+    type: "extension_ui_request",
+    method: "setWorkingVisible",
+    visible: false,
+  });
   await emitDriverEvent(driver, { type: "rin_working_start" });
   await emitDriverEvent(driver, { type: "rin_working_end" });
   await emitDriverEvent(driver, { type: "compaction_start" });

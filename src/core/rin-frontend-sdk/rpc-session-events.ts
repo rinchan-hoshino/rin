@@ -2,7 +2,6 @@ export type RinRpcSessionEventTarget = {
   activeTurn?: unknown;
   isCompacting?: boolean;
   compactionReason?: string;
-  rinWorking?: boolean;
   retryAttempt?: number;
   handleSessionUnavailable?: () => void;
   handleSessionRecovered?: () => void;
@@ -53,10 +52,6 @@ export async function handleRinRpcSessionEvent(
   if (payload.type === "agent_start") {
     setRemoteTurnRunning(true);
   }
-  if (payload.type === "rin_working_start") {
-    target.rinWorking = true;
-    setRemoteTurnRunning(true);
-  }
   if (
     payload.type === "rpc_turn_event" &&
     (payload.event === "start" || payload.event === "heartbeat")
@@ -67,14 +62,9 @@ export async function handleRinRpcSessionEvent(
     target.isCompacting = true;
     target.compactionReason = String(payload.reason || "").trim();
   }
-  if (payload.type === "rin_working_end") {
-    target.rinWorking = false;
-    if (!target.isCompacting) setRemoteTurnRunning(false);
-  }
   if (payload.type === "compaction_end") {
     target.isCompacting = false;
     target.compactionReason = "";
-    if (target.rinWorking === false) setRemoteTurnRunning(false);
     void refresh.refreshMessagesAndSession();
   }
   if (payload.type === "auto_retry_start") {
@@ -112,8 +102,6 @@ export async function handleRinRpcSessionEvent(
   }
   target.emitEvent?.(payload);
   if (
-    payload.type === "rin_working_start" ||
-    payload.type === "rin_working_end" ||
     payload.type === "compaction_start" ||
     payload.type === "compaction_end"
   ) {

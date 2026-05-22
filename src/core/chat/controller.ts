@@ -552,7 +552,7 @@ export class ChatController {
 
   async pollTyping() {
     if (!this.deliveryEnabled) return false;
-    if (!this.hasActiveTurn()) {
+    if (!this.driver.hasWorkerActiveTurn()) {
       await this.clearWorkingReaction().catch(() => {});
       return false;
     }

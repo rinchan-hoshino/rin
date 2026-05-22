@@ -381,7 +381,7 @@ test("rpc session events keep turns alive until explicit rpc completion", async 
   ]);
 });
 
-test("rpc session events expose Rin pre-compaction work as working", async () => {
+test("rpc session events ignore Rin-private working events as frontend working truth", async () => {
   const seen = [];
   const target = {
     isStreaming: false,
@@ -403,22 +403,18 @@ test("rpc session events expose Rin pre-compaction work as working", async () =>
     async () => {},
     async () => {},
   );
-  assert.equal(target.remoteTurnRunning, true);
-  assert.equal(target.rinWorking, true);
-
   await events.handleRpcSessionEvent(
     target,
     { type: "rin_working_end", reason: "session_before_compact" },
     async () => {},
     async () => {},
   );
+
   assert.equal(target.remoteTurnRunning, false);
-  assert.equal(target.rinWorking, false);
+  assert.equal(target.rinWorking, undefined);
   assert.deepEqual(seen, [
     { type: "rin_working_start", reason: "session_before_compact" },
-    { type: "frontend_status_refresh", force: true },
     { type: "rin_working_end", reason: "session_before_compact" },
-    { type: "frontend_status_refresh", force: true },
   ]);
 });
 

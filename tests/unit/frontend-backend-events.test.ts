@@ -40,15 +40,27 @@ test("frontend backend event translator exposes status as a shared frontend even
   );
 });
 
-test("frontend backend event translator exposes compaction review as external working", () => {
+test("frontend backend event translator exposes Pi working and compaction events", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
-  assert.deepEqual(translator.translate({ type: "rin_working_start" }), [
-    { type: "external_working_start" },
-  ]);
-  assert.deepEqual(translator.translate({ type: "rin_working_end" }), [
-    { type: "external_working_end" },
-  ]);
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      method: "setWorkingVisible",
+      visible: true,
+    }),
+    [{ type: "working_visible", visible: true }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      method: "setWorkingVisible",
+      visible: false,
+    }),
+    [{ type: "working_visible", visible: false }],
+  );
+  assert.deepEqual(translator.translate({ type: "rin_working_start" }), []);
+  assert.deepEqual(translator.translate({ type: "rin_working_end" }), []);
   assert.deepEqual(translator.translate({ type: "compaction_start" }), [
     { type: "compaction_start_notice", text: "Compacting..." },
     { type: "external_working_start" },

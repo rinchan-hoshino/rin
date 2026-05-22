@@ -16,7 +16,10 @@ import { sleep } from "../platform/process.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
-import { handleRinRpcSessionEvent } from "./rpc-session-events.js";
+import {
+  handleRinRpcSessionEvent,
+  type RinRpcSessionEventTarget,
+} from "./rpc-session-events.js";
 import type {
   RinFrontendBackendEvent,
   RinFrontendClient,
@@ -343,6 +346,7 @@ export class RinFrontendTurnDriver {
   }
 
   private setFrontendPhase(phase: RinFrontendTurnPhase) {
+    if (this.frontendPhase === phase) return;
     this.frontendPhase = phase;
     this.emit({ type: "frontend_status", phase: this.frontendPhase });
   }
@@ -356,6 +360,15 @@ export class RinFrontendTurnDriver {
   private isStreaming() {
     return Boolean(
       this.frontendState.isStreaming || this.frontendState.turnActive,
+    );
+  }
+
+  private isRemoteWorking() {
+    return Boolean(
+      this.frontendState.isStreaming ||
+      this.frontendState.turnActive ||
+      this.frontendState.isCompacting ||
+      this.frontendState.piWorkingVisible,
     );
   }
 
@@ -392,6 +405,10 @@ export class RinFrontendTurnDriver {
 
   hasActiveTurn() {
     return Boolean(this.liveTurn) || this.isStreaming();
+  }
+
+  hasWorkerActiveTurn() {
+    return this.isRemoteWorking();
   }
 
   hasClient() {
@@ -1195,32 +1212,38 @@ export class RinFrontendTurnDriver {
         payload?.type === "session_recovering" ||
         payload?.type === "session_recovered" ||
         payload?.type === "queue_update" ||
+        payload?.type === "compaction_start" ||
+        payload?.type === "compaction_end" ||
         (payload?.type === "rpc_turn_event" &&
           (payload.event === "start" ||
             payload.event === "heartbeat" ||
             payload.event === "complete" ||
             payload.event === "error"))
       ) {
-        await handleRinRpcSessionEvent(
-          {
-            setRemoteTurnRunning: (running: boolean) => {
-              this.frontendState.turnActive = running;
-              this.frontendState.isStreaming = running;
-              this.setFrontendPhase(running ? "working" : "idle");
-            },
-            emitFrontendStatus: () => {},
-            emitEvent: () => {},
+        const frontendState = this.frontendState;
+        const eventTarget: RinRpcSessionEventTarget = {
+          get isCompacting() {
+            return Boolean(frontendState.isCompacting);
           },
-          payload,
-          {
-            refreshMessages: async () => {},
-            refreshMessagesAndSession: async () => {
-              await this.refreshFrontendState(this.currentSessionFile()).catch(
-                () => ({}),
-              );
-            },
+          set isCompacting(value: boolean) {
+            frontendState.isCompacting = Boolean(value);
           },
-        );
+          setRemoteTurnRunning: (running: boolean) => {
+            this.frontendState.turnActive = running;
+            this.frontendState.isStreaming = running;
+            this.setFrontendPhase(running ? "working" : "idle");
+          },
+          emitFrontendStatus: () => {},
+          emitEvent: () => {},
+        };
+        await handleRinRpcSessionEvent(eventTarget, payload, {
+          refreshMessages: async () => {},
+          refreshMessagesAndSession: async () => {
+            await this.refreshFrontendState(this.currentSessionFile()).catch(
+              () => ({}),
+            );
+          },
+        });
       }
     }
     const backendEvents =
@@ -1272,6 +1295,10 @@ export class RinFrontendTurnDriver {
         ) {
           this.setFrontendPhase("idle");
         }
+        return;
+      case "working_visible":
+        this.frontendState.piWorkingVisible = event.visible;
+        this.setFrontendPhase(event.visible ? "working" : "idle");
         return;
       case "assistant_stream":
         this.latestAssistantText = event.text;
