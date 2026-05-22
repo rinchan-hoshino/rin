@@ -31,6 +31,7 @@ import {
 } from "../rin-lib/update-notices.js";
 import { extractMessageText } from "../message-content.js";
 import { formatSelfImproveReviewNotice } from "../rin-frontend-sdk/command-responses.js";
+import { shouldPullSelfImproveNoticesForTurnState } from "../rin-frontend-sdk/turn-driver.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 import {
   getRinTuiRuntimeRole,
@@ -396,7 +397,23 @@ export function insertRinUpdateNotificationPlaceholder(instance: any) {
   return placeholder;
 }
 
+function selfImproveNoticeTurnState(instance: any) {
+  const status = instance?.session?.getFrontendStatusEvent?.();
+  return {
+    liveTurn: status?.phase === "sending" || status?.phase === "working",
+    isStreaming: Boolean(instance?.session?.isStreaming || status?.isStreaming),
+    turnActive: Boolean(status?.turnActive),
+  };
+}
+
+export function shouldPullSelfImproveReviewNotices(instance: any) {
+  return shouldPullSelfImproveNoticesForTurnState(
+    selfImproveNoticeTurnState(instance),
+  );
+}
+
 export function showSelfImproveReviewNotice(instance: any, event: any) {
+  if (!shouldPullSelfImproveReviewNotices(instance)) return false;
   const text = formatSelfImproveReviewNotice(event);
   if (!text) return false;
   if (typeof instance?.chatContainer?.addChild !== "function") return false;

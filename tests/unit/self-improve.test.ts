@@ -296,7 +296,7 @@ test("automatic self-improve handlers run periodic reviews synchronously", async
   });
 });
 
-test("periodic self-improve review emits the completed result as a core notice event", async () => {
+test("periodic self-improve review records a pullable notice after final messages", async () => {
   await withTempRoot(async (root) => {
     const notices = [];
     const definition = selfImproveIndex.default({
@@ -335,7 +335,14 @@ test("periodic self-improve review emits the completed result as a core notice e
     await messageEnd({ message: assistantFinal("done 8") }, ctx);
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    assert.deepEqual(notices, [NOTICE_CHANGED_SKILL_ONE]);
+    assert.deepEqual(notices, []);
+    assert.deepEqual(
+      await asyncJobs.takePendingMemoryMaintenanceNotices({
+        agentDir: root,
+        sessionFile,
+      }),
+      [NOTICE_CHANGED_SKILL_ONE],
+    );
   });
 });
 
@@ -1005,6 +1012,40 @@ test("queued maintenance reclaims expired worker locks", async () => {
       () => fs.readFile(selfImprovePaths.maintenanceLockPath(root), "utf8"),
       /ENOENT/,
     );
+  });
+});
+
+test("queued maintenance keeps live worker locks fresh by updatedAt", async () => {
+  await withTempRoot(async (root) => {
+    await asyncJobs.enqueueMemoryMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    });
+    await fs.mkdir(path.dirname(selfImprovePaths.maintenanceLockPath(root)), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      selfImprovePaths.maintenanceLockPath(root),
+      JSON.stringify({
+        pid: process.pid,
+        createdAt: "2000-01-01T00:00:00.000Z",
+        updatedAt: new Date().toISOString(),
+        activeJob: {
+          id: "maintenance_job_active",
+          kind: "self_improve_review",
+          trigger: "self_improve:periodic_review",
+          sessionFile: path.join(root, "active-session.jsonl"),
+        },
+      }),
+      "utf8",
+    );
+
+    const result = await asyncJobs.processQueuedMemoryJobs(root);
+    assert.deepEqual(result, { skipped: "locked" });
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
   });
 });
 

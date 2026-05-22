@@ -44,6 +44,7 @@ import {
   submitNativeFrontendPromptTurn,
   type RpcFrontendClient,
 } from "../rin-frontend-sdk/index.js";
+import { shouldPullSelfImproveNoticesForTurnState } from "../rin-frontend-sdk/turn-driver.js";
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
 type PendingRpcOperation = {
@@ -464,6 +465,15 @@ export class RpcInteractiveSession {
   }
 
   async flushPendingSelfImproveNotices() {
+    if (
+      !shouldPullSelfImproveNoticesForTurnState({
+        liveTurn: this.activeTurn,
+        isStreaming: this.isStreaming,
+        turnActive: this.remoteTurnRunning,
+      })
+    ) {
+      return;
+    }
     await flushPendingSelfImproveNotices(this.client);
   }
 
@@ -1076,7 +1086,11 @@ export class RpcInteractiveSession {
       payload,
       () => this.queueRefreshStateAndRender(REFRESH_MESSAGES),
       () => this.queueRefreshStateAndRender(REFRESH_MESSAGES_AND_SESSION),
-    );
+    ).then(() => {
+      if (payload?.type !== "rpc_turn_event") return;
+      if (payload.event !== "complete" && payload.event !== "error") return;
+      void this.flushPendingSelfImproveNotices().catch(() => {});
+    });
   }
 
   private async handleExtensionUiRequest(payload: any) {

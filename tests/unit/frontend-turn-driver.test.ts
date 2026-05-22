@@ -180,7 +180,7 @@ async function emitRpcTurnComplete(
   });
 }
 
-test("frontend SDK turn driver forwards passive notices without changing phase", async () => {
+test("frontend SDK turn driver forwards passive notices while idle", async () => {
   const driver = createDriver();
   const seen: any[] = [];
   driver.subscribe((event: any) => seen.push(event));
@@ -203,6 +203,40 @@ test("frontend SDK turn driver forwards passive notices without changing phase",
     },
   ]);
   assert.equal(driver.frontendPhase, "idle");
+});
+
+test("frontend SDK turn driver ignores pushed self-improve notices during active turns", async () => {
+  const driver = createDriver();
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "start",
+    requestTag: "turn-a",
+  });
+  await driver.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "self_improve_review_notice",
+      status: "completed",
+      targets: [],
+      changedCount: 0,
+    },
+  });
+
+  assert.deepEqual(seen, [
+    { type: "frontend_status", phase: "working" },
+    { type: "turn_accepted" },
+  ]);
+
+  await emitRpcTurnComplete(driver, "turn-a", "final text");
+
+  assert.deepEqual(seen, [
+    { type: "frontend_status", phase: "working" },
+    { type: "turn_accepted" },
+    { type: "frontend_status", phase: "idle" },
+  ]);
 });
 
 test("frontend SDK turn driver flushes pending self-improve notices on connect", async () => {

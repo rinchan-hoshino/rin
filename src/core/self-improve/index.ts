@@ -11,7 +11,6 @@ import {
   enqueueMemoryMaintenanceJob,
   runMemoryMaintenanceJobNow,
   spawnQueuedMemoryWorker,
-  takePendingMemoryMaintenanceNotices,
 } from "./async-jobs.js";
 import {
   formatSelfImproveAgentResult,
@@ -173,19 +172,6 @@ async function recordSelfImproveReviewNotice(
   });
 }
 
-async function flushSelfImproveReviewNotices(
-  ctx: any,
-  options: { sessionFile?: string } = {},
-) {
-  const agentDir = String(ctx?.agentDir || "").trim();
-  if (!agentDir) return;
-  const notices = await takePendingMemoryMaintenanceNotices({
-    agentDir,
-    sessionFile: options.sessionFile,
-  });
-  for (const notice of notices) emitSelfImproveReviewNotice(ctx, notice);
-}
-
 async function enqueueSelfImproveReview(
   ctx: any,
   opts: SelfImproveReviewOptions,
@@ -279,9 +265,6 @@ export default function selfImproveModule(
               runMemoryMaintenanceNow,
             );
           }
-          await flushSelfImproveReviewNotices(ctx, {
-            sessionFile: meta.sessionFile,
-          });
         },
       ],
       session_shutdown: [

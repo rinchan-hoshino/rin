@@ -42,14 +42,16 @@ export type RinFrontendTurnResult = {
   sessionFile?: string;
 };
 
+export type RinFrontendPassiveNoticeEvent = {
+  type: "passive_notice";
+  text: string;
+  level?: "info" | "warning" | "error";
+};
+
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "turn_accepted" }
-  | {
-      type: "passive_notice";
-      text: string;
-      level?: "info" | "warning" | "error";
-    }
+  | RinFrontendPassiveNoticeEvent
   | { type: "assistant_interim"; text: string };
 
 export type RinFrontendTurnClient = RinFrontendClient & {
@@ -60,6 +62,22 @@ export type RinFrontendTurnClient = RinFrontendClient & {
   terminateSession?: () => Promise<unknown>;
   consumeQueuedOfflineOperation?: (requestTag?: string) => boolean;
 };
+
+export function shouldDeferPassiveNoticeForTurnState(state: {
+  liveTurn?: unknown;
+  isStreaming?: boolean;
+  turnActive?: boolean;
+}) {
+  return Boolean(state.liveTurn || state.isStreaming || state.turnActive);
+}
+
+export function shouldPullSelfImproveNoticesForTurnState(state: {
+  liveTurn?: unknown;
+  isStreaming?: boolean;
+  turnActive?: boolean;
+}) {
+  return !shouldDeferPassiveNoticeForTurnState(state);
+}
 
 export type RinFrontendPromptTurnInput = {
   text: string;
@@ -340,6 +358,21 @@ export class RinFrontendTurnDriver {
     );
   }
 
+  private emitPassiveNoticeAtPullCheckpoint(
+    event: RinFrontendPassiveNoticeEvent,
+  ) {
+    if (
+      !shouldPullSelfImproveNoticesForTurnState({
+        liveTurn: this.liveTurn,
+        isStreaming: Boolean(this.frontendState.isStreaming),
+        turnActive: Boolean(this.frontendState.turnActive),
+      })
+    ) {
+      return;
+    }
+    this.emit(event);
+  }
+
   interruptActiveTurnLikeTui() {
     this.rejectLiveTurnAsAborted();
     try {
@@ -421,6 +454,15 @@ export class RinFrontendTurnDriver {
 
   private async flushPendingSelfImproveNotices(sessionFile?: string) {
     if (!this.client) return;
+    if (
+      !shouldPullSelfImproveNoticesForTurnState({
+        liveTurn: this.liveTurn,
+        isStreaming: Boolean(this.frontendState.isStreaming),
+        turnActive: Boolean(this.frontendState.turnActive),
+      })
+    ) {
+      return;
+    }
     await flushPendingSelfImproveNotices(this.client, sessionFile, {
       sessionFiles: sessionFile
         ? undefined
@@ -1207,7 +1249,7 @@ export class RinFrontendTurnDriver {
         this.emit({ type: "turn_accepted" });
         return;
       case "passive_notice":
-        this.emit({
+        this.emitPassiveNoticeAtPullCheckpoint({
           type: "passive_notice",
           text: event.text,
           level: event.level,
@@ -1258,6 +1300,9 @@ export class RinFrontendTurnDriver {
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
         });
+        await this.flushPendingSelfImproveNotices(event.sessionFile).catch(
+          () => {},
+        );
         return;
       }
       case "turn_error": {
@@ -1272,6 +1317,9 @@ export class RinFrontendTurnDriver {
         error.sessionId = event.sessionId;
         error.sessionFile = event.sessionFile;
         this.failLiveTurn(error);
+        await this.flushPendingSelfImproveNotices(event.sessionFile).catch(
+          () => {},
+        );
         return;
       }
     }

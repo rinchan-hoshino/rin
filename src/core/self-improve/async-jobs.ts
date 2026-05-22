@@ -152,6 +152,41 @@ export async function appendPendingMemoryMaintenanceNotice(input: {
   await savePendingNotices(agentDir, notices);
 }
 
+export type MemoryMaintenanceNoticeFilter = {
+  sessionFile?: string;
+  sessionFiles?: string[];
+};
+
+export function filterMemoryMaintenanceNoticesForDisplay(
+  notices: PendingMemoryMaintenanceNotice[],
+  filter: MemoryMaintenanceNoticeFilter = {},
+) {
+  const sessionFile = resolveSessionFile(filter.sessionFile);
+  const sessionFiles = Array.isArray(filter.sessionFiles)
+    ? new Set(
+        filter.sessionFiles
+          .map((item) => resolveSessionFile(item))
+          .filter(Boolean),
+      )
+    : null;
+  const taken: PendingMemoryMaintenanceNotice[] = [];
+  const remaining: PendingMemoryMaintenanceNotice[] = [];
+  for (const notice of notices) {
+    const noticeSessionFile = resolveSessionFile(notice.sessionFile);
+    const matched = sessionFile
+      ? noticeSessionFile === sessionFile
+      : sessionFiles
+        ? sessionFiles.has(noticeSessionFile)
+        : true;
+    if (matched) {
+      taken.push(notice);
+    } else {
+      remaining.push(notice);
+    }
+  }
+  return { taken, remaining };
+}
+
 export async function takePendingMemoryMaintenanceNotices(input: {
   agentDir: string;
   sessionFile?: string;
@@ -159,31 +194,10 @@ export async function takePendingMemoryMaintenanceNotices(input: {
 }) {
   const agentDir = resolveAgentDir(input.agentDir);
   if (!agentDir) return [];
-  const sessionFile = resolveSessionFile(input.sessionFile);
-  const sessionFiles = Array.isArray(input.sessionFiles)
-    ? new Set(
-        input.sessionFiles
-          .map((item) => resolveSessionFile(item))
-          .filter(Boolean),
-      )
-    : null;
-  const notices = loadPendingNotices(agentDir);
-  const taken: PendingMemoryMaintenanceNotice[] = [];
-  const remaining: PendingMemoryMaintenanceNotice[] = [];
-  for (const notice of notices) {
-    const noticeSessionFile = resolveSessionFile(notice.sessionFile);
-    if (
-      sessionFile
-        ? noticeSessionFile === sessionFile
-        : sessionFiles
-          ? sessionFiles.has(noticeSessionFile)
-          : true
-    ) {
-      taken.push(notice);
-    } else {
-      remaining.push(notice);
-    }
-  }
+  const { taken, remaining } = filterMemoryMaintenanceNoticesForDisplay(
+    loadPendingNotices(agentDir),
+    input,
+  );
   if (taken.length) await savePendingNotices(agentDir, remaining);
   return taken.map((entry) => entry.notice);
 }
@@ -284,6 +298,16 @@ export async function enqueueMemoryMaintenanceJob(
 
 const WORKER_LOCK_STALE_MS = 2 * 60 * 60 * 1000;
 
+type MaintenanceWorkerLock = {
+  pid: number;
+  createdAt: string;
+  updatedAt: string;
+  activeJob?: Pick<
+    MaintenanceJob,
+    "id" | "kind" | "trigger" | "sessionFile" | "leafId" | "snapshotKey"
+  >;
+};
+
 function processExists(pid: number) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -294,21 +318,50 @@ function processExists(pid: number) {
   }
 }
 
-function lockIsExpired(createdAt: unknown, nowMs = Date.now()) {
-  const timestamp = Date.parse(safeString(createdAt).trim());
+function lockIsExpired(lock: unknown, nowMs = Date.now()) {
+  const record = lock && typeof lock === "object" ? (lock as any) : {};
+  const timestamp = Date.parse(
+    safeString(record.updatedAt || record.createdAt).trim(),
+  );
   if (!Number.isFinite(timestamp)) return true;
   return nowMs - timestamp > WORKER_LOCK_STALE_MS;
 }
 
-async function acquireWorkerLock(agentDir: string) {
+function lockPayload(job?: MaintenanceJob): MaintenanceWorkerLock {
+  const timestamp = nowIso();
+  return {
+    pid: process.pid,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...(job
+      ? {
+          activeJob: {
+            id: job.id,
+            kind: job.kind,
+            trigger: job.trigger,
+            sessionFile: job.sessionFile,
+            leafId: job.leafId,
+            snapshotKey: job.snapshotKey,
+          },
+        }
+      : {}),
+  };
+}
+
+async function writeWorkerLock(agentDir: string, job?: MaintenanceJob) {
+  await fs.writeFile(
+    maintenanceLockPath(agentDir),
+    stringifyJson(lockPayload(job)),
+    "utf8",
+  );
+}
+
+async function acquireWorkerLock(agentDir: string, job?: MaintenanceJob) {
   await ensureStateDir(agentDir);
   const filePath = maintenanceLockPath(agentDir);
   try {
     const handle = await fs.open(filePath, "wx");
-    await handle.writeFile(
-      stringifyJson({ pid: process.pid, createdAt: nowIso() }),
-      "utf8",
-    );
+    await handle.writeFile(stringifyJson(lockPayload(job)), "utf8");
     return handle;
   } catch (error: any) {
     if (error?.code !== "EEXIST") return null;
@@ -316,13 +369,10 @@ async function acquireWorkerLock(agentDir: string) {
       const raw = await fs.readFile(filePath, "utf8");
       const parsed = JSON.parse(raw);
       const pid = Number(parsed?.pid || 0);
-      if (!processExists(pid) || lockIsExpired(parsed?.createdAt)) {
+      if (!processExists(pid) || lockIsExpired(parsed)) {
         await fs.rm(filePath, { force: true });
         const handle = await fs.open(filePath, "wx");
-        await handle.writeFile(
-          stringifyJson({ pid: process.pid, createdAt: nowIso() }),
-          "utf8",
-        );
+        await handle.writeFile(stringifyJson(lockPayload(job)), "utf8");
         return handle;
       }
     } catch {}
@@ -345,10 +395,11 @@ async function releaseWorkerLock(
 async function acquireWorkerLockWithWait(
   agentDir: string,
   timeoutMs = 30 * 60 * 1000,
+  job?: MaintenanceJob,
 ) {
   const deadline = Date.now() + Math.max(0, timeoutMs);
   while (true) {
-    const handle = await acquireWorkerLock(agentDir);
+    const handle = await acquireWorkerLock(agentDir, job);
     if (handle) return handle;
     if (Date.now() >= deadline) return null;
     await sleep(250);
@@ -523,7 +574,11 @@ export async function runMemoryMaintenanceJobNow(
     ...input,
     kind: "self_improve_review",
   });
-  const handle = await acquireWorkerLockWithWait(job.agentDir);
+  const handle = await acquireWorkerLockWithWait(
+    job.agentDir,
+    30 * 60 * 1000,
+    job,
+  );
   if (!handle) {
     return {
       status: "skipped",
@@ -611,6 +666,7 @@ export async function processQueuedMemoryJobs(agentDir: string) {
       const job = jobs[0];
       if (!job) break;
       const startedAt = nowIso();
+      await writeWorkerLock(resolvedAgentDir, job);
       try {
         const result = await processJob(job);
         const finishedAt = nowIso();
