@@ -137,6 +137,24 @@ test("rin update delegates final update UI to rin-install update args", () => {
   assert.equal(source.includes("rin update:"), false);
 });
 
+test("rin lifecycle control uses the recorded managed service boundary", () => {
+  const source = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin", "control.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /readManagedRuntimeService/);
+  assert.match(
+    source,
+    /installer\.json does not record a managed runtime service/,
+  );
+  assert.match(source, /tryManagedSystemdAction\(\[service\.label\]/);
+  assert.match(source, /stopManagedWebSearchSidecars\(context\.agentDir\)/);
+  assert.match(source, /waitForDaemonUnavailable\(context\)/);
+  assert.match(source, /rin_stop_incomplete/);
+  assert.doesNotMatch(source, /pkill/);
+});
+
 test("rin updater waits longer for daemon readiness than first install", () => {
   const updaterSource = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "updater.ts"),

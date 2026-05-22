@@ -592,6 +592,46 @@ test("persist reconcileInstallerManifest avoids duplicate writes for default ins
   });
 });
 
+test("persist reconcileInstallerManifest records the managed runtime service", async () => {
+  await withTempDir(async (dir) => {
+    const ownerHome = path.join(dir, "home", "demo");
+    const installDir = path.join(ownerHome, ".rin");
+    const writes = [];
+    persist.reconcileInstallerManifest(
+      {
+        targetUser: "demo",
+        installDir,
+        elevated: false,
+        service: {
+          kind: "systemd",
+          label: "rin-daemon-demo.service",
+          path: path.join(
+            ownerHome,
+            ".config/systemd/user/rin-daemon-demo.service",
+          ),
+        },
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000, home: ownerHome }),
+        ensureDir: async () => {},
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
+        runPrivileged: () => {},
+      },
+    );
+
+    assert.deepEqual(writes[0].value.service, {
+      kind: "systemd",
+      label: "rin-daemon-demo.service",
+      path: path.join(
+        ownerHome,
+        ".config/systemd/user/rin-daemon-demo.service",
+      ),
+    });
+  });
+});
+
 test("persist reconcileInstallerManifest keeps runtime defaults out of installer manifests", async () => {
   await withTempDir(async (dir) => {
     const ownerHome = path.join(dir, "home", "demo");

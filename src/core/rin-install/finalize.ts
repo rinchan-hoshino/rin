@@ -125,28 +125,6 @@ async function applyInstalledRuntime(
     publishedRuntime.releaseRoot,
     useElevatedWrite,
   );
-  const installerManifest = reconcileInstallerManifest(
-    {
-      targetUser,
-      installDir,
-      release,
-      currentReleaseName,
-      currentReleaseRoot: publishedRuntime.releaseRoot,
-      previousReleaseName,
-      previousReleaseRoot: previousReleaseName
-        ? installedReleaseRoot(installDir, previousReleaseName)
-        : undefined,
-      elevated: useElevatedWrite,
-    },
-    {
-      findSystemUser,
-      ensureDir,
-      readInstallerJson,
-      writeJsonFileWithPrivilege,
-      writeJsonFile,
-      runPrivileged,
-    },
-  );
   refreshManagedServiceFiles(
     targetUser,
     installDir,
@@ -244,6 +222,38 @@ async function applyInstalledRuntime(
       installedService = null;
     }
   }
+
+  const installerManifest = reconcileInstallerManifest(
+    {
+      targetUser,
+      installDir,
+      release,
+      currentReleaseName,
+      currentReleaseRoot: publishedRuntime.releaseRoot,
+      previousReleaseName,
+      previousReleaseRoot: previousReleaseName
+        ? installedReleaseRoot(installDir, previousReleaseName)
+        : undefined,
+      elevated: useElevatedWrite,
+      ...(installedService
+        ? {
+            service: {
+              kind: installedService.kind,
+              label: installedService.label,
+              path: installedService.servicePath,
+            },
+          }
+        : {}),
+    },
+    {
+      findSystemUser,
+      ensureDir,
+      readInstallerJson,
+      writeJsonFileWithPrivilege,
+      writeJsonFile,
+      runPrivileged,
+    },
+  );
 
   const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
     ? Math.max(0, Number(options.daemonReadyTimeoutMs))

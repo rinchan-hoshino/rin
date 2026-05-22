@@ -677,6 +677,11 @@ export function reconcileInstallerManifest(
     previousReleaseName?: string;
     previousReleaseRoot?: string;
     elevated?: boolean;
+    service?: {
+      kind: "launchd" | "systemd" | "windows-startup";
+      label: string;
+      path?: string;
+    } | null;
   },
   deps: {
     findSystemUser: (targetUser: string) => any;
@@ -747,6 +752,15 @@ export function reconcileInstallerManifest(
     release: previousReleaseMetadata,
   });
   if (currentRelease) manifestJson.currentRelease = currentRelease;
+  if (options.service) {
+    manifestJson.service = {
+      kind: options.service.kind,
+      label: options.service.label,
+      ...(options.service.path ? { path: options.service.path } : {}),
+    };
+  } else if (isJsonRecord(priorManifest.service)) {
+    manifestJson.service = priorManifest.service;
+  }
   if (
     previousRelease &&
     previousRelease.name !== String(currentRelease?.name || "")
