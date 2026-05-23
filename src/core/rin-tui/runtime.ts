@@ -32,7 +32,7 @@ import {
   getLastAssistantText,
   getPersistentSettingsManager,
   getSessionBranch,
-  flushPendingSelfImproveNotices,
+  runSelfImproveNoticeCheckpoint,
   parseFrontendCompactCommand,
   persistRpcSettingsMutation,
   resolveRinFrontendCommandResponses,
@@ -462,17 +462,23 @@ export class RpcInteractiveSession {
     }
   }
 
-  async flushPendingSelfImproveNotices() {
-    if (
-      !shouldPullSelfImproveNoticesForTurnState({
+  async runSelfImproveNoticeCheckpoint(
+    kind: "frontend_open" | "new_session" | "turn_complete" = "frontend_open",
+    sessionFile?: string,
+  ) {
+    await runSelfImproveNoticeCheckpoint(this.client, {
+      kind,
+      sessionFile,
+      canPull: shouldPullSelfImproveNoticesForTurnState({
         liveTurn: this.activeTurn,
         isStreaming: this.isStreaming,
         turnActive: this.remoteTurnRunning,
-      })
-    ) {
-      return;
-    }
-    await flushPendingSelfImproveNotices(this.client);
+      }),
+    });
+  }
+
+  async flushPendingSelfImproveNotices() {
+    await this.runSelfImproveNoticeCheckpoint("frontend_open");
   }
 
   async disconnect() {
@@ -621,7 +627,9 @@ export class RpcInteractiveSession {
       });
       await this.refreshState(REFRESH_ALL);
       if (!data?.cancelled) {
-        await flushPendingSelfImproveNotices(this.client).catch(() => {});
+        await this.runSelfImproveNoticeCheckpoint("new_session").catch(
+          () => {},
+        );
       }
       return !Boolean(data?.cancelled);
     } finally {
@@ -638,7 +646,9 @@ export class RpcInteractiveSession {
       });
       await this.refreshState(REFRESH_ALL);
       if (!data?.cancelled) {
-        await flushPendingSelfImproveNotices(this.client).catch(() => {});
+        await this.runSelfImproveNoticeCheckpoint("new_session").catch(
+          () => {},
+        );
       }
       return !Boolean(data?.cancelled);
     } finally {
@@ -1087,7 +1097,10 @@ export class RpcInteractiveSession {
     ).then(() => {
       if (payload?.type !== "rpc_turn_event") return;
       if (payload.event !== "complete" && payload.event !== "error") return;
-      void this.flushPendingSelfImproveNotices().catch(() => {});
+      void this.runSelfImproveNoticeCheckpoint(
+        "turn_complete",
+        String(payload.sessionFile || this.sessionFile || ""),
+      ).catch(() => {});
     });
   }
 

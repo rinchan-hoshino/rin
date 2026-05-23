@@ -1160,6 +1160,11 @@ export class ChatController {
         clearProcessing: true,
         bindSession: false,
       });
+      if (commandName === "new") {
+        await this.driver
+          .runSelfImproveNoticeCheckpoint?.("new_session")
+          .catch(() => {});
+      }
       return data;
     } catch (error: any) {
       if (!isTransientChatRuntimeError(error)) {
@@ -1259,6 +1264,12 @@ export class ChatController {
         sessionFile: result.sessionFile,
         incomingMessageId: input.incomingMessageId,
       });
+      await this.driver
+        .runSelfImproveNoticeCheckpoint?.(
+          "turn_complete",
+          result.sessionFile || this.currentSessionFile(),
+        )
+        .catch(() => {});
       return {
         finalText: result.finalText,
         result: result.result,
@@ -1327,6 +1338,12 @@ export class ChatController {
           clearProcessing: true,
         });
         this.clearCurrentTurn();
+        await this.driver
+          .runSelfImproveNoticeCheckpoint?.(
+            "turn_complete",
+            result.sessionFile || this.currentSessionFile(),
+          )
+          .catch(() => {});
         return {
           finalText: result.finalText,
           result: result.result,

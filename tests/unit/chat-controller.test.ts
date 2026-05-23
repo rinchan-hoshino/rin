@@ -447,6 +447,62 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller pulls self-improve notices after final delivery checkpoint", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, content) => {
+    const first = Array.isArray(content) ? content[0] : content;
+    deliveries.push(first?.attrs?.content || first);
+    return [`m${deliveries.length}`];
+  };
+
+  const currentSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "checkpoint.jsonl",
+  );
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => currentSessionFile,
+      getSessionId: () => "session-checkpoint",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: currentSessionFile,
+      sessionId: "session-checkpoint",
+    }),
+    prompt: async (_text, options = {}) => {
+      emitRpcTurnComplete(controller, options, "final before notice");
+    },
+  };
+  const originalRequest = controller.client.request.bind(controller.client);
+  controller.client.request = async (command) => {
+    if (command?.type === "flush_self_improve_notices") {
+      assert.equal(command.sessionFile, currentSessionFile);
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "self_improve_review_notice",
+          status: "completed",
+          targets: [],
+          changedCount: 0,
+        },
+      });
+      return { flushed: 1 };
+    }
+    return await originalRequest(command);
+  };
+
+  const result = await controller.runTurn({ text: "hello", attachments: [] });
+
+  assert.equal(result.finalText, "final before notice");
+  assert.deepEqual(deliveries, ["final before notice", NOTICE_NO_CHANGE]);
+});
+
 test("chat controller surfaces SDK overflow errors instead of following continuation markers", async () => {
   const controller = await createController();
   const deliveries = [];

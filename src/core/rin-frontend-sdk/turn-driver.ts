@@ -112,21 +112,51 @@ export async function submitNativeFrontendPromptTurn(
   await client.prompt(input.text, promptOptions);
 }
 
+export type SelfImproveNoticeCheckpointKind =
+  | "frontend_open"
+  | "new_session"
+  | "turn_complete";
+
+export async function runSelfImproveNoticeCheckpoint(
+  client: Pick<RinFrontendClient, "isConnected" | "request">,
+  input: {
+    kind: SelfImproveNoticeCheckpointKind;
+    sessionFile?: string;
+    sessionFiles?: string[];
+    canPull?: boolean;
+  },
+) {
+  if (!client.isConnected() || input.canPull === false) return;
+  const sessionFile =
+    input.kind === "turn_complete"
+      ? safeString(input.sessionFile || "").trim() || undefined
+      : undefined;
+  if (input.kind === "turn_complete" && !sessionFile) return;
+  const sessionFiles =
+    input.kind === "turn_complete" || sessionFile
+      ? undefined
+      : Array.isArray(input.sessionFiles)
+        ? input.sessionFiles
+            .map((item) => safeString(item).trim())
+            .filter(Boolean)
+        : undefined;
+  await client.request({
+    type: "flush_self_improve_notices",
+    sessionFile,
+    ...(sessionFiles ? { sessionFiles } : {}),
+  });
+}
+
 export async function flushPendingSelfImproveNotices(
   client: Pick<RinFrontendClient, "isConnected" | "request">,
   sessionFile?: string,
-  options: { sessionFiles?: string[] } = {},
+  options: { sessionFiles?: string[]; canPull?: boolean } = {},
 ) {
-  if (!client.isConnected()) return;
-  const sessionFiles = Array.isArray(options.sessionFiles)
-    ? options.sessionFiles
-        .map((item) => safeString(item).trim())
-        .filter(Boolean)
-    : undefined;
-  await client.request({
-    type: "flush_self_improve_notices",
-    sessionFile: safeString(sessionFile || "").trim() || undefined,
-    ...(sessionFiles ? { sessionFiles } : {}),
+  await runSelfImproveNoticeCheckpoint(client, {
+    kind: sessionFile ? "turn_complete" : "frontend_open",
+    sessionFile,
+    sessionFiles: options.sessionFiles,
+    canPull: options.canPull,
   });
 }
 
@@ -472,22 +502,31 @@ export class RinFrontendTurnDriver {
     throw new Error("rin_disconnected:rpc_turn_queued_offline");
   }
 
-  private async flushPendingSelfImproveNotices(sessionFile?: string) {
+  async runSelfImproveNoticeCheckpoint(
+    kind: SelfImproveNoticeCheckpointKind,
+    sessionFile?: string,
+  ) {
     if (!this.client) return;
-    if (
-      !shouldPullSelfImproveNoticesForTurnState({
+    await runSelfImproveNoticeCheckpoint(this.client, {
+      kind,
+      sessionFile,
+      sessionFiles:
+        kind === "turn_complete"
+          ? undefined
+          : this.selfImproveNoticeSessionFiles?.(),
+      canPull: shouldPullSelfImproveNoticesForTurnState({
         liveTurn: this.liveTurn,
         isStreaming: Boolean(this.frontendState.isStreaming),
         turnActive: Boolean(this.frontendState.turnActive),
-      })
-    ) {
-      return;
-    }
-    await flushPendingSelfImproveNotices(this.client, sessionFile, {
-      sessionFiles: sessionFile
-        ? undefined
-        : this.selfImproveNoticeSessionFiles?.(),
+      }),
     });
+  }
+
+  private async flushPendingSelfImproveNotices(sessionFile?: string) {
+    await this.runSelfImproveNoticeCheckpoint(
+      sessionFile ? "turn_complete" : "frontend_open",
+      sessionFile,
+    );
   }
 
   private async selectSessionTarget(sessionFile?: string) {
@@ -589,9 +628,6 @@ export class RinFrontendTurnDriver {
       await this.refreshFrontendState(this.currentSessionFile()).catch(
         () => {},
       );
-      if (!value?.cancelled) {
-        await this.flushPendingSelfImproveNotices().catch(() => {});
-      }
       return {
         handled: true,
         cancelled: Boolean(value?.cancelled),
@@ -1337,9 +1373,6 @@ export class RinFrontendTurnDriver {
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
         });
-        await this.flushPendingSelfImproveNotices(event.sessionFile).catch(
-          () => {},
-        );
         return;
       }
       case "turn_error": {
@@ -1354,9 +1387,6 @@ export class RinFrontendTurnDriver {
         error.sessionId = event.sessionId;
         error.sessionFile = event.sessionFile;
         this.failLiveTurn(error);
-        await this.flushPendingSelfImproveNotices(event.sessionFile).catch(
-          () => {},
-        );
         return;
       }
     }

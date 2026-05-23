@@ -69,12 +69,14 @@ export {
 export {
   RinFrontendTurnDriver,
   flushPendingSelfImproveNotices,
+  runSelfImproveNoticeCheckpoint,
   submitNativeFrontendPromptTurn,
   type RinFrontendPromptTurnInput,
   type RinFrontendTurnClient,
   type RinFrontendTurnDriverEvent,
   type RinFrontendTurnPhase,
   type RinFrontendTurnResult,
+  type SelfImproveNoticeCheckpointKind,
 } from "./turn-driver.js";
 
 export {

@@ -447,7 +447,6 @@ export function shouldPullSelfImproveReviewNotices(instance: any) {
 }
 
 export function showSelfImproveReviewNotice(instance: any, event: any) {
-  if (!shouldPullSelfImproveReviewNotices(instance)) return false;
   const text = formatSelfImproveReviewNotice(event);
   if (!text) return false;
   if (typeof instance?.chatContainer?.addChild !== "function") return false;

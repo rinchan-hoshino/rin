@@ -8,7 +8,7 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const { RinFrontendTurnDriver } = await import(
+const { RinFrontendTurnDriver, runSelfImproveNoticeCheckpoint } = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "turn-driver.js"),
   ).href
@@ -258,6 +258,74 @@ test("frontend SDK turn driver flushes pending self-improve notices on connect",
 
   assert.deepEqual(
     client.calls.filter((call: any) => call.type === "request"),
+    [
+      {
+        type: "request",
+        command: {
+          type: "flush_self_improve_notices",
+          sessionFile: undefined,
+        },
+      },
+    ],
+  );
+});
+
+test("frontend SDK self-improve checkpoint scopes fixed pull points", async () => {
+  const client = createFrontendClient();
+  await client.connect();
+
+  await runSelfImproveNoticeCheckpoint(client, {
+    kind: "frontend_open",
+    sessionFiles: ["/tmp/a.jsonl", ""],
+  });
+  await runSelfImproveNoticeCheckpoint(client, {
+    kind: "turn_complete",
+    sessionFile: "/tmp/current.jsonl",
+    sessionFiles: ["/tmp/ignored.jsonl"],
+  });
+  await runSelfImproveNoticeCheckpoint(client, {
+    kind: "new_session",
+    sessionFiles: ["/tmp/old.jsonl"],
+    canPull: false,
+  });
+
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "request"),
+    [
+      {
+        type: "request",
+        command: {
+          type: "flush_self_improve_notices",
+          sessionFile: undefined,
+          sessionFiles: ["/tmp/a.jsonl"],
+        },
+      },
+      {
+        type: "request",
+        command: {
+          type: "flush_self_improve_notices",
+          sessionFile: "/tmp/current.jsonl",
+        },
+      },
+    ],
+  );
+});
+
+test("frontend SDK turn driver leaves turn-complete notice checkpoints to the frontend", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  await driver.connect();
+  client.calls.length = 0;
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "frontend final");
+  assert.deepEqual(
+    client.calls.filter(
+      (call: any) =>
+        call.type === "request" &&
+        call.command?.type === "flush_self_improve_notices",
+    ),
     [
       {
         type: "request",

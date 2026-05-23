@@ -253,7 +253,7 @@ test("self-improve notices render as chat custom messages", () => {
   assert.equal(footerInvalidations, 1);
 });
 
-test("self-improve notices do not render while TUI session is streaming", () => {
+test("self-improve notices already pulled by a checkpoint render even if status is stale", () => {
   themeModule.initTheme("dark", false);
   const chatContainer = new piTuiModule.Container();
   let renderRequests = 0;
@@ -284,10 +284,10 @@ test("self-improve notices do not render while TUI session is streaming", () => 
     changedCount: 0,
   };
 
-  assert.equal(overrides.showSelfImproveReviewNotice(instance, notice), false);
-  assert.doesNotMatch(chatContainer.render(100).join("\n"), /self-improve/);
-  assert.equal(renderRequests, 0);
-  assert.equal(footerInvalidations, 0);
+  assert.equal(overrides.showSelfImproveReviewNotice(instance, notice), true);
+  assert.match(chatContainer.render(100).join("\n"), /self-improve/);
+  assert.equal(renderRequests, 1);
+  assert.equal(footerInvalidations, 1);
 });
 
 test("update overrides replace startup update path and keep single changelog version state", async () => {
