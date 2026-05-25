@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -11,6 +13,11 @@ const rootDir = path.resolve(
 const { runCustomRpcMode } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "rpc-mode.js"))
     .href
+);
+const { appendPendingMemoryMaintenanceNotice } = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "self-improve", "async-jobs.js"),
+  ).href
 );
 
 function wait(ms = 0) {
@@ -3035,6 +3042,148 @@ test(
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
+  "rpc mode switch_session flushes only notices for the rebound session",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const agentDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "rin-rpc-notice-scope-"),
+    );
+    const targetSessionFile = path.join(agentDir, "sessions", "target.jsonl");
+    const otherSessionFile = path.join(agentDir, "sessions", "other.jsonl");
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    const createSession = (sessionFile: string) => ({
+      isStreaming: false,
+      isCompacting: false,
+      sessionFile,
+      sessionId: path.basename(sessionFile, ".jsonl"),
+      agent: { waitForIdle: async () => {} },
+      bindExtensions: async () => {},
+      subscribe: () => () => {},
+      prompt: async () => {},
+      sendCustomMessage: async () => {},
+      steer: async () => {},
+      followUp: async () => {},
+      abort: async () => {},
+      modelRegistry: { getAvailable: async () => [] },
+      sessionManager: {
+        getEntries: () => [],
+        getTree: () => [],
+        getLeafId: () => null,
+        getCwd: () => process.cwd(),
+        getSessionDir: () => path.dirname(sessionFile),
+      },
+      messages: [],
+      getSessionStats: () => ({}),
+      getUserMessagesForForking: () => [],
+      getLastAssistantText: () => "",
+      setThinkingLevel: () => {},
+      cycleThinkingLevel: () => undefined,
+      setSteeringMode: () => {},
+      setFollowUpMode: () => {},
+      compact: async () => {},
+      setAutoCompactionEnabled: () => {},
+      setAutoRetryEnabled: () => {},
+      abortRetry: () => {},
+      executeBash: async () => {},
+      abortBash: async () => {},
+      fork: async () => ({ cancelled: false, selectedText: "" }),
+      navigateTree: async () => ({ cancelled: false }),
+      exportToHtml: async () => "",
+      exportToJsonl: () => "",
+      importFromJsonl: async () => ({ cancelled: false }),
+      setModel: async () => {},
+      reload: async () => {},
+      setSessionName: () => {},
+    });
+    const runtime: any = {
+      session: createSession(path.join(agentDir, "sessions", "current.jsonl")),
+      services: { agentDir },
+      async newSession() {
+        throw new Error("unexpected");
+      },
+      async switchSession(sessionFile: string) {
+        runtime.session = createSession(sessionFile);
+        return { cancelled: false };
+      },
+      async fork() {
+        throw new Error("unexpected");
+      },
+      async importFromJsonl() {
+        throw new Error("unexpected");
+      },
+    };
+
+    try {
+      await fs.mkdir(path.dirname(targetSessionFile), { recursive: true });
+      await appendPendingMemoryMaintenanceNotice({
+        agentDir,
+        sessionFile: targetSessionFile,
+        notice: {
+          type: "self_improve_review_notice",
+          status: "completed",
+          targets: ["target-skill"],
+          changedCount: 1,
+        },
+      });
+      await appendPendingMemoryMaintenanceNotice({
+        agentDir,
+        sessionFile: otherSessionFile,
+        notice: {
+          type: "self_improve_review_notice",
+          status: "completed",
+          targets: ["other-skill"],
+          changedCount: 1,
+        },
+      });
+
+      void runCustomRpcMode(runtime, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({
+            id: "switch-1",
+            type: "switch_session",
+            sessionFile: targetSessionFile,
+          })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const output = lines.join("");
+      assert.match(output, /target-skill/);
+      assert.doesNotMatch(output, /other-skill/);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+      await fs.rm(agentDir, { recursive: true, force: true });
     }
   },
 );

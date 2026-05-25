@@ -146,7 +146,7 @@ test("chat controller delivers passive notices as distinct short messages", asyn
   ]);
 });
 
-test("chat controller scopes pending self-improve notices outside private chats", async () => {
+test("chat controller pulls pending self-improve notices for the current session only", async () => {
   async function createScopedController(chatKey) {
     const tempDir = await fs.mkdtemp(
       path.join(os.tmpdir(), "rin-chat-notice-scope-"),
@@ -214,8 +214,7 @@ test("chat controller scopes pending self-improve notices outside private chats"
   assert.deepEqual(group.requests, [
     {
       type: "flush_self_improve_notices",
-      sessionFile: undefined,
-      sessionFiles: ["/tmp/group-current.jsonl", "/tmp/group-old.jsonl"],
+      sessionFile: "/tmp/current.jsonl",
     },
   ]);
 
@@ -248,8 +247,7 @@ test("chat controller scopes pending self-improve notices outside private chats"
   assert.deepEqual(privateChat.requests, [
     {
       type: "flush_self_improve_notices",
-      sessionFile: undefined,
-      sessionFiles: ["/tmp/private-current.jsonl", "/tmp/private-old.jsonl"],
+      sessionFile: "/tmp/current.jsonl",
     },
   ]);
 });
@@ -504,19 +502,24 @@ test("chat controller pulls self-improve notices after final delivery checkpoint
     },
   };
   const originalRequest = controller.client.request.bind(controller.client);
+  let flushCount = 0;
   controller.client.request = async (command) => {
     if (command?.type === "flush_self_improve_notices") {
       assert.equal(command.sessionFile, currentSessionFile);
-      await controller.handleClientEvent({
-        type: "ui",
-        payload: {
-          type: "self_improve_review_notice",
-          status: "completed",
-          targets: [],
-          changedCount: 0,
-        },
-      });
-      return { flushed: 1 };
+      flushCount += 1;
+      if (flushCount === 2) {
+        await controller.handleClientEvent({
+          type: "ui",
+          payload: {
+            type: "self_improve_review_notice",
+            status: "completed",
+            targets: [],
+            changedCount: 0,
+          },
+        });
+        return { flushed: 1 };
+      }
+      return { flushed: 0 };
     }
     return await originalRequest(command);
   };

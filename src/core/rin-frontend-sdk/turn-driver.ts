@@ -122,40 +122,26 @@ export async function runSelfImproveNoticeCheckpoint(
   input: {
     kind: SelfImproveNoticeCheckpointKind;
     sessionFile?: string;
-    sessionFiles?: string[];
     canPull?: boolean;
   },
 ) {
   if (!client.isConnected() || input.canPull === false) return;
-  const sessionFile =
-    input.kind === "turn_complete"
-      ? safeString(input.sessionFile || "").trim() || undefined
-      : undefined;
-  if (input.kind === "turn_complete" && !sessionFile) return;
-  const sessionFiles =
-    input.kind === "turn_complete" || sessionFile
-      ? undefined
-      : Array.isArray(input.sessionFiles)
-        ? input.sessionFiles
-            .map((item) => safeString(item).trim())
-            .filter(Boolean)
-        : undefined;
+  const sessionFile = safeString(input.sessionFile || "").trim();
+  if (!sessionFile) return;
   await client.request({
     type: "flush_self_improve_notices",
     sessionFile,
-    ...(sessionFiles ? { sessionFiles } : {}),
   });
 }
 
 export async function flushPendingSelfImproveNotices(
   client: Pick<RinFrontendClient, "isConnected" | "request">,
   sessionFile?: string,
-  options: { sessionFiles?: string[]; canPull?: boolean } = {},
+  options: { canPull?: boolean } = {},
 ) {
   await runSelfImproveNoticeCheckpoint(client, {
     kind: sessionFile ? "turn_complete" : "frontend_open",
     sessionFile,
-    sessionFiles: options.sessionFiles,
     canPull: options.canPull,
   });
 }
@@ -184,7 +170,6 @@ export class RinFrontendTurnDriver {
   private readonly clientFactory: () => RinFrontendTurnClient;
   private readonly promptSource: string;
   private readonly commandResponses: RinFrontendCommandResponses;
-  private readonly selfImproveNoticeSessionFiles?: () => string[] | undefined;
   client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
@@ -209,14 +194,12 @@ export class RinFrontendTurnDriver {
     clientFactory: () => RinFrontendTurnClient;
     promptSource?: string;
     commandResponses?: Partial<RinFrontendCommandResponses>;
-    selfImproveNoticeSessionFiles?: () => string[] | undefined;
   }) {
     this.clientFactory = options.clientFactory;
     this.promptSource = safeString(options.promptSource).trim() || "frontend";
     this.commandResponses = resolveRinFrontendCommandResponses(
       options.commandResponses,
     );
-    this.selfImproveNoticeSessionFiles = options.selfImproveNoticeSessionFiles;
     this.backendEventTranslator = createRinFrontendBackendEventTranslator({
       commandResponses: this.commandResponses,
     });
@@ -249,11 +232,15 @@ export class RinFrontendTurnDriver {
     ).trim();
     if (wantedSessionFile) {
       await this.selectSessionTarget(wantedSessionFile);
-      await this.flushPendingSelfImproveNotices().catch(() => {});
+      await this.flushPendingSelfImproveNotices(
+        this.currentSessionFile() || wantedSessionFile,
+      ).catch(() => {});
       return;
     }
     await this.refreshFrontendState().catch(() => {});
-    await this.flushPendingSelfImproveNotices().catch(() => {});
+    await this.flushPendingSelfImproveNotices(this.currentSessionFile()).catch(
+      () => {},
+    );
   }
 
   dispose() {
@@ -509,11 +496,7 @@ export class RinFrontendTurnDriver {
     if (!this.client) return;
     await runSelfImproveNoticeCheckpoint(this.client, {
       kind,
-      sessionFile,
-      sessionFiles:
-        kind === "turn_complete"
-          ? undefined
-          : this.selfImproveNoticeSessionFiles?.(),
+      sessionFile: sessionFile || this.currentSessionFile(),
       canPull: shouldPullSelfImproveNoticesForTurnState({
         liveTurn: this.liveTurn,
         isStreaming: Boolean(this.frontendState.isStreaming),
@@ -525,7 +508,7 @@ export class RinFrontendTurnDriver {
   private async flushPendingSelfImproveNotices(sessionFile?: string) {
     await this.runSelfImproveNoticeCheckpoint(
       sessionFile ? "turn_complete" : "frontend_open",
-      sessionFile,
+      sessionFile || this.currentSessionFile(),
     );
   }
 

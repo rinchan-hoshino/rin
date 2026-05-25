@@ -59,7 +59,7 @@ function queuePath(root) {
   return selfImprovePaths.maintenanceQueuePath(root);
 }
 
-test("pending self-improve notices support global and explicit session filters", async () => {
+test("pending self-improve notices support global and explicit session filtering", async () => {
   await withTempRoot(async (root) => {
     const first = path.join(root, "sessions", "first.jsonl");
     const second = path.join(root, "sessions", "second.jsonl");

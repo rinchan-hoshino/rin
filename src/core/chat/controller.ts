@@ -217,8 +217,6 @@ export class ChatController {
         deps.frontendClientFactory || (() => new RinDaemonFrontendClient()),
       promptSource: "chat-bridge",
       commandResponses: this.getCommandResponses(),
-      selfImproveNoticeSessionFiles: () =>
-        this.selfImproveNoticeSessionFilesForChat(),
     });
     this.driver.subscribe((event) => {
       void this.handleFrontendEvent(event).catch(() => {});
@@ -763,20 +761,6 @@ export class ChatController {
 
   private managedSessionLeafForFreshChat() {
     return this.currentSessionFile() ? undefined : MANAGED_CHAT_SESSION_LEAF;
-  }
-
-  private selfImproveNoticeSessionFilesForChat() {
-    const files = new Set<string>();
-    for (const candidate of [this.state.sessionFile]) {
-      const resolved = this.resolveSessionFileForUse(candidate);
-      if (resolved) files.add(resolved);
-    }
-    for (const item of listChatMessages(this.agentDir)) {
-      if (item.chatKey !== this.chatKey) continue;
-      const resolved = this.resolveSessionFileForUse(item.sessionFile);
-      if (resolved) files.add(resolved);
-    }
-    return [...files];
   }
 
   private chatTypeForNoticeScope() {

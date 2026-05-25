@@ -154,7 +154,6 @@ export async function appendPendingMemoryMaintenanceNotice(input: {
 
 export type MemoryMaintenanceNoticeFilter = {
   sessionFile?: string;
-  sessionFiles?: string[];
 };
 
 export function filterMemoryMaintenanceNoticesForDisplay(
@@ -162,22 +161,12 @@ export function filterMemoryMaintenanceNoticesForDisplay(
   filter: MemoryMaintenanceNoticeFilter = {},
 ) {
   const sessionFile = resolveSessionFile(filter.sessionFile);
-  const sessionFiles = Array.isArray(filter.sessionFiles)
-    ? new Set(
-        filter.sessionFiles
-          .map((item) => resolveSessionFile(item))
-          .filter(Boolean),
-      )
-    : null;
   const taken: PendingMemoryMaintenanceNotice[] = [];
   const remaining: PendingMemoryMaintenanceNotice[] = [];
   for (const notice of notices) {
-    const noticeSessionFile = resolveSessionFile(notice.sessionFile);
     const matched = sessionFile
-      ? noticeSessionFile === sessionFile
-      : sessionFiles
-        ? sessionFiles.has(noticeSessionFile)
-        : true;
+      ? resolveSessionFile(notice.sessionFile) === sessionFile
+      : true;
     if (matched) {
       taken.push(notice);
     } else {
@@ -190,7 +179,6 @@ export function filterMemoryMaintenanceNoticesForDisplay(
 export async function takePendingMemoryMaintenanceNotices(input: {
   agentDir: string;
   sessionFile?: string;
-  sessionFiles?: string[];
 }) {
   const agentDir = resolveAgentDir(input.agentDir);
   if (!agentDir) return [];
