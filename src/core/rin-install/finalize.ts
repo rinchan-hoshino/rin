@@ -206,16 +206,6 @@ async function applyInstalledRuntime(
         },
       );
 
-  if (!shouldRestartBeforePersist) {
-    reconcileSystemdUserService(
-      targetUser,
-      installDir,
-      "restart",
-      useElevatedWrite,
-      { findSystemUser },
-    );
-  }
-
   let installedService: null | {
     kind: "launchd" | "systemd" | "windows-startup";
     label: string;
@@ -270,6 +260,16 @@ async function applyInstalledRuntime(
       runPrivileged,
     },
   );
+
+  if (!shouldRestartBeforePersist) {
+    reconcileSystemdUserService(
+      targetUser,
+      installDir,
+      "restart",
+      useElevatedWrite,
+      { findSystemUser },
+    );
+  }
 
   const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
     ? Math.max(0, Number(options.daemonReadyTimeoutMs))
