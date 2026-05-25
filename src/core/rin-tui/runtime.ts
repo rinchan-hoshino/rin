@@ -9,6 +9,7 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
+import { createRinCapabilityDefinitions } from "../rin-lib/runtime.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
@@ -55,61 +56,6 @@ import {
 } from "../rin-frontend-sdk/turn-driver.js";
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
-function renderTextBlock(text: string) {
-  return {
-    render() {
-      return text ? String(text).split(/\r?\n/) : [];
-    },
-  };
-}
-
-function formatTodoLines(details: any) {
-  const todos = asArray(details?.todos);
-  return todos.map((todo: any) => {
-    const done = Boolean(todo?.done);
-    const text = String(todo?.text || "").trim();
-    return `${done ? "✓" : "○"} ${text}`.trimEnd();
-  });
-}
-
-function getRpcFrontendToolDefinition(toolName: string) {
-  const name = String(toolName || "").trim();
-  if (name === "web_search" || name === "search_memory") {
-    return {
-      name,
-      renderCall(input: any) {
-        return renderTextBlock(String(input?.q || input?.query || "").trim());
-      },
-      renderResult(result: any) {
-        const text = asArray(result?.content)
-          .map((item: any) => item?.text)
-          .filter(Boolean)
-          .join("\n");
-        return renderTextBlock(text);
-      },
-    };
-  }
-  if (name === "todo") {
-    return {
-      name,
-      renderShell: "self",
-      renderCall() {
-        return renderTextBlock("");
-      },
-      renderResult(result: any, _options: any, theme: any) {
-        const lines = formatTodoLines(result?.details);
-        return {
-          render() {
-            const blank = theme?.bg ? theme.bg("toolSuccessBg", " ") : " ";
-            return [blank, ...lines, blank];
-          },
-        };
-      },
-    };
-  }
-  return undefined;
-}
-
 type PendingRpcOperation = {
   mode: "prompt" | "steer" | "follow_up";
   message: string;
@@ -406,6 +352,7 @@ export class RpcInteractiveSession {
   private clearQueuePromise: Promise<void> | null = null;
   private lastFrontendPhase: RpcFrontendPhase | null = null;
   private nextRequestTagId = 0;
+  private coreToolDefinitions = new Map<string, any>();
 
   constructor(
     public client: RpcFrontendClient,
@@ -467,6 +414,7 @@ export class RpcInteractiveSession {
       appendSessionInfo: (name: string) =>
         void this.setSessionName(name).catch(() => {}),
     };
+    this.coreToolDefinitions = this.createCoreToolDefinitions();
   }
 
   async prepareForInteractiveStartup() {
@@ -1048,7 +996,30 @@ export class RpcInteractiveSession {
   }
 
   getToolDefinition(toolName: string) {
-    return getRpcFrontendToolDefinition(toolName);
+    return this.coreToolDefinitions.get(String(toolName || "").trim());
+  }
+
+  private createCoreToolDefinitions() {
+    const profile = getRuntimeProfile();
+    const definitions = createRinCapabilityDefinitions({
+      cwd: profile.cwd,
+      agentDir: profile.agentDir,
+      getThinkingLevel: () => this.thinkingLevel,
+      sendMessage: (message, messageOptions) => {
+        this.sendCustomMessage?.(message, messageOptions).catch?.(() => {});
+      },
+      emitEvent: (event) => {
+        this.emitEvent(event);
+      },
+    });
+    const tools = new Map<string, any>();
+    for (const definition of definitions) {
+      for (const tool of definition.tools || []) {
+        const name = String(tool?.name || "").trim();
+        if (name && !tools.has(name)) tools.set(name, tool);
+      }
+    }
+    return tools;
   }
 
   private buildSessionContext() {

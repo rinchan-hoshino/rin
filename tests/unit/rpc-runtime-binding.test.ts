@@ -281,6 +281,28 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
     .join("\n");
   assert.match(rendered, /RAG retrieval augmented generation/);
 
+  const longToolResultLines = session
+    .getToolDefinition("search_memory")
+    .renderResult(
+      {
+        content: [
+          {
+            type: "text",
+            text: "L39 assistant: " + "A".repeat(140),
+          },
+        ],
+      },
+      { expanded: false },
+      theme,
+      renderContext,
+    )
+    .render(40);
+  assert.ok(longToolResultLines.length > 1);
+  assert.ok(
+    longToolResultLines.every((line) => line.length <= 40),
+    `expected wrapped tool result lines, got ${JSON.stringify(longToolResultLines)}`,
+  );
+
   const todoTool = session.getToolDefinition("todo");
   assert.equal(todoTool.renderShell, "self");
 
@@ -313,6 +335,13 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
   assert.match(
     todoResultLines.at(-1) ?? "",
     /^<toolSuccessBg>\s*<\/toolSuccessBg>$/,
+  );
+  assert.ok(
+    todoResultLines.every(
+      (line) =>
+        line.startsWith("<toolSuccessBg>") && line.endsWith("</toolSuccessBg>"),
+    ),
+    `expected every todo line to be painted, got ${JSON.stringify(todoResultLines)}`,
   );
   assert.doesNotMatch(todoResultLines[0], /Wire core todo|Ship renderer/);
   assert.doesNotMatch(
