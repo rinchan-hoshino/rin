@@ -59,16 +59,25 @@ test("installer service helpers prefer current daemon entry, quote systemd value
     await fs.mkdir(path.dirname(currentDaemon), { recursive: true });
     await fs.writeFile(currentDaemon, "export {};\n", "utf8");
 
-    const spec = service.buildSystemdUserService(
-      "demo.user+test",
-      installDir,
-      () => targetLinuxHome,
-    );
-    const plist = service.buildLaunchdPlist(
-      "demo.user+test",
-      installDir,
-      () => targetMacHome,
-    );
+    const oldPath = process.env.PATH;
+    let spec;
+    let plist;
+    try {
+      process.env.PATH =
+        "/home/THE_cattail/.local/bin:/tmp/installer-only-bin:/usr/bin";
+      spec = service.buildSystemdUserService(
+        "demo.user+test",
+        installDir,
+        () => targetLinuxHome,
+      );
+      plist = service.buildLaunchdPlist(
+        "demo.user+test",
+        installDir,
+        () => targetMacHome,
+      );
+    } finally {
+      process.env.PATH = oldPath;
+    }
     const windowsStartup = service.buildWindowsStartupLauncher(
       "demo.user+test",
       installDir,
@@ -104,6 +113,8 @@ test("installer service helpers prefer current daemon entry, quote systemd value
       ),
     );
     assert.match(spec.service, /^Environment="PATH=.+"$/m);
+    assert.equal(spec.service.includes("/home/THE_cattail"), false);
+    assert.equal(spec.service.includes("/tmp/installer-only-bin"), false);
 
     assert.equal(plist.label, "com.rin.daemon.demo.user-test");
     assert.ok(
@@ -121,6 +132,8 @@ test("installer service helpers prefer current daemon entry, quote systemd value
       plist.plist.includes(`<string>${escapeXml(currentDaemon)}</string>`),
     );
     assert.ok(plist.plist.includes(`<key>PATH</key>`));
+    assert.equal(plist.plist.includes("/home/THE_cattail"), false);
+    assert.equal(plist.plist.includes("/tmp/installer-only-bin"), false);
     assert.ok(
       plist.plist.includes(`<string>${escapeXml(installDir)}</string>`),
     );

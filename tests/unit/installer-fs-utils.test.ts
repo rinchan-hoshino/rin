@@ -25,10 +25,20 @@ test("installer fs utils compute launcher targets and script", () => {
   assert.ok(
     targets.rinGui[0].endsWith(path.join("dist", "app", "rin-gui", "main.js")),
   );
-  const script = fsUtils.launcherScript(["/tmp/a.js", "/tmp/b.js"]);
+  const oldPath = process.env.PATH;
+  let script;
+  try {
+    process.env.PATH =
+      "/home/THE_cattail/.local/bin:/tmp/installer-only-bin:/usr/bin";
+    script = fsUtils.launcherScript(["/tmp/a.js", "/tmp/b.js"]);
+  } finally {
+    process.env.PATH = oldPath;
+  }
   assert.ok(script.includes("installed runtime entry not found"));
   assert.ok(script.includes("/tmp/a.js"));
-  assert.ok(script.includes("PATH="));
+  assert.equal(script.includes("PATH="), false);
+  assert.equal(script.includes("/home/THE_cattail"), false);
+  assert.equal(script.includes("/tmp/installer-only-bin"), false);
   assert.ok(script.includes("'/usr/bin/env' 'node' '/tmp/a.js' \"$@\""));
   assert.equal(script.includes(process.execPath), false);
   const windowsScript = fsUtils.windowsCmdLauncherScript(targets.rinGui);

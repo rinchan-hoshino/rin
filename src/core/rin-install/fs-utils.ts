@@ -99,18 +99,7 @@ const RUNTIME_COPY_ENTRY_NAMES = [
 ] as const;
 
 export function installedRuntimePathValue() {
-  const seen = new Set<string>();
-  const dirs: string[] = [];
-  for (const dir of [
-    ...String(process.env.PATH || "").split(path.delimiter),
-    ...COMMON_RUNTIME_BIN_DIRS,
-  ]) {
-    const next = String(dir || "").trim();
-    if (!next || seen.has(next)) continue;
-    seen.add(next);
-    dirs.push(next);
-  }
-  return dirs.join(path.delimiter);
+  return COMMON_RUNTIME_BIN_DIRS.join(path.delimiter);
 }
 
 export function installedRuntimeNodeCommandArgs() {
@@ -118,7 +107,6 @@ export function installedRuntimeNodeCommandArgs() {
 }
 
 export function launcherScript(candidates: string[]) {
-  const runtimePath = installedRuntimePathValue();
   const nodeCommand = installedRuntimeNodeCommandArgs()
     .map((entry) => shellQuote(entry))
     .join(" ");
@@ -128,7 +116,7 @@ export function launcherScript(candidates: string[]) {
         `if [ -f ${shellQuote(candidate)} ]; then exec ${nodeCommand} ${shellQuote(candidate)} "$@"; fi`,
     )
     .join("\n");
-  return `#!/usr/bin/env sh\nPATH=${shellQuote(runtimePath)}\nexport PATH\n${checks}\necho "rin: installed runtime entry not found" >&2\nexit 1\n`;
+  return `#!/usr/bin/env sh\n${checks}\necho "rin: installed runtime entry not found" >&2\nexit 1\n`;
 }
 
 export function installerTempRootCandidates() {
