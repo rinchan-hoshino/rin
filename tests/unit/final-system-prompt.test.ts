@@ -99,7 +99,14 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("use Rin scheduled tasks first"));
   assert.equal(baseSystemPrompt.includes("condition.kind"), false);
   assert.ok(baseSystemPrompt.includes("Rich text guidance:"));
-  assert.ok(baseSystemPrompt.includes("use Rin native rich output syntax"));
+  assert.ok(baseSystemPrompt.includes("prefer Rin native rich output syntax"));
+  assert.ok(baseSystemPrompt.includes("docs/rich-text-output-format.md"));
+  assert.equal(
+    baseSystemPrompt.includes(
+      "attach it directly with native rich syntax such as [image: name](local-path) instead of replying with only its path",
+    ),
+    false,
+  );
   assert.ok(baseSystemPrompt.includes("Chat bridge guidance:"));
   assert.equal(
     baseSystemPrompt.includes("Memory and self-improvement guidance:"),

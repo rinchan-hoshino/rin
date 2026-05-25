@@ -21,4 +21,5 @@ Rin accepts structured rich parts from code and Markdown rich-object syntax from
 - Use native mentions only when the exact platform user id is known.
 - Use quote replies only with the exact platform message id from the current context or message store.
 - Prefer local files or already accessible URLs for attachments; do not expose private credentials in attachment URLs.
+- When a reply includes an image or file intended for the recipient, attach it directly with the matching rich-object syntax such as `[image: preview](local-path)`.
 - Keep fallback text understandable because unsupported rich objects degrade to readable plain text.

@@ -32,6 +32,11 @@ test("chat prompt context leaves user text clean and moves metadata to system bl
   assert.ok(systemBlock.includes("- sender trust: owner"));
   assert.ok(
     systemBlock.includes(
+      "Only address the sender as the owner when sender trust is owner.",
+    ),
+  );
+  assert.ok(
+    systemBlock.includes(
       "- runtime note: metadata in this Chat context block is not sender-authored message text.",
     ),
   );
@@ -39,6 +44,22 @@ test("chat prompt context leaves user text clean and moves metadata to system bl
   const combined = appendPromptContextSystemPrompt("Base prompt", meta);
   assert.ok(combined.startsWith("Base prompt\n\nChat context:"));
   assert.ok(combined.includes("- sender user id: THE-cattail"));
+});
+
+test("chat prompt context includes reply id without quoted message payload", () => {
+  const systemBlock = formatPromptContextSystemPromptBlock({
+    source: "chat-bridge",
+    chatKey: "onebot/100:200",
+    chatType: "group",
+    userId: "u2",
+    nickname: "other-user",
+    identity: "TRUSTED",
+    replyToMessageId: "m1",
+  });
+
+  assert.ok(systemBlock.includes("- quoted platform message id: m1"));
+  assert.equal(systemBlock.includes("- replied message:"), false);
+  assert.equal(systemBlock.includes("  - content:"), false);
 });
 
 test("chat prompt context keeps scheduled-task-only metadata out of the system prompt", () => {
