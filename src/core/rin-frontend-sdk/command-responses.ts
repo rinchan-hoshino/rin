@@ -12,6 +12,7 @@ export type RinFrontendCommandResponses = {
   compactionStart: string;
   compactionSummaryLine: string;
   compactionSummaryText: string;
+  selfImproveReviewNotice: string;
   selfImproveReviewQueued: string;
   selfImproveReviewSkipped: string;
   selfImproveReviewFailed: string;
@@ -32,6 +33,7 @@ export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses
     compactionStart: "Compacting...",
     compactionSummaryLine: "Compacted from {tokens} tokens",
     compactionSummaryText: "[compaction]\n\n{summary}",
+    selfImproveReviewNotice: "",
     selfImproveReviewQueued: "Self-improve review queued.",
     selfImproveReviewSkipped: "Self-improve review skipped.",
     selfImproveReviewFailed: "Self-improve review failed.",
@@ -86,6 +88,30 @@ export function formatSelfImproveReviewNotice(
 ) {
   const notice = isJsonRecord(input) ? input : {};
   const status = safeString(notice.status).trim();
+  const customNoticeTemplate = safeString(
+    responses.selfImproveReviewNotice,
+  ).trim();
+  if (customNoticeTemplate) {
+    return prefixSelfImproveReviewNotice(
+      replaceTemplateValues(customNoticeTemplate, {
+        status,
+        targets: Array.isArray(notice.targets)
+          ? notice.targets
+              .map((item) => safeString(item).trim())
+              .filter(Boolean)
+              .join(", ")
+          : "",
+        count: String(
+          Math.max(
+            0,
+            Math.floor(
+              Number(notice.hiddenTargetCount || notice.changedCount || 0),
+            ) || 0,
+          ),
+        ),
+      }),
+    );
+  }
   if (status === "queued") {
     return prefixSelfImproveReviewNotice(responses.selfImproveReviewQueued);
   }

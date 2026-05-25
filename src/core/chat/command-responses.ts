@@ -32,18 +32,10 @@ const CHAT_COMMAND_RESPONSE_I18N_IDS = {
   newCancelled: "chat.commandResponses.newCancelled",
   compact: "chat.commandResponses.compact",
   reload: "chat.commandResponses.reload",
-  compactionBusy: "chat.compaction.busy",
   compactionStart: "chat.compaction.start",
   compactionSummaryLine: "chat.compaction.summaryLine",
-  compactionSummaryText: "chat.compaction.summaryText",
-  selfImproveReviewQueued: "chat.selfImproveReview.queued",
-  selfImproveReviewSkipped: "chat.selfImproveReview.skipped",
-  selfImproveReviewFailed: "chat.selfImproveReview.failed",
-  selfImproveReviewNoChange: "chat.selfImproveReview.noChange",
-  selfImproveReviewChanged: "chat.selfImproveReview.changed",
-  selfImproveReviewChangedWithMore: "chat.selfImproveReview.changedWithMore",
-  selfImproveReviewChangedCount: "chat.selfImproveReview.changedCount",
-} satisfies Record<keyof RinFrontendCommandResponses, string>;
+  selfImproveReviewNotice: "chat.selfImproveReview.notice",
+} satisfies Partial<Record<keyof RinFrontendCommandResponses, string>>;
 
 function chatCommandResponsesFromI18nCatalog(catalog: RinI18nCatalog) {
   return Object.fromEntries(

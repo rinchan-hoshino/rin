@@ -86,7 +86,7 @@ test("generic i18n catalog accepts nested message keys", async () => {
   assert.equal(responses.new, "Started a new session.");
 });
 
-test("chat i18n exposes dynamic compact and self-improve review templates", async () => {
+test("chat i18n exposes only chat-sent compaction and self-improve review templates", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-command-copy-"),
   );
@@ -101,6 +101,7 @@ test("chat i18n exposes dynamic compact and self-improve review templates", asyn
           summaryText: "COMPACT: {summary}",
         },
         selfImproveReview: {
+          notice: "Review notice.",
           changedWithMore: "Reviewed {targets} plus {count} hidden.",
         },
       },
@@ -108,15 +109,16 @@ test("chat i18n exposes dynamic compact and self-improve review templates", asyn
   );
 
   const responses = commandResponses.readChatCommandResponses(agentDir);
-  assert.equal(responses.compactionBusy, "Already compacting.");
+  assert.equal(responses.compactionBusy, "Compaction already in progress.");
   assert.equal(responses.compactionStart, "Shrinking now...");
   assert.equal(
     responses.compactionSummaryLine,
     "Shrunk {tokens}; open with {expandKey}.",
   );
-  assert.equal(responses.compactionSummaryText, "COMPACT: {summary}");
+  assert.equal(responses.compactionSummaryText, "{summary}");
+  assert.equal(responses.selfImproveReviewNotice, "Review notice.");
   assert.equal(
     responses.selfImproveReviewChangedWithMore,
-    "Reviewed {targets} plus {count} hidden.",
+    "Self-improve review updated {targets} and {count} more.",
   );
 });
