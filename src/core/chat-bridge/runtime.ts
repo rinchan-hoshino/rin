@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { chatDataPath } from "../data-layout.js";
 import {
   enqueueChatOutboxPayload,
   type ChatMessagePart,
@@ -162,7 +163,7 @@ function createNullHelpers(useChat: (chatKey: string) => any) {
 }
 
 function auditDir(agentDir: string) {
-  return path.join(path.resolve(agentDir), "data", "chat-bridge-eval");
+  return chatDataPath(agentDir, "eval");
 }
 
 export function appendChatBridgeAudit(

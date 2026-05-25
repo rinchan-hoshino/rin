@@ -355,7 +355,13 @@ test("resumable worker commands persist a running record until they finish", asy
   const dir = await makeTempDir("rin-worker-pool-running-");
   const workerPath = path.join(dir, "worker.mjs");
   const sessionFile = path.join(dir, "session.jsonl");
-  const statePath = path.join(dir, "data", "running-workers.json");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
   await fs.writeFile(
     workerPath,
     String.raw`process.stdin.setEncoding('utf8');

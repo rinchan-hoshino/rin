@@ -567,10 +567,12 @@ test("daemon auto-resumes sessions recorded as running before restart", async ()
   const logPath = path.join(agentDir, "commands.log");
   const sessionFile = path.join(agentDir, "sessions", "active-session.jsonl");
   await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-  await fs.mkdir(path.join(agentDir, "data"), { recursive: true });
+  await fs.mkdir(path.join(agentDir, "data", "core", "workers"), {
+    recursive: true,
+  });
   await fs.writeFile(sessionFile, "");
   await fs.writeFile(
-    path.join(agentDir, "data", "running-workers.json"),
+    path.join(agentDir, "data", "core", "workers", "running-workers.json"),
     `${JSON.stringify({
       schemaVersion: 1,
       sessionFiles: [sessionFile],

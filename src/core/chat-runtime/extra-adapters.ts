@@ -215,7 +215,7 @@ export class DiscordAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:discord", logger);
-    this.cacheDir = path.join(dataDir, "chat-runtime-cache", "discord");
+    this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "discord");
     ensureDir(this.cacheDir);
     const internal: any = {
       client: null,
@@ -533,7 +533,7 @@ export class SlackAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:slack", logger);
-    this.cacheDir = path.join(dataDir, "chat-runtime-cache", "slack");
+    this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "slack");
     ensureDir(this.cacheDir);
     const internal: any = {
       web: null,
@@ -1225,7 +1225,7 @@ export class LarkAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:lark", logger);
-    this.cacheDir = path.join(dataDir, "chat-runtime-cache", "lark");
+    this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "lark");
     ensureDir(this.cacheDir);
     const internal: any = {
       client: null,

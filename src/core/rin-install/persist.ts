@@ -4,6 +4,11 @@ import path from "node:path";
 
 import { normalizeStoredChatSettings } from "../chat/settings.js";
 import {
+  chatDataPath,
+  LEGACY_DATA_LAYOUT_MOVES,
+  schedulerDataPath,
+} from "../data-layout.js";
+import {
   listChatStateFiles,
   listDetachedControllerStateFiles,
 } from "../chat/support.js";
@@ -82,9 +87,6 @@ function removeFile(
     fs.rmSync(filePath, { force: true });
   } catch {}
 }
-
-const PREVIOUS_CHAT_MESSAGE_STORE_DIRNAME = "koishi-message-store";
-const CHAT_MESSAGE_STORE_DIRNAME = "chat-message-store";
 
 type InstallPathMoveResult = {
   id: string;
@@ -270,6 +272,49 @@ function moveInstalledPathIfNeeded(
   return { ...move, moved: true, skipped: false };
 }
 
+type InstallDataLayoutMigrationResult = {
+  id: "data-layout-v1";
+  skipped: boolean;
+  moved: number;
+  skippedExistingTarget: number;
+  movedPaths: Array<{ id: string; fromPath: string; toPath: string }>;
+};
+
+function migrateInstalledDataLayout(
+  installDir: string,
+  fileOps: InstallMigrationFileOps,
+): InstallDataLayoutMigrationResult {
+  const root = path.resolve(String(installDir || "").trim() || ".");
+  const movedPaths: InstallDataLayoutMigrationResult["movedPaths"] = [];
+  let skippedExistingTarget = 0;
+  for (const move of LEGACY_DATA_LAYOUT_MOVES) {
+    const result = moveInstalledPathIfNeeded(
+      {
+        id: move.id,
+        fromPath: path.join(root, "data", move.from),
+        toPath: path.join(root, "data", move.to),
+      },
+      fileOps,
+    );
+    if (result.moved) {
+      movedPaths.push({
+        id: move.id,
+        fromPath: result.fromPath,
+        toPath: result.toPath,
+      });
+    } else if (result.skipped) {
+      skippedExistingTarget += 1;
+    }
+  }
+  return {
+    id: "data-layout-v1",
+    skipped: movedPaths.length === 0,
+    moved: movedPaths.length,
+    skippedExistingTarget,
+    movedPaths,
+  };
+}
+
 const CHAT_STATE_SESSION_FILE_MIGRATION_ID = "chat-state-session-file-v1";
 const CHAT_SESSION_MANAGED_FILE_MIGRATION_ID = "chat-session-managed-file-v1";
 
@@ -348,7 +393,13 @@ function rewriteInstalledChatStateSessionFileKeys(
 
   const root = path.resolve(String(installDir || "").trim() || ".");
   const statePaths = uniqueStatePaths([
+    ...listChatStateFiles(chatDataPath(root, "session-state")).map(
+      (item) => item.statePath,
+    ),
     ...listChatStateFiles(path.join(root, "data", "chats")).map(
+      (item) => item.statePath,
+    ),
+    ...listDetachedControllerStateFiles(schedulerDataPath(root, "turns")).map(
       (item) => item.statePath,
     ),
     ...listDetachedControllerStateFiles(
@@ -486,11 +537,14 @@ function migrateInstalledChatSessionFilesToManaged(
   }
 
   const root = path.resolve(String(installDir || "").trim() || ".");
-  const statePaths = uniqueStatePaths(
-    listChatStateFiles(path.join(root, "data", "chats")).map(
+  const statePaths = uniqueStatePaths([
+    ...listChatStateFiles(chatDataPath(root, "session-state")).map(
       (item) => item.statePath,
     ),
-  );
+    ...listChatStateFiles(path.join(root, "data", "chats")).map(
+      (item) => item.statePath,
+    ),
+  ]);
   const migratedFiles: string[] = [];
   for (const statePath of statePaths) {
     const migratedFile = migrateChatStateSessionFileToManaged(
@@ -542,22 +596,7 @@ export function applyInstallUpgradeMigrations(
 ) {
   const fileOps = createInstallMigrationFileOps(options, deps);
   return [
-    moveInstalledPathIfNeeded(
-      {
-        id: "chat-message-store-dir",
-        fromPath: path.join(
-          options.installDir,
-          "data",
-          PREVIOUS_CHAT_MESSAGE_STORE_DIRNAME,
-        ),
-        toPath: path.join(
-          options.installDir,
-          "data",
-          CHAT_MESSAGE_STORE_DIRNAME,
-        ),
-      },
-      fileOps,
-    ),
+    migrateInstalledDataLayout(options.installDir, fileOps),
     rewriteInstalledChatStateSessionFileKeys(options.installDir, fileOps),
     migrateInstalledChatSessionFilesToManaged(options.installDir, fileOps),
   ];

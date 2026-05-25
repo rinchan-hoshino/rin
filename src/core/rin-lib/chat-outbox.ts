@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { chatDataPath } from "../data-layout.js";
 import { readJsonFile, writeJsonAtomic } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 
@@ -123,7 +124,7 @@ export type EnqueueChatOutboxOptions = {
 let sequenceCounter = 0;
 
 export function chatOutboxDir(agentDir: string) {
-  return path.join(path.resolve(agentDir), "data", "chat-outbox");
+  return chatDataPath(agentDir, "outbox");
 }
 
 export function chatOutboxItemsDir(agentDir: string) {

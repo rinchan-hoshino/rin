@@ -401,7 +401,8 @@ export async function startChatBridge(
   ) => {
     const statePath = path.join(
       dataDir,
-      "cron-turns",
+      "scheduler",
+      "turns",
       safeString(controllerKey)
         .trim()
         .replace(/[^A-Za-z0-9._:-]+/g, "_"),
@@ -924,7 +925,8 @@ export async function startChatBridge(
           fs.rmSync(
             path.join(
               dataDir,
-              "cron-turns",
+              "scheduler",
+              "turns",
               controllerKey.replace(/[^A-Za-z0-9._:-]+/g, "_"),
             ),
             {

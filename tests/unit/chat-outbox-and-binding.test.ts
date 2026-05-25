@@ -226,7 +226,7 @@ test("chat state paths stay stable", () => {
   const statePath = support.chatStatePath("/tmp/rin-data", "telegram/777:1");
   assert.ok(
     statePath.endsWith(
-      path.join("chats", "telegram", "777", "1", "state.json"),
+      path.join("chat", "session-state", "telegram", "777", "1", "state.json"),
     ),
   );
 });

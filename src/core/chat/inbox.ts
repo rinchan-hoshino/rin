@@ -21,6 +21,7 @@ import {
 import { readJsonFile } from "./support.js";
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
+import { chatDataPath } from "../data-layout.js";
 
 function hashKey(value: string) {
   return createHash("sha1").update(value).digest("hex");
@@ -53,7 +54,7 @@ export type ChatInboxItem = {
 };
 
 export function chatInboxDir(agentDir: string) {
-  return path.join(path.resolve(agentDir), "data", "chat-inbox");
+  return chatDataPath(agentDir, "inbox");
 }
 
 function pendingDir(agentDir: string) {

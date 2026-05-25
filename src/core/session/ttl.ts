@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import fssync from "node:fs";
 import path from "node:path";
 
+import { coreDataPath } from "../data-layout.js";
+
 import { getRuntimeSessionDir } from "../rin-lib/profile.js";
 
 export const DEFAULT_SESSION_TTL_DAYS = 90;
@@ -115,7 +117,7 @@ export async function runSessionTtlMaintenance(
 }
 
 function sessionTtlStatePath(agentDir: string) {
-  return path.join(agentDir, "data", "session-ttl-maintenance.json");
+  return coreDataPath(agentDir, "sessions", "ttl-maintenance.json");
 }
 
 export async function runDueSessionTtlMaintenance(

@@ -49,6 +49,7 @@ async function writeLiveSidecarState(agentDir: string, baseUrl: string) {
   const statePath = path.join(
     agentDir,
     "data",
+    "sidecars",
     "web-search",
     "instances",
     instanceId,
@@ -233,7 +234,9 @@ test("web search falls back across SearXNG engines", async () => {
 test("web search paths derive data root location", () => {
   const root = "/tmp/demo";
   assert.ok(
-    paths.dataRootForState(root).endsWith(path.join("data", "web-search")),
+    paths
+      .dataRootForState(root)
+      .endsWith(path.join("data", "sidecars", "web-search")),
   );
 });
 
@@ -253,7 +256,10 @@ test("web search status does not install or start SearXNG", async () => {
     assert.equal(status.runtime.ready, false);
     assert.deepEqual(status.instances, []);
     await assert.rejects(
-      () => fs.stat(path.join(agentDir, "data", "web-search", "runtime")),
+      () =>
+        fs.stat(
+          path.join(agentDir, "data", "sidecars", "web-search", "runtime"),
+        ),
       /ENOENT/,
     );
   } finally {
@@ -286,7 +292,14 @@ test("web search runtime rejects an invalid managed Python before source install
     await assert.rejects(
       () =>
         fs.stat(
-          path.join(agentDir, "data", "web-search", "runtime", "searxng"),
+          path.join(
+            agentDir,
+            "data",
+            "sidecars",
+            "web-search",
+            "runtime",
+            "searxng",
+          ),
         ),
       /ENOENT/,
     );

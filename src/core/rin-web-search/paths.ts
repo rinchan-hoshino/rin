@@ -7,6 +7,7 @@ import {
   writeInstanceState as writeSidecarInstanceState,
 } from "../sidecar/common.js";
 import { readJsonFile, writeJsonAtomic } from "../platform/fs.js";
+import { sharedRuntimeDataPath, sidecarDataPath } from "../data-layout.js";
 
 export type RuntimeBootstrapState = {
   ready?: boolean;
@@ -29,25 +30,13 @@ export type WebSearchInstanceState = {
   ownerPid?: number;
 };
 
-const WEB_SEARCH_DATA_SEGMENTS = ["data", "web-search"] as const;
 const RUNTIME_SEGMENT = "runtime";
 const INSTANCES_SEGMENT = "instances";
 const WINDOWS_VENV_BIN_DIR = "Scripts";
 const POSIX_VENV_BIN_DIR = "bin";
 
-function agentDataPathForState(
-  stateRoot: string,
-  ...segments: string[]
-): string {
-  return path.join(path.resolve(stateRoot), "data", ...segments);
-}
-
 function dataPathForState(stateRoot: string, ...segments: string[]): string {
-  return agentDataPathForState(
-    stateRoot,
-    ...WEB_SEARCH_DATA_SEGMENTS.slice(1),
-    ...segments,
-  );
+  return sidecarDataPath(stateRoot, "web-search", ...segments);
 }
 
 function runtimePathForState(stateRoot: string, ...segments: string[]): string {
@@ -58,7 +47,7 @@ function sharedRuntimePathForState(
   stateRoot: string,
   ...segments: string[]
 ): string {
-  return agentDataPathForState(stateRoot, "runtime", ...segments);
+  return sharedRuntimeDataPath(stateRoot, ...segments);
 }
 
 function instancePathForState(

@@ -854,7 +854,7 @@ test("persist normalizeInstalledChatSettings drops removed adapter settings with
 test("persist normalizeInstalledChatSettings applies install upgrade migrations", async () => {
   await withTempDir(async (dir) => {
     const previousStoreDir = path.join(dir, "data", "koishi-message-store");
-    const currentStoreDir = path.join(dir, "data", "chat-message-store");
+    const currentStoreDir = path.join(dir, "data", "chat", "message-store");
     await fs.mkdir(previousStoreDir, { recursive: true });
     await fs.writeFile(
       path.join(previousStoreDir, "marker.txt"),
@@ -879,14 +879,20 @@ test("persist normalizeInstalledChatSettings applies install upgrade migrations"
 
     await fs.access(path.join(currentStoreDir, "marker.txt"));
     await assert.rejects(fs.access(path.join(previousStoreDir, "marker.txt")));
-    assert.deepEqual(result.migrations, [
-      {
-        id: "chat-message-store-dir",
-        fromPath: previousStoreDir,
-        toPath: currentStoreDir,
-        moved: true,
-        skipped: false,
-      },
+    assert.deepEqual(result.migrations[0], {
+      id: "data-layout-v1",
+      skipped: false,
+      moved: 1,
+      skippedExistingTarget: 0,
+      movedPaths: [
+        {
+          id: "koishi-message-store",
+          fromPath: previousStoreDir,
+          toPath: currentStoreDir,
+        },
+      ],
+    });
+    assert.deepEqual(result.migrations.slice(1), [
       {
         id: "chat-state-session-file-v1",
         markerPath: path.join(
@@ -935,7 +941,8 @@ test("persist normalizeInstalledChatSettings migrates previous chat state sessio
     const detachedStatePath = path.join(
       dir,
       "data",
-      "cron-turns",
+      "scheduler",
+      "turns",
       "cron_demo",
       "state.json",
     );
@@ -965,14 +972,46 @@ test("persist normalizeInstalledChatSettings migrates previous chat state sessio
       },
     );
 
-    assert.deepEqual(JSON.parse(await fs.readFile(chatStatePath, "utf8")), {
-      chatKey: "telegram/1:2",
-      sessionFile: "chat.jsonl",
-    });
-    assert.deepEqual(JSON.parse(await fs.readFile(detachedStatePath, "utf8")), {
-      chatKey: "cron:test",
-      sessionFile: "turn.jsonl",
-    });
+    assert.deepEqual(
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            dir,
+            "data",
+            "chat",
+            "session-state",
+            "telegram",
+            "1",
+            "2",
+            "state.json",
+          ),
+          "utf8",
+        ),
+      ),
+      {
+        chatKey: "telegram/1:2",
+        sessionFile: "chat.jsonl",
+      },
+    );
+    assert.deepEqual(
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            dir,
+            "data",
+            "scheduler",
+            "turns",
+            "cron_demo",
+            "state.json",
+          ),
+          "utf8",
+        ),
+      ),
+      {
+        chatKey: "cron:test",
+        sessionFile: "turn.jsonl",
+      },
+    );
     assert.equal(result.migrations[1].id, "chat-state-session-file-v1");
     assert.equal(result.migrations[1].skipped, false);
     assert.equal(result.migrations[1].scanned, 2);
@@ -1055,14 +1094,48 @@ test("persist normalizeInstalledChatSettings moves chat-bound root sessions unde
       "chat",
       "chat-root.jsonl",
     );
-    assert.deepEqual(JSON.parse(await fs.readFile(chatStatePath, "utf8")), {
-      chatKey: "telegram/1:2",
-      sessionFile: "managed/chat/chat-root.jsonl",
-    });
-    assert.deepEqual(JSON.parse(await fs.readFile(managedStatePath, "utf8")), {
-      chatKey: "telegram/1:3",
-      sessionFile: "managed/chat/already.jsonl",
-    });
+    assert.deepEqual(
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            dir,
+            "data",
+            "chat",
+            "session-state",
+            "telegram",
+            "1",
+            "2",
+            "state.json",
+          ),
+          "utf8",
+        ),
+      ),
+      {
+        chatKey: "telegram/1:2",
+        sessionFile: "managed/chat/chat-root.jsonl",
+      },
+    );
+    assert.deepEqual(
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            dir,
+            "data",
+            "chat",
+            "session-state",
+            "telegram",
+            "1",
+            "3",
+            "state.json",
+          ),
+          "utf8",
+        ),
+      ),
+      {
+        chatKey: "telegram/1:3",
+        sessionFile: "managed/chat/already.jsonl",
+      },
+    );
     assert.equal(
       await fs.readFile(targetSessionPath, "utf8"),
       "root session\n",
@@ -1080,7 +1153,7 @@ test("persist normalizeInstalledChatSettings moves chat-bound root sessions unde
 test("persist normalizeInstalledChatSettings runs elevated migrations as target user", async () => {
   await withTempDir(async (dir) => {
     const previousStoreDir = path.join(dir, "data", "koishi-message-store");
-    const currentStoreDir = path.join(dir, "data", "chat-message-store");
+    const currentStoreDir = path.join(dir, "data", "chat", "message-store");
     const chatStatePath = path.join(
       dir,
       "data",
@@ -1158,16 +1231,44 @@ test("persist normalizeInstalledChatSettings runs elevated migrations as target 
           call.args[1] === targetSessionPath,
       ),
     );
+    const migratedChatStatePath = path.join(
+      dir,
+      "data",
+      "chat",
+      "session-state",
+      "telegram",
+      "1",
+      "2",
+      "state.json",
+    );
     assert.ok(
       targetCalls.some(
         (call) =>
-          call.command === "install" && call.args.at(-1) === chatStatePath,
+          call.command === "install" &&
+          call.args.at(-1) === migratedChatStatePath,
       ),
     );
-    assert.deepEqual(JSON.parse(await fs.readFile(chatStatePath, "utf8")), {
-      chatKey: "telegram/1:2",
-      sessionFile: "managed/chat/chat-root.jsonl",
-    });
+    assert.deepEqual(
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            dir,
+            "data",
+            "chat",
+            "session-state",
+            "telegram",
+            "1",
+            "2",
+            "state.json",
+          ),
+          "utf8",
+        ),
+      ),
+      {
+        chatKey: "telegram/1:2",
+        sessionFile: "managed/chat/chat-root.jsonl",
+      },
+    );
     assert.equal(
       await fs.readFile(path.join(currentStoreDir, "marker.txt"), "utf8"),
       "old\n",
@@ -1176,7 +1277,7 @@ test("persist normalizeInstalledChatSettings runs elevated migrations as target 
       await fs.readFile(targetSessionPath, "utf8"),
       "root session\n",
     );
-    assert.equal(result.migrations[0].moved, true);
+    assert.equal(result.migrations[0].moved >= 1, true);
     assert.equal(result.migrations[1].migrated, 1);
     assert.equal(result.migrations[2].migrated, 1);
   });
@@ -1247,7 +1348,7 @@ test("persist persistInstallerOutputs applies install upgrade migrations before 
   await withTempDir(async (dir) => {
     const ownerHome = path.join(dir, "home", "demo");
     const previousStoreDir = path.join(dir, "data", "koishi-message-store");
-    const currentStoreDir = path.join(dir, "data", "chat-message-store");
+    const currentStoreDir = path.join(dir, "data", "chat", "message-store");
     await fs.mkdir(previousStoreDir, { recursive: true });
     await fs.writeFile(
       path.join(previousStoreDir, "marker.txt"),
@@ -1286,14 +1387,20 @@ test("persist persistInstallerOutputs applies install upgrade migrations before 
 
     await fs.access(path.join(currentStoreDir, "marker.txt"));
     await assert.rejects(fs.access(path.join(previousStoreDir, "marker.txt")));
-    assert.deepEqual(result.migrations, [
-      {
-        id: "chat-message-store-dir",
-        fromPath: previousStoreDir,
-        toPath: currentStoreDir,
-        moved: true,
-        skipped: false,
-      },
+    assert.deepEqual(result.migrations[0], {
+      id: "data-layout-v1",
+      skipped: false,
+      moved: 1,
+      skippedExistingTarget: 0,
+      movedPaths: [
+        {
+          id: "koishi-message-store",
+          fromPath: previousStoreDir,
+          toPath: currentStoreDir,
+        },
+      ],
+    });
+    assert.deepEqual(result.migrations.slice(1), [
       {
         id: "chat-state-session-file-v1",
         markerPath: path.join(

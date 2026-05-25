@@ -99,8 +99,21 @@ export function chatStateDir(dataDir: string, chatKey: string) {
   const parsed = parseChatKey(chatKey);
   if (!parsed) throw new Error(`invalid_chatKey:${chatKey}`);
   return parsed.botId
-    ? path.join(dataDir, "chats", parsed.platform, parsed.botId, parsed.chatId)
-    : path.join(dataDir, "chats", parsed.platform, parsed.chatId);
+    ? path.join(
+        dataDir,
+        "chat",
+        "session-state",
+        parsed.platform,
+        parsed.botId,
+        parsed.chatId,
+      )
+    : path.join(
+        dataDir,
+        "chat",
+        "session-state",
+        parsed.platform,
+        parsed.chatId,
+      );
 }
 
 export function chatStatePath(dataDir: string, chatKey: string) {

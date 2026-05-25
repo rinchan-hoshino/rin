@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+
+import { coreDataPath } from "../data-layout.js";
 import os from "node:os";
 
 import BetterSqlite3 from "better-sqlite3";
@@ -390,7 +392,7 @@ export function resolveAgentDir(agentDir = ""): string {
 }
 
 export function resolveTokenUsageRoot(agentDir = ""): string {
-  return path.join(resolveAgentDir(agentDir), "data", "token-usage");
+  return coreDataPath(resolveAgentDir(agentDir), "usage");
 }
 
 export function resolveTokenUsageDbPath(agentDir = ""): string {

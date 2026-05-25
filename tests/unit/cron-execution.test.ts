@@ -1024,7 +1024,7 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
 
 test("cron scheduler persists built-in task state across restarts while hiding it publicly", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const tasksFile = path.join(agentDir, "data", "cron", "tasks.json");
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
   const builtInId = "builtin_memory_index_repair_daily";
   try {
     const first = new cronMod.CronScheduler({ agentDir });
@@ -1194,7 +1194,7 @@ test("cron scheduler can manually run an existing built-in task", async () => {
 
 test("cron scheduler derives running from live execution without persisting it", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const tasksFile = path.join(agentDir, "data", "cron", "tasks.json");
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
     scheduler.start();

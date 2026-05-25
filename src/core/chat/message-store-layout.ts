@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { normalizeLocalDateOnly } from "./date.js";
 import { parseChatKey } from "./support.js";
+import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
 
 export type ChatMessageStoreRoot = {
@@ -72,7 +73,7 @@ function buildChatMessageStoreLayout(
 
 function detectChatMessageStoreLayout(rootDir: string) {
   const preferredRoot = buildChatMessageStoreRoot(
-    path.join(rootDir, "data", "chat-message-store"),
+    chatDataPath(rootDir, "message-store"),
   );
   return buildChatMessageStoreLayout(preferredRoot, []);
 }

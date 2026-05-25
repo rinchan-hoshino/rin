@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { coreDataPath } from "../data-layout.js";
+
 import { ensureDir } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { nowIso } from "../time-utils.js";
@@ -29,7 +31,7 @@ export type DaemonInstanceLock = {
 };
 
 export function daemonInstanceLockPath(agentDir: string) {
-  return path.join(agentDir, "data", "daemon", LOCK_DIR_NAME);
+  return coreDataPath(agentDir, "daemon", LOCK_DIR_NAME);
 }
 
 function daemonInstanceLockOwnerPath(lockDir: string) {

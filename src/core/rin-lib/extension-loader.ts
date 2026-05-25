@@ -4,6 +4,8 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { extensionDataPath } from "../data-layout.js";
+
 function text(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
@@ -173,7 +175,7 @@ function createExtensionApi(
     cwd: options.cwd,
     agentDir: options.agentDir,
     dataDir,
-    runtimeRoot: path.join(dataDir, "extension-runtime"),
+    runtimeRoot: extensionDataPath(options.agentDir, "runtime"),
     config: {},
     logger: { info: noop, warn: noop, error: noop },
     heartbeat: { appendInfo: () => ({ entry: undefined, filePath: "" }) },

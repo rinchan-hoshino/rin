@@ -114,6 +114,7 @@ test("std configured session keeps daemon-independent Rin tools usable without d
   const sidecarStatePath = path.join(
     agentDir,
     "data",
+    "sidecars",
     "web-search",
     "instances",
     `process-${process.pid}`,

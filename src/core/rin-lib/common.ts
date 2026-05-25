@@ -1,11 +1,12 @@
 import path from "node:path";
 import os from "node:os";
+import { coreDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
 
 export { safeString };
 
 export function bridgeDaemonSocketPath(agentDir: string) {
-  return path.join(agentDir, "data", "daemon", "bridge.sock");
+  return coreDataPath(agentDir, "daemon", "bridge.sock");
 }
 
 function fallbackRuntimeDir() {

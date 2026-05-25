@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { extensionDataPath } from "./data-layout.js";
 
 import { cloneJson, isJsonRecord } from "./json-utils.js";
 import { readJsonFile } from "./platform/fs.js";
@@ -63,7 +64,7 @@ export function listRinBackgroundExtensionConfigs(
 }
 
 export function getRinExtensionRuntimeRoot(agentDir: string): string {
-  return path.join(agentDir, "data", "extension-runtime");
+  return extensionDataPath(agentDir, "runtime");
 }
 
 export function ensureRuntimeImporter(runtimeRoot: string, fileName: string) {

@@ -29,7 +29,8 @@ function chatDateIndexPath(root, date) {
   return path.join(
     root,
     "data",
-    "chat-message-store",
+    "chat",
+    "message-store",
     "indexes",
     "by-chat-date",
     "telegram",
@@ -307,7 +308,7 @@ test("message store always uses the preferred root even if a previous root still
 
     assert.equal(
       messageStore.chatMessageStoreDir(root),
-      path.join(root, "data", "chat-message-store"),
+      path.join(root, "data", "chat", "message-store"),
     );
     assert.equal(
       messageStore.chatMessageLogPath(
@@ -318,7 +319,8 @@ test("message store always uses the preferred root even if a previous root still
       path.join(
         root,
         "data",
-        "chat-message-store",
+        "chat",
+        "message-store",
         "chat-log-view",
         "telegram",
         "123",

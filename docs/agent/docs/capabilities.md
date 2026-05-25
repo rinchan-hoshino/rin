@@ -125,13 +125,13 @@ Background extensions are configured under `settings.json -> rinExtensions.backg
 }
 ```
 
-Use only trusted package names and versions. Packages may be installed or updated under `~/.rin/data/extension-runtime` during startup; restart Rin after editing background extension settings.
+Use only trusted package names and versions. Packages may be installed or updated under `~/.rin/data/extensions/runtime` during startup; restart Rin after editing background extension settings.
 
 ## Web search details
 
 Use fresh web search for latest, time-sensitive, version-sensitive, or otherwise changeable information. When `q` is an HTTP(S) URL, `web_search` fetches that page directly with a browser-like user agent and extracts readable content.
 
-Default web search uses a Rin-managed local SearXNG sidecar so users can search without provider API keys, external search setup, or a Rin-managed search service. The installer prepares the SearXNG runtime; the daemon starts and keeps the sidecar warm; web-search calls use an already-running sidecar and never install SearXNG. The sidecar runs on loopback, stores its runtime, state, and generated settings under Rin's own `data/web-search` directory, and does not write into the user's project files.
+Default web search uses a Rin-managed local SearXNG sidecar so users can search without provider API keys, external search setup, or a Rin-managed search service. The installer prepares the SearXNG runtime; the daemon starts and keeps the sidecar warm; web-search calls use an already-running sidecar and never install SearXNG. The sidecar runs on loopback, stores its runtime, state, and generated settings under Rin's own `data/sidecars/web-search` directory, and does not write into the user's project files.
 
 ## Runtime status and token usage
 
@@ -140,7 +140,7 @@ Default web search uses a Rin-managed local SearXNG sidecar so users can search 
 - `rin status --json`: raw `daemon_activity` RPC payload
 - RPC clients can call `daemon_activity` directly for the same real-time state
 - `daemon_activity` includes a top-level `schemaVersion` and redacts scheduled task prompt/command bodies
-- Token telemetry is stored under `~/.rin/data/token-usage/usage.db`
+- Token telemetry is stored under `~/.rin/data/core/usage/usage.db`
 - `rin usage` shows a text dashboard, configured provider account/quota data when available, and grouped usage queries
 
 ## Stable documentation paths

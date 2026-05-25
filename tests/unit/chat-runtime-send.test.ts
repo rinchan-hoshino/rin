@@ -351,7 +351,8 @@ test("onebot adapter recreates the outbound media cache directory before sending
     const cacheDir = path.join(
       agentDir,
       "data",
-      "chat-runtime-cache",
+      "chat",
+      "runtime-cache",
       "onebot",
     );
     const calls: Array<{ action: string; params: any }> = [];
@@ -371,7 +372,7 @@ test("onebot adapter recreates the outbound media cache directory before sending
     assert.equal(calls[0].action, "send_private_msg");
     assert.match(
       calls[0].params.message,
-      /^\[CQ:image,file=file:\/\/.*chat-runtime-cache\/onebot\/.*avatar\.png\]$/,
+      /^\[CQ:image,file=file:\/\/.*chat\/runtime-cache\/onebot\/.*avatar\.png\]$/,
     );
     const cachedPath = calls[0].params.message
       .replace(/^\[CQ:image,file=file:\/\//, "")

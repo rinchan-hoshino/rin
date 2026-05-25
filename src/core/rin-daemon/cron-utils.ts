@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { schedulerDataPath } from "../data-layout.js";
+
 import { safeString } from "../platform/process.js";
 export { nowIso } from "../time-utils.js";
 
@@ -75,7 +77,7 @@ export function normalizeIso(value: unknown, field: string) {
 }
 
 export function cronRoot(agentDir: string) {
-  return path.join(path.resolve(agentDir), "data", "cron");
+  return schedulerDataPath(agentDir);
 }
 
 export function cronTasksPath(agentDir: string) {

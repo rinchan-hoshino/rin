@@ -36,7 +36,7 @@ async function withTempRoot(fn: (dir: string) => Promise<void>) {
 test("message store layout defaults to the preferred root", async () => {
   await withTempRoot(async (root) => {
     const layout = getChatMessageStoreLayout(root);
-    const preferredStoreDir = path.join(root, "data", "chat-message-store");
+    const preferredStoreDir = path.join(root, "data", "chat", "message-store");
 
     assert.equal(layout.storeDir, preferredStoreDir);
     assert.equal(layout.primaryRoot.storeDir, preferredStoreDir);
@@ -56,7 +56,7 @@ test("message store layout defaults to the preferred root", async () => {
 
 test("message store layout keeps using the preferred root when a previous root exists", async () => {
   await withTempRoot(async (root) => {
-    const preferredStoreDir = path.join(root, "data", "chat-message-store");
+    const preferredStoreDir = path.join(root, "data", "chat", "message-store");
     await fs.mkdir(path.join(root, "data", "koishi-message-store"), {
       recursive: true,
     });

@@ -38,7 +38,7 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
   - chat sending, chat turn control, stored-message lookup, log inspection, and identity updates are documented SDK/file workflows rather than agent tools
   - `/chat` enters platform selection directly, keeps installer-only opt-in confirmation, prefers the minimum runnable fields, defaults to polling / socket modes when supported, and includes direct official links for required values
 - `token-usage`
-  - records detailed token telemetry under `~/.rin/data/token-usage/usage.db`
+  - records detailed token telemetry under `~/.rin/data/core/usage/usage.db`
   - powers the charted `rin usage` text dashboard, grouped usage queries, and best-effort configured provider account/quota display
 
 ## Core todo capability
@@ -129,7 +129,7 @@ Keep the change minimal:
 
 - disabled unless listed under `settings.json -> rinExtensions.backgroundServices` or a local/package extension exposes background capabilities
 - run as trusted Node.js packages in Rin's background runtime for long-running async work
-- may install or update configured npm packages under `~/.rin/data/extension-runtime` during startup
+- may install or update configured npm packages under `~/.rin/data/extensions/runtime` during startup
 - do not run in std/maintenance mode
 - may register chat adapters with `ctx.registerChatAdapter(...)`
 - may register external memory providers with `ctx.registerMemoryProvider(...)`; providers can implement `search`, `listRecent`, and `write`, and can return remote `reference` or `url` values instead of local transcript paths

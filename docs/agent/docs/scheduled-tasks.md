@@ -21,7 +21,7 @@ If the desired time, chat target, authority, or irreversible action is unclear, 
 1. Read `~/.rin/docs/rin/docs/agent-sdk.md` for the SDK import and helper names.
 2. Use the local Rin Agent SDK for normal task operations; do not construct raw `cron_*` daemon RPC payloads by hand.
 3. Use `rin status` or `rin status --json` for a redacted liveness overview.
-4. Do not edit `~/.rin/data/cron/tasks.json` while the daemon is running unless doing explicit offline recovery; the running daemon is authoritative.
+4. Do not edit `~/.rin/data/scheduler/tasks.json` while the daemon is running unless doing explicit offline recovery; the running daemon is authoritative.
 
 ## Operation workflow
 

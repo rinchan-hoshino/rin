@@ -107,16 +107,16 @@ For plain inspection of already stored chat records, read the local message stor
 Normal installs store chat records under:
 
 ```text
-<agentDir>/data/chat-message-store/
+<agentDir>/data/chat/message-store/
 ```
 
 Replace `<agentDir>` with the active Rin agent directory, usually `~/.rin`.
 
 Useful paths:
 
-- records: `data/chat-message-store/records/<first-two-record-key-chars>/<recordKey>.json`
-- message-id index: `data/chat-message-store/indexes/by-message-id/<first-two-index-key-chars>/<indexKey>.json`
-- chat/date index: `data/chat-message-store/indexes/by-chat-date/<platform>/<botId-if-present>/<chatId>/<YYYY-MM-DD>.json`
+- records: `data/chat/message-store/records/<first-two-record-key-chars>/<recordKey>.json`
+- message-id index: `data/chat/message-store/indexes/by-message-id/<first-two-index-key-chars>/<indexKey>.json`
+- chat/date index: `data/chat/message-store/indexes/by-chat-date/<platform>/<botId-if-present>/<chatId>/<YYYY-MM-DD>.json`
 
 Cookbook:
 
@@ -131,7 +131,7 @@ agent_dir="$HOME/.rin"
 chat_key='onebot/2301401877:1067390680'
 message_id='1234567890'
 record_key=$(node -e 'const crypto=require("crypto"); const [chatKey,messageId]=process.argv.slice(1); console.log(crypto.createHash("sha1").update(`${chatKey}\n${messageId}`).digest("hex"));' "$chat_key" "$message_id")
-record_path="$agent_dir/data/chat-message-store/records/${record_key:0:2}/$record_key.json"
+record_path="$agent_dir/data/chat/message-store/records/${record_key:0:2}/$record_key.json"
 ```
 
 When only `messageId` is known, read the message-id index first; it contains relative record paths:
@@ -140,7 +140,7 @@ When only `messageId` is known, read the message-id index first; it contains rel
 agent_dir="$HOME/.rin"
 message_id='1234567890'
 index_key=$(node -e 'const crypto=require("crypto"); console.log(crypto.createHash("sha1").update(process.argv[1]).digest("hex"));' "$message_id")
-index_path="$agent_dir/data/chat-message-store/indexes/by-message-id/${index_key:0:2}/$index_key.json"
+index_path="$agent_dir/data/chat/message-store/indexes/by-message-id/${index_key:0:2}/$index_key.json"
 ```
 
 When listing one chat/date, read the chat/date index to get `recordKeys`, then read the matching record files.

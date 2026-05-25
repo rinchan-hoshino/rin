@@ -322,7 +322,7 @@ class TelegramAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:telegram", logger);
-    this.cacheDir = path.join(dataDir, "chat-runtime-cache", "telegram");
+    this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "telegram");
     const cursorKey =
       safeString(config?.token)
         .trim()
@@ -330,7 +330,8 @@ class TelegramAdapter {
         ?.replace(/[^A-Za-z0-9._-]+/g, "_") || "default";
     this.cursorPath = path.join(
       dataDir,
-      "chat-runtime-state",
+      "chat",
+      "runtime-state",
       "telegram",
       cursorKey,
       "cursor.json",
@@ -1090,7 +1091,7 @@ class OneBotAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:onebot", logger);
-    this.cacheDir = path.join(dataDir, "chat-runtime-cache", "onebot");
+    this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "onebot");
     ensureDir(this.cacheDir);
     this.bot = {
       platform: "onebot",

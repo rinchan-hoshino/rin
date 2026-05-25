@@ -88,7 +88,7 @@ test("chat chat log appends into unified message store and reads one day chat hi
       "telegram/123:456",
       "2026-04-04",
     );
-    assert.match(filePath, /chat-message-store[\\/]chat-log-view[\\/]/);
+    assert.match(filePath, /chat[\\/]message-store[\\/]chat-log-view[\\/]/);
     assert.equal(entries.length, 2);
     assert.match(chatLog.formatChatLog(entries), /assistant: Good morning!/);
   });

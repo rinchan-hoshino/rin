@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { coreDataPath } from "../data-layout.js";
 import { ensureDir } from "../platform/fs.js";
 import { nowIso } from "../time-utils.js";
 import {
@@ -101,15 +102,15 @@ export async function startDaemon(
     shutdownGraceMs?: number;
   } = {},
 ) {
+  const runtime = resolveRuntimeProfile();
+  applyRuntimeProfileEnvironment(runtime);
   const socketPath = options.socketPath || defaultDaemonSocketPath();
   const bridgeSocketPath = bridgeDaemonSocketPath(
-    process.env.RIN_DIR || resolveRuntimeProfile().agentDir,
+    process.env.RIN_DIR || runtime.agentDir,
   );
   const workerPath =
     options.workerPath ||
     path.join(path.dirname(new URL(import.meta.url).pathname), "worker.js");
-  const runtime = resolveRuntimeProfile();
-  applyRuntimeProfileEnvironment(runtime);
   const instanceLock =
     options.instanceLock ||
     (await acquireDaemonInstanceLock(runtime.agentDir, { socketPath }));
@@ -128,7 +129,7 @@ export async function startDaemon(
     cwd: runtime.cwd,
     gcIdleMs: options.workerGcIdleMs,
     sweepIntervalMs: options.workerSweepIntervalMs,
-    resourceOptionsDir: path.join(runtime.agentDir, "data", "worker-options"),
+    resourceOptionsDir: coreDataPath(runtime.agentDir, "workers", "options"),
     agentDir: runtime.agentDir,
     onWorkerSpawn: (requester, worker) => {
       if (requester)

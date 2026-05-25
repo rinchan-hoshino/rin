@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { coreDataPath } from "../data-layout.js";
 import { normalizeSessionRef } from "../session/ref.js";
 
 const RUNNING_WORKERS_FILE = "running-workers.json";
@@ -11,7 +12,7 @@ type RunningWorkerState = {
 };
 
 export function runningWorkersStatePath(agentDir: string) {
-  return path.join(agentDir, "data", RUNNING_WORKERS_FILE);
+  return coreDataPath(agentDir, "workers", RUNNING_WORKERS_FILE);
 }
 
 function normalizeSessionFile(value: unknown) {
