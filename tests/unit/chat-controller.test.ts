@@ -221,11 +221,35 @@ test("chat controller scopes pending self-improve notices outside private chats"
 
   const privateChat = await createScopedController("telegram/1:200");
   privateChat.controller.state.chatType = "private";
+  privateChat.controller.state.sessionFile = "/tmp/private-current.jsonl";
+  saveChatMessage(privateChat.agentDir, {
+    chatKey: "telegram/1:200",
+    messageId: "private-old",
+    role: "user",
+    platform: "telegram",
+    botId: "1",
+    chatId: "200",
+    chatType: "private",
+    receivedAt: new Date().toISOString(),
+    sessionFile: "/tmp/private-old.jsonl",
+  });
+  saveChatMessage(privateChat.agentDir, {
+    chatKey: "telegram/1:300",
+    messageId: "other-private",
+    role: "user",
+    platform: "telegram",
+    botId: "1",
+    chatId: "300",
+    chatType: "private",
+    receivedAt: new Date().toISOString(),
+    sessionFile: "/tmp/other-private.jsonl",
+  });
   await privateChat.controller.connect({ restoreSession: false });
   assert.deepEqual(privateChat.requests, [
     {
       type: "flush_self_improve_notices",
       sessionFile: undefined,
+      sessionFiles: ["/tmp/private-current.jsonl", "/tmp/private-old.jsonl"],
     },
   ]);
 });

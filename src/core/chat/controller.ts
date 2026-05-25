@@ -766,7 +766,6 @@ export class ChatController {
   }
 
   private selfImproveNoticeSessionFilesForChat() {
-    if (this.chatTypeForNoticeScope() === "private") return undefined;
     const files = new Set<string>();
     for (const candidate of [this.state.sessionFile]) {
       const resolved = this.resolveSessionFileForUse(candidate);
