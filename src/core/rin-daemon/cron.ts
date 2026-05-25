@@ -62,6 +62,11 @@ export type CronTaskSessionBinding = {
   sessionFile?: string;
 };
 
+export type CronTaskFrontendBinding = {
+  kind?: string;
+  key: string;
+};
+
 export type CronTaskThinkingLevel = AvailableThinkingLevel;
 
 export type CronTaskRecord = {
@@ -73,14 +78,14 @@ export type CronTaskRecord = {
     sessionFile?: string;
     sessionId?: string;
     sessionName?: string;
-    chatKey?: string;
+    frontend?: CronTaskFrontendBinding;
   };
   name?: string;
   enabled: boolean;
   completedAt?: string;
   completionReason?: string;
   pausedAt?: string;
-  chatKey?: string;
+  frontend?: CronTaskFrontendBinding;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
   trigger: CronTaskTrigger;
@@ -105,7 +110,7 @@ export type CronTaskInput = {
   id?: string;
   name?: string;
   enabled?: boolean;
-  chatKey?: string | null;
+  frontend?: CronTaskFrontendBinding | null;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
   trigger?: CronTaskTrigger;
@@ -119,7 +124,7 @@ type CronTaskUpsertDefaults = {
   sessionFile?: string;
   sessionId?: string;
   sessionName?: string;
-  chatKey?: string;
+  frontend?: CronTaskFrontendBinding;
 };
 
 function normalizeThinkingLevel(
@@ -236,6 +241,20 @@ function normalizeTaskCondition(
     lastResult: existing?.condition?.lastResult,
     lastOutput: existing?.condition?.lastOutput,
   };
+}
+
+function normalizeTaskFrontend(
+  frontend: CronTaskFrontendBinding | null | undefined,
+  existing: CronTaskRecord | undefined,
+): CronTaskFrontendBinding | undefined {
+  if (frontend === null) return undefined;
+  if (frontend === undefined) return existing?.frontend;
+  const key = requireNonEmptyString(
+    (frontend as any).key,
+    "cron_frontend_key_required",
+  );
+  const kind = safeString((frontend as any).kind).trim() || undefined;
+  return { ...(kind ? { kind } : {}), key };
 }
 
 function resolveDedicatedSessionBinding(options: {
@@ -432,12 +451,7 @@ export class CronScheduler {
       input.name !== undefined
         ? safeString(input.name).trim() || undefined
         : existing?.name;
-    const chatKey =
-      input.chatKey === null
-        ? undefined
-        : input.chatKey !== undefined
-          ? safeString(input.chatKey).trim() || undefined
-          : existing?.chatKey;
+    const frontend = normalizeTaskFrontend(input.frontend, existing);
 
     const normalizedTrigger = normalizeTaskTrigger(
       input.trigger ?? existing?.trigger,
@@ -463,8 +477,8 @@ export class CronScheduler {
       input.target ?? existing?.target,
     );
     if (session.mode === "session_instruction") {
-      if (chatKey)
-        throw new Error("cron_session_instruction_chat_key_forbidden");
+      if (frontend)
+        throw new Error("cron_session_instruction_frontend_forbidden");
       if (normalizedTarget.kind !== "agent_prompt") {
         throw new Error("cron_session_instruction_requires_agent_prompt");
       }
@@ -493,14 +507,14 @@ export class CronScheduler {
         sessionFile: defaults.sessionFile,
         sessionId: defaults.sessionId,
         sessionName: defaults.sessionName,
-        chatKey: defaults.chatKey,
+        frontend: normalizeTaskFrontend(defaults.frontend, undefined),
       },
       name,
       enabled,
       completedAt: existing?.completedAt,
       completionReason: existing?.completionReason,
       pausedAt: existing?.pausedAt,
-      chatKey,
+      frontend,
       model,
       thinkingLevel,
       trigger: normalizedTrigger,
@@ -642,6 +656,13 @@ export class CronScheduler {
       row.lastError = row.lastError ? safeString(row.lastError) : undefined;
       row.thinkingLevel = normalizeThinkingLevel(row.thinkingLevel);
       row.model = normalizeModelOverride(row.model);
+      const legacyChatKey = safeString((row as any).chatKey).trim();
+      row.frontend = normalizeTaskFrontend(
+        row.frontend ||
+          (legacyChatKey ? { kind: "chat", key: legacyChatKey } : undefined),
+        undefined,
+      );
+      delete (row as any).chatKey;
       const normalizedMode = normalizeScheduledTaskSessionMode(
         (row.session as any)?.mode,
       );
@@ -706,7 +727,7 @@ export class CronScheduler {
   private statusTask(task: CronTaskRecord) {
     const snapshot = this.snapshotTask(task);
     const {
-      chatKey,
+      frontend,
       createdFrom,
       dedicatedSessionFile,
       lastError,
@@ -720,7 +741,8 @@ export class CronScheduler {
     void lastResultText;
     return cloneJson({
       ...safeTask,
-      hasChatBinding: Boolean(chatKey),
+      hasFrontendBinding: Boolean(frontend),
+      frontendKind: frontend?.kind,
       session: { mode: snapshot.session.mode },
       target: { kind: target.kind },
     });
@@ -773,9 +795,11 @@ export class CronScheduler {
 
   private terminateTaskSession(task: CronTaskRecord | undefined) {
     if (!task || task.id.startsWith("builtin_self_improve_")) return;
-    void this.options.chat
-      ?.terminateTurn?.({ controllerKey: task.id })
-      .catch(() => {});
+    const controllerKey =
+      task.frontend && task.frontend.kind !== "chat"
+        ? task.frontend.key
+        : task.id;
+    void this.options.chat?.terminateTurn?.({ controllerKey }).catch(() => {});
   }
 
   private evaluateCondition(task: CronTaskRecord) {

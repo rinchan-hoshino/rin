@@ -38,7 +38,7 @@ Required verification after a create/update/run-state change:
 - `trigger`, `nextRunAt`, and local-time expectation
 - `condition` plus `condition.lastEvaluatedAt` / `condition.lastResult` after a run-now or due tick
 - `session.mode`, `dedicatedSessionFile` when dedicated
-- `target.kind`, prompt/command intent, `chatKey`
+- `target.kind`, prompt/command intent, `frontend`
 - `model`, `thinkingLevel`
 - `termination`, `runCount`, `lastStartedAt`, `lastFinishedAt`, `lastResultText`, `lastError`
 
@@ -53,7 +53,8 @@ type Task = {
   id?: string;
   name?: string;
   enabled?: boolean;
-  chatKey?: string | null;
+  // binds the task turn to a frontend/controller identity; use kind: "chat" for chat delivery
+  frontend?: { kind?: string; key: string } | null;
   model?: string;
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   trigger: {
@@ -202,7 +203,8 @@ Behavior:
 
 - Agent tasks run in a managed task session for that run.
 - Rin disposes/shuts down the no-session turn after completion, except special self-improve maintenance tasks.
-- If `chatKey` is set, the final task result is sent to that chat and may preserve a chat-bound session file for quote/resume context.
+- If `frontend` is set, Rin binds the scheduled turn to that frontend/controller identity.
+- If `frontend.kind` is `"chat"`, the final task result is sent to that chat and may preserve a chat-bound session file for quote/resume context.
 
 ### `session.mode: "dedicated"`
 
@@ -228,7 +230,7 @@ Requirements enforced by the scheduler:
 
 - `target.kind` must be `"agent_prompt"`.
 - Trigger must be one-time `runAt`/`startAt`, not a recurring cron expression.
-- Do not set `chatKey`; Rin derives the chat binding from the stored session file.
+- Do not set `frontend`; Rin derives the existing frontend/chat binding from the stored session file.
 - `session.sessionFile` must point to an existing stored session with a chat binding.
 
 Runtime prompt metadata marks this as an agent-initiated scheduled task without adding task metadata to the normal system prompt.
@@ -239,7 +241,8 @@ Runtime prompt metadata marks this as an agent-initiated scheduled task without 
 
 Runs an agent turn. Use this for owner-facing reports, summaries, checks that need reasoning, and any task that should produce polished chat text.
 
-- `chatKey` binds delivery to a chat bridge target.
+- `frontend` binds execution to a frontend/controller identity.
+- `frontend: { kind: "chat", key: "..." }` binds delivery to a chat bridge target.
 - `model` and `thinkingLevel` override the run when present.
 - Rin stores a summarized final result in `lastResultText`.
 - If the agent turn has no canonical final assistant text, the task records `lastError`.
@@ -292,7 +295,7 @@ await rin.tasks.upsert({
   id: "cron_daily_brief",
   name: "Daily brief",
   enabled: true,
-  chatKey: "telegram/123456:7890",
+  frontend: { kind: "chat", key: "telegram/123456:7890" },
   thinkingLevel: "medium",
   trigger: { expression: "30 8 * * *", timezone: "local" },
   session: { mode: "none" },
@@ -369,7 +372,7 @@ await rin.tasks.upsert({
 });
 ```
 
-`upsert()` merges with the existing task when `id` matches. Include fields you intend to change. Use `null` only for fields that explicitly support removal (`chatKey`, `termination`, `condition`).
+`upsert()` merges with the existing task when `id` matches. Include fields you intend to change. Use `null` only for fields that explicitly support removal (`frontend`, `termination`, `condition`).
 
 Run now, pause, or resume:
 
@@ -401,7 +404,7 @@ await rin.tasks.delete("cron_daily_brief");
 
 - `complete()` keeps a completed record with `completionReason` and disables future runs.
 - `delete()` removes the record.
-- Both terminate the task's active chat turn when applicable.
+- Both terminate the task's active frontend turn when applicable.
 
 ## Built-in tasks
 
@@ -444,7 +447,7 @@ Use ids like `cron_daily_brief`, `cron_qmt_evening_review`, or `cron_follow_up_h
 ## Troubleshooting
 
 - Task did not run: inspect `enabled`, `completedAt`, `pausedAt`, `nextRunAt`, `condition.lastResult`, `lastError`, and `rin status --json`.
-- Run-now returned but no report arrived: inspect `running`, `lastStartedAt`, active chat turn, `lastError`, and the target `chatKey`.
+- Run-now returned but no report arrived: inspect `running`, `lastStartedAt`, active frontend turn, `lastError`, and the target `frontend`.
 - Recurring task is noisy: add `condition`, lower `thinkingLevel`, or change prompt to report only changes.
 - Report formatting is too raw: replace `shell_command` delivery with an `agent_prompt` wrapper.
-- Current-session follow-up fails: verify the `sessionFile` exists and has a stored chat binding; do not add `chatKey` to `session_instruction` tasks.
+- Current-session follow-up fails: verify the `sessionFile` exists and has a stored chat binding; do not add `frontend` to `session_instruction` tasks.

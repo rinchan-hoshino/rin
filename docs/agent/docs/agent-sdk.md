@@ -59,7 +59,7 @@ Helper semantics:
 
 - `list()` returns agent-created task records visible through the daemon.
 - `get(taskId)` inspects one visible task.
-- `upsert(task, defaults?)` creates or updates a task; matching `id` merges with the existing record. Use `condition: null`, `termination: null`, or `chatKey: null` to remove those optional fields.
+- `upsert(task, defaults?)` creates or updates a task; matching `id` merges with the existing record. Use `condition: null`, `termination: null`, or `frontend: null` to remove those optional fields.
 - `run(taskId)` starts the existing task through the scheduler path and still evaluates `condition`; it does not clone the task or change its definition.
 - `pause(taskId)` disables future runs, records `pausedAt`, clears `nextRunAt`, and asks chat runtime to terminate the task turn when applicable.
 - `resume(taskId)` enables the task, clears `pausedAt`, and recomputes `nextRunAt`.

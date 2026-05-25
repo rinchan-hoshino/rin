@@ -83,9 +83,11 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   chat_turn_aborted: () => "The chat turn was aborted.",
 
   cron_chat_unavailable: () =>
-    "Scheduled task delivery failed because the target chat is unavailable. Check the task chat binding and retry.",
+    "Scheduled task delivery failed because the target chat is unavailable. Check the task frontend binding and retry.",
   cron_final_assistant_text_missing: () =>
     "Scheduled task finished but produced no final reply. Check the task session and retry.",
+  cron_frontend_key_required: () =>
+    "Scheduled task frontend binding needs a frontend key. Add the key or remove the binding and retry.",
   cron_invalid_agent_task: () =>
     "Scheduled task configuration is not a valid agent task. Fix the task target and retry.",
   cron_invalid_expression: () =>
@@ -106,6 +108,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task cannot find the chat binding for this session. Rebind the task or choose another session.",
   cron_session_instruction_chat_key_forbidden: () =>
     "Scheduled task session instructions must use the session chat binding, not a separate chat key. Fix the task target and retry.",
+  cron_session_instruction_frontend_forbidden: () =>
+    "Scheduled task session instructions must use the session's frontend binding, not a separate frontend target. Fix the task target and retry.",
   cron_session_instruction_requires_agent_prompt: () =>
     "Scheduled task session instruction needs an agent prompt. Add the prompt and retry.",
   cron_session_instruction_requires_once: () =>

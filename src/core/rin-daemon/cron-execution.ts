@@ -17,7 +17,7 @@ import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
 import { resolveStoredSessionFile } from "../session/ref.js";
-import type { CronTaskRecord } from "./cron.js";
+import type { CronTaskFrontendBinding, CronTaskRecord } from "./cron.js";
 
 type CronChatCapability = {
   send?: (payload: ChatOutboxPayload) => Promise<any>;
@@ -145,12 +145,26 @@ export async function executeCronShellTask(
   });
 }
 
+function resolveCronTaskFrontend(task: CronTaskRecord) {
+  const frontend = (task as any).frontend as
+    | CronTaskFrontendBinding
+    | undefined;
+  const key = String(frontend?.key || "").trim();
+  if (!key) return undefined;
+  return {
+    key,
+    kind: String(frontend?.kind || "").trim() || undefined,
+  };
+}
+
 function buildCronTaskPromptContext(task: CronTaskRecord) {
   const taskName = String(task.name || "").trim();
+  const frontend = resolveCronTaskFrontend(task);
   return {
-    source: "chat-bridge",
+    source: frontend?.kind === "chat" ? "chat-bridge" : "scheduled-task",
     sentAt: Date.now(),
-    chatKey: task.chatKey,
+    ...(frontend?.kind === "chat" ? { chatKey: frontend.key } : {}),
+    frontend,
     taskId: task.id,
     taskName: taskName || undefined,
   };
@@ -277,7 +291,10 @@ export async function executeCronAgentTask(
       ? String(task.dedicatedSessionFile || "").trim() ||
         getManagedTaskSessionFile(options.agentDir, task.id)
       : undefined;
-  const controllerKey = task.id;
+  const frontend = resolveCronTaskFrontend(task);
+  const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
+  const controllerKey =
+    frontend && frontend.kind !== "chat" ? frontend.key : task.id;
   const sessionFile = await resolveCronSessionFile(task);
   const continuing = Boolean(
     sessionMode === "dedicated" && (sessionFile || task.runCount > 1),
@@ -288,7 +305,7 @@ export async function executeCronAgentTask(
   if (!basePrompt) throw new Error("cron_prompt_required");
   const prompt = basePrompt;
   const result = await options.chat.runTurn({
-    chatKey: task.chatKey,
+    chatKey,
     controllerKey,
     deliveryEnabled: false,
     affectChatBinding: false,
@@ -301,7 +318,7 @@ export async function executeCronAgentTask(
       : {}),
     ...(task.model ? { model: task.model } : {}),
     ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
-    ...(task.chatKey
+    ...(frontend
       ? {
           promptMeta: buildCronTaskPromptContext(task),
         }
@@ -311,7 +328,7 @@ export async function executeCronAgentTask(
   const finalText = summarizeText(completion.finalText, 4000);
   if (!finalText) throw new Error("cron_final_assistant_text_missing");
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
-  const keepChatBoundSession = Boolean(task.chatKey && nextSessionFile);
+  const keepChatBoundSession = Boolean(chatKey && nextSessionFile);
   if (sessionMode === "dedicated") {
     if (dedicatedSessionFile) {
       task.dedicatedSessionFile = dedicatedSessionFile;
@@ -406,9 +423,11 @@ export async function executeCronTask(
         status: "completed",
         outputPreview: text,
       };
-      if (task.chatKey && text) {
+      const frontend = resolveCronTaskFrontend(task);
+      const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
+      if (chatKey && text) {
         await sendChatText(options, {
-          chatKey: task.chatKey,
+          chatKey,
           taskId: task.id,
           runId,
           text,
@@ -433,9 +452,11 @@ export async function executeCronTask(
         outputPreview: result.text,
         sessionFile: result.sessionFile,
       };
-      if (task.chatKey && result.text) {
+      const frontend = resolveCronTaskFrontend(task);
+      const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
+      if (chatKey && result.text) {
         await sendChatText(options, {
-          chatKey: task.chatKey,
+          chatKey,
           taskId: task.id,
           runId,
           text: result.text,

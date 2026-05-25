@@ -153,7 +153,7 @@ test("cron dedicated agent task creates and then preserves its bound session", a
   const secondSessionFile = path.join(agentDir, "dedicated-session-next.jsonl");
   const task = {
     id: "cron_dedicated",
-    chatKey: "telegram/demo:1",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
     session: { mode: "dedicated" },
     target: {
       kind: "agent_prompt",
@@ -247,7 +247,7 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const task = {
     id: "cron_seeded",
-    chatKey: "telegram/demo:1",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
     session: { mode: "dedicated" },
     dedicatedSessionFile: path.join(
       agentDir,
@@ -380,6 +380,83 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
   }
 });
 
+test("cron frontend-bound no-session agent task uses frontend controller without chat delivery", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const task = {
+    id: "cron_frontend_bound",
+    frontend: { kind: "gui", key: "desktop/main" },
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt: "hello" },
+  };
+  const calls = [];
+  try {
+    const result = await execMod.executeCronAgentTask(task, {
+      agentDir,
+      runId: "run-frontend-1",
+      chat: {
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return {
+            finalText: "done",
+            sessionId: "s1",
+            sessionFile: path.join(agentDir, "sessions", "frontend.jsonl"),
+          };
+        },
+      },
+    });
+    assert.equal(result.text, "done");
+    assert.equal(result.sessionFile, undefined);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].chatKey, undefined);
+    assert.equal(calls[0].controllerKey, "desktop/main");
+    assert.equal(calls[0].deliveryEnabled, false);
+    assert.equal(calls[0].affectChatBinding, false);
+    assert.equal(calls[0].shutdownAfterTurn, true);
+    assert.deepEqual(calls[0].promptMeta?.frontend, {
+      kind: "gui",
+      key: "desktop/main",
+    });
+    assert.equal(calls[0].promptMeta?.source, "scheduled-task");
+    assert.equal(calls[0].promptMeta?.taskId, "cron_frontend_bound");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler persists generic frontend bindings", () => {
+  const scheduler = new cronMod.CronScheduler({
+    agentDir: "/tmp/rin-agent",
+    cwd: process.cwd(),
+  });
+  const task = scheduler.upsertTask({
+    trigger: { runAt: "2026-04-10T00:00:00.000Z" },
+    frontend: { kind: "tui", key: "terminal/main" },
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt: "hello" },
+  });
+  assert.deepEqual(task.frontend, { kind: "tui", key: "terminal/main" });
+});
+
+test("cron scheduler rejects explicit frontend bindings for session instructions", () => {
+  const scheduler = new cronMod.CronScheduler({
+    agentDir: "/tmp/rin-agent",
+    cwd: process.cwd(),
+  });
+  assert.throws(
+    () =>
+      scheduler.upsertTask({
+        trigger: { runAt: "2026-04-10T00:00:00.000Z" },
+        frontend: { kind: "chat", key: "telegram/demo:1" },
+        session: {
+          mode: "session_instruction",
+          sessionFile: "/tmp/session.jsonl",
+        },
+        target: { kind: "agent_prompt", prompt: "hello" },
+      }),
+    /cron_session_instruction_frontend_forbidden/,
+  );
+});
+
 test("cron chat-bound no-session agent task preserves session file for quote resume", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const transientSessionFile = path.join(
@@ -392,7 +469,7 @@ test("cron chat-bound no-session agent task preserves session file for quote res
   const task = {
     id: "cron_chat_bound",
     name: "Chat Bound Task",
-    chatKey: "telegram/demo:1",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt: "hello" },
     trigger: { expression: "*/1 * * * *", timezone: "local" },
@@ -603,23 +680,6 @@ test("cron scheduler validates current-session instruction bindings", async () =
     assert.throws(
       () =>
         scheduler.upsertTask({
-          id: "cron_instruction_chat_key",
-          chatKey: "telegram/demo:1",
-          trigger: { runAt: "2099-01-01T00:00:00.000Z" },
-          session: {
-            mode: "session_instruction",
-            sessionFile: "/tmp/session.jsonl",
-          },
-          target: {
-            kind: "agent_prompt",
-            prompt: "Continue here.",
-          },
-        }),
-      /cron_session_instruction_chat_key_forbidden/,
-    );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
           id: "cron_instruction_shell",
           trigger: { runAt: "2099-01-01T00:00:00.000Z" },
           session: {
@@ -661,7 +721,7 @@ test("cron scheduler validates current-session instruction bindings", async () =
         prompt: "Continue here.",
       },
     });
-    assert.equal(task.chatKey, undefined);
+    assert.equal(task.frontend, undefined);
     assert.equal(task.session.mode, "session_instruction");
     assert.equal(task.session.sessionFile, "/tmp/session.jsonl");
     assert.equal(task.target.kind, "agent_prompt");
@@ -676,7 +736,7 @@ test("cron agent task falls back to canonical turn result text", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const task = {
     id: "cron_result_fallback",
-    chatKey: "telegram/demo:1",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
     session: { mode: "dedicated" },
     target: { kind: "agent_prompt", prompt: "hello" },
   };
@@ -720,7 +780,7 @@ test("cron dedicated agent task uses separate initial and continuation prompts",
   );
   const task = {
     id: "cron_prompt_modes",
-    chatKey: "telegram/demo:1",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
     session: { mode: "dedicated" },
     runCount: 1,
     target: {
@@ -773,7 +833,7 @@ test("cron chat-bound agent task delivery records session binding", async () => 
   const sent = [];
   const task = {
     id: "cron_delivery",
-    chatKey: "telegram/demo:1",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
     session: { mode: "none" },
     trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
     target: { kind: "agent_prompt", prompt: "hello" },
@@ -1018,6 +1078,48 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     assert.doesNotMatch(sleep.target.prompt, /## Basic concepts/);
   } finally {
     scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler migrates persisted chatKey tasks to frontend chat bindings", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  let scheduler;
+  try {
+    await fs.mkdir(path.dirname(tasksFile), { recursive: true });
+    await fs.writeFile(
+      tasksFile,
+      JSON.stringify([
+        {
+          id: "cron_legacy_chat",
+          createdAt: "2026-04-10T00:00:00.000Z",
+          updatedAt: "2026-04-10T00:00:00.000Z",
+          enabled: true,
+          chatKey: "telegram/demo:1",
+          trigger: { runAt: "2099-01-01T00:00:00.000Z" },
+          session: { mode: "none" },
+          target: { kind: "agent_prompt", prompt: "hello" },
+          runCount: 0,
+          running: false,
+        },
+      ]),
+      "utf8",
+    );
+
+    scheduler = new cronMod.CronScheduler({ agentDir });
+    scheduler.start();
+    const task = scheduler.getTask("cron_legacy_chat");
+    assert.deepEqual(task.frontend, { kind: "chat", key: "telegram/demo:1" });
+    assert.equal("chatKey" in task, false);
+    scheduler.stop();
+
+    const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    const row = rows.find((item) => item.id === "cron_legacy_chat");
+    assert.deepEqual(row.frontend, { kind: "chat", key: "telegram/demo:1" });
+    assert.equal("chatKey" in row, false);
+  } finally {
+    scheduler?.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
