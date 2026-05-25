@@ -73,7 +73,18 @@ function toFrontendEvent(event: any): InteractiveFrontendEvent | null {
 export type RinDaemonFrontendClientTransportOptions = {
   socketPath?: string;
   connectSocket: RpcSocketConnector;
+  connectTimeoutMs?: number;
 };
+
+const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
+
+function normalizeConnectTimeoutMs(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return DEFAULT_CONNECT_TIMEOUT_MS;
+  }
+  return Math.max(1, Math.floor(numeric));
+}
 
 function parseCommandArgumentCompletionRequest(input: string) {
   const value = String(input || "");
@@ -90,6 +101,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   socketPath: string;
   socket: RpcSocketLike | null = null;
   private readonly connectSocket?: RpcSocketConnector;
+  private readonly connectTimeoutMs: number;
   state = { buffer: "" };
   requestId = 0;
   pending = new Map<
@@ -108,41 +120,74 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     if (typeof transport === "string") {
       this.socketPath = transport;
       this.connectSocket = undefined;
+      this.connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS;
       return;
     }
     this.socketPath = transport.socketPath || "inprocess://rin-daemon";
     this.connectSocket = transport.connectSocket;
+    this.connectTimeoutMs = normalizeConnectTimeoutMs(
+      transport.connectTimeoutMs,
+    );
   }
 
   async connect() {
     if (this.socket && !this.socket.destroyed) return;
     if (this.connectPromise) return await this.connectPromise;
-    this.connectPromise = (async () => {
-      const socket = this.connectSocket
-        ? await this.connectSocket()
-        : net.createConnection(this.socketPath);
-
-      await new Promise<void>((resolve, reject) => {
-        const onError = (error: Error) => {
+    this.connectPromise = new Promise<void>((resolve, reject) => {
+      let socket: RpcSocketLike | null = null;
+      let settled = false;
+      const timerRef: { current?: NodeJS.Timeout } = {};
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        if (error) {
           try {
-            socket.destroy();
+            socket?.destroy(error);
           } catch {}
           this.connectPromise = null;
           reject(error);
-        };
+          return;
+        }
+        if (!socket) {
+          this.connectPromise = null;
+          reject(new Error("rin_request_failed:connect"));
+          return;
+        }
+        this.socket = socket;
+        this.state.buffer = "";
+        socket.on("data", (chunk) => this.handleChunk(String(chunk), socket));
+        socket.on("close", () => this.handleDisconnect(true, socket));
+        socket.on("error", () => this.handleDisconnect(true, socket));
+        this.connectPromise = null;
+        resolve();
+      };
+      timerRef.current = setTimeout(() => {
+        finish(new Error("rin_timeout:connect"));
+      }, this.connectTimeoutMs);
+      const attachSocket = (created: RpcSocketLike) => {
+        if (settled) {
+          try {
+            created.destroy();
+          } catch {}
+          return;
+        }
+        socket = created;
+        const onError = (error: Error) => finish(error);
         socket.once("error", onError);
         socket.once("connect", () => {
-          socket.removeListener("error", onError);
-          this.socket = socket;
-          this.state.buffer = "";
-          socket.on("data", (chunk) => this.handleChunk(String(chunk), socket));
-          socket.on("close", () => this.handleDisconnect(true, socket));
-          socket.on("error", () => this.handleDisconnect(true, socket));
-          this.connectPromise = null;
-          resolve();
+          socket?.removeListener("error", onError);
+          finish();
         });
+      };
+      Promise.resolve(
+        this.connectSocket
+          ? this.connectSocket()
+          : net.createConnection(this.socketPath),
+      ).then(attachSocket, (error) => {
+        finish(error instanceof Error ? error : new Error(String(error)));
       });
-    })().catch((error) => {
+    }).catch((error) => {
       this.connectPromise = null;
       throw error;
     });

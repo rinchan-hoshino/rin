@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -52,6 +53,43 @@ test("rpc client ignores stale socket disconnect after reconnect", () => {
   assert.equal(seen.length, 1);
   assert.equal(seen[0]?.type, "ui");
   assert.equal(seen[0]?.name, "connection_lost");
+});
+
+test("rpc client retries after a socket connect attempt stalls", async () => {
+  let attempts = 0;
+  class StalledSocket extends EventEmitter {
+    destroyed = false;
+    write() {
+      return false;
+    }
+    end() {
+      this.destroy();
+    }
+    destroy(error?: Error) {
+      if (this.destroyed) return;
+      this.destroyed = true;
+      if (error) queueMicrotask(() => this.emit("error", error));
+      queueMicrotask(() => this.emit("close"));
+    }
+  }
+
+  const client = new RinDaemonFrontendClient({
+    socketPath: "inprocess://stall-once",
+    connectTimeoutMs: 5,
+    connectSocket: async () => {
+      attempts += 1;
+      if (attempts === 1) return new StalledSocket();
+      return createConnectedRpcSocketPair().clientSocket;
+    },
+  });
+
+  await assert.rejects(client.connect(), /rin_timeout:connect/);
+  assert.equal(client.connectPromise, null);
+  assert.equal(client.isConnected(), false);
+
+  await client.connect();
+  assert.equal(attempts, 2);
+  assert.equal(client.isConnected(), true);
 });
 
 test("rpc client supports injected in-process transport connectors", async () => {
