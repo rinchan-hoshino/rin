@@ -28,6 +28,15 @@ function closeServer(server: http.Server) {
   });
 }
 
+async function pathExists(targetPath: string) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function deferred() {
   let resolve = () => {};
   const promise = new Promise<void>((nextResolve) => {
@@ -89,6 +98,30 @@ test("Rin backend serializes web_search execution without tool-side metadata", a
   session.setActiveToolsByName(["web_search"]);
   assert.notEqual(session.agent.state.tools[0], baseTool);
   assert.equal(session.agent.state.tools[0].executionMode, undefined);
+});
+
+test("configured session persists once a user starts a real conversation", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-user-session-"));
+  const agentDir = path.join(root, "agent");
+  await fs.mkdir(agentDir, { recursive: true });
+
+  const runtime = await runtimeMod.createConfiguredAgentSession({
+    cwd: root,
+    agentDir,
+  });
+
+  try {
+    const manager = runtime.session.sessionManager;
+    const sessionFile = manager.getSessionFile();
+    manager._rewriteFile();
+    assert.equal(await pathExists(sessionFile), false);
+
+    manager.appendMessage({ role: "user", content: "hello" });
+    assert.equal(await pathExists(sessionFile), true);
+  } finally {
+    await runtime.runtime?.dispose?.().catch?.(() => {});
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test("std configured session keeps daemon-independent Rin tools usable without daemon", async () => {

@@ -551,7 +551,7 @@ export class RpcInteractiveSession {
     source?: string;
     requestTag?: string;
   }) {
-    await this.ensureRemoteSession();
+    await this.ensureRemoteSession({ persist: true });
     await this.call("resume_interrupted_turn", {
       source: options?.source,
       requestTag: this.ensureRequestTag(options?.requestTag),
@@ -863,7 +863,7 @@ export class RpcInteractiveSession {
         };
       }
     }
-    await this.ensureRemoteSession();
+    await this.ensureRemoteSession({ persist: true });
     const data = await this.call("run_command", { commandLine });
     await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
     return data;
@@ -1407,7 +1407,9 @@ export class RpcInteractiveSession {
     }
 
     const sendOperation = async () => {
-      await this.ensureRemoteSession();
+      await this.ensureRemoteSession({
+        persist: operation.mode === "prompt",
+      });
       if (operation.mode === "prompt") {
         await submitNativeFrontendPromptTurn(
           {
@@ -1610,8 +1612,8 @@ export class RpcInteractiveSession {
     return classifyRinFrontendCommand(text, commands).kind === "daemon";
   }
 
-  private async ensureRemoteSession() {
-    if (this.sessionFile || this.sessionId) return;
+  private async ensureRemoteSession(options: { persist?: boolean } = {}) {
+    if (this.sessionFile || (!options.persist && this.sessionId)) return;
     const data = await this.call("new_session", {
       resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
     });

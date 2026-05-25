@@ -1301,6 +1301,62 @@ test("rpc runtime rebuilds session context from entries when messages are stale"
   ]);
 });
 
+test("rpc runtime promotes a temporary worker session before the first prompt", async () => {
+  const sent = [];
+  let promoted = false;
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      if (payload.type === "get_state") {
+        return Promise.resolve({
+          success: true,
+          data: promoted
+            ? { sessionFile: "/tmp/real.jsonl", sessionId: "real" }
+            : { sessionId: "temporary" },
+        });
+      }
+      if (payload.type === "new_session") {
+        promoted = true;
+        return Promise.resolve({
+          success: true,
+          data: { sessionFile: "/tmp/real.jsonl", sessionId: "real" },
+        });
+      }
+      if (payload.type === "get_session_snapshot") {
+        return Promise.resolve({ success: true, data: {} });
+      }
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return true;
+    },
+    connect() {
+      return Promise.resolve();
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+
+  await session.connect({ flushPendingSelfImproveNotices: false });
+  assert.equal(session.sessionId, "temporary");
+  assert.equal(session.sessionFile, undefined);
+
+  await session.prompt("hello");
+
+  assert.ok(sent.some((payload) => payload.type === "new_session"));
+  assert.equal(
+    sent.find((payload) => payload.type === "prompt")?.sessionFile,
+    "/tmp/real.jsonl",
+  );
+});
+
 test("rpc runtime lets native queue updates own steer prompt state", async () => {
   const sent = [];
   let releaseEnsureRemoteSession;

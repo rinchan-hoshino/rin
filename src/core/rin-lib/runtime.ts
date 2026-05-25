@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -836,6 +837,65 @@ const RIN_RUNTIME_SESSION_SHUTDOWN_KEY = Symbol.for(
   "rin.runtimeSessionShutdown",
 );
 
+const RIN_SESSION_CONVERSATION_PERSIST_KEY = Symbol.for(
+  "rin.sessionConversationPersist",
+);
+
+function hasConversationMessageEntry(entries: unknown) {
+  return Array.isArray(entries)
+    ? entries.some(
+        (entry: any) =>
+          entry?.type === "message" &&
+          (entry?.message?.role === "user" ||
+            entry?.message?.role === "assistant"),
+      )
+    : false;
+}
+
+function patchSessionManagerConversationPersistence(sessionManager: any) {
+  if (!sessionManager || typeof sessionManager !== "object") return;
+  if (sessionManager[RIN_SESSION_CONVERSATION_PERSIST_KEY]) return;
+  const originalRewriteFile =
+    typeof sessionManager._rewriteFile === "function"
+      ? sessionManager._rewriteFile.bind(sessionManager)
+      : null;
+  const originalPersist =
+    typeof sessionManager._persist === "function"
+      ? sessionManager._persist.bind(sessionManager)
+      : null;
+  if (originalRewriteFile) {
+    sessionManager._rewriteFile = (...args: any[]) => {
+      if (
+        sessionManager.isPersisted?.() !== false &&
+        !hasConversationMessageEntry(sessionManager.fileEntries)
+      ) {
+        sessionManager.flushed = false;
+        return;
+      }
+      return originalRewriteFile(...args);
+    };
+  }
+  if (originalPersist) {
+    sessionManager._persist = (...args: any[]) => {
+      const result = originalPersist(...args);
+      if (
+        sessionManager.isPersisted?.() !== false &&
+        hasConversationMessageEntry(sessionManager.fileEntries) &&
+        sessionManager.sessionFile &&
+        !fsSync.existsSync(sessionManager.sessionFile)
+      ) {
+        originalRewriteFile?.();
+        sessionManager.flushed = true;
+      }
+      return result;
+    };
+  }
+  sessionManager[RIN_SESSION_CONVERSATION_PERSIST_KEY] = {
+    originalRewriteFile,
+    originalPersist,
+  };
+}
+
 function hasRinCapabilityHandlers(session: any, type: string) {
   const capabilitySet = session?.__rinCapabilities;
   if (!type || !capabilitySet || typeof capabilitySet.emit !== "function") {
@@ -1075,6 +1135,7 @@ export async function createConfiguredAgentSession(
   const initialSessionManager =
     options.sessionManager ||
     SessionManager.create(cwd, getRuntimeSessionDir(cwd, agentDir));
+  patchSessionManagerConversationPersistence(initialSessionManager);
 
   const createRuntime = async ({
     cwd: runtimeCwd,
@@ -1091,6 +1152,7 @@ export async function createConfiguredAgentSession(
       process.chdir(runtimeCwd);
     }
     applyRuntimeProfileEnvironment({ agentDir: runtimeAgentDir });
+    patchSessionManagerConversationPersistence(sessionManager);
 
     const settingsManager = SettingsManager.create(runtimeCwd, runtimeAgentDir);
     applyBundledRinExtensionAliases(settingsManager);

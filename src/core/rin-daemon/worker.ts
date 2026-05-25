@@ -4,6 +4,10 @@ import { pathToFileURL } from "node:url";
 
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import { createConfiguredAgentSession } from "../rin-lib/runtime.js";
+import {
+  getRuntimeSessionDir,
+  resolveRuntimeProfile,
+} from "../rin-lib/profile.js";
 import { runCustomRpcMode } from "./rpc-mode.js";
 
 type WorkerResourceOptions = {
@@ -48,10 +52,33 @@ function readWorkerResourceOptions(
   }
 }
 
+export function createTemporaryWorkerSessionManager(
+  SessionManager: any,
+  options: { cwd: string; sessionDir: string },
+) {
+  const sessionManager = SessionManager.inMemory(options.cwd);
+  sessionManager.sessionDir = options.sessionDir;
+  return sessionManager;
+}
+
 export async function startWorker(options: WorkerResourceOptions = {}) {
   const sessionManagerModule = await loadRinSessionManagerModule();
+  const runtimeProfile = resolveRuntimeProfile();
+  const sessionManager = createTemporaryWorkerSessionManager(
+    sessionManagerModule.SessionManager,
+    {
+      cwd: runtimeProfile.cwd,
+      sessionDir: getRuntimeSessionDir(
+        runtimeProfile.cwd,
+        runtimeProfile.agentDir,
+      ),
+    },
+  );
   const mergedOptions = { ...readWorkerResourceOptions(), ...options };
   const { runtime } = await createConfiguredAgentSession({
+    cwd: runtimeProfile.cwd,
+    agentDir: runtimeProfile.agentDir,
+    sessionManager,
     additionalExtensionPaths: mergedOptions.additionalExtensionPaths,
     noExtensions: mergedOptions.noExtensions,
     extensionFlagValues: new Map(mergedOptions.extensionFlagValues || []),
@@ -67,7 +94,7 @@ export async function startWorker(options: WorkerResourceOptions = {}) {
   });
   await runCustomRpcMode(runtime, {
     SessionManager: sessionManagerModule.SessionManager,
-    reuseFreshSessionForInitialNewSession: true,
+    reuseFreshSessionForInitialNewSession: false,
   });
 }
 
