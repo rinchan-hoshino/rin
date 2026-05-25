@@ -42,10 +42,10 @@
     "promotedFromBetaVersion": "0.1.0-beta.20260504"
   },
   "beta": {
-    "version": "0.1.0-beta.20260504",
-    "archiveUrl": "https://github.com/rinchanai/rin/archive/ae8593feb7a2361da8c9d200c4c27f575634145b.tar.gz",
-    "ref": "ae8593feb7a2361da8c9d200c4c27f575634145b",
-    "promotionVersion": "0.1.0"
+    "version": "0.2.0-beta.20260525",
+    "archiveUrl": "https://github.com/rinchanai/rin/archive/6abdc80e03d221c88deac7402ecc96cb3b482e50.tar.gz",
+    "ref": "6abdc80e03d221c88deac7402ecc96cb3b482e50",
+    "promotionVersion": "0.2.0"
   },
   "nightly": {
     "version": "0.2.0-nightly.20260525+6abdc80",
