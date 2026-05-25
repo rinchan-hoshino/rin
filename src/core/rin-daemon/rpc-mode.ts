@@ -358,15 +358,24 @@ async function settleTurnCompletionEvents() {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-async function waitForSessionPostAgentEvents(session: any) {
-  await session?.agent?.waitForIdle?.();
-  const eventQueue = session?._agentEventQueue;
-  if (eventQueue && typeof eventQueue.then === "function") {
-    try {
-      await eventQueue;
-    } catch {}
-  }
-  await settleTurnCompletionEvents();
+function resolveTurnCompletionFromTurnBoundary(
+  options: Parameters<typeof collectTurnCompletionMessages>[1],
+) {
+  const messages = collectTurnCompletionMessages(null, options);
+  return {
+    messages,
+    completion: resolveTurnCompletion({ messages }),
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
 }
 
 export async function runCustomRpcMode(
@@ -646,10 +655,29 @@ export async function runCustomRpcMode(
       : undefined;
     const turnStartedAtMs = Date.now();
     let lastCompletedAssistantMessage: any = null;
+    const turnCompletion = createDeferred<{
+      finalText: string;
+      result: any;
+    }>();
+    const tryResolveTurnCompletion = () => {
+      const { completion } = resolveTurnCompletionFromTurnBoundary({
+        lastCompletedAssistantMessage,
+        baselineSessionMessageCount,
+        baselineAgentMessageCount,
+        turnStartedAtMs,
+      });
+      if (!completion.finalText) return false;
+      turnCompletion.resolve({
+        finalText: completion.finalText,
+        result: completion.result,
+      });
+      return true;
+    };
     const rawUnsubscribeTurnSession = turnSession.subscribe?.((event: any) => {
       if (event?.type !== "message_end") return;
       if (event?.message?.role !== "assistant") return;
       lastCompletedAssistantMessage = event.message;
+      tryResolveTurnCompletion();
     });
     const unsubscribeTurnSession =
       typeof rawUnsubscribeTurnSession === "function"
@@ -681,30 +709,30 @@ export async function runCustomRpcMode(
             }, TURN_HEARTBEAT_INTERVAL_MS)
           : null;
       try {
-        let taskError: any = null;
-        try {
-          await task();
-        } catch (error) {
-          taskError = error;
-        }
-        await waitForSessionPostAgentEvents(turnSession);
-        const turnMessages = collectTurnCompletionMessages(turnSession, {
-          lastCompletedAssistantMessage,
-          baselineSessionMessageCount,
-          baselineAgentMessageCount,
-          turnStartedAtMs,
-        });
-        const completion = resolveTurnCompletion({
-          messages: turnMessages,
-        });
-        if (!completion.finalText) {
-          if (taskError) throw taskError;
-          const failureMessage = resolveTurnFailureMessage(
-            turnSession,
-            turnMessages,
-          );
-          throw new Error(failureMessage || "rpc_turn_final_output_missing");
-        }
+        const taskPromise = task();
+        taskPromise
+          .then(async () => {
+            await settleTurnCompletionEvents();
+            if (tryResolveTurnCompletion()) return;
+            const { messages } = resolveTurnCompletionFromTurnBoundary({
+              lastCompletedAssistantMessage,
+              baselineSessionMessageCount,
+              baselineAgentMessageCount,
+              turnStartedAtMs,
+            });
+            const failureMessage = resolveTurnFailureMessage(
+              turnSession,
+              messages,
+            );
+            turnCompletion.reject(
+              new Error(failureMessage || "rpc_turn_final_output_missing"),
+            );
+          })
+          .catch((error) => {
+            if (tryResolveTurnCompletion()) return;
+            turnCompletion.reject(error);
+          });
+        const completion = await turnCompletion.promise;
         emitTurnEvent(
           "complete",
           requestTag,
@@ -716,6 +744,7 @@ export async function runCustomRpcMode(
           },
           forceTurnEvents,
         );
+        taskPromise.catch(() => {});
       } catch (error: any) {
         emitTurnEvent(
           "error",

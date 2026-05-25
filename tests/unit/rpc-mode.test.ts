@@ -1569,6 +1569,153 @@ test(
 );
 
 test(
+  "rpc mode resolves prompt completion from turn messages without post-agent event queues",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const sessionSubscribers = new Set<(event: any) => void>();
+    let resolvePostAgentQueue: (() => void) | undefined;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk: any) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const postAgentQueue = new Promise<void>((resolve) => {
+        resolvePostAgentQueue = resolve;
+      });
+      let waitForIdleCalled = false;
+      let promptSettled = false;
+      const session = {
+        isStreaming: false,
+        isCompacting: true,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: {
+          waitForIdle: async () => {
+            waitForIdleCalled = true;
+            await postAgentQueue;
+          },
+        },
+        _agentEventQueue: postAgentQueue,
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        prompt: async () => {
+          const assistantMessage = {
+            role: "assistant",
+            content: [{ type: "text", text: "final before compaction" }],
+          };
+          session.messages = [
+            { role: "user", content: [{ type: "text", text: "hello" }] },
+            assistantMessage,
+          ];
+          for (const handler of sessionSubscribers) {
+            handler({ type: "message_end", message: assistantMessage });
+          }
+          await postAgentQueue;
+          promptSettled = true;
+        },
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: {
+          getEntries: () => [],
+          getTree: () => [],
+          getLeafId: () => null,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const events = lines
+        .join("")
+        .trim()
+        .split(/\n+/)
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const completion = events.find(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      assert.equal(completion?.requestTag, "tag-1");
+      assert.equal(completion?.finalText, "final before compaction");
+      assert.deepEqual(completion?.result, {
+        messages: [{ type: "text", text: "final before compaction" }],
+      });
+      assert.equal(waitForIdleCalled, false);
+      assert.equal(promptSettled, false);
+    } finally {
+      resolvePostAgentQueue?.();
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode emits agent failure messages instead of missing-final sentinels",
   { concurrency: false },
   async () => {
