@@ -920,9 +920,15 @@ export class RinFrontendTurnDriver {
     };
     this.setFrontendPhase("working");
     while (this.liveTurn === liveTurn) {
-      const state: any = await this.refreshFrontendState(
-        targetSessionFile,
-      ).catch(() => ({}));
+      let state: any = {};
+      try {
+        state = await this.refreshFrontendState(targetSessionFile);
+      } catch (error) {
+        if (!isRecoverableConnectionError(error)) throw error;
+        await this.recoverLiveTurnAfterDisconnect(error);
+        if (this.liveTurn === liveTurn) continue;
+        break;
+      }
       if (!Boolean(state?.turnActive || state?.isStreaming)) {
         const error = new Error("rpc_turn_final_output_missing");
         this.failLiveTurn(error);

@@ -881,6 +881,41 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
   );
 });
 
+test("frontend SDK turn driver follows active turn across transient reconnect before rpc final", async () => {
+  const client = createFrontendClient();
+  let getStateCount = 0;
+  client.getState = async () => {
+    getStateCount += 1;
+    if (getStateCount === 2) throw new Error("rin_disconnected:daemon_restart");
+    return {
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      isStreaming: true,
+      turnActive: true,
+    };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const resultPromise = driver.runTurn({ text: "follow existing turn" });
+  await new Promise((resolve) => setImmediate(resolve));
+  await emitDriverEvent(driver as any, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "",
+    finalText: "final after reconnect",
+    result: { messages: [{ type: "text", text: "final after reconnect" }] },
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+  });
+
+  const result = await resultPromise;
+  assert.equal(result.finalText, "final after reconnect");
+  assert.equal(getStateCount >= 3, true);
+});
+
 test("frontend SDK turn driver does not complete from agent_end before rpc final", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
