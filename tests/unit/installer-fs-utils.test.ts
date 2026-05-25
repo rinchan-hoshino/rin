@@ -140,6 +140,55 @@ test("elevated install writes create target-owned parent directories", () => {
   );
 });
 
+test("syncTree warns when a replaced backup cannot be removed", async () => {
+  const tempRoot = await fs.mkdtemp(path.join(tempBaseDir, "rin-sync-tree-"));
+  const source = path.join(tempRoot, "source");
+  const dest = path.join(tempRoot, "dest");
+  const fakeBin = path.join(tempRoot, "bin");
+
+  await fs.mkdir(source, { recursive: true });
+  await fs.writeFile(path.join(source, "NEW.md"), "new\n", "utf8");
+  await fs.mkdir(dest, { recursive: true });
+  await fs.writeFile(path.join(dest, "OLD.md"), "old\n", "utf8");
+  await fs.mkdir(fakeBin, { recursive: true });
+  const fakeRm = path.join(fakeBin, "rm");
+  await fs.writeFile(
+    fakeRm,
+    "#!/bin/sh\necho fake rm failure >&2\nexit 1\n",
+    "utf8",
+  );
+  await fs.chmod(fakeRm, 0o755);
+
+  const previousPath = process.env.PATH;
+  const originalStderrWrite = process.stderr.write;
+  let stderr = "";
+  try {
+    process.env.PATH = `${fakeBin}${path.delimiter}${previousPath ?? ""}`;
+    process.stderr.write = ((chunk: any, ...args: any[]) => {
+      stderr += String(chunk);
+      return (originalStderrWrite as any).call(process.stderr, chunk, ...args);
+    }) as typeof process.stderr.write;
+
+    fsUtils.syncTree(source, dest);
+  } finally {
+    process.stderr.write = originalStderrWrite;
+    if (previousPath == null) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+
+  await fs.access(path.join(dest, "NEW.md"));
+  await assert.rejects(fs.access(path.join(dest, "OLD.md")));
+  const leftovers = (await fs.readdir(tempRoot)).filter((name) =>
+    name.startsWith(".dest.backup-"),
+  );
+  assert.equal(leftovers.length, 1);
+  assert.match(stderr, /rin update warning: replaced old tree/);
+  assert.match(stderr, /could not remove backup/);
+  assert.doesNotMatch(stderr, /root-owned|sudo rm -rf|cleanup needs/);
+
+  await fs.rm(tempRoot, { recursive: true, force: true });
+});
+
 test("syncInstalledDocs copies upstream mirrors into installed doc locations", async () => {
   const tempRoot = await fs.mkdtemp(path.join(tempBaseDir, "rin-install-src-"));
   const installDir = await fs.mkdtemp(

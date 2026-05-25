@@ -401,6 +401,24 @@ export function writeJsonFileWithPrivilege(
   );
 }
 
+function warnTreeCleanupFailed(treePath: string, error: unknown) {
+  const reason =
+    error instanceof Error && error.message ? `: ${error.message}` : "";
+  process.stderr.write(
+    `rin update warning: replaced old tree, but could not remove backup ${treePath}${reason}\n`,
+  );
+}
+
+function removeTreeOrWarn(treePath: string, warnOnFailure = false) {
+  try {
+    execFileSync("rm", ["-rf", treePath], { stdio: "inherit" });
+    return true;
+  } catch (error) {
+    if (warnOnFailure) warnTreeCleanupFailed(treePath, error);
+    return false;
+  }
+}
+
 export function syncTree(sourcePath: string, destPath: string) {
   const destParent = path.dirname(destPath);
   const baseName = path.basename(destPath);
@@ -411,17 +429,13 @@ export function syncTree(sourcePath: string, destPath: string) {
     : null;
 
   ensureDir(destParent);
-  try {
-    execFileSync("rm", ["-rf", tempPath], { stdio: "inherit" });
-  } catch {}
+  removeTreeOrWarn(tempPath);
   execFileSync("cp", ["-a", sourcePath, tempPath], { stdio: "inherit" });
   if (backupPath) fs.renameSync(destPath, backupPath);
   try {
     fs.renameSync(tempPath, destPath);
   } catch (error) {
-    try {
-      execFileSync("rm", ["-rf", tempPath], { stdio: "inherit" });
-    } catch {}
+    removeTreeOrWarn(tempPath);
     if (backupPath && !fs.existsSync(destPath) && fs.existsSync(backupPath)) {
       try {
         fs.renameSync(backupPath, destPath);
@@ -429,11 +443,7 @@ export function syncTree(sourcePath: string, destPath: string) {
     }
     throw error;
   }
-  if (backupPath) {
-    try {
-      execFileSync("rm", ["-rf", backupPath], { stdio: "inherit" });
-    } catch {}
-  }
+  if (backupPath) removeTreeOrWarn(backupPath, true);
 }
 
 export function syncInstalledDocTree(
