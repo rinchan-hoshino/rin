@@ -94,7 +94,7 @@ test("new session workers receive rpc resource options through a private file", 
     gcIdleMs: 50,
     resourceOptionsDir: path.join(dir, "worker-options"),
   });
-  pool.resolveWorkerForCommand(
+  const worker = pool.resolveWorkerForCommand(
     { socket: { destroyed: false, write() {} }, clientBuffer: "" },
     {
       type: "new_session",
@@ -490,12 +490,38 @@ setInterval(() => {}, 1000);
   assert.equal(pool.getStatusSnapshot().workerCount, 0);
 });
 
-test("attached worker stays alive across detached-worker sweeps", async () => {
+test("attached idle worker sleeps while preserving the selected session", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");
+  const commandPath = path.join(dir, "attached-idle-commands.jsonl");
+  const sessionFile = "/tmp/attached-idle.jsonl";
   await fs.writeFile(
     workerPath,
-    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+    String.raw`import fs from 'node:fs';
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(${JSON.stringify(commandPath)}, command.type + '\n');
+    if (command.type === 'sleep_session') process.exit(0);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { sessionFile: command.sessionPath || ${JSON.stringify(sessionFile)}, sessionId: 'attached-idle' },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
   );
 
   const connection = {
@@ -506,17 +532,37 @@ test("attached worker stays alive across detached-worker sweeps", async () => {
   const pool = new WorkerPool({
     workerPath,
     cwd: dir,
-    gcIdleMs: 10,
+    gcIdleMs: 20,
     sweepIntervalMs: 10,
   });
   const worker = pool.resolveWorkerForCommand(connection, {
     type: "new_session",
   });
-  pool.requestWorker(worker, connection, { type: "get_state" }, true);
+  pool.setWorkerSessionRefs(worker, {
+    sessionFile,
+    sessionId: "attached-idle",
+  });
+  pool.attachWorker(connection, worker);
 
-  await sleep(80);
+  for (let i = 0; i < 50; i += 1) {
+    if (pool.getStatusSnapshot().workerCount === 0) break;
+    await sleep(10);
+  }
 
+  assert.equal(pool.getStatusSnapshot().workerCount, 0);
+  assert.equal(connection.attachedWorker, undefined);
+  assert.equal(connection.sessionFile, sessionFile);
+  assert.equal(connection.sessionId, "attached-idle");
+
+  const replacement = await pool.ensureSelectedWorker(connection);
+
+  assert.equal(Boolean(replacement), true);
+  assert.equal(connection.attachedWorker, replacement);
   assert.equal(pool.getStatusSnapshot().workerCount, 1);
+  assert.deepEqual(
+    (await fs.readFile(commandPath, "utf8")).trim().split("\n"),
+    ["sleep_session", "switch_session"],
+  );
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
@@ -715,6 +761,160 @@ setInterval(() => {}, 1000);
   assert.equal(connection.sessionFile, "/tmp/selected.jsonl");
   assert.equal(sameWorker, worker);
   assert.equal(pool.getStatusSnapshot().workerCount, 1);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("concurrent selectSession calls reuse one worker for the same session", async () => {
+  const dir = await makeTempDir("rin-worker-pool-concurrent-select-");
+  const workerPath = path.join(dir, "worker.mjs");
+  const startedPath = path.join(dir, "switch-started.log");
+  const releasePath = path.join(dir, "switch-release");
+  const sessionFile = "/tmp/concurrent-selected.jsonl";
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  void (async () => {
+    while (true) {
+      const idx = buffer.indexOf('\n');
+      if (idx < 0) break;
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (!line.trim()) continue;
+      const command = JSON.parse(line);
+      if (command.type === 'switch_session') {
+        fs.appendFileSync(${JSON.stringify(startedPath)}, String(process.pid) + '\n');
+        while (!fs.existsSync(${JSON.stringify(releasePath)})) await sleep(10);
+      }
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: 'response',
+        command: command.type,
+        success: true,
+        data: { cancelled: false, sessionFile: command.sessionPath, sessionId: 'concurrent-selected' },
+      }) + '\n');
+    }
+  })();
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const firstConnection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const secondConnection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  const firstSelection = pool.selectSession(firstConnection, { sessionFile });
+  const secondSelection = pool.selectSession(secondConnection, { sessionFile });
+
+  for (let i = 0; i < 50; i += 1) {
+    try {
+      const started = (await fs.readFile(startedPath, "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+      if (started.length >= 1) break;
+    } catch {}
+    await sleep(10);
+  }
+
+  await fs.writeFile(releasePath, "release");
+  const [firstWorker, secondWorker] = await Promise.all([
+    firstSelection,
+    secondSelection,
+  ]);
+
+  assert.equal(firstWorker, secondWorker);
+  assert.equal(firstConnection.attachedWorker, firstWorker);
+  assert.equal(secondConnection.attachedWorker, firstWorker);
+  assert.equal(pool.getStatusSnapshot().workerCount, 1);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("duplicate restoreSessionWorker calls converge to one session worker", async () => {
+  const dir = await makeTempDir("rin-worker-pool-restore-dedupe-");
+  const workerPath = path.join(dir, "worker.mjs");
+  const startedPath = path.join(dir, "restore-started.log");
+  const releasePath = path.join(dir, "restore-release");
+  const sessionFile = "/tmp/restore-dedupe.jsonl";
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  void (async () => {
+    while (true) {
+      const idx = buffer.indexOf('\n');
+      if (idx < 0) break;
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (!line.trim()) continue;
+      const command = JSON.parse(line);
+      if (command.type === 'switch_session') {
+        fs.appendFileSync(${JSON.stringify(startedPath)}, String(process.pid) + '\n');
+        while (!fs.existsSync(${JSON.stringify(releasePath)})) await sleep(10);
+      }
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: 'response',
+        command: command.type,
+        success: true,
+        data: { cancelled: false, sessionFile: command.sessionPath, sessionId: 'restore-dedupe' },
+      }) + '\n');
+    }
+  })();
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  pool.restoreSessionWorker({ sessionFile });
+  pool.restoreSessionWorker({ sessionFile });
+
+  for (let i = 0; i < 50; i += 1) {
+    try {
+      const started = (await fs.readFile(startedPath, "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+      if (started.length >= 1) break;
+    } catch {}
+    await sleep(10);
+  }
+
+  await fs.writeFile(releasePath, "release");
+  for (let i = 0; i < 50; i += 1) {
+    const status = pool.getStatusSnapshot();
+    if (
+      status.workerCount === 1 &&
+      status.workers[0]?.sessionFile === sessionFile
+    ) {
+      break;
+    }
+    await sleep(10);
+  }
+
+  const status = pool.getStatusSnapshot();
+  assert.equal(status.workerCount, 1);
+  assert.equal(status.workers[0]?.sessionFile, sessionFile);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

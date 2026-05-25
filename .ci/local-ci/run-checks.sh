@@ -23,4 +23,7 @@ else
 fi
 
 npm run lint
-npm test
+
+ci_timeout="45m"
+echo "Running npm test with ${ci_timeout} timeout..."
+timeout --foreground "$ci_timeout" npm test

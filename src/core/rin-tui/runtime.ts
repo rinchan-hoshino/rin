@@ -3,14 +3,12 @@ import type {
   AgentMessage,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { buildSessionContext } from "@earendil-works/pi-coding-agent";
 
 import { asArray } from "../json-utils.js";
 import {
-  createRinCapabilityDefinitions,
   getRuntimeSessionDir,
   resolveRuntimeProfile,
-} from "../rin-lib/runtime.js";
+} from "../rin-lib/profile.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
@@ -19,34 +17,99 @@ import {
 } from "../rin-lib/user-facing-errors.js";
 import {
   applyFrontendBuiltinCommandText,
-  applyRpcSessionState,
-  applyRpcSessionTree,
-  classifyRinFrontendCommand,
-  computeAvailableThinkingLevels,
-  computeSessionStats,
-  createModelRegistry,
+  parseFrontendCompactCommand,
+  resolveRinFrontendCommandResponses,
+} from "../rin-frontend-sdk/command-responses.js";
+import { classifyRinFrontendCommand } from "../rin-frontend-sdk/command-dispatcher.js";
+import type { RpcFrontendClient } from "../rin-frontend-sdk/frontend-surface.js";
+import { createModelRegistry } from "../rin-frontend-sdk/model-registry.js";
+import {
   cycleRpcModel,
   cycleRpcThinkingLevel,
-  extractText,
-  getContextUsage,
-  getLastAssistantText,
   getPersistentSettingsManager,
-  getSessionBranch,
-  runSelfImproveNoticeCheckpoint,
-  parseFrontendCompactCommand,
   persistRpcSettingsMutation,
-  resolveRinFrontendCommandResponses,
   setRpcAutoCompaction,
   setRpcFollowUpMode,
   setRpcModel,
   setRpcSteeringMode,
   setRpcThinkingLevel,
+} from "../rin-frontend-sdk/model-settings.js";
+import {
+  computeAvailableThinkingLevels,
+  extractText,
+  getLastAssistantText,
+} from "../rin-frontend-sdk/session-helpers.js";
+import {
+  computeSessionStats,
+  getContextUsage,
+} from "../rin-frontend-sdk/stats.js";
+import {
+  applyRpcSessionState,
+  applyRpcSessionTree,
+  getSessionBranch,
+} from "../rin-frontend-sdk/state-utils.js";
+import {
+  runSelfImproveNoticeCheckpoint,
+  shouldPullSelfImproveNoticesForTurnState,
   submitNativeFrontendPromptTurn,
-  type RpcFrontendClient,
-} from "../rin-frontend-sdk/index.js";
-import { shouldPullSelfImproveNoticesForTurnState } from "../rin-frontend-sdk/turn-driver.js";
+} from "../rin-frontend-sdk/turn-driver.js";
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
+function renderTextBlock(text: string) {
+  return {
+    render() {
+      return text ? String(text).split(/\r?\n/) : [];
+    },
+  };
+}
+
+function formatTodoLines(details: any) {
+  const todos = asArray(details?.todos);
+  return todos.map((todo: any) => {
+    const done = Boolean(todo?.done);
+    const text = String(todo?.text || "").trim();
+    return `${done ? "✓" : "○"} ${text}`.trimEnd();
+  });
+}
+
+function getRpcFrontendToolDefinition(toolName: string) {
+  const name = String(toolName || "").trim();
+  if (name === "web_search" || name === "search_memory") {
+    return {
+      name,
+      renderCall(input: any) {
+        return renderTextBlock(String(input?.q || input?.query || "").trim());
+      },
+      renderResult(result: any) {
+        const text = asArray(result?.content)
+          .map((item: any) => item?.text)
+          .filter(Boolean)
+          .join("\n");
+        return renderTextBlock(text);
+      },
+    };
+  }
+  if (name === "todo") {
+    return {
+      name,
+      renderShell: "self",
+      renderCall() {
+        return renderTextBlock("");
+      },
+      renderResult(result: any, _options: any, theme: any) {
+        const lines = formatTodoLines(result?.details);
+        return {
+          render() {
+            const blank = theme?.bg ? theme.bg("toolSuccessBg", " ") : " ";
+            return [blank, ...lines, blank];
+          },
+        };
+      },
+    };
+  }
+  return undefined;
+}
+
 type PendingRpcOperation = {
   mode: "prompt" | "steer" | "follow_up";
   message: string;
@@ -338,7 +401,6 @@ export class RpcInteractiveSession {
   private waitForDaemonHintTimer: NodeJS.Timeout | null = null;
   private startupPending = true;
   private resourceSnapshot = emptyRpcResourceSnapshot();
-  private localToolDefinitions = new Map<string, any>();
   private sessionOperationPending = false;
   private recoveryPending = false;
   private clearQueuePromise: Promise<void> | null = null;
@@ -381,7 +443,6 @@ export class RpcInteractiveSession {
       if (!descriptor || typeof descriptor.value !== "function") continue;
       (this as any)[name] = descriptor.value.bind(this);
     }
-    this.localToolDefinitions = this.createLocalToolDefinitions();
     this.extensionRunner = this.createPassiveExtensionRunner();
     this.agent = new RemoteAgent(client);
     this.settingsManager = undefined;
@@ -394,8 +455,7 @@ export class RpcInteractiveSession {
       getEntry: (id: string) => this.entryById.get(id),
       getLabel: (id: string) => this.labelsById.get(id),
       getBranch: (fromId?: string) => this.getBranch(fromId),
-      buildSessionContext: () =>
-        buildSessionContext(this.entries, this.leafId, this.entryById as any),
+      buildSessionContext: () => this.buildSessionContext(),
       getEntries: () => [...this.entries],
       getSessionName: () => this.sessionName,
       getTree: () => [...this.tree],
@@ -988,25 +1048,16 @@ export class RpcInteractiveSession {
   }
 
   getToolDefinition(toolName: string) {
-    return this.localToolDefinitions.get(String(toolName || "").trim());
+    return getRpcFrontendToolDefinition(toolName);
   }
 
-  private createLocalToolDefinitions() {
-    const profile = getRuntimeProfile();
-    const definitions = createRinCapabilityDefinitions({
-      cwd: profile.cwd,
-      agentDir: profile.agentDir,
-      getThinkingLevel: () => this.thinkingLevel,
-      sendMessage: () => {},
-    });
-    const tools = new Map<string, any>();
-    for (const definition of definitions) {
-      for (const tool of definition?.tools || []) {
-        const name = String(tool?.name || "").trim();
-        if (name && !tools.has(name)) tools.set(name, tool);
-      }
-    }
-    return tools;
+  private buildSessionContext() {
+    return {
+      messages: getSessionBranch(this.entryById, this.leafId).flatMap(
+        (entry: any) =>
+          entry?.type === "message" && entry.message ? [entry.message] : [],
+      ),
+    };
   }
 
   private createPassiveExtensionRunner() {
@@ -1724,11 +1775,7 @@ export class RpcInteractiveSession {
   }
 
   private syncDerivedMessages() {
-    const context = buildSessionContext(
-      this.entries,
-      this.leafId,
-      this.entryById as any,
-    );
+    const context = this.buildSessionContext();
     this.messages = asArray(context?.messages);
     this.state.messages = this.messages;
   }

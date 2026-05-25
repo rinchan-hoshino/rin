@@ -107,13 +107,13 @@ export class WorkerPool {
   private workers = new Set<WorkerHandle>();
   private workersBySessionFile = new Map<string, WorkerHandle>();
   private workersBySessionId = new Map<string, WorkerHandle>();
-  private workerSeq = 0;
-  private internalRequestSeq = 0;
-  private shuttingDown = false;
-  private restoringWorkersBySessionFile = new Map<
+  private pendingSessionClaims = new Map<
     string,
     Promise<WorkerHandle | undefined>
   >();
+  private workerSeq = 0;
+  private internalRequestSeq = 0;
+  private shuttingDown = false;
   private readonly gcIdleMs: number;
   private readonly internalCommandTimeoutMs: number;
   private readonly switchSessionCommandTimeoutMs: number;
@@ -341,37 +341,28 @@ export class WorkerPool {
     }
     if (!wanted.sessionFile) return undefined;
 
-    const restoring = this.restoringWorkersBySessionFile.get(
-      wanted.sessionFile,
-    );
-    if (restoring) {
-      const restored = await restoring;
-      if (restored && this.workers.has(restored)) {
-        this.attachWorker(connection, restored);
-        return restored;
+    const claimed = await this.withSessionClaim(wanted, async () => {
+      const worker = this.createWorker(connection, connection.resourceOptions);
+      try {
+        await this.sendInternalCommand(
+          worker,
+          createSwitchSessionCommand(wanted.sessionFile),
+        );
+        const existing = this.findWorkerBySelector(wanted);
+        if (existing && existing !== worker) {
+          this.destroyWorker(worker);
+          return existing;
+        }
+        this.setWorkerSessionRefs(worker, wanted);
+        return worker;
+      } catch (error) {
+        this.destroyWorker(worker);
+        throw error;
       }
-      const restoredExisting = this.findWorkerBySelector(wanted);
-      if (restoredExisting) {
-        this.attachWorker(connection, restoredExisting);
-        return restoredExisting;
-      }
-    }
-
-    const worker = this.createWorker(connection, connection.resourceOptions);
-    try {
-      await this.sendInternalCommand(
-        worker,
-        createSwitchSessionCommand(wanted.sessionFile),
-      );
-      this.setWorkerSessionRefs(worker, wanted);
-      this.attachWorker(connection, worker);
-      return worker;
-    } catch (error) {
-      this.destroyWorker(worker);
-      throw error;
-    }
+    });
+    if (claimed) this.attachWorker(connection, claimed);
+    return claimed;
   }
-
   resolveCurrentWorkerForCommand(connection: ConnectionState, command: any) {
     const selector = this.resolveSelector(connection, command);
     const selectedWorker = this.findWorkerBySelector(selector);
@@ -518,18 +509,21 @@ export class WorkerPool {
     if (!selector.sessionFile) return;
     const existing = this.findWorkerBySelector(selector);
     if (existing) return existing;
-    const inFlight = this.restoringWorkersBySessionFile.get(
-      selector.sessionFile,
-    );
-    if (inFlight) return undefined;
+    const key = this.sessionClaimKey(selector);
+    if (key && this.pendingSessionClaims.has(key)) return undefined;
 
     const worker = this.createWorker();
-    const restorePromise = (async () => {
+    void this.withSessionClaim(selector, async () => {
       try {
         await this.sendInternalCommand(
           worker,
           createSwitchSessionCommand(selector.sessionFile!),
         );
+        const existingAfterSwitch = this.findWorkerBySelector(selector);
+        if (existingAfterSwitch && existingAfterSwitch !== worker) {
+          this.destroyWorker(worker);
+          return existingAfterSwitch;
+        }
         this.setWorkerSessionRefs(worker, selector);
         if (resumeTurn) {
           await this.sendInternalCommand(worker, {
@@ -541,20 +535,8 @@ export class WorkerPool {
       } catch {
         this.destroyWorker(worker);
         return undefined;
-      } finally {
-        if (
-          this.restoringWorkersBySessionFile.get(selector.sessionFile!) ===
-          restorePromise
-        ) {
-          this.restoringWorkersBySessionFile.delete(selector.sessionFile!);
-        }
       }
-    })();
-    restorePromise.catch(() => {});
-    this.restoringWorkersBySessionFile.set(
-      selector.sessionFile,
-      restorePromise,
-    );
+    }).catch(() => {});
     return worker;
   }
 
@@ -850,15 +832,12 @@ export class WorkerPool {
   private maybeReleaseWorker(worker: WorkerHandle) {
     if (!this.workers.has(worker)) return;
     if (worker.gracefulShutdownRequested) return;
-    if (worker.connections.size > 0) {
-      worker.idleSince = null;
-      return;
-    }
     if (
       worker.pendingResponses.size > 0 ||
       worker.turnActive ||
       worker.isStreaming ||
-      worker.isCompacting
+      worker.isCompacting ||
+      worker.rinWorking
     ) {
       worker.idleSince = null;
       return;
@@ -868,8 +847,17 @@ export class WorkerPool {
       return;
     }
     worker.idleSince ??= Date.now();
-    if (Date.now() - worker.idleSince >= this.gcIdleMs) {
-      this.sleepWorkerGracefully(worker);
+    if (Date.now() - worker.idleSince < this.gcIdleMs) return;
+    this.detachWorkerConnections(worker);
+    this.sleepWorkerGracefully(worker);
+  }
+
+  private detachWorkerConnections(worker: WorkerHandle) {
+    for (const connection of Array.from(worker.connections)) {
+      if (connection.attachedWorker === worker) {
+        connection.attachedWorker = undefined;
+      }
+      worker.connections.delete(connection);
     }
   }
 
@@ -915,6 +903,32 @@ export class WorkerPool {
       return this.workersBySessionId.get(selector.sessionId);
     }
     return undefined;
+  }
+
+  private sessionClaimKey(selector: SessionSelector) {
+    const normalized = sessionSelectorFromState(selector);
+    if (normalized.sessionFile) return `file:${normalized.sessionFile}`;
+    if (normalized.sessionId) return `id:${normalized.sessionId}`;
+    return undefined;
+  }
+
+  private async withSessionClaim(
+    selector: SessionSelector,
+    claim: () => Promise<WorkerHandle | undefined>,
+  ) {
+    const key = this.sessionClaimKey(selector);
+    if (!key) return await claim();
+    const existingClaim = this.pendingSessionClaims.get(key);
+    if (existingClaim) return await existingClaim;
+    const promise = claim();
+    this.pendingSessionClaims.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.pendingSessionClaims.get(key) === promise) {
+        this.pendingSessionClaims.delete(key);
+      }
+    }
   }
 
   private workerMatchesSelector(
@@ -1043,6 +1057,20 @@ export class WorkerPool {
     }
     if (!selector.sessionFile) return;
 
+    const existing = this.findWorkerBySelector(selector);
+    if (existing) {
+      for (const connection of liveConnections) {
+        this.attachWorker(connection, existing);
+        writeLine(connection.socket, {
+          type: "session_recovered",
+          sessionFile: selector.sessionFile,
+          sessionId: selector.sessionId,
+          resumed: false,
+        });
+      }
+      return;
+    }
+
     const replacement = this.createWorker();
 
     void (async () => {
@@ -1051,6 +1079,14 @@ export class WorkerPool {
           replacement,
           createSwitchSessionCommand(selector.sessionFile),
         );
+        const existingAfterSwitch = this.findWorkerBySelector(selector);
+        if (existingAfterSwitch && existingAfterSwitch !== replacement) {
+          this.destroyWorker(replacement);
+          for (const connection of liveConnections) {
+            this.attachWorker(connection, existingAfterSwitch);
+          }
+          return;
+        }
         this.setWorkerSessionRefs(replacement, selector);
         for (const connection of liveConnections) {
           this.attachWorker(connection, replacement);

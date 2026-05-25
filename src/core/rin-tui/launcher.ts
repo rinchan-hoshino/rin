@@ -1,13 +1,10 @@
-import {
-  InteractiveMode,
-  type InteractiveModeOptions,
-} from "@earendil-works/pi-coding-agent";
+import { InteractiveMode } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js";
+import type { InteractiveModeOptions } from "@earendil-works/pi-coding-agent";
 
 import {
   applyRuntimeProfileEnvironment,
-  createConfiguredAgentSession,
   resolveRuntimeProfile,
-} from "../rin-lib/runtime.js";
+} from "../rin-lib/profile.js";
 import {
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RPC_FRONTEND_ROLE,
@@ -21,10 +18,8 @@ import {
 } from "../rin-lib/user-facing-errors.js";
 
 import { parseTuiCliOptions, type TuiResourceOptions } from "./cli-options.js";
-import {
-  RinDaemonFrontendClient,
-  createFrontendSdkRuntimeWrapper,
-} from "../rin-frontend-sdk/index.js";
+import { RinDaemonFrontendClient } from "../rin-frontend-sdk/daemon-client.js";
+import { createFrontendSdkRuntimeWrapper } from "../rin-frontend-sdk/runtime-wrapper.js";
 import { RpcInteractiveSession } from "./runtime.js";
 import { createRpcRuntimeHost } from "./runtime-host.js";
 import { applyRinTuiOverrides } from "./upstream-overrides.js";
@@ -251,6 +246,8 @@ async function startStdTui(
   profile: ReturnType<typeof startupProfiler>,
   interactiveOptions: TuiInteractiveOptions,
 ) {
+  const { createConfiguredAgentSession } =
+    await import("../rin-lib/runtime.js");
   const { runtime: sessionRuntime } = await createConfiguredAgentSession({
     additionalExtensionPaths: resourceOptions.additionalExtensionPaths,
     noExtensions: resourceOptions.noExtensions,

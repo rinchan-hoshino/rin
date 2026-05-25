@@ -20,14 +20,13 @@ import {
 import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
-} from "../../core/rin-lib/runtime.js";
+} from "../../core/rin-lib/profile.js";
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
 import {
   cleanupOrphanSearxngSidecars,
-  startSearxngSidecar,
   stopSearxngSidecar,
 } from "../../core/rin-web-search/service.js";
-import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/index.js";
+import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/daemon-client.js";
 
 async function main() {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -52,26 +51,8 @@ async function main() {
   let servicesPromise: Promise<
     Awaited<ReturnType<typeof startChatBridge>>
   > | null = null;
-  let sidecarHealthTimer: NodeJS.Timeout | null = null;
-  let webSearchEnsureInFlight: Promise<void> | null = null;
-
-  const ensureWebSearch = async () => {
-    if (webSearchEnsureInFlight) return await webSearchEnsureInFlight;
-    webSearchEnsureInFlight = (async () => {
-      await cleanupOrphanSearxngSidecars(runtime.agentDir).catch(() => {});
-      await startSearxngSidecar(runtime.agentDir, {
-        instanceId: webSearchInstanceId,
-        logger: console,
-      }).catch(() => {});
-    })().finally(() => {
-      webSearchEnsureInFlight = null;
-    });
-    return await webSearchEnsureInFlight;
-  };
 
   const stopServices = async () => {
-    if (sidecarHealthTimer) clearInterval(sidecarHealthTimer);
-    sidecarHealthTimer = null;
     await chatBridge?.stop().catch(() => {});
     await backgroundExtensionManager?.stop().catch(() => {});
     await stopSearxngSidecar(runtime.agentDir, {
@@ -85,10 +66,9 @@ async function main() {
       socketPath: daemonSocketPath,
     });
 
-    void ensureWebSearch();
-    sidecarHealthTimer = setInterval(() => {
-      void ensureWebSearch();
-    }, 10_000);
+    void cleanupOrphanSearxngSidecars(runtime.agentDir, {
+      logger: console,
+    }).catch(() => {});
 
     backgroundExtensionManager = new RinBackgroundExtensionManager({
       cwd: runtime.cwd,

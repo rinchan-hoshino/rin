@@ -246,17 +246,12 @@ test("web search service reports SearXNG sidecar runtime status by default", () 
   assert.deepEqual(status.instances, []);
 });
 
-test("web search service does not install SearXNG during a search call", async () => {
+test("web search status does not install or start SearXNG", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-web-search-"));
   try {
-    await assert.rejects(
-      () =>
-        service.searchWeb(
-          { q: "rinchanai", limit: 2 },
-          { stateRoot: agentDir },
-        ),
-      /web_search_sidecar_unavailable/,
-    );
+    const status = service.getWebSearchStatus(agentDir);
+    assert.equal(status.runtime.ready, false);
+    assert.deepEqual(status.instances, []);
     await assert.rejects(
       () => fs.stat(path.join(agentDir, "data", "web-search", "runtime")),
       /ENOENT/,

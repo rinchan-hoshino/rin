@@ -467,6 +467,40 @@ async function listPiResolvedBackgroundExtensionConfigs(options: {
     );
 }
 
+function listAutoDiscoveredBackgroundExtensionConfigs(options: {
+  cwd: string;
+}): RinBackgroundExtensionConfig[] {
+  const extensionsDir = path.join(options.cwd, "extensions");
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(extensionsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.flatMap((entry) => {
+    if (!entry.isDirectory()) return [];
+    const modulePath = path.join(extensionsDir, entry.name, "index.js");
+    if (!fs.existsSync(modulePath)) return [];
+    const backgroundEntry = backgroundEntryFromResolvedExtension({
+      enabled: true,
+      path: modulePath,
+      metadata: { source: "auto", baseDir: path.dirname(modulePath) },
+    });
+    return backgroundEntry ? [backgroundEntry] : [];
+  });
+}
+
+function shouldResolvePiBackgroundExtensions(
+  settings: unknown,
+  agentDir: string,
+) {
+  const value = settings as any;
+  if (Array.isArray(value?.extensions) && value.extensions.length > 0)
+    return true;
+  if (Array.isArray(value?.packages) && value.packages.length > 0) return true;
+  return fs.existsSync(path.join(agentDir, "extensions"));
+}
+
 function dedupeBackgroundEntries(entries: RinBackgroundExtensionConfig[]) {
   const seen = new Set<string>();
   const result: RinBackgroundExtensionConfig[] = [];
@@ -497,24 +531,35 @@ export class RinBackgroundExtensionManager {
   async start() {
     this.chatAdapters.length = 0;
     this.memoryProviders.length = 0;
-    const explicitEntries = listRinBackgroundExtensionConfigs(
-      readRuntimeSettings(this.options.agentDir),
-      { cwd: this.options.cwd },
-    );
+    const runtimeSettings = readRuntimeSettings(this.options.agentDir);
+    const explicitEntries = listRinBackgroundExtensionConfigs(runtimeSettings, {
+      cwd: this.options.cwd,
+    });
+    const autoDiscoveredEntries = listAutoDiscoveredBackgroundExtensionConfigs({
+      cwd: this.options.cwd,
+    });
     let piResolvedEntries: RinBackgroundExtensionConfig[] = [];
-    try {
-      piResolvedEntries = await listPiResolvedBackgroundExtensionConfigs(
-        this.options,
-      );
-    } catch (error: any) {
-      this.options.logger?.warn?.(
-        `background extension package resolution failed err=${safeString(
-          error?.message || error,
-        )}`,
-      );
+    if (
+      shouldResolvePiBackgroundExtensions(
+        runtimeSettings,
+        this.options.agentDir,
+      )
+    ) {
+      try {
+        piResolvedEntries = await listPiResolvedBackgroundExtensionConfigs(
+          this.options,
+        );
+      } catch (error: any) {
+        this.options.logger?.warn?.(
+          `background extension package resolution failed err=${safeString(
+            error?.message || error,
+          )}`,
+        );
+      }
     }
     const entries = dedupeBackgroundEntries([
       ...explicitEntries,
+      ...autoDiscoveredEntries,
       ...piResolvedEntries,
     ]);
     if (!entries.length) return [];

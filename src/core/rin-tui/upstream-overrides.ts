@@ -1,12 +1,10 @@
-import {
-  CustomMessageComponent,
-  DynamicBorder,
-  FooterComponent,
-  InteractiveMode,
-  keyHint,
-  SessionManager,
-  SessionSelectorComponent,
-} from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js";
+import { InteractiveMode } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js";
+import { CustomMessageComponent } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/custom-message.js";
+import { DynamicBorder } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/dynamic-border.js";
+import { FooterComponent } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/footer.js";
+import { keyHint } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/keybinding-hints.js";
+import { SessionSelectorComponent } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector.js";
 import { APP_NAME } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/config.js";
 import {
   formatKeyText,

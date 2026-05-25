@@ -1,33 +1,35 @@
-import * as PiAgentRuntime from "@earendil-works/pi-coding-agent";
-
-import * as Changelog from "./changelog.js";
-export { loadRinAgentRuntime } from "./agent-runtime.js";
-
 export async function loadRinSessionManagerModule() {
-  return { SessionManager: PiAgentRuntime.SessionManager };
+  const { SessionManager } =
+    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js");
+  return { SessionManager };
 }
 
 export async function loadRinInteractiveModeModule() {
-  return { InteractiveMode: PiAgentRuntime.InteractiveMode };
+  const { InteractiveMode } =
+    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js");
+  return { InteractiveMode };
 }
 
 export async function loadRinInteractiveFooterModule() {
-  return { FooterComponent: PiAgentRuntime.FooterComponent };
+  const { FooterComponent } =
+    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/footer.js");
+  return { FooterComponent };
 }
 
 export async function loadRinInteractiveThemeModule() {
-  return {
-    theme: PiAgentRuntime.Theme,
-    initTheme: PiAgentRuntime.initTheme,
-  };
+  const { theme, initTheme } =
+    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
+  return { theme, initTheme };
 }
 
 export async function loadRinSessionSelectorModule() {
+  const { SessionSelectorComponent } =
+    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector.js");
   return {
-    SessionSelectorComponent: PiAgentRuntime.SessionSelectorComponent,
+    SessionSelectorComponent,
   };
 }
 
 export async function loadRinChangelogModule() {
-  return Changelog;
+  return await import("./changelog.js");
 }

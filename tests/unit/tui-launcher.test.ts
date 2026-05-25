@@ -195,6 +195,16 @@ test("tui launcher clears the visible viewport before taking over the terminal",
   assert.deepEqual(writes, ["\x1b[2J\x1b[H"]);
 });
 
+test("tui cli options stay lightweight without onboarding imports", async () => {
+  const source = await fs.readFile(
+    path.join(rootDir, "src", "core", "rin-tui", "cli-options.ts"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(source, /self-improve\/onboarding/);
+  assert.doesNotMatch(source, /buildOnboardingPrompt/);
+});
+
 test("tui launcher maps init mode to hidden onboarding guidance", () => {
   const parsed = cliOptions.parseTuiCliOptions(["--init"]);
 

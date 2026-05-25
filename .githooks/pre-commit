@@ -24,4 +24,4 @@ echo "rin local ci: running format, lint, test in container..."
 archive_file="$(mktemp)"
 trap 'rm -f "$archive_file"' EXIT
 git archive --format=tar "$tree_id" >"$archive_file"
-docker run --rm --network none -e FORMAT_TARGETS_SET=1 -e FORMAT_TARGETS="$format_targets" -i "$image_tag" <"$archive_file"
+docker run --rm --network none --memory 4g --memory-swap 4g -e FORMAT_TARGETS_SET=1 -e FORMAT_TARGETS="$format_targets" -i "$image_tag" <"$archive_file"

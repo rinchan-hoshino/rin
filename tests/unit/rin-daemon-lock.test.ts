@@ -68,6 +68,19 @@ async function waitForExit(child: ChildProcess, timeoutMs = 3000) {
   ]);
 }
 
+async function terminateChild(child: ChildProcess, timeoutMs = 1000) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  try {
+    await waitForExit(child, timeoutMs);
+  } catch {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await waitForExit(child, timeoutMs).catch(() => {});
+    }
+  }
+}
+
 async function listenOnUnixSocket(socketPath: string) {
   const server = net.createServer((socket) => {
     socket.on("error", () => {});
@@ -134,14 +147,15 @@ test("daemon instance lock rejects a second daemon without unlinking the active 
   const lock = await acquireDaemonInstanceLock(agentDir, { socketPath });
   const server = await listenOnUnixSocket(socketPath);
 
+  const daemon = spawnDaemon(agentDir, socketPath);
   try {
-    const daemon = spawnDaemon(agentDir, socketPath);
     const exit = await waitForExit(daemon.child);
 
     assert.equal(exit.code, 1);
     assert.match(daemon.stderr(), /rin_daemon_already_running/);
     assert.equal(await connectAndRead(socketPath), "ok\n");
   } finally {
+    await terminateChild(daemon.child);
     await closeServer(server).catch(() => {});
     await lock.release();
     await fs.rm(agentDir, { recursive: true, force: true });

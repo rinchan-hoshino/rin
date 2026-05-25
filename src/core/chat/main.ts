@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
-} from "../rin-lib/runtime.js";
+} from "../rin-lib/profile.js";
 import type { RinFrontendTurnClient } from "../rin-frontend-sdk/index.js";
 import { nowIso } from "../time-utils.js";
 import {

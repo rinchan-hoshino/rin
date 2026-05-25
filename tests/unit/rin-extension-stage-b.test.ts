@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -379,6 +380,45 @@ function restoreEnv(name: string, value: string | undefined) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
+
+test("stage B background extension manager stays lightweight without configured background extensions", () => {
+  const script = `
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { RinBackgroundExtensionManager } from ${JSON.stringify(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "rin-daemon", "extensions.js"),
+    ).href,
+  )};
+function mb(value) { return value / 1024 / 1024; }
+const tmp = mkdtempSync(path.join(os.tmpdir(), "rin-bg-ext-light-"));
+const agentDir = path.join(tmp, "rin");
+mkdirSync(agentDir, { recursive: true });
+try {
+  const manager = new RinBackgroundExtensionManager({
+    cwd: tmp,
+    agentDir,
+    logger: { warn() {}, info() {}, error() {} },
+  });
+  const started = await manager.start();
+  if (started.length !== 0) throw new Error("unexpected_background_extension_start");
+  if (global.gc) global.gc();
+  const rssMb = mb(process.memoryUsage().rss);
+  console.log(JSON.stringify({ rssMb }));
+  if (rssMb > 110) throw new Error("background_extension_start_loaded_heavy_runtime:" + rssMb.toFixed(1));
+  await manager.stop();
+} finally {
+  rmSync(tmp, { recursive: true, force: true });
+}
+`;
+  const result = spawnSync(
+    process.execPath,
+    ["--expose-gc", "--input-type=module", "-e", script],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
 
 test("stage B background extension manager contributes chat runtime adapters", async () => {
   const agentDir = await fs.mkdtemp(

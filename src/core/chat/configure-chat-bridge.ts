@@ -5,7 +5,7 @@ import {
   promptChatBridgeSetup,
   type ChatBridgePromptApi,
 } from "../chat-bridge/setup.js";
-import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
+import { resolveRuntimeProfile } from "../rin-lib/profile.js";
 import { normalizeStoredChatSettings } from "./settings.js";
 import { readJsonFile, writeJsonFile } from "./support.js";
 

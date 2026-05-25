@@ -26,7 +26,7 @@ import {
 import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
-} from "../rin-lib/runtime.js";
+} from "../rin-lib/profile.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 import { getWebSearchStatus } from "../rin-web-search/service.js";
 import { CronScheduler } from "./cron.js";

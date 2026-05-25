@@ -1,7 +1,7 @@
 import path from "node:path";
 import fssync from "node:fs";
 
-import { getRuntimeSessionDir } from "../rin-lib/runtime.js";
+import { getRuntimeSessionDir } from "../rin-lib/profile.js";
 import { safeString } from "../text-utils.js";
 
 export type SessionRef = {

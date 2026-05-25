@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveRuntimeProfile } from "./runtime.js";
+import { resolveRuntimeProfile } from "./profile.js";
 
 const CHANGELOG_RELATIVE_PATH = ["docs", "release", "CHANGELOG.md"] as const;
 

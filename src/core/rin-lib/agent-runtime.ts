@@ -1,5 +1,3 @@
-import * as PiAgentRuntime from "@earendil-works/pi-coding-agent";
-
 import { createRinDefaultResourceLoader } from "./extension-loader.js";
 
 let rinAgentRuntimeModule: any;
@@ -45,7 +43,10 @@ function applyExtensionFlagValues(
   return diagnostics;
 }
 
-function createRinAgentSessionServicesFactory(RinDefaultResourceLoader: any) {
+function createRinAgentSessionServicesFactory(
+  PiAgentRuntime: any,
+  RinDefaultResourceLoader: any,
+) {
   return async function createRinAgentSessionServices(options: any) {
     const cwd = options.cwd;
     const agentDir = options.agentDir ?? PiAgentRuntime.getAgentDir?.();
@@ -104,12 +105,14 @@ function createRinAgentSessionServicesFactory(RinDefaultResourceLoader: any) {
 
 export async function loadRinAgentRuntime() {
   if (!rinAgentRuntimeModule) {
+    const PiAgentRuntime = await import("@earendil-works/pi-coding-agent");
     const DefaultResourceLoader =
       createRinDefaultResourceLoader(PiAgentRuntime);
     rinAgentRuntimeModule = {
       ...PiAgentRuntime,
       DefaultResourceLoader,
       createAgentSessionServices: createRinAgentSessionServicesFactory(
+        PiAgentRuntime,
         DefaultResourceLoader,
       ),
     };

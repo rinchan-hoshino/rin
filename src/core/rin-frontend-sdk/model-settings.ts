@@ -1,10 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
-import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
-import {
-  applyRinSettingsDefaults,
-  resolveRuntimeProfile,
-} from "../rin-lib/runtime.js";
+import { resolveRuntimeProfile } from "../rin-lib/profile.js";
 import { computeAvailableThinkingLevels } from "./session-helpers.js";
 
 const RPC_MODE_VALUES = ["all", "one-at-a-time"] as const;
@@ -57,6 +53,11 @@ async function runRpcModelMutation(
 export async function getPersistentSettingsManager() {
   if (!persistentSettingsManagerPromise) {
     persistentSettingsManagerPromise = (async () => {
+      const [{ loadRinAgentRuntime }, { applyRinSettingsDefaults }] =
+        await Promise.all([
+          import("../rin-lib/agent-runtime.js"),
+          import("../rin-lib/runtime.js"),
+        ]);
       const agentRuntimeModule: any = await loadRinAgentRuntime();
       const SettingsManager = agentRuntimeModule?.SettingsManager;
       if (!SettingsManager?.create) {

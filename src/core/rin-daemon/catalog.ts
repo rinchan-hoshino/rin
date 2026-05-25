@@ -3,9 +3,8 @@ import path from "node:path";
 import { asArray } from "../json-utils.js";
 import {
   applyRuntimeProfileEnvironment,
-  createRinCapabilityDefinitions,
   resolveRuntimeProfile,
-} from "../rin-lib/runtime.js";
+} from "../rin-lib/profile.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
 import { createRinCapabilitySet } from "../rin-lib/capability-session.js";
 import {
@@ -140,6 +139,8 @@ async function createCatalogContext(
     null,
     modelRegistry,
   );
+  const { createRinCapabilityDefinitions } =
+    await import("../rin-lib/runtime.js");
   const rinCapabilities = createRinCapabilitySet({
     cwd,
     agentDir,

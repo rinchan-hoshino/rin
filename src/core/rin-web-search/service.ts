@@ -849,14 +849,30 @@ async function cleanupOrphanSearxngSidecars(
   return { ok: true, cleaned };
 }
 
+let searchSidecarStartInFlight: Promise<{ baseUrl?: string }> | null = null;
+
 async function resolveSearxngSearchBaseUrl(options: SearchWebOptions) {
   const stateRoot = trimString(options.stateRoot) || defaultStateRoot();
   const instanceId = trimString(options.instanceId) || defaultInstanceId();
   const sidecar =
     reuseStoredSearxngInstance(stateRoot, instanceId) ||
     reuseAnySearxngInstance(stateRoot);
-  if (!sidecar?.baseUrl) throw new Error("web_search_sidecar_unavailable");
-  return sidecar.baseUrl;
+  if (sidecar?.baseUrl) return sidecar.baseUrl;
+
+  searchSidecarStartInFlight ??= (async () => {
+    await cleanupOrphanSearxngSidecars(stateRoot, {
+      logger: options.logger,
+    }).catch(() => {});
+    return await startSearxngSidecar(stateRoot, {
+      instanceId,
+      logger: options.logger,
+    });
+  })().finally(() => {
+    searchSidecarStartInFlight = null;
+  });
+  const started = await searchSidecarStartInFlight;
+  if (!started?.baseUrl) throw new Error("web_search_sidecar_unavailable");
+  return started.baseUrl;
 }
 
 async function searchWeb(

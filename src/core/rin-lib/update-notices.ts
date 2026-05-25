@@ -7,13 +7,10 @@ import { promisify } from "node:util";
 import { safeString } from "../text-utils.js";
 import { getChangelogPath, parseChangelog } from "./changelog.js";
 import { resolveRuntimeProfile } from "./profile.js";
-import {
-  getReleaseRepoUrl,
-  type InstalledReleaseInfo,
-  loadReleaseManifestForNetwork,
+import type {
+  InstalledReleaseInfo,
   ReleaseChannel,
   ReleaseManifest,
-  resolveReleaseRequest,
 } from "./release.js";
 
 export type ParsedPackageVersion = {
@@ -282,6 +279,7 @@ export function getNewRinChangelogEntries(
 
 async function latestGitRefForBranch(
   manifest: ReleaseManifest,
+  getReleaseRepoUrl: (manifest: ReleaseManifest) => string,
   currentRelease?: InstalledReleaseInfo,
 ) {
   if (!manifest.git) return undefined;
@@ -311,11 +309,20 @@ export async function latestRinVersionForChannel(
   options: RinUpdateCheckOptions = {},
 ) {
   const { channel, currentRelease } = currentUpdateContext(options);
+  const {
+    getReleaseRepoUrl,
+    loadReleaseManifestForNetwork,
+    resolveReleaseRequest,
+  } = await import("./release.js");
   const manifest =
     options.manifest ||
     (await loadReleaseManifestForNetwork(options.sourceRoot));
   if (channel === "git")
-    return await latestGitRefForBranch(manifest, currentRelease);
+    return await latestGitRefForBranch(
+      manifest,
+      getReleaseRepoUrl,
+      currentRelease,
+    );
   return resolveReleaseRequest(manifest, { channel }).version;
 }
 

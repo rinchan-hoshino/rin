@@ -67,12 +67,30 @@ test("local CI runner reuses image dependencies before repo checks", () => {
   ]);
 });
 
+test("repository test scripts bound default test concurrency", () => {
+  const packageJson = JSON.parse(readRepoFile("package.json"));
+
+  assert.match(packageJson.scripts["test:unit"], /--test-concurrency=4/);
+  assert.match(packageJson.scripts["test:release"], /--test-concurrency=4/);
+  assert.match(packageJson.scripts["test:e2e"], /--test-concurrency=2/);
+  assert.match(packageJson.scripts["test:interactive"], /--test-concurrency=2/);
+});
+
 test("local CI runner enables inner install-to-TUI smoke before tests", () => {
   const runner = readRepoFile(".ci/local-ci/run-checks.sh");
 
   assertOrdered(runner, [
     "export RIN_INSTALL_TUI_CONTAINER_INNER=1",
     "npm test",
+  ]);
+});
+
+test("local CI runner bounds the full test gate", () => {
+  const runner = readRepoFile(".ci/local-ci/run-checks.sh");
+
+  assertOrdered(runner, [
+    'ci_timeout="45m"',
+    'timeout --foreground "$ci_timeout" npm test',
   ]);
 });
 
@@ -88,13 +106,13 @@ test("local CI runner preserves staged format target filtering", () => {
   assert.match(runner, /No staged files need format checking\./);
 });
 
-test("pre-commit runs only the containerized local CI", () => {
+test("pre-commit runs only the bounded containerized local CI", () => {
   const hook = readRepoFile(".githooks/pre-commit");
 
   assertOrdered(hook, [
     'docker build -f .ci/local-ci/Dockerfile -t "$image_tag" .',
     'git archive --format=tar "$tree_id" >"$archive_file"',
-    "docker run --rm --network none",
+    "docker run --rm --network none --memory 4g --memory-swap 4g",
   ]);
   assert.doesNotMatch(hook, /run_host_checks/);
   assert.doesNotMatch(hook, /fallback/i);
