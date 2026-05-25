@@ -33,7 +33,7 @@ import {
 } from "./interactive.js";
 import { createInstallerI18n, promptInstallerLanguage } from "./i18n.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
-import { finalizeInstallPlan } from "./finalize.js";
+import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";
 import {
   DEFAULT_LANGUAGE_TAG,
   detectLocalLanguageTag,
@@ -147,9 +147,10 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     const errorPath = cli.applyErrorFile;
     try {
       const rawPlan = fs.readFileSync(cli.applyPlanFile, "utf8");
-      const result = await finalizeInstallPlan(
-        JSON.parse(rawPlan) as FinalizeInstallOptions,
-      );
+      const plan = JSON.parse(rawPlan) as FinalizeInstallOptions;
+      const result = plan.coreUpdate
+        ? await finalizeCoreUpdate(plan)
+        : await finalizeInstallPlan(plan);
       if (resultPath)
         fs.writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
       return;

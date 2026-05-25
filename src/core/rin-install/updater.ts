@@ -168,6 +168,7 @@ export async function startUpdater(deps: {
           installDir,
           sourceRoot: deps.repoRootFromHere(),
           daemonReadyTimeoutMs: 30_000,
+          coreUpdate: true,
           ...(deps.release ? { release: deps.release } : {}),
         } satisfies FinalizeInstallOptions,
         i18n.refreshingInstalledTargetMessage,

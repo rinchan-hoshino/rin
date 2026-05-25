@@ -78,6 +78,7 @@ test("startUpdater does not write language during core updates", async () => {
     assert.equal(capturedOptions.currentUser, "alice");
     assert.equal(capturedOptions.targetUser, "alice");
     assert.equal(Object.hasOwn(capturedOptions, "language"), false);
+    assert.equal(capturedOptions.coreUpdate, true);
   });
 });
 

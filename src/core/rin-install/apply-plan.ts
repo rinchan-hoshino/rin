@@ -23,6 +23,7 @@ export type FinalizeInstallOptions = {
   sourceRoot?: string;
   release?: InstalledReleaseInfo;
   daemonReadyTimeoutMs?: number;
+  coreUpdate?: boolean;
 };
 
 export function writeFinalizeInstallPlanFile(
