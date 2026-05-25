@@ -25,6 +25,7 @@ import {
 import {
   collectDaemonFailureDetails,
   daemonSocketPathForUser,
+  buildSystemdUserService,
   installDaemonService,
   reconcileSystemdUserService,
   refreshManagedServiceFiles,
@@ -214,7 +215,7 @@ async function applyInstalledRuntime(
     stderrPath?: string;
     service?: string;
   } = null;
-  if (installServiceNow) {
+  if (installServiceNow && shouldRestartBeforePersist) {
     try {
       installedService = installDaemonService(
         targetUser,
@@ -226,6 +227,12 @@ async function applyInstalledRuntime(
       if (persistInstallerState) throw error;
       installedService = null;
     }
+  } else if (installServiceNow && process.platform === "linux") {
+    installedService = buildSystemdUserService(
+      targetUser,
+      installDir,
+      targetHomeForUser,
+    );
   }
 
   const installerManifest = reconcileInstallerManifest(
@@ -262,6 +269,19 @@ async function applyInstalledRuntime(
   );
 
   if (!shouldRestartBeforePersist) {
+    if (installServiceNow) {
+      try {
+        installedService = installDaemonService(
+          targetUser,
+          installDir,
+          useElevatedService,
+          serviceDeps,
+        );
+      } catch (error) {
+        if (persistInstallerState) throw error;
+        installedService = null;
+      }
+    }
     reconcileSystemdUserService(
       targetUser,
       installDir,
