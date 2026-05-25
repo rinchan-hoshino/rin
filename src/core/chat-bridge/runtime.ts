@@ -1,6 +1,9 @@
 import path from "node:path";
 
-import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
+import {
+  enqueueChatOutboxPayload,
+  type ChatMessagePart,
+} from "../rin-lib/chat-outbox.js";
 import { formatLocalDateOnly } from "../chat/date.js";
 import { readChatLog } from "../chat/chat-log.js";
 import { normalizeChatMessageLookup } from "../chat/message-store.js";
@@ -13,7 +16,7 @@ import {
   trustOf,
 } from "../chat/support.js";
 import { appendJsonLineSync } from "../platform/fs.js";
-import { sendOutboxPayload } from "../chat/transport.js";
+import { drainChatOutbox } from "../chat/boot.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { serializeBridgeValue } from "./eval.js";
 import { nowIso } from "../time-utils.js";
@@ -216,8 +219,7 @@ export function createChatBridgeRuntime(options: {
         safeString(replyToMessageId).trim(),
       );
       if (!parts.length) throw new Error("chat_bridge_send_empty");
-      return await sendOutboxPayload(
-        options.app,
+      enqueueChatOutboxPayload(
         options.agentDir,
         {
           type: "parts_delivery",
@@ -228,8 +230,17 @@ export function createChatBridgeRuntime(options: {
           sessionFile,
           parts,
         },
-        options.h,
+        { deliveryKind: "generic" },
       );
+      const results = await drainChatOutbox(
+        options.app,
+        options.agentDir,
+        options.h,
+        { warn() {} },
+      );
+      return Array.isArray(results)
+        ? results.flatMap((item: any) => item?.deliveryResult || [])
+        : [];
     };
 
     const scope: any = {

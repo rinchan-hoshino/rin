@@ -13,6 +13,10 @@ const rootDir = path.resolve(
 const boot = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "boot.js")).href
 );
+const outbox = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
+    .href
+);
 
 test("chat boot exposes the dedicated chat command registry", () => {
   const rows = boot.getChatCommandRows();
@@ -144,16 +148,12 @@ test("chat boot clears common telegram scopes before syncing default commands", 
 
 test("chat boot claims outbox files before sending so concurrent drains do not duplicate delivery", async () => {
   await withTempDir(async (agentDir) => {
-    const outboxDir = path.join(agentDir, "data", "chat-outbox");
-    await fs.mkdir(outboxDir, { recursive: true });
-    await fs.writeFile(
-      path.join(outboxDir, "one.json"),
-      JSON.stringify({
-        type: "text_delivery",
-        chatKey: "telegram/1:2",
-        text: "hello",
-      }),
-    );
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/1:2",
+      text: "hello",
+    });
 
     const sends = [];
     const app = {
@@ -187,18 +187,14 @@ test("chat boot claims outbox files before sending so concurrent drains do not d
   });
 });
 
-test("chat boot moves failed outbox deliveries into failed storage", async () => {
+test("chat boot keeps retryable outbox delivery failures queued", async () => {
   await withTempDir(async (agentDir) => {
-    const outboxDir = path.join(agentDir, "data", "chat-outbox");
-    await fs.mkdir(outboxDir, { recursive: true });
-    await fs.writeFile(
-      path.join(outboxDir, "one.json"),
-      JSON.stringify({
-        type: "text_delivery",
-        chatKey: "telegram/1:2",
-        text: "hello",
-      }),
-    );
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/1:2",
+      text: "hello",
+    });
 
     const warnings = [];
     const app = {
@@ -227,42 +223,12 @@ test("chat boot moves failed outbox deliveries into failed storage", async () =>
       },
     });
 
-    const failedDir = path.join(outboxDir, "failed");
-    const failedFiles = await fs.readdir(failedDir);
-    assert.deepEqual(failedFiles, ["one.json"]);
+    const item = outbox.listChatOutboxItems(agentDir)[0].item;
+    assert.equal(item.status, "queued");
+    assert.equal(item.failureKind, "retryable");
+    assert.ok(item.nextAttemptAt);
     assert.ok(
-      warnings.some((message) => message.includes("chat outbox failed")),
-    );
-  });
-});
-
-test("chat boot moves invalid outbox json into failed storage instead of dropping it", async () => {
-  await withTempDir(async (agentDir) => {
-    const outboxDir = path.join(agentDir, "data", "chat-outbox");
-    await fs.mkdir(outboxDir, { recursive: true });
-    await fs.writeFile(path.join(outboxDir, "bad.json"), "{not json\n");
-
-    const warnings = [];
-    await boot.drainChatOutbox(
-      { bots: [] },
-      agentDir,
-      {},
-      {
-        warn(message) {
-          warnings.push(String(message));
-        },
-      },
-    );
-
-    const failedDir = path.join(outboxDir, "failed");
-    const failedFiles = await fs.readdir(failedDir);
-    assert.deepEqual(failedFiles, ["bad.json"]);
-    assert.ok(
-      warnings.some(
-        (message) =>
-          message.includes("chat outbox failed") &&
-          message.includes("chat_outbox_invalid_json"),
-      ),
+      warnings.some((message) => message.includes("chat outbox queued")),
     );
   });
 });

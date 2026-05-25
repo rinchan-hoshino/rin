@@ -23,7 +23,11 @@ import {
   listChatStateFiles,
   listDetachedControllerStateFiles,
 } from "./support.js";
-import { getChatCommandRows, syncTelegramCommands } from "./boot.js";
+import {
+  drainChatOutbox,
+  getChatCommandRows,
+  syncTelegramCommands,
+} from "./boot.js";
 import {
   elementsToText,
   ensureDir,
@@ -83,9 +87,11 @@ import {
   listChatRuntimeAdapterEntries,
 } from "./runtime-config.js";
 import { composeChatKey, loadIdentity, trustOf } from "./support.js";
-import { sendOutboxPayload } from "./transport.js";
 import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
-import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
+import {
+  enqueueChatOutboxPayload,
+  type ChatOutboxPayload,
+} from "../rin-lib/chat-outbox.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
 import {
@@ -309,6 +315,22 @@ export async function startChatBridge(
 
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
+  const enqueueAndDrainOutbox = async (
+    payload: ChatOutboxPayload,
+    deliveryKind: "command_ack" | "error" | "generic" = "generic",
+  ) => {
+    const id = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
+    enqueueChatOutboxPayload(runtime.agentDir, payload, { id, deliveryKind });
+    const results = await drainChatOutbox(app, runtime.agentDir, h, logger);
+    const own = Array.isArray(results)
+      ? results.find((item: any) => item?.id === id)
+      : null;
+    if (own && own.status !== "delivered") {
+      throw new Error(
+        safeString((own as any).error).trim() || "chat_outbox_delivery_pending",
+      );
+    }
+  };
   const chatRuntimeRoot = path.join(dataDir, "chat-runtime");
   try {
     ensureChatRuntimeDependencies(chatRuntimeRoot, settings);
@@ -467,9 +489,7 @@ export async function startChatBridge(
         (entry) =>
           `/${entry.name}${entry.description ? ` — ${entry.description}` : ""}`,
       );
-      await sendOutboxPayload(
-        app,
-        runtime.agentDir,
+      await enqueueAndDrainOutbox(
         {
           type: "text_delivery",
           createdAt: nowIso(),
@@ -477,7 +497,7 @@ export async function startChatBridge(
           text: lines.join("\n"),
           replyToMessageId: messageId || undefined,
         },
-        h,
+        "command_ack",
       ).catch(() => {});
       return { retry: false };
     }
@@ -600,9 +620,7 @@ export async function startChatBridge(
           messageId,
         )
       ) {
-        void sendOutboxPayload(
-          app,
-          runtime.agentDir,
+        void enqueueAndDrainOutbox(
           {
             type: "text_delivery",
             createdAt: nowIso(),
@@ -611,7 +629,7 @@ export async function startChatBridge(
             replyToMessageId: messageId || undefined,
             sessionFile: linkedSessionFile || undefined,
           },
-          h,
+          "error",
         ).catch(() => {});
         void controller.clearProcessingState().catch(() => {});
       }
@@ -850,7 +868,7 @@ export async function startChatBridge(
 
   const startedAt = nowIso();
   const send = async (payload: ChatOutboxPayload) => {
-    await sendOutboxPayload(app, runtime.agentDir, payload, h);
+    await enqueueAndDrainOutbox(payload, "generic");
     return { delivered: true as const };
   };
   const runTurn = async (payload: ChatBridgeTurnPayload) => {

@@ -42,8 +42,10 @@ import {
   markProcessedChatMessage,
   safeString,
 } from "./chat-helpers.js";
+import { enqueueChatOutboxPayload } from "../rin-lib/chat-outbox.js";
+import { drainChatOutbox } from "./boot.js";
 import { listChatMessages } from "./message-store.js";
-import { restorePromptParts, sendOutboxPayload } from "./transport.js";
+import { restorePromptParts } from "./transport.js";
 import {
   formatChatRuntimeErrorForUser,
   isTransientChatRuntimeError,
@@ -172,6 +174,7 @@ export class ChatController {
   } | null = null;
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatTextDelivery | null = null;
+  pendingPassiveNotices: string[] = [];
   awaitingTurnSettle = false;
   turnAbortRequested = false;
   sleepAfterIdleMs = 0;
@@ -626,9 +629,7 @@ export class ChatController {
     const text = this.buildStatusText();
     this.markProcessedMessage(incomingMessageId, false);
     if (!this.deliveryEnabled) return { handled: true, text, local: true };
-    await sendOutboxPayload(
-      this.app,
-      this.agentDir,
+    await this.enqueueAndDrainDelivery(
       {
         type: "text_delivery",
         chatKey: this.chatKey,
@@ -636,7 +637,7 @@ export class ChatController {
         replyToMessageId: safeString(replyToMessageId).trim() || undefined,
         createdAt: nowIso(),
       },
-      this.h,
+      { deliveryKind: "command_ack" },
     );
     return { handled: true, text, local: true };
   }
@@ -867,7 +868,54 @@ export class ChatController {
     return text;
   }
 
-  private async commitPendingDelivery(clearProcessing = false) {
+  private async enqueueAndDrainDelivery(
+    payload: any,
+    options: {
+      deliveryKind?:
+        | "final"
+        | "interim"
+        | "passive_notice"
+        | "error"
+        | "command_ack"
+        | "generic";
+      postDelivery?: any;
+    } = {},
+  ) {
+    const id = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
+    const deliveryKind = safeString(options.deliveryKind).trim();
+    const normalizedPayload =
+      payload?.type === "text_delivery" &&
+      (deliveryKind === "final" ||
+        deliveryKind === "interim" ||
+        deliveryKind === "passive_notice") &&
+      !payload.deliveryKind
+        ? { ...payload, deliveryKind }
+        : payload;
+    enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
+      id,
+      ...options,
+    });
+    const results = await drainChatOutbox(
+      this.app,
+      this.agentDir,
+      this.h,
+      this.logger,
+    );
+    const own = Array.isArray(results)
+      ? results.find((item: any) => item?.id === id)
+      : null;
+    if (own && own.status !== "delivered") {
+      throw new Error(
+        safeString((own as any).error).trim() || "chat_outbox_delivery_pending",
+      );
+    }
+    return (own as any)?.deliveryResult || [];
+  }
+
+  private async commitPendingDelivery(
+    clearProcessing = false,
+    postDelivery?: any,
+  ) {
     const pending = this.stagedDelivery;
     if (!pending) return;
     if (!this.deliveryEnabled) {
@@ -878,14 +926,12 @@ export class ChatController {
       }
       return;
     }
-    await sendOutboxPayload(
-      this.app,
-      this.agentDir,
+    await this.enqueueAndDrainDelivery(
       {
         ...pending,
         createdAt: nowIso(),
       },
-      this.h,
+      { deliveryKind: "final", postDelivery },
     );
     this.stagedDelivery = null;
     if (clearProcessing) {
@@ -904,7 +950,16 @@ export class ChatController {
   }) {
     const bindSession = input.bindSession !== false && this.affectChatBinding;
     const text = this.stageAssistantDelivery({ ...input, bindSession });
-    await this.commitPendingDelivery(input.clearProcessing);
+    await this.commitPendingDelivery(input.clearProcessing, {
+      markProcessed: {
+        chatKey: this.chatKey,
+        messageId: input.incomingMessageId,
+        sessionFile: bindSession
+          ? input.sessionFile || this.currentSessionFile()
+          : undefined,
+        bindSession,
+      },
+    });
     this.markProcessedMessage(input.incomingMessageId, bindSession);
     return text;
   }
@@ -916,9 +971,7 @@ export class ChatController {
     const incomingMessageId = this.currentIncomingMessageId();
     const replyToMessageId = this.currentReplyToMessageId();
     try {
-      await sendOutboxPayload(
-        this.app,
-        this.agentDir,
+      await this.enqueueAndDrainDelivery(
         {
           type: "text_delivery",
           createdAt: nowIso(),
@@ -933,9 +986,37 @@ export class ChatController {
               }
             : {}),
         },
-        this.h,
+        { deliveryKind: "interim" },
       );
       this.markAcceptedMessage(incomingMessageId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private shouldDeferPassiveNotice() {
+    return (
+      this.hasActiveTurn() ||
+      this.awaitingTurnSettle ||
+      Boolean(this.stagedDelivery)
+    );
+  }
+
+  private async sendPassiveNoticeNow(text: string) {
+    const trimmed = safeString(text).trim();
+    if (!trimmed) return false;
+    if (!this.deliveryEnabled) return true;
+    try {
+      await this.enqueueAndDrainDelivery(
+        {
+          type: "text_delivery",
+          createdAt: nowIso(),
+          chatKey: this.chatKey,
+          text: trimmed,
+        },
+        { deliveryKind: "passive_notice" },
+      );
       return true;
     } catch {
       return false;
@@ -945,23 +1026,17 @@ export class ChatController {
   private async deliverPassiveNotice(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
-    if (!this.deliveryEnabled) return true;
-    try {
-      await sendOutboxPayload(
-        this.app,
-        this.agentDir,
-        {
-          type: "text_delivery",
-          createdAt: nowIso(),
-          chatKey: this.chatKey,
-          deliveryKind: "passive_notice",
-          text: trimmed,
-        },
-        this.h,
-      );
+    if (this.shouldDeferPassiveNotice()) {
+      this.pendingPassiveNotices.push(trimmed);
       return true;
-    } catch {
-      return false;
+    }
+    return await this.sendPassiveNoticeNow(trimmed);
+  }
+
+  private async flushPendingPassiveNotices() {
+    const notices = this.pendingPassiveNotices.splice(0);
+    for (const notice of notices) {
+      await this.sendPassiveNoticeNow(notice);
     }
   }
 
@@ -975,17 +1050,14 @@ export class ChatController {
     if (!trimmed) return false;
     if (!this.deliveryEnabled) return true;
     try {
-      const messageIds = await sendOutboxPayload(
-        this.app,
-        this.agentDir,
+      const messageIds = await this.enqueueAndDrainDelivery(
         {
           type: "text_delivery",
           createdAt: nowIso(),
           chatKey: this.chatKey,
-          deliveryKind: "passive_notice",
           text: trimmed,
         },
-        this.h,
+        { deliveryKind: "passive_notice" },
       );
       const messageId = safeString(messageIds?.[0]).trim();
       if (messageId) {
@@ -1270,6 +1342,8 @@ export class ChatController {
           result.sessionFile || this.currentSessionFile(),
         )
         .catch(() => {});
+      await new Promise((resolve) => setImmediate(resolve));
+      await this.flushPendingPassiveNotices();
       return {
         finalText: result.finalText,
         result: result.result,
@@ -1337,13 +1411,15 @@ export class ChatController {
           incomingMessageId: input.incomingMessageId,
           clearProcessing: true,
         });
-        this.clearCurrentTurn();
         await this.driver
           .runSelfImproveNoticeCheckpoint?.(
             "turn_complete",
             result.sessionFile || this.currentSessionFile(),
           )
           .catch(() => {});
+        await new Promise((resolve) => setImmediate(resolve));
+        await this.flushPendingPassiveNotices();
+        this.clearCurrentTurn();
         return {
           finalText: result.finalText,
           result: result.result,
@@ -1455,6 +1531,8 @@ export class ChatController {
       case "passive_notice":
         if (event.noticeKind === "compaction_end") {
           await this.finishCompactionNotice();
+          await this.sendPassiveNoticeNow(event.text);
+          return;
         }
         await this.deliverPassiveNotice(event.text);
         return;

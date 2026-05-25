@@ -14,6 +14,9 @@ const outbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
     .href
 );
+const boot = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "boot.js")).href
+);
 const support = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href
 );
@@ -44,6 +47,151 @@ test("chat outbox enqueues payload on disk", async () => {
     });
     const stat = await fs.stat(filePath);
     assert.ok(stat.isFile());
+  });
+});
+
+test("chat outbox retries queued payloads after send failure", async () => {
+  await withTempDir(async (dir) => {
+    outbox.enqueueChatOutboxPayload(dir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/777:1",
+      text: "retry me",
+    });
+    const deliveries = [];
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "777",
+          async sendMessage(_chatId, content) {
+            deliveries.push(content?.[0]?.attrs?.content);
+            if (deliveries.length === 1) throw new Error("network down");
+            return ["m-retry"];
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+    const logger = { warn() {} };
+
+    let results = await boot.drainChatOutbox(app, dir, h, logger);
+    assert.equal(results[0].status, "queued");
+    const stored = outbox.listChatOutboxItems(dir)[0].item;
+    assert.equal(stored.status, "queued");
+    assert.equal(stored.failureKind, "retryable");
+    assert.ok(stored.nextAttemptAt);
+    assert.ok(Date.parse(stored.nextAttemptAt) - Date.now() <= 1500);
+
+    results = await boot.drainChatOutbox(app, dir, h, logger);
+    assert.deepEqual(results, []);
+
+    outbox.writeChatOutboxItem(dir, {
+      ...stored,
+      nextAttemptAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    results = await boot.drainChatOutbox(app, dir, h, logger);
+    assert.equal(results[0].status, "delivered");
+    assert.deepEqual(deliveries, ["retry me", "retry me"]);
+    assert.equal(outbox.listChatOutboxItems(dir)[0].item.status, "delivered");
+  });
+});
+
+test("chat outbox stops retrying after repeated transient failures", async () => {
+  await withTempDir(async (dir) => {
+    outbox.enqueueChatOutboxPayload(dir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/777:1",
+      text: "stop retrying",
+    });
+    const stored = outbox.listChatOutboxItems(dir)[0].item;
+    outbox.writeChatOutboxItem(dir, { ...stored, attempts: 3 });
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "777",
+          async sendMessage() {
+            throw new Error("network still down");
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+    const logger = { warn() {} };
+
+    const results = await boot.drainChatOutbox(app, dir, h, logger);
+    assert.equal(results[0].status, "failed");
+    const failed = outbox.listChatOutboxItems(dir)[0].item;
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.failureKind, "attempts_exhausted");
+  });
+});
+
+test("chat outbox fails permanent delivery errors without retrying", async () => {
+  await withTempDir(async (dir) => {
+    outbox.enqueueChatOutboxPayload(dir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/777:1",
+      text: "no bot",
+    });
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+    const logger = { warn() {} };
+
+    const results = await boot.drainChatOutbox({ bots: [] }, dir, h, logger);
+    assert.equal(results[0].status, "failed");
+    const stored = outbox.listChatOutboxItems(dir)[0].item;
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.failureKind, "permanent");
+    assert.equal(stored.nextAttemptAt, undefined);
+  });
+});
+
+test("chat outbox treats platform permission errors as permanent", async () => {
+  await withTempDir(async (dir) => {
+    outbox.enqueueChatOutboxPayload(dir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/777:1",
+      text: "blocked",
+    });
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "777",
+          async sendMessage() {
+            throw new Error("Forbidden: bot was blocked by the user");
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+    const logger = { warn() {} };
+
+    const results = await boot.drainChatOutbox(app, dir, h, logger);
+    assert.equal(results[0].status, "failed");
+    const stored = outbox.listChatOutboxItems(dir)[0].item;
+    assert.equal(stored.status, "failed");
+    assert.equal(stored.failureKind, "permanent");
   });
 });
 
