@@ -3,6 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
+import { type ManagedFilesManifest } from "./persist.js";
 import {
   ensureDir,
   preferredTempRootCandidates,
@@ -455,6 +456,77 @@ export function syncInstalledDocTree(
   }
   syncTree(sourceDir, destDir);
   return destDir;
+}
+
+function listRelativeFiles(root: string, prefix = "") {
+  const files: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const fullPath = path.join(root, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...listRelativeFiles(fullPath, relativePath));
+      } else if (entry.isFile()) {
+        files.push(relativePath);
+      }
+    }
+  } catch {}
+  return files.sort();
+}
+
+function collectManagedFilesFromSource(
+  files: string[],
+  sourceRoot: string,
+  installRelativePrefix = "",
+) {
+  if (!fs.existsSync(sourceRoot)) return files;
+  if (fs.statSync(sourceRoot).isFile()) {
+    const entry = installRelativePrefix || path.basename(sourceRoot);
+    files.push(entry.replace(/\\/g, "/"));
+    return files;
+  }
+  for (const file of listRelativeFiles(sourceRoot)) {
+    files.push(
+      path.posix.join(installRelativePrefix.replace(/\\/g, "/"), file),
+    );
+  }
+  return files;
+}
+
+export function buildInstalledManagedFilesManifest(
+  sourceRoot: string,
+): ManagedFilesManifest {
+  const rinDocFiles: string[] = [];
+  collectManagedFilesFromSource(
+    rinDocFiles,
+    path.join(sourceRoot, "docs", "agent"),
+  );
+  for (const skillName of INSTALLED_BUILTIN_SKILL_NAMES) {
+    collectManagedFilesFromSource(
+      rinDocFiles,
+      path.join(sourceRoot, "upstream", skillName),
+      path.posix.join("builtin-skills", skillName),
+    );
+  }
+
+  const releaseDocFiles = collectManagedFilesFromSource(
+    [],
+    path.join(sourceRoot, "docs", "release"),
+  );
+
+  const piDocFiles: string[] = [];
+  const piDocRoot = path.join(sourceRoot, "upstream", "pi");
+  for (const name of INSTALLED_PI_DOC_NAMES) {
+    collectManagedFilesFromSource(piDocFiles, path.join(piDocRoot, name), name);
+  }
+
+  const trees: Record<string, string[]> = {};
+  if (rinDocFiles.length)
+    trees["docs/rin"] = Array.from(new Set(rinDocFiles)).sort();
+  if (releaseDocFiles.length) trees["docs/release"] = releaseDocFiles;
+  if (piDocFiles.length)
+    trees["docs/pi"] = Array.from(new Set(piDocFiles)).sort();
+  return { trees };
 }
 
 export function syncInstalledDocs(

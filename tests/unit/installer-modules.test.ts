@@ -344,6 +344,66 @@ test("persist reconcileInstallerManifest writes only install metadata for custom
   });
 });
 
+test("persist reconcileInstallerManifest migrates managed files into installer manifest", async () => {
+  await withTempDir(async (dir) => {
+    const installDir = path.join(dir, "srv", "rin-demo");
+    const ownerHome = path.join(dir, "home", "demo");
+    const legacyPath = path.join(
+      installDir,
+      "data",
+      ".managed",
+      "install-home.json",
+    );
+    const writes = [];
+    const removed = [];
+
+    persist.reconcileInstallerManifest(
+      {
+        targetUser: "demo",
+        installDir,
+        managedFiles: {
+          trees: {
+            "docs/rin": ["README.md", "docs/runtime-layout.md"],
+          },
+        },
+        elevated: true,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000, home: ownerHome }),
+        ensureDir: async () => {},
+        readInstallerJson: (filePath, fallback) => {
+          if (filePath === legacyPath) {
+            return {
+              version: 1,
+              trees: {
+                extensions: ["init.ts"],
+                "docs/rin": ["stale.md"],
+              },
+            };
+          }
+          return fallback;
+        },
+        writeJsonFileWithPrivilege: (filePath, value) =>
+          writes.push({ filePath, value }),
+        writeJsonFile: () => {},
+        runPrivileged: (command, args) => removed.push([command, ...args]),
+      },
+    );
+
+    assert.equal(writes.length, 2);
+    for (const entry of writes) {
+      assert.deepEqual(entry.value.managedFiles, {
+        trees: {
+          extensions: ["init.ts"],
+          "docs/rin": ["README.md", "docs/runtime-layout.md"],
+        },
+      });
+      assert.equal("version" in entry.value.managedFiles, false);
+    }
+    assert.deepEqual(removed, [["rm", "-f", legacyPath]]);
+  });
+});
+
 test("persist reconcileInstallerManifest stores release metadata on currentRelease only", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");
@@ -553,6 +613,7 @@ test("persist reconcileInstallerManifest reuses only currentRelease state from p
     assert.deepEqual(readCalls, [
       path.join(installDir, "installer.json"),
       path.join(ownerHome, ".rin", "installer.json"),
+      path.join(installDir, "data", ".managed", "install-home.json"),
     ]);
     assert.equal(writes.length, 2);
     for (const entry of writes) {

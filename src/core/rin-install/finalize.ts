@@ -10,6 +10,7 @@ import {
   runCommandAsUser,
   runPrivileged,
   captureCommandAsUser,
+  buildInstalledManagedFilesManifest,
   syncInstalledDocs,
   writeJsonFile,
   writeJsonFileWithPrivilege,
@@ -165,6 +166,7 @@ async function applyInstalledRuntime(
           release,
           currentReleaseName,
           currentReleaseRoot: publishedRuntime.releaseRoot,
+          managedFiles: buildInstalledManagedFilesManifest(sourceRoot),
           previousReleaseName,
           previousReleaseRoot: previousReleaseName
             ? installedReleaseRoot(installDir, previousReleaseName)
@@ -237,6 +239,7 @@ async function applyInstalledRuntime(
       release,
       currentReleaseName,
       currentReleaseRoot: publishedRuntime.releaseRoot,
+      managedFiles: buildInstalledManagedFilesManifest(sourceRoot),
       previousReleaseName,
       previousReleaseRoot: previousReleaseName
         ? installedReleaseRoot(installDir, previousReleaseName)

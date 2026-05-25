@@ -22,6 +22,10 @@ import {
   installSettingsPath,
 } from "./paths.js";
 
+export type ManagedFilesManifest = {
+  trees: Record<string, string[]>;
+};
+
 function resolveInstallOwner(
   targetUser: string,
   findSystemUser: (targetUser: string) => any,
@@ -63,6 +67,20 @@ function writeInstallerJson(
     return;
   }
   deps.writeJsonFile(filePath, value);
+}
+
+function removeFile(
+  filePath: string,
+  elevated: boolean,
+  runPrivileged: (command: string, args: string[]) => void,
+) {
+  try {
+    if (elevated) {
+      runPrivileged("rm", ["-f", filePath]);
+      return;
+    }
+    fs.rmSync(filePath, { force: true });
+  } catch {}
 }
 
 const PREVIOUS_CHAT_MESSAGE_STORE_DIRNAME = "koishi-message-store";
@@ -667,6 +685,54 @@ function buildInstalledReleaseRecord(options: {
   };
 }
 
+function legacyManagedFilesManifestPath(installDir: string) {
+  return path.join(installDir, "data", ".managed", "install-home.json");
+}
+
+function normalizeManagedTreeFiles(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((entry) =>
+          String(entry || "")
+            .trim()
+            .replace(/\\/g, "/"),
+        )
+        .filter((entry) => entry && !entry.startsWith("/") && entry !== "."),
+    ),
+  ).sort();
+}
+
+function normalizeManagedFilesManifest(
+  value: unknown,
+): ManagedFilesManifest | undefined {
+  if (!isJsonRecord(value) || !isJsonRecord(value.trees)) return undefined;
+  const trees: Record<string, string[]> = {};
+  for (const [rawRoot, rawFiles] of Object.entries(value.trees)) {
+    const root = String(rawRoot || "")
+      .trim()
+      .replace(/\\/g, "/");
+    if (!root || root.startsWith("/") || root === ".") continue;
+    const files = normalizeManagedTreeFiles(rawFiles);
+    if (files.length) trees[root] = files;
+  }
+  return Object.keys(trees).length ? { trees } : undefined;
+}
+
+function mergeManagedFilesManifests(
+  prior: ManagedFilesManifest | undefined,
+  next: ManagedFilesManifest | undefined,
+) {
+  if (!prior && !next) return undefined;
+  return {
+    trees: {
+      ...(prior?.trees || {}),
+      ...(next?.trees || {}),
+    },
+  };
+}
+
 export function reconcileInstallerManifest(
   options: {
     targetUser: string;
@@ -677,6 +743,7 @@ export function reconcileInstallerManifest(
     previousReleaseName?: string;
     previousReleaseRoot?: string;
     elevated?: boolean;
+    managedFiles?: ManagedFilesManifest;
     service?: {
       kind: "launchd" | "systemd" | "windows-startup";
       label: string;
@@ -714,6 +781,9 @@ export function reconcileInstallerManifest(
     ownerGroup,
     options.elevated,
   );
+  const legacyManagedFilesPath = legacyManagedFilesManifestPath(
+    options.installDir,
+  );
   const priorManifest: any =
     loadFirstValidCandidate(
       manifestPaths.recoveryPaths,
@@ -721,6 +791,15 @@ export function reconcileInstallerManifest(
         deps.readInstallerJson<any>(filePath, null, Boolean(options.elevated)),
       (value) => (isJsonRecord(value) ? value : null),
     ) || {};
+  const priorManagedFiles =
+    normalizeManagedFilesManifest(priorManifest.managedFiles) ||
+    normalizeManagedFilesManifest(
+      deps.readInstallerJson<any>(
+        legacyManagedFilesPath,
+        null,
+        Boolean(options.elevated),
+      ),
+    );
   const manifestJson: any = {
     targetUser: options.targetUser,
     installDir: options.installDir,
@@ -752,6 +831,11 @@ export function reconcileInstallerManifest(
     release: previousReleaseMetadata,
   });
   if (currentRelease) manifestJson.currentRelease = currentRelease;
+  const managedFiles = mergeManagedFilesManifests(
+    priorManagedFiles,
+    normalizeManagedFilesManifest(options.managedFiles),
+  );
+  if (managedFiles) manifestJson.managedFiles = managedFiles;
   if (options.service) {
     manifestJson.service = {
       kind: options.service.kind,
@@ -777,6 +861,11 @@ export function reconcileInstallerManifest(
   for (const filePath of manifestPaths.writePaths) {
     writeInstallerJson(filePath, manifestJson, writeOptions, deps);
   }
+  removeFile(
+    legacyManagedFilesPath,
+    Boolean(options.elevated),
+    deps.runPrivileged,
+  );
   return {
     manifestPath,
     locatorManifestPath,
@@ -849,6 +938,7 @@ export async function persistInstallerOutputs(
     release?: InstalledReleaseInfo;
     currentReleaseName?: string;
     currentReleaseRoot?: string;
+    managedFiles?: ManagedFilesManifest;
     previousReleaseName?: string;
     previousReleaseRoot?: string;
     elevated?: boolean;
@@ -939,6 +1029,7 @@ export async function persistInstallerOutputs(
       release: options.release,
       currentReleaseName: options.currentReleaseName,
       currentReleaseRoot: options.currentReleaseRoot,
+      managedFiles: options.managedFiles,
       previousReleaseName: options.previousReleaseName,
       previousReleaseRoot: options.previousReleaseRoot,
       elevated: options.elevated,
