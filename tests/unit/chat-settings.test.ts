@@ -69,6 +69,34 @@ test("chat turn policy supports record-only per chat key", () => {
   );
 });
 
+test("chat turn policy supports record-only wake tasks", () => {
+  const settings = {
+    chat: {
+      turnPolicy: {
+        byChatKey: {
+          "telegram/123:456": {
+            mode: "record_only",
+            wakeTaskId: "cron_wake_chat",
+          },
+          "telegram/123:789": {
+            mode: "start_on_message",
+            wakeTaskId: "ignored",
+          },
+        },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    chatSettings.resolveChatTurnPolicy(settings, "telegram/123:456"),
+    { mode: "record_only", wakeTaskId: "cron_wake_chat" },
+  );
+  assert.deepEqual(
+    chatSettings.resolveChatTurnPolicy(settings, "telegram/123:789"),
+    { mode: "start_on_message" },
+  );
+});
+
 test("chat support ignores removed legacy adapter settings keys", () => {
   const config = support.buildChatConfigFromSettings({
     koishi: {
