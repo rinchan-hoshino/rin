@@ -90,13 +90,6 @@ async function applyInstalledRuntime(
   const serviceDeps = { findSystemUser, targetHomeForUser };
 
   if (options.stopRuntimeBeforePublish) {
-    reconcileSystemdUserService(
-      targetUser,
-      installDir,
-      "stop",
-      useElevatedWrite,
-      { findSystemUser },
-    );
     await stopInstalledWebSearchSidecars(installDir);
   }
 
@@ -142,13 +135,16 @@ async function applyInstalledRuntime(
   if (options.prepareWebSearchRuntime !== false) {
     await prepareSearxngRuntime(installDir).catch(() => undefined);
   }
-  reconcileSystemdUserService(
-    targetUser,
-    installDir,
-    "restart",
-    useElevatedWrite,
-    { findSystemUser },
-  );
+  const shouldRestartBeforePersist = !options.stopRuntimeBeforePublish;
+  if (shouldRestartBeforePersist) {
+    reconcileSystemdUserService(
+      targetUser,
+      installDir,
+      "restart",
+      useElevatedWrite,
+      { findSystemUser },
+    );
+  }
 
   const written = persistInstallerState
     ? await persistInstallerOutputs(
@@ -209,6 +205,16 @@ async function applyInstalledRuntime(
           captureCommandAsUser,
         },
       );
+
+  if (!shouldRestartBeforePersist) {
+    reconcileSystemdUserService(
+      targetUser,
+      installDir,
+      "restart",
+      useElevatedWrite,
+      { findSystemUser },
+    );
+  }
 
   let installedService: null | {
     kind: "launchd" | "systemd" | "windows-startup";

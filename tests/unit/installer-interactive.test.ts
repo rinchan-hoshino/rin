@@ -407,7 +407,7 @@ test("installer steps show progress after user input before work runs", () => {
   assert.match(sources, /refreshingInstalledTargetMessage/);
 });
 
-test("core update stops runtime and skips web search preparation while fresh install keeps preparation", () => {
+test("core update restarts runtime only after manifest persistence", () => {
   const source = readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "finalize.ts"),
     "utf8",
@@ -423,6 +423,11 @@ test("core update stops runtime and skips web search preparation while fresh ins
   assert.match(source, /if \(options\.stopRuntimeBeforePublish\)/);
   assert.match(source, /stopInstalledWebSearchSidecars\(installDir\)/);
   assert.match(source, /if \(options\.prepareWebSearchRuntime !== false\)/);
+  assert.match(
+    source,
+    /const shouldRestartBeforePersist = !options\.stopRuntimeBeforePublish/,
+  );
+  assert.match(source, /if \(!shouldRestartBeforePersist\)/);
   assert.match(updateBlock, /stopRuntimeBeforePublish: true/);
   assert.match(updateBlock, /prepareWebSearchRuntime: false/);
   assert.doesNotMatch(installBlock, /stopRuntimeBeforePublish: true/);
