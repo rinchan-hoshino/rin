@@ -110,6 +110,10 @@ export class WorkerPool {
   private workerSeq = 0;
   private internalRequestSeq = 0;
   private shuttingDown = false;
+  private restoringWorkersBySessionFile = new Map<
+    string,
+    Promise<WorkerHandle | undefined>
+  >();
   private readonly gcIdleMs: number;
   private readonly internalCommandTimeoutMs: number;
   private readonly switchSessionCommandTimeoutMs: number;
@@ -337,6 +341,22 @@ export class WorkerPool {
     }
     if (!wanted.sessionFile) return undefined;
 
+    const restoring = this.restoringWorkersBySessionFile.get(
+      wanted.sessionFile,
+    );
+    if (restoring) {
+      const restored = await restoring;
+      if (restored && this.workers.has(restored)) {
+        this.attachWorker(connection, restored);
+        return restored;
+      }
+      const restoredExisting = this.findWorkerBySelector(wanted);
+      if (restoredExisting) {
+        this.attachWorker(connection, restoredExisting);
+        return restoredExisting;
+      }
+    }
+
     const worker = this.createWorker(connection, connection.resourceOptions);
     try {
       await this.sendInternalCommand(
@@ -474,19 +494,7 @@ export class WorkerPool {
   restoreSessionWorker(item: { sessionFile?: string }) {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) return;
-    const worker = this.createWorker();
-    void (async () => {
-      try {
-        await this.sendInternalCommand(
-          worker,
-          createSwitchSessionCommand(selector.sessionFile),
-        );
-        this.setWorkerSessionRefs(worker, selector);
-      } catch {
-        this.destroyWorker(worker);
-      }
-    })().catch(() => {});
-    return worker;
+    return this.restoreWorkerForSession(selector, false);
   }
 
   continueInterruptedTurnSessionWorker(item: {
@@ -495,22 +503,59 @@ export class WorkerPool {
   }) {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) return;
+    void this.restoreWorkerForSession(
+      selector,
+      true,
+      item.source || "daemon-restart",
+    );
+  }
+
+  private restoreWorkerForSession(
+    selector: SessionSelector,
+    resumeTurn: boolean,
+    source = "daemon-restart",
+  ) {
+    if (!selector.sessionFile) return;
+    const existing = this.findWorkerBySelector(selector);
+    if (existing) return existing;
+    const inFlight = this.restoringWorkersBySessionFile.get(
+      selector.sessionFile,
+    );
+    if (inFlight) return undefined;
+
     const worker = this.createWorker();
-    void (async () => {
+    const restorePromise = (async () => {
       try {
         await this.sendInternalCommand(
           worker,
-          createSwitchSessionCommand(selector.sessionFile),
+          createSwitchSessionCommand(selector.sessionFile!),
         );
         this.setWorkerSessionRefs(worker, selector);
-        await this.sendInternalCommand(worker, {
-          type: "resume_interrupted_turn",
-          source: item.source || "daemon-restart",
-        });
+        if (resumeTurn) {
+          await this.sendInternalCommand(worker, {
+            type: "resume_interrupted_turn",
+            source,
+          });
+        }
+        return worker;
       } catch {
         this.destroyWorker(worker);
+        return undefined;
+      } finally {
+        if (
+          this.restoringWorkersBySessionFile.get(selector.sessionFile!) ===
+          restorePromise
+        ) {
+          this.restoringWorkersBySessionFile.delete(selector.sessionFile!);
+        }
       }
-    })().catch(() => {});
+    })();
+    restorePromise.catch(() => {});
+    this.restoringWorkersBySessionFile.set(
+      selector.sessionFile,
+      restorePromise,
+    );
+    return worker;
   }
 
   async shutdown(graceMs: number) {

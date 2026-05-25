@@ -294,6 +294,63 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("selectSession waits for daemon-restart recovery instead of spawning a duplicate worker", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker.mjs");
+  const logPath = path.join(dir, "commands.log");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + ":" + (command.source || "") + "\\n");
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({ id: command.id, type: "response", command: command.type, success: true, data: {} }) + "\\n");
+    }, command.type === "switch_session" ? 100 : 0);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile: "/tmp/session.jsonl",
+    source: "daemon-restart",
+  });
+
+  const selected = await pool.selectSession(connection, {
+    sessionFile: "/tmp/session.jsonl",
+  });
+
+  assert.ok(selected);
+  assert.equal(pool.getStatusSnapshot().workerCount, 1);
+  assert.equal(connection.attachedWorker, selected);
+  assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
+    "switch_session:",
+    "resume_interrupted_turn:daemon-restart",
+  ]);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("resumable worker commands persist a running record until they finish", async () => {
   const dir = await makeTempDir("rin-worker-pool-running-");
   const workerPath = path.join(dir, "worker.mjs");
