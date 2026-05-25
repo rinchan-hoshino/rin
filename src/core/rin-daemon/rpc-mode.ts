@@ -59,6 +59,123 @@ function withCompactionEventMetadata(session: any, event: any) {
   return tokensBefore === undefined ? event : { ...event, tokensBefore };
 }
 
+function stableJson(value: any) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function getSessionEntries(session: any) {
+  return Array.isArray(session?.sessionManager?.getEntries?.())
+    ? session.sessionManager.getEntries()
+    : [];
+}
+
+function lastPersistedMessage(session: any) {
+  const entries = getSessionEntries(session);
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type === "message") return entry.message;
+  }
+  return undefined;
+}
+
+function ensureInterruptedAssistantPersisted(session: any, message: any) {
+  const manager = session?.sessionManager;
+  if (typeof manager?.appendMessage !== "function") return;
+  if (stableJson(lastPersistedMessage(session)) === stableJson(message)) return;
+  manager.appendMessage(message);
+}
+
+function messageToolCallIds(message: any) {
+  if (message?.role !== "assistant") return [];
+  return extractToolCallParts(message.content)
+    .map((part) => safeString(part?.id).trim())
+    .filter(Boolean);
+}
+
+function toolResultHasMatchingAncestor(
+  entry: any,
+  byId: Map<string, any>,
+  validIds: Set<string>,
+) {
+  const toolCallId = safeString(entry?.message?.toolCallId).trim();
+  if (!toolCallId) return true;
+  let parentId = safeString(entry?.parentId).trim();
+  const seen = new Set<string>();
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    if (!validIds.has(parentId)) return false;
+    const parent = byId.get(parentId);
+    if (!parent) return false;
+    const message = parent.type === "message" ? parent.message : undefined;
+    if (message?.role === "user") return false;
+    if (messageToolCallIds(message).includes(toolCallId)) return true;
+    parentId = safeString(parent.parentId).trim();
+  }
+  return false;
+}
+
+function rebuildSessionTreeIndexes(session: any, keptEntries: any[]) {
+  const manager = session?.sessionManager;
+  if (manager?.byId instanceof Map) {
+    manager.byId.clear();
+    for (const entry of keptEntries) {
+      if (entry?.id) manager.byId.set(entry.id, entry);
+    }
+  }
+  if ("leafId" in (manager || {})) {
+    manager.leafId =
+      [...keptEntries].reverse().find((entry) => entry?.type !== "session")
+        ?.id ?? null;
+  }
+}
+
+function repairOrphanToolResultEntries(session: any) {
+  const entries = getSessionEntries(session);
+  if (!entries.length) return 0;
+  const byId = new Map<string, any>(
+    entries
+      .filter((entry: any) => safeString(entry?.id).trim())
+      .map((entry: any) => [safeString(entry.id).trim(), entry]),
+  );
+  const validIds = new Set<string>();
+  const keptEntries: any[] = [];
+  let removed = 0;
+
+  for (const entry of entries) {
+    const id = safeString(entry?.id).trim();
+    const parentId = safeString(entry?.parentId).trim();
+    const parentValid = !parentId || validIds.has(parentId);
+    const toolResultValid =
+      entry?.type !== "message" ||
+      entry?.message?.role !== "toolResult" ||
+      toolResultHasMatchingAncestor(entry, byId, validIds);
+    if (!parentValid || !toolResultValid) {
+      removed += 1;
+      continue;
+    }
+    keptEntries.push(entry);
+    if (id) validIds.add(id);
+  }
+
+  if (!removed) return 0;
+  entries.splice(0, entries.length, ...keptEntries);
+  rebuildSessionTreeIndexes(session, keptEntries);
+  if (typeof session?.sessionManager?._rewriteFile === "function") {
+    session.sessionManager._rewriteFile();
+  }
+  if (Array.isArray(session?.agent?.state?.messages)) {
+    const context = session.sessionManager?.buildSessionContext?.();
+    if (Array.isArray(context?.messages)) {
+      session.agent.state.messages = context.messages;
+    }
+  }
+  return removed;
+}
+
 function appendInterruptedToolResults(
   session: any,
   options: { persistToSession?: boolean } = {},
@@ -71,10 +188,14 @@ function appendInterruptedToolResults(
   const toolCalls = extractToolCallParts(lastMessage.content);
   if (!toolCalls.length) return false;
 
+  const persistToSession = options.persistToSession !== false;
+  if (persistToSession)
+    ensureInterruptedAssistantPersisted(session, lastMessage);
+
   for (const toolCall of toolCalls) {
     const message = createInterruptedToolResultMessage(toolCall);
     session.agent.state.messages.push(message);
-    if (options.persistToSession !== false) {
+    if (persistToSession) {
       session.sessionManager.appendMessage(message);
     }
   }
@@ -835,6 +956,7 @@ export async function runCustomRpcMode(
   let unsubscribeSessionEvents: (() => void) | undefined;
   const bindCurrentSession = async () => {
     const session = getSession();
+    repairOrphanToolResultEntries(session);
     await session.bindExtensions({
       uiContext: createExtensionUiContext(),
       commandContextActions: {

@@ -3681,24 +3681,177 @@ test(
       );
       await wait(10);
 
-      assert.equal(calls.length, 2);
+      assert.equal(calls.length, 3);
       assert.equal(calls[0][0], "appendMessage");
-      assert.equal(calls[0][1].role, "toolResult");
-      assert.equal(calls[0][1].toolCallId, "tool-1");
-      assert.equal(calls[0][1].toolName, "bash");
-      assert.equal(calls[0][1].isError, true);
+      assert.equal(calls[0][1].role, "assistant");
+      assert.equal(calls[0][1].content[0].id, "tool-1");
+      assert.equal(calls[1][0], "appendMessage");
+      assert.equal(calls[1][1].role, "toolResult");
+      assert.equal(calls[1][1].toolCallId, "tool-1");
+      assert.equal(calls[1][1].toolName, "bash");
+      assert.equal(calls[1][1].isError, true);
       assert.equal(
-        calls[0][1].content[0].text,
+        calls[1][1].content[0].text,
         "The tool was interrupted because the daemon exited.",
       );
-      assert.deepEqual(calls[0][1].details, {
+      assert.deepEqual(calls[1][1].details, {
         interrupted: true,
         reason: "daemon_exit",
       });
-      assert.deepEqual(calls[1], ["continue"]);
+      assert.deepEqual(calls[2], ["continue"]);
       assert.equal(stateMessages.length, 2);
       assert.equal(stateMessages[1].role, "toolResult");
       assert.ok(lines.join("").includes('"command":"resume_interrupted_turn"'));
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
+  "rpc mode repairs orphan tool results before binding a resumed session",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    let rewrites = 0;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const entries: any[] = [
+        { type: "session", version: 3 },
+        {
+          type: "message",
+          id: "user-1",
+          parentId: null,
+          message: { role: "user", content: [{ type: "text", text: "go" }] },
+        },
+        {
+          type: "message",
+          id: "orphan-result",
+          parentId: "missing-assistant",
+          message: {
+            role: "toolResult",
+            toolCallId: "call-missing",
+            toolName: "bash",
+            content: [{ type: "text", text: "interrupted" }],
+            isError: true,
+          },
+        },
+        {
+          type: "message",
+          id: "error-reply",
+          parentId: "orphan-result",
+          message: { role: "assistant", content: [], stopReason: "error" },
+        },
+        {
+          type: "message",
+          id: "valid-user",
+          parentId: "user-1",
+          message: { role: "user", content: [{ type: "text", text: "ok" }] },
+        },
+      ];
+      const byId = new Map(
+        entries.filter((entry) => entry.id).map((entry) => [entry.id, entry]),
+      );
+      let manager: any;
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        agent: {
+          waitForIdle: async () => {},
+          state: {
+            messages: entries
+              .filter((entry) => entry.message)
+              .map((entry) => entry.message),
+          },
+          continue: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: () => {},
+        prompt: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        dispose: () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: (manager = {
+          byId,
+          leafId: "error-reply",
+          getEntries: () => entries,
+          _rewriteFile: () => {
+            rewrites += 1;
+          },
+          buildSessionContext: () => ({
+            messages: entries
+              .filter((entry) => entry.type === "message")
+              .map((entry) => entry.message),
+          }),
+          getTree: () => [],
+          getLeafId: () => manager.leafId,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        }),
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      }).catch((error) => lines.push(`rpcError:${String(error)}`));
+      await wait(0);
+
+      assert.equal(rewrites, 1);
+      assert.deepEqual(entries.map((entry) => entry.id).filter(Boolean), [
+        "user-1",
+        "valid-user",
+      ]);
+      assert.equal(byId.has("orphan-result"), false);
+      assert.equal(byId.has("error-reply"), false);
+      assert.equal(session.sessionManager.leafId, "valid-user");
+      assert.deepEqual(
+        session.agent.state.messages.map((message) => message.role),
+        ["user", "user"],
+      );
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
