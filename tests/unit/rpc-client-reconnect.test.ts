@@ -614,8 +614,9 @@ test("rpc interactive session can shut down or terminate an attached worker with
   assert.equal(calls[1]?.type, "terminate_session");
 });
 
-test("rpc interactive session queues prompts while recovery is pending", async () => {
+test("rpc interactive session shows locally queued prompts while recovery is pending", async () => {
   const calls = [];
+  const seen = [];
   const session = new RpcInteractiveSession({
     isConnected: () => true,
     send: async (payload) => {
@@ -627,6 +628,8 @@ test("rpc interactive session queues prompts while recovery is pending", async (
   session.startupPending = false;
   session.recoveryPending = true;
   session.rpcConnected = true;
+  session.subscribe((event) => seen.push(event));
+  seen.length = 0;
 
   await session.prompt("hello", { expandPromptTemplates: false });
 
@@ -645,12 +648,24 @@ test("rpc interactive session queues prompts while recovery is pending", async (
     String(session.queuedOfflineOps[0]?.requestTag || ""),
     /^rin-tui-/,
   );
+  assert.deepEqual(session.getSteeringMessages(), ["hello"]);
+  assert.equal(session.pendingMessageCount, 1);
+  assert.deepEqual(
+    seen.filter((event) => event.type === "queue_update"),
+    [{ type: "queue_update", steering: ["hello"], followUp: [] }],
+  );
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "connecting",
     label: "Connecting",
     connected: true,
   });
+
+  const cleared = session.clearQueue();
+  assert.deepEqual(cleared, { steering: ["hello"], followUp: [] });
+  assert.deepEqual(session.queuedOfflineOps, []);
+  assert.deepEqual(session.getSteeringMessages(), []);
+  assert.equal(session.pendingMessageCount, 0);
 });
 
 test("rpc interactive session exits connecting after get_state succeeds and delays resync until history refresh finishes", async () => {

@@ -202,6 +202,9 @@ async function completeRpcRecovery(target: any) {
   target.emitFrontendStatus(true);
   const queued = [...target.queuedOfflineOps];
   target.queuedOfflineOps = [];
+  if (typeof target.emitQueueUpdate === "function") {
+    target.emitQueueUpdate();
+  }
   for (const operation of queued) {
     await target.sendOrQueue(operation);
   }
@@ -572,12 +575,10 @@ export class RpcInteractiveSession {
   }
 
   clearQueue() {
-    const queued = {
-      steering: [...this.steeringMessages],
-      followUp: [...this.followUpMessages],
-    };
+    const queued = this.visibleQueuedMessages();
     this.steeringMessages = [];
     this.followUpMessages = [];
+    this.queuedOfflineOps = [];
     this.syncPendingCount();
     this.emitQueueUpdate();
     if (
@@ -599,10 +600,10 @@ export class RpcInteractiveSession {
   }
 
   getSteeringMessages() {
-    return [...this.steeringMessages];
+    return this.visibleQueuedMessages().steering;
   }
   getFollowUpMessages() {
-    return [...this.followUpMessages];
+    return this.visibleQueuedMessages().followUp;
   }
   async abort() {
     this.activeTurn = null;
@@ -1350,6 +1351,8 @@ export class RpcInteractiveSession {
 
   private queueOfflineOperation(operation: PendingRpcOperation) {
     this.queuedOfflineOps.push(operation);
+    this.syncPendingCount();
+    this.emitQueueUpdate();
     if (!this.client.isConnected() || !this.rpcConnected) {
       void this.ensureReconnectLoop();
     }
@@ -1534,11 +1537,28 @@ export class RpcInteractiveSession {
   }
 
   private emitQueueUpdate() {
+    const visible = this.visibleQueuedMessages();
     this.emitEvent({
       type: "queue_update",
-      steering: [...this.steeringMessages],
-      followUp: [...this.followUpMessages],
+      steering: visible.steering,
+      followUp: visible.followUp,
     } as any);
+  }
+
+  private visibleQueuedMessages() {
+    const steering = [...this.steeringMessages];
+    const followUp = [...this.followUpMessages];
+    for (const operation of this.queuedOfflineOps) {
+      if (
+        operation.mode === "follow_up" ||
+        operation.streamingBehavior === "followUp"
+      ) {
+        followUp.push(operation.message);
+      } else {
+        steering.push(operation.message);
+      }
+    }
+    return { steering, followUp };
   }
 
   private parseSlashCommandName(text: string) {
@@ -1738,7 +1758,8 @@ export class RpcInteractiveSession {
   }
 
   private syncPendingCount() {
+    const visible = this.visibleQueuedMessages();
     this.pendingMessageCount =
-      this.steeringMessages.length + this.followUpMessages.length;
+      visible.steering.length + visible.followUp.length;
   }
 }
