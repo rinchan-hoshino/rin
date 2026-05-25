@@ -41,16 +41,24 @@ const input = JSON.parse(await new Promise((resolve) => {
   process.stdin.on("end", () => resolve(body));
 }));
 const { stripTypeScriptTypes } = await import("node:module");
-const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-const code = stripTypeScriptTypes(String(input.code || ""));
+const rawCode = String(input.code || "");
 const context = input.context || {};
 let result;
-if (/^\\s*(?:async\\s+)?(?:function\\b|\\(?[\\w\\s,{}[\\].:=]*\\)?\\s*=>)/.test(code)) {
+if (/^\\s*(?:async\\s+)?(?:function\\b|\\(?[\\w\\s,{}[\\].:=]*\\)?\\s*=>)/.test(rawCode)) {
+  const code = stripTypeScriptTypes(rawCode);
   result = await (0, eval)("(" + code + ")")(context);
-} else if (/\\breturn\\b/.test(code)) {
-  result = await new AsyncFunction("context", code)(context);
+} else if (/\\breturn\\b/.test(rawCode)) {
+  const code = stripTypeScriptTypes(
+    "globalThis.__condition__ = async (context) => {\\n" + rawCode + "\\n};",
+  );
+  (0, eval)(code);
+  result = await globalThis.__condition__(context);
 } else {
-  result = await new AsyncFunction("context", "return (" + code + ");")(context);
+  const code = stripTypeScriptTypes(
+    "globalThis.__condition__ = async (context) => (" + rawCode + ");",
+  );
+  (0, eval)(code);
+  result = await globalThis.__condition__(context);
 }
 process.stdout.write(JSON.stringify({ passed: Boolean(result), result }));
 `;
