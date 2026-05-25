@@ -98,8 +98,13 @@ const RUNTIME_COPY_ENTRY_NAMES = [
   "package.json",
 ] as const;
 
-export function installedRuntimePathValue() {
-  return COMMON_RUNTIME_BIN_DIRS.join(path.delimiter);
+export function installedRuntimePathValue(home?: string) {
+  return [
+    home ? path.join(home, ".local", "bin") : "",
+    ...COMMON_RUNTIME_BIN_DIRS,
+  ]
+    .filter(Boolean)
+    .join(path.delimiter);
 }
 
 export function installedRuntimeNodeCommandArgs() {

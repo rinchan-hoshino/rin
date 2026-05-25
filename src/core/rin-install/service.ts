@@ -137,10 +137,11 @@ function resolveDaemonLaunchContext(
   installDir: string,
   targetHomeForUser: (user: string) => string,
 ) {
+  const targetHome = targetHomeForUser(targetUser);
   return {
-    targetHome: targetHomeForUser(targetUser),
+    targetHome,
     daemonEntry: resolveDaemonEntryForInstall(installDir),
-    runtimePath: installedRuntimePathValue(),
+    runtimePath: installedRuntimePathValue(targetHome),
     nodeCommandArgs: installedRuntimeNodeCommandArgs(),
   };
 }

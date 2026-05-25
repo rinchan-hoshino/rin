@@ -113,6 +113,7 @@ test("installer service helpers prefer current daemon entry, quote systemd value
       ),
     );
     assert.match(spec.service, /^Environment="PATH=.+"$/m);
+    assert.ok(spec.service.includes(`${targetLinuxHome}/.local/bin`));
     assert.equal(spec.service.includes("/home/THE_cattail"), false);
     assert.equal(spec.service.includes("/tmp/installer-only-bin"), false);
 
@@ -132,6 +133,7 @@ test("installer service helpers prefer current daemon entry, quote systemd value
       plist.plist.includes(`<string>${escapeXml(currentDaemon)}</string>`),
     );
     assert.ok(plist.plist.includes(`<key>PATH</key>`));
+    assert.ok(plist.plist.includes(`${escapeXml(targetMacHome)}/.local/bin`));
     assert.equal(plist.plist.includes("/home/THE_cattail"), false);
     assert.equal(plist.plist.includes("/tmp/installer-only-bin"), false);
     assert.ok(
