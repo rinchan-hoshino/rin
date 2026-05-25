@@ -447,6 +447,10 @@ export class RpcInteractiveSession {
         } as any);
         return;
       }
+      if ((event as any).type === "self_improve_review_notice") {
+        this.handleRpcEvent(event);
+        return;
+      }
       if (event.type !== "ui") return;
       const payload: any = event.payload;
       if (!payload || payload.type === "response") return;
