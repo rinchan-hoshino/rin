@@ -1277,10 +1277,6 @@ export class ChatController {
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
     if (mode === "steer" && this.canSteerActiveTurn()) {
-      await this.beginVisibleProcessingTurn({
-        incomingMessageId: input.incomingMessageId,
-        replyToMessageId: input.replyToMessageId,
-      });
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
         this.resolveSessionFileForUse(rawWantedSessionFile);
@@ -1329,6 +1325,10 @@ export class ChatController {
           sessionFile: this.currentSessionFile(),
         };
       }
+      await this.beginVisibleProcessingTurn({
+        incomingMessageId: input.incomingMessageId,
+        replyToMessageId: input.replyToMessageId,
+      });
       await this.deliverAssistantReply({
         text: result.finalText,
         replyToMessageId: input.replyToMessageId,

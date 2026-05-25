@@ -1511,7 +1511,7 @@ test("chat controller uses configured command responses for /compact and /reload
   }
 });
 
-test("chat controller moves working indicators to the steering message", async () => {
+test("chat controller leaves the working reaction on the active message while steering", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -1596,9 +1596,9 @@ test("chat controller moves working indicators to the steering message", async (
   );
 
   assert.equal(steerResult.steered, true);
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-  assert.deepEqual(reactions, [["create", "2", "m-steer", "🤔"]]);
-  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
+  assert.deepEqual(actions, []);
+  assert.deepEqual(reactions, []);
+  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), false);
 
   releaseFirstPrompt();
   assert.equal((await firstTurn).finalText, "done");
