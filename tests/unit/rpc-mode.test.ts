@@ -3751,14 +3751,8 @@ test(
         },
         {
           type: "message",
-          id: "error-reply",
-          parentId: "orphan-result",
-          message: { role: "assistant", content: [], stopReason: "error" },
-        },
-        {
-          type: "message",
           id: "valid-user",
-          parentId: "user-1",
+          parentId: "orphan-result",
           message: { role: "user", content: [{ type: "text", text: "ok" }] },
         },
       ];
@@ -3789,7 +3783,7 @@ test(
         modelRegistry: { getAvailable: async () => [] },
         sessionManager: (manager = {
           byId,
-          leafId: "error-reply",
+          leafId: "valid-user",
           getEntries: () => entries,
           _rewriteFile: () => {
             rewrites += 1;
@@ -3846,7 +3840,8 @@ test(
         "valid-user",
       ]);
       assert.equal(byId.has("orphan-result"), false);
-      assert.equal(byId.has("error-reply"), false);
+      assert.equal(entries[1].parentId, null);
+      assert.equal(entries[2].parentId, "user-1");
       assert.equal(session.sessionManager.leafId, "valid-user");
       assert.deepEqual(
         session.agent.state.messages.map((message) => message.role),

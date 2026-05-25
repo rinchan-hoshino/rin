@@ -143,11 +143,18 @@ function repairOrphanToolResultEntries(session: any) {
   );
   const validIds = new Set<string>();
   const keptEntries: any[] = [];
+  const replacementParents = new Map<string, string | null>();
   let removed = 0;
+  let lastKeptId: string | null = null;
 
   for (const entry of entries) {
     const id = safeString(entry?.id).trim();
-    const parentId = safeString(entry?.parentId).trim();
+    const originalParentId = safeString(entry?.parentId).trim();
+    const replacementParent = originalParentId
+      ? replacementParents.get(originalParentId)
+      : undefined;
+    const parentId = replacementParent ?? originalParentId;
+    if (replacementParent !== undefined) entry.parentId = parentId;
     const parentValid = !parentId || validIds.has(parentId);
     const toolResultValid =
       entry?.type !== "message" ||
@@ -155,10 +162,15 @@ function repairOrphanToolResultEntries(session: any) {
       toolResultHasMatchingAncestor(entry, byId, validIds);
     if (!parentValid || !toolResultValid) {
       removed += 1;
+      if (id)
+        replacementParents.set(id, parentValid ? parentId || null : lastKeptId);
       continue;
     }
     keptEntries.push(entry);
-    if (id) validIds.add(id);
+    if (id) {
+      validIds.add(id);
+      lastKeptId = id;
+    }
   }
 
   if (!removed) return 0;
