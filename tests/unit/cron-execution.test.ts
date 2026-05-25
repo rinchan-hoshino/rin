@@ -1061,48 +1061,6 @@ test("cron task condition accepts function bodies with return", async () => {
   }
 });
 
-test("cron task condition errors are recorded and recurring tasks reschedule", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  let runTurnCount = 0;
-  const scheduler = new cronMod.CronScheduler({
-    agentDir,
-    chat: {
-      runTurn: async () => {
-        runTurnCount += 1;
-        return { finalText: "ran" };
-      },
-    },
-  });
-  try {
-    scheduler.start();
-    scheduler.upsertTask({
-      id: "cron_condition_error",
-      trigger: { expression: "* * * * *", timezone: "local" },
-      session: { mode: "none" },
-      target: { kind: "agent_prompt", prompt: "run" },
-      condition: { code: "return missing.value" },
-    });
-    const skipped = scheduler.runTaskNow("cron_condition_error");
-    assert.equal(runTurnCount, 0);
-    assert.equal(skipped.runCount, 0);
-    assert.equal(skipped.running, false);
-    assert.equal(skipped.condition.lastResult, false);
-    assert.match(
-      skipped.condition.lastOutput,
-      /cron_condition_failed:.*missing is not defined/s,
-    );
-    assert.match(
-      skipped.lastError,
-      /cron_condition_failed:.*missing is not defined/s,
-    );
-    assert.equal(skipped.lastResultText, "condition_error");
-    assert.ok(Date.parse(skipped.nextRunAt) > Date.now());
-  } finally {
-    scheduler.stop();
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
 test("cron scheduler installs built-in daily memory maintenance tasks", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });

@@ -626,15 +626,7 @@ export class CronScheduler {
     if (this.activeExecutions.has(taskId)) {
       throw new Error(`cron_task_already_running:${taskId}`);
     }
-    let conditionPassed = false;
-    try {
-      conditionPassed = this.evaluateCondition(task);
-    } catch (error) {
-      this.recordConditionError(task, error);
-      this.rescheduleSkippedTask(task, "condition_error");
-      return this.publicTask(task);
-    }
-    if (!conditionPassed) {
+    if (!this.evaluateCondition(task)) {
       this.rescheduleSkippedTask(task, "condition_false");
       return this.publicTask(task);
     }
@@ -819,17 +811,6 @@ export class CronScheduler {
     task.condition.lastOutput = result.output;
     task.updatedAt = now;
     return result.passed;
-  }
-
-  private recordConditionError(task: CronTaskRecord, error: unknown) {
-    const now = nowIso();
-    const message = safeString((error as any)?.message || error).trim();
-    task.lastError = message || "cron_condition_failed";
-    task.condition ||= { code: "" };
-    task.condition.lastEvaluatedAt = now;
-    task.condition.lastResult = false;
-    task.condition.lastOutput = task.lastError;
-    task.updatedAt = now;
   }
 
   private rescheduleSkippedTask(task: CronTaskRecord, reason: string) {
