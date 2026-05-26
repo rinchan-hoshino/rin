@@ -270,7 +270,16 @@ function defaultAgentState(agent: HeartbeatAgentConfig) {
 function ensureAgentState(ctx: BackgroundContext, agent: HeartbeatAgentConfig) {
   const filePath = agentStatePath(ctx.dataDir, agent.agentId);
   const current = readJson(filePath);
-  if (isRecord(current)) return;
+  if (isRecord(current)) {
+    const next = { ...current };
+    let changed = false;
+    if (agent.privateInstructionPath && !next.privateInstructionPath) {
+      next.privateInstructionPath = agent.privateInstructionPath;
+      changed = true;
+    }
+    if (changed) writeJson(filePath, next);
+    return;
+  }
   writeJson(filePath, defaultAgentState(agent));
 }
 
