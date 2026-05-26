@@ -110,7 +110,7 @@ If `extensions` is missing or `[]`, `todo` stays on by default and both optional
 
 ### Optional heartbeat notification service
 
-`rin:heartbeat-notifier` is a bundled background extension, not core chat behavior. It watches configured record-only chat message stores and nudges scheduled tasks by moving their next run time to now. The scheduler still evaluates each task's condition normally.
+`rin:heartbeat-notifier` is a bundled background extension, not core chat behavior. It can provision reusable heartbeat-agent scheduled tasks, watches configured record-only chat message stores, and nudges those tasks by moving their next run time to now. The scheduler still evaluates each task's condition normally.
 
 Enable it under `settings.json -> rinExtensions.backgroundServices`:
 
@@ -122,9 +122,14 @@ Enable it under `settings.json -> rinExtensions.backgroundServices`:
         "packageName": "rin:heartbeat-notifier",
         "config": {
           "pollIntervalMs": 1000,
-          "byChatKey": {
-            "telegram/123456:7890": "rinchan_personality_heartbeat_owner_tg"
-          }
+          "agents": [
+            {
+              "agentId": "owner_tg",
+              "taskId": "heartbeat_owner_tg",
+              "chatKey": "telegram/123456:7890",
+              "privateInstructionPath": "/home/me/.rin-private/owner_tg.md"
+            }
+          ]
         }
       }
     ]
@@ -132,7 +137,7 @@ Enable it under `settings.json -> rinExtensions.backgroundServices`:
 }
 ```
 
-Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge.
+Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and example heartbeat-agent template. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
 
 ### Enabling bundled browser/computer control
 
