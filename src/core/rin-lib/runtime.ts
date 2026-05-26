@@ -533,12 +533,6 @@ const AUTO_RELOAD_AFTER_COMPACTION_KEY = Symbol.for(
 const COMPACTION_REASON_TRACKING_KEY = Symbol.for(
   "rin.compactionReasonTracking",
 );
-const COMPACTION_CONCURRENCY_GUARD_KEY = Symbol.for(
-  "rin.compactionConcurrencyGuard",
-);
-const COMPACTION_SETTINGS_TUNING_KEY = Symbol.for(
-  "rin.compactionSettingsTuning",
-);
 
 export function applyRinCompactionReasonTracking(session: any) {
   if (!session || typeof session !== "object") return;
@@ -586,128 +580,6 @@ export function applyRinCompactionReasonTracking(session: any) {
   (session as any)[COMPACTION_REASON_TRACKING_KEY] = {
     originalRunAutoCompaction,
     originalCompact,
-  };
-}
-
-function abortActiveCompaction(session: any) {
-  try {
-    session?.abortCompaction?.();
-  } catch {}
-}
-
-type RinCompactionGuardState = {
-  activeCompaction?: { reason: string; promise: Promise<unknown> };
-};
-
-function isRinCompactionBusy(session: any, state: RinCompactionGuardState) {
-  return Boolean(state.activeCompaction || session?.isCompacting);
-}
-
-async function runRinCompactionExclusive<T>(
-  session: any,
-  state: RinCompactionGuardState,
-  reason: string,
-  onBusy: () => T | Promise<T>,
-  run: () => T | Promise<T>,
-): Promise<T> {
-  if (isRinCompactionBusy(session, state)) return await onBusy();
-  const promise = Promise.resolve(run());
-  state.activeCompaction = { reason, promise };
-  try {
-    return await promise;
-  } finally {
-    if (state.activeCompaction?.promise === promise) {
-      state.activeCompaction = undefined;
-    }
-  }
-}
-
-export function applyRinCompactionSettingsTuning(session: any) {
-  if (!session || typeof session !== "object") return;
-  if ((session as any)[COMPACTION_SETTINGS_TUNING_KEY]) return;
-  const settingsManager = session.settingsManager;
-  const original =
-    typeof settingsManager?.getCompactionSettings === "function"
-      ? settingsManager.getCompactionSettings.bind(settingsManager)
-      : null;
-  if (!original) return;
-
-  settingsManager.getCompactionSettings = () => {
-    const settings = { ...(original() || {}) };
-    const contextWindow = Number(session.model?.contextWindow || 0);
-    if (contextWindow >= 100_000) {
-      settings.reserveTokens = Math.max(
-        Number(settings.reserveTokens || 0),
-        Math.min(32_768, Math.floor(contextWindow * 0.08)),
-      );
-      settings.keepRecentTokens = Math.max(
-        Number(settings.keepRecentTokens || 0),
-        Math.min(120_000, Math.floor(contextWindow * 0.35)),
-      );
-    }
-    return settings;
-  };
-
-  (session as any)[COMPACTION_SETTINGS_TUNING_KEY] = { original };
-}
-
-export function applyRinCompactionConcurrencyGuard(session: any) {
-  if (!session || typeof session !== "object") return;
-  if ((session as any)[COMPACTION_CONCURRENCY_GUARD_KEY]) return;
-
-  const guardState: RinCompactionGuardState = {};
-
-  const originalCompact =
-    typeof session.compact === "function"
-      ? session.compact.bind(session)
-      : null;
-  if (originalCompact) {
-    session.compact = async function guardedManualCompaction(...args: any[]) {
-      return await runRinCompactionExclusive(
-        session,
-        guardState,
-        "manual",
-        () => {
-          throw new Error("Compaction already in progress");
-        },
-        () => originalCompact(...args),
-      );
-    };
-  }
-
-  const originalRunAutoCompaction =
-    typeof session._runAutoCompaction === "function"
-      ? session._runAutoCompaction.bind(session)
-      : null;
-  if (originalRunAutoCompaction) {
-    session._runAutoCompaction = async function guardedAutoCompaction(
-      reason: string,
-      ...args: any[]
-    ) {
-      return await runRinCompactionExclusive(
-        session,
-        guardState,
-        String(reason || "auto"),
-        () => undefined,
-        () => originalRunAutoCompaction(reason, ...args),
-      );
-    };
-  }
-
-  const originalAbort =
-    typeof session.abort === "function" ? session.abort.bind(session) : null;
-  if (originalAbort) {
-    session.abort = async (...args: any[]) => {
-      if (isRinCompactionBusy(session, guardState))
-        abortActiveCompaction(session);
-      return await originalAbort(...args);
-    };
-  }
-
-  (session as any)[COMPACTION_CONCURRENCY_GUARD_KEY] = {
-    originalCompact,
-    originalRunAutoCompaction,
-    originalAbort,
   };
 }
 
@@ -1262,9 +1134,7 @@ export async function createConfiguredAgentSession(
     applyRinBackendToolExecutionLocks(result.session);
 
     applyRinPromptBuilder(result.session);
-    applyRinCompactionSettingsTuning(result.session);
     applyAutoReloadAfterCompaction(result.session);
-    applyRinCompactionConcurrencyGuard(result.session);
     return {
       ...result,
       services,
