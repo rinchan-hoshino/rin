@@ -1583,6 +1583,60 @@ test("rpc runtime applies daemon queue updates before the user message starts", 
   ]);
 });
 
+test("rpc runtime shows a connecting prompt only as steering queue", async () => {
+  const session = new RpcInteractiveSession({
+    send() {
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return false;
+    },
+    connect() {
+      return new Promise(() => {});
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+
+  session.rpcConnected = false;
+  session.startupPending = false;
+
+  const seen = [];
+  session.subscribe((event) => seen.push(event));
+  seen.length = 0;
+
+  await session.prompt("hello", {
+    expandPromptTemplates: false,
+  });
+
+  assert.deepEqual(session.getSteeringMessages(), ["hello"]);
+  assert.equal(
+    seen.some((event) => event?.type === "rpc_local_user_message"),
+    false,
+  );
+  assert.deepEqual(seen[0], {
+    type: "queue_update",
+    steering: ["hello"],
+    followUp: [],
+  });
+  assert.deepEqual(
+    seen.filter((event) => event?.type === "rpc_frontend_status").at(-1),
+    {
+      type: "rpc_frontend_status",
+      phase: "connecting",
+      label: "Connecting",
+      connected: false,
+    },
+  );
+});
+
 test("rpc runtime marks a connected prompt as working before remote session setup finishes", async () => {
   const sent = [];
   let releaseEnsureRemoteSession;

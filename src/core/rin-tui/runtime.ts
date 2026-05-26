@@ -1387,8 +1387,6 @@ export class RpcInteractiveSession {
   }
 
   private async sendOrQueue(operation: PendingRpcOperation) {
-    if (operation.mode === "prompt" && !operation.streamingBehavior)
-      this.emitLocalUserMessage(operation.message);
     if (
       !this.client.isConnected() ||
       !this.rpcConnected ||
@@ -1397,6 +1395,9 @@ export class RpcInteractiveSession {
       this.queueOfflineOperation(operation);
       return;
     }
+
+    if (operation.mode === "prompt" && !operation.streamingBehavior)
+      this.emitLocalUserMessage(operation.message);
 
     if (this.clearQueuePromise) await this.clearQueuePromise;
 
