@@ -439,8 +439,16 @@ export class RinFrontendTurnDriver {
     this.assistantFinalReplyCommitted = false;
   }
 
+  private isTurnActive() {
+    return Boolean(
+      this.liveTurn ||
+      this.frontendState.isStreaming ||
+      this.frontendState.turnActive,
+    );
+  }
+
   hasActiveTurn() {
-    return Boolean(this.liveTurn) || this.isStreaming();
+    return this.isTurnActive();
   }
 
   hasWorkerActiveTurn() {
@@ -452,7 +460,7 @@ export class RinFrontendTurnDriver {
   }
 
   canSteerActiveTurn() {
-    if (!this.liveTurn && !this.isStreaming()) return false;
+    if (!this.isTurnActive()) return false;
     return !this.assistantFinalReplyCommitted;
   }
 
@@ -1100,7 +1108,7 @@ export class RinFrontendTurnDriver {
     const text = safeString(input.text).trim();
     const images = Array.isArray(input.images) ? input.images : [];
 
-    if (this.isStreaming()) {
+    if (this.isTurnActive()) {
       if (input.streamingBehavior !== "steer") {
         return await this.followActiveTurn(ready);
       }

@@ -709,6 +709,36 @@ test("frontend SDK turn driver treats worker exit as recovery while following an
   );
 });
 
+test("frontend SDK turn driver steers while the rpc turn is active between streaming segments", async () => {
+  const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: false,
+    turnActive: true,
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  assert.equal(driver.canSteerActiveTurn(), true);
+  const result = await driver.runTurn({
+    text: "steer between tools",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+    streamingBehavior: "steer",
+  });
+
+  assert.equal(result.steered, true);
+  const promptCall = client.calls.find((call: any) => call.type === "prompt");
+  assert.equal(promptCall.text, "steer between tools");
+  assert.equal(promptCall.options.streamingBehavior, "steer");
+});
+
 test("frontend SDK turn driver defers steering until active compaction finishes", async () => {
   const client = createFrontendClient();
   let compacting = true;
