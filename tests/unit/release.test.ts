@@ -116,7 +116,7 @@ test("resolveParsedArgs rejects conflicting release selectors", () => {
 
 test("resolveReleaseRequest resolves stable beta nightly and git sources", () => {
   const manifest = {
-    packageName: "@rinchan-hoshino/rin",
+    packageName: "@hoshinorin/rin",
     repoUrl: "https://github.com/rinchan-hoshino/rin",
     train: {
       series: "1.3",
@@ -182,7 +182,7 @@ test("resolveReleaseRequest resolves stable beta nightly and git sources", () =>
 
   const stableFallback = release.resolveReleaseRequest(
     {
-      packageName: "@rinchan-hoshino/rin",
+      packageName: "@hoshinorin/rin",
       repoUrl: "https://github.com/rinchan-hoshino/rin",
       stable: { version: "1.2.3" },
       beta: manifest.beta,
@@ -193,7 +193,7 @@ test("resolveReleaseRequest resolves stable beta nightly and git sources", () =>
   );
   assert.equal(
     stableFallback.archiveUrl,
-    "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz",
+    "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-1.2.3.tgz",
   );
 
   const gitResolved = release.resolveReleaseRequest(manifest, {
@@ -212,7 +212,7 @@ test("readBundledReleaseManifest falls back to bundled defaults", () => {
   const manifest = release.readBundledReleaseManifest(
     path.join(rootDir, ".missing-release-manifest-root"),
   );
-  assert.equal(manifest.packageName, "@rinchan-hoshino/rin");
+  assert.equal(manifest.packageName, "@hoshinorin/rin");
   assert.equal(manifest.bootstrapBranch, "bootstrap");
   assert.equal(manifest.train.series, "0.0");
   assert.equal(manifest.stable.version, "0.0.0");
@@ -220,7 +220,7 @@ test("readBundledReleaseManifest falls back to bundled defaults", () => {
   assert.equal(manifest.nightly.version, "0.1.0-nightly.0");
   assert.equal(
     manifest.stable.archiveUrl,
-    "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-0.0.0.tgz",
+    "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.0.0.tgz",
   );
 });
 

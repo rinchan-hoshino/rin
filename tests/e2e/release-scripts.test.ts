@@ -28,7 +28,7 @@ test("update-release-manifest script writes stable npm tarball metadata", () => 
       manifestPath,
       JSON.stringify({
         schemaVersion: 2,
-        packageName: "@rinchan-hoshino/rin",
+        packageName: "@hoshinorin/rin",
         repoUrl: "https://github.com/rinchan-hoshino/rin",
         train: { series: "1.2", nightlyBranch: "main" },
         stable: { version: "1.2.2", archiveUrl: "https://example.com/old.tgz" },
@@ -65,17 +65,17 @@ test("update-release-manifest script writes stable npm tarball metadata", () => 
       { cwd: rootDir, stdio: "pipe" },
     );
     const next = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-    assert.equal(next.packageName, "@rinchan-hoshino/rin");
+    assert.equal(next.packageName, "@hoshinorin/rin");
     assert.equal(next.stable.version, "1.2.3");
     assert.equal(next.stable.ref, "deadbeef");
     assert.equal(next.stable.promotedFromBetaVersion, "1.2.3-beta.20260420");
     assert.equal(
       next.stable.archiveUrl,
-      "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz",
+      "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-1.2.3.tgz",
     );
     assert.equal(
       next.stable.versions["1.2.3"].archiveUrl,
-      "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz",
+      "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-1.2.3.tgz",
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -90,13 +90,13 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
       manifestPath,
       JSON.stringify({
         schemaVersion: 2,
-        packageName: "@rinchan-hoshino/rin",
+        packageName: "@hoshinorin/rin",
         repoUrl: "https://github.com/rinchan-hoshino/rin",
         train: { series: "1.2", nightlyBranch: "main" },
         stable: {
           version: "1.2.3",
           archiveUrl:
-            "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz",
+            "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-1.2.3.tgz",
         },
         beta: {},
         nightly: {},

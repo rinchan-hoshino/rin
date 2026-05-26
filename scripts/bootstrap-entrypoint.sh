@@ -316,13 +316,13 @@ const [manifestPath, repoArg, packageArg, channelArg, branchArg, versionArg, boo
 const safeString = (value) => (value == null ? '' : String(value));
 const trimValue = (value) => safeString(value).trim();
 const repoUrl = trimValue(repoArg || 'https://github.com/rinchan-hoshino/rin').replace(/\.git$/i, '');
-const packageName = trimValue(packageArg || '@rinchan-hoshino/rin');
+const packageName = trimValue(packageArg || '@hoshinorin/rin');
 const channel = trimValue(channelArg || 'stable').toLowerCase() || 'stable';
 const branch = trimValue(branchArg);
 const version = trimValue(versionArg);
 const buildNpmTarballUrl = (name, releaseVersion) => {
-  const encodedName = encodeURIComponent(name || '@rinchan-hoshino/rin');
-  const fileBase = String(name || '@rinchan-hoshino/rin').split('/').pop();
+  const encodedName = encodeURIComponent(name || '@hoshinorin/rin');
+  const fileBase = String(name || '@hoshinorin/rin').split('/').pop();
   return `https://registry.npmjs.org/${encodedName}/-/${fileBase}-${releaseVersion || '0.0.0'}.tgz`;
 };
 const defaultManifest = {
@@ -361,7 +361,7 @@ try {
   manifest = { ...defaultManifest, ...JSON.parse(fs.readFileSync(manifestPath, 'utf8')) };
 } catch {}
 const releaseRepoUrl = trimValue(manifest.repoUrl || repoUrl).replace(/\.git$/i, '');
-const releasePackageName = trimValue(manifest.packageName || packageName) || '@rinchan-hoshino/rin';
+const releasePackageName = trimValue(manifest.packageName || packageName) || '@hoshinorin/rin';
 const buildRefArchiveUrl = (ref) => `${releaseRepoUrl}/archive/${String(ref || 'main').split('/').map(encodeURIComponent).join('/')}.tar.gz`;
 const buildBranchArchiveUrl = (name) => `${releaseRepoUrl}/archive/refs/heads/${String(name || 'main').split('/').map(encodeURIComponent).join('/')}.tar.gz`;
 const shellEscape = (value) => `'${String(value ?? '').replace(/'/g, `"'"'"'`)}'`;
@@ -452,13 +452,13 @@ launch_published_installer() {
 }
 
 INSTALLER_ENTRY='dist/app/rin-install/main.js'
-PACKAGE_NAME='@rinchan-hoshino/rin'
+PACKAGE_NAME='@hoshinorin/rin'
 parse_args "$@"
 check_node_version
 : >"$LOGFILE"
 run_step "$MANIFEST_LABEL" fetch_manifest
 eval "$(resolve_release)"
-PACKAGE_NAME=${PACKAGE_NAME:-@rinchan-hoshino/rin}
+PACKAGE_NAME=${PACKAGE_NAME:-@hoshinorin/rin}
 RELEASE_FILE="$WORKDIR/release.json"
 node - "$RELEASE_FILE" "$CHANNEL" "$VERSION" "$BRANCH" "$REF" "$SOURCE_LABEL" "$ARCHIVE_URL" <<'NODE'
 const fs = require('node:fs');

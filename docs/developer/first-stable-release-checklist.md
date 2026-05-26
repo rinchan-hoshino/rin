@@ -4,11 +4,11 @@ Use this checklist before the first real stable npm promotion.
 
 ## One-time package readiness
 
-- confirm the intended npm package name is `@rinchan-hoshino/rin`
+- confirm the intended npm package name is `@hoshinorin/rin`
 - confirm the npm organization and package ownership are set correctly
 - confirm the package should be public
 - confirm the repository secret `NPM_TOKEN` is configured for GitHub Actions publishing
-- confirm the configured npm publisher identity can publish `@rinchan-hoshino/rin`
+- confirm the configured npm publisher identity can publish `@hoshinorin/rin`
 - confirm `package.json` metadata is acceptable for the first public release
 - confirm no files that should stay private are included in the published package
 
@@ -23,7 +23,7 @@ Use this checklist before the first real stable npm promotion.
 ## Release metadata readiness
 
 - confirm `release-manifest.json` has:
-  - `packageName: "@rinchan-hoshino/rin"`
+  - `packageName: "@hoshinorin/rin"`
   - correct `repoUrl`
   - correct `bootstrapBranch`
   - correct `train.nightlyBranch`
@@ -58,7 +58,7 @@ Expected status:
 
 Before the first real stable promotion:
 
-1. configure the repository secret `NPM_TOKEN` with a token that can publish `@rinchan-hoshino/rin`
+1. configure the repository secret `NPM_TOKEN` with a token that can publish `@hoshinorin/rin`
 2. let `publish-beta` cut a beta candidate on schedule or by manual dispatch
 3. verify that `release-manifest.json -> beta` now contains the intended candidate ref and version
 4. run or wait for `publish-stable`
@@ -68,7 +68,7 @@ The stable workflow should:
 
 1. validate the pinned beta candidate with the focused release test set
 2. set the promotion version only inside the detached candidate worktree
-3. publish `@rinchan-hoshino/rin` to npm with dist-tag `latest`
+3. publish `@hoshinorin/rin` to npm with dist-tag `latest`
 4. rewrite stable manifest metadata to the npm tarball and promoted ref
 5. tag the promoted candidate ref as `v<version>`
 6. commit the manifest update back to `main`
@@ -86,9 +86,9 @@ Also verify the user-facing channel shortcuts still behave as intended:
 
 Verify all of the following after the workflow succeeds:
 
-- npm package page for `@rinchan-hoshino/rin` shows the new version
-- `npm view @rinchan-hoshino/rin version` returns the published stable version
-- `npm view @rinchan-hoshino/rin dist-tags.latest` matches the stable version
+- npm package page for `@hoshinorin/rin` shows the new version
+- `npm view @hoshinorin/rin version` returns the published stable version
+- `npm view @hoshinorin/rin dist-tags.latest` matches the stable version
 - `release-manifest.json` on `main` now points stable to the npm tarball URL and promoted ref
 - `bootstrap` contains only the intended bootstrap payload
 - tag `v<version>` exists on the remote and points to the promoted beta candidate ref

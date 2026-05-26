@@ -56,7 +56,7 @@ async function createReleaseManifest(tempDir) {
       stable: {
         version: "1.2.3",
         archiveUrl:
-          "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz",
+          "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-1.2.3.tgz",
         ref: "abc1234",
       },
       beta: {
@@ -166,7 +166,7 @@ if (args[0] === "-") {
     ],
     stable: [
       "CHANNEL='stable'",
-      "ARCHIVE_URL='https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz'",
+      "ARCHIVE_URL='https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-1.2.3.tgz'",
       "VERSION='1.2.3'",
       "BRANCH='stable'",
       "REF='abc1234'",
@@ -336,11 +336,11 @@ test("stable install and update wrappers resolve release metadata before launchi
     assert.equal(/npm:.*:run build/.test(log), false);
     assert.match(
       log,
-      /npm:.*:exec --yes --package @rinchan-hoshino\/rin@1\.2\.3 -- rin-install --release-file [^\n]+\n/,
+      /npm:.*:exec --yes --package @hoshinorin\/rin@1\.2\.3 -- rin-install --release-file [^\n]+\n/,
     );
     assert.match(
       log,
-      /npm:.*:exec --yes --package @rinchan-hoshino\/rin@1\.2\.3 -- rin-install --release-file [^\s]+ --update/,
+      /npm:.*:exec --yes --package @hoshinorin\/rin@1\.2\.3 -- rin-install --release-file [^\s]+ --update/,
     );
 
     assert.deepEqual(await fs.readdir(workRoot), []);
@@ -469,11 +469,11 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
     );
     assert.match(
       log,
-      /npm:.*:exec --yes --package @rinchan-hoshino\/rin@1\.2\.3 -- rin-install --release-file [^\n]+\n/,
+      /npm:.*:exec --yes --package @hoshinorin\/rin@1\.2\.3 -- rin-install --release-file [^\n]+\n/,
     );
     assert.match(
       log,
-      /npm:.*:exec --yes --package @rinchan-hoshino\/rin@1\.2\.3 -- rin-install --release-file [^\s]+ --update/,
+      /npm:.*:exec --yes --package @hoshinorin\/rin@1\.2\.3 -- rin-install --release-file [^\s]+ --update/,
     );
     assert.deepEqual(await fs.readdir(workRoot), []);
   });

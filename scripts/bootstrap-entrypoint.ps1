@@ -182,7 +182,7 @@ function Get-Property($Object, [string]$Name) {
 
 function Resolve-Release {
   $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-  $packageName = if ($manifest.packageName) { [string]$manifest.packageName } else { "@rinchan-hoshino/rin" }
+  $packageName = if ($manifest.packageName) { [string]$manifest.packageName } else { "@hoshinorin/rin" }
   $releaseRepoUrl = if ($manifest.repoUrl) { [string]$manifest.repoUrl } else { $repoUrl }
   $releaseRepoUrl = $releaseRepoUrl -replace "\.git$", ""
   $fileBase = ($packageName -split "/")[-1]

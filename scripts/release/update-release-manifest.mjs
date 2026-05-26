@@ -104,9 +104,7 @@ const ref = trim(args.ref);
 const branch = trim(args.branch);
 const series = trim(args.series);
 const packageName =
-  trim(args.packageName) ||
-  trim(manifest.packageName) ||
-  "@rinchan-hoshino/rin";
+  trim(args.packageName) || trim(manifest.packageName) || "@hoshinorin/rin";
 const repoUrl =
   trim(args.repoUrl) ||
   trim(manifest.repoUrl) ||
