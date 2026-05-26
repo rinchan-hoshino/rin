@@ -83,12 +83,7 @@ export async function handleRinRpcSessionEvent(
     void refresh.refreshMessagesAndSession();
   }
   if (payload.type === "worker_exit") {
-    if (typeof target.handleSessionUnavailable === "function") {
-      target.handleSessionUnavailable();
-    } else {
-      finishRemoteTurn();
-      void refresh.refreshMessagesAndSession();
-    }
+    target.handleSessionUnavailable?.();
   }
   if (payload.type === "queue_update") {
     target.applyQueueUpdate?.(payload);

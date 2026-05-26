@@ -116,14 +116,10 @@ test("rpc session events do not refresh whole state on every stream update", asy
       refreshMessagesAndSession += 1;
     },
   );
-  assert.equal(target.isStreaming, false);
-  assert.equal(target.remoteTurnRunning, false);
-  assert.equal(target.activeTurn, null);
-  assert.equal(refreshMessagesAndSession, 2);
-
-  target.activeTurn = { mode: "prompt" };
-  target.remoteTurnRunning = true;
-  target.isStreaming = true;
+  assert.equal(target.isStreaming, true);
+  assert.equal(target.remoteTurnRunning, true);
+  assert.equal(target.activeTurn?.mode, "prompt");
+  assert.equal(refreshMessagesAndSession, 1);
 
   await events.handleRpcSessionEvent(
     target,
@@ -138,7 +134,7 @@ test("rpc session events do not refresh whole state on every stream update", asy
   assert.equal(target.isStreaming, false);
   assert.equal(target.remoteTurnRunning, false);
   assert.equal(target.activeTurn, null);
-  assert.equal(refreshMessagesAndSession, 3);
+  assert.equal(refreshMessagesAndSession, 2);
   assert.deepEqual(seen, [
     { type: "message_update", message: { role: "assistant" } },
     { type: "message_end", message: { role: "assistant" } },

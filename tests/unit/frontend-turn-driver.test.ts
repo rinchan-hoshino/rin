@@ -653,6 +653,52 @@ test("frontend SDK turn driver follows an already active turn by default", async
   );
 });
 
+test("frontend SDK turn driver treats worker exit as recovery while following an active turn", async () => {
+  const client = createFrontendClient();
+  let state = {
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+  };
+  client.getState = async () => state;
+  client.prompt = async () => {
+    throw new Error("prompt_should_not_be_resubmitted");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const resultPromise = driver.runTurn({
+    text: "follow active across worker exit",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  state = {
+    ...state,
+    isStreaming: false,
+    turnActive: false,
+  };
+  await emitDriverEvent(driver, { type: "worker_exit", code: null });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await emitDriverEvent(driver, {
+    type: "session_recovered",
+    sessionFile: state.sessionFile,
+    sessionId: state.sessionId,
+    resumed: true,
+  });
+  await emitRpcTurnComplete(driver, "", "final after worker recovery");
+
+  const result = await resultPromise;
+  assert.equal(result.finalText, "final after worker recovery");
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
+});
+
 test("frontend SDK turn driver defers steering until active compaction finishes", async () => {
   const client = createFrontendClient();
   let compacting = true;

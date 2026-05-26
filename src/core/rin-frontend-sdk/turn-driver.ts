@@ -371,11 +371,16 @@ export class RinFrontendTurnDriver {
     };
   }
 
+  private isSessionRecovering() {
+    return Boolean(this.frontendState.sessionRecovering);
+  }
+
   private isRemoteWorking() {
     return Boolean(
       this.frontendState.isStreaming ||
       this.frontendState.turnActive ||
       this.frontendState.isCompacting ||
+      this.frontendState.sessionRecovering ||
       this.frontendState.piWorkingVisible,
     );
   }
@@ -858,7 +863,13 @@ export class RinFrontendTurnDriver {
       const state = await this.refreshFrontendState(targetSessionFile).catch(
         () => ({}),
       );
-      if (Boolean((state as any)?.turnActive || (state as any)?.isStreaming)) {
+      if (
+        Boolean(
+          (state as any)?.turnActive ||
+          (state as any)?.isStreaming ||
+          (state as any)?.sessionRecovering,
+        )
+      ) {
         deadline = Date.now() + 120_000;
       }
       const raced = await Promise.race([
@@ -904,6 +915,13 @@ export class RinFrontendTurnDriver {
         break;
       }
       if (!Boolean(state?.turnActive || state?.isStreaming)) {
+        if (this.isSessionRecovering() || state?.sessionRecovering) {
+          await this.recoverLiveTurnAfterDisconnect(
+            new Error("rin_session_recovering"),
+          );
+          if (this.liveTurn === liveTurn) continue;
+          break;
+        }
         const error = new Error("rpc_turn_final_output_missing");
         this.failLiveTurn(error);
         throw error;
@@ -1256,6 +1274,19 @@ export class RinFrontendTurnDriver {
             this.frontendState.turnActive = running;
             this.frontendState.isStreaming = running;
             this.setFrontendPhase(running ? "working" : "idle");
+          },
+          handleSessionUnavailable: () => {
+            this.frontendState.sessionRecovering = true;
+            this.setFrontendPhase("connecting");
+            if (this.liveTurn) {
+              void this.recoverLiveTurnAfterDisconnect(
+                new Error("rin_session_recovering"),
+              );
+            }
+          },
+          handleSessionRecovered: () => {
+            this.frontendState.sessionRecovering = false;
+            if (this.liveTurn) this.setFrontendPhase("working");
           },
           emitFrontendStatus: () => {},
           emitEvent: () => {},
