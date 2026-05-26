@@ -1354,7 +1354,11 @@ test("rpc runtime promotes a temporary worker session before the first prompt", 
 
   await session.prompt("hello");
 
-  assert.ok(sent.some((payload) => payload.type === "new_session"));
+  const newSessionPayload = sent.find(
+    (payload) => payload.type === "new_session",
+  );
+  assert.ok(newSessionPayload);
+  assert.deepEqual(newSessionPayload.frontendIdentity, { kind: "tui" });
   assert.equal(
     sent.find((payload) => payload.type === "prompt")?.sessionFile,
     "/tmp/real.jsonl",

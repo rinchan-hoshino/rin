@@ -1653,6 +1653,13 @@ export class RpcInteractiveSession {
     type: string,
     payload: Record<string, unknown>,
   ) {
+    const frontendScoped = [
+      "new_session",
+      "select_session",
+      "switch_session",
+    ].includes(type)
+      ? { frontendIdentity: TUI_FRONTEND_IDENTITY }
+      : {};
     const withResources = [
       "get_state",
       "new_session",
@@ -1664,6 +1671,7 @@ export class RpcInteractiveSession {
       "get_command_argument_completions",
     ].includes(type)
       ? {
+          ...frontendScoped,
           ...payload,
           resourceOptions:
             payload.resourceOptions ||

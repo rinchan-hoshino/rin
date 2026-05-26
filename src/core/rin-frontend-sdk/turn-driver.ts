@@ -115,10 +115,7 @@ export async function runSelfImproveNoticeCheckpoint(
   if (!client.isConnected() || input.canPull === false) return;
   const sessionFile = safeString(input.sessionFile || "").trim() || undefined;
   const frontendIdentity = normalizeFrontendIdentity(input.frontendIdentity);
-  if (!input.unfiltered && !frontendIdentity) {
-    if (input.kind === "frontend_open") return;
-    throw new Error("self_improve_notice_frontend_required");
-  }
+  if (!input.unfiltered && !frontendIdentity) return;
   await client.request({
     type: "flush_self_improve_notices",
     sessionFile,

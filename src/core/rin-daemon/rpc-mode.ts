@@ -1032,9 +1032,7 @@ export async function runCustomRpcMode(
     const frontendIdentity = normalizeFrontendIdentity(
       options.frontendIdentity,
     );
-    if (!options.unfiltered && !frontendIdentity) {
-      throw new Error("self_improve_notice_frontend_required");
-    }
+    if (!options.unfiltered && !frontendIdentity) return 0;
     const profile = resolveRuntimeProfile({
       cwd:
         safeString(runtime.cwd || getSession()?.sessionManager?.getCwd?.()) ||

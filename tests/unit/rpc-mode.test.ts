@@ -25,6 +25,83 @@ function wait(ms = 0) {
 }
 
 test(
+  "rpc mode ignores unscoped self-improve notice flushes without surfacing errors",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const agentDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "rin-rpc-unscoped-notice-"),
+    );
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: path.join(agentDir, "sessions", "current.jsonl"),
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        sessionManager: {
+          getEntries: () => [],
+          getTree: () => [],
+          getLeafId: () => null,
+          getCwd: () => process.cwd(),
+          getSessionDir: () => path.join(agentDir, "sessions"),
+        },
+      };
+      const runtime = { session, services: { agentDir } };
+
+      void runCustomRpcMode(runtime, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "flush-1", type: "flush_self_improve_notices", sessionFile: session.sessionFile })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const responseLine = lines.find((line) =>
+        line.includes('"id":"flush-1"'),
+      );
+      assert.ok(responseLine);
+      assert.match(responseLine, /"success":true/);
+      assert.match(responseLine, /"flushed":0/);
+      assert.doesNotMatch(
+        responseLine,
+        /self_improve_notice_frontend_required/,
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+      await fs.rm(agentDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "rpc mode sleep_session disposes the session without emitting runtime shutdown",
   { concurrency: false },
   async () => {
