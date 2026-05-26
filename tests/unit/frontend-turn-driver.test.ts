@@ -653,6 +653,71 @@ test("frontend SDK turn driver follows an already active turn by default", async
   );
 });
 
+test("frontend SDK turn driver defers steering until active compaction finishes", async () => {
+  const client = createFrontendClient();
+  let compacting = true;
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+    isCompacting: compacting,
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const resultPromise = driver.runTurn({
+    text: "steer after compaction",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+    streamingBehavior: "steer",
+  });
+  setImmediate(() => {
+    compacting = false;
+  });
+
+  const result = await resultPromise;
+
+  assert.equal(result.steered, true);
+  const promptCall = client.calls.find((call: any) => call.type === "prompt");
+  assert.equal(promptCall.text, "steer after compaction");
+  assert.equal(promptCall.options.streamingBehavior, "steer");
+});
+
+test("frontend SDK turn driver waits for standalone compaction before prompting", async () => {
+  const client = createFrontendClient();
+  let compacting = true;
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: false,
+    turnActive: false,
+    isCompacting: compacting,
+  });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const resultPromise = driver.runTurn({
+    text: "message after compaction",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+  setImmediate(() => {
+    compacting = false;
+  });
+
+  const result = await resultPromise;
+
+  assert.equal(result.finalText, "frontend final");
+  const promptCall = client.calls.find((call: any) => call.type === "prompt");
+  assert.equal(promptCall.text, "message after compaction");
+});
+
 test("frontend SDK turn driver steers through native prompt streamingBehavior", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({

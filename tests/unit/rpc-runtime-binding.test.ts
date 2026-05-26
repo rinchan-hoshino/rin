@@ -1468,6 +1468,54 @@ test("rpc runtime forwards raw self-improve notices from the daemon", async () =
   ]);
 });
 
+test("rpc runtime defers prompt submission until compaction ends", async () => {
+  const sent = [];
+  const session = new RpcInteractiveSession({
+    send(command) {
+      sent.push(command);
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return true;
+    },
+    connect() {
+      return Promise.resolve();
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+
+  session.sessionId = "s1";
+  session.rpcConnected = true;
+  session.startupPending = false;
+  session.isCompacting = true;
+  session.ensureRemoteSession = () => Promise.resolve();
+
+  const promptPromise = session.prompt("hello", {
+    expandPromptTemplates: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    sent.some((command) => command?.type === "prompt"),
+    false,
+  );
+
+  session.handleRpcEvent({ type: "compaction_end" });
+  await promptPromise;
+
+  const promptCommands = sent.filter((command) => command?.type === "prompt");
+  assert.equal(promptCommands.length, 1);
+  assert.equal(promptCommands[0]?.message, "hello");
+});
+
 test("rpc runtime applies daemon queue updates before the user message starts", async () => {
   const session = new RpcInteractiveSession({
     send() {

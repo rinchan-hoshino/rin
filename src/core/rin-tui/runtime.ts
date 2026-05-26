@@ -22,6 +22,7 @@ import {
   resolveRinFrontendCommandResponses,
 } from "../rin-frontend-sdk/command-responses.js";
 import { classifyRinFrontendCommand } from "../rin-frontend-sdk/command-dispatcher.js";
+import { waitForFrontendInputSubmissionReady } from "../rin-frontend-sdk/input-submission.js";
 import type { RpcFrontendClient } from "../rin-frontend-sdk/frontend-surface.js";
 import { createModelRegistry } from "../rin-frontend-sdk/model-registry.js";
 import {
@@ -1424,10 +1425,18 @@ export class RpcInteractiveSession {
             source: operation.source,
             requestTag: operation.requestTag,
             sessionFile: this.sessionFile,
+            gate: {
+              isCompacting: () => this.isCompacting,
+              onWaiting: () => this.emitFrontendStatus(true),
+            },
           },
         );
         return;
       }
+      await waitForFrontendInputSubmissionReady({
+        isCompacting: () => this.isCompacting,
+        onWaiting: () => this.emitFrontendStatus(true),
+      });
       await this.call(operation.mode, {
         message: operation.message,
         images: operation.images,

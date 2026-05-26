@@ -146,6 +146,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin is not connected to a session yet. Reconnect or start a new session, then retry.",
   frontend_session_restore_mismatch: () =>
     "Rin could not restore the requested chat session before running the turn. Retry the message; if it repeats, restart Rin.",
+  frontend_compaction_timeout: () =>
+    "Rin waited for context compaction to finish, but it took too long. Retry after compaction ends; if it repeats, restart Rin.",
   frontend_turn_already_running: () =>
     "A turn is already running in this session. Wait for it to finish or abort it, then retry.",
   frontend_turn_driver_disposed: () =>

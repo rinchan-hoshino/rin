@@ -17,6 +17,10 @@ import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
 import {
+  submitNativeFrontendPromptTurn,
+  type RinFrontendPromptTurnInput,
+} from "./input-submission.js";
+import {
   handleRinRpcSessionEvent,
   type RinRpcSessionEventTarget,
 } from "./rpc-session-events.js";
@@ -26,9 +30,13 @@ import type {
   RinFrontendEvent,
   RinNewSessionResult,
   RinPromptContext,
-  RinPromptOptions,
   RinSessionState,
 } from "./types.js";
+
+export {
+  submitNativeFrontendPromptTurn,
+  type RinFrontendPromptTurnInput,
+} from "./input-submission.js";
 
 export type RinFrontendTurnPhase =
   | "idle"
@@ -81,35 +89,6 @@ export function shouldPullSelfImproveNoticesForTurnState(state: {
   turnActive?: boolean;
 }) {
   return !shouldDeferPassiveNoticeForTurnState(state);
-}
-
-export type RinFrontendPromptTurnInput = {
-  text: string;
-  images?: any[];
-  source?: string;
-  requestTag?: string;
-  streamingBehavior?: "steer" | "followUp";
-  promptContext?: RinPromptContext;
-  sessionFile?: string;
-  sessionId?: string;
-};
-
-export async function submitNativeFrontendPromptTurn(
-  client: Pick<RinFrontendClient, "prompt">,
-  input: RinFrontendPromptTurnInput,
-): Promise<void> {
-  const promptOptions: RinPromptOptions = {
-    images: input.images,
-    streamingBehavior: input.streamingBehavior,
-    source: input.source,
-    requestTag: input.requestTag,
-  };
-  if (input.promptContext) promptOptions.promptContext = input.promptContext;
-  const sessionFile = safeString(input.sessionFile || "").trim();
-  if (sessionFile) promptOptions.sessionFile = sessionFile;
-  const sessionId = safeString(input.sessionId || "").trim();
-  if (sessionId) promptOptions.sessionId = sessionId;
-  await client.prompt(input.text, promptOptions);
 }
 
 export type SelfImproveNoticeCheckpointKind =
@@ -378,6 +357,18 @@ export class RinFrontendTurnDriver {
     return Boolean(
       this.frontendState.isStreaming || this.frontendState.turnActive,
     );
+  }
+
+  private isCompacting() {
+    return Boolean(this.frontendState.isCompacting);
+  }
+
+  private inputSubmissionGate(sessionFile?: string) {
+    return {
+      isCompacting: () => this.isCompacting(),
+      refresh: () => this.refreshFrontendState(sessionFile),
+      onWaiting: () => this.setFrontendPhase("working"),
+    };
   }
 
   private isRemoteWorking() {
@@ -988,6 +979,7 @@ export class RinFrontendTurnDriver {
       },
       targetSessionFile,
     );
+    const inputGate = this.inputSubmissionGate(targetSessionFile);
     const requestTag =
       safeString(input.requestTag).trim() || this.createTurnRequestTag();
     await submitNativeFrontendPromptTurn(this.client, {
@@ -998,6 +990,7 @@ export class RinFrontendTurnDriver {
       streamingBehavior: input.streamingBehavior,
       promptContext: input.promptContext,
       sessionFile: targetSessionFile,
+      gate: inputGate,
     });
     this.throwIfQueuedOffline(requestTag);
     return {
@@ -1048,6 +1041,7 @@ export class RinFrontendTurnDriver {
       sessionFile || restoreSessionFile,
       targetSessionFile,
     );
+    const inputGate = this.inputSubmissionGate(targetSessionFile);
     if (input.resetModelOptionsFromSettings) {
       await this.resetModelOptionsFromSettings(targetSessionFile);
     }
@@ -1075,6 +1069,7 @@ export class RinFrontendTurnDriver {
         requestTag,
         promptContext: input.promptContext,
         sessionFile: targetSessionFile,
+        gate: inputGate,
       });
       this.throwIfQueuedOffline(requestTag);
       return {
@@ -1132,6 +1127,7 @@ export class RinFrontendTurnDriver {
         requestTag,
         promptContext: input.promptContext,
         sessionFile: targetSessionFile,
+        gate: inputGate,
       });
       this.throwIfQueuedOffline(requestTag);
     })();
@@ -1170,6 +1166,7 @@ export class RinFrontendTurnDriver {
           requestTag: steerRequestTag,
           promptContext: input.promptContext,
           sessionFile: targetSessionFile,
+          gate: inputGate,
         });
         this.throwIfQueuedOffline(steerRequestTag);
         return {
