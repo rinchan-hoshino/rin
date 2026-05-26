@@ -1,3 +1,4 @@
+import type { RinFrontendIdentity } from "./frontend-identity.js";
 import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,
@@ -94,7 +95,10 @@ export interface InteractiveFrontendSurface {
   getAutocompleteItems(input: string): Promise<FrontendAutocompleteItem[]>;
   getCommands(): Promise<FrontendCommandItem[]>;
   listSessions(): Promise<FrontendSessionItem[]>;
-  resumeSession(sessionId: string): Promise<void>;
+  resumeSession(
+    sessionId: string,
+    options?: { frontendIdentity?: RinFrontendIdentity },
+  ): Promise<void>;
   listModels?(): Promise<FrontendModelItem[]>;
   openDialog?(id: string): Promise<FrontendDialogSpec | null>;
   respondDialog?(id: string, payload: unknown): Promise<void>;

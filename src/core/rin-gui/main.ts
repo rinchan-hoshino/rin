@@ -1,5 +1,8 @@
 import { installSettingsPath } from "../rin-install/paths.js";
-import { RinDaemonFrontendClient } from "../rin-frontend-sdk/index.js";
+import {
+  RinDaemonFrontendClient,
+  sourceFrontendIdentity,
+} from "../rin-frontend-sdk/index.js";
 import {
   createTargetExecutionContext,
   ensureDaemonAvailable,
@@ -17,7 +20,10 @@ export async function runGui(parsed: ParsedArgs, rawArgv: string[] = []) {
 
   await ensureDaemonAvailable(context);
 
-  const client = new RinDaemonFrontendClient(context.socketPath);
+  const client = new RinDaemonFrontendClient({
+    socketPath: context.socketPath,
+    frontendIdentity: sourceFrontendIdentity("gui"),
+  });
   await client.connect();
   try {
     await runNativeDesktopGui({

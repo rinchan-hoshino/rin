@@ -545,7 +545,9 @@ export class RinFrontendTurnDriver {
     if (!wanted) return { changed: false };
     if (!this.client) throw new Error("frontend_session_not_connected");
     const before = this.currentSessionFile();
-    await this.client.resumeSession(wanted);
+    await this.client.resumeSession(wanted, {
+      frontendIdentity: this.frontendIdentity,
+    });
     await this.refreshFrontendState(wanted).catch(() => {});
     return {
       changed: before !== wanted,
@@ -581,6 +583,7 @@ export class RinFrontendTurnDriver {
     if (managedLeaf && !wanted) {
       const value = await this.client.newSession({
         managedSessionLeaf: managedLeaf,
+        frontendIdentity: this.frontendIdentity,
       });
       if (value?.cancelled) throw new Error("rin_new_session_cancelled");
       this.updateFrontendStateFrom(value);
@@ -632,9 +635,10 @@ export class RinFrontendTurnDriver {
       if (sessionFile && !managedSessionLeaf) {
         throw new Error("new_session_session_file_unsupported");
       }
-      const value: RinNewSessionResult = await this.client.newSession(
-        managedSessionLeaf ? { managedSessionLeaf } : undefined,
-      );
+      const value: RinNewSessionResult = await this.client.newSession({
+        ...(managedSessionLeaf ? { managedSessionLeaf } : {}),
+        frontendIdentity: this.frontendIdentity,
+      });
       this.updateFrontendStateFrom(value);
       await this.refreshFrontendState(this.currentSessionFile()).catch(
         () => {},

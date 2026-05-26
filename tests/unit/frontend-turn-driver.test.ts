@@ -402,7 +402,10 @@ test("frontend SDK turn driver uses configured built-in command responses", asyn
     client.calls.find((call: any) => call.type === "newSession"),
     {
       type: "newSession",
-      options: { managedSessionLeaf: "chat" },
+      options: {
+        managedSessionLeaf: "chat",
+        frontendIdentity: { kind: "chat-bridge" },
+      },
     },
   );
 });
@@ -992,7 +995,9 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
     isStreaming: false,
   });
   client.newSession = async (options: any = {}) => {
-    calls.push(`newSession:${options.managedSessionLeaf}`);
+    calls.push(
+      `newSession:${options.managedSessionLeaf}:${JSON.stringify(options.frontendIdentity)}`,
+    );
     sessionFile = "/tmp/rin/sessions/managed/task/created.jsonl";
     return { cancelled: false, sessionFile, sessionId: "session-driver" };
   };
@@ -1007,7 +1012,7 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
   });
 
   assert.equal(result.finalText, "done");
-  assert.deepEqual(calls, ["newSession:task", "prompt"]);
+  assert.deepEqual(calls, ['newSession:task:{"kind":"chat-bridge"}', "prompt"]);
   assert.equal(
     result.sessionFile,
     "/tmp/rin/sessions/managed/task/created.jsonl",

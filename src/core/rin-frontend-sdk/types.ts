@@ -186,6 +186,7 @@ export type RinSessionState = {
 export type RinNewSessionOptions = {
   managedSessionLeaf?: string;
   parentSession?: string;
+  frontendIdentity?: RinFrontendIdentity;
 };
 
 export type RinNewSessionResult = RinSessionState & {
@@ -243,7 +244,10 @@ export interface RinFrontendClient {
     argumentPrefix: string,
   ): Promise<RinFrontendAutocompleteItem[]>;
   listSessions(): Promise<RinFrontendSessionItem[]>;
-  resumeSession(sessionId: string): Promise<void>;
+  resumeSession(
+    sessionId: string,
+    options?: { frontendIdentity?: RinFrontendIdentity },
+  ): Promise<void>;
   newSession(options?: RinNewSessionOptions): Promise<RinNewSessionResult>;
   listModels(): Promise<RinFrontendModelItem[]>;
   setModel(

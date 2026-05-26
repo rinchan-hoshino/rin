@@ -8,6 +8,10 @@ import type {
 import { defaultDaemonSocketPath, parseJsonl } from "../rin-lib/common.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
 import { describeBoundSessions } from "../session/listing.js";
+import {
+  normalizeFrontendIdentity,
+  type RinFrontendIdentity,
+} from "./frontend-identity.js";
 import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,
@@ -72,8 +76,9 @@ function toFrontendEvent(event: any): InteractiveFrontendEvent | null {
 
 export type RinDaemonFrontendClientTransportOptions = {
   socketPath?: string;
-  connectSocket: RpcSocketConnector;
+  connectSocket?: RpcSocketConnector;
   connectTimeoutMs?: number;
+  frontendIdentity?: RinFrontendIdentity;
 };
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5000;
@@ -102,6 +107,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   socket: RpcSocketLike | null = null;
   private readonly connectSocket?: RpcSocketConnector;
   private readonly connectTimeoutMs: number;
+  private readonly frontendIdentity?: RinFrontendIdentity;
   state = { buffer: "" };
   requestId = 0;
   pending = new Map<
@@ -121,10 +127,14 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
       this.socketPath = transport;
       this.connectSocket = undefined;
       this.connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS;
+      this.frontendIdentity = undefined;
       return;
     }
     this.socketPath = transport.socketPath || "inprocess://rin-daemon";
     this.connectSocket = transport.connectSocket;
+    this.frontendIdentity = normalizeFrontendIdentity(
+      transport.frontendIdentity,
+    );
     this.connectTimeoutMs = normalizeConnectTimeoutMs(
       transport.connectTimeoutMs,
     );
@@ -218,7 +228,14 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   }
 
   async prompt(text: string, options: Record<string, unknown> = {}) {
-    await this.request({ type: "prompt", message: text, ...options });
+    await this.request({
+      type: "prompt",
+      message: text,
+      ...(this.frontendIdentity
+        ? { frontendIdentity: this.frontendIdentity }
+        : {}),
+      ...options,
+    });
   }
 
   async abort() {
@@ -341,9 +358,14 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   }
 
   async newSession(options: Record<string, unknown> = {}) {
+    const { frontendIdentity: requestedFrontendIdentity, ...rest } = options;
+    const frontendIdentity =
+      normalizeFrontendIdentity(requestedFrontendIdentity) ||
+      this.frontendIdentity;
     return await this.request<Record<string, unknown>>({
       type: "new_session",
-      ...options,
+      ...(frontendIdentity ? { frontendIdentity } : {}),
+      ...rest,
     });
   }
 
@@ -420,8 +442,18 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     }));
   }
 
-  async resumeSession(sessionId: string): Promise<void> {
-    await this.send({ type: "select_session", sessionPath: sessionId });
+  async resumeSession(
+    sessionId: string,
+    options: { frontendIdentity?: RinFrontendIdentity } = {},
+  ): Promise<void> {
+    const frontendIdentity =
+      normalizeFrontendIdentity(options.frontendIdentity) ||
+      this.frontendIdentity;
+    await this.send({
+      type: "select_session",
+      sessionPath: sessionId,
+      ...(frontendIdentity ? { frontendIdentity } : {}),
+    });
   }
 
   async listModels(): Promise<FrontendModelItem[]> {
