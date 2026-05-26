@@ -94,6 +94,7 @@ const INSTALLED_BUILTIN_SKILL_NAMES = [
 
 const RUNTIME_COPY_ENTRY_NAMES = [
   "dist",
+  "extensions",
   "node_modules",
   "package.json",
 ] as const;
@@ -683,12 +684,10 @@ export function publishInstalledRuntime(
     );
     ensurePrivilegedOwnedDir(releaseRoot, target?.name, targetGroup);
     for (const name of RUNTIME_COPY_ENTRY_NAMES) {
+      const sourcePath = path.join(sourceRoot, name);
+      if (!fs.existsSync(sourcePath)) continue;
       runPrivileged("rm", ["-rf", path.join(releaseRoot, name)]);
-      runPrivileged("cp", [
-        "-a",
-        path.join(sourceRoot, name),
-        path.join(releaseRoot, name),
-      ]);
+      runPrivileged("cp", ["-a", sourcePath, path.join(releaseRoot, name)]);
     }
     runPrivileged("touch", [releaseRoot]);
     try {
@@ -708,8 +707,12 @@ export function publishInstalledRuntime(
     return { releaseRoot, currentLink };
   }
   ensureDir(path.dirname(releaseRoot));
-  for (const name of RUNTIME_COPY_ENTRY_NAMES)
-    syncTree(path.join(sourceRoot, name), path.join(releaseRoot, name));
+  for (const name of RUNTIME_COPY_ENTRY_NAMES) {
+    const sourcePath = path.join(sourceRoot, name);
+    if (fs.existsSync(sourcePath)) {
+      syncTree(sourcePath, path.join(releaseRoot, name));
+    }
+  }
   try {
     fs.utimesSync(releaseRoot, new Date(), new Date());
   } catch {}

@@ -7,6 +7,7 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
 - Core Rin capabilities are available through native product code when their tools are present in the live tool list.
 - The core todo capability is always enabled and registers the `todo` tool plus `/todos` command.
 - Optional browser/computer tools are packaged with Rin but remain off until `settings.json -> extensions` enables their `rin:` aliases.
+- Optional background services such as heartbeat notification remain off until `settings.json -> rinExtensions.backgroundServices` enables their `rin:` aliases.
 - Background extensions run in Rin's background runtime and are not Pi session tools.
 - The current tool list and system prompt remain authoritative for a specific turn.
 
@@ -106,6 +107,32 @@ Use Pi resource filters with the alias to disable entries from a broader extensi
 ```
 
 If `extensions` is missing or `[]`, `todo` stays on by default and both optional browser/computer tools are off.
+
+### Optional heartbeat notification service
+
+`rin:heartbeat-notifier` is a bundled background extension, not core chat behavior. It watches configured record-only chat message stores and nudges scheduled tasks by moving their next run time to now. The scheduler still evaluates each task's condition normally.
+
+Enable it under `settings.json -> rinExtensions.backgroundServices`:
+
+```json
+{
+  "rinExtensions": {
+    "backgroundServices": [
+      {
+        "packageName": "rin:heartbeat-notifier",
+        "config": {
+          "pollIntervalMs": 1000,
+          "byChatKey": {
+            "telegram/123456:7890": "rinchan_personality_heartbeat_owner_tg"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge.
 
 ### Enabling bundled browser/computer control
 

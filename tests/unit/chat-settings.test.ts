@@ -69,31 +69,25 @@ test("chat turn policy supports record-only per chat key", () => {
   );
 });
 
-test("chat turn policy supports record-only wake tasks", () => {
+test("chat turn policy accepts object entries without core wake behavior", () => {
   const settings = {
     chat: {
       turnPolicy: {
         byChatKey: {
-          "telegram/123:456": {
-            mode: "record_only",
-            wakeTaskId: "cron_wake_chat",
-          },
-          "telegram/123:789": {
-            mode: "start_on_message",
-            wakeTaskId: "ignored",
-          },
+          "telegram/123:456": { mode: "record_only", wakeTaskId: "ignored" },
+          "telegram/123:789": { mode: "start_on_message" },
         },
       },
     },
   };
 
-  assert.deepEqual(
-    chatSettings.resolveChatTurnPolicy(settings, "telegram/123:456"),
-    { mode: "record_only", wakeTaskId: "cron_wake_chat" },
+  assert.equal(
+    chatSettings.resolveChatTurnPolicyMode(settings, "telegram/123:456"),
+    "record_only",
   );
-  assert.deepEqual(
-    chatSettings.resolveChatTurnPolicy(settings, "telegram/123:789"),
-    { mode: "start_on_message" },
+  assert.equal(
+    chatSettings.resolveChatTurnPolicyMode(settings, "telegram/123:789"),
+    "start_on_message",
   );
 });
 

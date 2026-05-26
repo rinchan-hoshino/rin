@@ -6,6 +6,7 @@ import { safeString } from "./text-utils.js";
 const BUNDLED_RIN_EXTENSION_DIRS: Record<string, string> = {
   "rin:browser-use": "rin-browser-use",
   "rin:computer-use": "rin-computer-use",
+  "rin:heartbeat-notifier": "rin-heartbeat-notifier",
 };
 
 function getRepoRoot() {

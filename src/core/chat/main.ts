@@ -54,7 +54,7 @@ import {
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { readChatCommandResponses } from "./command-responses.js";
-import { resolveChatTurnPolicy } from "./settings.js";
+import { resolveChatTurnPolicyMode } from "./settings.js";
 import { appendChatLog } from "./chat-log.js";
 import {
   type ChatInboxItem,
@@ -88,7 +88,6 @@ import {
 } from "./runtime-config.js";
 import { composeChatKey, loadIdentity, trustOf } from "./support.js";
 import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
-import { requestDaemonCommand } from "../rin-daemon/client.js";
 import {
   enqueueChatOutboxPayload,
   type ChatOutboxPayload,
@@ -655,22 +654,6 @@ export async function startChatBridge(
     }
   };
 
-  const wakeRecordOnlyTask = (chatKey: string, wakeTaskId?: string) => {
-    const taskId = safeString(wakeTaskId).trim();
-    if (!taskId) return;
-    void requestDaemonCommand(
-      { type: "cron_wake_task", taskId },
-      { timeoutMs: 1000 },
-    ).catch((error: any) => {
-      const message = safeString(error?.message || error);
-      if (!message.includes("cron_task_already_running")) {
-        logger.warn(
-          `chat record-only wake failed chatKey=${chatKey} taskId=${taskId} err=${message}`,
-        );
-      }
-    });
-  };
-
   const handleChatTurnSession = async (
     session: any,
     elements: any[],
@@ -679,9 +662,9 @@ export async function startChatBridge(
     const platform = safeString(session?.platform || "").trim();
     const decision = await shouldProcessText(session, elements, identity);
     if (!decision.allow) return { retry: false };
-    const turnPolicy = resolveChatTurnPolicy(settings, decision.chatKey);
-    if (turnPolicy.mode === "record_only") {
-      wakeRecordOnlyTask(decision.chatKey, turnPolicy.wakeTaskId);
+    if (
+      resolveChatTurnPolicyMode(settings, decision.chatKey) === "record_only"
+    ) {
       return { retry: false };
     }
     return await handleAllowedChatTurnSession(
@@ -791,14 +774,11 @@ export async function startChatBridge(
         run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
       };
     }
-    const turnPolicy = resolveChatTurnPolicy(settings, decision.chatKey);
-    if (turnPolicy.mode === "record_only") {
+    if (
+      resolveChatTurnPolicyMode(settings, decision.chatKey) === "record_only"
+    ) {
       return {
-        run: () =>
-          runClaimedInboxJob(job, async () => {
-            wakeRecordOnlyTask(decision.chatKey, turnPolicy.wakeTaskId);
-            return { retry: false };
-          }),
+        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
       };
     }
 

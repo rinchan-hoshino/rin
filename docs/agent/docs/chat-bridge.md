@@ -45,24 +45,7 @@ Modes:
 - `start_on_message`: default behavior; allowed incoming messages start an agent turn.
 - `record_only`: store inbound chat messages, but do not start an agent turn for normal messages in that chat. Chat commands are still handled by the command path.
 
-Use `record_only` only when another explicit path, such as a scheduled task or SDK call, will inspect stored messages and decide whether to respond. A record-only chat can also wake a scheduled task immediately after message storage without starting the normal chat turn:
-
-```json
-{
-  "chat": {
-    "turnPolicy": {
-      "byChatKey": {
-        "telegram/123456:7890": {
-          "mode": "record_only",
-          "wakeTaskId": "rinchan_personality_heartbeat_owner_tg"
-        }
-      }
-    }
-  }
-}
-```
-
-`wakeTaskId` only moves the task's next run time to now; the scheduler still evaluates the task condition normally. Use it as a notification nudge, not as a forced reply path.
+Use `record_only` only when another explicit path, such as a scheduled task, SDK call, or optional background extension, will inspect stored messages and decide whether to respond. Core chat storage does not wake tasks by itself.
 
 Agent SDK examples:
 

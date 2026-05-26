@@ -2,46 +2,22 @@ import { isJsonRecord } from "../json-utils.js";
 
 export type ChatTurnPolicyMode = "start_on_message" | "record_only";
 
-export type ChatTurnPolicyResolution = {
-  mode: ChatTurnPolicyMode;
-  wakeTaskId?: string;
-};
-
 const DEFAULT_CHAT_TURN_POLICY: ChatTurnPolicyMode = "start_on_message";
 
 function normalizeChatTurnPolicyMode(value: unknown): ChatTurnPolicyMode {
   return value === "record_only" ? "record_only" : DEFAULT_CHAT_TURN_POLICY;
 }
 
-function normalizeWakeTaskId(value: unknown) {
-  const taskId = String(value || "").trim();
-  return taskId || undefined;
-}
-
-function normalizeChatTurnPolicyResolution(
-  value: unknown,
-): ChatTurnPolicyResolution {
-  if (isJsonRecord(value)) {
-    const mode = normalizeChatTurnPolicyMode(value.mode);
-    const wakeTaskId =
-      mode === "record_only"
-        ? normalizeWakeTaskId(value.wakeTaskId)
-        : undefined;
-    return wakeTaskId ? { mode, wakeTaskId } : { mode };
-  }
-  return { mode: normalizeChatTurnPolicyMode(value) };
-}
-
 export function getStoredChatConfigRoot(settings: any): Record<string, any> {
   return isJsonRecord(settings?.chat) ? settings.chat : {};
 }
 
-export function resolveChatTurnPolicy(
+export function resolveChatTurnPolicyMode(
   settings: any,
   chatKey: string,
-): ChatTurnPolicyResolution {
+): ChatTurnPolicyMode {
   const turnPolicy = getStoredChatConfigRoot(settings).turnPolicy;
-  if (!isJsonRecord(turnPolicy)) return { mode: DEFAULT_CHAT_TURN_POLICY };
+  if (!isJsonRecord(turnPolicy)) return DEFAULT_CHAT_TURN_POLICY;
   const byChatKey = isJsonRecord(turnPolicy.byChatKey)
     ? turnPolicy.byChatKey
     : {};
@@ -50,16 +26,12 @@ export function resolveChatTurnPolicy(
     normalizedChatKey &&
     Object.prototype.hasOwnProperty.call(byChatKey, normalizedChatKey)
   ) {
-    return normalizeChatTurnPolicyResolution(byChatKey[normalizedChatKey]);
+    const entry = byChatKey[normalizedChatKey];
+    return normalizeChatTurnPolicyMode(
+      isJsonRecord(entry) ? entry.mode : entry,
+    );
   }
-  return normalizeChatTurnPolicyResolution(turnPolicy.default);
-}
-
-export function resolveChatTurnPolicyMode(
-  settings: any,
-  chatKey: string,
-): ChatTurnPolicyMode {
-  return resolveChatTurnPolicy(settings, chatKey).mode;
+  return normalizeChatTurnPolicyMode(turnPolicy.default);
 }
 
 export function dropLegacyChatSettings(settings: any) {
