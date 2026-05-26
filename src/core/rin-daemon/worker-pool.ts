@@ -49,6 +49,7 @@ export type WorkerHandle = {
   sessionFile?: string;
   sessionId?: string;
   turnActive: boolean;
+  rpcTurnActive: boolean;
   isStreaming: boolean;
   isCompacting: boolean;
   rinWorking: boolean;
@@ -575,13 +576,13 @@ export class WorkerPool {
     }
 
     if (payload.type === "agent_start") {
-      worker.turnActive = true;
+      if (!worker.rpcTurnActive) worker.turnActive = true;
       worker.isStreaming = true;
       this.syncRunningWorkerRecord(worker);
     }
     if (payload.type === "agent_end") {
-      worker.turnActive = false;
       worker.isStreaming = false;
+      if (!worker.rpcTurnActive) worker.turnActive = false;
       this.syncRunningWorkerRecord(worker);
       this.maybeReleaseWorker(worker);
     }
@@ -607,6 +608,11 @@ export class WorkerPool {
       payload.type === "rpc_turn_event" &&
       (payload.event === "start" || payload.event === "heartbeat")
     ) {
+      const selector = sessionSelectorFromState(payload);
+      if (hasSessionSelector(selector)) {
+        this.setWorkerSessionRefs(worker, selector, { syncConnections: false });
+      }
+      worker.rpcTurnActive = true;
       worker.turnActive = true;
       this.syncRunningWorkerRecord(worker);
     }
@@ -614,6 +620,7 @@ export class WorkerPool {
       payload.type === "rpc_turn_event" &&
       (payload.event === "complete" || payload.event === "error")
     ) {
+      worker.rpcTurnActive = false;
       worker.turnActive = false;
       worker.isStreaming = false;
       this.syncRunningWorkerRecord(worker);
@@ -674,6 +681,7 @@ export class WorkerPool {
       pendingResponses: new Map(),
       ignoredResponseIds: new Set(),
       turnActive: false,
+      rpcTurnActive: false,
       isStreaming: false,
       isCompacting: false,
       rinWorking: false,

@@ -429,6 +429,84 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("rpc turn start keeps a running record after an agent segment ends", async () => {
+  const dir = await makeTempDir("rin-worker-pool-rpc-running-");
+  const workerPath = path.join(dir, "worker.mjs");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    String.raw`process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: {},
+    }) + '\n');
+    process.stdout.write(JSON.stringify({
+      type: 'rpc_turn_event',
+      event: 'start',
+      sessionFile: command.sessionFile,
+      sessionId: 'active',
+    }) + '\n');
+    process.stdout.write(JSON.stringify({ type: 'agent_end' }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 50,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.requestWorker(
+    worker,
+    connection,
+    { id: "prompt-1", type: "prompt", sessionFile },
+    true,
+  );
+
+  await sleep(100);
+
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+  });
+  assert.equal(pool.getStatusSnapshot().workers[0]?.turnActive, true);
+  assert.equal(pool.getStatusSnapshot().workers[0]?.isStreaming, false);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("detached worker survives eviction while response is pending", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker.mjs");
