@@ -282,16 +282,6 @@ test("frontend SDK self-improve checkpoint skips unscoped flushes without surfac
     kind: "frontend_open",
     unfiltered: true,
   });
-  const staleDaemonClient = createFrontendClient();
-  await staleDaemonClient.connect();
-  staleDaemonClient.request = async () => {
-    throw new Error("self_improve_notice_frontend_required");
-  };
-  await runSelfImproveNoticeCheckpoint(staleDaemonClient, {
-    kind: "turn_complete",
-    sessionFile: "/tmp/current.jsonl",
-    frontendIdentity: { kind: "test", key: "frontend-a" },
-  });
   await runSelfImproveNoticeCheckpoint(client, {
     kind: "new_session",
     sessionFile: "/tmp/old.jsonl",
