@@ -262,7 +262,7 @@ test("frontend SDK turn driver does not pull self-improve notices on generic con
   );
 });
 
-test("frontend SDK self-improve checkpoint requires a frontend unless explicitly unfiltered", async () => {
+test("frontend SDK self-improve checkpoint skips unscoped open but requires a frontend for scoped flush", async () => {
   const client = createFrontendClient();
   await client.connect();
 
@@ -271,13 +271,9 @@ test("frontend SDK self-improve checkpoint requires a frontend unless explicitly
     sessionFile: "/tmp/current.jsonl",
     frontendIdentity: { kind: "test", key: "frontend-a" },
   });
-  await assert.rejects(
-    () =>
-      runSelfImproveNoticeCheckpoint(client, {
-        kind: "frontend_open",
-      }),
-    /self_improve_notice_frontend_required/,
-  );
+  await runSelfImproveNoticeCheckpoint(client, {
+    kind: "frontend_open",
+  });
   await assert.rejects(
     () =>
       runSelfImproveNoticeCheckpoint(client, {

@@ -116,6 +116,7 @@ export async function runSelfImproveNoticeCheckpoint(
   const sessionFile = safeString(input.sessionFile || "").trim() || undefined;
   const frontendIdentity = normalizeFrontendIdentity(input.frontendIdentity);
   if (!input.unfiltered && !frontendIdentity) {
+    if (input.kind === "frontend_open") return;
     throw new Error("self_improve_notice_frontend_required");
   }
   await client.request({
