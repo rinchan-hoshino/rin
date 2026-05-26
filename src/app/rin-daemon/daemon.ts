@@ -28,7 +28,7 @@ import {
 } from "../../core/rin-web-search/service.js";
 import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/daemon-client.js";
 import {
-  listBuiltInRinExtensionStates,
+  listBuiltInRinExtensionStatesWithLifecycle,
   setBuiltInRinExtensionState,
 } from "../../core/rin-builtin-extension-controls.js";
 import { loadRinAgentRuntime } from "../../core/rin-lib/agent-runtime.js";
@@ -140,7 +140,10 @@ async function main() {
           return {
             success: true,
             data: {
-              extensions: listBuiltInRinExtensionStates(settingsManager),
+              extensions:
+                await listBuiltInRinExtensionStatesWithLifecycle(
+                  settingsManager,
+                ),
             },
           };
         }

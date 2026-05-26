@@ -332,6 +332,21 @@ test("stage B built-in extension controls update settings aliases", async () => 
   }
 });
 
+test("stage B built-in extension entrypoints stay self-contained", async () => {
+  const extensionsDir = path.join(rootDir, "extensions");
+  const entries = await fs.readdir(extensionsDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const entrypoint = path.join(extensionsDir, entry.name, "index.ts");
+    const source = await fs.readFile(entrypoint, "utf8").catch(() => "");
+    assert.equal(
+      /from\s+["']\.\.\/\.\.\/(?:src|dist)\//.test(source),
+      false,
+      `${entry.name} must not import Rin core implementation from src/ or dist/`,
+    );
+  }
+});
+
 test("stage B web search loads as an external built-in extension", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-web-search-ext-"),

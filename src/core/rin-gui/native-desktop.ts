@@ -186,6 +186,27 @@ async function handleNativeDesktopCommand(
     });
     return;
   }
+  if (command?.type === "builtin-extensions:list") {
+    sendNativeEvent(stdin, {
+      type: "builtin-extensions:list",
+      extensions: await client.listBuiltInExtensions(),
+    });
+    return;
+  }
+  if (command?.type === "builtin-extensions:set") {
+    const extensionId = String(command.extensionId || "");
+    if (!extensionId) throw new Error("Missing built-in extension id.");
+    const extension = await client.setBuiltInExtension(
+      extensionId,
+      Boolean(command.enabled),
+    );
+    sendNativeEvent(stdin, { type: "builtin-extensions:set", extension });
+    sendNativeEvent(stdin, {
+      type: "builtin-extensions:list",
+      extensions: await client.listBuiltInExtensions(),
+    });
+    return;
+  }
   if (command?.type === "autocomplete:list") {
     sendNativeEvent(stdin, {
       type: "autocomplete:list",
@@ -365,6 +386,7 @@ function buildAssistantDesktopHtml() {
       <label>Thinking<select id="setting-thinking"><option value="">Default</option><option>off</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
       <label>Language<input id="setting-language" placeholder="zh_CN" /></label>
       <div class="toolbar"><button id="save-settings" type="button">Save settings</button><button id="refresh-runtime" type="button">Refresh runtime</button></div>
+      <h2>Built-In Extensions</h2><div id="builtin-extensions" class="list"></div>
       <h2>Sessions</h2><div id="sessions" class="list"></div>
       <h2>Models</h2><div id="models" class="list"></div>
       <h2>Commands</h2><div id="commands" class="list"></div>
@@ -379,6 +401,7 @@ function buildAssistantDesktopHtml() {
     const sessionsEl = document.getElementById('sessions');
     const modelsEl = document.getElementById('models');
     const commandsEl = document.getElementById('commands');
+    const builtInExtensionsEl = document.getElementById('builtin-extensions');
     const settingProvider = document.getElementById('setting-provider');
     const settingModel = document.getElementById('setting-model');
     const settingThinking = document.getElementById('setting-thinking');
@@ -418,7 +441,19 @@ function buildAssistantDesktopHtml() {
       const values = Array.isArray(commands) ? commands : [];
       commandsEl.replaceChildren(...(values.length ? values.slice(0, 12).map((command) => item(command.name || command.id || '/command', command.description || command.category || '', () => { const name = command.name || command.id || ''; show('chat'); promptEl.value = name.startsWith('/') ? name + ' ' : '/' + name + ' '; promptEl.focus(); } )) : [item('No commands available', '', () => {})]));
     }
-    function refreshRuntime() { send({ type: 'settings:get' }); send({ type: 'sessions:list' }); send({ type: 'models:list' }); send({ type: 'commands:list' }); }
+    function renderBuiltInExtensions(extensions) {
+      const values = Array.isArray(extensions) ? extensions : [];
+      builtInExtensionsEl.replaceChildren(...(values.length ? values.map((extension) => {
+        const enabled = Boolean(extension.enabled);
+        const lifecycle = extension.lifecycle || {};
+        const subtitle = [extension.description, enabled ? 'Enabled' : 'Disabled', lifecycle.status, lifecycle.detail].filter(Boolean).join(' · ');
+        return item((enabled ? 'Disable ' : 'Enable ') + (extension.label || extension.id), subtitle, () => {
+          builtInExtensionsEl.replaceChildren(item('Working…', extension.label || extension.id, () => {}));
+          send({ type: 'builtin-extensions:set', extensionId: extension.id, enabled: !enabled });
+        });
+      }) : [item('No built-in extensions available', '', () => {})]));
+    }
+    function refreshRuntime() { send({ type: 'settings:get' }); send({ type: 'builtin-extensions:list' }); send({ type: 'sessions:list' }); send({ type: 'models:list' }); send({ type: 'commands:list' }); }
     window.rinDesktop.onEvent((payload) => {
       if (payload.type === 'status') statusEl.textContent = payload.text || 'Status';
       else if (payload.type === 'surface:ready') { setSettings(payload.settings); refreshRuntime(); }
@@ -427,6 +462,8 @@ function buildAssistantDesktopHtml() {
       else if (payload.type === 'session:resumed') { show('chat'); appendMessage('system', 'Resumed session: ' + payload.sessionId); }
       else if (payload.type === 'models:list') renderModels(payload.models);
       else if (payload.type === 'commands:list') renderCommands(payload.commands);
+      else if (payload.type === 'builtin-extensions:list') renderBuiltInExtensions(payload.extensions);
+      else if (payload.type === 'builtin-extensions:set') appendMessage('system', 'Built-In Extensions updated.');
       else { show('chat'); appendMessage(payload.role || payload.type, payload.text || JSON.stringify(payload)); }
     });
     document.getElementById('pet').addEventListener('click', () => show(body.className === 'chat' ? '' : 'chat'));
