@@ -63,7 +63,7 @@ export type InstallTargetSelection =
   | VmInstallTarget;
 
 const INSTALL_COMMAND =
-  "curl -fsSL https://raw.githubusercontent.com/rinchanai/rin/bootstrap/install.sh | sh";
+  "curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh";
 
 export function defaultSshControlPath(targetName: string) {
   return path.join(

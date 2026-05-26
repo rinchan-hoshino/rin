@@ -8,7 +8,7 @@ if [ -f "$LOCAL_BOOTSTRAP_SCRIPT" ]; then
   exec sh "$LOCAL_BOOTSTRAP_SCRIPT" "$BOOTSTRAP_MODE" "$@"
 fi
 
-REPO_URL=${RIN_INSTALL_REPO_URL:-https://github.com/rinchanai/rin}
+REPO_URL=${RIN_INSTALL_REPO_URL:-https://github.com/rinchan-hoshino/rin}
 DEFAULT_BOOTSTRAP_BRANCH=bootstrap
 BOOTSTRAP_BRANCH=${RIN_BOOTSTRAP_BRANCH:-$DEFAULT_BOOTSTRAP_BRANCH}
 RAW_BASE=$(printf '%s' "$REPO_URL" | sed -e 's#^https://github.com/#https://raw.githubusercontent.com/#' -e 's#\.git$##')

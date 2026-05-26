@@ -18,7 +18,7 @@ if ($localBootstrapScript -and (Test-Path -LiteralPath $localBootstrapScript)) {
   exit $LASTEXITCODE
 }
 
-$repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchanai/rin" }
+$repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchan-hoshino/rin" }
 $defaultBootstrapBranch = "bootstrap"
 $bootstrapBranch = if ($env:RIN_BOOTSTRAP_BRANCH) { $env:RIN_BOOTSTRAP_BRANCH } else { $defaultBootstrapBranch }
 $rawBase = ($repoUrl -replace "^https://github.com/", "https://raw.githubusercontent.com/") -replace "\.git$", ""

@@ -114,7 +114,7 @@ if ($mode -eq "update") {
 }
 $minimumNodeVersion = [version]"22.19.0"
 
-$repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchanai/rin" }
+$repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchan-hoshino/rin" }
 $bootstrapBranch = if ($env:RIN_BOOTSTRAP_BRANCH) { $env:RIN_BOOTSTRAP_BRANCH } else { "bootstrap" }
 $cacheBase = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } elseif ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
 $tempBase = if ($env:TEMP) { $env:TEMP } else { Join-Path $cacheBase "rin-install" }
@@ -182,7 +182,7 @@ function Get-Property($Object, [string]$Name) {
 
 function Resolve-Release {
   $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-  $packageName = if ($manifest.packageName) { [string]$manifest.packageName } else { "@rinchanai20260422/rin" }
+  $packageName = if ($manifest.packageName) { [string]$manifest.packageName } else { "@rinchan-hoshino/rin" }
   $releaseRepoUrl = if ($manifest.repoUrl) { [string]$manifest.repoUrl } else { $repoUrl }
   $releaseRepoUrl = $releaseRepoUrl -replace "\.git$", ""
   $fileBase = ($packageName -split "/")[-1]

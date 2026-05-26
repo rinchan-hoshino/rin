@@ -370,7 +370,7 @@ export async function checkForNewRinVersion(
 }
 
 export function getRinChangelogUrl() {
-  return "https://github.com/rinchanai/rin/blob/main/docs/release/CHANGELOG.md";
+  return "https://github.com/rinchan-hoshino/rin/blob/main/docs/release/CHANGELOG.md";
 }
 
 export function readRinChangelogEntries() {

@@ -171,7 +171,7 @@ test("web search maps freshness to SearXNG sidecar query parameters", async () =
   }) as typeof fetch;
   try {
     const result = await query.searchWeb("http://127.0.0.1:8080", {
-      q: "rinchanai",
+      q: "rinchan-hoshino",
       freshness: "week",
     });
     assert.equal(result.ok, true);
@@ -219,7 +219,7 @@ test("web search falls back across SearXNG engines", async () => {
   }) as typeof fetch;
   try {
     const result = await query.searchWeb("http://127.0.0.1:8080", {
-      q: "rinchanai",
+      q: "rinchan-hoshino",
       limit: 2,
     });
     assert.equal(result.ok, true);
@@ -368,7 +368,7 @@ test("web search service reuses Rin-managed sidecar state", async () => {
     },
     async (agentDir) => {
       const result = await service.searchWeb(
-        { q: "rinchanai", limit: 2 },
+        { q: "rinchan-hoshino", limit: 2 },
         { stateRoot: agentDir },
       );
       assert.equal(result.ok, true);
@@ -395,7 +395,7 @@ test("web search tool output exposes provider attempts to the agent on sidecar f
       const result = await registeredTool.execute(
         "call-demo",
         {
-          q: "rinchanai",
+          q: "rinchan-hoshino",
           limit: 1,
         },
         undefined,
@@ -429,7 +429,7 @@ test("web search tool exposes SearXNG parameter errors for agent retry", async (
       const result = await registeredTool.execute(
         "call-demo",
         {
-          q: "rinchanai",
+          q: "rinchan-hoshino",
           limit: 1,
           language: "bad_language",
         },
