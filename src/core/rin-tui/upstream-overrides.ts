@@ -23,6 +23,11 @@ import {
 } from "@earendil-works/pi-tui";
 
 import {
+  listBuiltInRinExtensionStates,
+  setBuiltInRinExtensionState,
+} from "../rin-builtin-extension-controls.js";
+
+import {
   onThemeChange,
   theme,
 } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
@@ -879,6 +884,53 @@ export async function initializePiInteractiveModeWithoutManagedToolEnsure(
   await instance.updateAvailableProviderCount();
 }
 
+function enhanceBuiltInExtensionSettings(instance: any) {
+  const selector = instance?.editorContainer?.children?.find(
+    (child: any) => typeof child?.getSettingsList === "function",
+  );
+  const settingsList = selector?.getSettingsList?.();
+  if (!settingsList || settingsList.__rinBuiltInExtensionsEnhanced) return;
+  settingsList.__rinBuiltInExtensionsEnhanced = true;
+  const states = listBuiltInRinExtensionStates(instance.settingsManager);
+  for (const state of states) {
+    settingsList.items.push({
+      id: `rin-built-in-extension:${state.id}`,
+      label: `Built-in: ${state.label}`,
+      description: `${state.description} Reload or open a new session after changing this setting.`,
+      currentValue: state.enabled ? "true" : "false",
+      values: ["true", "false"],
+    });
+  }
+  settingsList.filteredItems = settingsList.items;
+  const originalOnChange = settingsList.onChange;
+  settingsList.onChange = (id: string, newValue: string) => {
+    if (String(id).startsWith("rin-built-in-extension:")) {
+      const extensionId = String(id).slice("rin-built-in-extension:".length);
+      void setBuiltInRinExtensionState(
+        instance.settingsManager,
+        extensionId,
+        newValue === "true",
+      )
+        .then(async () => {
+          if (typeof instance.session?.reload === "function") {
+            await instance.session.reload();
+            instance.setupAutocompleteProvider?.();
+            instance.showStatus?.("Built-in extension settings reloaded.");
+            return;
+          }
+          await instance.session?.call?.("reload").catch?.(() => {});
+        })
+        .catch((error) => {
+          instance.showError?.(
+            error instanceof Error ? error.message : String(error),
+          );
+        });
+      return;
+    }
+    originalOnChange.call(settingsList, id, newValue);
+  };
+}
+
 function createSessionSelectorLoaders(instance: any) {
   if (!isRpcTransportControlled(instance)) {
     const loadSessions = () =>
@@ -1102,6 +1154,16 @@ export async function applyRinTuiOverrides() {
           this.ui?.requestRender?.();
         }
         return result;
+      };
+  }
+
+  const originalShowSettingsSelector =
+    interactiveModeProto?.showSettingsSelector;
+  if (typeof originalShowSettingsSelector === "function") {
+    interactiveModeProto.showSettingsSelector =
+      function showSettingsSelectorWithBuiltInExtensions() {
+        originalShowSettingsSelector.call(this);
+        enhanceBuiltInExtensionSettings(this);
       };
   }
 

@@ -10,6 +10,7 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
 import { createRinCapabilityDefinitions } from "../rin-lib/runtime.js";
+import webSearchModule from "../rin-web-search/index.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
@@ -1008,17 +1009,20 @@ export class RpcInteractiveSession {
 
   private createCoreToolDefinitions() {
     const profile = getRuntimeProfile();
-    const definitions = createRinCapabilityDefinitions({
-      cwd: profile.cwd,
-      agentDir: profile.agentDir,
-      getThinkingLevel: () => this.thinkingLevel,
-      sendMessage: (message, messageOptions) => {
-        this.sendCustomMessage?.(message, messageOptions).catch?.(() => {});
-      },
-      emitEvent: (event) => {
-        this.emitEvent(event);
-      },
-    });
+    const definitions = [
+      ...createRinCapabilityDefinitions({
+        cwd: profile.cwd,
+        agentDir: profile.agentDir,
+        getThinkingLevel: () => this.thinkingLevel,
+        sendMessage: (message, messageOptions) => {
+          this.sendCustomMessage?.(message, messageOptions).catch?.(() => {});
+        },
+        emitEvent: (event) => {
+          this.emitEvent(event);
+        },
+      }),
+      webSearchModule(),
+    ];
     const tools = new Map<string, any>();
     for (const definition of definitions) {
       for (const tool of definition.tools || []) {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import {
   ensureRuntimeImporter,
   getRinExtensionRuntimeRoot,
@@ -452,6 +453,7 @@ async function listPiResolvedBackgroundExtensionConfigs(options: {
   const agentRuntimeModule = await loadRinAgentRuntime();
   const { DefaultPackageManager, SettingsManager } = agentRuntimeModule as any;
   const settingsManager = SettingsManager.create(options.cwd, options.agentDir);
+  applyBundledRinExtensionAliases(settingsManager);
   const packageManager = new DefaultPackageManager({
     cwd: options.cwd,
     agentDir: options.agentDir,

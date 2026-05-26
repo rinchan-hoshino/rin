@@ -77,6 +77,9 @@ async function applyInstalledRuntime(
   const setDefaultTarget = options.setDefaultTarget !== false;
   const chatConfig = options.chatConfig || null;
   const authData = options.authData || {};
+  const builtInExtensions = Array.isArray(options.builtInExtensions)
+    ? options.builtInExtensions
+    : undefined;
   const sourceRoot =
     String(options.sourceRoot || "").trim() || repoRootFromHere();
   const persistInstallerState = Boolean(options.persistInstallerState);
@@ -133,7 +136,10 @@ async function applyInstalledRuntime(
     targetHome: targetHomeForUser(targetUser),
     installDir,
   });
-  if (options.prepareWebSearchRuntime !== false) {
+  if (
+    options.prepareWebSearchRuntime !== false &&
+    builtInExtensions?.includes("rin:web-search")
+  ) {
     await prepareSearxngRuntime(installDir).catch(() => undefined);
   }
   const shouldRestartBeforePersist = !options.stopRuntimeBeforePublish;
@@ -160,6 +166,7 @@ async function applyInstalledRuntime(
           setDefaultTarget,
           chatConfig,
           authData,
+          builtInExtensions,
           release,
           currentReleaseName,
           currentReleaseRoot: publishedRuntime.releaseRoot,

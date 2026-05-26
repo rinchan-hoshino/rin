@@ -38,6 +38,11 @@ const bundledExtensions = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-bundled-extensions.js"))
     .href
 );
+const builtInExtensionControls = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-builtin-extension-controls.js"),
+  ).href
+);
 const todoModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href
 );
@@ -285,6 +290,63 @@ test("core todo remains enabled when optional extensions are disabled", async ()
       process.chdir(originalCwd);
       await fs.rm(agentDir, { recursive: true, force: true });
     }
+  }
+});
+
+test("stage B built-in extension controls update settings aliases", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
+  try {
+    await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: ["rin:browser-use"],
+    });
+    const settingsManager = SettingsManager.create(agentDir, agentDir);
+
+    assert.deepEqual(
+      builtInExtensionControls
+        .listBuiltInRinExtensionStates(settingsManager)
+        .map((entry: any) => [entry.id, entry.enabled]),
+      [
+        ["rin:web-search", false],
+        ["rin:browser-use", true],
+        ["rin:computer-use", false],
+        ["rin:heartbeat-notifier", false],
+        ["rin:github-issue-bridge", false],
+      ],
+    );
+
+    await builtInExtensionControls.enableBuiltInRinExtension(
+      settingsManager,
+      "rin:computer-use",
+    );
+    await builtInExtensionControls.disableBuiltInRinExtension(
+      settingsManager,
+      "rin:browser-use",
+    );
+    await settingsManager.flush();
+
+    const saved = JSON.parse(
+      await fs.readFile(path.join(agentDir, "settings.json"), "utf8"),
+    );
+    assert.deepEqual(saved.extensions, ["rin:computer-use"]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("stage B web search loads as an external built-in extension", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-web-search-ext-"),
+  );
+  try {
+    await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: ["rin:web-search"],
+    });
+    const loader = await createExtensionLoader(agentDir);
+    const toolNames = extensionToolNames(loader);
+
+    assert.equal(toolNames.includes("web_search"), true);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 

@@ -26,7 +26,7 @@ See `docs/memory-layering.md` and `docs/capabilities.md` for agent-facing behavi
 
 ### Builtin capabilities
 
-Rin registers additional builtin capabilities such as web search with URL fetching, memory, scheduled-task pause/resume control, and chat bridge configuration directly in core.
+Rin registers additional capabilities such as memory, scheduled-task pause/resume control, chat bridge configuration, and bundled optional extensions such as web search with URL fetching.
 Do not reason from upstream pi defaults alone.
 See `docs/builtin-extensions.md` and `docs/capabilities.md`.
 

@@ -153,6 +153,12 @@ test("std configured session keeps daemon-independent Rin tools usable without d
     `process-${process.pid}`,
     "state.json",
   );
+  await fs.mkdir(agentDir, { recursive: true });
+  await fs.writeFile(
+    path.join(agentDir, "settings.json"),
+    `${JSON.stringify({ extensions: ["rin:web-search"] })}\n`,
+    "utf8",
+  );
   await fs.mkdir(path.dirname(sidecarStatePath), { recursive: true });
   await fs.writeFile(
     sidecarStatePath,
@@ -180,8 +186,12 @@ test("std configured session keeps daemon-independent Rin tools usable without d
       assert.ok(session.getToolDefinition(name), `${name} should be available`);
     }
     assert.ok(
-      session._customTools?.some((tool: any) => tool?.name === "web_search"),
-      "Rin tools should enter the Pi session through SDK customTools",
+      runtime.runtime?.session?.resourceLoader
+        ?.getExtensions?.()
+        ?.extensions?.some((extension: any) =>
+          extension.tools?.has?.("web_search"),
+        ),
+      "web_search should be provided by the built-in extension loader",
     );
     const memoryResult = await session
       .getToolDefinition("search_memory")

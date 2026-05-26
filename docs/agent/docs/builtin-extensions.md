@@ -6,16 +6,14 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
 
 - Core Rin capabilities are available through native product code when their tools are present in the live tool list.
 - The core todo capability is always enabled and registers the `todo` tool plus `/todos` command.
-- Optional browser/computer tools are packaged with Rin but remain off until `settings.json -> extensions` enables their `rin:` aliases.
-- Optional background services such as heartbeat notification remain off until `settings.json -> rinExtensions.backgroundServices` enables their `rin:` aliases.
+- Built-in optional extensions are packaged with Rin and are controlled through `settings.json -> extensions` with their `rin:` aliases.
+- Fresh installs enable `rin:web-search` by default; existing installs keep their current settings until changed.
+- Optional background services such as heartbeat notification remain off until `settings.json -> extensions` enables their `rin:` aliases.
 - Background extensions run in Rin's background runtime and are not Pi session tools.
 - The current tool list and system prompt remain authoritative for a specific turn.
 
 ## Default extra capabilities
 
-- `web-search`
-  - provides live web search
-  - gets web pages directly when `q` is an HTTP(S) URL
 - `memory`
   - provides `search_memory`, transcript archiving, and the searchable session-history index
 - `self-improve`
@@ -54,16 +52,21 @@ Rin's todo support is native core behavior, not a Pi extension.
 
 ## Bundled optional Pi extensions
 
-Rin ships optional browser/computer control as normal Pi extension packages under the installed app. They are "built in" only in the packaging sense: the code is included with the Rin installation, but the tools stay off until enabled.
+Rin ships optional web search, browser/computer control, heartbeat notification, and GitHub issue automation as normal Pi extension packages under the installed app. They are "built in" in the packaging sense: the code is included with the Rin installation, while settings decide which entries are active.
 
 Installed settings can use Rin aliases instead of installation-specific paths:
 
 ```json
 {
-  "extensions": ["rin:browser-use", "rin:computer-use"]
+  "extensions": ["rin:web-search", "rin:browser-use", "rin:computer-use"]
 }
 ```
 
+- `rin:web-search`
+  - expands to the bundled `extensions/rin-web-search` Pi package
+  - registers `web_search`
+  - gets pages directly when `q` is an HTTP(S) URL
+  - uses Rin-managed SearXNG for search queries; fresh install enables this alias and prepares the SearXNG runtime, while manual enablement prepares it best-effort
 - `rin:browser-use`
   - expands to the bundled `extensions/rin-browser-use` Pi package
   - registers `browser_use`
@@ -76,6 +79,16 @@ Installed settings can use Rin aliases instead of installation-specific paths:
   - reads optional configuration from `~/.rin/extensions/rin-computer-use.json`
   - otherwise works out of the box with platform backends: PowerShell/.NET on Windows, `screencapture` + `osascript`/`cliclick` on macOS, and screenshot tools + `xdotool` on Linux
   - may install `cliclick` through Homebrew only when `allowInstall` is `true` in the extension config file
+- `rin:heartbeat-notifier`
+  - expands to the bundled `extensions/rin-heartbeat-notifier` Pi package
+  - runs configurable record-only chat heartbeat notification as a background extension
+  - reads standard settings from top-level `settings.json -> heartbeatNotifier`
+  - requires explicit chat and prompt configuration; it is not enabled by default
+- `rin:github-issue-bridge`
+  - expands to the bundled `extensions/rin-github-issue-bridge` Pi package
+  - registers a GitHub chat adapter and background polling service when configured
+  - reads standard settings from top-level `settings.json -> githubIssueBridge`
+  - requires explicit repositories and a GitHub token; it is not enabled by default
 
 Optional extension configuration uses Rin's extension-file convention. Rin does not create these files by default; create them only to override the open-box behavior.
 
@@ -106,7 +119,7 @@ Use Pi resource filters with the alias to disable entries from a broader extensi
 }
 ```
 
-If `extensions` is missing or `[]`, `todo` stays on by default and both optional browser/computer tools are off.
+If `extensions` is missing or `[]`, `todo` stays on by default and optional extension tools are off for that runtime. Fresh installs write `rin:web-search` unless the installer selection disables it.
 
 ### Optional heartbeat notification service
 

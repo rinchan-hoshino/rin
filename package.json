@@ -69,6 +69,7 @@
     "jsdom": "^29.1.1",
     "marked": "^15.0.12",
     "minimatch": "^10.2.4",
+    "octokit": "^4.1.4",
     "pretty-ms": "^9.3.0",
     "proper-lockfile": "^4.1.2",
     "qq-guild-bot": "^2.9.5",

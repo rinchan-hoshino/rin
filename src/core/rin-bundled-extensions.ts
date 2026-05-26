@@ -3,11 +3,71 @@ import { fileURLToPath } from "node:url";
 
 import { safeString } from "./text-utils.js";
 
-const BUNDLED_RIN_EXTENSION_DIRS: Record<string, string> = {
-  "rin:browser-use": "rin-browser-use",
-  "rin:computer-use": "rin-computer-use",
-  "rin:heartbeat-notifier": "rin-heartbeat-notifier",
+export type BuiltInRinExtensionId =
+  | "rin:web-search"
+  | "rin:browser-use"
+  | "rin:computer-use"
+  | "rin:heartbeat-notifier"
+  | "rin:github-issue-bridge";
+
+export type BuiltInRinExtensionDefinition = {
+  id: BuiltInRinExtensionId;
+  label: string;
+  description: string;
+  directory: string;
+  defaultEnabled?: boolean;
+  installOnEnable?: boolean;
+  onEnable?: (context: { agentDir?: string }) => Promise<void> | void;
 };
+
+export const BUILT_IN_RIN_EXTENSIONS: BuiltInRinExtensionDefinition[] = [
+  {
+    id: "rin:web-search",
+    label: "Web search",
+    description:
+      "Adds the web_search tool and prepares Rin-managed SearXNG when enabled.",
+    directory: "rin-web-search",
+    defaultEnabled: true,
+    installOnEnable: true,
+    async onEnable(context) {
+      const agentDir = String(context.agentDir || "").trim();
+      if (!agentDir) return;
+      const { prepareSearxngRuntime } =
+        await import("./rin-web-search/service.js");
+      await prepareSearxngRuntime(agentDir).catch(() => undefined);
+    },
+  },
+  {
+    id: "rin:browser-use",
+    label: "Browser use",
+    description: "Adds the browser_use tool for Rin-owned browser automation.",
+    directory: "rin-browser-use",
+  },
+  {
+    id: "rin:computer-use",
+    label: "Computer use",
+    description: "Adds the computer_use tool for Rin-owned desktop automation.",
+    directory: "rin-computer-use",
+  },
+  {
+    id: "rin:heartbeat-notifier",
+    label: "Heartbeat notifier",
+    description:
+      "Runs configurable record-only chat heartbeat notification as a background extension.",
+    directory: "rin-heartbeat-notifier",
+  },
+  {
+    id: "rin:github-issue-bridge",
+    label: "GitHub issue bridge",
+    description:
+      "Runs configurable GitHub issue/PR chat automation as a background extension.",
+    directory: "rin-github-issue-bridge",
+  },
+];
+
+const BUNDLED_RIN_EXTENSION_DIRS: Record<string, string> = Object.fromEntries(
+  BUILT_IN_RIN_EXTENSIONS.map((entry) => [entry.id, entry.directory]),
+);
 
 function getRepoRoot() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -33,6 +93,52 @@ export function expandBundledRinExtensionEntry(entry: string) {
 export function expandBundledRinExtensionEntries(entries: unknown) {
   if (!Array.isArray(entries)) return [];
   return entries.map((entry) => expandBundledRinExtensionEntry(String(entry)));
+}
+
+function stripEntryMarker(entry: string) {
+  const text = safeString(entry).trim();
+  const marker = ["!", "+", "-"].includes(text[0]) ? text[0] : "";
+  return { marker, value: marker ? text.slice(1) : text };
+}
+
+function builtInEntryMatches(entry: string, id: BuiltInRinExtensionId) {
+  const { value } = stripEntryMarker(entry);
+  if (value === id) return true;
+  const extensionPath = resolveBundledRinExtensionPath(id);
+  return (
+    value === extensionPath ||
+    value === path.join(extensionPath, "index.ts") ||
+    value === path.join(extensionPath, "index.js")
+  );
+}
+
+export function isBuiltInRinExtensionEnabled(
+  entries: unknown,
+  id: BuiltInRinExtensionId,
+) {
+  if (!Array.isArray(entries)) return false;
+  let enabled = false;
+  for (const rawEntry of entries) {
+    const text = safeString(rawEntry).trim();
+    if (!text || !builtInEntryMatches(text, id)) continue;
+    const { marker } = stripEntryMarker(text);
+    enabled = marker !== "!" && marker !== "-";
+  }
+  return enabled;
+}
+
+export function setBuiltInRinExtensionEnabled(
+  entries: unknown,
+  id: BuiltInRinExtensionId,
+  enabled: boolean,
+) {
+  const current = Array.isArray(entries)
+    ? entries.map((entry) => safeString(entry).trim()).filter(Boolean)
+    : [];
+  const withoutTarget = current.filter(
+    (entry) => !builtInEntryMatches(entry, id),
+  );
+  return enabled ? [...withoutTarget, id] : withoutTarget;
 }
 
 function expandSettingsExtensions(settings: any) {

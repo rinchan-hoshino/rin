@@ -422,7 +422,8 @@ test("core update restarts runtime only after manifest persistence", () => {
 
   assert.match(source, /if \(options\.stopRuntimeBeforePublish\)/);
   assert.match(source, /stopInstalledWebSearchSidecars\(installDir\)/);
-  assert.match(source, /if \(options\.prepareWebSearchRuntime !== false\)/);
+  assert.match(source, /options\.prepareWebSearchRuntime !== false/);
+  assert.match(source, /builtInExtensions\?\.includes\("rin:web-search"\)/);
   assert.match(
     source,
     /const shouldRestartBeforePersist = !options\.stopRuntimeBeforePublish/,
@@ -495,6 +496,28 @@ test("update mode skips language prompt and reuses installer note renderer", () 
     /const promptConfirm = deps\.confirm \|\| confirm/,
   );
   assert.doesNotMatch(updaterSource, /process\.env/);
+});
+
+test("promptBuiltInExtensionSetup defaults web search on for fresh installs", async () => {
+  let promptOptions;
+  const selected = await interactive.promptBuiltInExtensionSetup({
+    ensureNotCancelled: (value) => value,
+    select: async () => undefined,
+    text: async () => undefined,
+    confirm: async () => true,
+    multiselect: async (options) => {
+      promptOptions = options;
+      return options.initialValues;
+    },
+  });
+
+  assert.deepEqual(selected, ["rin:web-search"]);
+  assert.deepEqual(promptOptions.initialValues, ["rin:web-search"]);
+  assert.ok(
+    promptOptions.options.some(
+      (entry) => entry.value === "rin:github-issue-bridge",
+    ),
+  );
 });
 
 test("promptProviderSetup reuses complete existing provider config", async () => {

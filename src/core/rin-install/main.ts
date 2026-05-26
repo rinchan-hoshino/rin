@@ -7,6 +7,7 @@ import {
   confirm,
   intro,
   isCancel,
+  multiselect,
   outro,
   select,
   text,
@@ -26,6 +27,7 @@ import {
   renderInstallerNote,
   wrapInstallerNoteText,
   describeInstallDirState,
+  promptBuiltInExtensionSetup,
   promptChatSetup,
   promptDefaultTargetUser,
   promptProviderSetup,
@@ -242,6 +244,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     ensureNotCancelled,
     select,
     text,
+    multiselect,
     confirm: localizedConfirm,
   };
   const target = await promptInstallTarget(
@@ -353,6 +356,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     promptApi,
     i18n,
   );
+  const builtInExtensions = await promptBuiltInExtensionSetup(promptApi, i18n);
 
   note(
     wrapInstallerNoteText(
@@ -430,6 +434,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           chatDescription,
           chatDetail,
           chatConfig,
+          builtInExtensions,
           authData: authResult.authData || {},
           release: releaseInfoFromFile(cli.releaseFile),
         },

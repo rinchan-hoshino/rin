@@ -20,6 +20,7 @@ export type FinalizeInstallOptions = {
   chatDetail?: string;
   chatConfig?: any;
   authData?: any;
+  builtInExtensions?: string[];
   sourceRoot?: string;
   release?: InstalledReleaseInfo;
   daemonReadyTimeoutMs?: number;

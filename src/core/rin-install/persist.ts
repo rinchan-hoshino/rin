@@ -4,6 +4,10 @@ import path from "node:path";
 
 import { normalizeStoredChatSettings } from "../chat/settings.js";
 import {
+  BUILT_IN_RIN_EXTENSIONS,
+  setBuiltInRinExtensionEnabled,
+} from "../rin-bundled-extensions.js";
+import {
   chatDataPath,
   LEGACY_DATA_LAYOUT_MOVES,
   schedulerDataPath,
@@ -624,6 +628,7 @@ function applyInstalledDefaults(
     modelId?: string;
     thinkingLevel?: string;
     language?: string;
+    builtInExtensions?: string[];
   },
 ) {
   if (options.provider) target.defaultProvider = options.provider;
@@ -633,6 +638,23 @@ function applyInstalledDefaults(
   }
   const language = normalizeConfiguredLanguage(options.language);
   if (language) target.language = language;
+  if (Array.isArray(options.builtInExtensions)) {
+    const selected = new Set(
+      options.builtInExtensions.map((entry) => String(entry)),
+    );
+    let extensions = Array.isArray(target.extensions)
+      ? target.extensions.map((entry: unknown) => String(entry))
+      : [];
+    for (const { id } of BUILT_IN_RIN_EXTENSIONS) {
+      extensions = setBuiltInRinExtensionEnabled(
+        extensions,
+        id,
+        selected.has(id),
+      );
+    }
+    if (extensions.length > 0) target.extensions = extensions;
+    else delete target.extensions;
+  }
 }
 
 function installerWriteOptions(
@@ -972,6 +994,7 @@ export async function persistInstallerOutputs(
     thinkingLevel: string;
     language?: string;
     setDefaultTarget?: boolean;
+    builtInExtensions?: string[];
     chatConfig: any;
     authData: any;
     release?: InstalledReleaseInfo;

@@ -27,6 +27,12 @@ import {
   stopSearxngSidecar,
 } from "../../core/rin-web-search/service.js";
 import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/daemon-client.js";
+import {
+  listBuiltInRinExtensionStates,
+  setBuiltInRinExtensionState,
+} from "../../core/rin-builtin-extension-controls.js";
+import { loadRinAgentRuntime } from "../../core/rin-lib/agent-runtime.js";
+import { applyRinSettingsDefaults } from "../../core/rin-lib/runtime.js";
 
 async function main() {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -59,6 +65,16 @@ async function main() {
       instanceId: webSearchInstanceId,
       logger: console,
     }).catch(() => {});
+  };
+
+  const getSettingsManager = async () => {
+    const agentRuntimeModule: any = await loadRinAgentRuntime();
+    const settingsManager = agentRuntimeModule.SettingsManager.create(
+      runtime.cwd,
+      runtime.agentDir,
+    );
+    applyRinSettingsDefaults(settingsManager);
+    return settingsManager;
   };
 
   try {
@@ -119,6 +135,28 @@ async function main() {
       }),
       handleLocalCommand: async (command) => {
         const type = String(command?.type || "").trim();
+        if (type === "list_builtin_extensions") {
+          const settingsManager = await getSettingsManager();
+          return {
+            success: true,
+            data: {
+              extensions: listBuiltInRinExtensionStates(settingsManager),
+            },
+          };
+        }
+        if (type === "set_builtin_extension") {
+          const settingsManager = await getSettingsManager();
+          return {
+            success: true,
+            data: {
+              extension: await setBuiltInRinExtensionState(
+                settingsManager,
+                String(command?.extensionId || command?.id || ""),
+                Boolean(command?.enabled),
+              ),
+            },
+          };
+        }
         if (type === "chat_send") {
           return {
             success: true,
