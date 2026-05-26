@@ -79,7 +79,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
 
   assert.ok(
     baseSystemPrompt.startsWith(
-      "As the assistant, you must fulfill the user's requests.\nYou are an LLM running inside an agent loop: one bounded turn from input or scheduled trigger to a single final response; after that, work stops until another loop starts.",
+      "As the assistant, you must fulfill the user's requests.\nYou are running in the Rin runtime environment.",
     ),
   );
   assert.ok(
