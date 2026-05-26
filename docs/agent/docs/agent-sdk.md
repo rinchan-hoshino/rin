@@ -50,6 +50,7 @@ await rin.tasks.pause("cron_example");
 await rin.tasks.resume("cron_example");
 await rin.tasks.rescheduleOnce("cron_example", "2026-05-08T15:00:00+08:00");
 await rin.tasks.run("cron_example");
+await rin.tasks.wake("cron_example");
 await rin.tasks.control("pause", "cron_example");
 await rin.tasks.complete("cron_example", "finished");
 await rin.tasks.delete("cron_example");
@@ -61,6 +62,7 @@ Helper semantics:
 - `get(taskId)` inspects one visible task.
 - `upsert(task, defaults?)` creates or updates a task; matching `id` merges with the existing record. Use `condition: null`, `termination: null`, or `frontend: null` to remove those optional fields.
 - `run(taskId)` starts the existing task through the scheduler path and still evaluates `condition`; it does not clone the task or change its definition.
+- `wake(taskId)` only moves the task's next run time to now; the scheduler tick then evaluates its condition normally. Use this for event notifications that should behave like a timer nudge rather than a forced run.
 - `pause(taskId)` disables future runs, records `pausedAt`, clears `nextRunAt`, and asks chat runtime to terminate the task turn when applicable.
 - `resume(taskId)` enables the task, clears `pausedAt`, and recomputes `nextRunAt`.
 - `rescheduleOnce(taskId, runAt)` is only for one-time tasks; it sets `trigger.runAt`, sets `nextRunAt`, clears completed/paused state, and enables the task.

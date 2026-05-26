@@ -91,6 +91,7 @@ test("agent SDK maps task helpers to daemon task commands", async () => {
       const paused = await rin.tasks.pause("cron_demo");
       const resumed = await rin.tasks.resume("cron_demo");
       await rin.tasks.run("cron_demo");
+      await rin.tasks.wake("cron_demo");
       await rin.tasks.rescheduleOnce("cron_demo", "2099-01-02T00:00:00.000Z");
       await rin.tasks.get("cron_demo");
       await rin.tasks.list();
@@ -104,6 +105,7 @@ test("agent SDK maps task helpers to daemon task commands", async () => {
           "cron_pause_task",
           "cron_resume_task",
           "cron_run_task",
+          "cron_wake_task",
           "cron_reschedule_once_task",
           "cron_get_task",
           "cron_list_tasks",

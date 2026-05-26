@@ -155,6 +155,11 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
           { type: "cron_run_task", taskId: trimTaskId(taskId) },
           override,
         ),
+      wake: async (taskId: string, override?: RinAgentSdkOptions) =>
+        await request<{ task?: unknown }>(
+          { type: "cron_wake_task", taskId: trimTaskId(taskId) },
+          override,
+        ),
       control: controlTask,
     },
     chat: {

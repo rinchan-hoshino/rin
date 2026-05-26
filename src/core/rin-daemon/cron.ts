@@ -619,6 +619,18 @@ export class CronScheduler {
     return this.publicTask(updatedTask);
   }
 
+  wakeTaskNow(taskId: string) {
+    const task = this.tasks.get(taskId);
+    if (!task) throw new Error(`cron_task_not_found:${taskId}`);
+    if (task.completedAt) throw new Error(`cron_task_completed:${taskId}`);
+    task.enabled = true;
+    delete task.pausedAt;
+    task.nextRunAt = nowIso();
+    task.updatedAt = nowIso();
+    this.save();
+    return this.publicTask(task);
+  }
+
   runTaskNow(taskId: string) {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);

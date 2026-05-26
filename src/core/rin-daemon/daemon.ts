@@ -318,6 +318,11 @@ export async function startDaemon(
         task: cronScheduler.runTaskNow(taskIdFromCommand(command)),
       },
     }),
+    cron_wake_task: (command) => ({
+      data: {
+        task: cronScheduler.wakeTaskNow(taskIdFromCommand(command)),
+      },
+    }),
   };
 
   const selfHandleCommand = async (

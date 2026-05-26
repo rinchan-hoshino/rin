@@ -304,7 +304,7 @@ test("chat main wakes configured tasks for record-only chat messages", async () 
       await new Promise((resolve) => setTimeout(resolve, 300));
       server.close();
 
-      if (seen.length !== 0 || wakeCommands.length !== 1 || wakeCommands[0]?.type !== "cron_run_task" || wakeCommands[0]?.taskId !== "cron_record_only_wake") {
+      if (seen.length !== 0 || wakeCommands.length !== 1 || wakeCommands[0]?.type !== "cron_wake_task" || wakeCommands[0]?.taskId !== "cron_record_only_wake") {
         throw new Error(JSON.stringify({ seen, wakeCommands }));
       }
       process.exit(0);

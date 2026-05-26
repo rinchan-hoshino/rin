@@ -62,6 +62,7 @@ export type RinRpcCommandType =
   | "cron_delete_task"
   | "cron_complete_task"
   | "cron_run_task"
+  | "cron_wake_task"
   | "cron_pause_task"
   | "cron_resume_task"
   | "cron_reschedule_once_task"

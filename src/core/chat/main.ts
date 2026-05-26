@@ -659,7 +659,7 @@ export async function startChatBridge(
     const taskId = safeString(wakeTaskId).trim();
     if (!taskId) return;
     void requestDaemonCommand(
-      { type: "cron_run_task", taskId },
+      { type: "cron_wake_task", taskId },
       { timeoutMs: 1000 },
     ).catch((error: any) => {
       const message = safeString(error?.message || error);

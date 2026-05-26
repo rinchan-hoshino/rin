@@ -378,11 +378,14 @@ Run now, pause, or resume:
 
 ```js
 await rin.tasks.run("cron_daily_brief");
+await rin.tasks.wake("cron_daily_brief");
 await rin.tasks.pause("cron_daily_brief");
 await rin.tasks.resume("cron_daily_brief");
 ```
 
 `rin.tasks.run()` starts the existing task record through the scheduler path. It does not clone the task or change its definition. It still evaluates `condition`.
+
+`rin.tasks.wake()` only moves the existing task's next run time to now. The scheduler tick then evaluates `condition` normally. Use it for event notifications that should behave like a timer nudge rather than a forced run.
 
 Reschedule and activate a one-time task:
 

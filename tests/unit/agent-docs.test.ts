@@ -40,6 +40,7 @@ test("agent docs expose scheduled task operation workflow", () => {
     "rin.tasks.resume",
     "rin.tasks.rescheduleOnce",
     "rin.tasks.run",
+    "rin.tasks.wake",
   ]) {
     assert.match(scheduledTasks, new RegExp(helper.replace(/\./g, "\\.")));
     assert.match(agentSdk, new RegExp(helper.replace(/\./g, "\\.")));
@@ -52,6 +53,7 @@ test("agent docs expose scheduled task operation workflow", () => {
     "cron_delete_task",
     "cron_complete_task",
     "cron_run_task",
+    "cron_wake_task",
     "cron_pause_task",
     "cron_resume_task",
     "cron_reschedule_once_task",

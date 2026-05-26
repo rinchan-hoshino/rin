@@ -62,7 +62,7 @@ Use `record_only` only when another explicit path, such as a scheduled task or S
 }
 ```
 
-`wakeTaskId` only nudges the task; the task condition should still cheaply decide whether to run and should handle debouncing or silence.
+`wakeTaskId` only moves the task's next run time to now; the scheduler still evaluates the task condition normally. Use it as a notification nudge, not as a forced reply path.
 
 Agent SDK examples:
 
