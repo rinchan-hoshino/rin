@@ -432,6 +432,4 @@ export function createBackgroundService() {
   };
 }
 
-export default function heartbeatNotifierExtension(rin: any) {
-  rin.registerBackgroundService(createBackgroundService());
-}
+export default createBackgroundService();
