@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "packageName": "@hoshinorin/rin",
+  "repoUrl": "https://github.com/rinchan-hoshino/rin",
+  "bootstrapBranch": "bootstrap",
+  "train": {
+    "series": "0.0",
+    "nightlyBranch": "main"
+  },
+  "stable": {
+    "version": "0.1.2",
+    "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.1.2.tgz",
+    "ref": "6203bf16b5921a7da41a4a56691f103adb972dab",
+    "versions": {
+      "0.0.0": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.0.0.tgz",
+        "ref": "main"
+      },
+      "0.0.1": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.0.1.tgz",
+        "ref": "7fc56e8782a0a28279c8f07374ae58e8f6056287",
+        "promotedFromBetaVersion": "0.0.1-beta.20260429"
+      },
+      "0.0.2": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.0.2.tgz",
+        "ref": "a6cce066660e6452c7a02ddb46ddd7d6b719f3ed"
+      },
+      "0.0.3": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.0.3.tgz",
+        "ref": "d94fc7bc73df00e589f4d55eacc7f3f1b0c95bc3"
+      },
+      "0.1.0": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.1.0.tgz",
+        "ref": "ae8593feb7a2361da8c9d200c4c27f575634145b",
+        "promotedFromBetaVersion": "0.1.0-beta.20260504"
+      },
+      "0.1.1": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.1.1.tgz",
+        "ref": "637e0948d5d8f5f8998351949b42981b6d7b8521"
+      },
+      "0.1.2": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.1.2.tgz",
+        "ref": "6203bf16b5921a7da41a4a56691f103adb972dab"
+      }
+    },
+    "promotedFromBetaVersion": "0.1.0-beta.20260504"
+  },
+  "beta": {
+    "version": "0.2.0-beta.20260525",
+    "archiveUrl": "https://github.com/rinchan-hoshino/rin/archive/6abdc80e03d221c88deac7402ecc96cb3b482e50.tar.gz",
+    "ref": "6abdc80e03d221c88deac7402ecc96cb3b482e50",
+    "promotionVersion": "0.2.0"
+  },
+  "nightly": {
+    "version": "0.2.0-nightly.20260525+9c2fd50",
+    "archiveUrl": "https://github.com/rinchan-hoshino/rin/archive/9c2fd50c18070ba4e3f9ab97cc5ae3ef2756c188.tar.gz",
+    "ref": "9c2fd50c18070ba4e3f9ab97cc5ae3ef2756c188",
+    "branch": "main"
+  },
+  "git": {
+    "defaultBranch": "main",
+    "repoUrl": "https://github.com/rinchan-hoshino/rin"
+  }
+}
