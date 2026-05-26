@@ -5,7 +5,7 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 ## Preconditions
 
 - keep `main` as the development source of truth
-- configure the repository secret `NPM_TOKEN` so `publish-stable.yml` and `publish-hotfix.yml` can publish `@rinchanai20260422/rin`
+- configure the repository secret `NPM_TOKEN` so `publish-stable.yml` and `publish-hotfix.yml` can publish `@rinchan-hoshino/rin`
 - confirm the focused release validation set passes on `main`
 - update `docs/release/CHANGELOG.md` before beta, stable, or hotfix publishing; release workflows require a `## <stable-version>` heading for the target user-facing version
 - keep stable/hotfix versioning aligned with the current policy: each regular stable release advances `minor + 1` and resets `patch` to `0`, while each hotfix advances the current stable line by `patch + 1`
@@ -69,7 +69,7 @@ It:
 5. verifies the candidate `docs/release/CHANGELOG.md` contains the stable version heading
 6. validates that candidate with the focused release test set
 7. sets the package version only inside the candidate worktree
-8. publishes `@rinchanai20260422/rin` to npm using dist-tag `latest`
+8. publishes `@rinchan-hoshino/rin` to npm using dist-tag `latest`
 9. updates `release-manifest.json -> stable` with the promoted ref and beta provenance
 10. tags the promoted candidate ref as `v<version>`
 11. commits the manifest update back to `main`

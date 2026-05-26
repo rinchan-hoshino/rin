@@ -1,6 +1,6 @@
 const SEARCH_TIMEOUT_MS = 8_000;
 const USER_AGENT =
-  "Mozilla/5.0 (compatible; RinWebSearch/1.0; +https://github.com/rinchanai/rin)";
+  "Mozilla/5.0 (compatible; RinWebSearch/1.0; +https://github.com/rinchan-hoshino/rin)";
 const SUPPORTED_FRESHNESS = ["day", "week", "month", "year"] as const;
 
 export const SEARXNG_WEB_SEARCH_PROVIDERS = [

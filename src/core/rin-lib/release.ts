@@ -66,8 +66,8 @@ export type InstalledReleaseInfo = ResolvedRelease & {
   installedAt?: string;
 };
 
-const DEFAULT_PACKAGE_NAME = "@rinchanai20260422/rin";
-const DEFAULT_REPO_URL = "https://github.com/rinchanai/rin";
+const DEFAULT_PACKAGE_NAME = "@rinchan-hoshino/rin";
+const DEFAULT_REPO_URL = "https://github.com/rinchan-hoshino/rin";
 const DEFAULT_BOOTSTRAP_BRANCH = "bootstrap";
 const DEFAULT_TRAIN_SERIES = "0.0";
 const DEFAULT_STABLE_VERSION = "0.0.0";

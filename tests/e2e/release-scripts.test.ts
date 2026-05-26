@@ -28,8 +28,8 @@ test("update-release-manifest script writes stable npm tarball metadata", () => 
       manifestPath,
       JSON.stringify({
         schemaVersion: 2,
-        packageName: "@rinchanai20260422/rin",
-        repoUrl: "https://github.com/rinchanai/rin",
+        packageName: "@rinchan-hoshino/rin",
+        repoUrl: "https://github.com/rinchan-hoshino/rin",
         train: { series: "1.2", nightlyBranch: "main" },
         stable: { version: "1.2.2", archiveUrl: "https://example.com/old.tgz" },
         beta: {
@@ -65,17 +65,17 @@ test("update-release-manifest script writes stable npm tarball metadata", () => 
       { cwd: rootDir, stdio: "pipe" },
     );
     const next = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-    assert.equal(next.packageName, "@rinchanai20260422/rin");
+    assert.equal(next.packageName, "@rinchan-hoshino/rin");
     assert.equal(next.stable.version, "1.2.3");
     assert.equal(next.stable.ref, "deadbeef");
     assert.equal(next.stable.promotedFromBetaVersion, "1.2.3-beta.20260420");
     assert.equal(
       next.stable.archiveUrl,
-      "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-1.2.3.tgz",
+      "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz",
     );
     assert.equal(
       next.stable.versions["1.2.3"].archiveUrl,
-      "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-1.2.3.tgz",
+      "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz",
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -90,13 +90,13 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
       manifestPath,
       JSON.stringify({
         schemaVersion: 2,
-        packageName: "@rinchanai20260422/rin",
-        repoUrl: "https://github.com/rinchanai/rin",
+        packageName: "@rinchan-hoshino/rin",
+        repoUrl: "https://github.com/rinchan-hoshino/rin",
         train: { series: "1.2", nightlyBranch: "main" },
         stable: {
           version: "1.2.3",
           archiveUrl:
-            "https://registry.npmjs.org/%40rinchanai20260422%2Frin/-/rin-1.2.3.tgz",
+            "https://registry.npmjs.org/%40rinchan-hoshino%2Frin/-/rin-1.2.3.tgz",
         },
         beta: {},
         nightly: {},
@@ -143,14 +143,14 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
     assert.equal(next.beta.promotionVersion, "1.2.4");
     assert.equal(
       next.beta.archiveUrl,
-      "https://github.com/rinchanai/rin/archive/deadbeef.tar.gz",
+      "https://github.com/rinchan-hoshino/rin/archive/deadbeef.tar.gz",
     );
     assert.equal(next.nightly.version, "1.2.5-nightly.20260420+deadbee");
     assert.equal(next.nightly.ref, "deadbeef");
     assert.equal(next.nightly.branch, "main");
     assert.equal(
       next.nightly.archiveUrl,
-      "https://github.com/rinchanai/rin/archive/deadbeef.tar.gz",
+      "https://github.com/rinchan-hoshino/rin/archive/deadbeef.tar.gz",
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

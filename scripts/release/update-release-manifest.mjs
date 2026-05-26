@@ -106,11 +106,11 @@ const series = trim(args.series);
 const packageName =
   trim(args.packageName) ||
   trim(manifest.packageName) ||
-  "@rinchanai20260422/rin";
+  "@rinchan-hoshino/rin";
 const repoUrl =
   trim(args.repoUrl) ||
   trim(manifest.repoUrl) ||
-  "https://github.com/rinchanai/rin";
+  "https://github.com/rinchan-hoshino/rin";
 
 if (!version) throw new Error("missing_version");
 if (!["stable", "beta", "nightly"].includes(channel)) {
