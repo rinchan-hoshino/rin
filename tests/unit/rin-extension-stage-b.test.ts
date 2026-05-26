@@ -310,7 +310,6 @@ test("stage B built-in extension controls update settings aliases", async () => 
         ["rin:browser-use", true],
         ["rin:computer-use", false],
         ["rin:heartbeat-notifier", false],
-        ["rin:github-issue-bridge", false],
       ],
     );
 

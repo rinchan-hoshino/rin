@@ -52,7 +52,7 @@ Rin's todo support is native core behavior, not a Pi extension.
 
 ## Bundled optional Pi extensions
 
-Rin ships optional web search, browser/computer control, heartbeat notification, and GitHub issue automation as normal Pi extension packages under the installed app. They are "built in" in the packaging sense: the code is included with the Rin installation, while settings decide which entries are active.
+Rin ships optional web search, browser/computer control, and heartbeat notification as normal Pi extension packages under the installed app. They are "built in" in the packaging sense: the code is included with the Rin installation, while settings decide which entries are active.
 
 Installed settings can use Rin aliases instead of installation-specific paths:
 
@@ -84,13 +84,7 @@ Installed settings can use Rin aliases instead of installation-specific paths:
   - runs configurable record-only chat heartbeat notification as a background extension
   - reads standard settings from top-level `settings.json -> heartbeatNotifier`
   - requires explicit chat and prompt configuration; it is not enabled by default
-- `rin:github-issue-bridge`
-  - expands to the bundled `extensions/rin-github-issue-bridge` Pi package
-  - registers a GitHub chat adapter and background polling service when configured
-  - reads standard settings from top-level `settings.json -> githubIssueBridge`
-  - requires explicit repositories and a GitHub token; it is not enabled by default
-
-Optional extension configuration uses Rin's extension-file convention. Rin does not create these files by default; create them only to override the open-box behavior.
+    Optional extension configuration uses Rin's extension-file convention. Rin does not create these files by default; create them only to override the open-box behavior.
 
 ```jsonc
 // ~/.rin/extensions/rin-browser-use.json

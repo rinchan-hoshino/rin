@@ -7,8 +7,7 @@ export type BuiltInRinExtensionId =
   | "rin:web-search"
   | "rin:browser-use"
   | "rin:computer-use"
-  | "rin:heartbeat-notifier"
-  | "rin:github-issue-bridge";
+  | "rin:heartbeat-notifier";
 
 export type BuiltInRinExtensionDefinition = {
   id: BuiltInRinExtensionId;
@@ -55,13 +54,6 @@ export const BUILT_IN_RIN_EXTENSIONS: BuiltInRinExtensionDefinition[] = [
     description:
       "Runs configurable record-only chat heartbeat notification as a background extension.",
     directory: "rin-heartbeat-notifier",
-  },
-  {
-    id: "rin:github-issue-bridge",
-    label: "GitHub issue bridge",
-    description:
-      "Runs configurable GitHub issue/PR chat automation as a background extension.",
-    directory: "rin-github-issue-bridge",
   },
 ];
 

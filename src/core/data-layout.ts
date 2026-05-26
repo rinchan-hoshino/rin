@@ -117,11 +117,6 @@ export const LEGACY_DATA_LAYOUT_MOVES: Array<{
     to: path.join("extensions", "runtime"),
   },
   {
-    id: "github-issue-bridge",
-    from: "github-issue-bridge",
-    to: path.join("extensions", "state", "rin-github-issue-bridge"),
-  },
-  {
     id: "rinchan-heartbeat",
     from: "rinchan-heartbeat",
     to: path.join("features", "rinchan-heartbeat"),

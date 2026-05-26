@@ -51,9 +51,5 @@ test("legacy data layout moves are installer-owned and keep migrations global", 
     byFrom.get("extension-runtime")?.to,
     path.join("extensions", "runtime"),
   );
-  assert.equal(
-    byFrom.get("github-issue-bridge")?.to,
-    path.join("extensions", "state", "rin-github-issue-bridge"),
-  );
   assert.equal(byFrom.has("migrations"), false);
 });
