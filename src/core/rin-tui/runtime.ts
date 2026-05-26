@@ -1643,6 +1643,7 @@ export class RpcInteractiveSession {
     if (this.sessionFile || (!options.persist && this.sessionId)) return;
     const data = await this.call("new_session", {
       resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
+      frontendIdentity: TUI_FRONTEND_IDENTITY,
     });
     if (data && data.cancelled) throw new Error("rin_new_session_cancelled");
     await this.refreshState(REFRESH_ALL);

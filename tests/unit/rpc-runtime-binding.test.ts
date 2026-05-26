@@ -867,6 +867,10 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
   const sentTypes = sent.map((entry) => entry.type);
   assert.ok(sentTypes.includes("new_session"));
   assert.deepEqual(
+    sent.find((entry) => entry.type === "new_session")?.frontendIdentity,
+    { kind: "tui" },
+  );
+  assert.deepEqual(
     sent.find((entry) => entry.type === "new_session")?.resourceOptions,
     {
       additionalExtensionPaths: ["/tmp/extra-extension"],
