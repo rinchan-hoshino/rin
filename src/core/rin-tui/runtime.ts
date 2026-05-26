@@ -51,6 +51,7 @@ import {
   applyRpcSessionTree,
   getSessionBranch,
 } from "../rin-frontend-sdk/state-utils.js";
+import { TUI_FRONTEND_IDENTITY } from "../rin-frontend-sdk/frontend-identity.js";
 import {
   runSelfImproveNoticeCheckpoint,
   shouldPullSelfImproveNoticesForTurnState,
@@ -484,10 +485,13 @@ export class RpcInteractiveSession {
   async runSelfImproveNoticeCheckpoint(
     kind: "frontend_open" | "new_session" | "turn_complete" = "frontend_open",
     sessionFile?: string,
+    options: { unfiltered?: boolean } = {},
   ) {
     await runSelfImproveNoticeCheckpoint(this.client, {
       kind,
       sessionFile,
+      frontendIdentity: TUI_FRONTEND_IDENTITY,
+      unfiltered: options.unfiltered,
       canPull: shouldPullSelfImproveNoticesForTurnState({
         liveTurn: this.activeTurn,
         isStreaming: this.isStreaming,
@@ -497,7 +501,9 @@ export class RpcInteractiveSession {
   }
 
   async flushPendingSelfImproveNotices() {
-    await this.runSelfImproveNoticeCheckpoint("frontend_open");
+    await this.runSelfImproveNoticeCheckpoint("frontend_open", undefined, {
+      unfiltered: true,
+    });
   }
 
   async disconnect() {
@@ -641,12 +647,14 @@ export class RpcInteractiveSession {
         parentSession: options?.parentSession,
         managedSessionLeaf: options?.managedSessionLeaf,
         resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
+        frontendIdentity: TUI_FRONTEND_IDENTITY,
       });
       await this.refreshState(REFRESH_ALL);
       if (!data?.cancelled) {
-        await this.runSelfImproveNoticeCheckpoint("new_session").catch(
-          () => {},
-        );
+        await this.runSelfImproveNoticeCheckpoint(
+          "new_session",
+          String(this.sessionFile || ""),
+        ).catch(() => {});
       }
       return !Boolean(data?.cancelled);
     } finally {
@@ -660,12 +668,14 @@ export class RpcInteractiveSession {
       const data = await this.call("switch_session", {
         sessionPath,
         resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
+        frontendIdentity: TUI_FRONTEND_IDENTITY,
       });
       await this.refreshState(REFRESH_ALL);
       if (!data?.cancelled) {
-        await this.runSelfImproveNoticeCheckpoint("new_session").catch(
-          () => {},
-        );
+        await this.runSelfImproveNoticeCheckpoint(
+          "new_session",
+          String(this.sessionFile || sessionPath || ""),
+        ).catch(() => {});
       }
       return !Boolean(data?.cancelled);
     } finally {

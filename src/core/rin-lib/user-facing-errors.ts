@@ -413,6 +413,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "The local SearXNG search sidecar did not become ready in time. Retry later or run rin doctor.",
   self_improve_content_required: () =>
     "Self-improvement update needs content. Add content and retry.",
+  self_improve_notice_frontend_required: () =>
+    "Self-improve reminders need a frontend identity before they can be shown here. Reopen this frontend and retry.",
   session_file_required: () =>
     "Session operation needs a session file. Choose a session and retry.",
   session_fork_unsupported: () =>

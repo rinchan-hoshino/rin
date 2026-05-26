@@ -168,6 +168,7 @@ async function recordSelfImproveReviewNotice(
   await appendPendingMemoryMaintenanceNotice({
     agentDir: job.agentDir,
     sessionFile: job.sessionFile,
+    frontend: ctx?.frontend,
     notice: notice as any,
   });
 }

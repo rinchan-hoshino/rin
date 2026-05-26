@@ -163,6 +163,10 @@ export function createRinCapabilitySet(options: {
       get model() {
         return getModel();
       },
+      get frontend() {
+        return (options.sessionManager as any)?.__rinFrontend;
+      },
+
       isIdle: () => contextActions.isIdle(),
       signal: contextActions.getSignal(),
       abort: () => contextActions.abort(),

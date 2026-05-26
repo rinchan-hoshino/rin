@@ -347,6 +347,10 @@ export async function executeCronAgentTask(
     ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
     ...(frontend
       ? {
+          frontend: {
+            kind: frontend.kind || "scheduled-task",
+            key: frontend.key,
+          },
           promptMeta: buildCronTaskPromptContext(task),
         }
       : {}),

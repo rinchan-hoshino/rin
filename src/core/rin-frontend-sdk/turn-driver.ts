@@ -17,6 +17,11 @@ import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
 import {
+  normalizeFrontendIdentity,
+  sourceFrontendIdentity,
+  type RinFrontendIdentity,
+} from "./frontend-identity.js";
+import {
   submitNativeFrontendPromptTurn,
   type RinFrontendPromptTurnInput,
 } from "./input-submission.js";
@@ -102,27 +107,40 @@ export async function runSelfImproveNoticeCheckpoint(
   input: {
     kind: SelfImproveNoticeCheckpointKind;
     sessionFile?: string;
+    frontendIdentity?: RinFrontendIdentity;
     canPull?: boolean;
+    unfiltered?: boolean;
   },
 ) {
   if (!client.isConnected() || input.canPull === false) return;
-  const sessionFile = safeString(input.sessionFile || "").trim();
-  if (!sessionFile) return;
+  const sessionFile = safeString(input.sessionFile || "").trim() || undefined;
+  const frontendIdentity = normalizeFrontendIdentity(input.frontendIdentity);
+  if (!input.unfiltered && !frontendIdentity) {
+    throw new Error("self_improve_notice_frontend_required");
+  }
   await client.request({
     type: "flush_self_improve_notices",
     sessionFile,
+    ...(frontendIdentity ? { frontendIdentity } : {}),
+    ...(input.unfiltered ? { unfiltered: true } : {}),
   });
 }
 
 export async function flushPendingSelfImproveNotices(
   client: Pick<RinFrontendClient, "isConnected" | "request">,
   sessionFile?: string,
-  options: { canPull?: boolean } = {},
+  options: {
+    frontendIdentity?: RinFrontendIdentity;
+    canPull?: boolean;
+    unfiltered?: boolean;
+  } = {},
 ) {
   await runSelfImproveNoticeCheckpoint(client, {
     kind: sessionFile ? "turn_complete" : "frontend_open",
     sessionFile,
+    frontendIdentity: options.frontendIdentity,
     canPull: options.canPull,
+    unfiltered: options.unfiltered,
   });
 }
 
@@ -150,6 +168,8 @@ export class RinFrontendTurnDriver {
   private readonly clientFactory: () => RinFrontendTurnClient;
   private readonly promptSource: string;
   private readonly commandResponses: RinFrontendCommandResponses;
+  private readonly frontendIdentity: RinFrontendIdentity;
+  private readonly selfImproveNoticeSessionFile?: () => string | undefined;
   client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
@@ -174,12 +194,18 @@ export class RinFrontendTurnDriver {
     clientFactory: () => RinFrontendTurnClient;
     promptSource?: string;
     commandResponses?: Partial<RinFrontendCommandResponses>;
+    frontendIdentity?: RinFrontendIdentity;
+    selfImproveNoticeSessionFile?: () => string | undefined;
   }) {
     this.clientFactory = options.clientFactory;
     this.promptSource = safeString(options.promptSource).trim() || "frontend";
     this.commandResponses = resolveRinFrontendCommandResponses(
       options.commandResponses,
     );
+    this.frontendIdentity =
+      normalizeFrontendIdentity(options.frontendIdentity) ||
+      sourceFrontendIdentity(this.promptSource);
+    this.selfImproveNoticeSessionFile = options.selfImproveNoticeSessionFile;
     this.backendEventTranslator = createRinFrontendBackendEventTranslator({
       commandResponses: this.commandResponses,
     });
@@ -212,15 +238,9 @@ export class RinFrontendTurnDriver {
     ).trim();
     if (wantedSessionFile) {
       await this.selectSessionTarget(wantedSessionFile);
-      await this.flushPendingSelfImproveNotices(
-        this.currentSessionFile() || wantedSessionFile,
-      ).catch(() => {});
       return;
     }
     await this.refreshFrontendState().catch(() => {});
-    await this.flushPendingSelfImproveNotices(this.currentSessionFile()).catch(
-      () => {},
-    );
   }
 
   dispose() {
@@ -494,6 +514,7 @@ export class RinFrontendTurnDriver {
     await runSelfImproveNoticeCheckpoint(this.client, {
       kind,
       sessionFile: sessionFile || this.currentSessionFile(),
+      frontendIdentity: this.frontendIdentity,
       canPull: shouldPullSelfImproveNoticesForTurnState({
         liveTurn: this.liveTurn,
         isStreaming: Boolean(this.frontendState.isStreaming),
@@ -503,9 +524,13 @@ export class RinFrontendTurnDriver {
   }
 
   private async flushPendingSelfImproveNotices(sessionFile?: string) {
+    const noticeSessionFile =
+      sessionFile ||
+      this.selfImproveNoticeSessionFile?.() ||
+      this.currentSessionFile();
     await this.runSelfImproveNoticeCheckpoint(
-      sessionFile ? "turn_complete" : "frontend_open",
-      sessionFile || this.currentSessionFile(),
+      noticeSessionFile ? "turn_complete" : "frontend_open",
+      noticeSessionFile,
     );
   }
 
@@ -1005,6 +1030,7 @@ export class RinFrontendTurnDriver {
       text: input.text,
       images: input.images,
       source: safeString(input.source).trim() ? promptSource : input.source,
+      frontendIdentity: this.frontendIdentity,
       requestTag,
       streamingBehavior: input.streamingBehavior,
       promptContext: input.promptContext,
@@ -1084,6 +1110,7 @@ export class RinFrontendTurnDriver {
         text,
         images,
         source: promptSource,
+        frontendIdentity: this.frontendIdentity,
         streamingBehavior: "steer",
         requestTag,
         promptContext: input.promptContext,

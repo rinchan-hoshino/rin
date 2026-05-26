@@ -1,5 +1,9 @@
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
+import {
+  normalizeFrontendIdentity,
+  type RinFrontendIdentity,
+} from "./frontend-identity.js";
 import type { RinFrontendClient, RinPromptOptions } from "./types.js";
 
 export type RinFrontendInputSubmissionGate = {
@@ -14,6 +18,7 @@ export type RinFrontendPromptTurnInput = {
   text: string;
   images?: any[];
   source?: string;
+  frontendIdentity?: RinFrontendIdentity;
   requestTag?: string;
   streamingBehavior?: "steer" | "followUp";
   promptContext?: unknown;
@@ -49,6 +54,8 @@ export async function submitNativeFrontendPromptTurn(
     source: input.source,
     requestTag: input.requestTag,
   };
+  const frontendIdentity = normalizeFrontendIdentity(input.frontendIdentity);
+  if (frontendIdentity) promptOptions.frontendIdentity = frontendIdentity;
   if (input.promptContext) promptOptions.promptContext = input.promptContext;
   const sessionFile = safeString(input.sessionFile || "").trim();
   if (sessionFile) promptOptions.sessionFile = sessionFile;

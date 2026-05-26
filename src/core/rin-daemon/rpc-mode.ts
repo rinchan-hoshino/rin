@@ -9,6 +9,7 @@ import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
+import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import { takePendingMemoryMaintenanceNotices } from "../self-improve/async-jobs.js";
 import { safeString } from "../text-utils.js";
 import {
@@ -1021,7 +1022,19 @@ export async function runCustomRpcMode(
 
   await bindCurrentSession();
 
-  const flushPendingSelfImproveNotices = async (sessionFile?: string) => {
+  const flushPendingSelfImproveNotices = async (
+    options: {
+      sessionFile?: string;
+      frontendIdentity?: any;
+      unfiltered?: boolean;
+    } = {},
+  ) => {
+    const frontendIdentity = normalizeFrontendIdentity(
+      options.frontendIdentity,
+    );
+    if (!options.unfiltered && !frontendIdentity) {
+      throw new Error("self_improve_notice_frontend_required");
+    }
     const profile = resolveRuntimeProfile({
       cwd:
         safeString(runtime.cwd || getSession()?.sessionManager?.getCwd?.()) ||
@@ -1030,7 +1043,8 @@ export async function runCustomRpcMode(
     });
     const notices = await takePendingMemoryMaintenanceNotices({
       agentDir: profile.agentDir,
-      sessionFile,
+      sessionFile: options.sessionFile,
+      frontend: frontendIdentity,
     });
     for (const notice of notices) output(notice);
     return notices.length;
@@ -1058,6 +1072,12 @@ export async function runCustomRpcMode(
         }
         if (command.promptContext !== undefined) {
           promptOptions.promptContext = command.promptContext;
+        }
+        const frontendIdentity = normalizeFrontendIdentity(
+          command.frontendIdentity,
+        );
+        if (frontendIdentity !== undefined) {
+          promptOptions.frontendIdentity = frontendIdentity;
         }
         if (streamingBehavior) {
           await session.prompt(command.message, promptOptions);
@@ -1109,9 +1129,11 @@ export async function runCustomRpcMode(
         );
       case "flush_self_improve_notices":
         return run(id, type, async () => ({
-          flushed: await flushPendingSelfImproveNotices(
-            safeString(command.sessionFile).trim() || undefined,
-          ),
+          flushed: await flushPendingSelfImproveNotices({
+            sessionFile: safeString(command.sessionFile).trim() || undefined,
+            frontendIdentity: command.frontendIdentity,
+            unfiltered: command.unfiltered === true,
+          }),
         }));
       case "get_state":
         return done(
@@ -1352,7 +1374,10 @@ export async function runCustomRpcMode(
                 );
             await bindCurrentSession();
             const rebound = getSession();
-            await flushPendingSelfImproveNotices(rebound?.sessionFile);
+            await flushPendingSelfImproveNotices({
+              sessionFile: rebound?.sessionFile,
+              frontendIdentity: command.frontendIdentity,
+            });
             return {
               cancelled: Boolean(value?.cancelled),
               sessionFile: rebound?.sessionFile,
@@ -1369,7 +1394,10 @@ export async function runCustomRpcMode(
           () =>
             runtime.switchSession(sessionFile).then(async (value: any) => {
               await bindCurrentSession();
-              await flushPendingSelfImproveNotices(getSession()?.sessionFile);
+              await flushPendingSelfImproveNotices({
+                sessionFile: getSession()?.sessionFile,
+                frontendIdentity: command.frontendIdentity,
+              });
               return value;
             }),
           (value) => ({ cancelled: Boolean(value?.cancelled) }),

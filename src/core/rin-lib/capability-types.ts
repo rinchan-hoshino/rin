@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { RinFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 
 export type RinHookHandler = (event: any, ctx: any) => Promise<any> | any;
 
@@ -24,6 +25,7 @@ export type RinCapabilityContext = {
   sessionManager: any;
   modelRegistry: any;
   readonly model: any;
+  readonly frontend?: RinFrontendIdentity;
   isIdle: () => boolean;
   signal: AbortSignal | undefined;
   abort: () => void;

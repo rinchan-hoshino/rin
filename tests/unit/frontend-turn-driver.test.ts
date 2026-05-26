@@ -250,7 +250,7 @@ test("frontend SDK turn driver ignores pushed self-improve notices during active
   ]);
 });
 
-test("frontend SDK turn driver flushes pending self-improve notices on connect", async () => {
+test("frontend SDK turn driver does not pull self-improve notices on generic connect", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
 
@@ -258,28 +258,37 @@ test("frontend SDK turn driver flushes pending self-improve notices on connect",
 
   assert.deepEqual(
     client.calls.filter((call: any) => call.type === "request"),
-    [
-      {
-        type: "request",
-        command: {
-          type: "flush_self_improve_notices",
-          sessionFile: "/tmp/frontend-chat.jsonl",
-        },
-      },
-    ],
+    [],
   );
 });
 
-test("frontend SDK self-improve checkpoint requires one explicit session", async () => {
+test("frontend SDK self-improve checkpoint requires a frontend unless explicitly unfiltered", async () => {
   const client = createFrontendClient();
   await client.connect();
 
   await runSelfImproveNoticeCheckpoint(client, {
-    kind: "frontend_open",
-  });
-  await runSelfImproveNoticeCheckpoint(client, {
     kind: "turn_complete",
     sessionFile: "/tmp/current.jsonl",
+    frontendIdentity: { kind: "test", key: "frontend-a" },
+  });
+  await assert.rejects(
+    () =>
+      runSelfImproveNoticeCheckpoint(client, {
+        kind: "frontend_open",
+      }),
+    /self_improve_notice_frontend_required/,
+  );
+  await assert.rejects(
+    () =>
+      runSelfImproveNoticeCheckpoint(client, {
+        kind: "turn_complete",
+        sessionFile: "/tmp/current.jsonl",
+      }),
+    /self_improve_notice_frontend_required/,
+  );
+  await runSelfImproveNoticeCheckpoint(client, {
+    kind: "frontend_open",
+    unfiltered: true,
   });
   await runSelfImproveNoticeCheckpoint(client, {
     kind: "new_session",
@@ -295,6 +304,15 @@ test("frontend SDK self-improve checkpoint requires one explicit session", async
         command: {
           type: "flush_self_improve_notices",
           sessionFile: "/tmp/current.jsonl",
+          frontendIdentity: { kind: "test", key: "frontend-a" },
+        },
+      },
+      {
+        type: "request",
+        command: {
+          type: "flush_self_improve_notices",
+          sessionFile: undefined,
+          unfiltered: true,
         },
       },
     ],
@@ -316,15 +334,7 @@ test("frontend SDK turn driver leaves turn-complete notice checkpoints to the fr
         call.type === "request" &&
         call.command?.type === "flush_self_improve_notices",
     ),
-    [
-      {
-        type: "request",
-        command: {
-          type: "flush_self_improve_notices",
-          sessionFile: "/tmp/frontend-chat.jsonl",
-        },
-      },
-    ],
+    [],
   );
 });
 

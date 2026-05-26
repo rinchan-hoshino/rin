@@ -13,6 +13,11 @@ import {
   writeJsonAtomic,
 } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
+import {
+  normalizeFrontendIdentity,
+  sameFrontendIdentity,
+  type RinFrontendIdentity,
+} from "../rin-frontend-sdk/frontend-identity.js";
 import { normalizeSessionValue } from "../session/ref.js";
 import { nowIso, safeString, uniqueStrings } from "./core/utils.js";
 import {
@@ -60,6 +65,7 @@ export type PendingMemoryMaintenanceNotice = {
   updatedAt: string;
   agentDir: string;
   sessionFile: string;
+  frontend?: RinFrontendIdentity;
   notice: MemoryMaintenanceNotice;
 };
 
@@ -134,11 +140,13 @@ async function savePendingNotices(
 export async function appendPendingMemoryMaintenanceNotice(input: {
   agentDir: string;
   sessionFile: string;
+  frontend?: RinFrontendIdentity;
   notice: MemoryMaintenanceNotice;
 }) {
   const agentDir = resolveAgentDir(input.agentDir);
   const sessionFile = resolveSessionFile(input.sessionFile);
   if (!agentDir || !sessionFile) return;
+  const frontend = normalizeFrontendIdentity(input.frontend);
   const now = nowIso();
   const notices = loadPendingNotices(agentDir);
   notices.push({
@@ -147,6 +155,7 @@ export async function appendPendingMemoryMaintenanceNotice(input: {
     updatedAt: now,
     agentDir,
     sessionFile,
+    frontend,
     notice: input.notice,
   });
   await savePendingNotices(agentDir, notices);
@@ -154,18 +163,20 @@ export async function appendPendingMemoryMaintenanceNotice(input: {
 
 export type MemoryMaintenanceNoticeFilter = {
   sessionFile?: string;
+  frontend?: RinFrontendIdentity;
 };
 
 export function filterMemoryMaintenanceNoticesForDisplay(
   notices: PendingMemoryMaintenanceNotice[],
   filter: MemoryMaintenanceNoticeFilter = {},
 ) {
-  const sessionFile = resolveSessionFile(filter.sessionFile);
+  const frontend = normalizeFrontendIdentity(filter.frontend);
   const taken: PendingMemoryMaintenanceNotice[] = [];
   const remaining: PendingMemoryMaintenanceNotice[] = [];
   for (const notice of notices) {
-    const matched = sessionFile
-      ? resolveSessionFile(notice.sessionFile) === sessionFile
+    const noticeFrontend = normalizeFrontendIdentity(notice.frontend);
+    const matched = frontend
+      ? sameFrontendIdentity(noticeFrontend, frontend)
       : true;
     if (matched) {
       taken.push(notice);
@@ -179,6 +190,7 @@ export function filterMemoryMaintenanceNoticesForDisplay(
 export async function takePendingMemoryMaintenanceNotices(input: {
   agentDir: string;
   sessionFile?: string;
+  frontend?: RinFrontendIdentity;
 }) {
   const agentDir = resolveAgentDir(input.agentDir);
   if (!agentDir) return [];

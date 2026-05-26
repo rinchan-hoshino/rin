@@ -20,6 +20,7 @@ import selfImproveModule from "../self-improve/index.js";
 import taskModule from "../task/index.js";
 import tokenUsageModule from "../token-usage/index.js";
 import chatModule from "../chat/index.js";
+import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import type {
   RinCapabilityDefinition,
   RinCapabilityOptions,
@@ -462,29 +463,46 @@ function applyRinPromptBuilder(session: any) {
         basePrompt,
         options?.promptContext,
       );
-      if (turnPrompt === basePrompt) {
-        return await originalPrompt(text, options);
-      }
       const previousActiveTurnPrompt = session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
+      const previousFrontend = session.sessionManager?.__rinFrontend;
       const activeTurnPrompt: {
         basePrompt: string;
         turnPrompt: string;
         refreshedBasePrompt?: string;
       } = { basePrompt, turnPrompt };
-      session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = activeTurnPrompt;
-      applySessionBaseSystemPrompt(session, turnPrompt);
+      const frontendIdentity = normalizeFrontendIdentity(
+        options?.frontendIdentity,
+      );
+      if (session.sessionManager && frontendIdentity) {
+        session.sessionManager.__rinFrontend = frontendIdentity;
+      }
+      if (turnPrompt !== basePrompt) {
+        session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = activeTurnPrompt;
+        applySessionBaseSystemPrompt(session, turnPrompt);
+      }
       try {
         return await originalPrompt(text, options);
       } finally {
-        if (previousActiveTurnPrompt === undefined) {
-          delete session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
-        } else {
-          session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = previousActiveTurnPrompt;
+        if (turnPrompt !== basePrompt) {
+          if (previousActiveTurnPrompt === undefined) {
+            delete session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
+          } else {
+            session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = previousActiveTurnPrompt;
+          }
         }
-        applySessionBaseSystemPrompt(
-          session,
-          String(activeTurnPrompt.refreshedBasePrompt || basePrompt),
-        );
+        if (session.sessionManager) {
+          if (previousFrontend === undefined) {
+            delete session.sessionManager.__rinFrontend;
+          } else {
+            session.sessionManager.__rinFrontend = previousFrontend;
+          }
+        }
+        if (turnPrompt !== basePrompt) {
+          applySessionBaseSystemPrompt(
+            session,
+            String(activeTurnPrompt.refreshedBasePrompt || basePrompt),
+          );
+        }
       }
     };
   }

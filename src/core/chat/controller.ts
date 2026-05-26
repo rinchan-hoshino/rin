@@ -6,8 +6,10 @@ import {
   RinDaemonFrontendClient,
   RinFrontendTurnDriver,
   applyFrontendBuiltinCommandText,
+  chatFrontendIdentity,
   frontendCommandNameFromLine,
   getRinNonInteractiveCommandInteractionPolicy,
+  type RinFrontendIdentity,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
 import {
@@ -192,6 +194,7 @@ export class ChatController {
       frontendClientFactory?: () => RinFrontendTurnClient;
       sleepAfterIdleMs?: number;
       commandResponses?: Partial<ChatCommandResponses>;
+      frontendIdentity?: RinFrontendIdentity;
     },
   ) {
     this.app = app;
@@ -214,6 +217,8 @@ export class ChatController {
         deps.frontendClientFactory || (() => new RinDaemonFrontendClient()),
       promptSource: "chat-bridge",
       commandResponses: this.getCommandResponses(),
+      frontendIdentity: deps.frontendIdentity || chatFrontendIdentity(chatKey),
+      selfImproveNoticeSessionFile: () => this.currentSessionFile(),
     });
     this.driver.subscribe((event) => {
       void this.handleFrontendEvent(event).catch(() => {});

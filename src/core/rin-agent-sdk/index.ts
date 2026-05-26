@@ -1,4 +1,5 @@
 import { requestDaemonCommand } from "../rin-daemon/client.js";
+import type { RinFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 
 export type RinAgentSdkOptions = {
   socketPath?: string;
@@ -9,6 +10,7 @@ export type TaskControlAction = "pause" | "resume";
 
 export type ChatRunTurnOptions = {
   chatKey?: string;
+  frontend?: RinFrontendIdentity;
   text: string;
   sessionFile?: string;
   sessionId?: string;

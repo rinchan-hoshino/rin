@@ -147,7 +147,7 @@ test("chat controller delivers passive notices as distinct short messages", asyn
   ]);
 });
 
-test("chat controller pulls pending self-improve notices for the current session only", async () => {
+test("chat controller does not pull self-improve notices on connect", async () => {
   async function createScopedController(chatKey) {
     const tempDir = await fs.mkdtemp(
       path.join(os.tmpdir(), "rin-chat-notice-scope-"),
@@ -212,12 +212,7 @@ test("chat controller pulls pending self-improve notices for the current session
 
   await group.controller.connect({ restoreSession: false });
 
-  assert.deepEqual(group.requests, [
-    {
-      type: "flush_self_improve_notices",
-      sessionFile: "/tmp/current.jsonl",
-    },
-  ]);
+  assert.deepEqual(group.requests, []);
 
   const privateChat = await createScopedController("telegram/1:200");
   privateChat.controller.state.chatType = "private";
@@ -245,12 +240,7 @@ test("chat controller pulls pending self-improve notices for the current session
     sessionFile: "/tmp/other-private.jsonl",
   });
   await privateChat.controller.connect({ restoreSession: false });
-  assert.deepEqual(privateChat.requests, [
-    {
-      type: "flush_self_improve_notices",
-      sessionFile: "/tmp/current.jsonl",
-    },
-  ]);
+  assert.deepEqual(privateChat.requests, []);
 });
 
 test("chat controller delivers compact collapsed notice without summary text", async () => {
@@ -507,8 +497,12 @@ test("chat controller pulls self-improve notices after final delivery checkpoint
   controller.client.request = async (command) => {
     if (command?.type === "flush_self_improve_notices") {
       assert.equal(command.sessionFile, currentSessionFile);
+      assert.deepEqual(command.frontendIdentity, {
+        kind: "chat",
+        key: controller.chatKey,
+      });
       flushCount += 1;
-      if (flushCount === 2) {
+      if (flushCount === 1) {
         await controller.handleClientEvent({
           type: "ui",
           payload: {

@@ -89,6 +89,10 @@ import {
 import { composeChatKey, loadIdentity, trustOf } from "./support.js";
 import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
 import {
+  normalizeFrontendIdentity,
+  type RinFrontendIdentity,
+} from "../rin-frontend-sdk/frontend-identity.js";
+import {
   enqueueChatOutboxPayload,
   type ChatOutboxPayload,
 } from "../rin-lib/chat-outbox.js";
@@ -251,6 +255,7 @@ export type ChatBridgeTurnPayload = {
   model?: string;
   thinkingLevel?: string;
   promptMeta?: PromptContextMeta;
+  frontend?: RinFrontendIdentity;
 };
 
 export type ChatBridgeEvalPayload = {
@@ -400,6 +405,7 @@ export async function startChatBridge(
     detachedOptions?: {
       chatKey?: string;
       affectChatBinding?: boolean;
+      frontendIdentity?: RinFrontendIdentity;
     },
   ) => {
     const statePath = path.join(
@@ -423,6 +429,7 @@ export async function startChatBridge(
         frontendClientFactory,
         sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
         commandResponses: chatCommandResponses,
+        frontendIdentity: detachedOptions?.frontendIdentity,
       });
       detachedControllers.set(controllerKey, controller);
       return controller;
@@ -896,6 +903,7 @@ export async function startChatBridge(
       : getDetachedController(controllerKey, {
           chatKey,
           affectChatBinding,
+          frontendIdentity: normalizeFrontendIdentity(payload?.frontend),
         });
     try {
       return await controller.runTurn(

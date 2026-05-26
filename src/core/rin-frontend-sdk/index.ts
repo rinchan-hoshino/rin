@@ -61,6 +61,15 @@ export {
 } from "./command-dispatcher.js";
 
 export {
+  TUI_FRONTEND_IDENTITY,
+  chatFrontendIdentity,
+  normalizeFrontendIdentity,
+  sameFrontendIdentity,
+  sourceFrontendIdentity,
+  type RinFrontendIdentity,
+} from "./frontend-identity.js";
+
+export {
   handleRinRpcSessionEvent,
   type RinRpcSessionEventRefresh,
   type RinRpcSessionEventTarget,

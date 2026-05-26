@@ -42,7 +42,8 @@ test(
       return true;
     };
     process.exit = (() => {
-      throw new Error("process_exit_mock");
+      calls.push("process.exit");
+      return undefined as never;
     }) as unknown as typeof process.exit;
 
     try {
@@ -93,6 +94,7 @@ test(
         "session.abort",
         "session.flush",
         "session.dispose",
+        "process.exit",
       ]);
     } finally {
       process.stdin.on = stdinOn;
@@ -120,7 +122,8 @@ test(
       return true;
     };
     process.exit = (() => {
-      throw new Error("process_exit_mock");
+      calls.push("process.exit");
+      return undefined as never;
     }) as unknown as typeof process.exit;
 
     try {
@@ -163,7 +166,11 @@ test(
       );
       await wait(20);
 
-      assert.deepEqual(calls, ["runtime.dispose", "session.flush"]);
+      assert.deepEqual(calls, [
+        "runtime.dispose",
+        "session.flush",
+        "process.exit",
+      ]);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -3136,6 +3143,7 @@ test(
       await appendPendingMemoryMaintenanceNotice({
         agentDir,
         sessionFile: targetSessionFile,
+        frontend: { kind: "tui" },
         notice: {
           type: "self_improve_review_notice",
           status: "completed",
@@ -3146,6 +3154,7 @@ test(
       await appendPendingMemoryMaintenanceNotice({
         agentDir,
         sessionFile: otherSessionFile,
+        frontend: { kind: "chat", key: "other" },
         notice: {
           type: "self_improve_review_notice",
           status: "completed",
@@ -3172,6 +3181,7 @@ test(
             id: "switch-1",
             type: "switch_session",
             sessionFile: targetSessionFile,
+            frontendIdentity: { kind: "tui" },
           })}\n`,
         ),
       );
@@ -3283,7 +3293,9 @@ test(
       const onData = handlers.get("data");
       assert.equal(typeof onData, "function");
       onData(
-        Buffer.from(`${JSON.stringify({ id: "3", type: "new_session" })}\n`),
+        Buffer.from(
+          `${JSON.stringify({ id: "3", type: "new_session", frontendIdentity: { kind: "tui" } })}\n`,
+        ),
       );
       await wait(20);
 
@@ -3437,6 +3449,7 @@ test(
             id: "managed-new",
             type: "new_session",
             managedSessionLeaf: "chat",
+            frontendIdentity: { kind: "tui" },
           })}\n`,
         ),
       );
@@ -3564,7 +3577,7 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "resp-1", type: "new_session" })}\n`,
+          `${JSON.stringify({ id: "resp-1", type: "new_session", frontendIdentity: { kind: "tui" } })}\n`,
         ),
       );
       await wait(20);
@@ -3692,7 +3705,9 @@ test(
       const onData = handlers.get("data");
       assert.equal(typeof onData, "function");
       onData(
-        Buffer.from(`${JSON.stringify({ id: "3", type: "new_session" })}\n`),
+        Buffer.from(
+          `${JSON.stringify({ id: "3", type: "new_session", frontendIdentity: { kind: "tui" } })}\n`,
+        ),
       );
       await wait(20);
       onData(
@@ -4323,7 +4338,7 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "switch-1", type: "switch_session", sessionPath: interruptedSession.sessionFile })}\n`,
+          `${JSON.stringify({ id: "switch-1", type: "switch_session", sessionPath: interruptedSession.sessionFile, frontendIdentity: { kind: "tui" } })}\n`,
         ),
       );
       await wait(100);

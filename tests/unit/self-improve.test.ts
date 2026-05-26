@@ -59,7 +59,7 @@ function queuePath(root) {
   return selfImprovePaths.maintenanceQueuePath(root);
 }
 
-test("pending self-improve notices support global and explicit session filtering", async () => {
+test("pending self-improve notices support global and frontend filtering", async () => {
   await withTempRoot(async (root) => {
     const first = path.join(root, "sessions", "first.jsonl");
     const second = path.join(root, "sessions", "second.jsonl");
@@ -81,24 +81,28 @@ test("pending self-improve notices support global and explicit session filtering
     await asyncJobs.appendPendingMemoryMaintenanceNotice({
       agentDir: root,
       sessionFile: first,
+      frontend: { kind: "test", key: "frontend-a" },
       notice: NOTICE_NO_CHANGE,
     });
     await asyncJobs.appendPendingMemoryMaintenanceNotice({
       agentDir: root,
-      sessionFile: second,
+      sessionFile: first,
+      frontend: { kind: "test", key: "frontend-b" },
       notice: NOTICE_CHANGED_SKILL_ONE,
     });
     assert.deepEqual(
       await asyncJobs.takePendingMemoryMaintenanceNotices({
         agentDir: root,
-        sessionFile: first,
+        sessionFile: second,
+        frontend: { kind: "test", key: "frontend-a" },
       }),
       [NOTICE_NO_CHANGE],
     );
     assert.deepEqual(
       await asyncJobs.takePendingMemoryMaintenanceNotices({
         agentDir: root,
-        sessionFile: second,
+        sessionFile: first,
+        frontend: { kind: "test", key: "frontend-b" },
       }),
       [NOTICE_CHANGED_SKILL_ONE],
     );

@@ -2,6 +2,7 @@ import type {
   RinRpcCommandType,
   RinRpcResponseEnvelope,
 } from "../rin-lib/rpc-types.js";
+import type { RinFrontendIdentity } from "./frontend-identity.js";
 
 export type RinRpcCommand = {
   id?: string;
@@ -212,6 +213,7 @@ export type RinPromptOptions = {
   images?: unknown[];
   streamingBehavior?: "steer" | "followUp";
   source?: string;
+  frontendIdentity?: RinFrontendIdentity;
   requestTag?: string;
   promptContext?: RinPromptContext;
   sessionFile?: string;
