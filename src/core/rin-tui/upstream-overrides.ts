@@ -61,6 +61,7 @@ const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
 const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "starting",
   "connecting",
+  "sending",
   "compacting",
 ]);
 const TODO_TOOL_COALESCE_EVENTS = new Set(["tool_execution_end", "agent_end"]);

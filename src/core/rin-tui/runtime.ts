@@ -261,6 +261,7 @@ type RpcFrontendPhase =
   | "idle"
   | "starting"
   | "compacting"
+  | "sending"
   | "working"
   | "connecting";
 
@@ -271,6 +272,7 @@ const RPC_FRONTEND_PHASE_LABELS: Record<
   connecting: "Connecting",
   starting: "Starting",
   compacting: "Compacting context",
+  sending: "Sending",
   working: "Working",
 };
 
@@ -1261,7 +1263,8 @@ export class RpcInteractiveSession {
     }
     if (!this.rpcConnected || this.recoveryPending) return "connecting";
     if (this.isCompacting) return "compacting";
-    if (this.remoteTurnRunning || this.activeTurn) return "working";
+    if (this.remoteTurnRunning) return "working";
+    if (this.activeTurn) return "sending";
     return "idle";
   }
 

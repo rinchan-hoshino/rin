@@ -65,6 +65,7 @@ export type RinFrontendStatusPhase =
   | "idle"
   | "connecting"
   | "starting"
+  | "sending"
   | "working"
   | "compacting";
 

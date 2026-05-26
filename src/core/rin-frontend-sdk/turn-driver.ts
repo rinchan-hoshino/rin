@@ -42,6 +42,7 @@ export type RinFrontendTurnPhase =
   | "idle"
   | "connecting"
   | "starting"
+  | "sending"
   | "working";
 
 export type RinFrontendTurnResult = {
@@ -1129,6 +1130,7 @@ export class RinFrontendTurnDriver {
     ).catch(() => []);
     const requestTag = this.createTurnRequestTag();
     const liveTurn = this.startLiveTurn(requestTag);
+    this.setFrontendPhase("sending");
     this.liveTurnRecoveryContext = {
       sessionFile:
         safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
@@ -1325,6 +1327,7 @@ export class RinFrontendTurnDriver {
         return;
       case "turn_accepted":
         this.frontendState.turnActive = true;
+        this.setFrontendPhase("working");
         this.emit({ type: "turn_accepted" });
         return;
       case "passive_notice":

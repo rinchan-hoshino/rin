@@ -29,6 +29,7 @@ function statusPhase(value: unknown): RinFrontendStatusPhase {
     phase === "idle" ||
     phase === "connecting" ||
     phase === "starting" ||
+    phase === "sending" ||
     phase === "working" ||
     phase === "compacting"
   ) {
