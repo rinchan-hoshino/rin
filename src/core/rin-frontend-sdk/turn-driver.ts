@@ -116,12 +116,23 @@ export async function runSelfImproveNoticeCheckpoint(
   const sessionFile = safeString(input.sessionFile || "").trim() || undefined;
   const frontendIdentity = normalizeFrontendIdentity(input.frontendIdentity);
   if (!input.unfiltered && !frontendIdentity) return;
-  await client.request({
-    type: "flush_self_improve_notices",
-    sessionFile,
-    ...(frontendIdentity ? { frontendIdentity } : {}),
-    ...(input.unfiltered ? { unfiltered: true } : {}),
-  });
+  try {
+    await client.request({
+      type: "flush_self_improve_notices",
+      sessionFile,
+      ...(frontendIdentity ? { frontendIdentity } : {}),
+      ...(input.unfiltered ? { unfiltered: true } : {}),
+    });
+  } catch (error) {
+    if (
+      safeString((error as any)?.message || error).includes(
+        "self_improve_notice_frontend_required",
+      )
+    ) {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function flushPendingSelfImproveNotices(
