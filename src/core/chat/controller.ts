@@ -155,7 +155,6 @@ export class ChatController {
   turnQueue: Promise<void> = Promise.resolve();
   logger: any;
   h: any;
-  deliveryEnabled: boolean;
   affectChatBinding: boolean;
   workingReactionEmoji = "";
   workingReactionTick = 0;
@@ -188,7 +187,6 @@ export class ChatController {
     deps: {
       logger: any;
       h: any;
-      deliveryEnabled?: boolean;
       affectChatBinding?: boolean;
       statePath?: string;
       frontendClientFactory?: () => RinFrontendTurnClient;
@@ -200,7 +198,6 @@ export class ChatController {
     this.chatKey = chatKey;
     this.dataDir = dataDir;
     this.agentDir = path.resolve(dataDir, "..");
-    this.deliveryEnabled = deps.deliveryEnabled !== false;
     this.affectChatBinding = deps.affectChatBinding !== false;
     this.statePath = deps.statePath || chatStatePath(dataDir, chatKey);
     this.state = readJsonFile<ChatState>(this.statePath, { chatKey });
@@ -412,6 +409,12 @@ export class ChatController {
     });
   }
 
+  private canDeliverReplies() {
+    const parsed = parseChatKey(this.chatKey);
+    if (!parsed) return false;
+    return Boolean(findBot(this.app, parsed.platform, parsed.botId));
+  }
+
   private getWorkingIndicators() {
     const parsed = parseChatKey(this.chatKey);
     if (!parsed) return [];
@@ -474,7 +477,7 @@ export class ChatController {
   }
 
   private async startWorkingMarker() {
-    if (!this.deliveryEnabled) return false;
+    if (!this.canDeliverReplies()) return false;
     const indicators = this.getWorkingIndicators();
     this.activeWorkingIndicators = indicators;
     const context = this.workingIndicatorContext({ event: "start" });
@@ -508,7 +511,7 @@ export class ChatController {
   }
 
   private async startCompactionWorkingMarker() {
-    if (!this.deliveryEnabled) return false;
+    if (!this.canDeliverReplies()) return false;
     const indicators = this.getWorkingIndicators();
     this.compactionWorkingIndicators = indicators;
     const context = this.compactionWorkingIndicatorContext({ event: "start" });
@@ -525,7 +528,7 @@ export class ChatController {
   }
 
   private async pollCompactionTyping() {
-    if (!this.deliveryEnabled || !this.compactionTurn) return false;
+    if (!this.canDeliverReplies() || !this.compactionTurn) return false;
     const indicators = this.compactionWorkingIndicators.length
       ? this.compactionWorkingIndicators
       : this.getWorkingIndicators();
@@ -626,7 +629,7 @@ export class ChatController {
   ) {
     const text = this.buildStatusText();
     this.markProcessedMessage(incomingMessageId, false);
-    if (!this.deliveryEnabled) return { handled: true, text, local: true };
+    if (!this.canDeliverReplies()) return { handled: true, text, local: true };
     await this.enqueueAndDrainDelivery(
       {
         type: "text_delivery",
@@ -641,7 +644,7 @@ export class ChatController {
   }
 
   async pollTyping() {
-    if (!this.deliveryEnabled) return false;
+    if (!this.canDeliverReplies()) return false;
     if (!this.driver.hasWorkerActiveTurn()) {
       await this.clearWorkingReaction().catch(() => {});
       return false;
@@ -901,7 +904,7 @@ export class ChatController {
   ) {
     const pending = this.stagedDelivery;
     if (!pending) return;
-    if (!this.deliveryEnabled) {
+    if (!this.canDeliverReplies()) {
       this.stagedDelivery = null;
       if (clearProcessing) {
         await this.clearWorkingReaction().catch(() => {});
@@ -950,7 +953,7 @@ export class ChatController {
   private async deliverAssistantInterim(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
-    if (!this.deliveryEnabled) return true;
+    if (!this.canDeliverReplies()) return true;
     const incomingMessageId = this.currentIncomingMessageId();
     const replyToMessageId = this.currentReplyToMessageId();
     try {
@@ -989,7 +992,7 @@ export class ChatController {
   private async sendPassiveNoticeNow(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
-    if (!this.deliveryEnabled) return true;
+    if (!this.canDeliverReplies()) return true;
     try {
       await this.enqueueAndDrainDelivery(
         {
@@ -1031,7 +1034,7 @@ export class ChatController {
   private async deliverCompactionStartNotice(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
-    if (!this.deliveryEnabled) return true;
+    if (!this.canDeliverReplies()) return true;
     try {
       const messageIds = await this.enqueueAndDrainDelivery(
         {
@@ -1242,6 +1245,10 @@ export class ChatController {
       this.stagedDelivery = null;
       this.saveState();
     }
+  }
+
+  async beginExternalWorking() {
+    await this.beginVisibleProcessingTurn({});
   }
 
   async runTurn(

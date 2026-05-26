@@ -83,7 +83,6 @@ const result = await rin.chat.runTurn({
   chatKey: "telegram/123456:7890",
   text: "Write a short status update for this room.",
   controllerKey: `agent-${Date.now()}`,
-  deliveryEnabled: true,
   affectChatBinding: false,
   disposeAfterTurn: true,
 });

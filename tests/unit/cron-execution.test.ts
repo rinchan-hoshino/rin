@@ -206,7 +206,6 @@ test("cron dedicated agent task creates and then preserves its bound session", a
       calls.map((item) => ({
         chatKey: item.chatKey,
         controllerKey: item.controllerKey,
-        deliveryEnabled: item.deliveryEnabled,
         affectChatBinding: item.affectChatBinding,
         disposeAfterTurn: item.disposeAfterTurn,
         text: item.text,
@@ -214,18 +213,16 @@ test("cron dedicated agent task creates and then preserves its bound session", a
       })),
       [
         {
-          chatKey: "telegram/demo:1",
+          chatKey: undefined,
           controllerKey: "cron_dedicated",
-          deliveryEnabled: false,
           affectChatBinding: false,
           disposeAfterTurn: false,
           text: "hello",
           sessionFile: dedicatedSessionFile,
         },
         {
-          chatKey: "telegram/demo:1",
+          chatKey: undefined,
           controllerKey: "cron_dedicated",
-          deliveryEnabled: false,
           affectChatBinding: false,
           disposeAfterTurn: false,
           text: "hello again",
@@ -290,16 +287,14 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
       {
         chatKey: calls[0].chatKey,
         controllerKey: calls[0].controllerKey,
-        deliveryEnabled: calls[0].deliveryEnabled,
         affectChatBinding: calls[0].affectChatBinding,
         disposeAfterTurn: calls[0].disposeAfterTurn,
         text: calls[0].text,
         sessionFile: calls[0].sessionFile,
       },
       {
-        chatKey: "telegram/demo:1",
+        chatKey: undefined,
         controllerKey: "cron_seeded",
-        deliveryEnabled: false,
         affectChatBinding: false,
         disposeAfterTurn: false,
         text: "hello again",
@@ -362,9 +357,7 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
     assert.equal(task.dedicatedSessionFile, undefined);
     assert.deepEqual(calls, [
       {
-        chatKey: undefined,
         controllerKey: "cron_none",
-        deliveryEnabled: false,
         affectChatBinding: false,
         disposeAfterTurn: true,
         shutdownAfterTurn: true,
@@ -380,7 +373,7 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
   }
 });
 
-test("cron frontend-bound no-session agent task uses frontend controller without chat delivery", async () => {
+test("cron frontend-bound no-session agent task uses frontend controller without controller auto-delivery", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const task = {
     id: "cron_frontend_bound",
@@ -409,7 +402,6 @@ test("cron frontend-bound no-session agent task uses frontend controller without
     assert.equal(calls.length, 1);
     assert.equal(calls[0].chatKey, undefined);
     assert.equal(calls[0].controllerKey, "desktop/main");
-    assert.equal(calls[0].deliveryEnabled, false);
     assert.equal(calls[0].affectChatBinding, false);
     assert.equal(calls[0].shutdownAfterTurn, true);
     assert.deepEqual(calls[0].promptMeta?.frontend, {
@@ -568,7 +560,6 @@ test("cron current-session instruction derives chat binding from session file me
       {
         chatKey: calls[0].chatKey,
         controllerKey: calls[0].controllerKey,
-        deliveryEnabled: calls[0].deliveryEnabled,
         affectChatBinding: calls[0].affectChatBinding,
         disposeAfterTurn: calls[0].disposeAfterTurn,
         text: calls[0].text,
@@ -579,7 +570,6 @@ test("cron current-session instruction derives chat binding from session file me
       {
         chatKey: "telegram/demo:1",
         controllerKey: undefined,
-        deliveryEnabled: true,
         affectChatBinding: true,
         disposeAfterTurn: false,
         text: "Ask for the review status.",
@@ -852,6 +842,42 @@ test("cron chat-bound agent task delivery records session binding", async () => 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].sessionFile, sessionFile);
     assert.equal(sent[0].sessionBinding, "conversation");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron chat-bound shell task toggles frontend working while running", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const working = [];
+  const task = {
+    id: "cron_shell_working",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
+    session: { mode: "none" },
+    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
+    target: { kind: "shell_command", command: "printf done" },
+    runCount: 1,
+  };
+  try {
+    await execMod.executeCronTask(task, {
+      agentDir,
+      chat: {
+        setWorkingVisible: async (payload) => {
+          working.push(payload);
+        },
+        send: async () => {},
+      },
+    });
+    assert.deepEqual(working, [
+      {
+        chatKey: "telegram/demo:1",
+        visible: true,
+      },
+      {
+        chatKey: "telegram/demo:1",
+        visible: false,
+      },
+    ]);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

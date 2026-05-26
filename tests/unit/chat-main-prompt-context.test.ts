@@ -153,11 +153,10 @@ test("chat controller passes sender metadata through the frontend prompt context
       const controller = new controllerMod.ChatController(
         { bots: [] },
         dataDir,
-        "telegram/1:2",
+        "cron/prompt:context",
         {
           logger: { warn() {}, info() {}, error() {} },
           h: {},
-          deliveryEnabled: false,
           affectChatBinding: false,
         },
       );

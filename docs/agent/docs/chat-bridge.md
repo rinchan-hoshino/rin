@@ -70,7 +70,6 @@ await rin.chat.runTurn({
   chatKey: "telegram/123456:7890",
   text: "Summarize the last status update for this room.",
   controllerKey: `agent-${Date.now()}`,
-  deliveryEnabled: true,
   affectChatBinding: false,
   disposeAfterTurn: true,
 });

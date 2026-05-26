@@ -23,7 +23,7 @@ const { getChatMessage, saveChatMessage } = await import(
 
 const NOTICE_NO_CHANGE = "💡 Self-improve review completed with no changes.";
 
-async function createController(chatKey = "telegram/1:2") {
+async function createController(chatKey = "telegram/1:2", deps = {}) {
   const tempDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-controller-"),
   );
@@ -39,6 +39,7 @@ async function createController(chatKey = "telegram/1:2") {
         return { type: "quote", attrs: { id } };
       },
     },
+    ...deps,
   });
   installChatControllerSessionClient(controller.constructor);
   controller.app = {
@@ -1198,8 +1199,7 @@ test("chat controller ignores replied session files for /new", async () => {
 });
 
 test("chat controller ignores replied session files for non-new commands", async () => {
-  const controller = await createController();
-  controller.deliveryEnabled = false;
+  const controller = await createController("cron/detached:test");
   const calls = [];
 
   const currentSessionFile = path.join(
@@ -1395,8 +1395,7 @@ test("chat controller starts /new immediately through the TUI new-session path",
 });
 
 test("chat controller keeps /status immediate during an active chat turn", async () => {
-  const controller = await createController();
-  controller.deliveryEnabled = false;
+  const controller = await createController("cron/detached:test");
   const calls = [];
   let firstRequestTag = "";
   controller.session = {
@@ -1738,6 +1737,19 @@ test("chat controller keeps transient daemon command errors out of chat replies"
     /connect ENOENT \/run\/user\/1001\/rin-daemon\/daemon.sock/,
   );
   assert.deepEqual(deliveries, []);
+});
+
+test("chat controller can expose external working indicators", async () => {
+  const actions = [];
+  const controller = await createController("telegram/1:2");
+  controller.app.bots[0].getWorkingIndicators = () => [
+    testPollingIndicator(actions),
+  ];
+  controller.driver.hasWorkerActiveTurn = () => true;
+
+  await controller.beginExternalWorking();
+
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
 });
 
 test("chat controller polls typing and rotating reactions while a turn is active", async () => {

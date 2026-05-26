@@ -389,7 +389,6 @@ async function runDetachedTurn(
         model: options.model,
         thinkingLevel: options.thinkingLevel,
         controllerKey: `cli-${Date.now()}`,
-        deliveryEnabled: Boolean(options.chatKey),
         affectChatBinding: false,
         disposeAfterTurn: true,
       },

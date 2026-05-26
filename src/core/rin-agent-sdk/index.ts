@@ -16,7 +16,6 @@ export type ChatRunTurnOptions = {
   model?: string;
   thinkingLevel?: string;
   controllerKey?: string;
-  deliveryEnabled?: boolean;
   affectChatBinding?: boolean;
   disposeAfterTurn?: boolean;
   shutdownAfterTurn?: boolean;

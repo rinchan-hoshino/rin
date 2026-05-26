@@ -22,6 +22,11 @@ import type { CronTaskFrontendBinding, CronTaskRecord } from "./cron.js";
 type CronChatCapability = {
   send?: (payload: ChatOutboxPayload) => Promise<any>;
   runTurn?: (payload: any) => Promise<any>;
+  setWorkingVisible?: (payload: {
+    chatKey?: string;
+    controllerKey?: string;
+    visible?: boolean;
+  }) => Promise<any>;
   terminateTurn?: (payload: {
     controllerKey?: string;
     chatKey?: string;
@@ -155,6 +160,31 @@ function resolveCronTaskFrontend(task: CronTaskRecord) {
     key,
     kind: String(frontend?.kind || "").trim() || undefined,
   };
+}
+
+function cronTaskRunControllerKey(task: CronTaskRecord) {
+  const frontend = resolveCronTaskFrontend(task);
+  return frontend && frontend.kind !== "chat" ? frontend.key : task.id;
+}
+
+async function setCronTaskFrontendWorking(
+  task: CronTaskRecord,
+  options: { chat?: CronChatCapability },
+  visible: boolean,
+) {
+  if (typeof options.chat?.setWorkingVisible !== "function") return false;
+  const frontend = resolveCronTaskFrontend(task);
+  if (!frontend) return false;
+  const chatKey = frontend.kind === "chat" ? frontend.key : undefined;
+  await options.chat
+    .setWorkingVisible({
+      ...(chatKey
+        ? { chatKey }
+        : { controllerKey: cronTaskRunControllerKey(task) }),
+      visible,
+    })
+    .catch(() => {});
+  return true;
 }
 
 function buildCronTaskPromptContext(task: CronTaskRecord) {
@@ -293,8 +323,7 @@ export async function executeCronAgentTask(
       : undefined;
   const frontend = resolveCronTaskFrontend(task);
   const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
-  const controllerKey =
-    frontend && frontend.kind !== "chat" ? frontend.key : task.id;
+  const controllerKey = cronTaskRunControllerKey(task);
   const sessionFile = await resolveCronSessionFile(task);
   const continuing = Boolean(
     sessionMode === "dedicated" && (sessionFile || task.runCount > 1),
@@ -305,9 +334,7 @@ export async function executeCronAgentTask(
   if (!basePrompt) throw new Error("cron_prompt_required");
   const prompt = basePrompt;
   const result = await options.chat.runTurn({
-    chatKey,
     controllerKey,
-    deliveryEnabled: false,
     affectChatBinding: false,
     disposeAfterTurn: sessionMode === "none",
     shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(task, sessionMode),
@@ -376,7 +403,6 @@ export async function executeCronSessionInstructionTask(
   );
   const result = await options.chat.runTurn({
     chatKey,
-    deliveryEnabled: true,
     affectChatBinding: true,
     disposeAfterTurn: false,
     text: instruction,
@@ -414,6 +440,7 @@ export async function executeCronTask(
       }
     | undefined;
   try {
+    await setCronTaskFrontendWorking(task, options, true);
     if (task.target.kind === "shell_command") {
       const text = await executeCronShellTask(task, {
         agentDir: options.agentDir,
@@ -473,6 +500,7 @@ export async function executeCronTask(
       error: task.lastError,
     };
   } finally {
+    await setCronTaskFrontendWorking(task, options, false);
     task.lastFinishedAt = nowIso();
     task.updatedAt = nowIso();
     if (maintenanceHistoryRecord) {

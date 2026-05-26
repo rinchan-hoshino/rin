@@ -242,7 +242,6 @@ function parseInboundCommand(
 export type ChatBridgeTurnPayload = {
   chatKey?: string;
   controllerKey?: string;
-  deliveryEnabled?: boolean;
   affectChatBinding?: boolean;
   disposeAfterTurn?: boolean;
   shutdownAfterTurn?: boolean;
@@ -286,6 +285,11 @@ export type ChatBridgeHandle = {
   getStatus: () => ChatBridgeStatus;
   send: (payload: ChatOutboxPayload) => Promise<{ delivered: true }>;
   runTurn: (payload: ChatBridgeTurnPayload) => Promise<any>;
+  setWorkingVisible: (payload: {
+    chatKey?: string;
+    controllerKey?: string;
+    visible?: boolean;
+  }) => Promise<{ handled: boolean }>;
   terminateTurn: (payload: {
     controllerKey?: string;
     chatKey?: string;
@@ -395,7 +399,6 @@ export async function startChatBridge(
     controllerKey: string,
     detachedOptions?: {
       chatKey?: string;
-      deliveryEnabled?: boolean;
       affectChatBinding?: boolean;
     },
   ) => {
@@ -415,7 +418,6 @@ export async function startChatBridge(
       controller = new ChatController(app, dataDir, controllerChatKey, {
         logger,
         h,
-        deliveryEnabled: detachedOptions?.deliveryEnabled,
         affectChatBinding: detachedOptions?.affectChatBinding,
         statePath,
         frontendClientFactory,
@@ -882,22 +884,17 @@ export async function startChatBridge(
     const { sessionFile } = normalizeSessionRef(payload);
     const controllerKey =
       safeString(payload?.controllerKey).trim() || "default";
-    const deliveryEnabled = payload?.deliveryEnabled !== false;
     const affectChatBinding = payload?.affectChatBinding !== false;
     const disposeAfterTurn = payload?.disposeAfterTurn === true;
     const shutdownAfterTurn = payload?.shutdownAfterTurn === true;
     if (!text) throw new Error("chat_text_required");
     const useBoundController = Boolean(
-      chatKey &&
-      controllerKey === "default" &&
-      deliveryEnabled &&
-      affectChatBinding,
+      chatKey && controllerKey === "default" && affectChatBinding,
     );
     const controller = useBoundController
       ? getController(chatKey)
       : getDetachedController(controllerKey, {
           chatKey,
-          deliveryEnabled,
           affectChatBinding,
         });
     try {
@@ -942,6 +939,30 @@ export async function startChatBridge(
       }
     }
   };
+  const setWorkingVisible = async (payload: {
+    chatKey?: string;
+    controllerKey?: string;
+    visible?: boolean;
+  }) => {
+    const chatKey = safeString(payload?.chatKey).trim();
+    const controllerKey =
+      safeString(payload?.controllerKey).trim() || (chatKey ? "default" : "");
+    if (!chatKey && !controllerKey) return { handled: false };
+    const useBoundController = Boolean(chatKey && controllerKey === "default");
+    const controller = useBoundController
+      ? getController(chatKey)
+      : getDetachedController(controllerKey, {
+          chatKey,
+          affectChatBinding: false,
+        });
+    if (payload?.visible === false) {
+      await controller.clearWorkingReaction().catch(() => {});
+      return { handled: true };
+    }
+    await controller.beginExternalWorking().catch(() => {});
+    return { handled: true };
+  };
+
   const terminateTurn = async (payload: {
     controllerKey?: string;
     chatKey?: string;
@@ -1087,6 +1108,7 @@ export async function startChatBridge(
     getStatus,
     send,
     runTurn,
+    setWorkingVisible,
     terminateTurn,
     evalBridge,
   };
