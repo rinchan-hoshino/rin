@@ -63,6 +63,9 @@ const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
 const STARTUP_INPUT_QUEUE_KEY = "__rinStartupInputQueue";
 const RPC_TRANSPORT_STATUS_COMPONENT_KEY = "__rinRpcTransportStatusComponent";
 const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
+const RIN_UPDATE_NOTICE_KEY = "__rinUpdateNotice";
+const RIN_UPDATE_NOTIFICATION_COMPONENT_KEY =
+  "__rinUpdateNotificationComponent";
 const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "starting",
   "connecting",
@@ -381,13 +384,60 @@ function shouldCoalesceTodoAfterEvent(event: any) {
   return TODO_TOOL_COALESCE_EVENTS.has(String(event?.type || ""));
 }
 
-function redrawCurrentSessionHistoryAfterRpcResync(instance: any) {
+function clearCurrentSessionRenderState(instance: any) {
   instance.chatContainer?.clear?.();
   instance.pendingMessagesContainer?.clear?.();
   instance.compactionQueuedMessages = [];
   instance.streamingComponent = undefined;
   instance.streamingMessage = undefined;
   instance.pendingTools?.clear?.();
+}
+
+function currentSessionHasRenderedHistory(instance: any) {
+  const messages =
+    instance?.session?.messages ?? instance?.session?.state?.messages;
+  if (Array.isArray(messages) && messages.length > 0) return true;
+  const entries = instance?.sessionManager?.getEntries?.();
+  return Array.isArray(entries) && entries.length > 0;
+}
+
+export function renderRinInitialSessionChrome(instance: any) {
+  instance.showLoadedResources?.({
+    force: false,
+    showDiagnosticsWhenQuiet: true,
+  });
+  instance.showStartupNoticesIfNeeded?.();
+  restoreRinUpdateNotificationAfterSessionRedraw(instance);
+}
+
+export function renderRinCurrentSessionStateAfterReplacement(instance: any) {
+  clearCurrentSessionRenderState(instance);
+  if (!currentSessionHasRenderedHistory(instance)) {
+    renderRinInitialSessionChrome(instance);
+  }
+  instance.renderInitialMessages?.();
+  restoreRinUpdateNotificationAfterSessionRedraw(instance);
+}
+
+async function withoutRebindChatDecorations(
+  instance: any,
+  operation: () => Promise<unknown>,
+) {
+  const originalShowLoadedResources = instance.showLoadedResources;
+  const originalShowStartupNoticesIfNeeded =
+    instance.showStartupNoticesIfNeeded;
+  instance.showLoadedResources = () => {};
+  instance.showStartupNoticesIfNeeded = () => {};
+  try {
+    return await operation();
+  } finally {
+    instance.showLoadedResources = originalShowLoadedResources;
+    instance.showStartupNoticesIfNeeded = originalShowStartupNoticesIfNeeded;
+  }
+}
+
+function redrawCurrentSessionHistoryAfterRpcResync(instance: any) {
+  clearCurrentSessionRenderState(instance);
   const context = instance.sessionManager.buildSessionContext();
   instance.renderSessionContext(context, {
     updateFooter: true,
@@ -429,10 +479,33 @@ export class DeferredRinUpdateNotification {
   }
 }
 
+function containerHasChild(container: any, child: any) {
+  return Boolean(
+    child &&
+    Array.isArray(container?.children) &&
+    container.children.includes(child),
+  );
+}
+
 export function insertRinUpdateNotificationPlaceholder(instance: any) {
   const placeholder = new DeferredRinUpdateNotification();
+  instance[RIN_UPDATE_NOTIFICATION_COMPONENT_KEY] = placeholder;
   instance.chatContainer.addChild(placeholder);
   return placeholder;
+}
+
+function ensureRinUpdateNotificationPlaceholder(
+  instance: any,
+  placeholder?: DeferredRinUpdateNotification,
+) {
+  if (containerHasChild(instance?.chatContainer, placeholder)) {
+    return placeholder;
+  }
+  const current = instance?.[RIN_UPDATE_NOTIFICATION_COMPONENT_KEY];
+  if (containerHasChild(instance?.chatContainer, current)) {
+    return current;
+  }
+  return insertRinUpdateNotificationPlaceholder(instance);
 }
 
 function selfImproveNoticeTurnState(instance: any) {
@@ -475,11 +548,20 @@ export function showSelfImproveReviewNotice(instance: any, event: any) {
 export function showRinUpdateNotification(
   instance: any,
   notice: RinUpdateNotice,
-  placeholder: DeferredRinUpdateNotification,
+  placeholder?: DeferredRinUpdateNotification,
 ) {
+  instance[RIN_UPDATE_NOTICE_KEY] = notice;
+  const target = ensureRinUpdateNotificationPlaceholder(instance, placeholder);
   const text = formatRinUpdateNotificationText(notice);
-  placeholder.setText(formatRinUpdateWarningText(text));
+  target.setText(formatRinUpdateWarningText(text));
   instance?.ui?.requestRender?.();
+}
+
+export function restoreRinUpdateNotificationAfterSessionRedraw(instance: any) {
+  const notice = instance?.[RIN_UPDATE_NOTICE_KEY];
+  if (!notice) return false;
+  showRinUpdateNotification(instance, notice);
+  return true;
 }
 
 function scheduleRinUpdateNotificationWhenReady(instance: any) {
@@ -872,6 +954,7 @@ export async function initializePiInteractiveModeWithoutManagedToolEnsure(
   instance.ui.start();
   instance.isInitialized = true;
   await instance.rebindCurrentSession();
+  renderRinInitialSessionChrome(instance);
   instance.renderInitialMessages();
   onThemeChange(() => {
     instance.ui.invalidate();
@@ -1154,6 +1237,24 @@ export async function applyRinTuiOverrides() {
           this.ui?.requestRender?.();
         }
         return result;
+      };
+  }
+
+  const originalRebindCurrentSession =
+    interactiveModeProto?.rebindCurrentSession;
+  if (typeof originalRebindCurrentSession === "function") {
+    interactiveModeProto.rebindCurrentSession =
+      async function rebindCurrentSessionWithoutChatDecoration() {
+        return await withoutRebindChatDecorations(this, () =>
+          originalRebindCurrentSession.call(this),
+        );
+      };
+  }
+
+  if (typeof interactiveModeProto?.renderCurrentSessionState === "function") {
+    interactiveModeProto.renderCurrentSessionState =
+      function renderCurrentSessionStateWithRinStartupChrome() {
+        renderRinCurrentSessionStateAfterReplacement(this);
       };
   }
 

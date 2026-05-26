@@ -217,6 +217,145 @@ test("async Rin update notice fills its startup placeholder instead of appending
   assert.equal(renderRequests, 1);
 });
 
+test("Rin update notice is reattached after chat redraw removes its placeholder", () => {
+  themeModule.initTheme("dark", false);
+  const chatContainer = new piTuiModule.Container();
+  const renderText = () =>
+    chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
+  let renderRequests = 0;
+  const instance = {
+    chatContainer,
+    ui: {
+      requestRender() {
+        renderRequests += 1;
+      },
+    },
+  };
+
+  const placeholder =
+    overrides.insertRinUpdateNotificationPlaceholder(instance);
+  chatContainer.clear();
+  chatContainer.addChild(new piTuiModule.Text("new session line", 1, 0));
+
+  overrides.showRinUpdateNotification(
+    instance,
+    {
+      version: "1.2.3",
+      channel: "stable",
+      currentVersion: "1.2.2",
+      command: "rin update",
+    },
+    placeholder,
+  );
+
+  const rendered = renderText();
+  assert.ok(rendered.includes("Rin update available: 1.2.3"));
+  assert.ok(rendered.includes("new session line"));
+  assert.equal(renderRequests, 1);
+});
+
+test("session rebind does not own chat startup decoration rendering", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const calls: string[] = [];
+  const instance = {
+    unsubscribe() {
+      calls.push("unsubscribe");
+    },
+    applyRuntimeSettings() {
+      calls.push("settings");
+    },
+    async bindCurrentSessionExtensions() {
+      calls.push("bind");
+      this.showLoadedResources({ force: false });
+      this.showStartupNoticesIfNeeded();
+    },
+    subscribeToAgent() {
+      calls.push("subscribe");
+    },
+    async updateAvailableProviderCount() {
+      calls.push("providers");
+    },
+    updateEditorBorderColor() {
+      calls.push("border");
+    },
+    updateTerminalTitle() {
+      calls.push("title");
+    },
+    showLoadedResources() {
+      calls.push("resources");
+    },
+    showStartupNoticesIfNeeded() {
+      calls.push("startup-notices");
+    },
+  };
+
+  await codingAgentModule.InteractiveMode.prototype.rebindCurrentSession.call(
+    instance,
+  );
+
+  assert.deepEqual(calls, [
+    "unsubscribe",
+    "settings",
+    "bind",
+    "subscribe",
+    "providers",
+    "border",
+    "title",
+  ]);
+});
+
+test("session replacement final render owns startup decorations for empty sessions", () => {
+  const calls: string[] = [];
+  const instance = {
+    chatContainer: { clear() {} },
+    pendingMessagesContainer: { clear() {} },
+    pendingTools: new Map([["tool", true]]),
+    session: { messages: [] },
+    showLoadedResources(options: unknown) {
+      calls.push(`resources:${JSON.stringify(options)}`);
+    },
+    showStartupNoticesIfNeeded() {
+      calls.push("startup-notices");
+    },
+    renderInitialMessages() {
+      calls.push("messages");
+    },
+  };
+
+  overrides.renderRinCurrentSessionStateAfterReplacement(instance);
+
+  assert.deepEqual(calls, [
+    'resources:{"force":false,"showDiagnosticsWhenQuiet":true}',
+    "startup-notices",
+    "messages",
+  ]);
+  assert.equal(instance.pendingTools.size, 0);
+});
+
+test("session replacement final render does not inject startup decorations into history", () => {
+  const calls: string[] = [];
+  const instance = {
+    chatContainer: { clear() {} },
+    pendingMessagesContainer: { clear() {} },
+    pendingTools: new Map(),
+    session: { messages: [{ role: "user", content: "hello" }] },
+    showLoadedResources() {
+      calls.push("resources");
+    },
+    showStartupNoticesIfNeeded() {
+      calls.push("startup-notices");
+    },
+    renderInitialMessages() {
+      calls.push("messages");
+    },
+  };
+
+  overrides.renderRinCurrentSessionStateAfterReplacement(instance);
+
+  assert.deepEqual(calls, ["messages"]);
+});
+
 test("self-improve notices render as chat custom messages", () => {
   themeModule.initTheme("dark", false);
   const chatContainer = new piTuiModule.Container();
