@@ -1143,7 +1143,7 @@ test("frontend SDK turn driver does not emit text-only assistant messages as int
   assert.deepEqual(interimTexts, []);
 });
 
-test("frontend SDK turn driver rejects overflow continuation markers instead of following them", async () => {
+test("frontend SDK turn driver completes Pi-native overflow recovery", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.prompt = async (_text: string, options: any = {}) => {
@@ -1170,32 +1170,26 @@ test("frontend SDK turn driver rejects overflow continuation markers instead of 
       willRetry: true,
       result: { summary: "compacted" },
     });
+    await emitDriverEvent(driver, { type: "agent_start" });
     await emitDriverEvent(driver, {
-      type: "rpc_turn_event",
-      event: "error",
-      requestTag: options.requestTag,
-      error: "context_length_exceeded",
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "continued after compaction" }],
+      },
     });
-    setTimeout(() => {
-      void (async () => {
-        await emitDriverEvent(driver, { type: "agent_start" });
-        await emitDriverEvent(driver, {
-          type: "message_end",
-          message: {
-            role: "assistant",
-            stopReason: "stop",
-            content: [{ type: "text", text: "continued after compaction" }],
-          },
-        });
-        await emitDriverEvent(driver, { type: "agent_end" });
-      })();
-    }, 5);
+    await emitDriverEvent(driver, { type: "agent_end" });
+    await emitRpcTurnComplete(
+      driver,
+      options.requestTag,
+      "continued after compaction",
+    );
   };
 
-  await assert.rejects(
-    () => driver.runTurn({ text: "hello" }),
-    /context_length_exceeded/,
-  );
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "continued after compaction");
 });
 
 test("frontend SDK turn driver waits for an already submitted restored prompt instead of resubmitting", async () => {

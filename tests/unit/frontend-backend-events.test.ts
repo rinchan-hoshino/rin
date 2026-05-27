@@ -275,7 +275,7 @@ test("frontend backend event translator does not complete turns from interim tex
   assert.deepEqual(translator.translate({ type: "agent_end" }), []);
 });
 
-test("frontend backend event translator ignores overflow continuation markers", () => {
+test("frontend backend event translator treats overflow compaction as ordinary backend progress", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -302,22 +302,6 @@ test("frontend backend event translator ignores overflow continuation markers", 
   );
   assert.deepEqual(
     translator.translate({
-      type: "rpc_turn_event",
-      event: "error",
-      error: "context_length_exceeded",
-    }),
-    [
-      {
-        type: "turn_error",
-        error: "context_length_exceeded",
-        sessionId: undefined,
-        sessionFile: undefined,
-        requestTag: undefined,
-      },
-    ],
-  );
-  assert.deepEqual(
-    translator.translate({
       type: "agent_start",
     }),
     [{ type: "turn_accepted" }],
@@ -333,7 +317,31 @@ test("frontend backend event translator ignores overflow continuation markers", 
     }),
     [{ type: "assistant_final", text: "continued" }],
   );
-  assert.deepEqual(translator.translate({ type: "agent_end" }), []);
+  assert.deepEqual(
+    translator.translate({
+      type: "rpc_turn_event",
+      event: "complete",
+      finalText: "continued",
+    }),
+    [
+      {
+        type: "assistant_final",
+        text: "continued",
+        result: undefined,
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: undefined,
+      },
+      {
+        type: "turn_complete",
+        finalText: "continued",
+        result: undefined,
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: undefined,
+      },
+    ],
+  );
 });
 
 test("frontend backend event translator returns final typed turn events after completion", () => {

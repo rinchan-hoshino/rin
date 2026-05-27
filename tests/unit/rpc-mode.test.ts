@@ -2095,7 +2095,7 @@ test(
 );
 
 test(
-  "rpc mode surfaces context errors instead of following overflow continuation markers",
+  "rpc mode waits for Pi-native overflow recovery inside prompt lifecycle",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2142,6 +2142,7 @@ test(
           stateMessages.push(errorMessage);
           emit({ type: "message_end", message: errorMessage });
           emit({ type: "agent_end" });
+          emit({ type: "compaction_start", reason: "overflow" });
           emit({
             type: "compaction_end",
             reason: "overflow",
@@ -2149,17 +2150,16 @@ test(
             willRetry: true,
             result: { summary: "ok" },
           });
-          setTimeout(() => {
-            const finalMessage = {
-              role: "assistant",
-              content: [{ type: "text", text: "continued final" }],
-              stopReason: "stop",
-              errorMessage: "",
-            };
-            stateMessages.push(finalMessage);
-            emit({ type: "agent_start" });
-            emit({ type: "message_end", message: finalMessage });
-          }, 5);
+          const finalMessage = {
+            role: "assistant",
+            content: [{ type: "text", text: "continued final" }],
+            stopReason: "stop",
+            errorMessage: "",
+          };
+          stateMessages.push(finalMessage);
+          emit({ type: "agent_start" });
+          emit({ type: "message_end", message: finalMessage });
+          emit({ type: "agent_end" });
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
@@ -2231,15 +2231,15 @@ test(
           }
         })
         .filter(Boolean);
-      const error = emitted.find(
-        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      const completion = emitted.find(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
       );
-      assert.equal(error?.requestTag, "tag-1");
-      assert.match(String(error?.error || ""), /context_length_exceeded/);
+      assert.equal(completion?.requestTag, "tag-1");
+      assert.equal(completion?.finalText, "continued final");
       assert.equal(
         emitted.some(
-          (event) =>
-            event.type === "rpc_turn_event" && event.event === "complete",
+          (event) => event.type === "rpc_turn_event" && event.event === "error",
         ),
         false,
       );

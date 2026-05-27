@@ -131,7 +131,8 @@ async function main() {
           await (await getHostedChatBridge()).runTurn(payload),
         typing: async (payload) =>
           await (await getHostedChatBridge()).typing(payload),
-        react: async (payload) => await (await getHostedChatBridge()).react(payload),
+        react: async (payload) =>
+          await (await getHostedChatBridge()).react(payload),
         setWorkingVisible: async (payload) =>
           await (await getHostedChatBridge()).setWorkingVisible(payload),
         terminateTurn: async (payload) =>

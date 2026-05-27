@@ -525,7 +525,7 @@ test("chat controller pulls self-improve notices after final delivery checkpoint
   assert.deepEqual(deliveries, ["final before notice", NOTICE_NO_CHANGE]);
 });
 
-test("chat controller surfaces SDK overflow errors instead of following continuation markers", async () => {
+test("chat controller delivers Pi-native overflow recovery finals", async () => {
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -585,44 +585,31 @@ test("chat controller surfaces SDK overflow errors instead of following continua
       });
       await controller.handleClientEvent({
         type: "ui",
+        payload: { type: "agent_start" },
+      });
+      await controller.handleClientEvent({
+        type: "ui",
         payload: {
-          type: "rpc_turn_event",
-          event: "error",
-          requestTag: options.requestTag,
-          error: "context_length_exceeded",
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [{ type: "text", text: "continued answer" }],
+          },
         },
       });
-      setTimeout(() => {
-        void (async () => {
-          await controller.handleClientEvent({
-            type: "ui",
-            payload: { type: "agent_start" },
-          });
-          await controller.handleClientEvent({
-            type: "ui",
-            payload: {
-              type: "message_end",
-              message: {
-                role: "assistant",
-                stopReason: "stop",
-                content: [{ type: "text", text: "continued answer" }],
-              },
-            },
-          });
-          await controller.handleClientEvent({
-            type: "ui",
-            payload: { type: "agent_end" },
-          });
-        })();
-      }, 5);
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: { type: "agent_end" },
+      });
+      emitRpcTurnComplete(controller, options, "continued answer");
     },
   };
 
-  await assert.rejects(
-    () => controller.runTurn({ text: "hello", attachments: [] }),
-    /context_length_exceeded/,
-  );
-  assert.deepEqual(deliveries, []);
+  const result = await controller.runTurn({ text: "hello", attachments: [] });
+
+  assert.equal(result.finalText, "continued answer");
+  assert.deepEqual(deliveries, ["continued answer"]);
 });
 
 test("chat controller resets chat prompt sessions through the session settings reload path", async () => {
