@@ -35,7 +35,13 @@ test("runtime error formatter maps known internal markers to actionable messages
   );
   assert.equal(
     formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
-    "Rin finished the turn but did not receive a final reply. Retry the action; if it repeats, restart Rin.",
+    "Rin finished the turn but did not receive a final reply. The turn may still be recovering; check the session output or run rin doctor if it repeats.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rpc_turn_final_output_missing").includes(
+      "Retry the action; if it repeats, restart Rin",
+    ),
+    false,
   );
   assert.equal(
     formatRuntimeErrorForUser(

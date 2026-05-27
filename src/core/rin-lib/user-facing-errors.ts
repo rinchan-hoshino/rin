@@ -140,7 +140,7 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "External chat adapter must return both an adapter and a bot. Fix the adapter implementation and restart Rin.",
 
   final_assistant_text_missing: () =>
-    "Rin finished the turn but did not produce final reply text. Retry the action; if it repeats, restart Rin.",
+    "Rin finished the turn but did not produce final reply text. Check the session output; if it repeats, run rin doctor.",
   frontend_model_not_found: modelNotFound,
   frontend_session_not_connected: () =>
     "Rin is not connected to a session yet. Reconnect or start a new session, then retry.",
@@ -397,7 +397,7 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rpc_turn_failed: () =>
     "Rin failed while running the remote turn. Retry the action; if it repeats, restart Rin.",
   rpc_turn_final_output_missing: () =>
-    "Rin finished the turn but did not receive a final reply. Retry the action; if it repeats, restart Rin.",
+    "Rin finished the turn but did not receive a final reply. The turn may still be recovering; check the session output or run rin doctor if it repeats.",
 
   run_mode_value_required: () =>
     "Run command needs a mode value. Choose text or json and retry.",

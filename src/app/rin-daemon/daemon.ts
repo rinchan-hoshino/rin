@@ -58,13 +58,17 @@ async function main() {
     Awaited<ReturnType<typeof startChatBridge>>
   > | null = null;
 
-  const stopServices = async () => {
+  const stopHostedServices = async () => {
     await chatBridge?.stop().catch(() => {});
-    await backgroundExtensionManager?.stop().catch(() => {});
     await stopSearxngSidecar(runtime.agentDir, {
       instanceId: webSearchInstanceId,
       logger: console,
     }).catch(() => {});
+  };
+
+  const stopAllServices = async () => {
+    await stopHostedServices();
+    await backgroundExtensionManager?.stop().catch(() => {});
   };
 
   const getSettingsManager = async () => {
@@ -109,7 +113,7 @@ async function main() {
       console.error(
         `rin_app_daemon_services_failed:${String(error?.message || error || "unknown")}`,
       );
-      await stopServices().catch(() => {});
+      await stopAllServices().catch(() => {});
       await daemonLock?.release().catch(() => {});
       process.exit(1);
     });
@@ -206,10 +210,10 @@ async function main() {
         localFrontendConnectorResolver?.(connector);
         localFrontendConnectorResolver = null;
       },
-      onShutdown: stopServices,
+      onShutdown: stopHostedServices,
     });
   } catch (error) {
-    await stopServices().catch(() => {});
+    await stopAllServices().catch(() => {});
     await daemonLock?.release().catch(() => {});
     throw error;
   }

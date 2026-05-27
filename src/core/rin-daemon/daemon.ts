@@ -673,6 +673,7 @@ export async function startDaemon(
     if (shuttingDown) return;
     shuttingDown = true;
     cronScheduler.stop();
+    await Promise.resolve(options.onShutdown?.()).catch(() => {});
     await backgroundExtensionManager.stop().catch(() => {});
     workerPool.beginShutdown();
     for (const socket of Array.from(activeSockets)) {
@@ -692,7 +693,6 @@ export async function startDaemon(
       } catch {}
     }
     await workerPool.shutdown(shutdownGraceMs);
-    await Promise.resolve(options.onShutdown?.()).catch(() => {});
     await instanceLock.release().catch(() => {});
     process.exit(0);
   };
