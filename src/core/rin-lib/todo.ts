@@ -119,24 +119,8 @@ function formatTodoChecklistRender(
   return lines.join("\n");
 }
 
-function getTodoBackground(
-  theme: Theme,
-  options: { isError?: boolean; isPartial?: boolean },
-) {
-  const bg = options.isPartial
-    ? "toolPendingBg"
-    : options.isError
-      ? "toolErrorBg"
-      : "toolSuccessBg";
-  return (text: string) => theme.bg(bg, text);
-}
-
-function renderTodoText(
-  text: string,
-  theme: Theme,
-  options: { isError?: boolean; isPartial?: boolean },
-) {
-  return new Text(text, 1, 1, getTodoBackground(theme, options));
+function renderTodoText(text: string) {
+  return new Text(text, 0, 0);
 }
 
 class TodoListComponent {
@@ -273,7 +257,6 @@ export default function todoCapability(): RinCapabilityDefinition {
       "Todo output is user-visible checklist state; read and write actions should leave the checklist display current.",
     ],
     parameters: TodoParams,
-    renderShell: "self",
 
     async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
       switch (params.action) {
@@ -390,19 +373,11 @@ export default function todoCapability(): RinCapabilityDefinition {
       return new Container();
     },
 
-    renderResult(result, { expanded, isPartial }, theme, context) {
+    renderResult(result, { expanded }, theme, _context) {
       const details = readTodoDetails(result.details);
-      const renderOptions = {
-        isPartial: Boolean(isPartial),
-        isError: Boolean(context?.isError || details?.error),
-      };
       if (!details) {
         const text = result.content[0];
-        return renderTodoText(
-          text?.type === "text" ? text.text : "",
-          theme,
-          renderOptions,
-        );
+        return renderTodoText(text?.type === "text" ? text.text : "");
       }
 
       const checklist = formatTodoChecklistRender(
@@ -413,12 +388,10 @@ export default function todoCapability(): RinCapabilityDefinition {
       if (details.error) {
         return renderTodoText(
           `${theme.fg("error", `Error: ${details.error}`)}\n${checklist}`,
-          theme,
-          renderOptions,
         );
       }
 
-      return renderTodoText(checklist, theme, renderOptions);
+      return renderTodoText(checklist);
     },
   };
 

@@ -304,7 +304,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
   );
 
   const todoTool = session.getToolDefinition("todo");
-  assert.equal(todoTool.renderShell, "self");
+  assert.equal(todoTool.renderShell, undefined);
 
   const todoCall = todoTool
     .renderCall({ action: "add", text: "Wire core todo" }, theme, renderContext)
@@ -331,28 +331,12 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
       renderContext,
     )
     .render(80);
-  assert.match(todoResultLines[0], /^<toolSuccessBg>\s*<\/toolSuccessBg>$/);
-  assert.match(
-    todoResultLines.at(-1) ?? "",
-    /^<toolSuccessBg>\s*<\/toolSuccessBg>$/,
-  );
-  assert.ok(
-    todoResultLines.every(
-      (line) =>
-        line.startsWith("<toolSuccessBg>") && line.endsWith("</toolSuccessBg>"),
-    ),
-    `expected every todo line to be painted, got ${JSON.stringify(todoResultLines)}`,
-  );
-  assert.doesNotMatch(todoResultLines[0], /Wire core todo|Ship renderer/);
-  assert.doesNotMatch(
-    todoResultLines.at(-1) ?? "",
-    /Wire core todo|Ship renderer/,
-  );
+  assert.equal(todoResultLines.length, 2);
+  assert.match(todoResultLines[0], /○ Wire core todo/);
+  assert.match(todoResultLines[1], /✓ Ship renderer/);
 
   const todoResult = todoResultLines.join("\n");
-  assert.match(todoResult, /<toolSuccessBg>/);
-  assert.match(todoResult, /○ Wire core todo/);
-  assert.match(todoResult, /✓ Ship renderer/);
+  assert.doesNotMatch(todoResult, /<toolSuccessBg>/);
   assert.doesNotMatch(todoResult, /#1|#2|Checklist add|Added todo|completed/);
 });
 
