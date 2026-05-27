@@ -17,6 +17,7 @@ import {
   formatSelfImproveResult,
 } from "./lib.js";
 import { readSessionMetadata } from "../session/metadata.js";
+import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
 
 const DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES = 5;
 const reviewStateBySession = new Map<
@@ -234,6 +235,7 @@ export default function selfImproveModule(
     name: "self_improve",
     tools: [],
     hooks: {
+      tool_execution_start: [recordSelfImproveSkillReadEvent],
       message_end: [
         async (event, ctx) => {
           const meta = sessionMeta(ctx);

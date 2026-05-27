@@ -45,6 +45,11 @@ const maintainer = await import(
     path.join(rootDir, "dist", "core", "self-improve", "maintainer.js"),
   ).href
 );
+const skillUsage = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "self-improve", "skill-usage.js"),
+  ).href
+);
 
 async function withTempRoot(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-memory-test-"));
@@ -212,6 +217,97 @@ test("self-improve paths resolve under the agent root", () => {
     selfImprovePaths.maintenanceLockPath(root),
     path.join(stateDir, "maintenance-worker.lock"),
   );
+});
+
+test("self-improve skill usage stats detect and record read skill files", async () => {
+  await withTempRoot(async (root) => {
+    const skillPath = path.join(
+      root,
+      "self_improve",
+      "skills",
+      "demo-skill",
+      "SKILL.md",
+    );
+    assert.deepEqual(
+      skillUsage.detectSelfImproveSkillRead({
+        agentDir: root,
+        cwd: root,
+        args: { path: skillPath },
+      }),
+      { skillName: "demo-skill", skillPath },
+    );
+    assert.deepEqual(
+      skillUsage.detectSelfImproveSkillRead({
+        agentDir: root,
+        cwd: root,
+        args: { path: "self_improve/skills/demo-skill/SKILL.md" },
+      }),
+      { skillName: "demo-skill", skillPath },
+    );
+    assert.equal(
+      skillUsage.detectSelfImproveSkillRead({
+        agentDir: root,
+        cwd: root,
+        args: {
+          path: path.join(root, "self_improve", "prompts", "agent_profile.md"),
+        },
+      }),
+      null,
+    );
+
+    await skillUsage.recordSelfImproveSkillUsage({
+      agentDir: root,
+      skillName: "demo-skill",
+      skillPath,
+      sessionId: "session-1",
+      sessionFile: "/tmp/session.jsonl",
+      timestamp: "2026-05-27T00:00:00.000Z",
+    });
+    await skillUsage.recordSelfImproveSkillUsage({
+      agentDir: root,
+      skillName: "demo-skill",
+      skillPath,
+      sessionId: "session-2",
+      timestamp: "2026-05-27T00:01:00.000Z",
+    });
+    const stats = skillUsage.readSkillUsageStats(root);
+    assert.equal(stats.skills["demo-skill"].count, 2);
+    assert.equal(
+      stats.skills["demo-skill"].firstUsedAt,
+      "2026-05-27T00:00:00.000Z",
+    );
+    assert.equal(
+      stats.skills["demo-skill"].lastUsedAt,
+      "2026-05-27T00:01:00.000Z",
+    );
+    assert.equal(stats.skills["demo-skill"].lastSessionId, "session-2");
+    assert.equal(stats.skills["demo-skill"].lastPath, skillPath);
+  });
+});
+
+test("self-improve module records read-tool skill usage", async () => {
+  await withTempRoot(async (root) => {
+    const mod = selfImproveIndex.default({});
+    await mod.hooks.tool_execution_start[0](
+      {
+        toolName: "read",
+        args: {
+          path: path.join(
+            root,
+            "self_improve",
+            "skills",
+            "active-skill",
+            "SKILL.md",
+          ),
+        },
+      },
+      { agentDir: root, cwd: root, sessionId: "session-1" },
+    );
+    assert.equal(
+      skillUsage.readSkillUsageStats(root).skills["active-skill"].count,
+      1,
+    );
+  });
 });
 
 test("self-improve agent dir resolution follows Rin runtime profile precedence", () => {
@@ -767,6 +863,8 @@ test("self-improve maintenance manual codifies review rules", async () => {
   assert.match(manual, /explicit owner corrections/);
   assert.match(manual, /Use prompt baselines only for every-turn identity/);
   assert.match(manual, /Review priorities/);
+  assert.match(manual, /skill-usage\.json/);
+  assert.match(manual, /low or absent usage as a cleanup signal/);
   assert.match(manual, /If the owner corrects behavior/);
   assert.match(manual, /patch that current skill first/);
   assert.match(manual, /patch the umbrella skill/);

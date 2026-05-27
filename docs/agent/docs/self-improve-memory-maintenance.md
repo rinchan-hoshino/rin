@@ -24,16 +24,17 @@ Do not turn a memory review into a runtime feature proposal: do not add new buil
 
 1. Inspect the current prompt slots.
 2. Inspect the current workflow skill, any umbrella skill that covers the same class of work, and the fixed memory skill destinations.
-3. Extract candidate lessons from the available evidence.
-4. Score each candidate quickly:
+3. Inspect `<agentDir>/self_improve/state/skill-usage.json` when present. Use low or absent usage as a cleanup signal, not automatic deletion proof.
+4. Extract candidate lessons from the available evidence.
+5. Score each candidate quickly:
    - attention: affects future behavior;
    - emotion: strong correction, frustration, risk, preference, blocker, or failed prior behavior;
    - repetition: repeated in evidence or confirmed by existing memory.
-5. Choose the smallest correct destination using the destination priority below.
-6. Before creating a memory-index transaction, scan the relevant monthly index for an existing entry with the same domain, object, error, decision, or work thread. Merge into that existing topic transaction when it is the same topic.
-7. Rewrite the destination compactly. Replace or remove stale, lower-priority, conflicting, or duplicate lines instead of appending another rule.
-8. Prune stale short-term records and move misplaced material to the smallest correct destination.
-9. Validate skill frontmatter after editing skills.
+6. Choose the smallest correct destination using the destination priority below.
+7. Before creating a memory-index transaction, scan the relevant monthly index for an existing entry with the same domain, object, error, decision, or work thread. Merge into that existing topic transaction when it is the same topic.
+8. Rewrite the destination compactly. Replace or remove stale, lower-priority, conflicting, or duplicate lines instead of appending another rule.
+9. Prune stale short-term records and move misplaced material to the smallest correct destination.
+10. Validate skill frontmatter after editing skills.
 
 ## Review priorities
 
@@ -116,6 +117,7 @@ Use this checklist in every review:
 
 - prompt slots that need updates after repeated behavioral feedback;
 - overlapping skills that should merge or become a single canonical skill with only intentional aliases left;
+- skill usage statistics that suggest stale, unused, or rarely used ordinary skills worth merging, aliasing, or pruning;
 - broad skills that need clearer structure;
 - narrow skills that belong inside a larger workflow;
 - content filed under the wrong skill;
