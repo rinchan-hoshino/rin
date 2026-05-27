@@ -22,15 +22,14 @@ Do not turn a memory review into a runtime feature proposal: do not add new buil
 
 ## Extraction gate
 
-Before writing memory, classify the lesson by ownership and lifetime:
+Before writing memory, reduce each candidate to the smallest durable lesson:
 
-- Product/source defect: fix the producer or product doc; do not store a memory workaround. Example: duplicated prompt context from two document fields belongs in source assembly, not in a new rule reminding agents to ignore duplicates.
-- Always-on invariant: write a prompt baseline only if the rule must affect most future turns. Example: cross-task authority and evidence rules may belong in `core_doctrine`; frontend parity, status wording, account repair, or TDD details belong in owning skills.
-- Reusable workflow: update the closest current or umbrella skill. Preserve only the trigger and operational rule needed for future execution.
-- Skill visibility/lifecycle: do not keep an alias, paused workflow, one-off task, internal lookup, or narrow fragment as a standalone visible skill unless it has a distinct recurring trigger. Merge, hide, alias intentionally, or delete it.
-- Historical evidence: use `memory-index` only when future lookup needs provenance or chronology; otherwise leave evidence in transcripts.
-- Temporary continuity: use `short-term-memory` only for active unfinished work; remove it when the cleanup condition is met.
-- No write: if the useful action is already source/doc cleanup, skill consolidation, or no-op reporting, do not create another memory item.
+- Keep only lessons that change future behavior, routing, decisions, execution, or recall.
+- Convert concrete incidents into their reusable rule; do not preserve implementation-shaped details unless future work needs them.
+- Choose the narrowest durable home: prompt baseline for cross-turn invariants, current or umbrella skill for workflows, memory-index for provenance, short-term-memory for active continuity, or no write.
+- Prefer replacing, merging, moving, hiding, or deleting existing material over appending another item.
+- Keep visible skills only when they have a distinct recurring trigger and reusable operating value.
+- Drop stale, solved, speculative, duplicate, emotional-only, and one-off details after extracting any reusable lesson.
 
 ## Review workflow
 
@@ -38,7 +37,7 @@ Before writing memory, classify the lesson by ownership and lifetime:
 2. Inspect the current workflow skill, any umbrella skill that covers the same class of work, and the fixed memory skill destinations.
 3. Inspect `<agentDir>/self_improve/state/skill-usage.json` when present. Use low or absent usage as a cleanup signal, not automatic deletion proof.
 4. Extract candidate lessons from the available evidence.
-5. Apply the extraction gate above before scoring. Discard source-defect workarounds, one-off details, and lessons already covered by the owning surface.
+5. Apply the extraction gate above before scoring. Discard one-off details and lessons already covered by the owning surface.
 6. Score each remaining candidate quickly:
    - attention: affects future behavior;
    - emotion: strong correction, frustration, risk, preference, blocker, or failed prior behavior;
@@ -84,7 +83,7 @@ Location: `<agentDir>/self_improve/prompts/*.md`
 - `user_profile.md`: basic user information; limit 4 lines.
 - `core_doctrine.md`: durable methodology, worldview, values, and decision rules; limit 32 lines.
 
-Use prompt baselines only for every-turn identity, user identity, or doctrine invariants. Put procedures, examples, durable facts, and troubleshooting detail in skills or memory-index destinations. Do not use prompt baselines as a catch-all for lessons from a single product area.
+Use prompt baselines only for every-turn identity, user identity, or doctrine invariants. Put procedures, examples, durable facts, and troubleshooting detail in skills or memory-index destinations.
 
 Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic. When a new rule supersedes existing prompt text, replace or remove the lower-priority/conflicting line instead of appending another rule. Prefer shrinking an overgrown baseline over preserving every historical instruction.
 
