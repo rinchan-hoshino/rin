@@ -218,8 +218,11 @@ function pickBackgroundServiceProvider(
   moduleValue: any,
   options: { allowDefault?: boolean } = {},
 ): BackgroundServiceProvider | null {
+  if (typeof moduleValue?.createBackgroundService === "function") {
+    const service = moduleValue.createBackgroundService();
+    if (typeof service?.start === "function") return service;
+  }
   const candidates = [
-    moduleValue?.createBackgroundService,
     options.allowDefault ? moduleValue?.rinBackgroundService : undefined,
     options.allowDefault ? moduleValue?.backgroundServiceProvider : undefined,
     options.allowDefault ? moduleValue : undefined,
@@ -515,7 +518,7 @@ function listBundledBackgroundExtensionConfigs(
       packageName: "rin:heartbeat-notifier",
       version: "",
       config: {},
-      optional: true,
+      optional: false,
       modulePath: path.join(moduleRoot, "index.ts"),
     },
   ];
