@@ -1,18 +1,15 @@
 export async function loadRinSessionManagerModule() {
-  const { SessionManager } =
-    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js");
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
   return { SessionManager };
 }
 
 export async function loadRinInteractiveModeModule() {
-  const { InteractiveMode } =
-    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js");
+  const { InteractiveMode } = await import("@earendil-works/pi-coding-agent");
   return { InteractiveMode };
 }
 
 export async function loadRinInteractiveFooterModule() {
-  const { FooterComponent } =
-    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/footer.js");
+  const { FooterComponent } = await import("@earendil-works/pi-coding-agent");
   return { FooterComponent };
 }
 
@@ -24,7 +21,7 @@ export async function loadRinInteractiveThemeModule() {
 
 export async function loadRinSessionSelectorModule() {
   const { SessionSelectorComponent } =
-    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/session-selector.js");
+    await import("@earendil-works/pi-coding-agent");
   return {
     SessionSelectorComponent,
   };

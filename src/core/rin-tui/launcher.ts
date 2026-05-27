@@ -1,5 +1,7 @@
-import { InteractiveMode } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js";
-import type { InteractiveModeOptions } from "@earendil-works/pi-coding-agent";
+import {
+  InteractiveMode,
+  type InteractiveModeOptions,
+} from "@earendil-works/pi-coding-agent";
 
 import {
   applyRuntimeProfileEnvironment,
