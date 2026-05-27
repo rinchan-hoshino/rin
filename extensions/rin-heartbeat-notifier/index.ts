@@ -15,6 +15,16 @@ type HeartbeatAgentConfig = {
   state?: Record<string, any>;
 };
 
+type ChildAgentEntry = {
+  agentId: string;
+  purpose: string;
+  status: string;
+  chatKey: string;
+  statePath?: string;
+  dueAt?: string;
+  privateInstructionPath?: string;
+};
+
 type BackgroundContext = {
   agentDir: string;
   dataDir: string;
@@ -271,6 +281,16 @@ function buildRoundPrompt() {
   return "A new round has started.";
 }
 
+function buildChildInitialPrompt(options: {
+  instructionsPath: string;
+  parentAgent: HeartbeatAgentConfig;
+  child: ChildAgentEntry;
+  parentStatePath: string;
+  childStatePath: string;
+}) {
+  return `Read the bundled heartbeat instructions at ${options.instructionsPath}. You are delegated child agent ${options.child.agentId} for parent ${options.parentAgent.agentId}. Your purpose is: ${options.child.purpose}. Parent state file: ${options.parentStatePath}. Your child state file: ${options.childStatePath}. Work on the delegated task, use normal Rin tools when needed, send user-visible chat only when the delegated result should reach the chat, and update both your child state and the matching parent state childAgents entry before finishing.`;
+}
+
 async function deleteLegacyScheduledTask(agent: HeartbeatAgentConfig) {
   try {
     await requestDaemonCommand({
@@ -301,6 +321,87 @@ function hasOpenWakeChecklist(state: any) {
   return [...checklist, ...legacyTodos, ...childAgents].some(
     isOpenChecklistItem,
   );
+}
+
+function normalizeChildAgentEntry(
+  entry: unknown,
+  parent: HeartbeatAgentConfig,
+): ChildAgentEntry | null {
+  if (!isRecord(entry)) return null;
+  const status = text(entry.status).toLowerCase();
+  if (
+    ["done", "completed", "cancelled", "canceled", "closed"].includes(status)
+  ) {
+    return null;
+  }
+  const agentId = text(entry.agentId) || text(entry.id);
+  if (!agentId) return null;
+  const purpose =
+    text(entry.purpose) ||
+    text(entry.title) ||
+    text(entry.text) ||
+    "Delegated work";
+  return {
+    agentId,
+    purpose,
+    status: status || "open",
+    chatKey: text(entry.chatKey) || parent.chatKey,
+    statePath: text(entry.statePath) || undefined,
+    dueAt: text(entry.dueAt) || text(entry.nextRunAt) || undefined,
+    privateInstructionPath:
+      text(entry.privateInstructionPath) || parent.privateInstructionPath,
+  };
+}
+
+function listOpenChildAgents(
+  state: any,
+  parent: HeartbeatAgentConfig,
+): ChildAgentEntry[] {
+  const entries = Array.isArray(state?.childAgents) ? state.childAgents : [];
+  return entries
+    .map((entry) => normalizeChildAgentEntry(entry, parent))
+    .filter((entry): entry is ChildAgentEntry => Boolean(entry));
+}
+
+function childAgentDue(child: ChildAgentEntry) {
+  const dueMs = Date.parse(text(child.dueAt));
+  return !Number.isFinite(dueMs) || dueMs <= Date.now();
+}
+
+function ensureChildAgentState(options: {
+  dataDir: string;
+  parent: HeartbeatAgentConfig;
+  child: ChildAgentEntry;
+  parentStatePath: string;
+}) {
+  const statePath =
+    options.child.statePath ||
+    agentStatePath(options.dataDir, options.child.agentId);
+  const current = readJson(statePath);
+  if (isRecord(current)) return statePath;
+  writeJson(statePath, {
+    schemaVersion: 1,
+    agentId: options.child.agentId,
+    parentAgentId: options.parent.agentId,
+    chatKey: options.child.chatKey,
+    privateInstructionPath: options.child.privateInstructionPath,
+    parentStatePath: options.parentStatePath,
+    purpose: options.child.purpose,
+    summary: `Delegated child agent for: ${options.child.purpose}`,
+    checklist: [
+      {
+        id: "delegated:start",
+        type: "delegated_work",
+        status: "open",
+        title: options.child.purpose,
+        createdAt: new Date().toISOString(),
+      },
+    ],
+    nextRunAt: new Date().toISOString(),
+    lastRunAt: null,
+    lastDecision: "initialized",
+  });
+  return statePath;
 }
 
 function enqueueLatestMessageChecklist(
@@ -385,12 +486,74 @@ async function runAgent(ctx: BackgroundContext, agent: HeartbeatAgentConfig) {
   }
 }
 
+async function runChildAgent(options: {
+  ctx: BackgroundContext;
+  parent: HeartbeatAgentConfig;
+  child: ChildAgentEntry;
+  parentStatePath: string;
+}) {
+  const instructionsPath = bundledInstructionsPath();
+  const childStatePath = ensureChildAgentState({
+    dataDir: options.ctx.dataDir,
+    parent: options.parent,
+    child: options.child,
+    parentStatePath: options.parentStatePath,
+  });
+  const childState = readJson(childStatePath) || {};
+  const initialized = childState.instructionsInitialized === true;
+  await requestDaemonCommand(
+    {
+      type: "chat_run_turn",
+      payload: {
+        text: initialized
+          ? buildRoundPrompt()
+          : buildChildInitialPrompt({
+              instructionsPath,
+              parentAgent: options.parent,
+              child: options.child,
+              parentStatePath: options.parentStatePath,
+              childStatePath,
+            }),
+        controllerKey: `heartbeat:${options.child.agentId}`,
+        managedSessionLeaf: `heartbeat/${options.child.agentId}`,
+        deliveryEnabled: false,
+        affectChatBinding: false,
+        disposeAfterTurn: false,
+        shutdownAfterTurn: false,
+      },
+    },
+    15 * 60_000,
+  );
+  if (!initialized) {
+    const latest = readJson(childStatePath) || {};
+    writeJson(childStatePath, {
+      ...latest,
+      instructionsPath,
+      instructionsInitialized: true,
+      instructionsInitializedAt: new Date().toISOString(),
+    });
+  }
+}
+
 async function pollOnce(
   ctx: BackgroundContext,
   runningAgents: Set<string>,
   config: Record<string, any>,
 ) {
   for (const agent of normalizeAgents(config)) {
+    const state = enqueueLatestMessageChecklist(ctx, agent);
+    const parentStatePath = agentStatePath(ctx.dataDir, agent.agentId);
+    for (const child of listOpenChildAgents(state, agent)) {
+      if (!childAgentDue(child) || runningAgents.has(child.agentId)) continue;
+      runningAgents.add(child.agentId);
+      void runChildAgent({ ctx, parent: agent, child, parentStatePath })
+        .catch((error: any) => {
+          ctx.logger?.warn?.(
+            `heartbeat child agent run failed agentId=${child.agentId} parentAgentId=${agent.agentId} err=${text(error?.message || error)}`,
+          );
+        })
+        .finally(() => runningAgents.delete(child.agentId));
+    }
     if (runningAgents.has(agent.agentId)) continue;
     if (!agentShouldRun(ctx, agent)) continue;
     runningAgents.add(agent.agentId);
