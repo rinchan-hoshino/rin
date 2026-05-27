@@ -235,6 +235,9 @@ function defaultAgentState(agent: HeartbeatAgentConfig) {
       "This heartbeat agent maintains a compact state summary, reads only message increments, and decides whether to reply, stay silent, or delegate work.",
     styleNotes:
       "Keep visible chat replies short, natural, and user-facing. Do not mention internal heartbeat, scheduler, condition, state, or daemon details.",
+    attention: [],
+    openLoops: [],
+    delegations: [],
     checklist: [],
     todos: [],
     childAgents: [],
@@ -288,7 +291,7 @@ function buildChildInitialPrompt(options: {
   parentStatePath: string;
   childStatePath: string;
 }) {
-  return `Read the bundled heartbeat instructions at ${options.instructionsPath}. You are delegated child agent ${options.child.agentId} for parent ${options.parentAgent.agentId}. Your purpose is: ${options.child.purpose}. Parent state file: ${options.parentStatePath}. Your child state file: ${options.childStatePath}. Work on the delegated task, use normal Rin tools when needed, send user-visible chat only when the delegated result should reach the chat, and update both your child state and the matching parent state childAgents entry before finishing.`;
+  return `Read the bundled heartbeat instructions at ${options.instructionsPath}. You are a background helper for ${options.parentAgent.agentId}. Your purpose is: ${options.child.purpose}. Parent mind file: ${options.parentStatePath}. Your helper state file: ${options.childStatePath}. Do the delegated work with normal Rin tools, send the result to chat when it belongs in chat, and update the matching parent delegations entry before finishing.`;
 }
 
 async function deleteLegacyScheduledTask(agent: HeartbeatAgentConfig) {
@@ -300,7 +303,7 @@ async function deleteLegacyScheduledTask(agent: HeartbeatAgentConfig) {
   } catch {}
 }
 
-function isOpenChecklistItem(item: unknown) {
+function isOpenMindItem(item: unknown) {
   if (typeof item === "string") return Boolean(text(item));
   if (!isRecord(item)) return false;
   const status = text(item.status).toLowerCase();
@@ -309,18 +312,32 @@ function isOpenChecklistItem(item: unknown) {
   ) {
     return false;
   }
-  return Boolean(text(item.text) || text(item.title) || text(item.id));
+  return Boolean(
+    text(item.text) || text(item.title) || text(item.purpose) || text(item.id),
+  );
 }
 
-function hasOpenWakeChecklist(state: any) {
-  const checklist = Array.isArray(state?.checklist) ? state.checklist : [];
+function hasOpenWakeMind(state: any) {
+  const attention = Array.isArray(state?.attention) ? state.attention : [];
+  const openLoops = Array.isArray(state?.openLoops) ? state.openLoops : [];
+  const delegations = Array.isArray(state?.delegations)
+    ? state.delegations
+    : [];
+  const legacyChecklist = Array.isArray(state?.checklist)
+    ? state.checklist
+    : [];
   const legacyTodos = Array.isArray(state?.todos) ? state.todos : [];
-  const childAgents = Array.isArray(state?.childAgents)
+  const legacyChildAgents = Array.isArray(state?.childAgents)
     ? state.childAgents
     : [];
-  return [...checklist, ...legacyTodos, ...childAgents].some(
-    isOpenChecklistItem,
-  );
+  return [
+    ...attention,
+    ...openLoops,
+    ...delegations,
+    ...legacyChecklist,
+    ...legacyTodos,
+    ...legacyChildAgents,
+  ].some(isOpenMindItem);
 }
 
 function normalizeChildAgentEntry(
@@ -357,7 +374,10 @@ function listOpenChildAgents(
   state: any,
   parent: HeartbeatAgentConfig,
 ): ChildAgentEntry[] {
-  const entries = Array.isArray(state?.childAgents) ? state.childAgents : [];
+  const entries = [
+    ...(Array.isArray(state?.delegations) ? state.delegations : []),
+    ...(Array.isArray(state?.childAgents) ? state.childAgents : []),
+  ];
   return entries
     .map((entry) => normalizeChildAgentEntry(entry, parent))
     .filter((entry): entry is ChildAgentEntry => Boolean(entry));
@@ -388,15 +408,16 @@ function ensureChildAgentState(options: {
     parentStatePath: options.parentStatePath,
     purpose: options.child.purpose,
     summary: `Delegated child agent for: ${options.child.purpose}`,
-    checklist: [
+    attention: [],
+    openLoops: [
       {
         id: "delegated:start",
-        type: "delegated_work",
         status: "open",
         title: options.child.purpose,
         createdAt: new Date().toISOString(),
       },
     ],
+    delegations: [],
     nextRunAt: new Date().toISOString(),
     lastRunAt: null,
     lastDecision: "initialized",
@@ -404,7 +425,7 @@ function ensureChildAgentState(options: {
   return statePath;
 }
 
-function enqueueLatestMessageChecklist(
+function enqueueLatestMessageAttention(
   ctx: BackgroundContext,
   agent: HeartbeatAgentConfig,
 ) {
@@ -418,24 +439,23 @@ function enqueueLatestMessageChecklist(
     afterMs: Number.isFinite(lastSeenMs) ? lastSeenMs : 0,
   });
   if (!latest) return state;
-  const checklist = Array.isArray(state.checklist) ? state.checklist : [];
+  const attention = Array.isArray(state.attention) ? state.attention : [];
   const itemId = `message:${latest.messageId || latest.at}`;
-  const exists = checklist.some(
+  const exists = attention.some(
     (item: unknown) => isRecord(item) && text(item.id) === itemId,
   );
   if (exists) return state;
   const next = {
     ...state,
-    checklist: [
-      ...checklist,
+    attention: [
+      ...attention,
       {
         id: itemId,
-        type: "message",
-        status: "open",
+        kind: "message",
+        status: "new",
         chatKey: agent.chatKey,
         messageId: latest.messageId,
-        receivedAt: new Date(latest.at).toISOString(),
-        title: "Review new owner message and decide the next natural action",
+        at: new Date(latest.at).toISOString(),
         preview: latest.text.slice(0, 160),
         createdAt: new Date().toISOString(),
       },
@@ -447,8 +467,8 @@ function enqueueLatestMessageChecklist(
 }
 
 function agentShouldRun(ctx: BackgroundContext, agent: HeartbeatAgentConfig) {
-  const state = enqueueLatestMessageChecklist(ctx, agent);
-  if (!hasOpenWakeChecklist(state)) return false;
+  const state = enqueueLatestMessageAttention(ctx, agent);
+  if (!hasOpenWakeMind(state)) return false;
   const nextMs = Date.parse(text(state?.nextRunAt));
   return !Number.isFinite(nextMs) || nextMs <= Date.now();
 }
@@ -457,7 +477,9 @@ async function runAgent(ctx: BackgroundContext, agent: HeartbeatAgentConfig) {
   const instructionsPath = bundledInstructionsPath();
   const statePath = agentStatePath(ctx.dataDir, agent.agentId);
   const state = readJson(statePath) || {};
-  const initialized = state.instructionsInitialized === true;
+  const initialized =
+    state.instructionsInitialized === true &&
+    state.instructionsPath === instructionsPath;
   await requestDaemonCommand(
     {
       type: "chat_run_turn",
@@ -500,7 +522,9 @@ async function runChildAgent(options: {
     parentStatePath: options.parentStatePath,
   });
   const childState = readJson(childStatePath) || {};
-  const initialized = childState.instructionsInitialized === true;
+  const initialized =
+    childState.instructionsInitialized === true &&
+    childState.instructionsPath === instructionsPath;
   await requestDaemonCommand(
     {
       type: "chat_run_turn",
@@ -541,7 +565,7 @@ async function pollOnce(
   config: Record<string, any>,
 ) {
   for (const agent of normalizeAgents(config)) {
-    const state = enqueueLatestMessageChecklist(ctx, agent);
+    const state = enqueueLatestMessageAttention(ctx, agent);
     const parentStatePath = agentStatePath(ctx.dataDir, agent.agentId);
     for (const child of listOpenChildAgents(state, agent)) {
       if (!childAgentDue(child) || runningAgents.has(child.agentId)) continue;

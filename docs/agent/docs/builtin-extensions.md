@@ -118,7 +118,7 @@ If `extensions` is missing or `[]`, `todo` stays on by default and optional exte
 
 ### Optional heartbeat notification service
 
-`rin:heartbeat-notifier` is a bundled background-capable extension, not core chat behavior. It owns reusable in-process heartbeat agents: no ordinary scheduled task is created or left on disk. The extension watches configured record-only chat message stores, appends new owner-message notifications into each agent's `state.checklist`, sets `state.nextRunAt`, and starts the agent with a minimal round prompt.
+`rin:heartbeat-notifier` is a bundled background-capable extension, not core chat behavior. It owns reusable in-process heartbeat agents: no ordinary scheduled task is created or left on disk. The extension watches configured record-only chat message stores, appends new owner-message notifications into each agent's `state.attention`, sets `state.nextRunAt`, and starts the agent with a minimal round prompt.
 
 Enable it through the normal bundled extension list:
 
@@ -145,7 +145,7 @@ Configure agents with Rin's extension-file convention:
 }
 ```
 
-Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and reusable heartbeat-agent checklist template. Heartbeat agents can react to the referenced message and show typing before actively processing a fresh user message. Non-trivial work should be delegated through `state.childAgents`; the extension runs due open child agents as separate managed sessions so the parent heartbeat stays a small social presence. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
+Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and reusable heartbeat-agent mind template. Heartbeat agents can react to the referenced message and show typing before actively processing a fresh user message. Non-trivial work can be delegated through `state.delegations`; the extension runs due open helpers as separate managed sessions so the parent heartbeat stays a small social presence. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
 
 ### Enabling bundled browser/computer control
 
