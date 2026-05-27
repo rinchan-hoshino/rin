@@ -61,6 +61,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat inbox write failed because the chat key is missing. Check the adapter event.",
   chat_inbox_messageId_required: () =>
     "Chat inbox write failed because the message id is missing. Check the adapter event.",
+  chat_key_required: () =>
+    "Chat action failed because the target chat is missing. Choose a chat.",
   chat_message_store_chatKey_required: () =>
     "Chat message store write failed because the chat key is missing. Check the adapter event.",
   chat_message_store_messageId_required: () =>

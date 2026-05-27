@@ -2,6 +2,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_DELAY_MINUTES = 30;
@@ -12,11 +13,6 @@ type HeartbeatAgentConfig = {
   chatKey: string;
   privateInstructionPath?: string;
   state?: Record<string, any>;
-};
-
-type HeartbeatChatConfig = {
-  chatKey: string;
-  taskId: string;
 };
 
 type BackgroundContext = {
@@ -197,42 +193,16 @@ function normalizeAgents(config: Record<string, any>): HeartbeatAgentConfig[] {
     .filter((entry): entry is HeartbeatAgentConfig => Boolean(entry));
 }
 
-function normalizeChats(config: Record<string, any>): HeartbeatChatConfig[] {
-  const agents = normalizeAgents(config).map((agent) => ({
-    chatKey: agent.chatKey,
-    taskId: agent.taskId,
-  }));
-  if (agents.length) return agents;
-  if (Array.isArray(config.chats)) {
-    return config.chats
-      .map((entry) => ({
-        chatKey: text(entry?.chatKey),
-        taskId: text(entry?.taskId),
-      }))
-      .filter((entry) => entry.chatKey && entry.taskId);
-  }
-  if (isRecord(config.byChatKey)) {
-    return Object.entries(config.byChatKey)
-      .map(([chatKey, value]) => ({
-        chatKey: text(chatKey),
-        taskId: isRecord(value) ? text(value.taskId) : text(value),
-      }))
-      .filter((entry) => entry.chatKey && entry.taskId);
-  }
-  return [];
+function extensionConfigPath(agentDir: string) {
+  return path.join(agentDir, "extensions", "rin-heartbeat-notifier.json");
 }
 
-function notifierStatePath(dataDir: string) {
-  return path.join(dataDir, "heartbeat-notifier", "state.json");
-}
-
-function loadNotifierState(dataDir: string) {
-  const parsed = readJson(notifierStatePath(dataDir));
-  return isRecord(parsed) ? parsed : {};
-}
-
-function saveNotifierState(dataDir: string, state: Record<string, any>) {
-  writeJson(notifierStatePath(dataDir), state);
+function loadEffectiveConfig(ctx: BackgroundContext) {
+  const fileConfig = readJson(extensionConfigPath(ctx.agentDir));
+  return {
+    ...(isRecord(fileConfig) ? fileConfig : {}),
+    ...(isRecord(ctx.config) ? ctx.config : {}),
+  };
 }
 
 function agentDirPath(dataDir: string, agentId: string) {
@@ -255,11 +225,10 @@ function defaultAgentState(agent: HeartbeatAgentConfig) {
       "This heartbeat agent maintains a compact state summary, reads only message increments, and decides whether to reply, stay silent, or delegate work.",
     styleNotes:
       "Keep visible chat replies short, natural, and user-facing. Do not mention internal heartbeat, scheduler, condition, state, or daemon details.",
+    checklist: [],
     todos: [],
     childAgents: [],
-    nextRunAt: new Date(
-      Date.now() + DEFAULT_DELAY_MINUTES * 60_000,
-    ).toISOString(),
+    nextRunAt: null,
     defaultDelayMinutes: DEFAULT_DELAY_MINUTES,
     lastRunAt: null,
     lastDecision: "initialized",
@@ -283,152 +252,176 @@ function ensureAgentState(ctx: BackgroundContext, agent: HeartbeatAgentConfig) {
   writeJson(filePath, defaultAgentState(agent));
 }
 
-function buildConditionCode(agent: HeartbeatAgentConfig) {
-  return `async (context) => {
-const fs = await import('node:fs');
-const path = await import('node:path');
-const dataDir = path.join(process.env.HOME, '.rin', 'data');
-const agentId = ${JSON.stringify(agent.agentId)};
-const chatKey = ${JSON.stringify(agent.chatKey)};
-const statePath = path.join(dataDir, 'heartbeat-agents', agentId, 'state.json');
-function readJson(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }
-const state = readJson(statePath) || {};
-const nowMs = Date.now();
-const nextMs = Date.parse(String(state.nextRunAt || ''));
-if (!Number.isFinite(nextMs)) return true;
-if (nextMs <= nowMs) return true;
-const lastSeenMs = Date.parse(String(state.lastSeenMessageAt || '')) || 0;
-const match = /^([^/]+)\\/([^:]+):(.+)$/.exec(chatKey);
-if (!match) return false;
-const storeRoot = path.join(dataDir, 'chat', 'message-store');
-const chatDir = path.join(storeRoot, 'indexes', 'by-chat-date', match[1], match[2], match[3]);
-function days() { const out = []; for (let offset = -1; offset <= 1; offset += 1) out.push(new Date(nowMs + offset * 86400000).toISOString().slice(0, 10)); return out; }
-for (const day of days()) {
-  const idx = readJson(path.join(chatDir, day + '.json'));
-  const keys = Array.isArray(idx?.recordKeys) ? idx.recordKeys.slice(-80) : [];
-  for (const key of keys) {
-    const rec = readJson(path.join(storeRoot, 'records', key.slice(0, 2), key + '.json'));
-    if (!rec || rec.chatKey !== chatKey) continue;
-    if (rec.role !== 'user' || rec.trust !== 'OWNER') continue;
-    const at = Date.parse(rec.receivedAt || rec.processedAt || '') || 0;
-    if (at <= lastSeenMs) continue;
-    if (!String(rec.text || rec.rawContent || '').trim()) continue;
-    return true;
+function bundledInstructionsPath() {
+  return path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "agent-instructions.md",
+  );
+}
+
+function buildInitialPrompt(options: {
+  instructionsPath: string;
+  agent: HeartbeatAgentConfig;
+  statePath: string;
+}) {
+  return `Read the bundled heartbeat instructions at ${options.instructionsPath} to understand what to do. Your agentId is ${options.agent.agentId}, chatKey is ${options.agent.chatKey}, and state file is ${options.statePath}. Then start this round.`;
+}
+
+function buildRoundPrompt() {
+  return "A new round has started.";
+}
+
+async function deleteLegacyScheduledTask(agent: HeartbeatAgentConfig) {
+  try {
+    await requestDaemonCommand({
+      type: "cron_delete_task",
+      taskId: agent.taskId,
+    });
+  } catch {}
+}
+
+function isOpenChecklistItem(item: unknown) {
+  if (typeof item === "string") return Boolean(text(item));
+  if (!isRecord(item)) return false;
+  const status = text(item.status).toLowerCase();
+  if (
+    ["done", "completed", "cancelled", "canceled", "closed"].includes(status)
+  ) {
+    return false;
   }
-}
-return false;
-}`;
+  return Boolean(text(item.text) || text(item.title) || text(item.id));
 }
 
-function buildPrompt(agent: HeartbeatAgentConfig) {
-  return `You are a reusable heartbeat agent named ${agent.agentId}. You run as a scheduled background task for chat ${agent.chatKey}.
-
-Purpose:
-- Maintain compact state instead of rereading all history.
-- Read only new chat messages after state.lastSeenMessageAt.
-- Decide whether to send a natural reply, stay silent, update todos, or delegate work to child heartbeat agents.
-- Set state.nextRunAt every run. If unsure, use now + 30 minutes.
-
-Files:
-- State: ~/.rin/data/heartbeat-agents/${agent.agentId}/state.json
-- Optional private instructions: read state.privateInstructionPath if present and the file exists. Treat that file as local private deployment data; never quote it verbatim unless the user explicitly asks.
-
-Rules:
-1. Read state.json first. Treat summary, styleNotes, todos, and childAgents as your prefix cache from prior runs.
-2. Read only OWNER text messages in ${agent.chatKey} newer than state.lastSeenMessageAt. If needed, read a small recent window for context.
-3. If you send a chat message, use Rin Agent SDK: rin.chat.send({ type: 'text_delivery', createdAt: new Date().toISOString(), chatKey: ${JSON.stringify(agent.chatKey)}, text }).
-4. For non-trivial work, create or update a child heartbeat task instead of doing long work inline. Child agents should use the same state/nextRunAt/todo pattern under ~/.rin/data/heartbeat-agents/<childAgentId>/.
-5. Always write state.json before finishing. Preserve useful existing state. Update at least lastRunAt, lastSeenMessageAt when messages were inspected, summary/styleNotes when they changed, todos/childAgents, lastDecision, and nextRunAt.
-6. Visible chat replies must be user-facing and natural. Do not mention heartbeat, scheduler, daemon, condition, SDK, state, or implementation details.
-7. Final task output must be one line only: SENT: <brief>, SILENT: <brief>, or DISPATCHED: <brief>. Do not send that marker to chat.
-`;
+function hasOpenWakeChecklist(state: any) {
+  const checklist = Array.isArray(state?.checklist) ? state.checklist : [];
+  const legacyTodos = Array.isArray(state?.todos) ? state.todos : [];
+  const childAgents = Array.isArray(state?.childAgents)
+    ? state.childAgents
+    : [];
+  return [...checklist, ...legacyTodos, ...childAgents].some(
+    isOpenChecklistItem,
+  );
 }
 
-async function ensureAgentTask(
+function enqueueLatestMessageChecklist(
   ctx: BackgroundContext,
   agent: HeartbeatAgentConfig,
 ) {
   ensureAgentState(ctx, agent);
-  const prompt = buildPrompt(agent);
+  const filePath = agentStatePath(ctx.dataDir, agent.agentId);
+  const state = readJson(filePath) || {};
+  const lastSeenMs = Date.parse(text(state?.lastSeenMessageAt));
+  const latest = latestOwnerTextAfter({
+    dataDir: ctx.dataDir,
+    chatKey: agent.chatKey,
+    afterMs: Number.isFinite(lastSeenMs) ? lastSeenMs : 0,
+  });
+  if (!latest) return state;
+  const checklist = Array.isArray(state.checklist) ? state.checklist : [];
+  const itemId = `message:${latest.messageId || latest.at}`;
+  const exists = checklist.some(
+    (item: unknown) => isRecord(item) && text(item.id) === itemId,
+  );
+  if (exists) return state;
+  const next = {
+    ...state,
+    checklist: [
+      ...checklist,
+      {
+        id: itemId,
+        type: "message",
+        status: "open",
+        chatKey: agent.chatKey,
+        messageId: latest.messageId,
+        receivedAt: new Date(latest.at).toISOString(),
+        title: "Review new owner message and decide the next natural action",
+        preview: latest.text.slice(0, 160),
+        createdAt: new Date().toISOString(),
+      },
+    ],
+    nextRunAt: new Date().toISOString(),
+  };
+  writeJson(filePath, next);
+  return next;
+}
+
+function agentShouldRun(ctx: BackgroundContext, agent: HeartbeatAgentConfig) {
+  const state = enqueueLatestMessageChecklist(ctx, agent);
+  if (!hasOpenWakeChecklist(state)) return false;
+  const nextMs = Date.parse(text(state?.nextRunAt));
+  return !Number.isFinite(nextMs) || nextMs <= Date.now();
+}
+
+async function runAgent(ctx: BackgroundContext, agent: HeartbeatAgentConfig) {
+  const instructionsPath = bundledInstructionsPath();
+  const statePath = agentStatePath(ctx.dataDir, agent.agentId);
+  const state = readJson(statePath) || {};
+  const initialized = state.instructionsInitialized === true;
   await requestDaemonCommand(
     {
-      type: "cron_upsert_task",
-      task: {
-        id: agent.taskId,
-        name: `Heartbeat agent: ${agent.agentId}`,
-        enabled: true,
-        trigger: { expression: "* * * * *", timezone: "local" },
-        condition: { code: buildConditionCode(agent), timeoutMs: 5000 },
-        session: { mode: "none" },
-        target: { kind: "agent_prompt", prompt, continuationPrompt: prompt },
+      type: "chat_run_turn",
+      payload: {
+        text: initialized
+          ? buildRoundPrompt()
+          : buildInitialPrompt({ instructionsPath, agent, statePath }),
+        controllerKey: `heartbeat:${agent.agentId}`,
+        managedSessionLeaf: `heartbeat/${agent.agentId}`,
+        deliveryEnabled: false,
+        affectChatBinding: false,
+        disposeAfterTurn: false,
+        shutdownAfterTurn: false,
       },
     },
-    30_000,
+    15 * 60_000,
   );
-}
-
-async function ensureAgentTasks(ctx: BackgroundContext) {
-  for (const agent of normalizeAgents(ctx.config)) {
-    try {
-      await ensureAgentTask(ctx, agent);
-    } catch (error: any) {
-      ctx.logger?.warn?.(
-        `heartbeat notifier task setup failed agentId=${agent.agentId} taskId=${agent.taskId} err=${text(error?.message || error)}`,
-      );
-    }
-  }
-}
-
-async function pollOnce(ctx: BackgroundContext) {
-  const chats = normalizeChats(ctx.config);
-  if (!chats.length) return;
-  const state = loadNotifierState(ctx.dataDir);
-  let changed = false;
-  for (const chat of chats) {
-    const current = isRecord(state[chat.chatKey]) ? state[chat.chatKey] : {};
-    const afterMs = Date.parse(text(current.lastNotifiedAt));
-    const latest = latestOwnerTextAfter({
-      dataDir: ctx.dataDir,
-      chatKey: chat.chatKey,
-      afterMs: Number.isFinite(afterMs) ? afterMs : 0,
+  if (!initialized) {
+    const latest = readJson(statePath) || {};
+    writeJson(statePath, {
+      ...latest,
+      instructionsPath,
+      instructionsInitialized: true,
+      instructionsInitializedAt: new Date().toISOString(),
     });
-    if (!latest) continue;
-    try {
-      await requestDaemonCommand({
-        type: "cron_wake_task",
-        taskId: chat.taskId,
-      });
-      state[chat.chatKey] = {
-        ...current,
-        taskId: chat.taskId,
-        lastNotifiedAt: new Date(latest.at).toISOString(),
-        lastMessageId: latest.messageId,
-        updatedAt: new Date().toISOString(),
-      };
-      changed = true;
-    } catch (error: any) {
-      ctx.logger?.warn?.(
-        `heartbeat notifier wake failed chatKey=${chat.chatKey} taskId=${chat.taskId} err=${text(error?.message || error)}`,
-      );
-    }
   }
-  if (changed) saveNotifierState(ctx.dataDir, state);
+}
+
+async function pollOnce(
+  ctx: BackgroundContext,
+  runningAgents: Set<string>,
+  config: Record<string, any>,
+) {
+  for (const agent of normalizeAgents(config)) {
+    if (runningAgents.has(agent.agentId)) continue;
+    if (!agentShouldRun(ctx, agent)) continue;
+    runningAgents.add(agent.agentId);
+    void runAgent(ctx, agent)
+      .catch((error: any) => {
+        ctx.logger?.warn?.(
+          `heartbeat agent run failed agentId=${agent.agentId} err=${text(error?.message || error)}`,
+        );
+      })
+      .finally(() => runningAgents.delete(agent.agentId));
+  }
 }
 
 export function createBackgroundService() {
   return {
     start(ctx: BackgroundContext) {
+      const config = loadEffectiveConfig(ctx);
       const intervalMs = Math.max(
         250,
-        Number(ctx.config.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
+        Number(config.pollIntervalMs || DEFAULT_POLL_INTERVAL_MS),
       );
-      let running = false;
-      void ensureAgentTasks(ctx);
+      let polling = false;
+      const runningAgents = new Set<string>();
+      for (const agent of normalizeAgents(config)) {
+        void deleteLegacyScheduledTask(agent);
+      }
       const run = () => {
-        if (running || ctx.signal.aborted) return;
-        running = true;
-        void pollOnce(ctx).finally(() => {
-          running = false;
+        if (polling || ctx.signal.aborted) return;
+        polling = true;
+        void pollOnce(ctx, runningAgents, config).finally(() => {
+          polling = false;
         });
       };
       run();

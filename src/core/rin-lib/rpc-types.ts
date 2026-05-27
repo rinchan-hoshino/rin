@@ -52,6 +52,7 @@ export type RinRpcCommandType =
   | "daemon_activity"
   | "chat_send"
   | "chat_run_turn"
+  | "chat_typing"
   | "chat_terminate_turn"
   | "chat_bridge_eval"
   | "list_builtin_extensions"

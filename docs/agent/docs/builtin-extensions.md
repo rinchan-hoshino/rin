@@ -80,11 +80,12 @@ Installed settings can use Rin aliases instead of installation-specific paths:
   - otherwise works out of the box with platform backends: PowerShell/.NET on Windows, `screencapture` + `osascript`/`cliclick` on macOS, and screenshot tools + `xdotool` on Linux
   - may install `cliclick` through Homebrew only when `allowInstall` is `true` in the extension config file
 - `rin:heartbeat-notifier`
-  - expands to the bundled `extensions/rin-heartbeat-notifier` Pi package
-  - runs configurable record-only chat heartbeat notification as a background extension
-  - reads standard settings from top-level `settings.json -> heartbeatNotifier`
-  - requires explicit chat and prompt configuration; it is not enabled by default
-    Optional extension configuration uses Rin's extension-file convention. Rin does not create these files by default; create them only to override the open-box behavior.
+  - expands to the bundled `extensions/rin-heartbeat-notifier` package
+  - runs configurable record-only chat heartbeat agents as an in-process background extension
+  - reads optional agent configuration from `~/.rin/extensions/rin-heartbeat-notifier.json`
+  - uses bundled `agent-instructions.md` for reusable checklist/wake behavior; private deployment instructions stay in local files
+
+Optional extension configuration uses Rin's extension-file convention. Rin does not create these files by default; create them only to override the open-box behavior.
 
 ```jsonc
 // ~/.rin/extensions/rin-browser-use.json
@@ -117,34 +118,34 @@ If `extensions` is missing or `[]`, `todo` stays on by default and optional exte
 
 ### Optional heartbeat notification service
 
-`rin:heartbeat-notifier` is a bundled background extension, not core chat behavior. It can provision reusable heartbeat-agent scheduled tasks, watches configured record-only chat message stores, and nudges those tasks by moving their next run time to now. The scheduler still evaluates each task's condition normally.
+`rin:heartbeat-notifier` is a bundled background-capable extension, not core chat behavior. It owns reusable in-process heartbeat agents: no ordinary scheduled task is created or left on disk. The extension watches configured record-only chat message stores, appends new owner-message notifications into each agent's `state.checklist`, sets `state.nextRunAt`, and starts the agent with a minimal round prompt.
 
-Enable it under `settings.json -> rinExtensions.backgroundServices`:
+Enable it through the normal bundled extension list:
 
 ```json
 {
-  "rinExtensions": {
-    "backgroundServices": [
-      {
-        "packageName": "rin:heartbeat-notifier",
-        "config": {
-          "pollIntervalMs": 1000,
-          "agents": [
-            {
-              "agentId": "owner_tg",
-              "taskId": "heartbeat_owner_tg",
-              "chatKey": "telegram/123456:7890",
-              "privateInstructionPath": "/home/me/.rin-private/owner_tg.md"
-            }
-          ]
-        }
-      }
-    ]
-  }
+  "extensions": ["rin:heartbeat-notifier"]
 }
 ```
 
-Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and example heartbeat-agent template. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
+Configure agents with Rin's extension-file convention:
+
+```jsonc
+// ~/.rin/extensions/rin-heartbeat-notifier.json
+{
+  "pollIntervalMs": 1000,
+  "agents": [
+    {
+      "agentId": "owner_tg",
+      "taskId": "heartbeat_owner_tg",
+      "chatKey": "telegram/123456:7890",
+      "privateInstructionPath": "/home/me/.rin-private/owner_tg.md",
+    },
+  ],
+}
+```
+
+Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and reusable heartbeat-agent checklist template. Heartbeat agents show typing before actively processing a fresh user message. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
 
 ### Enabling bundled browser/computer control
 

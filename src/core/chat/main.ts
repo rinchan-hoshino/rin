@@ -96,6 +96,7 @@ import {
   enqueueChatOutboxPayload,
   type ChatOutboxPayload,
 } from "../rin-lib/chat-outbox.js";
+import { sendTyping } from "./transport.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
 import {
@@ -289,6 +290,7 @@ export type ChatBridgeHandle = {
   stop: () => Promise<void>;
   getStatus: () => ChatBridgeStatus;
   send: (payload: ChatOutboxPayload) => Promise<{ delivered: true }>;
+  typing: (payload: { chatKey?: string }) => Promise<{ sent: boolean }>;
   runTurn: (payload: ChatBridgeTurnPayload) => Promise<any>;
   setWorkingVisible: (payload: {
     chatKey?: string;
@@ -885,6 +887,11 @@ export async function startChatBridge(
     await enqueueAndDrainOutbox(payload, "generic");
     return { delivered: true as const };
   };
+  const typing = async (payload: { chatKey?: string }) => {
+    const chatKey = safeString(payload?.chatKey).trim();
+    if (!chatKey) throw new Error("chat_key_required");
+    return { sent: await sendTyping(app, chatKey, h) };
+  };
   const runTurn = async (payload: ChatBridgeTurnPayload) => {
     const chatKey = safeString(payload?.chatKey).trim();
     const text = safeString(payload?.text).trim();
@@ -1115,6 +1122,7 @@ export async function startChatBridge(
     stop,
     getStatus,
     send,
+    typing,
     runTurn,
     setWorkingVisible,
     terminateTurn,

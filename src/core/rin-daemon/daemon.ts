@@ -69,6 +69,7 @@ export async function startDaemon(
     chat?: {
       send?: (payload: any) => Promise<any>;
       runTurn?: (payload: any) => Promise<any>;
+      typing?: (payload: { chatKey?: string }) => Promise<any>;
       setWorkingVisible?: (payload: {
         chatKey?: string;
         controllerKey?: string;

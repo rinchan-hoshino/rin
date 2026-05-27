@@ -40,15 +40,15 @@ function normalizeBackgroundExtensionConfig(
   const packageName = safeString(value.packageName).trim();
   if (!packageName) return null;
   const bundledPath = resolveBundledRinExtensionPath(packageName);
+  if (bundledPath) return null;
   const name =
     safeString(value.name).trim() ||
     packageName.replace(/^@/, "").replace(/[^A-Za-z0-9._-]+/g, "-");
   return {
     name,
     packageName,
-    version: bundledPath ? "" : safeString(value.version).trim() || "latest",
+    version: safeString(value.version).trim() || "latest",
     config: isJsonRecord(value.config) ? cloneJson(value.config) : {},
-    ...(bundledPath ? { modulePath: path.join(bundledPath, "index.ts") } : {}),
   };
 }
 

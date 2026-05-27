@@ -31,6 +31,12 @@ export type ChatSendOptions = {
   [key: string]: unknown;
 };
 
+export type ChatTypingOptions =
+  | string
+  | {
+      chatKey: string;
+    };
+
 export type ChatTerminateTurnOptions =
   | string
   | {
@@ -210,6 +216,19 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
           { type: "chat_run_turn", payload },
           override,
         ),
+      typing: async (
+        target: ChatTypingOptions,
+        override?: RinAgentSdkOptions,
+      ) => {
+        const chatKey =
+          typeof target === "string"
+            ? target.trim()
+            : String(target.chatKey || "").trim();
+        return await request<{ sent?: boolean }>(
+          { type: "chat_typing", payload: { chatKey } },
+          override,
+        );
+      },
       terminateTurn: async (
         target: ChatTerminateTurnOptions,
         override?: RinAgentSdkOptions,

@@ -126,6 +126,7 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
     (payload) => {
       if (payload.type === "chat_send") return { delivered: true };
       if (payload.type === "chat_run_turn") return { finalText: "ok" };
+      if (payload.type === "chat_typing") return { sent: true };
       if (payload.type === "chat_terminate_turn") return { terminated: true };
       return { ok: true };
     },
@@ -137,6 +138,7 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
         text: "reply",
         controllerKey: "agent-test",
       });
+      const typing = await rin.chat.typing("telegram/1:2");
       const terminated = await rin.chat.terminateTurn("agent-test");
       const terminatedChat = await rin.chat.terminateTurn({
         chatKey: "telegram/1:3",
@@ -148,6 +150,7 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
         [
           "chat_send",
           "chat_run_turn",
+          "chat_typing",
           "chat_terminate_turn",
           "chat_terminate_turn",
           "chat_bridge_eval",
@@ -157,11 +160,13 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
         chatKey: "telegram/1:2",
         text: "hello",
       });
-      assert.deepEqual(requests[2].payload, { controllerKey: "agent-test" });
-      assert.deepEqual(requests[3].payload, {
+      assert.deepEqual(requests[2].payload, { chatKey: "telegram/1:2" });
+      assert.deepEqual(requests[3].payload, { controllerKey: "agent-test" });
+      assert.deepEqual(requests[4].payload, {
         chatKey: "telegram/1:3",
       });
       assert.equal(turn.finalText, "ok");
+      assert.equal(typing.sent, true);
       assert.equal(terminated.terminated, true);
       assert.equal(terminatedChat.terminated, true);
     },
