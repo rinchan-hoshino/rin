@@ -39,6 +39,7 @@ export type MaintenanceJob = {
   leafId?: string;
   trigger: string;
   snapshotKey?: string;
+  frontend?: RinFrontendIdentity;
   additionalExtensionPaths?: string[];
   attempts?: number;
   lastError?: string;
@@ -259,6 +260,7 @@ function createMaintenanceJob(
     leafId: leafId || undefined,
     trigger,
     snapshotKey: snapshotKey || undefined,
+    frontend: normalizeFrontendIdentity(input.frontend),
     additionalExtensionPaths: normalizeAdditionalExtensionPaths(
       input.additionalExtensionPaths,
     ),
@@ -277,6 +279,7 @@ async function enqueueMaintenanceJob(
     existing.trigger = nextJob.trigger;
     existing.leafId = nextJob.leafId;
     existing.snapshotKey = nextJob.snapshotKey;
+    existing.frontend = nextJob.frontend;
     existing.additionalExtensionPaths = nextJob.additionalExtensionPaths;
     existing.attempts = undefined;
     existing.lastError = undefined;
@@ -694,6 +697,7 @@ export async function processQueuedMemoryJobs(agentDir: string) {
         await appendPendingMemoryMaintenanceNotice({
           agentDir: resolvedAgentDir,
           sessionFile: job.sessionFile,
+          frontend: job.frontend,
           notice: buildMemoryMaintenanceNotice({
             status: "completed",
             changedFiles,
@@ -723,6 +727,7 @@ export async function processQueuedMemoryJobs(agentDir: string) {
         await appendPendingMemoryMaintenanceNotice({
           agentDir: resolvedAgentDir,
           sessionFile: job.sessionFile,
+          frontend: job.frontend,
           notice: buildMemoryMaintenanceNotice({ status: "failed" }),
         });
         failed += 1;

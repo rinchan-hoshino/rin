@@ -6,6 +6,7 @@ import type {
   RinHookHandler,
 } from "./capability-types.js";
 import { normalizeStringList } from "../text-utils.js";
+import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 
 type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
 
@@ -286,17 +287,17 @@ type RinExtensionRunnerPatchState = {
 };
 
 function withRinEventMetadata(event: any, session: any) {
+  if (!event || typeof event !== "object") return event;
   const type = String(event?.type || "").trim();
-  if (
-    type !== "session_before_compact" ||
-    !event ||
-    typeof event !== "object" ||
-    event.reason
-  ) {
-    return event;
+  const frontend = normalizeFrontendIdentity(
+    event.frontend ?? session?.sessionManager?.__rinFrontend,
+  );
+  const next = frontend ? { ...event, frontend } : event;
+  if (type !== "session_before_compact" || next.reason) {
+    return next;
   }
   return {
-    ...event,
+    ...next,
     reason: String(session?.__rinCurrentCompactionReason || "").trim(),
   };
 }

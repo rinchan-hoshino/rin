@@ -1353,6 +1353,12 @@ export async function runCustomRpcMode(
           id,
           type,
           async () => {
+            const frontendIdentity = normalizeFrontendIdentity(
+              command.frontendIdentity,
+            );
+            if (frontendIdentity && session.sessionManager) {
+              session.sessionManager.__rinFrontend = frontendIdentity;
+            }
             await abortCurrentSessionForReplacement();
             const managedSessionLeaf = safeString(
               command.managedSessionLeaf || "",
@@ -1389,20 +1395,29 @@ export async function runCustomRpcMode(
         return run(
           id,
           type,
-          () =>
-            runtime.switchSession(sessionFile).then(async (value: any) => {
-              await bindCurrentSession();
-              await flushPendingSelfImproveNotices({
-                sessionFile: getSession()?.sessionFile,
-                frontendIdentity: command.frontendIdentity,
+          () => {
+            const frontendIdentity = normalizeFrontendIdentity(
+              command.frontendIdentity,
+            );
+            if (frontendIdentity && session.sessionManager) {
+              session.sessionManager.__rinFrontend = frontendIdentity;
+            }
+            return runtime
+              .switchSession(sessionFile)
+              .then(async (value: any) => {
+                await bindCurrentSession();
+                await flushPendingSelfImproveNotices({
+                  sessionFile: getSession()?.sessionFile,
+                  frontendIdentity: command.frontendIdentity,
+                });
+                const rebound = getSession();
+                return {
+                  cancelled: Boolean(value?.cancelled),
+                  sessionFile: rebound?.sessionFile,
+                  sessionId: rebound?.sessionId,
+                };
               });
-              const rebound = getSession();
-              return {
-                cancelled: Boolean(value?.cancelled),
-                sessionFile: rebound?.sessionFile,
-                sessionId: rebound?.sessionId,
-              };
-            }),
+          },
           (value) => value,
         );
       }

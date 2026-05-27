@@ -793,7 +793,12 @@ function hasRinCapabilityHandlers(session: any, type: string) {
 async function emitRinCapabilityEvent(session: any, event: any) {
   const type = String(event?.type || "").trim();
   if (!hasRinCapabilityHandlers(session, type)) return;
-  await session.__rinCapabilities.emit(event);
+  const frontend = normalizeFrontendIdentity(
+    event?.frontend ?? session?.sessionManager?.__rinFrontend,
+  );
+  await session.__rinCapabilities.emit(
+    frontend ? { ...event, frontend } : event,
+  );
 }
 
 async function emitRinSessionShutdown(session: any, event: any) {

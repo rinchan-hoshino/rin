@@ -442,9 +442,10 @@ test("automatic self-improve handlers run periodic reviews synchronously", async
   });
 });
 
-test("periodic self-improve review records a pullable notice after final messages", async () => {
+test("periodic self-improve review records a frontend-scoped notice after final messages", async () => {
   await withTempRoot(async (root) => {
     const notices = [];
+    const frontend = { kind: "test", key: "periodic-owner" };
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
@@ -478,7 +479,7 @@ test("periodic self-improve review records a pullable notice after final message
       },
     };
 
-    await messageEnd({ message: assistantFinal("done 8") }, ctx);
+    await messageEnd({ message: assistantFinal("done 8"), frontend }, ctx);
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     assert.deepEqual(notices, []);
@@ -486,6 +487,15 @@ test("periodic self-improve review records a pullable notice after final message
       await asyncJobs.takePendingMemoryMaintenanceNotices({
         agentDir: root,
         sessionFile,
+        frontend: { kind: "test", key: "other" },
+      }),
+      [],
+    );
+    assert.deepEqual(
+      await asyncJobs.takePendingMemoryMaintenanceNotices({
+        agentDir: root,
+        sessionFile,
+        frontend,
       }),
       [NOTICE_CHANGED_SKILL_ONE],
     );
@@ -949,9 +959,10 @@ test("session reload does not trigger self-improve shutdown maintenance", async 
   });
 });
 
-test("real session shutdown queues self-improve review maintenance without a core notice", async () => {
+test("real session shutdown queues frontend-scoped self-improve review maintenance without a core notice", async () => {
   await withTempRoot(async (root) => {
     const notices = [];
+    const frontend = { kind: "test", key: "shutdown-owner" };
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
@@ -975,12 +986,13 @@ test("real session shutdown queues self-improve review maintenance without a cor
       },
     };
 
-    await shutdown({}, ctx);
+    await shutdown({ frontend }, ctx);
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 1);
     assert.equal(queue[0].kind, "self_improve_review");
     assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
+    assert.deepEqual(queue[0].frontend, frontend);
     assert.deepEqual(notices, []);
   });
 });
@@ -1101,11 +1113,13 @@ test("queued maintenance refresh clears stale retry metadata and normalizes exte
 
 test("queued maintenance drops invalid session jobs into history instead of blocking the queue", async () => {
   await withTempRoot(async (root) => {
+    const frontend = { kind: "test", key: "queued-owner" };
     await asyncJobs.enqueueMemoryMaintenanceJob({
       agentDir: root,
       sessionFile: path.join(root, "missing-session.jsonl"),
       trigger: "self_improve:periodic_review",
       snapshotKey: "review:5",
+      frontend,
     });
 
     const result = await asyncJobs.processQueuedMemoryJobs(root);
@@ -1127,6 +1141,22 @@ test("queued maintenance drops invalid session jobs into history instead of bloc
     assert.match(
       String(history[0].error || ""),
       /maintenance_job_missing_session_file:/,
+    );
+    assert.deepEqual(
+      await asyncJobs.takePendingMemoryMaintenanceNotices({
+        agentDir: root,
+        sessionFile: path.join(root, "missing-session.jsonl"),
+        frontend: { kind: "test", key: "other" },
+      }),
+      [],
+    );
+    assert.deepEqual(
+      await asyncJobs.takePendingMemoryMaintenanceNotices({
+        agentDir: root,
+        sessionFile: path.join(root, "missing-session.jsonl"),
+        frontend,
+      }),
+      [NOTICE_FAILED],
     );
   });
 });

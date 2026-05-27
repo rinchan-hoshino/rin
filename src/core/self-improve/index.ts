@@ -17,6 +17,7 @@ import {
   formatSelfImproveResult,
 } from "./lib.js";
 import { readSessionMetadata } from "../session/metadata.js";
+import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
 
 const DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES = 5;
@@ -133,6 +134,7 @@ type SelfImproveReviewOptions = {
   leafId?: string;
   trigger: string;
   snapshotKey?: string;
+  frontend?: unknown;
 };
 
 function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
@@ -151,6 +153,7 @@ function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
     leafId: meta.leafId || undefined,
     trigger: opts.trigger,
     snapshotKey: opts.snapshotKey,
+    frontend: normalizeFrontendIdentity(opts.frontend ?? ctx?.frontend),
   };
 }
 
@@ -169,7 +172,7 @@ async function recordSelfImproveReviewNotice(
   await appendPendingMemoryMaintenanceNotice({
     agentDir: job.agentDir,
     sessionFile: job.sessionFile,
-    frontend: ctx?.frontend,
+    frontend: job.frontend ?? ctx?.frontend,
     notice: notice as any,
   });
 }
@@ -264,6 +267,7 @@ export default function selfImproveModule(
                 leafId: meta.leafId,
                 trigger: "self_improve:periodic_review",
                 snapshotKey: `review:${reviewFinalMessages}`,
+                frontend: event?.frontend,
               },
               runMemoryMaintenanceNow,
             );
@@ -282,6 +286,7 @@ export default function selfImproveModule(
             sessionFile: meta.sessionFile,
             leafId: meta.leafId,
             trigger: "self_improve:session_shutdown_review",
+            frontend: event?.frontend,
           });
           if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
         },
