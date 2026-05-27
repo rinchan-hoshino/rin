@@ -17,6 +17,10 @@ const store = await import(
 const usageCli = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "usage.js")).href
 );
+const tokenUsageModule = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "token-usage", "index.js"))
+    .href
+);
 
 async function withTempRoot(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-token-usage-test-"));
@@ -371,6 +375,115 @@ test("token usage store returns recent events in reverse time order", async () =
   });
 });
 
+test("token usage store exposes a human-oriented session dimension", async () => {
+  await withTempRoot(async (root) => {
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-session-name",
+        timestamp: "2026-04-10T08:00:00.000Z",
+        sessionId: "s1",
+        sessionName: "named chat",
+        sessionFile: "/tmp/ignored.jsonl",
+        eventType: "message_end",
+        totalTokens: 30,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-session-file",
+        timestamp: "2026-04-10T08:01:00.000Z",
+        sessionId: "s2",
+        sessionFile: "/tmp/file-backed.jsonl",
+        eventType: "message_end",
+        totalTokens: 20,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-session-file-later-sparse",
+        timestamp: "2026-04-10T08:01:30.000Z",
+        sessionId: "s2",
+        eventType: "message_end",
+        totalTokens: 5,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-session-id",
+        timestamp: "2026-04-10T08:02:00.000Z",
+        sessionId: "s3",
+        eventType: "message_end",
+        totalTokens: 10,
+      },
+      root,
+    );
+
+    const rows = store.queryTokenUsageAggregate({
+      agentDir: root,
+      groupBy: ["session"],
+      limit: 10,
+    });
+
+    assert.deepEqual(
+      rows.map((row) => row.session),
+      ["named chat", "/tmp/file-backed.jsonl", "s3"],
+    );
+  });
+});
+
+test("token usage hooks keep session metadata and frontend source on later events", async () => {
+  await withTempRoot(async (root) => {
+    const previousDir = process.env.RIN_DIR;
+    process.env.RIN_DIR = root;
+    try {
+      const module = tokenUsageModule.default({
+        cwd: "/work/demo",
+        agentDir: root,
+        getThinkingLevel: () => "medium",
+        sendMessage: () => {},
+      });
+      const statefulCtx = {
+        frontend: { kind: "tui" },
+        sessionManager: {
+          getSessionId: () => "s1",
+          getSessionFile: () => "/tmp/session.jsonl",
+          getSessionName: () => "demo",
+          getCwd: () => "/work/demo",
+          isPersisted: () => true,
+        },
+      };
+      await module.hooks.session_start[0]({ reason: "new" }, statefulCtx);
+
+      const sparseCtx = {
+        frontend: { kind: "tui" },
+        sessionId: "s1",
+      };
+      await module.hooks.message_end[0](
+        {
+          message: {
+            id: "m1",
+            role: "assistant",
+            usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+          },
+        },
+        sparseCtx,
+      );
+
+      const rows = store.queryTokenUsageEvents({ agentDir: root, limit: 10 });
+      const message = rows.find((row) => row.event_type === "message_end");
+      assert.equal(message.session_file, "/tmp/session.jsonl");
+      assert.equal(message.session_name, "demo");
+      assert.equal(message.source, "frontend:tui");
+    } finally {
+      if (previousDir === undefined) delete process.env.RIN_DIR;
+      else process.env.RIN_DIR = previousDir;
+    }
+  });
+});
+
 test("token usage store supports shared provider_model and yes/no dimensions", async () => {
   await withTempRoot(async (root) => {
     store.appendTokenTelemetryEvent(
@@ -619,6 +732,9 @@ test("usage dashboard renders Codex subscription quota and token charts", async 
     assert.match(report, /Gemini CLI\s+gemini@example\.test/);
     assert.match(report, /temporarily unavailable \(quota unavailable\)/);
     assert.match(report, /overview/);
+    assert.match(report, /top sessions/);
+    assert.doesNotMatch(report, /top sources/);
+    assert.match(report, /top hours/);
     assert.match(report, /chart/);
   });
 });

@@ -47,9 +47,9 @@ type UsageAggregateSection = {
 
 const DASHBOARD_AGGREGATE_SECTIONS: UsageAggregateSection[] = [
   { title: "top models", groupBy: ["provider_model"], limit: 8 },
-  { title: "top sources", groupBy: ["source"], limit: 8 },
-  { title: "top sessions", groupBy: ["session_name", "session_id"], limit: 8 },
+  { title: "top sessions", groupBy: ["session"], limit: 10 },
   { title: "top capabilities", groupBy: ["capability"], limit: 10 },
+  { title: "top hours", groupBy: ["hour"], limit: 8 },
 ];
 
 const OPENAI_CODEX_PROVIDER = "openai-codex";
@@ -130,7 +130,7 @@ function printUsageHelp() {
       "Examples:",
       "  rin usage",
       "  rin usage --group-by provider_model,capability --from 7d",
-      "  rin usage --group-by session_id,event_type --filter source=extension",
+      "  rin usage --group-by session,capability --from 48h",
       "  rin usage --events --limit 50 --filter session_id=abc123",
     ].join("\n"),
   );
@@ -818,7 +818,6 @@ function renderEventTable(rows: Array<Record<string, unknown>>) {
       .replace("T", " ")
       .replace(".000Z", "Z"),
     session_id: row.session_id,
-    source: row.source,
     event_type: row.event_type,
     provider_model: formatProviderModelLabel(row.provider, row.model),
     capability: row.capability_key,
@@ -831,7 +830,6 @@ function renderEventTable(rows: Array<Record<string, unknown>>) {
   return renderReportTable(formatted, [
     "timestamp",
     "session_id",
-    "source",
     "event_type",
     "provider_model",
     "capability",

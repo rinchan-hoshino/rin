@@ -363,6 +363,33 @@ const PROVIDER_MODEL_VALUE_EXPR = [
 const PROVIDER_MODEL_DIMENSION_EXPR = coalescedTextDimensionExpr(
   PROVIDER_MODEL_VALUE_EXPR,
 );
+const KNOWN_SESSION_NAME_EXPR = `(
+  SELECT session_lookup.session_name
+  FROM telemetry_events AS session_lookup
+  WHERE session_lookup.session_id = telemetry_events.session_id
+    AND COALESCE(session_lookup.session_name, '') <> ''
+  ORDER BY session_lookup.timestamp DESC
+  LIMIT 1
+)`;
+const KNOWN_SESSION_FILE_EXPR = `(
+  SELECT session_lookup.session_file
+  FROM telemetry_events AS session_lookup
+  WHERE session_lookup.session_id = telemetry_events.session_id
+    AND COALESCE(session_lookup.session_file, '') <> ''
+  ORDER BY session_lookup.timestamp DESC
+  LIMIT 1
+)`;
+const SESSION_VALUE_EXPR = [
+  `CASE`,
+  `  WHEN COALESCE(session_name, '') <> '' THEN session_name`,
+  `  WHEN COALESCE(${KNOWN_SESSION_NAME_EXPR}, '') <> '' THEN ${KNOWN_SESSION_NAME_EXPR}`,
+  `  WHEN COALESCE(session_file, '') <> '' THEN session_file`,
+  `  WHEN COALESCE(${KNOWN_SESSION_FILE_EXPR}, '') <> '' THEN ${KNOWN_SESSION_FILE_EXPR}`,
+  `  WHEN COALESCE(session_id, '') <> '' THEN session_id`,
+  `  ELSE ''`,
+  `END`,
+].join(" ");
+const SESSION_DIMENSION_EXPR = coalescedTextDimensionExpr(SESSION_VALUE_EXPR);
 
 export function formatProviderModelLabel(
   provider: unknown,
@@ -665,6 +692,7 @@ export function getTokenUsageOverview(
 const DIMENSIONS = {
   day: buildDimension(`substr(timestamp, 1, 10)`),
   hour: buildDimension(`substr(timestamp, 1, 13) || ':00'`),
+  session: buildDimension(SESSION_DIMENSION_EXPR),
   session_id: textDimension(`session_id`),
   session_name: textDimension(`session_name`),
   session_file: textDimension(`session_file`),

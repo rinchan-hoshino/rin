@@ -11,6 +11,11 @@ import { readUsageMetrics } from "../usage-metrics.js";
 
 type SessionState = {
   seq: number;
+  sessionId: string;
+  sessionFile: string;
+  sessionName: string;
+  cwd: string;
+  sessionPersisted: boolean;
   source: string;
   turnIndex: number | null;
   lastPromptPreview: string;
@@ -52,6 +57,11 @@ function getSessionState(ctx: any): SessionState {
   if (!state) {
     state = {
       seq: 0,
+      sessionId: "",
+      sessionFile: "",
+      sessionName: "",
+      cwd: "",
+      sessionPersisted: false,
       source: "",
       turnIndex: null,
       lastPromptPreview: "",
@@ -69,6 +79,22 @@ function getSessionState(ctx: any): SessionState {
     } catch {}
   }
   return state;
+}
+
+function rememberSessionMetadata(
+  state: SessionState,
+  meta: ReturnType<typeof sessionMeta>,
+) {
+  if (meta.sessionId) state.sessionId = meta.sessionId;
+  if (meta.sessionFile) state.sessionFile = meta.sessionFile;
+  if (meta.sessionName) state.sessionName = meta.sessionName;
+  if (meta.cwd) state.cwd = meta.cwd;
+  if (meta.sessionPersisted) state.sessionPersisted = true;
+}
+
+function readFrontendSource(ctx: any): string {
+  const kind = safeString(ctx?.frontend?.kind).trim();
+  return kind ? `frontend:${kind}` : "";
 }
 
 function nextEventId(prefix: string, ctx: any) {
@@ -143,18 +169,22 @@ function inferCapability(eventType: string, message: any, toolName = "") {
 function recordEvent(ctx: any, input: Record<string, any>) {
   const meta = sessionMeta(ctx);
   const state = getSessionState(ctx);
+  rememberSessionMetadata(state, meta);
   const eventType = safeString(input.eventType).trim() || "event";
+  const source =
+    safeString(input.source).trim() || state.source || readFrontendSource(ctx);
+  if (source) state.source = source;
   appendTokenTelemetryEvent(
     {
       id: safeString(input.id).trim() || nextEventId(eventType, ctx),
       timestamp: input.timestamp,
-      sessionId: meta.sessionId,
-      sessionFile: meta.sessionFile,
-      sessionName: meta.sessionName,
-      sessionPersisted: meta.sessionPersisted,
-      cwd: meta.cwd,
+      sessionId: meta.sessionId || state.sessionId,
+      sessionFile: meta.sessionFile || state.sessionFile,
+      sessionName: meta.sessionName || state.sessionName,
+      sessionPersisted: meta.sessionPersisted || state.sessionPersisted,
+      cwd: meta.cwd || state.cwd,
       eventType,
-      source: safeString(input.source).trim() || state.source,
+      source,
       trigger: safeString(input.trigger).trim() || state.trigger,
       turnIndex: input.turnIndex ?? state.turnIndex,
       phase: input.phase,
