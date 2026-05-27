@@ -1084,6 +1084,174 @@ test("rpc runtime switches sessions through the daemon worker", async () => {
   assert.ok(sent[0]?.resourceOptions);
 });
 
+test("rpc runtime refreshes switched session state using the rebound session file", async () => {
+  const sent = [];
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      if (payload.type === "switch_session") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            cancelled: false,
+            sessionFile: "/tmp/new.jsonl",
+            sessionId: "new-session",
+          },
+        });
+      }
+      if (payload.type === "get_state") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            sessionId: "new-session",
+            sessionFile: "/tmp/new.jsonl",
+            thinkingLevel: "medium",
+            steeringMode: "all",
+            followUpMode: "one-at-a-time",
+            autoCompactionEnabled: false,
+            isStreaming: false,
+            isCompacting: false,
+            pendingMessageCount: 0,
+          },
+        });
+      }
+      if (payload.type === "get_session_snapshot") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            entries: [
+              {
+                id: "entry-1",
+                type: "message",
+                message: { role: "user", content: "fresh history" },
+              },
+            ],
+            tree: [],
+            leafId: "entry-1",
+          },
+        });
+      }
+      if (payload.type === "get_available_models") {
+        return Promise.resolve({ success: true, data: { models: [] } });
+      }
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return true;
+    },
+    connect() {
+      return Promise.resolve();
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+
+  session.sessionFile = "/tmp/old.jsonl";
+  session.sessionId = "old-session";
+  session.rpcConnected = true;
+  session.startupPending = false;
+
+  const completed = await session.switchSession("/tmp/new.jsonl");
+
+  assert.equal(completed, true);
+  const stateRequest = sent.find((payload) => payload.type === "get_state");
+  const snapshotRequest = sent.find(
+    (payload) => payload.type === "get_session_snapshot",
+  );
+  assert.equal(stateRequest?.sessionFile, "/tmp/new.jsonl");
+  assert.equal(snapshotRequest?.sessionFile, "/tmp/new.jsonl");
+  assert.equal(session.sessionFile, "/tmp/new.jsonl");
+  assert.equal(session.sessionId, "new-session");
+  assert.deepEqual(
+    session.state.messages.map((message) => message.content),
+    ["fresh history"],
+  );
+});
+
+test("rpc runtime refreshes new session state using the created session file", async () => {
+  const sent = [];
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      if (payload.type === "new_session") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            cancelled: false,
+            sessionFile: "/tmp/created.jsonl",
+            sessionId: "created-session",
+          },
+        });
+      }
+      if (payload.type === "get_state") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            sessionId: "created-session",
+            sessionFile: "/tmp/created.jsonl",
+            thinkingLevel: "medium",
+            steeringMode: "all",
+            followUpMode: "one-at-a-time",
+            autoCompactionEnabled: false,
+            isStreaming: false,
+            isCompacting: false,
+            pendingMessageCount: 0,
+          },
+        });
+      }
+      if (payload.type === "get_session_snapshot") {
+        return Promise.resolve({
+          success: true,
+          data: { entries: [], tree: [], leafId: null },
+        });
+      }
+      if (payload.type === "get_available_models") {
+        return Promise.resolve({ success: true, data: { models: [] } });
+      }
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    abort() {
+      return Promise.resolve();
+    },
+    isConnected() {
+      return true;
+    },
+    connect() {
+      return Promise.resolve();
+    },
+    disconnect() {
+      return Promise.resolve();
+    },
+  });
+
+  session.sessionFile = "/tmp/old.jsonl";
+  session.sessionId = "old-session";
+  session.rpcConnected = true;
+  session.startupPending = false;
+
+  const completed = await session.newSession();
+
+  assert.equal(completed, true);
+  const stateRequest = sent.find((payload) => payload.type === "get_state");
+  const snapshotRequest = sent.find(
+    (payload) => payload.type === "get_session_snapshot",
+  );
+  assert.equal(stateRequest?.sessionFile, "/tmp/created.jsonl");
+  assert.equal(snapshotRequest?.sessionFile, "/tmp/created.jsonl");
+  assert.equal(session.sessionFile, "/tmp/created.jsonl");
+  assert.equal(session.sessionId, "created-session");
+});
+
 test("rpc runtime restores active session history from one daemon snapshot", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({

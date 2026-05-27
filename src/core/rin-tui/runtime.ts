@@ -5,6 +5,7 @@ import type {
 } from "@earendil-works/pi-agent-core";
 
 import { asArray } from "../json-utils.js";
+import { safeString } from "../text-utils.js";
 import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
@@ -649,6 +650,10 @@ export class RpcInteractiveSession {
         resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
         frontendIdentity: TUI_FRONTEND_IDENTITY,
       });
+      if (!data?.cancelled) {
+        this.sessionFile = safeString(data?.sessionFile).trim() || undefined;
+        this.sessionId = safeString(data?.sessionId).trim() || this.sessionId;
+      }
       await this.refreshState(REFRESH_ALL);
       if (!data?.cancelled) {
         await this.runSelfImproveNoticeCheckpoint(
@@ -670,6 +675,13 @@ export class RpcInteractiveSession {
         resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
         frontendIdentity: TUI_FRONTEND_IDENTITY,
       });
+      if (!data?.cancelled) {
+        this.sessionFile =
+          safeString(data?.sessionFile).trim() ||
+          safeString(sessionPath).trim() ||
+          undefined;
+        this.sessionId = safeString(data?.sessionId).trim() || this.sessionId;
+      }
       await this.refreshState(REFRESH_ALL);
       if (!data?.cancelled) {
         await this.runSelfImproveNoticeCheckpoint(

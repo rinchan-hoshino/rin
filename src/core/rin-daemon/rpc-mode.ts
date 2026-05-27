@@ -1396,9 +1396,14 @@ export async function runCustomRpcMode(
                 sessionFile: getSession()?.sessionFile,
                 frontendIdentity: command.frontendIdentity,
               });
-              return value;
+              const rebound = getSession();
+              return {
+                cancelled: Boolean(value?.cancelled),
+                sessionFile: rebound?.sessionFile,
+                sessionId: rebound?.sessionId,
+              };
             }),
-          (value) => ({ cancelled: Boolean(value?.cancelled) }),
+          (value) => value,
         );
       }
       case "fork":

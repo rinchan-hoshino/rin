@@ -3267,6 +3267,13 @@ test(
       const output = lines.join("");
       assert.match(output, /target-skill/);
       assert.doesNotMatch(output, /other-skill/);
+      const switchResponse = output
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .find((line) => line.id === "switch-1");
+      assert.equal(switchResponse?.data?.sessionFile, targetSessionFile);
+      assert.equal(switchResponse?.data?.sessionId, "target");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
