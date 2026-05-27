@@ -783,11 +783,11 @@ export function rewriteRinStartupHeaderText(
   let next = String(text || "")
     .replace(
       /\bPi can explain its own features and look up its docs\./g,
-      "Rin can explain her own features and look up her docs.",
+      "Rin can explain its own features and look up its docs.",
     )
     .replace(
       /\bAsk it how to use or extend Pi\./g,
-      "Ask her how to use or extend Rin.",
+      "Ask Rin how to use or extend Rin.",
     )
     .split("pi")
     .join("rin")
@@ -806,12 +806,12 @@ export function rewriteRinStartupHeaderText(
   }
   return next
     .replace(
-      /\bRin can explain its own features and look up its docs\./g,
-      "Rin can explain her own features and look up her docs.",
+      /\bRin can explain (?:its|h(?:er)) own features and look up (?:its|h(?:er)) docs\./g,
+      "Rin can explain its own features and look up its docs.",
     )
     .replace(
-      /\bAsk it how to use or extend Rin\./g,
-      "Ask her how to use or extend Rin.",
+      /\bAsk (?:it|h(?:er)) how to use or extend Rin\./g,
+      "Ask Rin how to use or extend Rin.",
     );
 }
 
