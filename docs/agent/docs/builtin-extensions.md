@@ -145,7 +145,7 @@ Configure agents with Rin's extension-file convention:
 }
 ```
 
-Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and reusable heartbeat-agent mind template. Heartbeat agents can react to the referenced message and show typing before actively processing a fresh user message. Non-trivial work can be delegated through `state.delegations`; the extension runs due open helpers as separate managed sessions so the parent heartbeat stays a small social presence. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
+Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and reusable heartbeat-agent mind template. Heartbeat agents can use `state.attention`, `state.openLoops`, and `state.delegations` as memory abilities rather than a script. Due open delegations run as separate managed helper sessions. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
 
 ### Enabling bundled browser/computer control
 
