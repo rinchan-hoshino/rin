@@ -29,7 +29,7 @@ test("chat runtime treats worker exits without detail as transient", () => {
 test("chat runtime maps internal marker errors to user-facing messages", () => {
   assert.equal(
     formatChatRuntimeErrorForUser("new_session_session_file_unsupported"),
-    "Could not start a new chat session because the command was bound to a replied message's old session. Retry /new; chat commands should not use replied-message sessions.",
+    "Could not start a new chat session because the command was bound to a replied message's old session.",
   );
   assert.equal(
     formatChatRuntimeErrorForUser("frontend_model_not_found:openai/missing"),

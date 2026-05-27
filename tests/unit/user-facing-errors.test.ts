@@ -19,7 +19,7 @@ test("runtime error formatter keeps human messages", () => {
 test("runtime error formatter maps known internal markers to actionable messages", () => {
   assert.equal(
     formatRuntimeErrorForUser("new_session_session_file_unsupported"),
-    "Could not start a new chat session because the command was bound to a replied message's old session. Retry /new; chat commands should not use replied-message sessions.",
+    "Could not start a new chat session because the command was bound to a replied message's old session.",
   );
   assert.equal(
     formatRuntimeErrorForUser("frontend_model_not_found:openai/missing"),
@@ -27,19 +27,19 @@ test("runtime error formatter maps known internal markers to actionable messages
   );
   assert.equal(
     formatRuntimeErrorForUser("rin_worker_exit"),
-    "Rin's background worker exited before the request finished. Retry the action; if it repeats, restart Rin and try again.",
+    "Rin's background worker exited before the request finished.",
   );
   assert.equal(
     formatRuntimeErrorForUser("rin_no_attached_session"),
-    "Rin could not find a session attached to this chat command. Start a new chat session with /new, then retry the command.",
+    "Rin could not find a session attached to this chat command.",
   );
   assert.equal(
     formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
-    "Rin finished the turn but did not receive a final reply. The turn may still be recovering; check the session output or run rin doctor if it repeats.",
+    "Rin finished the turn without a final reply.",
   );
   assert.equal(
-    formatRuntimeErrorForUser("rpc_turn_final_output_missing").includes(
-      "Retry the action; if it repeats, restart Rin",
+    /retry|restart|doctor|check the session output/i.test(
+      formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
     ),
     false,
   );
@@ -47,7 +47,7 @@ test("runtime error formatter maps known internal markers to actionable messages
     formatRuntimeErrorForUser(
       "rin_daemon_unavailable: managed daemon service did not become available",
     ),
-    "Rin's background service is not available: managed daemon service did not become available. Start or restart Rin, then retry.",
+    "Rin's background service is not available: managed daemon service did not become available.",
   );
 });
 
@@ -55,7 +55,7 @@ test("runtime error formatter hides unmapped internal markers from user-facing t
   const text = formatRuntimeErrorForUser("some_new_internal_marker:debug_code");
   assert.equal(
     text,
-    "Rin hit an internal runtime problem before it could finish. Retry the action; if it repeats, run rin doctor and check the logs.",
+    "Rin hit an internal runtime problem before it could finish.",
   );
   assert.equal(text.includes("some_new_internal_marker"), false);
   assert.equal(text.includes("debug_code"), false);
@@ -78,6 +78,25 @@ test("runtime error formatter does not leak Rin-owned marker literals", () => {
     const formatted = formatRuntimeErrorForUser(marker);
     assert.equal(
       markerPattern.test(formatted),
+      false,
+      `${marker} formatted as ${formatted}`,
+    );
+  }
+});
+
+test("runtime error formatter does not add generic recovery advice", () => {
+  const bannedAdvice =
+    /\b(retry|try again)\b|restart Rin|run rin doctor|rin doctor|if it repeats/i;
+  const markers = collectRinOwnedErrorMarkers();
+  assert.ok(markers.size > 0);
+  assert.equal(
+    bannedAdvice.test(formatRuntimeErrorForUser("unknown_internal_marker")),
+    false,
+  );
+  for (const marker of markers) {
+    const formatted = formatRuntimeErrorForUser(marker);
+    assert.equal(
+      bannedAdvice.test(formatted),
       false,
       `${marker} formatted as ${formatted}`,
     );

@@ -142,7 +142,7 @@ export async function runChatBridgeConfigureCommand(ui: any) {
   const lines = [
     `Chat bridge updated: ${result.chatDescription}`,
     result.chatDetail,
-    "Restart Rin to apply the updated chat configuration.",
+    "Updated chat configuration is pending runtime reload.",
   ].filter(Boolean);
   ui.notify(lines.join("\n"), "info");
   return true;
