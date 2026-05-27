@@ -799,7 +799,7 @@ test("frontend SDK turn driver waits for standalone compaction before prompting"
   assert.equal(promptCall.text, "message after compaction");
 });
 
-test("frontend SDK turn driver steers through native prompt streamingBehavior", async () => {
+test("frontend SDK turn driver submits active-turn input through Pi prompt steering", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
     sessionFile: "/tmp/frontend-chat.jsonl",

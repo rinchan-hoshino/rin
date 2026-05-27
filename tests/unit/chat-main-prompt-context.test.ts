@@ -118,7 +118,7 @@ test("chat main carries sender metadata to the controller with the prompt body",
       .filter((line) => line.startsWith("["));
     const seen = JSON.parse(rows.at(-1) || "[]");
     assert.equal(seen.length, 1);
-    assert.equal(seen[0].mode, "prompt");
+    assert.equal(seen[0].mode, undefined);
     assert.equal(seen[0].text, "my name is?");
     assert.equal(seen[0].promptMeta.source, "chat-bridge");
     assert.equal(seen[0].promptMeta.chatKey, "telegram/1:2");

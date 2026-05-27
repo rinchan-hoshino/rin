@@ -653,17 +653,14 @@ export async function startChatBridge(
       return { retry: transientFailure, errorMessage };
     };
     try {
-      await controller.runTurn(
-        {
-          text: promptBody,
-          attachments,
-          promptMeta,
-          replyToMessageId: messageId,
-          incomingMessageId: messageId,
-          sessionFile: linkedSessionFile || undefined,
-        },
-        controller.canSteerActiveTurn() ? "steer" : "prompt",
-      );
+      await controller.runTurn({
+        text: promptBody,
+        attachments,
+        promptMeta,
+        replyToMessageId: messageId,
+        incomingMessageId: messageId,
+        sessionFile: linkedSessionFile || undefined,
+      });
       return { retry: false };
     } catch (error) {
       return await handleTurnFailure(error);
@@ -931,18 +928,15 @@ export async function startChatBridge(
           frontendIdentity: normalizeFrontendIdentity(payload?.frontend),
         });
     try {
-      return await controller.runTurn(
-        {
-          text,
-          attachments: [],
-          sessionFile,
-          managedSessionLeaf: payload?.managedSessionLeaf,
-          model: payload?.model,
-          thinkingLevel: payload?.thinkingLevel,
-          promptMeta: payload?.promptMeta,
-        },
-        "prompt",
-      );
+      return await controller.runTurn({
+        text,
+        attachments: [],
+        sessionFile,
+        managedSessionLeaf: payload?.managedSessionLeaf,
+        model: payload?.model,
+        thinkingLevel: payload?.thinkingLevel,
+        promptMeta: payload?.promptMeta,
+      });
     } finally {
       if (!useBoundController && (disposeAfterTurn || shutdownAfterTurn)) {
         if (shutdownAfterTurn) {

@@ -283,7 +283,7 @@ test("chat main treats /resume as a normal prompt after the command is removed",
         runCommandCalls !== 0 ||
         sentCount !== 0 ||
         seen.length !== 1 ||
-        seen[0]?.mode !== "prompt" ||
+        seen[0]?.mode !== undefined ||
         seen[0]?.text !== "/resume" ||
         seen[0]?.replyToMessageId !== "m-resume" ||
         seen[0]?.sessionFile !== null
@@ -986,7 +986,7 @@ test("chat main lets same-chat follow-up enter the chatKey worker as steer", asy
           }),
           prompt: async (_message, options = {}) => {
             promptModes.push(options.streamingBehavior || "prompt");
-            if (options.streamingBehavior === "steer") return;
+            if (controller.session.isStreaming) return;
             controller.session.isStreaming = true;
             await controller.handleClientEvent({
               type: "ui",
@@ -1567,7 +1567,7 @@ test("chat main passes quoted reply session metadata through one normal prompt s
       }
       const first = seen[0];
       if (
-        first.mode !== "prompt" ||
+        first.mode !== undefined ||
         first.sessionFile !== replySessionFile ||
         first.replyToMessageId !== "m-follow"
       ) {
@@ -1683,7 +1683,7 @@ test("chat main omits reply metadata when quoting the latest assistant message",
       if (seen.length !== 1) throw new Error(JSON.stringify({ seen }));
       const first = seen[0];
       if (
-        first.mode !== "prompt" ||
+        first.mode !== undefined ||
         first.sessionFile !== replySessionFile ||
         first.replyToMessageId !== "m-follow" ||
         first.promptMetaReplyTo !== null
@@ -1811,7 +1811,7 @@ test("chat main prepends own unsessioned quoted message to trigger text", async 
       if (seen.length !== 1) throw new Error(JSON.stringify({ seen }));
       const first = seen[0];
       if (
-        first.mode !== "prompt" ||
+        first.mode !== undefined ||
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
         first.promptMetaReplyTo !== null ||
@@ -1933,7 +1933,7 @@ test("chat main uses own unsessioned quoted message as mention-only trigger text
       if (seen.length !== 1) throw new Error(JSON.stringify({ seen }));
       const first = seen[0];
       if (
-        first.mode !== "prompt" ||
+        first.mode !== undefined ||
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
         first.promptMetaReplyTo !== null ||
@@ -2049,7 +2049,7 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
       }
       const [first] = seen;
       if (
-        first.mode !== "prompt" ||
+        first.mode !== undefined ||
         first.sessionFile !== replySessionFile ||
         first.replyToMessageId !== "m-follow"
       ) {

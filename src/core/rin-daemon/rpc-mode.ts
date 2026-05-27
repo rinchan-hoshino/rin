@@ -68,6 +68,21 @@ function stableJson(value: any) {
   }
 }
 
+async function promptWithQueueableTurnReceiver(
+  session: any,
+  message: string,
+  options: Record<string, unknown>,
+) {
+  if (typeof session?.prompt !== "function") return;
+  const receiver = new Proxy(session, {
+    get(target, property, receiver) {
+      if (property === "isStreaming") return true;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  return await session.prompt.call(receiver, message, options);
+}
+
 function getSessionEntries(session: any) {
   return Array.isArray(session?.sessionManager?.getEntries?.())
     ? session.sessionManager.getEntries()
@@ -1078,7 +1093,15 @@ export async function runCustomRpcMode(
           promptOptions.frontendIdentity = frontendIdentity;
         }
         if (streamingBehavior) {
-          await session.prompt(command.message, promptOptions);
+          if (isTurnActive() && !session.isStreaming) {
+            await promptWithQueueableTurnReceiver(
+              session,
+              command.message,
+              promptOptions,
+            );
+          } else {
+            await session.prompt(command.message, promptOptions);
+          }
           return done(id, "prompt");
         }
         startTurnTask(String(command.requestTag || ""), async () => {

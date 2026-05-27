@@ -1542,7 +1542,7 @@ test("chat controller leaves the working reaction on the active message while st
       sessionId: "session-live",
     }),
     prompt: async (_text, options = {}) => {
-      if (options.streamingBehavior === "steer") return;
+      if (controller.session.isStreaming) return;
       controller.session.isStreaming = true;
       await controller.handleClientEvent({
         type: "ui",
@@ -1616,7 +1616,7 @@ test("chat controller keeps steering open after assistant tool-call interim", as
     }),
     prompt: async (text, options = {}) => {
       promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
-      if (options.streamingBehavior === "steer") return;
+      if (controller.session.isStreaming) return;
       firstRequestTag = String(options.requestTag || "");
       controller.session.isStreaming = true;
       resolveFirstPromptStarted();
@@ -3148,7 +3148,7 @@ test("chat controller lets steer bypass the owned turn queue while the current t
     }),
     prompt: async (text, options = {}) => {
       promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
-      if (options.streamingBehavior === "steer") return;
+      if (controller.session.isStreaming) return;
       firstRequestTag = String(options.requestTag || "");
       controller.session.isStreaming = true;
       resolveFirstPromptStarted();

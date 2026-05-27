@@ -327,7 +327,9 @@ export class ChatController {
 
   canSteerActiveTurn() {
     if (this.turnAbortRequested) return false;
-    return this.driver.canSteerActiveTurn();
+    return typeof this.driver.canSteerActiveTurn === "function"
+      ? this.driver.canSteerActiveTurn()
+      : false;
   }
 
   private setCurrentTurn(input: {
@@ -1272,7 +1274,7 @@ export class ChatController {
   ) {
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
-    if (mode === "steer" && this.canSteerActiveTurn()) {
+    if (this.canSteerActiveTurn()) {
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
         this.resolveSessionFileForUse(rawWantedSessionFile);
