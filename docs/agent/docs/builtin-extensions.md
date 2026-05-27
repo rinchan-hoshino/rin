@@ -79,11 +79,6 @@ Installed settings can use Rin aliases instead of installation-specific paths:
   - reads optional configuration from `~/.rin/extensions/rin-computer-use.json`
   - otherwise works out of the box with platform backends: PowerShell/.NET on Windows, `screencapture` + `osascript`/`cliclick` on macOS, and screenshot tools + `xdotool` on Linux
   - may install `cliclick` through Homebrew only when `allowInstall` is `true` in the extension config file
-- `rin:heartbeat-notifier`
-  - expands to the bundled `extensions/rin-heartbeat-notifier` package
-  - runs configurable record-only chat heartbeat agents as an in-process background extension
-  - reads optional agent configuration from `~/.rin/extensions/rin-heartbeat-notifier.json`
-  - uses bundled `agent-instructions.md` for reusable checklist/wake behavior; private deployment instructions stay in local files
 
 Optional extension configuration uses Rin's extension-file convention. Rin does not create these files by default; create them only to override the open-box behavior.
 
@@ -115,37 +110,6 @@ Use Pi resource filters with the alias to disable entries from a broader extensi
 ```
 
 If `extensions` is missing or `[]`, `todo` stays on by default and optional extension tools are off for that runtime. Fresh installs write `rin:web-search` unless the installer selection disables it.
-
-### Optional heartbeat notification service
-
-`rin:heartbeat-notifier` is a bundled background-capable extension, not core chat behavior. It owns reusable in-process heartbeat agents: no ordinary scheduled task is created or left on disk. The extension watches configured record-only chat message stores, appends new owner-message notifications into each agent's `state.attention`, sets `state.nextRunAt`, and starts the agent with a minimal round prompt.
-
-Enable it through the normal bundled extension list:
-
-```json
-{
-  "extensions": ["rin:heartbeat-notifier"]
-}
-```
-
-Configure agents with Rin's extension-file convention:
-
-```jsonc
-// ~/.rin/extensions/rin-heartbeat-notifier.json
-{
-  "pollIntervalMs": 1000,
-  "agents": [
-    {
-      "agentId": "owner_tg",
-      "taskId": "heartbeat_owner_tg",
-      "chatKey": "telegram/123456:7890",
-      "privateInstructionPath": "/home/me/.rin-private/owner_tg.md",
-    },
-  ],
-}
-```
-
-Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and reusable heartbeat-agent mind template. Heartbeat agents can use `state.attention`, `state.openLoops`, and `state.delegations` as memory abilities rather than a script. Due open delegations run as separate managed helper sessions. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
 
 ### Enabling bundled browser/computer control
 

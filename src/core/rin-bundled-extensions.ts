@@ -6,8 +6,7 @@ import { safeString } from "./text-utils.js";
 export type BuiltInRinExtensionId =
   | "rin:web-search"
   | "rin:browser-use"
-  | "rin:computer-use"
-  | "rin:heartbeat-notifier";
+  | "rin:computer-use";
 
 export type BuiltInRinExtensionDefinition = {
   id: BuiltInRinExtensionId;
@@ -47,13 +46,6 @@ export const BUILT_IN_RIN_EXTENSIONS: BuiltInRinExtensionDefinition[] = [
     label: "Computer use",
     description: "Adds the computer_use tool for Rin-owned desktop automation.",
     directory: "rin-computer-use",
-  },
-  {
-    id: "rin:heartbeat-notifier",
-    label: "Heartbeat notifier",
-    description:
-      "Runs configurable record-only chat heartbeat notification as a background extension.",
-    directory: "rin-heartbeat-notifier",
   },
 ];
 

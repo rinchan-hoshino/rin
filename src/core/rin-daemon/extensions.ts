@@ -4,11 +4,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import {
-  applyBundledRinExtensionAliases,
-  isBuiltInRinExtensionEnabled,
-  resolveBundledRinExtensionPath,
-} from "../rin-bundled-extensions.js";
+import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import {
   ensureRuntimeImporter,
   getRinExtensionRuntimeRoot,
@@ -499,31 +495,6 @@ function listAutoDiscoveredBackgroundExtensionConfigs(options: {
   });
 }
 
-function listBundledBackgroundExtensionConfigs(
-  settings: unknown,
-): RinBackgroundExtensionConfig[] {
-  if (
-    !isBuiltInRinExtensionEnabled(
-      (settings as any)?.extensions,
-      "rin:heartbeat-notifier",
-    )
-  ) {
-    return [];
-  }
-  const moduleRoot = resolveBundledRinExtensionPath("rin:heartbeat-notifier");
-  if (!moduleRoot) return [];
-  return [
-    {
-      name: "rin-heartbeat-notifier",
-      packageName: "rin:heartbeat-notifier",
-      version: "",
-      config: {},
-      optional: false,
-      modulePath: path.join(moduleRoot, "index.ts"),
-    },
-  ];
-}
-
 function shouldResolvePiBackgroundExtensions(
   settings: unknown,
   agentDir: string,
@@ -569,8 +540,6 @@ export class RinBackgroundExtensionManager {
     const explicitEntries = listRinBackgroundExtensionConfigs(runtimeSettings, {
       cwd: this.options.cwd,
     });
-    const bundledEntries =
-      listBundledBackgroundExtensionConfigs(runtimeSettings);
     const autoDiscoveredEntries = listAutoDiscoveredBackgroundExtensionConfigs({
       cwd: this.options.cwd,
     });
@@ -595,7 +564,6 @@ export class RinBackgroundExtensionManager {
     }
     const entries = dedupeBackgroundEntries([
       ...explicitEntries,
-      ...bundledEntries,
       ...autoDiscoveredEntries,
       ...piResolvedEntries,
     ]);
