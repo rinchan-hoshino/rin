@@ -46,7 +46,7 @@ Recommended checklist item shape:
 
 1. Read `state.json` first. Treat `summary`, `styleNotes`, `checklist`, `todos`, and `childAgents` as your prefix cache from prior runs.
 2. Inspect `state.checklist` before deciding what to do.
-3. When you decide to actively process a fresh user message, call `rin.chat.typing(chatKey)` once before heavier reading or reasoning. To send, use Rin Agent SDK: `rin.chat.send({ type: 'text_delivery', createdAt: new Date().toISOString(), chatKey, text })`.
+3. When you decide to actively process a fresh user message, first react to the referenced message when the checklist item has `messageId`: `rin.chat.react({ chatKey, messageId, emoji: '👀' })`. Then call `rin.chat.typing(chatKey)` once before heavier reading or reasoning. To send, use Rin Agent SDK: `rin.chat.send({ type: 'text_delivery', createdAt: new Date().toISOString(), chatKey, text })`.
 4. Avoid mechanical one-message-in/one-message-out behavior. The right answer can be silence, one short reply, multiple natural replies, or a proactive later check-in.
 5. Always write `state.json` before finishing. Preserve useful existing state. Update at least `lastRunAt`, `lastSeenMessageAt` when messages were inspected, `summary`/`styleNotes` when they changed, `checklist`/`todos`/`childAgents`, `lastDecision`, and `nextRunAt`.
 6. Visible chat replies must be user-facing and natural. Do not mention heartbeat, scheduler, daemon, condition, SDK, state, or implementation details.

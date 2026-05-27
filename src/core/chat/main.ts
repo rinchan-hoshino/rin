@@ -96,7 +96,7 @@ import {
   enqueueChatOutboxPayload,
   type ChatOutboxPayload,
 } from "../rin-lib/chat-outbox.js";
-import { sendTyping } from "./transport.js";
+import { sendReaction, sendTyping } from "./transport.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
 import {
@@ -291,6 +291,11 @@ export type ChatBridgeHandle = {
   getStatus: () => ChatBridgeStatus;
   send: (payload: ChatOutboxPayload) => Promise<{ delivered: true }>;
   typing: (payload: { chatKey?: string }) => Promise<{ sent: boolean }>;
+  react: (payload: {
+    chatKey?: string;
+    messageId?: string;
+    emoji?: string;
+  }) => Promise<{ sent: boolean }>;
   runTurn: (payload: ChatBridgeTurnPayload) => Promise<any>;
   setWorkingVisible: (payload: {
     chatKey?: string;
@@ -892,6 +897,19 @@ export async function startChatBridge(
     if (!chatKey) throw new Error("chat_key_required");
     return { sent: await sendTyping(app, chatKey, h) };
   };
+  const react = async (payload: {
+    chatKey?: string;
+    messageId?: string;
+    emoji?: string;
+  }) => {
+    const chatKey = safeString(payload?.chatKey).trim();
+    const messageId = safeString(payload?.messageId).trim();
+    const emoji = safeString(payload?.emoji).trim();
+    if (!chatKey) throw new Error("chat_key_required");
+    if (!messageId) throw new Error("chat_message_id_required");
+    if (!emoji) throw new Error("chat_reaction_emoji_required");
+    return { sent: await sendReaction(app, chatKey, messageId, emoji) };
+  };
   const runTurn = async (payload: ChatBridgeTurnPayload) => {
     const chatKey = safeString(payload?.chatKey).trim();
     const text = safeString(payload?.text).trim();
@@ -1123,6 +1141,7 @@ export async function startChatBridge(
     getStatus,
     send,
     typing,
+    react,
     runTurn,
     setWorkingVisible,
     terminateTurn,

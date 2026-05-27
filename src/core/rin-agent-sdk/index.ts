@@ -37,6 +37,12 @@ export type ChatTypingOptions =
       chatKey: string;
     };
 
+export type ChatReactOptions = {
+  chatKey: string;
+  messageId: string;
+  emoji: string;
+};
+
 export type ChatTerminateTurnOptions =
   | string
   | {
@@ -229,6 +235,11 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
           override,
         );
       },
+      react: async (payload: ChatReactOptions, override?: RinAgentSdkOptions) =>
+        await request<{ sent?: boolean }>(
+          { type: "chat_react", payload },
+          override,
+        ),
       terminateTurn: async (
         target: ChatTerminateTurnOptions,
         override?: RinAgentSdkOptions,

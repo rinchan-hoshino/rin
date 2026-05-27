@@ -145,7 +145,7 @@ Configure agents with Rin's extension-file convention:
 }
 ```
 
-Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and reusable heartbeat-agent checklist template. Heartbeat agents show typing before actively processing a fresh user message. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
+Keep the chat itself configured through core `chat.turnPolicy` as `record_only`; the optional extension is the notification bridge and reusable heartbeat-agent checklist template. Heartbeat agents can react to the referenced message and show typing before actively processing a fresh user message. Put deployment-specific personality, names, and private preferences in `privateInstructionPath` or local state files, not in the reusable extension package.
 
 ### Enabling bundled browser/computer control
 

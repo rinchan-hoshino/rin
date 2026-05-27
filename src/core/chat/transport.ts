@@ -111,6 +111,42 @@ export async function sendTyping(app: any, chatKey: string, h: any) {
   return false;
 }
 
+export async function sendReaction(
+  app: any,
+  chatKey: string,
+  messageId: string,
+  emoji: string,
+) {
+  const target = tryResolveChatTarget(app, chatKey);
+  if (!target) return false;
+  const { parsed, bot } = target;
+  const nextEmoji = safeString(emoji).trim();
+  const nextMessageId = safeString(messageId).trim();
+  if (!nextEmoji || !nextMessageId) return false;
+  if (parsed.platform === "onebot" && isPrivateChat(parsed)) return false;
+
+  if (
+    parsed.platform !== "onebot" &&
+    typeof bot?.internal?.setMessageReaction === "function"
+  ) {
+    return await withPresentationTimeout(async () => {
+      await bot.internal.setMessageReaction({
+        chat_id: parsed.chatId,
+        message_id: Number(nextMessageId),
+        reaction: [{ type: "emoji", emoji: nextEmoji }],
+      });
+      return true;
+    }, false);
+  }
+
+  const createReaction = pickCreateReaction(bot);
+  if (!createReaction) return false;
+  return await withPresentationTimeout(async () => {
+    await createReaction(parsed.chatId, nextMessageId, nextEmoji);
+    return true;
+  }, false);
+}
+
 export async function rotateWorkingReaction(
   app: any,
   chatKey: string,

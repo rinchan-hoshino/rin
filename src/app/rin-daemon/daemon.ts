@@ -131,6 +131,7 @@ async function main() {
           await (await getHostedChatBridge()).runTurn(payload),
         typing: async (payload) =>
           await (await getHostedChatBridge()).typing(payload),
+        react: async (payload) => await (await getHostedChatBridge()).react(payload),
         setWorkingVisible: async (payload) =>
           await (await getHostedChatBridge()).setWorkingVisible(payload),
         terminateTurn: async (payload) =>
@@ -188,6 +189,14 @@ async function main() {
             data: await (
               await getHostedChatBridge()
             ).typing(command?.payload || {}),
+          };
+        }
+        if (type === "chat_react") {
+          return {
+            success: true,
+            data: await (
+              await getHostedChatBridge()
+            ).react(command?.payload || {}),
           };
         }
         if (type === "chat_set_working_visible") {

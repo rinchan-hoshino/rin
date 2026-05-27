@@ -70,6 +70,11 @@ export async function startDaemon(
       send?: (payload: any) => Promise<any>;
       runTurn?: (payload: any) => Promise<any>;
       typing?: (payload: { chatKey?: string }) => Promise<any>;
+      react?: (payload: {
+        chatKey?: string;
+        messageId?: string;
+        emoji?: string;
+      }) => Promise<any>;
       setWorkingVisible?: (payload: {
         chatKey?: string;
         controllerKey?: string;
