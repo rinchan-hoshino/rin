@@ -20,21 +20,34 @@ Memory-index extraction should preserve topic cohesion. When new evidence belong
 
 Do not turn a memory review into a runtime feature proposal: do not add new built-in tools, prompt contracts, or user-visible workflow requirements unless the owner explicitly asks for that product change.
 
+## Extraction gate
+
+Before writing memory, classify the lesson by ownership and lifetime:
+
+- Product/source defect: fix the producer or product doc; do not store a memory workaround. Example: duplicated prompt context from two document fields belongs in source assembly, not in a new rule reminding agents to ignore duplicates.
+- Always-on invariant: write a prompt baseline only if the rule must affect most future turns. Example: cross-task authority and evidence rules may belong in `core_doctrine`; frontend parity, status wording, account repair, or TDD details belong in owning skills.
+- Reusable workflow: update the closest current or umbrella skill. Preserve only the trigger and operational rule needed for future execution.
+- Skill visibility/lifecycle: do not keep an alias, paused workflow, one-off task, internal lookup, or narrow fragment as a standalone visible skill unless it has a distinct recurring trigger. Merge, hide, alias intentionally, or delete it.
+- Historical evidence: use `memory-index` only when future lookup needs provenance or chronology; otherwise leave evidence in transcripts.
+- Temporary continuity: use `short-term-memory` only for active unfinished work; remove it when the cleanup condition is met.
+- No write: if the useful action is already source/doc cleanup, skill consolidation, or no-op reporting, do not create another memory item.
+
 ## Review workflow
 
 1. Inspect the current prompt slots.
 2. Inspect the current workflow skill, any umbrella skill that covers the same class of work, and the fixed memory skill destinations.
 3. Inspect `<agentDir>/self_improve/state/skill-usage.json` when present. Use low or absent usage as a cleanup signal, not automatic deletion proof.
 4. Extract candidate lessons from the available evidence.
-5. Score each candidate quickly:
+5. Apply the extraction gate above before scoring. Discard source-defect workarounds, one-off details, and lessons already covered by the owning surface.
+6. Score each remaining candidate quickly:
    - attention: affects future behavior;
    - emotion: strong correction, frustration, risk, preference, blocker, or failed prior behavior;
    - repetition: repeated in evidence or confirmed by existing memory.
-6. Choose the smallest correct destination using the destination priority below.
-7. Before creating a memory-index transaction, scan the relevant monthly index for an existing entry with the same domain, object, error, decision, or work thread. Merge into that existing topic transaction when it is the same topic.
-8. Rewrite the destination compactly. Replace or remove stale, lower-priority, conflicting, or duplicate lines instead of appending another rule.
-9. Prune stale short-term records and move misplaced material to the smallest correct destination.
-10. Validate skill frontmatter after editing skills.
+7. Choose the smallest correct destination using the destination priority below.
+8. Before creating a memory-index transaction, scan the relevant monthly index for an existing entry with the same domain, object, error, decision, or work thread. Merge into that existing topic transaction when it is the same topic.
+9. Rewrite the destination compactly. Replace or remove stale, lower-priority, conflicting, or duplicate lines instead of appending another rule.
+10. Prune stale short-term records and move misplaced material to the smallest correct destination.
+11. Validate skill frontmatter after editing skills.
 
 ## Review priorities
 
@@ -71,9 +84,9 @@ Location: `<agentDir>/self_improve/prompts/*.md`
 - `user_profile.md`: basic user information; limit 4 lines.
 - `core_doctrine.md`: durable methodology, worldview, values, and decision rules; limit 32 lines.
 
-Use prompt baselines only for every-turn identity, user identity, or doctrine invariants. Put procedures, examples, durable facts, and troubleshooting detail in skills or memory-index destinations.
+Use prompt baselines only for every-turn identity, user identity, or doctrine invariants. Put procedures, examples, durable facts, and troubleshooting detail in skills or memory-index destinations. Do not use prompt baselines as a catch-all for lessons from a single product area.
 
-Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic. When a new rule supersedes existing prompt text, replace or remove the lower-priority/conflicting line instead of appending another rule.
+Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic. When a new rule supersedes existing prompt text, replace or remove the lower-priority/conflicting line instead of appending another rule. Prefer shrinking an overgrown baseline over preserving every historical instruction.
 
 ### Reusable skills
 
@@ -107,7 +120,7 @@ Create a new ordinary skill only when:
 - existing skills do not provide a clean home;
 - the lesson is not just a one-off issue, PR, error string, session artifact, or temporary implementation detail.
 
-Keep an ordinary skill only when it still has a distinct recurring trigger and enough reusable workflow, reference, or troubleshooting value to justify a separate file.
+Keep an ordinary skill only when it still has a distinct recurring trigger and enough reusable workflow, reference, or troubleshooting value to justify a separate file. Alias, paused, internal, or fixed lookup skills must be intentional and compact; otherwise merge or delete them instead of keeping them visible by inertia.
 
 When several related lessons appear together, make one composite skill with headings. Move or delete narrow fragments instead of preserving them as standalone skills.
 

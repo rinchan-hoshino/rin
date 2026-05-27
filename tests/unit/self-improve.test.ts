@@ -872,6 +872,18 @@ test("self-improve maintenance manual codifies review rules", async () => {
   assert.doesNotMatch(manual, /conversation transcript/);
   assert.match(manual, /explicit owner corrections/);
   assert.match(manual, /Use prompt baselines only for every-turn identity/);
+  assert.match(manual, /Extraction gate/);
+  assert.match(
+    manual,
+    /Product\/source defect: fix the producer or product doc/,
+  );
+  assert.match(manual, /Always-on invariant: write a prompt baseline only if/);
+  assert.match(manual, /Skill visibility\/lifecycle/);
+  assert.match(manual, /do not keep an alias, paused workflow, one-off task/);
+  assert.match(manual, /Discard source-defect workarounds/);
+  assert.match(manual, /Do not use prompt baselines as a catch-all/);
+  assert.match(manual, /Prefer shrinking an overgrown baseline/);
+  assert.match(manual, /visible by inertia/);
   assert.match(manual, /Review priorities/);
   assert.match(manual, /skill-usage\.json/);
   assert.match(manual, /low or absent usage as a cleanup signal/);
