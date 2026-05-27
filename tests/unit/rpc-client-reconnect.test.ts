@@ -596,7 +596,10 @@ test("rpc interactive session reconnect loop re-runs restore while stuck in reco
 test("rpc interactive session keeps the daemon connection while a worker exits mid-turn", () => {
   const client = { isConnected: () => true };
   const session = new RpcInteractiveSession(client);
-  session.ensureReconnectLoop = () => {};
+  let reconnects = 0;
+  session.ensureReconnectLoop = () => {
+    reconnects += 1;
+  };
   session.rpcConnected = true;
   session.startupPending = false;
   session.activeTurn = {
@@ -613,6 +616,7 @@ test("rpc interactive session keeps the daemon connection while a worker exits m
   session.handleRpcEvent({ type: "worker_exit", code: 9, signal: null });
 
   assert.equal(session.activeTurn, null);
+  assert.equal(reconnects, 1);
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "connecting",
@@ -628,6 +632,30 @@ test("rpc interactive session keeps the daemon connection while a worker exits m
     },
     { type: "worker_exit", code: 9, signal: null },
   ]);
+});
+
+test("rpc interactive session does not self-deadlock when restore sees a disconnected request", async () => {
+  const client = {
+    isConnected: () => true,
+    send: async (payload) => {
+      if (payload.type === "select_session") {
+        throw new Error("rin_disconnected:req_restore");
+      }
+      return { success: true, data: {} };
+    },
+  };
+  const session = new RpcInteractiveSession(client);
+  session.sessionFile = "/tmp/demo.jsonl";
+  session.rpcConnected = true;
+  session.recoveryPending = true;
+  session.reconnectPromise = Promise.resolve();
+
+  await assert.rejects(
+    session.handleConnectionRestored(),
+    /rin_disconnected:req_restore/,
+  );
+
+  assert.equal(session.recoveryPending, true);
 });
 
 test("rpc interactive session preserves native prompt payloads through the shared frontend SDK helper", async () => {

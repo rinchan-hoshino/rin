@@ -1516,6 +1516,7 @@ export class RpcInteractiveSession {
       return;
     }
     this.syncStreamingState();
+    void this.ensureReconnectLoop();
   }
 
   handleSessionRecovered() {
@@ -1738,6 +1739,9 @@ export class RpcInteractiveSession {
       ) {
         this.recoveryPending = true;
         this.emitFrontendStatus(true);
+        if (this.restorePromise || this.reconnectPromise) {
+          throw error;
+        }
         await this.waitForDaemonAvailable();
         response = await send();
       } else {
