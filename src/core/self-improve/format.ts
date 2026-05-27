@@ -15,10 +15,7 @@ function trimText(value: unknown) {
 }
 
 function collectPromptDocs(result: any) {
-  return [
-    ...asArray<any>(result?.self_improve_prompt_prompt_docs),
-    ...asArray<any>(result?.self_improve_prompt_docs),
-  ];
+  return asArray<any>(result?.self_improve_prompt_prompt_docs);
 }
 
 function getPromptDocBody(doc: any) {

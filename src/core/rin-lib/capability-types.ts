@@ -9,6 +9,7 @@ export type RinCapabilityOptions = {
   readonly getThinkingLevel: () => ThinkingLevel;
   readonly sendMessage: (message: any, options?: any) => void;
   readonly emitEvent?: (event: any) => void;
+  readonly compactWithRinPrompt?: (event: any) => Promise<any>;
 };
 
 export type RinCapabilityDefinition = {

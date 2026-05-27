@@ -2,6 +2,8 @@ import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { completeSimple } from "@earendil-works/pi-ai";
+
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import todoCapability from "./todo.js";
 import {
@@ -62,6 +64,16 @@ export function createRinCapabilityDefinitions(
     taskModule(),
     chatModule(),
     tokenUsageModule(options),
+    {
+      name: "rin_compaction_prompt",
+      hooks: {
+        session_before_compact: [
+          async (event: any) => {
+            return await options.compactWithRinPrompt?.(event);
+          },
+        ],
+      },
+    },
   ];
 }
 
@@ -99,6 +111,115 @@ function formatSkillsForPrompt(skills: any[]) {
 
 function buildRinRuntimeAwarenessBlock() {
   return "You are running in the Rin runtime environment.";
+}
+
+const RIN_COMPACTION_SYSTEM_PROMPT =
+  "Create a concise, faithful handoff summary for another LLM continuing the same task. Keep only actionable context. Do not invent facts.";
+
+const RIN_COMPACTION_PROMPT = `Summarize the conversation above as a continuation handoff.
+
+Rules:
+- Keep user intent, constraints, authority boundaries, corrections, current state, and next actions.
+- Keep exact paths, commands, function names, errors, and decisions only when needed to continue.
+- Remove stale, resolved, duplicate, and non-actionable detail.
+
+Use this exact structure:
+
+## Active Task
+[Current objective]
+
+## Constraints
+- [User requirements, preferences, authority boundaries, corrections]
+
+## Done
+- [Completed work]
+
+## Current State
+- [Branch/session/runtime state, partial work, blockers]
+
+## Next
+1. [Next concrete step]
+
+## Critical Context
+- [Only facts/artifacts needed to continue safely]`;
+
+const RIN_TURN_PREFIX_COMPACTION_PROMPT = `This is the prefix of a turn whose suffix will remain in context.
+
+Summarize only what the retained suffix needs:
+
+## Original Request
+[What the user asked in this turn]
+
+## Early Progress
+- [Key prefix actions and decisions]
+
+## Context for Suffix
+- [Facts needed to understand the retained suffix]
+
+Keep it concise. Do not list files unless needed.`;
+
+function extractAssistantText(message: any) {
+  return (Array.isArray(message?.content) ? message.content : [])
+    .filter((item: any) => item?.type === "text")
+    .map((item: any) => String(item.text || ""))
+    .join("\n")
+    .trim();
+}
+
+function createRinSummarizationOptions(
+  model: any,
+  maxTokens: number,
+  apiKey: string | undefined,
+  headers: Record<string, string> | undefined,
+  signal: AbortSignal | undefined,
+  thinkingLevel: any,
+) {
+  const options: any = { maxTokens, apiKey, headers, signal };
+  if (model?.reasoning && thinkingLevel && thinkingLevel !== "off") {
+    options.reasoning = thinkingLevel;
+  }
+  return options;
+}
+
+async function completeRinCompactionSummary(options: {
+  model: any;
+  promptText: string;
+  maxTokens: number;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+  thinkingLevel?: any;
+  streamFn?: any;
+}) {
+  const context: any = {
+    systemPrompt: RIN_COMPACTION_SYSTEM_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "text", text: options.promptText }],
+        timestamp: Date.now(),
+      },
+    ],
+  };
+  const completionOptions = createRinSummarizationOptions(
+    options.model,
+    options.maxTokens,
+    options.apiKey,
+    options.headers,
+    options.signal,
+    options.thinkingLevel,
+  );
+  const response = options.streamFn
+    ? await (
+        await options.streamFn(options.model, context, completionOptions)
+      ).result()
+    : await completeSimple(options.model, context, completionOptions);
+  if (response?.stopReason === "error") {
+    throw new Error(
+      `Rin compaction summarization failed: ${response.errorMessage || "Unknown error"}`,
+    );
+  }
+  return extractAssistantText(response);
 }
 
 function buildRinDocsBlock(agentDir: string) {
@@ -533,6 +654,90 @@ const AUTO_RELOAD_AFTER_COMPACTION_KEY = Symbol.for(
 const COMPACTION_REASON_TRACKING_KEY = Symbol.for(
   "rin.compactionReasonTracking",
 );
+const COMPACTION_PERCENT_THRESHOLD_KEY = Symbol.for(
+  "rin.compactionPercentThreshold",
+);
+
+function normalizeCompactionTriggerPercent(value: unknown) {
+  const percent = Number(value);
+  if (!Number.isFinite(percent) || percent <= 0 || percent >= 1) return 0.85;
+  return percent;
+}
+
+function shouldTriggerRinPercentCompaction(
+  contextTokens: number,
+  contextWindow: number,
+  settings: any,
+) {
+  if (!Number.isFinite(contextTokens) || contextTokens <= 0) return false;
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return false;
+  const triggerPercent = normalizeCompactionTriggerPercent(
+    settings?.triggerPercent,
+  );
+  const reserveTokens = Number(settings?.reserveTokens || 0);
+  const reserveThreshold =
+    reserveTokens > 0 ? contextWindow - reserveTokens : contextWindow;
+  const percentThreshold = Math.floor(contextWindow * triggerPercent);
+  const threshold = Math.min(percentThreshold, reserveThreshold);
+  return contextTokens >= threshold;
+}
+
+export function applyRinCompactionPercentThreshold(
+  session: any,
+  helpers: {
+    calculateContextTokens?: (usage: any) => number;
+    getLatestCompactionEntry?: (entries: any[]) => any;
+  } = {},
+) {
+  if (!session || typeof session !== "object") return;
+  if (session[COMPACTION_PERCENT_THRESHOLD_KEY]) return;
+  if (typeof session._checkCompaction !== "function") return;
+  if (typeof session._runAutoCompaction !== "function") return;
+  if (typeof helpers.calculateContextTokens !== "function") return;
+
+  const originalCheckCompaction = session._checkCompaction.bind(session);
+  session._checkCompaction = async function patchedRinPercentCompaction(
+    assistantMessage: any,
+    skipAbortedCheck = true,
+  ) {
+    const settings = this.settingsManager?.getCompactionSettings?.();
+    if (!settings?.enabled) {
+      return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
+    }
+    if (skipAbortedCheck && assistantMessage?.stopReason === "aborted") {
+      return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
+    }
+    // Let Pi's native overflow/error recovery run unchanged; the percentage
+    // threshold is only an earlier threshold trigger for successful turns.
+    if (assistantMessage?.stopReason === "error") {
+      return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
+    }
+
+    const contextWindow = Number(this.model?.contextWindow || 0);
+    const compactionEntry = helpers.getLatestCompactionEntry?.(
+      this.sessionManager?.getBranch?.() || [],
+    );
+    if (
+      compactionEntry &&
+      assistantMessage?.timestamp <=
+        new Date(compactionEntry.timestamp).getTime()
+    ) {
+      return false;
+    }
+
+    const contextTokens = helpers.calculateContextTokens(
+      assistantMessage?.usage,
+    );
+    if (
+      shouldTriggerRinPercentCompaction(contextTokens, contextWindow, settings)
+    ) {
+      return await this._runAutoCompaction("threshold", false);
+    }
+    return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
+  };
+
+  session[COMPACTION_PERCENT_THRESHOLD_KEY] = { originalCheckCompaction };
+}
 
 export function applyRinCompactionReasonTracking(session: any) {
   if (!session || typeof session !== "object") return;
@@ -1004,9 +1209,13 @@ export async function createConfiguredAgentSession(
 ) {
   const agentRuntimeModule = await loadRinAgentRuntime();
   const {
+    calculateContextTokens,
+    convertToLlm,
     createAgentSessionRuntime,
     createAgentSessionServices,
     createAgentSessionFromServices,
+    getLatestCompactionEntry,
+    serializeConversation,
     SettingsManager,
     SessionManager,
   } = agentRuntimeModule as any;
@@ -1086,6 +1295,82 @@ export async function createConfiguredAgentSession(
     }
 
     const sessionRef: { current?: any } = {};
+    const compactWithRinPrompt = async (event: any) => {
+      const session = sessionRef.current;
+      const preparation = event?.preparation;
+      const model = session?.model;
+      if (!session || !preparation || !model) return undefined;
+      if (
+        typeof convertToLlm !== "function" ||
+        typeof serializeConversation !== "function"
+      ) {
+        return undefined;
+      }
+
+      const { apiKey, headers } =
+        typeof session._getCompactionRequestAuth === "function"
+          ? await session._getCompactionRequestAuth(model)
+          : { apiKey: undefined, headers: undefined };
+      const reserveTokens = Number(preparation?.settings?.reserveTokens || 0);
+      const maxTokens = Math.min(
+        Math.floor(0.8 * (reserveTokens || 16384)),
+        model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
+      );
+      const buildPrompt = (
+        messages: any[],
+        instruction: string,
+        previousSummary?: string,
+      ) => {
+        const conversationText = serializeConversation(convertToLlm(messages));
+        return [
+          `<conversation>\n${conversationText}\n</conversation>`,
+          previousSummary
+            ? `<previous-summary>\n${previousSummary}\n</previous-summary>`
+            : "",
+          instruction,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+      };
+
+      const commonOptions = {
+        model,
+        maxTokens,
+        apiKey,
+        headers,
+        signal: event?.signal,
+        thinkingLevel: session.thinkingLevel,
+        streamFn: session.agent?.streamFn,
+      };
+      const historySummary = await completeRinCompactionSummary({
+        ...commonOptions,
+        promptText: buildPrompt(
+          preparation.messagesToSummarize || [],
+          RIN_COMPACTION_PROMPT,
+          preparation.previousSummary,
+        ),
+      });
+      let summary = historySummary || "No prior history.";
+      if (preparation.isSplitTurn && preparation.turnPrefixMessages?.length) {
+        const turnPrefixSummary = await completeRinCompactionSummary({
+          ...commonOptions,
+          maxTokens: Math.min(Math.floor(maxTokens * 0.5), maxTokens),
+          promptText: buildPrompt(
+            preparation.turnPrefixMessages,
+            RIN_TURN_PREFIX_COMPACTION_PROMPT,
+          ),
+        });
+        summary = `${summary}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixSummary}`;
+      }
+
+      return {
+        compaction: {
+          summary,
+          firstKeptEntryId: preparation.firstKeptEntryId,
+          tokensBefore: preparation.tokensBefore,
+        },
+      };
+    };
     const rinCapabilities = createRinCapabilitySet({
       cwd: runtimeCwd,
       agentDir: runtimeAgentDir,
@@ -1107,6 +1392,7 @@ export async function createConfiguredAgentSession(
         emitEvent: (event) => {
           sessionRef.current?.__rinEmitCoreEvent?.(event);
         },
+        compactWithRinPrompt,
       }),
     });
 
@@ -1124,6 +1410,10 @@ export async function createConfiguredAgentSession(
     }
 
     applyRinCompactionReasonTracking(result.session);
+    applyRinCompactionPercentThreshold(result.session, {
+      calculateContextTokens,
+      getLatestCompactionEntry,
+    });
 
     await attachRinCapabilitiesToSession(result.session, {
       capabilitySet: rinCapabilities,

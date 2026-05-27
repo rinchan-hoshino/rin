@@ -4,7 +4,6 @@ import {
   MEMORY_PROMPT_SLOTS,
   MemoryRelationGraph,
 } from "./core/types.js";
-import { previewMemoryDoc } from "./core/schema.js";
 import { safeString } from "./core/utils.js";
 
 function promptLine(slot: string, body: string): string {
@@ -50,7 +49,6 @@ export function compileFromDocsAndEvents(
       path: doc.path,
       content: safeString(doc.content).trim(),
     })),
-    self_improve_prompt_docs: prompts.map(previewMemoryDoc),
     self_improve_skills: [],
     episode_docs: [],
     related_docs: [],

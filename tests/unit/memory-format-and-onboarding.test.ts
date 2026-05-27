@@ -29,7 +29,7 @@ test("self-improve format builds compact compiled prompt", () => {
       },
       {
         self_improve_prompt_slot: "core_doctrine",
-        preview: "Verified",
+        content: "Verified",
       },
       {
         self_improve_prompt_slot: " ",
@@ -46,13 +46,56 @@ test("self-improve format builds compact compiled prompt", () => {
   });
   assert.match(text, /Agent profile:\nConcise/);
   assert.match(text, /Core doctrine:\nVerified/);
-  assert.match(text, /Project rules:\nSpecific/);
+  assert.equal(text.includes("Project rules:\nSpecific"), false);
   assert.ok(!text.includes("ignored"));
   assert.ok(!text.includes("# Self-Improve Prompts"));
   assert.equal(
     format.buildSystemPromptSelfImprove({ self_improve_prompt_docs: [] }),
     "",
   );
+});
+
+test("self-improve system prompt prefers full docs over preview docs", () => {
+  const text = format.buildSystemPromptSelfImprove({
+    self_improve_prompt_prompt_docs: [
+      {
+        self_improve_prompt_slot: "agent_profile",
+        content: "FULL AGENT PROFILE",
+      },
+      {
+        self_improve_prompt_slot: "user_profile",
+        content: "FULL USER PROFILE",
+      },
+      {
+        self_improve_prompt_slot: "core_doctrine",
+        content: "FULL CORE DOCTRINE",
+      },
+    ],
+    self_improve_prompt_docs: [
+      {
+        self_improve_prompt_slot: "agent_profile",
+        preview: "PREVIEW AGENT PROFILE",
+      },
+      {
+        self_improve_prompt_slot: "user_profile",
+        preview: "PREVIEW USER PROFILE",
+      },
+      {
+        self_improve_prompt_slot: "core_doctrine",
+        preview: "PREVIEW CORE DOCTRINE",
+      },
+    ],
+  });
+
+  assert.equal((text.match(/Agent profile:/g) || []).length, 1);
+  assert.equal((text.match(/User profile:/g) || []).length, 1);
+  assert.equal((text.match(/Core doctrine:/g) || []).length, 1);
+  assert.match(text, /FULL AGENT PROFILE/);
+  assert.match(text, /FULL USER PROFILE/);
+  assert.match(text, /FULL CORE DOCTRINE/);
+  assert.equal(text.includes("PREVIEW AGENT PROFILE"), false);
+  assert.equal(text.includes("PREVIEW USER PROFILE"), false);
+  assert.equal(text.includes("PREVIEW CORE DOCTRINE"), false);
 });
 
 test("self-improve format renders stable result variants", () => {
@@ -76,7 +119,7 @@ test("self-improve format renders stable result variants", () => {
       name: "Agent Profile",
       path: "/tmp/agent.md",
     },
-    self_improve_prompt_docs: [{ path: "/tmp/agent.md" }],
+    self_improve_prompt_prompt_docs: [{ path: "/tmp/agent.md" }],
   };
   const emptyResponse = {
     query: " memory ",
@@ -99,7 +142,7 @@ test("self-improve format renders stable result variants", () => {
   assert.equal(saveText.includes("/tmp/agent.md"), false);
 
   const compileText = format.formatSelfImproveResult("compile", {
-    self_improve_prompt_docs: [
+    self_improve_prompt_prompt_docs: [
       { self_improve_prompt_slot: "agent_profile", content: "Concise" },
     ],
   });
