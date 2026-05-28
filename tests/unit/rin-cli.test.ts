@@ -249,7 +249,7 @@ test("run parser supports Pi-style print, model, chatKey, json, and timeout opti
   assert.equal(run.shouldRunNonInteractive([], false), true);
 });
 
-test("usage, status, self-improve, and memory-index parsers ignore wrapper args around the subcommand", () => {
+test("usage, status, memory, and memory-index parsers ignore wrapper args around the subcommand", () => {
   assert.deepEqual(
     usage.parseUsageArgs(["-u", "rin", "usage", "--events", "--limit", "5"]),
     {
@@ -329,7 +329,7 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
 
   const selfImproveArgs = selfImprove.parseSelfImproveArgs([
     "--user=rin",
-    "self-improve",
+    "memory",
     "--from",
     "7d",
     "--limit",
@@ -383,7 +383,7 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
   );
 });
 
-test("self-improve report renders recent extraction history", () => {
+test("memory report renders recent extraction history", () => {
   const agentDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "rin-self-improve-report-"),
   );
@@ -417,7 +417,7 @@ test("self-improve report renders recent extraction history", () => {
       help: false,
     });
 
-    assert.match(report, /Rin self-improve extraction/);
+    assert.match(report, /Rin memory extraction/);
     assert.match(report, /self_improve:periodic_review/);
     assert.match(report, /updated:self_improve\/skills\/demo\/SKILL.md/);
   } finally {
@@ -537,6 +537,16 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
   assert.ok(memoryInternal);
   assert.equal(memoryInternal.run, memoryIndex.runMemoryIndexInternal);
   assert.deepEqual(memoryInternal.args, ["repair"]);
+
+  const memoryHelp = main.resolveInternalRinDispatch([
+    "-u",
+    "rin",
+    "memory",
+    "--help",
+  ]);
+  assert.ok(memoryHelp);
+  assert.equal(memoryHelp.run, selfImprove.runSelfImproveInternal);
+  assert.deepEqual(memoryHelp.args, ["--help"]);
 
   const selfImproveInternal = main.resolveInternalRinDispatch([
     "__self_improve_internal",

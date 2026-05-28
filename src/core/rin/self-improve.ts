@@ -40,7 +40,7 @@ type MaintenanceHistoryRecord = {
 function printSelfImproveHelp() {
   console.log(
     [
-      "rin self-improve [options]",
+      "rin memory [options]",
       "",
       "Options:",
       "  --from <time>       start time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
@@ -51,9 +51,9 @@ function printSelfImproveHelp() {
       "  --help              show this help",
       "",
       "Examples:",
-      "  rin self-improve",
-      "  rin self-improve --from 7d --limit 50",
-      "  rin self-improve --status failed --from 30d",
+      "  rin memory",
+      "  rin memory --from 7d --limit 50",
+      "  rin memory --status failed --from 30d",
     ].join("\n"),
   );
 }
@@ -99,7 +99,10 @@ function readArg(args: string[], index: number) {
 }
 
 export function parseSelfImproveArgs(argv: string[]): SelfImproveCliOptions {
-  const args = extractSubcommandArgv(argv, "self-improve");
+  const memoryArgs = extractSubcommandArgv(argv, "memory");
+  const selfImproveArgs = extractSubcommandArgv(argv, "self-improve");
+  const args =
+    memoryArgs.length < selfImproveArgs.length ? memoryArgs : selfImproveArgs;
   const result: SelfImproveCliOptions = { limit: 20, help: false };
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -262,7 +265,7 @@ export function renderSelfImproveReport(
     .sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
   const recent = records.slice(0, options.limit);
   return [
-    `Rin self-improve extraction @ ${formatReportTime(nowIso())}`,
+    `Rin memory extraction @ ${formatReportTime(nowIso())}`,
     "",
     summarize(records),
     "",
@@ -292,7 +295,7 @@ export async function runSelfImprove(parsed: ParsedArgs, rawArgv: string[]) {
       context,
       "__self_improve_internal",
       rawArgv,
-      "self-improve",
+      parsed.command === "memory" ? "memory" : "self-improve",
     );
     process.stdout.write(forwarded);
     return;

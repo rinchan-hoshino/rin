@@ -59,6 +59,7 @@ export type ParsedArgs = {
     | "status"
     | "gui"
     | "usage"
+    | "memory"
     | "self-improve"
     | "versions"
     | "rollback"
