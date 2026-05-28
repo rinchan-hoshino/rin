@@ -41,7 +41,7 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: node scripts/release/plan-release.mjs --channel nightly|beta|stable-promotion [--manifest <path>] [--ref <sha>] [--beta-version <x.y.z-beta...>] [--date <YYYYMMDD>]",
+        "Usage: npx tsx scripts/release/plan-release.ts --channel nightly|beta|stable-promotion [--manifest <path>] [--ref <sha>] [--beta-version <x.y.z-beta...>] [--date <YYYYMMDD>]",
       );
       process.exit(0);
     } else {

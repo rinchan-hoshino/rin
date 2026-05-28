@@ -407,6 +407,7 @@ test("cron frontend-bound no-session agent task uses frontend controller without
     assert.deepEqual(calls[0].promptMeta?.frontend, {
       kind: "gui",
       key: "desktop/main",
+      deliverFinal: true,
     });
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_frontend_bound");
@@ -426,7 +427,11 @@ test("cron scheduler persists generic frontend bindings", () => {
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt: "hello" },
   });
-  assert.deepEqual(task.frontend, { kind: "tui", key: "terminal/main" });
+  assert.deepEqual(task.frontend, {
+    kind: "tui",
+    key: "terminal/main",
+    deliverFinal: true,
+  });
 });
 
 test("cron scheduler rejects explicit frontend bindings for session instructions", () => {
@@ -847,6 +852,34 @@ test("cron chat-bound agent task delivery records session binding", async () => 
   }
 });
 
+test("cron chat-bound task can bind frontend without final delivery", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const sent = [];
+  const task = {
+    id: "cron_silent_delivery",
+    frontend: { kind: "chat", key: "telegram/demo:1", deliverFinal: false },
+    session: { mode: "none" },
+    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
+    target: { kind: "agent_prompt", prompt: "hello" },
+    runCount: 1,
+  };
+  try {
+    await execMod.executeCronTask(task, {
+      agentDir,
+      chat: {
+        runTurn: async () => ({ finalText: "hidden final" }),
+        send: async (payload) => {
+          sent.push(payload);
+        },
+      },
+    });
+    assert.equal(task.lastResultText, "hidden final");
+    assert.equal(sent.length, 0);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron chat-bound shell task toggles frontend working while running", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const working = [];
@@ -1183,13 +1216,21 @@ test("cron scheduler migrates persisted chatKey tasks to frontend chat bindings"
     scheduler = new cronMod.CronScheduler({ agentDir });
     scheduler.start();
     const task = scheduler.getTask("cron_legacy_chat");
-    assert.deepEqual(task.frontend, { kind: "chat", key: "telegram/demo:1" });
+    assert.deepEqual(task.frontend, {
+      kind: "chat",
+      key: "telegram/demo:1",
+      deliverFinal: true,
+    });
     assert.equal("chatKey" in task, false);
     scheduler.stop();
 
     const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
     const row = rows.find((item) => item.id === "cron_legacy_chat");
-    assert.deepEqual(row.frontend, { kind: "chat", key: "telegram/demo:1" });
+    assert.deepEqual(row.frontend, {
+      kind: "chat",
+      key: "telegram/demo:1",
+      deliverFinal: true,
+    });
     assert.equal("chatKey" in row, false);
   } finally {
     scheduler?.stop();
@@ -1310,25 +1351,63 @@ test("cron scheduler can reschedule and activate a one-time task while it is run
   }
 });
 
-test("cron scheduler reschedule-once rejects recurring tasks", async () => {
+test("cron scheduler can set the next run for a recurring task", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
     scheduler.start();
-    scheduler.upsertTask({
-      id: "cron_recurring",
+    const task = scheduler.upsertTask({
+      id: "cron_recurring_next",
       trigger: { expression: "*/1 * * * *", timezone: "local" },
       session: { mode: "none" },
       target: { kind: "shell_command", command: "echo ok" },
     });
-    assert.throws(
-      () =>
-        scheduler.rescheduleOneTimeTask(
-          "cron_recurring",
-          "2099-01-02T00:00:00.000Z",
-        ),
-      /cron_task_not_once:cron_recurring/,
+    assert.equal(task.trigger.expression, "*/1 * * * *");
+
+    const rescheduled = scheduler.rescheduleOneTimeTask(
+      "cron_recurring_next",
+      "2099-01-02T00:00:00.000Z",
     );
+    assert.equal(rescheduled.enabled, true);
+    assert.equal(rescheduled.completedAt, undefined);
+    assert.equal(rescheduled.trigger.expression, "*/1 * * * *");
+    assert.equal(rescheduled.nextRunAt, "2099-01-02T00:00:00.000Z");
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler preserves an agent-chosen recurring next run after execution", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const chosenNextRunAt = "2099-01-02T00:00:00.000Z";
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        const runningTask = scheduler.tasks.get("cron_recurring_self_next");
+        assert.ok(runningTask);
+        runningTask.nextRunAt = chosenNextRunAt;
+        return { finalText: "done" };
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: "cron_recurring_self_next",
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+    const task = scheduler.tasks.get("cron_recurring_self_next");
+    assert.ok(task);
+    task.runCount = 1;
+    task.nextRunAt = "2099-01-01T00:00:00.000Z";
+
+    await scheduler.executeTask(task);
+
+    const after = scheduler.getTask("cron_recurring_self_next");
+    assert.equal(after?.nextRunAt, chosenNextRunAt);
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });

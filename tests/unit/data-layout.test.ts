@@ -7,7 +7,6 @@ import {
   chatDataPath,
   coreDataPath,
   extensionDataPath,
-  featureDataPath,
   LEGACY_DATA_LAYOUT_MOVES,
   schedulerDataPath,
   sidecarDataPath,
@@ -34,10 +33,6 @@ test("data layout helpers group runtime state by owner", () => {
   assert.equal(
     extensionDataPath(root, "runtime"),
     path.join(root, "data", "extensions", "runtime"),
-  );
-  assert.equal(
-    featureDataPath(root, "rinchan-heartbeat"),
-    path.join(root, "data", "features", "rinchan-heartbeat"),
   );
 });
 

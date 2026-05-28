@@ -8,7 +8,6 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
 - The core todo capability is always enabled and registers the `todo` tool plus `/todos` command.
 - Built-in optional extensions are packaged with Rin and are controlled through `settings.json -> extensions` with their `rin:` aliases.
 - Fresh installs enable `rin:web-search` by default; existing installs keep their current settings until changed.
-- Optional background services such as heartbeat notification remain off until `settings.json -> extensions` enables their `rin:` aliases.
 - Background extensions run in Rin's background runtime and are not Pi session tools.
 - The current tool list and system prompt remain authoritative for a specific turn.
 
@@ -52,7 +51,7 @@ Rin's todo support is native core behavior, not a Pi extension.
 
 ## Bundled optional Pi extensions
 
-Rin ships optional web search, browser/computer control, and heartbeat notification as normal Pi extension packages under the installed app. They are "built in" in the packaging sense: the code is included with the Rin installation, while settings decide which entries are active.
+Rin ships optional web search and browser/computer control as normal Pi extension packages under the installed app. They are "built in" in the packaging sense: the code is included with the Rin installation, while settings decide which entries are active.
 
 Installed settings can use Rin aliases instead of installation-specific paths:
 

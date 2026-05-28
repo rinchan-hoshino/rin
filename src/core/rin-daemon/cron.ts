@@ -65,6 +65,7 @@ export type CronTaskSessionBinding = {
 export type CronTaskFrontendBinding = {
   kind?: string;
   key: string;
+  deliverFinal?: boolean;
 };
 
 export type CronTaskThinkingLevel = AvailableThinkingLevel;
@@ -254,7 +255,12 @@ function normalizeTaskFrontend(
     "cron_frontend_key_required",
   );
   const kind = safeString((frontend as any).kind).trim() || undefined;
-  return { ...(kind ? { kind } : {}), key };
+  const deliverFinal = (frontend as any).deliverFinal !== false;
+  return {
+    ...(kind ? { kind } : {}),
+    key,
+    deliverFinal,
+  };
 }
 
 function resolveDedicatedSessionBinding(options: {
@@ -603,9 +609,6 @@ export class CronScheduler {
     const task = this.tasks.get(taskId);
     assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
-    if (task.trigger.expression) {
-      throw new Error(`cron_task_not_once:${taskId}`);
-    }
     const nextRunAt =
       normalizeIso(runAt, "runAt") ||
       failCronTaskValidation("cron_runAt_required");
@@ -616,7 +619,7 @@ export class CronScheduler {
       completedAt: undefined,
       completionReason: undefined,
       pausedAt: undefined,
-      trigger: { runAt: nextRunAt },
+      trigger: task.trigger.expression ? task.trigger : { runAt: nextRunAt },
       nextRunAt,
     };
     this.tasks.set(task.id, updatedTask);
@@ -848,9 +851,13 @@ export class CronScheduler {
   }
 
   private async executeTask(task: CronTaskRecord) {
+    const scheduledNextRunAt = safeString(task.nextRunAt).trim() || undefined;
     try {
       await executeCronTask(task, this.options);
-      if (!task.completedAt) {
+      if (
+        !task.completedAt &&
+        (safeString(task.nextRunAt).trim() || undefined) === scheduledNextRunAt
+      ) {
         task.nextRunAt = computeNextRunAt(task, Date.now());
       }
       if (task.completedAt) this.terminateTaskSession(task);

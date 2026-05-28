@@ -114,8 +114,8 @@ function resolveGitRef(root: string, ref: string) {
 function writeSyncWorkspace(workspace: string, packageVersion: string) {
   fs.mkdirSync(path.join(workspace, "scripts"), { recursive: true });
   fs.copyFileSync(
-    path.join(rootDir, "scripts", "sync-upstreams.mjs"),
-    path.join(workspace, "scripts", "sync-upstreams.mjs"),
+    path.join(rootDir, "scripts", "sync-upstreams.ts"),
+    path.join(workspace, "scripts", "sync-upstreams.ts"),
   );
   fs.writeFileSync(
     path.join(workspace, "package.json"),
@@ -211,7 +211,7 @@ function runSync(
 ) {
   run(
     process.execPath,
-    [path.join(workspace, "scripts", "sync-upstreams.mjs"), target, ...args],
+    [path.join(workspace, "scripts", "sync-upstreams.ts"), target, ...args],
     workspace,
     env,
   );
@@ -224,7 +224,7 @@ function runPiSync(workspace: string, args: string[] = []) {
 function runDefaultSync(workspace: string, env: Record<string, string> = {}) {
   run(
     process.execPath,
-    [path.join(workspace, "scripts", "sync-upstreams.mjs")],
+    [path.join(workspace, "scripts", "sync-upstreams.ts")],
     workspace,
     env,
   );
@@ -644,7 +644,7 @@ test("sync-upstreams cleans temporary clone directories after clone failures", (
       run(
         process.execPath,
         [
-          path.join(workspace, "scripts", "sync-upstreams.mjs"),
+          path.join(workspace, "scripts", "sync-upstreams.ts"),
           "pi",
           "--repo",
           pathToFileURL(path.join(tempDir, "missing.git")).href,
@@ -687,7 +687,7 @@ test("sync-upstreams rejects value options without explicit values", () => {
           run(
             process.execPath,
             [
-              path.join(workspace, "scripts", "sync-upstreams.mjs"),
+              path.join(workspace, "scripts", "sync-upstreams.ts"),
               "pi",
               `--${option}`,
             ],

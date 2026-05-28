@@ -54,7 +54,7 @@ type Task = {
   name?: string;
   enabled?: boolean;
   // binds the task turn to a frontend/controller identity; use kind: "chat" for chat delivery
-  frontend?: { kind?: string; key: string } | null;
+  frontend?: { kind?: string; key: string; deliverFinal?: boolean } | null;
   model?: string;
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   trigger: {
@@ -205,6 +205,7 @@ Behavior:
 - Rin disposes/shuts down the no-session turn after completion, except special self-improve maintenance tasks.
 - If `frontend` is set, Rin binds the scheduled turn to that frontend/controller identity.
 - If `frontend.kind` is `"chat"`, the final task result is sent to that chat and may preserve a chat-bound session file for quote/resume context.
+- Set `frontend.deliverFinal: false` to bind the turn to that frontend without automatically displaying the task final; the agent can explicitly send a message through the SDK when useful.
 
 ### `session.mode: "dedicated"`
 
@@ -243,6 +244,7 @@ Runs an agent turn. Use this for owner-facing reports, summaries, checks that ne
 
 - `frontend` binds execution to a frontend/controller identity.
 - `frontend: { kind: "chat", key: "..." }` binds delivery to a chat bridge target.
+- `frontend: { kind: "chat", key: "...", deliverFinal: false }` binds the turn to that chat without automatically sending the final task text.
 - `model` and `thinkingLevel` override the run when present.
 - Rin stores a summarized final result in `lastResultText`.
 - If the agent turn has no canonical final assistant text, the task records `lastError`.
@@ -387,7 +389,7 @@ await rin.tasks.resume("cron_daily_brief");
 
 `rin.tasks.wake()` only moves the existing task's next run time to now. The scheduler tick then evaluates `condition` normally. Use it for event notifications that should behave like a timer nudge rather than a forced run.
 
-Reschedule and activate a one-time task:
+Set the next run time for any task:
 
 ```js
 await rin.tasks.rescheduleOnce(
@@ -396,7 +398,7 @@ await rin.tasks.rescheduleOnce(
 );
 ```
 
-`rescheduleOnce()` is only for one-time tasks. It sets `trigger.runAt`, sets `nextRunAt`, clears `completedAt` / `completionReason` / `pausedAt`, and enables the task. Use `upsert()` for recurring trigger changes.
+`rescheduleOnce()` sets `nextRunAt`, clears `completedAt` / `completionReason` / `pausedAt`, and enables the task. For one-time tasks it also updates `trigger.runAt`; for recurring tasks it leaves the cron expression unchanged, so the agent can choose the next wake time without losing the normal recurrence.
 
 Complete or delete:
 

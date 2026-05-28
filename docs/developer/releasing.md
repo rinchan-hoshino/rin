@@ -117,13 +117,13 @@ npm run release:bootstrap -- --output /path/to/bootstrap-worktree
 Before publishing a beta, stable, or hotfix build, add the user-facing notes under `docs/release/CHANGELOG.md` and verify the target stable version:
 
 ```bash
-node scripts/release/verify-changelog.mjs --version <x.y.z>
+npx tsx scripts/release/verify-changelog.ts --version <x.y.z>
 ```
 
 Stable:
 
 ```bash
-node scripts/release/update-release-manifest.mjs \
+npx tsx scripts/release/update-release-manifest.ts \
   --channel stable \
   --version <x.y.z> \
   --ref <sha> \
@@ -133,7 +133,7 @@ node scripts/release/update-release-manifest.mjs \
 Beta:
 
 ```bash
-node scripts/release/update-release-manifest.mjs \
+npx tsx scripts/release/update-release-manifest.ts \
   --channel beta \
   --version <x.y.z-beta.yyyymmdd> \
   --ref <sha> \
@@ -143,7 +143,7 @@ node scripts/release/update-release-manifest.mjs \
 Nightly:
 
 ```bash
-node scripts/release/update-release-manifest.mjs \
+npx tsx scripts/release/update-release-manifest.ts \
   --channel nightly \
   --version <x.y.z-nightly.yyyymmdd+sha> \
   --ref <sha> \

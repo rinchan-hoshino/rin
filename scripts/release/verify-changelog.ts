@@ -29,7 +29,7 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: node scripts/release/verify-changelog.mjs --version <x.y.z> [--changelog docs/release/CHANGELOG.md]",
+        "Usage: npx tsx scripts/release/verify-changelog.ts --version <x.y.z> [--changelog docs/release/CHANGELOG.md]",
       );
       process.exit(0);
     } else {

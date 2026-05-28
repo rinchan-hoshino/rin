@@ -28,10 +28,6 @@ export function extensionDataPath(agentDir: string, ...segments: string[]) {
   return dataPath(agentDir, "extensions", ...segments);
 }
 
-export function featureDataPath(agentDir: string, ...segments: string[]) {
-  return dataPath(agentDir, "features", ...segments);
-}
-
 export function sharedRuntimeDataPath(agentDir: string, ...segments: string[]) {
   return dataPath(agentDir, "runtime", ...segments);
 }
@@ -115,10 +111,5 @@ export const LEGACY_DATA_LAYOUT_MOVES: Array<{
     id: "daemon-runtime",
     from: "daemon-runtime",
     to: path.join("extensions", "runtime"),
-  },
-  {
-    id: "rinchan-heartbeat",
-    from: "rinchan-heartbeat",
-    to: path.join("features", "rinchan-heartbeat"),
   },
 ];

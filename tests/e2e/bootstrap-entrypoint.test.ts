@@ -411,7 +411,7 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
     await execFileAsync(
       process.execPath,
       [
-        path.join(rootDir, "scripts", "release", "export-bootstrap-branch.mjs"),
+        path.join(rootDir, "scripts", "release", "export-bootstrap-branch.ts"),
         "--output",
         bootstrapDir,
       ],

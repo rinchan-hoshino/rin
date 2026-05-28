@@ -57,7 +57,7 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: node scripts/release/update-release-manifest.mjs --channel stable|beta|nightly --version <value> [--ref <sha>] [--branch <name>] [--series <major.minor>] [--from-beta-version <value>] [--promotion-version <x.y.z>] [--package-name <name>] [--repo-url <url>] [--manifest <path>]",
+        "Usage: npx tsx scripts/release/update-release-manifest.ts --channel stable|beta|nightly --version <value> [--ref <sha>] [--branch <name>] [--series <major.minor>] [--from-beta-version <value>] [--promotion-version <x.y.z>] [--package-name <name>] [--repo-url <url>] [--manifest <path>]",
       );
       process.exit(0);
     } else {

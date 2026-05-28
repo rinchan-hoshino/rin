@@ -34,7 +34,7 @@ jobs:
             echo 'Missing beta candidate in release-manifest.json' >&2
             exit 1
           fi
-          plan_json=$(node scripts/release/plan-release.mjs --channel stable-promotion --beta-version "$beta_version")
+          plan_json=$(npx --yes tsx scripts/release/plan-release.ts --channel stable-promotion --beta-version "$beta_version")
           version=$(node -e 'const value = JSON.parse(process.argv[1]); process.stdout.write(value.version);' "$plan_json")
           echo "beta_ref=$beta_ref" >> "$GITHUB_OUTPUT"
           echo "beta_version=$beta_version" >> "$GITHUB_OUTPUT"
@@ -46,7 +46,7 @@ jobs:
           git worktree add --detach "$candidate_dir" '${{ steps.plan.outputs.beta_ref }}'
       - name: Verify Rin changelog entry
         working-directory: ${{ runner.temp }}/stable-candidate
-        run: node scripts/release/verify-changelog.mjs --version '${{ steps.plan.outputs.version }}'
+        run: npx --yes tsx scripts/release/verify-changelog.ts --version '${{ steps.plan.outputs.version }}'
       - name: Install candidate dependencies
         working-directory: ${{ runner.temp }}/stable-candidate
         run: npm ci --no-fund --no-audit

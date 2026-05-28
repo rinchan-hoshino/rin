@@ -4,7 +4,7 @@ Rin exposes a small local agent SDK for daemon-backed operations that agents sho
 
 Use it from Node scripts when you need scheduled-task control or common chat operations. This SDK is an installed-runtime helper; it is not a public npm import surface.
 
-Run scripts with `node script.mjs` and import the SDK from the installed runtime under `~/.rin/app/current/dist`.
+Run scripts with `tsx script.ts` and import the SDK from the installed runtime under `~/.rin/app/current/dist`.
 
 ```js
 import path from "node:path";
@@ -65,7 +65,7 @@ Helper semantics:
 - `wake(taskId)` only moves the task's next run time to now; the scheduler tick then evaluates its condition normally. Use this for event notifications that should behave like a timer nudge rather than a forced run.
 - `pause(taskId)` disables future runs, records `pausedAt`, clears `nextRunAt`, and asks chat runtime to terminate the task turn when applicable.
 - `resume(taskId)` enables the task, clears `pausedAt`, and recomputes `nextRunAt`.
-- `rescheduleOnce(taskId, runAt)` is only for one-time tasks; it sets `trigger.runAt`, sets `nextRunAt`, clears completed/paused state, and enables the task.
+- `rescheduleOnce(taskId, runAt)` sets `nextRunAt`, clears completed/paused state, enables the task, and also updates `trigger.runAt` for one-time tasks while preserving recurring cron expressions.
 - `complete(taskId, reason?)` disables future runs while keeping the record and completion reason.
 - `delete(taskId)` removes the record.
 

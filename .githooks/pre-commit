@@ -11,7 +11,7 @@ fi
 
 format_targets="$({
   git diff --cached --name-only --diff-filter=ACMR
-} | grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|js|mjs|md|json|yml|yaml)$|^\.github/workflows/.*\.(yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.mjs)$' || true)"
+} | grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|md|json|yml|yaml)$|^\.github/workflows/.*\.(yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.ts)$' || true)"
 
 image_tag="rin-local-ci:latest"
 

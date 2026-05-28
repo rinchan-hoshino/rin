@@ -156,15 +156,23 @@ function resolveCronTaskFrontend(task: CronTaskRecord) {
     | undefined;
   const key = String(frontend?.key || "").trim();
   if (!key) return undefined;
+  const kind = String(frontend?.kind || "").trim() || undefined;
   return {
     key,
-    kind: String(frontend?.kind || "").trim() || undefined,
+    ...(kind ? { kind } : {}),
+    deliverFinal: (frontend as any).deliverFinal !== false,
   };
 }
 
 function cronTaskRunControllerKey(task: CronTaskRecord) {
   const frontend = resolveCronTaskFrontend(task);
   return frontend && frontend.kind !== "chat" ? frontend.key : task.id;
+}
+
+function shouldDeliverCronTaskFinal(
+  frontend: ReturnType<typeof resolveCronTaskFrontend>,
+) {
+  return frontend?.kind === "chat" && frontend.deliverFinal !== false;
 }
 
 async function setCronTaskFrontendWorking(
@@ -458,7 +466,9 @@ export async function executeCronTask(
         outputPreview: text,
       };
       const frontend = resolveCronTaskFrontend(task);
-      const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
+      const chatKey = shouldDeliverCronTaskFinal(frontend)
+        ? frontend?.key
+        : undefined;
       if (chatKey && text) {
         await sendChatText(options, {
           chatKey,
@@ -487,7 +497,9 @@ export async function executeCronTask(
         sessionFile: result.sessionFile,
       };
       const frontend = resolveCronTaskFrontend(task);
-      const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
+      const chatKey = shouldDeliverCronTaskFinal(frontend)
+        ? frontend?.key
+        : undefined;
       if (chatKey && result.text) {
         await sendChatText(options, {
           chatKey,
@@ -517,7 +529,12 @@ export async function executeCronTask(
         finishedAt: task.lastFinishedAt,
       }).catch(() => {});
     }
-    if (!task.completedAt && !task.trigger.expression && task.runCount >= 1) {
+    if (
+      !task.completedAt &&
+      !task.trigger.expression &&
+      task.runCount >= 1 &&
+      !task.nextRunAt
+    ) {
       task.completedAt = nowIso();
       task.completionReason = "once_completed";
       task.enabled = false;

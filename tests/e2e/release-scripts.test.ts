@@ -50,7 +50,7 @@ test("update-release-manifest script writes stable npm tarball metadata", () => 
     execFileSync(
       process.execPath,
       [
-        path.join(rootDir, "scripts", "release", "update-release-manifest.mjs"),
+        path.join(rootDir, "scripts", "release", "update-release-manifest.ts"),
         "--manifest",
         manifestPath,
         "--channel",
@@ -106,7 +106,7 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
     execFileSync(
       process.execPath,
       [
-        path.join(rootDir, "scripts", "release", "update-release-manifest.mjs"),
+        path.join(rootDir, "scripts", "release", "update-release-manifest.ts"),
         "--manifest",
         manifestPath,
         "--channel",
@@ -123,7 +123,7 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
     execFileSync(
       process.execPath,
       [
-        path.join(rootDir, "scripts", "release", "update-release-manifest.mjs"),
+        path.join(rootDir, "scripts", "release", "update-release-manifest.ts"),
         "--manifest",
         manifestPath,
         "--channel",
@@ -174,7 +174,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       execFileSync(
         process.execPath,
         [
-          path.join(rootDir, "scripts", "release", "plan-release.mjs"),
+          path.join(rootDir, "scripts", "release", "plan-release.ts"),
           "--manifest",
           manifestPath,
           "--channel",
@@ -195,7 +195,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       execFileSync(
         process.execPath,
         [
-          path.join(rootDir, "scripts", "release", "plan-release.mjs"),
+          path.join(rootDir, "scripts", "release", "plan-release.ts"),
           "--manifest",
           manifestPath,
           "--channel",
@@ -218,7 +218,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       execFileSync(
         process.execPath,
         [
-          path.join(rootDir, "scripts", "release", "plan-release.mjs"),
+          path.join(rootDir, "scripts", "release", "plan-release.ts"),
           "--manifest",
           manifestPath,
           "--channel",
@@ -247,7 +247,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       execFileSync(
         process.execPath,
         [
-          path.join(rootDir, "scripts", "release", "plan-release.mjs"),
+          path.join(rootDir, "scripts", "release", "plan-release.ts"),
           "--manifest",
           manifestPath,
           "--channel",
@@ -275,7 +275,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       execFileSync(
         process.execPath,
         [
-          path.join(rootDir, "scripts", "release", "plan-release.mjs"),
+          path.join(rootDir, "scripts", "release", "plan-release.ts"),
           "--manifest",
           manifestPath,
           "--channel",
@@ -298,12 +298,12 @@ test("plan-release script computes beta nightly and stable promotion versions", 
 
 test("release scripts reject value options without explicit values", () => {
   const cases = [
-    ["update-release-manifest.mjs", "--manifest"],
-    ["update-release-manifest.mjs", "--version"],
-    ["plan-release.mjs", "--manifest"],
-    ["plan-release.mjs", "--channel"],
-    ["verify-changelog.mjs", "--changelog"],
-    ["verify-changelog.mjs", "--version"],
+    ["update-release-manifest.ts", "--manifest"],
+    ["update-release-manifest.ts", "--version"],
+    ["plan-release.ts", "--manifest"],
+    ["plan-release.ts", "--channel"],
+    ["verify-changelog.ts", "--changelog"],
+    ["verify-changelog.ts", "--version"],
   ];
 
   for (const [script, option] of cases) {
@@ -331,7 +331,7 @@ test("verify-changelog script requires a target Rin changelog heading", () => {
     execFileSync(
       process.execPath,
       [
-        path.join(rootDir, "scripts", "release", "verify-changelog.mjs"),
+        path.join(rootDir, "scripts", "release", "verify-changelog.ts"),
         "--changelog",
         changelogPath,
         "--version",
@@ -343,7 +343,7 @@ test("verify-changelog script requires a target Rin changelog heading", () => {
       execFileSync(
         process.execPath,
         [
-          path.join(rootDir, "scripts", "release", "verify-changelog.mjs"),
+          path.join(rootDir, "scripts", "release", "verify-changelog.ts"),
           "--changelog",
           changelogPath,
           "--version",
@@ -409,7 +409,7 @@ test("release workflows require changelog entries before expensive publish gates
   const beta = readWorkflow("publish-beta.yml");
   assert.match(
     beta,
-    /node scripts\/release\/verify-changelog\.mjs --version '\$\{\{ steps\.plan\.outputs\.promotion_version \}\}'/,
+    /npx --yes tsx scripts\/release\/verify-changelog\.ts --version '\$\{\{ steps\.plan\.outputs\.promotion_version \}\}'/,
   );
   assert.ok(
     beta.indexOf("Verify Rin changelog entry") <
@@ -419,7 +419,7 @@ test("release workflows require changelog entries before expensive publish gates
   const stable = readWorkflow("publish-stable.yml");
   assert.match(
     stable,
-    /node scripts\/release\/verify-changelog\.mjs --version '\$\{\{ steps\.plan\.outputs\.version \}\}'/,
+    /npx --yes tsx scripts\/release\/verify-changelog\.ts --version '\$\{\{ steps\.plan\.outputs\.version \}\}'/,
   );
   assert.ok(
     stable.indexOf("Verify Rin changelog entry") <
@@ -429,7 +429,7 @@ test("release workflows require changelog entries before expensive publish gates
   const hotfix = readWorkflow("publish-hotfix.yml");
   assert.match(
     hotfix,
-    /node scripts\/release\/verify-changelog\.mjs --version '\$\{\{ inputs\.version \}\}'/,
+    /npx --yes tsx scripts\/release\/verify-changelog\.ts --version '\$\{\{ inputs\.version \}\}'/,
   );
   assert.ok(
     hotfix.indexOf("Verify Rin changelog entry") <
@@ -477,7 +477,7 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
     execFileSync(
       process.execPath,
       [
-        path.join(rootDir, "scripts", "release", "export-bootstrap-branch.mjs"),
+        path.join(rootDir, "scripts", "release", "export-bootstrap-branch.ts"),
         "--output",
         tempDir,
       ],

@@ -25,7 +25,7 @@ The built-in direct runtime currently includes:
 
 ## Incoming turn policy
 
-By default, an allowed incoming chat message starts an agent turn after Rin stores the message. To make a chat record-only for external schedulers, heartbeat tasks, or manual processing, configure `settings.json -> chat.turnPolicy.byChatKey`:
+By default, an allowed incoming chat message starts an agent turn after Rin stores the message. To make a chat record-only for external schedulers, autonomous tasks, or manual processing, configure `settings.json -> chat.turnPolicy.byChatKey`:
 
 ```json
 {

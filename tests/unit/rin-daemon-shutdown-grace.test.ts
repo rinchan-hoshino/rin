@@ -80,8 +80,12 @@ async function withDaemon(workerScript, options, fn) {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-daemon-grace-"),
   );
+  await fs.writeFile(
+    path.join(agentDir, "package.json"),
+    '{"type":"module"}\n',
+  );
   const socketPath = path.join(agentDir, "daemon.sock");
-  const workerPath = path.join(agentDir, "fake-worker.mjs");
+  const workerPath = path.join(agentDir, "fake-worker-source");
   await fs.writeFile(
     workerPath,
     workerScript.replace("__FAKE_STEP_MS__", String(options.stepMs ?? 0)),

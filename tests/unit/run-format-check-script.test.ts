@@ -8,7 +8,7 @@ const rootDir = path.resolve(
   "../..",
 );
 const formatCheckScript = await import(
-  pathToFileURL(path.join(rootDir, "scripts", "run-format-check.mjs")).href
+  pathToFileURL(path.join(rootDir, "scripts", "run-format-check.ts")).href
 );
 
 test("run-format-check builds default prettier check arguments", () => {

@@ -27,14 +27,14 @@ jobs:
         run: |
           set -eu
           release_ref=$(git rev-parse HEAD)
-          plan_json=$(node scripts/release/plan-release.mjs --channel beta --ref "$release_ref")
+          plan_json=$(npx --yes tsx scripts/release/plan-release.ts --channel beta --ref "$release_ref")
           version=$(node -e 'const value = JSON.parse(process.argv[1]); process.stdout.write(value.version);' "$plan_json")
           promotion_version=$(node -e 'const value = JSON.parse(process.argv[1]); process.stdout.write(value.promotionVersion);' "$plan_json")
           echo "release_ref=$release_ref" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "promotion_version=$promotion_version" >> "$GITHUB_OUTPUT"
       - name: Verify Rin changelog entry
-        run: node scripts/release/verify-changelog.mjs --version '${{ steps.plan.outputs.promotion_version }}'
+        run: npx --yes tsx scripts/release/verify-changelog.ts --version '${{ steps.plan.outputs.promotion_version }}'
       - run: npm ci --no-fund --no-audit
       - run: npm run build
       - run: npm run test:release

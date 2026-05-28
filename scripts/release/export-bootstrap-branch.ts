@@ -26,7 +26,7 @@ function parseArgs(argv) {
       args.branch = String(argv[++index] || "").trim();
     else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: node scripts/release/export-bootstrap-branch.mjs --output <dir> [--branch bootstrap]",
+        "Usage: npx tsx scripts/release/export-bootstrap-branch.ts --output <dir> [--branch bootstrap]",
       );
       process.exit(0);
     } else {
