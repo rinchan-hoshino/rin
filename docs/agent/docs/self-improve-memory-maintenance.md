@@ -108,7 +108,9 @@ Create a new ordinary skill only when:
 - existing skills do not provide a clean home;
 - the lesson is not just a one-off issue, PR, error string, session artifact, or temporary implementation detail.
 
-Keep an ordinary skill only when it still has a distinct recurring trigger and enough reusable workflow, reference, or troubleshooting value to justify a separate file. Alias, paused, internal, or fixed lookup skills must be intentional and compact; otherwise merge or delete them instead of keeping them visible by inertia.
+Keep an ordinary skill only when it still has a distinct recurring trigger and enough reusable workflow, reference, or troubleshooting value to justify a separate file. Delete compatibility aliases and stale narrow fragments instead of preserving them as standalone skills.
+
+Use `disable-model-invocation: true` only for skills that should remain as explicit/manual reference material but must not appear in the always-visible model skill list, such as paused workflows or internal fixed lookup destinations. Do not use it as a junk drawer for obsolete aliases; delete those.
 
 When several related lessons appear together, make one composite skill with headings. Move or delete narrow fragments instead of preserving them as standalone skills.
 
