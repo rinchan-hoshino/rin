@@ -61,7 +61,8 @@ test("agent docs expose scheduled task operation workflow", () => {
     assert.doesNotMatch(capabilities, new RegExp(command));
   }
 
-  assert.match(agentSdk, /"src", "core", "rin-agent-sdk", "index\.ts"/);
+  assert.match(agentSdk, /"dist", "core", "rin-agent-sdk", "index\.js"/);
+  assert.doesNotMatch(agentSdk, /"src", "core", "rin-agent-sdk", "index\.ts"/);
   assert.match(scheduledTasks, /`session\.mode: "dedicated"`/);
   assert.match(scheduledTasks, /code: string/);
   assert.match(

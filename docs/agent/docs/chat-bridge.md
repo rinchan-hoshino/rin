@@ -55,7 +55,7 @@ import { pathToFileURL } from "node:url";
 
 const rinAppDir = path.join(process.env.HOME, ".rin", "app", "current");
 const sdkUrl = pathToFileURL(
-  path.join(rinAppDir, "src", "core", "rin-agent-sdk", "index.ts"),
+  path.join(rinAppDir, "dist", "core", "rin-agent-sdk", "index.js"),
 ).href;
 const { createRinAgentSdk } = await import(sdkUrl);
 

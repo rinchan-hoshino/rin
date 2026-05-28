@@ -2,9 +2,9 @@
 
 Rin exposes a small local agent SDK for daemon-backed operations that agents should not perform by hand with raw RPC payloads.
 
-Use it from Node scripts when you need scheduled-task control or common chat operations. This SDK is a Rin source/runtime-internal helper; it is not a public npm import surface.
+Use it from Node scripts when you need scheduled-task control or common chat operations. This SDK is an installed-runtime helper; it is not a public npm import surface.
 
-Run scripts that import Rin source modules with `node --import tsx script.mjs`.
+Run scripts with `node script.mjs` and import the SDK from the installed runtime under `~/.rin/app/current/dist`.
 
 ```js
 import path from "node:path";
@@ -12,7 +12,7 @@ import { pathToFileURL } from "node:url";
 
 const rinAppDir = path.join(process.env.HOME, ".rin", "app", "current");
 const sdkUrl = pathToFileURL(
-  path.join(rinAppDir, "src", "core", "rin-agent-sdk", "index.ts"),
+  path.join(rinAppDir, "dist", "core", "rin-agent-sdk", "index.js"),
 ).href;
 const { createRinAgentSdk } = await import(sdkUrl);
 
