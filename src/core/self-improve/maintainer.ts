@@ -99,7 +99,7 @@ export function buildSelfImproveReviewPrompt(
   void trigger;
   const manualPath = selfImproveMemoryMaintenanceManualPath(agentDir);
   const libraryPath = path.join(agentDir, "self_improve");
-  return `Follow the maintenance requirements in ${manualPath} to improve the entire current self-improve memory library under ${libraryPath} using the conversation above as evidence: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.`;
+  return `Follow the maintenance requirements in ${manualPath} to review the self-improve memory library under ${libraryPath} using the conversation above as evidence. Extract only durable reusable lessons, update existing memory only when it reduces future error or ambiguity, and prefer consolidation, pruning, or a no-op over adding new memory. Cover prompt baselines, reusable skills, memory-index skills, and short-term memory skills in one cohesive pass.`;
 }
 
 async function createForkedSessionManager(options: {

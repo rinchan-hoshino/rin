@@ -845,15 +845,15 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   );
   assert.equal(
     prompt,
-    "Follow the maintenance requirements in /tmp/rin-agent/docs/rin/docs/self-improve-memory-maintenance.md to improve the entire current self-improve memory library under /tmp/rin-agent/self_improve using the conversation above as evidence: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.",
+    "Follow the maintenance requirements in /tmp/rin-agent/docs/rin/docs/self-improve-memory-maintenance.md to review the self-improve memory library under /tmp/rin-agent/self_improve using the conversation above as evidence. Extract only durable reusable lessons, update existing memory only when it reduces future error or ambiguity, and prefer consolidation, pruning, or a no-op over adding new memory. Cover prompt baselines, reusable skills, memory-index skills, and short-term memory skills in one cohesive pass.",
   );
   assert.doesNotMatch(prompt, /Trigger:/);
   assert.doesNotMatch(prompt, /self_improve:periodic_review/);
   assert.doesNotMatch(prompt, /Review priorities:/);
   assert.doesNotMatch(prompt, /explicit owner corrections/);
   assert.match(prompt, /prompt baselines, reusable skills/);
-  assert.match(prompt, /Optimize, consolidate, correct/);
-  assert.match(prompt, /merge, move, delete, and prune/);
+  assert.match(prompt, /Extract only durable reusable lessons/);
+  assert.match(prompt, /prefer consolidation, pruning, or a no-op/);
   assert.doesNotMatch(prompt, /self_improve_manage/);
   assert.doesNotMatch(prompt, /skill-read contract/);
 });
@@ -872,16 +872,10 @@ test("self-improve maintenance manual codifies review rules", async () => {
   assert.doesNotMatch(manual, /conversation transcript/);
   assert.match(manual, /explicit owner corrections/);
   assert.match(manual, /Use prompt baselines only for every-turn identity/);
-  assert.match(manual, /Extraction gate/);
-  assert.match(manual, /smallest durable lesson/);
+  assert.doesNotMatch(manual, /Extraction gate/);
+  assert.match(manual, /reusable rules, not incident details/);
   assert.match(manual, /change future behavior, routing, decisions/);
-  assert.match(manual, /Convert concrete incidents into their reusable rule/);
-  assert.match(manual, /Choose the narrowest durable home/);
-  assert.match(
-    manual,
-    /Keep visible skills only when they have a distinct recurring trigger/,
-  );
-  assert.match(manual, /Drop stale, solved, speculative, duplicate/);
+  assert.match(manual, /Discard one-off, stale, solved, speculative/);
   assert.match(manual, /Prefer shrinking an overgrown baseline/);
   assert.match(manual, /Review priorities/);
   assert.match(manual, /skill-usage\.json/);

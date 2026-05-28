@@ -20,24 +20,13 @@ Memory-index extraction should preserve topic cohesion. When new evidence belong
 
 Do not turn a memory review into a runtime feature proposal: do not add new built-in tools, prompt contracts, or user-visible workflow requirements unless the owner explicitly asks for that product change.
 
-## Extraction gate
-
-Before writing memory, reduce each candidate to the smallest durable lesson:
-
-- Keep only lessons that change future behavior, routing, decisions, execution, or recall.
-- Convert concrete incidents into their reusable rule; do not preserve implementation-shaped details unless future work needs them.
-- Choose the narrowest durable home: prompt baseline for cross-turn invariants, current or umbrella skill for workflows, memory-index for provenance, short-term-memory for active continuity, or no write.
-- Prefer replacing, merging, moving, hiding, or deleting existing material over appending another item.
-- Keep visible skills only when they have a distinct recurring trigger and reusable operating value.
-- Drop stale, solved, speculative, duplicate, emotional-only, and one-off details after extracting any reusable lesson.
-
 ## Review workflow
 
 1. Inspect the current prompt slots.
 2. Inspect the current workflow skill, any umbrella skill that covers the same class of work, and the fixed memory skill destinations.
 3. Inspect `<agentDir>/self_improve/state/skill-usage.json` when present. Use low or absent usage as a cleanup signal, not automatic deletion proof.
-4. Extract candidate lessons from the available evidence.
-5. Apply the extraction gate above before scoring. Discard one-off details and lessons already covered by the owning surface.
+4. Extract candidate lessons as reusable rules, not incident details. Keep only candidates that change future behavior, routing, decisions, execution, or recall.
+5. Discard one-off, stale, solved, speculative, duplicate, emotional-only, and already-covered candidates.
 6. Score each remaining candidate quickly:
    - attention: affects future behavior;
    - emotion: strong correction, frustration, risk, preference, blocker, or failed prior behavior;
