@@ -49,13 +49,18 @@ test("runtime session shutdown emits Rin capability hooks without extension-runn
   const calls = [];
   const runtime = {
     session: {
+      sessionManager: {
+        __rinLastFrontend: { kind: "test", key: "last-owner" },
+      },
       __rinCapabilities: {
         hasHandlers(eventName) {
           calls.push(`has:${eventName}`);
           return eventName === "session_shutdown";
         },
         async emit(event) {
-          calls.push(`emit:${event.reason}:${event.targetSessionFile || ""}`);
+          calls.push(
+            `emit:${event.reason}:${event.targetSessionFile || ""}:${event.frontend?.key || ""}`,
+          );
         },
       },
     },
@@ -73,10 +78,10 @@ test("runtime session shutdown emits Rin capability hooks without extension-runn
 
   assert.deepEqual(calls, [
     "has:session_shutdown",
-    "emit:new:/tmp/next-session.jsonl",
+    "emit:new:/tmp/next-session.jsonl:last-owner",
     "teardown:new:/tmp/next-session.jsonl",
     "has:session_shutdown",
-    "emit:quit:",
+    "emit:quit::last-owner",
     "dispose",
   ]);
 });

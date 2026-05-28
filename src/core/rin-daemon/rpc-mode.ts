@@ -1381,6 +1381,7 @@ export async function runCustomRpcMode(
             );
             if (frontendIdentity && session.sessionManager) {
               session.sessionManager.__rinFrontend = frontendIdentity;
+              session.sessionManager.__rinLastFrontend = frontendIdentity;
             }
             await abortCurrentSessionForReplacement();
             const managedSessionLeaf = safeString(
@@ -1424,6 +1425,7 @@ export async function runCustomRpcMode(
             );
             if (frontendIdentity && session.sessionManager) {
               session.sessionManager.__rinFrontend = frontendIdentity;
+              session.sessionManager.__rinLastFrontend = frontendIdentity;
             }
             return runtime
               .switchSession(sessionFile)

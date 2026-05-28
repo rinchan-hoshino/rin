@@ -165,7 +165,10 @@ export function createRinCapabilitySet(options: {
         return getModel();
       },
       get frontend() {
-        return (options.sessionManager as any)?.__rinFrontend;
+        return (
+          (options.sessionManager as any)?.__rinFrontend ??
+          (options.sessionManager as any)?.__rinLastFrontend
+        );
       },
 
       isIdle: () => contextActions.isIdle(),
@@ -290,7 +293,9 @@ function withRinEventMetadata(event: any, session: any) {
   if (!event || typeof event !== "object") return event;
   const type = String(event?.type || "").trim();
   const frontend = normalizeFrontendIdentity(
-    event.frontend ?? session?.sessionManager?.__rinFrontend,
+    event.frontend ??
+      session?.sessionManager?.__rinFrontend ??
+      session?.sessionManager?.__rinLastFrontend,
   );
   const next = frontend ? { ...event, frontend } : event;
   if (type !== "session_before_compact" || next.reason) {
