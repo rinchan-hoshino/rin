@@ -10,7 +10,7 @@ A review should reduce entropy in the current library. It may add durable memory
 
 ## Operating rules
 
-Start from the existing library. Complete one cohesive pass across all reachable improvement points.
+Start from the existing library. Complete one cohesive pass across all reachable improvement points. The expected outcome is active entropy reduction: prefer deletion, merge, move, pruning, and compaction of existing material over preserving stale or redundant state.
 
 Treat explicit owner corrections, frustration, repeated reminders, and failed prior behavior as high-salience evidence.
 
@@ -24,14 +24,14 @@ Do not turn a memory review into a runtime feature proposal: do not add new buil
 
 1. Inspect the current prompt slots.
 2. Inspect the current workflow skill, any umbrella skill that covers the same class of work, and the fixed memory skill destinations.
-3. Inspect `<agentDir>/self_improve/state/skill-usage.json` when present. Use low or absent usage as a cleanup signal, not automatic deletion proof.
+3. Inspect `<agentDir>/self_improve/state/skill-usage.json` when present. Use low or absent usage as a cleanup signal, not automatic deletion proof: for each low-signal ordinary skill, decide whether to delete, merge into a broader workflow, mark as intentional manual reference, or keep with a concrete reason.
 4. Extract candidate lessons as reusable rules, not incident details. Keep only candidates that change future behavior, routing, decisions, execution, or recall.
 5. Discard one-off, stale, solved, speculative, duplicate, emotional-only, and already-covered candidates.
 6. Score each remaining candidate quickly:
    - attention: affects future behavior;
    - emotion: strong correction, frustration, risk, preference, blocker, or failed prior behavior;
    - repetition: repeated in evidence or confirmed by existing memory.
-7. Choose the smallest correct destination using the destination priority below.
+7. Choose the smallest correct destination using the destination priority below. When two destinations overlap, consolidate into one canonical owner and delete or shrink the redundant copy instead of leaving both.
 8. Before creating a memory-index transaction, scan the relevant monthly index for an existing entry with the same domain, object, error, decision, or work thread. Merge into that existing topic transaction when it is the same topic.
 9. Rewrite the destination compactly. Replace or remove stale, lower-priority, conflicting, or duplicate lines instead of appending another rule.
 10. Prune stale short-term records and move misplaced material to the smallest correct destination.

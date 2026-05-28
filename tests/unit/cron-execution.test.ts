@@ -1128,7 +1128,7 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the maintenance requirements in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to improve the entire current self-improve memory library under ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Optimize, consolidate, correct, merge, move, delete, and prune all reachable improvement points in one cohesive pass.`,
+      `Follow the maintenance requirements in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to improve the entire current self-improve memory library under ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Actively reduce entropy in one cohesive pass: delete obsolete or low-value material, merge redundant skills and memory-index topics, move misplaced details to the smallest correct destination, prune stale short-term records, and rewrite verbose rules compactly.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /Trigger:/);
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
@@ -1143,7 +1143,9 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     assert.match(sleep.target.prompt, /reusable skills/);
     assert.match(sleep.target.prompt, /memory-index skills/);
     assert.match(sleep.target.prompt, /short-term memory skills/);
-    assert.match(sleep.target.prompt, /merge, move, delete, and prune/);
+    assert.match(sleep.target.prompt, /delete obsolete or low-value material/);
+    assert.match(sleep.target.prompt, /merge redundant skills/);
+    assert.doesNotMatch(sleep.target.prompt, /no-change result as exceptional/);
     assert.doesNotMatch(sleep.target.prompt, /one concise no-op reason/);
     assert.doesNotMatch(sleep.target.prompt, /read-only guidance/);
     assert.doesNotMatch(sleep.target.prompt, /## Basic concepts/);
