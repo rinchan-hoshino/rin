@@ -21,6 +21,7 @@ export type ChatRunTurnOptions = {
   affectChatBinding?: boolean;
   disposeAfterTurn?: boolean;
   shutdownAfterTurn?: boolean;
+  deliverFinal?: boolean;
   promptMeta?: unknown;
 };
 

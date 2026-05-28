@@ -2611,6 +2611,62 @@ test("chat controller sends a session-file prompt through conversation binding",
   assert.equal(controller.state.sessionFile, "managed/chat/scheduled.jsonl");
 });
 
+test("chat controller can run a session-file prompt without final delivery", async () => {
+  const controller = await createController("telegram/1:2");
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "silent-scheduled.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "session", "utf8");
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-silent-scheduled",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-silent-scheduled",
+    }),
+    prompt: async (_text, options = {}) => {
+      emitRpcTurnComplete(controller, options, "silent final", {
+        messages: [{ type: "text", text: "silent final" }],
+      });
+    },
+    switchSession: async () => {},
+  };
+
+  const result = await controller.runTurn({
+    text: "scheduled instruction",
+    attachments: [],
+    sessionFile,
+    deliverFinal: false,
+    promptMeta: {
+      source: "scheduled-task",
+      scheduledTaskInitiator: "agent",
+      taskId: "cron_silent_current_session",
+    },
+  });
+
+  assert.equal(result.finalText, "silent final");
+  const delivered = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "m1",
+  );
+  assert.equal(delivered, null);
+  assert.equal(
+    controller.state.sessionFile,
+    "managed/chat/silent-scheduled.jsonl",
+  );
+});
+
 test("chat controller delivers prompt turn errors through conversation binding", async () => {
   const controller = await createController("telegram/1:2");
   const chatKey = "telegram/1:2";

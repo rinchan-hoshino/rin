@@ -55,6 +55,8 @@ type Task = {
   enabled?: boolean;
   // binds the task turn to a frontend/controller identity; use kind: "chat" for chat delivery
   frontend?: { kind?: string; key: string; deliverFinal?: boolean } | null;
+  // for session_instruction, controls whether the inserted turn's final is posted to chat; default true
+  deliverFinal?: boolean;
   model?: string;
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   trigger: {
@@ -225,14 +227,14 @@ Avoid dedicated sessions for routine reports unless the task truly benefits from
 
 ### `session.mode: "session_instruction"`
 
-Use for a one-time follow-up inserted into an existing chat session.
+Use for a follow-up inserted into an existing chat session. It can be one-time or recurring.
 
 Requirements enforced by the scheduler:
 
 - `target.kind` must be `"agent_prompt"`.
-- Trigger must be one-time `runAt`/`startAt`, not a recurring cron expression.
 - Do not set `frontend`; Rin derives the existing frontend/chat binding from the stored session file.
 - `session.sessionFile` must point to an existing stored session with a chat binding.
+- Set root `deliverFinal: false` when the inserted turn should update the session without automatically posting its final text to chat.
 
 Runtime prompt metadata marks this as an agent-initiated scheduled task without adding task metadata to the normal system prompt.
 
@@ -245,6 +247,7 @@ Runs an agent turn. Use this for owner-facing reports, summaries, checks that ne
 - `frontend` binds execution to a frontend/controller identity.
 - `frontend: { kind: "chat", key: "..." }` binds delivery to a chat bridge target.
 - `frontend: { kind: "chat", key: "...", deliverFinal: false }` binds the turn to that chat without automatically sending the final task text.
+- For `session.mode: "session_instruction"`, use root `deliverFinal: false` for the same silent-final behavior.
 - `model` and `thinkingLevel` override the run when present.
 - Rin stores a summarized final result in `lastResultText`.
 - If the agent turn has no canonical final assistant text, the task records `lastError`.

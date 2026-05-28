@@ -250,6 +250,7 @@ export type ChatBridgeTurnPayload = {
   affectChatBinding?: boolean;
   disposeAfterTurn?: boolean;
   shutdownAfterTurn?: boolean;
+  deliverFinal?: boolean;
   text: string;
   sessionFile?: string;
   managedSessionLeaf?: string;
@@ -936,6 +937,7 @@ export async function startChatBridge(
         model: payload?.model,
         thinkingLevel: payload?.thinkingLevel,
         promptMeta: payload?.promptMeta,
+        deliverFinal: payload?.deliverFinal,
       });
     } finally {
       if (!useBoundController && (disposeAfterTurn || shutdownAfterTurn)) {

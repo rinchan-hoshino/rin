@@ -87,6 +87,7 @@ export type CronTaskRecord = {
   completionReason?: string;
   pausedAt?: string;
   frontend?: CronTaskFrontendBinding;
+  deliverFinal?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
   trigger: CronTaskTrigger;
@@ -112,6 +113,7 @@ export type CronTaskInput = {
   name?: string;
   enabled?: boolean;
   frontend?: CronTaskFrontendBinding | null;
+  deliverFinal?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
   trigger?: CronTaskTrigger;
@@ -299,6 +301,7 @@ function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
     },
     session: { mode: "none" },
     target: { kind: "shell_command", command },
+    deliverFinal: true,
     runCount: 0,
     running: false,
   };
@@ -333,6 +336,7 @@ function createBuiltInSelfImproveSleepConsolidationTask(
     },
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt },
+    deliverFinal: true,
     runCount: 0,
     running: false,
   };
@@ -493,9 +497,6 @@ export class CronScheduler {
       if (normalizedTarget.kind !== "agent_prompt") {
         throw new Error("cron_session_instruction_requires_agent_prompt");
       }
-      if (normalizedTrigger.expression) {
-        throw new Error("cron_session_instruction_requires_once");
-      }
     }
     const { dedicatedSessionFile, dedicatedSessionPersistent } =
       resolveDedicatedSessionBinding({
@@ -526,6 +527,10 @@ export class CronScheduler {
       completionReason: existing?.completionReason,
       pausedAt: existing?.pausedAt,
       frontend,
+      deliverFinal:
+        input.deliverFinal !== undefined
+          ? Boolean(input.deliverFinal)
+          : (existing?.deliverFinal ?? true),
       model,
       thinkingLevel,
       trigger: normalizedTrigger,
@@ -676,6 +681,7 @@ export class CronScheduler {
       row.lastError = row.lastError ? safeString(row.lastError) : undefined;
       row.thinkingLevel = normalizeThinkingLevel(row.thinkingLevel);
       row.model = normalizeModelOverride(row.model);
+      row.deliverFinal = row.deliverFinal !== false;
       const legacyChatKey = safeString((row as any).chatKey).trim();
       row.frontend = normalizeTaskFrontend(
         row.frontend ||

@@ -420,6 +420,7 @@ export async function executeCronSessionInstructionTask(
     chatKey,
     affectChatBinding: true,
     disposeAfterTurn: false,
+    deliverFinal: task.deliverFinal !== false,
     text: instruction,
     sessionFile,
     ...(task.model ? { model: task.model } : {}),

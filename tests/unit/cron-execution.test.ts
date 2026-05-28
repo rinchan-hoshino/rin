@@ -648,6 +648,7 @@ test("cron current-session instruction relies on bound delivery without duplicat
     assert.equal(calls.length, 1);
     assert.equal(calls[0].chatKey, "telegram/demo:1");
     assert.equal(calls[0].sessionFile, sessionFile);
+    assert.equal(calls[0].deliverFinal, true);
     assert.equal(sent.length, 0);
     assert.equal(task.lastResultText, "done");
   } finally {
@@ -688,22 +689,21 @@ test("cron scheduler validates current-session instruction bindings", async () =
         }),
       /cron_session_instruction_requires_agent_prompt/,
     );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
-          id: "cron_instruction_cron",
-          trigger: { expression: "*/1 * * * *", timezone: "local" },
-          session: {
-            mode: "session_instruction",
-            sessionFile: "/tmp/session.jsonl",
-          },
-          target: {
-            kind: "agent_prompt",
-            prompt: "Continue here.",
-          },
-        }),
-      /cron_session_instruction_requires_once/,
-    );
+    const recurring = scheduler.upsertTask({
+      id: "cron_instruction_cron",
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
+      session: {
+        mode: "session_instruction",
+        sessionFile: "/tmp/session.jsonl",
+      },
+      deliverFinal: false,
+      target: {
+        kind: "agent_prompt",
+        prompt: "Continue here.",
+      },
+    });
+    assert.equal(recurring.trigger.expression, "*/1 * * * *");
+    assert.equal(recurring.deliverFinal, false);
     const task = scheduler.upsertTask({
       id: "cron_instruction_ok",
       trigger: { runAt: "2099-01-01T00:00:00.000Z" },
@@ -717,6 +717,7 @@ test("cron scheduler validates current-session instruction bindings", async () =
       },
     });
     assert.equal(task.frontend, undefined);
+    assert.equal(task.deliverFinal, true);
     assert.equal(task.session.mode, "session_instruction");
     assert.equal(task.session.sessionFile, "/tmp/session.jsonl");
     assert.equal(task.target.kind, "agent_prompt");

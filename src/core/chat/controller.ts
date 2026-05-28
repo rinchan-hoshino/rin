@@ -1268,11 +1268,13 @@ export class ChatController {
       model?: string;
       thinkingLevel?: string;
       managedSessionLeaf?: string;
+      deliverFinal?: boolean;
     },
     mode: "prompt" | "steer" = "prompt",
   ) {
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
+    const deliverFinal = input.deliverFinal !== false;
     if (this.canSteerActiveTurn()) {
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
@@ -1322,18 +1324,20 @@ export class ChatController {
           sessionFile: this.currentSessionFile(),
         };
       }
-      await this.beginVisibleProcessingTurn({
-        incomingMessageId: input.incomingMessageId,
-        replyToMessageId: input.replyToMessageId,
-      });
-      await this.deliverAssistantReply({
-        text: result.finalText,
-        replyToMessageId: input.replyToMessageId,
-        sessionFile: result.sessionFile,
-        incomingMessageId: input.incomingMessageId,
-      });
-      await new Promise((resolve) => setImmediate(resolve));
-      await this.flushPendingPassiveNotices();
+      if (deliverFinal) {
+        await this.beginVisibleProcessingTurn({
+          incomingMessageId: input.incomingMessageId,
+          replyToMessageId: input.replyToMessageId,
+        });
+        await this.deliverAssistantReply({
+          text: result.finalText,
+          replyToMessageId: input.replyToMessageId,
+          sessionFile: result.sessionFile,
+          incomingMessageId: input.incomingMessageId,
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        await this.flushPendingPassiveNotices();
+      }
       return {
         finalText: result.finalText,
         result: result.result,
@@ -1362,10 +1366,12 @@ export class ChatController {
         attachments: input.attachments,
         startedAt: Date.now(),
       });
-      await this.beginVisibleProcessingTurn({
-        incomingMessageId: input.incomingMessageId,
-        replyToMessageId: input.replyToMessageId,
-      });
+      if (deliverFinal) {
+        await this.beginVisibleProcessingTurn({
+          incomingMessageId: input.incomingMessageId,
+          replyToMessageId: input.replyToMessageId,
+        });
+      }
       try {
         const result = await this.driver.runTurn({
           text: formatPromptForChatContext(text, input.promptMeta),
@@ -1394,15 +1400,17 @@ export class ChatController {
             sessionFile: this.currentSessionFile(),
           };
         }
-        await this.deliverAssistantReply({
-          text: result.finalText,
-          replyToMessageId: input.replyToMessageId,
-          sessionFile: result.sessionFile,
-          incomingMessageId: input.incomingMessageId,
-          clearProcessing: true,
-        });
-        await new Promise((resolve) => setImmediate(resolve));
-        await this.flushPendingPassiveNotices();
+        if (deliverFinal) {
+          await this.deliverAssistantReply({
+            text: result.finalText,
+            replyToMessageId: input.replyToMessageId,
+            sessionFile: result.sessionFile,
+            incomingMessageId: input.incomingMessageId,
+            clearProcessing: true,
+          });
+          await new Promise((resolve) => setImmediate(resolve));
+          await this.flushPendingPassiveNotices();
+        }
         this.clearCurrentTurn();
         return {
           finalText: result.finalText,
