@@ -179,6 +179,8 @@ test("rpc client applies configured frontend identity to scoped frontend command
   await client.prompt("hello");
   await client.newSession();
   await client.resumeSession("/tmp/session.jsonl");
+  await client.shutdownSession();
+  await client.terminateSession();
 
   assert.deepEqual(
     received.map((payload) => ({
@@ -189,6 +191,8 @@ test("rpc client applies configured frontend identity to scoped frontend command
       { type: "prompt", frontendIdentity: { kind: "gui" } },
       { type: "new_session", frontendIdentity: { kind: "gui" } },
       { type: "select_session", frontendIdentity: { kind: "gui" } },
+      { type: "shutdown_session", frontendIdentity: { kind: "gui" } },
+      { type: "terminate_session", frontendIdentity: { kind: "gui" } },
     ],
   );
 });

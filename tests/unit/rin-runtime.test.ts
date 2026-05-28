@@ -50,7 +50,7 @@ test("runtime session shutdown emits Rin capability hooks without extension-runn
   const runtime = {
     session: {
       sessionManager: {
-        __rinLastFrontend: { kind: "test", key: "last-owner" },
+        __rinFrontend: { kind: "test", key: "stable-owner" },
       },
       __rinCapabilities: {
         hasHandlers(eventName) {
@@ -78,10 +78,10 @@ test("runtime session shutdown emits Rin capability hooks without extension-runn
 
   assert.deepEqual(calls, [
     "has:session_shutdown",
-    "emit:new:/tmp/next-session.jsonl:last-owner",
+    "emit:new:/tmp/next-session.jsonl:stable-owner",
     "teardown:new:/tmp/next-session.jsonl",
     "has:session_shutdown",
-    "emit:quit::last-owner",
+    "emit:quit::stable-owner",
     "dispose",
   ]);
 });

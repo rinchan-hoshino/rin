@@ -585,7 +585,6 @@ function applyRinPromptBuilder(session: any) {
         options?.promptContext,
       );
       const previousActiveTurnPrompt = session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
-      const previousFrontend = session.sessionManager?.__rinFrontend;
       const activeTurnPrompt: {
         basePrompt: string;
         turnPrompt: string;
@@ -596,7 +595,6 @@ function applyRinPromptBuilder(session: any) {
       );
       if (session.sessionManager && frontendIdentity) {
         session.sessionManager.__rinFrontend = frontendIdentity;
-        session.sessionManager.__rinLastFrontend = frontendIdentity;
       }
       if (turnPrompt !== basePrompt) {
         session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = activeTurnPrompt;
@@ -610,13 +608,6 @@ function applyRinPromptBuilder(session: any) {
             delete session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
           } else {
             session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = previousActiveTurnPrompt;
-          }
-        }
-        if (session.sessionManager) {
-          if (previousFrontend === undefined) {
-            delete session.sessionManager.__rinFrontend;
-          } else {
-            session.sessionManager.__rinFrontend = previousFrontend;
           }
         }
         if (turnPrompt !== basePrompt) {
@@ -1000,9 +991,7 @@ async function emitRinCapabilityEvent(session: any, event: any) {
   const type = String(event?.type || "").trim();
   if (!hasRinCapabilityHandlers(session, type)) return;
   const frontend = normalizeFrontendIdentity(
-    event?.frontend ??
-      session?.sessionManager?.__rinFrontend ??
-      session?.sessionManager?.__rinLastFrontend,
+    event?.frontend ?? session?.sessionManager?.__rinFrontend,
   );
   await session.__rinCapabilities.emit(
     frontend ? { ...event, frontend } : event,

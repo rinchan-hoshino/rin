@@ -214,7 +214,12 @@ export class ChatController {
     if (!this.state.chatKey) this.state.chatKey = chatKey;
     this.driver = new RinFrontendTurnDriver({
       clientFactory:
-        deps.frontendClientFactory || (() => new RinDaemonFrontendClient()),
+        deps.frontendClientFactory ||
+        (() =>
+          new RinDaemonFrontendClient({
+            frontendIdentity:
+              deps.frontendIdentity || chatFrontendIdentity(chatKey),
+          })),
       promptSource: "chat-bridge",
       commandResponses: this.getCommandResponses(),
       frontendIdentity: deps.frontendIdentity || chatFrontendIdentity(chatKey),

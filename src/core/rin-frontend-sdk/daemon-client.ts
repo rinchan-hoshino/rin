@@ -130,7 +130,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
       this.frontendIdentity = undefined;
       return;
     }
-    this.socketPath = transport.socketPath || "inprocess://rin-daemon";
+    this.socketPath = transport.socketPath || defaultDaemonSocketPath();
     this.connectSocket = transport.connectSocket;
     this.frontendIdentity = normalizeFrontendIdentity(
       transport.frontendIdentity,
@@ -350,11 +350,21 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   }
 
   async shutdownSession() {
-    return await this.request({ type: "shutdown_session" });
+    return await this.request({
+      type: "shutdown_session",
+      ...(this.frontendIdentity
+        ? { frontendIdentity: this.frontendIdentity }
+        : {}),
+    });
   }
 
   async terminateSession() {
-    return await this.request({ type: "terminate_session" });
+    return await this.request({
+      type: "terminate_session",
+      ...(this.frontendIdentity
+        ? { frontendIdentity: this.frontendIdentity }
+        : {}),
+    });
   }
 
   async newSession(options: Record<string, unknown> = {}) {

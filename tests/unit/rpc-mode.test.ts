@@ -182,7 +182,7 @@ test(
 );
 
 test(
-  "rpc mode shutdown_session disposes runtime and flushes the session file",
+  "rpc mode shutdown_session disposes runtime with stable frontend identity and flushes the session file",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -221,7 +221,9 @@ test(
       const runtime = {
         session,
         dispose: async () => {
-          calls.push("runtime.dispose");
+          calls.push(
+            `runtime.dispose:${session.sessionManager.__rinFrontend?.kind || ""}`,
+          );
         },
       };
 
@@ -238,13 +240,13 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "1", type: "shutdown_session" })}\n`,
+          `${JSON.stringify({ id: "1", type: "shutdown_session", frontendIdentity: { kind: "tui" } })}\n`,
         ),
       );
       await wait(20);
 
       assert.deepEqual(calls, [
-        "runtime.dispose",
+        "runtime.dispose:tui",
         "session.flush",
         "process.exit",
       ]);

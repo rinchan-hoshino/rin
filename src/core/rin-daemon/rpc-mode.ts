@@ -1129,11 +1129,18 @@ export async function runCustomRpcMode(
           session.abortCompaction?.();
           await session.abort();
         });
-      case "shutdown_session":
+      case "shutdown_session": {
+        const frontendIdentity = normalizeFrontendIdentity(
+          command.frontendIdentity,
+        );
+        if (frontendIdentity && session.sessionManager) {
+          session.sessionManager.__rinFrontend = frontendIdentity;
+        }
         await runtime.dispose();
         await forceFlushSessionFile(session);
         output(done(id, type, { shutdown: true }));
         return process.exit(0);
+      }
       case "sleep_session":
         try {
           await session.abort();
@@ -1381,7 +1388,6 @@ export async function runCustomRpcMode(
             );
             if (frontendIdentity && session.sessionManager) {
               session.sessionManager.__rinFrontend = frontendIdentity;
-              session.sessionManager.__rinLastFrontend = frontendIdentity;
             }
             await abortCurrentSessionForReplacement();
             const managedSessionLeaf = safeString(
@@ -1425,7 +1431,6 @@ export async function runCustomRpcMode(
             );
             if (frontendIdentity && session.sessionManager) {
               session.sessionManager.__rinFrontend = frontendIdentity;
-              session.sessionManager.__rinLastFrontend = frontendIdentity;
             }
             return runtime
               .switchSession(sessionFile)

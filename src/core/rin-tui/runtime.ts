@@ -1670,9 +1670,15 @@ export class RpcInteractiveSession {
       "new_session",
       "select_session",
       "switch_session",
+      "shutdown_session",
+      "terminate_session",
     ].includes(type)
       ? { frontendIdentity: TUI_FRONTEND_IDENTITY }
       : {};
+    const scopedPayload: Record<string, unknown> = {
+      ...frontendScoped,
+      ...payload,
+    };
     const withResources = [
       "get_state",
       "new_session",
@@ -1684,13 +1690,12 @@ export class RpcInteractiveSession {
       "get_command_argument_completions",
     ].includes(type)
       ? {
-          ...frontendScoped,
-          ...payload,
+          ...scopedPayload,
           resourceOptions:
             payload.resourceOptions ||
             serializeRpcResourceOptions(this.extensionOptions),
         }
-      : payload;
+      : scopedPayload;
     const hasExplicitSessionTarget = Boolean(
       withResources.sessionFile ||
       withResources.sessionPath ||
