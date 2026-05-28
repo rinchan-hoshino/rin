@@ -6,7 +6,6 @@ export type RinRpcCommandType =
   | "clear_queue"
   | "abort"
   | "get_state"
-  | "flush_self_improve_notices"
   | "cycle_model"
   | "get_messages"
   | "get_session_snapshot"

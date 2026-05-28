@@ -86,7 +86,7 @@ test("generic i18n catalog accepts nested message keys", async () => {
   assert.equal(responses.new, "Started a new session.");
 });
 
-test("chat i18n exposes only chat-sent compaction and self-improve review templates", async () => {
+test("chat i18n exposes only chat-sent compaction templates", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-command-copy-"),
   );
@@ -100,10 +100,6 @@ test("chat i18n exposes only chat-sent compaction and self-improve review templa
           summaryLine: "Shrunk {tokens}; open with {expandKey}.",
           summaryText: "COMPACT: {summary}",
         },
-        selfImproveReview: {
-          notice: "Review notice.",
-          changedWithMore: "Reviewed {targets} plus {count} hidden.",
-        },
       },
     }),
   );
@@ -116,9 +112,4 @@ test("chat i18n exposes only chat-sent compaction and self-improve review templa
     "Shrunk {tokens}; open with {expandKey}.",
   );
   assert.equal(responses.compactionSummaryText, "{summary}");
-  assert.equal(responses.selfImproveReviewNotice, "Review notice.");
-  assert.equal(
-    responses.selfImproveReviewChangedWithMore,
-    "Self-improve review updated {targets} and {count} more.",
-  );
 });

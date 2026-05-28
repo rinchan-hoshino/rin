@@ -199,10 +199,7 @@ export async function prepareRpcSessionWorkerForInteractiveStartup(
     rpcSession.settingsManager,
     interactiveOptions,
   );
-  await waitForRpcStartupStep(
-    rpcSession.connect({ flushPendingSelfImproveNotices: false }),
-    "rpc_connect",
-  );
+  await waitForRpcStartupStep(rpcSession.connect(), "rpc_connect");
   await waitForRpcStartupStep(
     rpcSession.ensureSessionReady(),
     "rpc_session_ready",
@@ -225,10 +222,9 @@ async function runInteractiveMode(
 
 export async function initializeRpcInteractiveModeForStartup(
   interactiveMode: InteractiveMode,
-  rpcSession: Pick<RpcInteractiveSession, "flushPendingSelfImproveNotices">,
+  _rpcSession: RpcInteractiveSession,
 ) {
   await (interactiveMode as any).init();
-  await rpcSession.flushPendingSelfImproveNotices().catch(() => {});
 }
 
 export async function runPreinitializedInteractiveMode(

@@ -12,14 +12,6 @@ export type RinFrontendCommandResponses = {
   compactionStart: string;
   compactionSummaryLine: string;
   compactionSummaryText: string;
-  selfImproveReviewNotice: string;
-  selfImproveReviewQueued: string;
-  selfImproveReviewSkipped: string;
-  selfImproveReviewFailed: string;
-  selfImproveReviewNoChange: string;
-  selfImproveReviewChanged: string;
-  selfImproveReviewChangedWithMore: string;
-  selfImproveReviewChangedCount: string;
 };
 
 export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses =
@@ -33,15 +25,6 @@ export const DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES: RinFrontendCommandResponses
     compactionStart: "Compacting...",
     compactionSummaryLine: "Compacted from {tokens} tokens",
     compactionSummaryText: "[compaction]\n\n{summary}",
-    selfImproveReviewNotice: "",
-    selfImproveReviewQueued: "Self-improve review queued.",
-    selfImproveReviewSkipped: "Self-improve review skipped.",
-    selfImproveReviewFailed: "Self-improve review failed.",
-    selfImproveReviewNoChange: "Self-improve review completed with no changes.",
-    selfImproveReviewChanged: "Self-improve review updated {targets}.",
-    selfImproveReviewChangedWithMore:
-      "Self-improve review updated {targets} and {count} more.",
-    selfImproveReviewChangedCount: "Self-improve review updated {count} files.",
   };
 
 export function resolveRinFrontendCommandResponses(
@@ -59,102 +42,6 @@ export function resolveRinFrontendCommandResponses(
       },
     ),
   ) as RinFrontendCommandResponses;
-}
-
-const SELF_IMPROVE_REVIEW_NOTICE_PREFIX = "💡 ";
-
-function replaceTemplateValues(
-  template: string,
-  values: Record<string, string>,
-) {
-  return Object.entries(values).reduce(
-    (text, [key, value]) => text.replaceAll(`{${key}}`, value),
-    template,
-  );
-}
-
-function prefixSelfImproveReviewNotice(text: string) {
-  const trimmed = safeString(text).trim();
-  if (!trimmed) return SELF_IMPROVE_REVIEW_NOTICE_PREFIX.trim();
-  if (trimmed.startsWith(SELF_IMPROVE_REVIEW_NOTICE_PREFIX.trim())) {
-    return trimmed;
-  }
-  return `${SELF_IMPROVE_REVIEW_NOTICE_PREFIX}${trimmed}`;
-}
-
-export function formatSelfImproveReviewNotice(
-  input: unknown,
-  responses: RinFrontendCommandResponses = resolveRinFrontendCommandResponses(),
-) {
-  const notice = isJsonRecord(input) ? input : {};
-  const status = safeString(notice.status).trim();
-  const customNoticeTemplate = safeString(
-    responses.selfImproveReviewNotice,
-  ).trim();
-  if (customNoticeTemplate) {
-    return prefixSelfImproveReviewNotice(
-      replaceTemplateValues(customNoticeTemplate, {
-        status,
-        targets: Array.isArray(notice.targets)
-          ? notice.targets
-              .map((item) => safeString(item).trim())
-              .filter(Boolean)
-              .join(", ")
-          : "",
-        count: String(
-          Math.max(
-            0,
-            Math.floor(
-              Number(notice.hiddenTargetCount || notice.changedCount || 0),
-            ) || 0,
-          ),
-        ),
-      }),
-    );
-  }
-  if (status === "queued") {
-    return prefixSelfImproveReviewNotice(responses.selfImproveReviewQueued);
-  }
-  if (status === "failed") {
-    return prefixSelfImproveReviewNotice(responses.selfImproveReviewFailed);
-  }
-  if (status === "skipped") {
-    return prefixSelfImproveReviewNotice(responses.selfImproveReviewSkipped);
-  }
-  const targets = Array.isArray(notice.targets)
-    ? notice.targets.map((item) => safeString(item).trim()).filter(Boolean)
-    : [];
-  const hiddenTargetCount = Math.max(
-    0,
-    Math.floor(Number(notice.hiddenTargetCount || 0)) || 0,
-  );
-  const changedCount = Math.max(
-    0,
-    Math.floor(Number(notice.changedCount || 0)) || 0,
-  );
-  if (targets.length && hiddenTargetCount > 0) {
-    return prefixSelfImproveReviewNotice(
-      replaceTemplateValues(responses.selfImproveReviewChangedWithMore, {
-        targets: targets.join(", "),
-        count: String(hiddenTargetCount),
-      }),
-    );
-  }
-  if (targets.length) {
-    return prefixSelfImproveReviewNotice(
-      replaceTemplateValues(responses.selfImproveReviewChanged, {
-        targets: targets.join(", "),
-      }),
-    );
-  }
-  if (changedCount > 0) {
-    return prefixSelfImproveReviewNotice(
-      replaceTemplateValues(responses.selfImproveReviewChangedCount, {
-        count: String(changedCount),
-      }),
-    );
-  }
-  return prefixSelfImproveReviewNotice(responses.selfImproveReviewNoChange);
 }
 
 export function frontendCommandNameFromLine(commandLine: string) {

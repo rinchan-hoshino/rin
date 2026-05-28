@@ -34,7 +34,6 @@ const CHAT_COMMAND_RESPONSE_I18N_IDS = {
   reload: "chat.commandResponses.reload",
   compactionStart: "chat.compaction.start",
   compactionSummaryLine: "chat.compaction.summaryLine",
-  selfImproveReviewNotice: "chat.selfImproveReview.notice",
 } satisfies Partial<Record<keyof RinFrontendCommandResponses, string>>;
 
 function chatCommandResponsesFromI18nCatalog(catalog: RinI18nCatalog) {

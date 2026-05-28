@@ -223,7 +223,6 @@ export class ChatController {
       promptSource: "chat-bridge",
       commandResponses: this.getCommandResponses(),
       frontendIdentity: deps.frontendIdentity || chatFrontendIdentity(chatKey),
-      selfImproveNoticeSessionFile: () => this.currentSessionFile(),
     });
     this.driver.subscribe((event) => {
       void this.handleFrontendEvent(event).catch(() => {});
@@ -1230,11 +1229,6 @@ export class ChatController {
         clearProcessing: true,
         bindSession: false,
       });
-      if (commandName === "new") {
-        await this.driver
-          .runSelfImproveNoticeCheckpoint?.("new_session")
-          .catch(() => {});
-      }
       return data;
     } catch (error: any) {
       if (!isTransientChatRuntimeError(error)) {
@@ -1338,12 +1332,6 @@ export class ChatController {
         sessionFile: result.sessionFile,
         incomingMessageId: input.incomingMessageId,
       });
-      await this.driver
-        .runSelfImproveNoticeCheckpoint?.(
-          "turn_complete",
-          result.sessionFile || this.currentSessionFile(),
-        )
-        .catch(() => {});
       await new Promise((resolve) => setImmediate(resolve));
       await this.flushPendingPassiveNotices();
       return {
@@ -1413,12 +1401,6 @@ export class ChatController {
           incomingMessageId: input.incomingMessageId,
           clearProcessing: true,
         });
-        await this.driver
-          .runSelfImproveNoticeCheckpoint?.(
-            "turn_complete",
-            result.sessionFile || this.currentSessionFile(),
-          )
-          .catch(() => {});
         await new Promise((resolve) => setImmediate(resolve));
         await this.flushPendingPassiveNotices();
         this.clearCurrentTurn();

@@ -13,7 +13,6 @@ const sdk = await import(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
-const NOTICE_NO_CHANGE = "💡 Self-improve review completed with no changes.";
 const NOTICE_CHANGED = "💡 Self-improve review updated demo.";
 
 test("frontend backend event translator exposes status as a shared frontend event", () => {
@@ -86,53 +85,6 @@ test("frontend backend event translator exposes Pi working and compaction events
   assert.deepEqual(translator.translate({ type: "compaction_end" }), [
     { type: "external_working_end" },
   ]);
-});
-
-test("frontend backend event translator exposes self-improve review events as passive notices", () => {
-  const translator = sdk.createRinFrontendBackendEventTranslator();
-
-  assert.deepEqual(
-    translator.translate({
-      type: "self_improve_review_notice",
-      status: "completed",
-      targets: [],
-      changedCount: 0,
-    }),
-    [
-      {
-        type: "passive_notice",
-        text: NOTICE_NO_CHANGE,
-        level: "info",
-      },
-    ],
-  );
-  assert.deepEqual(
-    translator.translate({
-      type: "self_improve_review_notice",
-      status: "completed",
-      targets: ["demo"],
-      changedCount: 1,
-    }),
-    [
-      {
-        type: "passive_notice",
-        text: NOTICE_CHANGED,
-        level: "info",
-      },
-    ],
-  );
-  assert.deepEqual(
-    translator.translate({
-      type: "extension_ui_request",
-      payload: {
-        type: "extension_ui_request",
-        method: "notify",
-        message: "ordinary extension notice",
-        notifyType: "info",
-      },
-    }),
-    [],
-  );
 });
 
 test("frontend backend event translator exposes compact collapsed notice without summary text", () => {

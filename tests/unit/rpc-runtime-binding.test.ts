@@ -1500,7 +1500,7 @@ test("rpc runtime promotes a temporary worker session before the first prompt", 
     },
   });
 
-  await session.connect({ flushPendingSelfImproveNotices: false });
+  await session.connect();
   assert.equal(session.sessionId, "temporary");
   assert.equal(session.sessionFile, undefined);
 
@@ -1570,62 +1570,6 @@ test("rpc runtime lets native queue updates own steer prompt state", async () =>
   assert.equal(sent.length, 1);
   assert.equal(sent[0]?.type, "prompt");
   assert.equal(sent[0]?.streamingBehavior, "steer");
-});
-
-test("rpc runtime forwards raw self-improve notices from the daemon", async () => {
-  let listener;
-  const session = new RpcInteractiveSession({
-    send(payload) {
-      if (payload.type === "get_state") {
-        return Promise.resolve({
-          success: true,
-          data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
-        });
-      }
-      if (payload.type === "get_session_snapshot") {
-        return Promise.resolve({ success: true, data: {} });
-      }
-      return Promise.resolve({ success: true, data: {} });
-    },
-    subscribe(next) {
-      listener = next;
-      return () => {};
-    },
-    abort() {
-      return Promise.resolve();
-    },
-    isConnected() {
-      return true;
-    },
-    connect() {
-      return Promise.resolve();
-    },
-    disconnect() {
-      return Promise.resolve();
-    },
-  });
-
-  const seen = [];
-  session.subscribe((event) => seen.push(event));
-  await session.connect({ flushPendingSelfImproveNotices: false });
-  seen.length = 0;
-
-  listener({
-    type: "self_improve_review_notice",
-    status: "completed",
-    targets: ["memory-index"],
-    changedCount: 1,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(seen, [
-    {
-      type: "self_improve_review_notice",
-      status: "completed",
-      targets: ["memory-index"],
-      changedCount: 1,
-    },
-  ]);
 });
 
 test("rpc runtime defers prompt submission until compaction ends", async () => {

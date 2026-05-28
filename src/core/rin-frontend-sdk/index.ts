@@ -36,7 +36,6 @@ export {
 export {
   DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
   applyFrontendBuiltinCommandText,
-  formatSelfImproveReviewNotice,
   frontendCommandNameFromLine,
   isFrontendAbortCommand,
   isFrontendNewSessionCommand,
@@ -77,15 +76,12 @@ export {
 
 export {
   RinFrontendTurnDriver,
-  flushPendingSelfImproveNotices,
-  runSelfImproveNoticeCheckpoint,
   submitNativeFrontendPromptTurn,
   type RinFrontendPromptTurnInput,
   type RinFrontendTurnClient,
   type RinFrontendTurnDriverEvent,
   type RinFrontendTurnPhase,
   type RinFrontendTurnResult,
-  type SelfImproveNoticeCheckpointKind,
 } from "./turn-driver.js";
 
 export {

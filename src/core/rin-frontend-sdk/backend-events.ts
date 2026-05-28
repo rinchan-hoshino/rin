@@ -6,7 +6,6 @@ import {
 } from "../message-content.js";
 import { safeString } from "../text-utils.js";
 import {
-  formatSelfImproveReviewNotice,
   resolveRinFrontendCommandResponses,
   type RinFrontendCommandResponses,
 } from "./command-responses.js";
@@ -127,16 +126,6 @@ export function createRinFrontendBackendEventTranslator(
           ];
         }
         return [];
-      }
-
-      if (payload.type === "self_improve_review_notice") {
-        return [
-          {
-            type: "passive_notice",
-            text: formatSelfImproveReviewNotice(payload, commandResponses),
-            level: payload.status === "failed" ? "error" : "info",
-          },
-        ];
       }
 
       if (payload.type === "rpc_turn_event") {

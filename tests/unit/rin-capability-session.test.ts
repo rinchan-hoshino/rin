@@ -35,12 +35,12 @@ test("Rin core capability events reach session subscribers without extension UI"
   const seen: any[] = [];
   session.subscribe((event: any) => seen.push(event));
   capabilitySet.createContext().emitEvent({
-    type: "self_improve_review_notice",
+    type: "demo_capability_event",
     status: "completed",
   });
 
   assert.deepEqual(seen, [
-    { type: "self_improve_review_notice", status: "completed" },
+    { type: "demo_capability_event", status: "completed" },
   ]);
 });
 

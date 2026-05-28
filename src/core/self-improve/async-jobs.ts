@@ -13,11 +13,6 @@ import {
   writeJsonAtomic,
 } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
-import {
-  normalizeFrontendIdentity,
-  sameFrontendIdentity,
-  type RinFrontendIdentity,
-} from "../rin-frontend-sdk/frontend-identity.js";
 import { normalizeSessionValue } from "../session/ref.js";
 import { nowIso, safeString, uniqueStrings } from "./core/utils.js";
 import {
@@ -26,8 +21,6 @@ import {
   maintenanceQueuePath,
   selfImproveStateDir,
 } from "./paths.js";
-
-const PENDING_NOTICES_FILE = "pending-notices.json";
 
 export type MaintenanceJob = {
   id: string;
@@ -39,7 +32,6 @@ export type MaintenanceJob = {
   leafId?: string;
   trigger: string;
   snapshotKey?: string;
-  frontend?: RinFrontendIdentity;
   additionalExtensionPaths?: string[];
   attempts?: number;
   lastError?: string;
@@ -49,25 +41,6 @@ export type MaintenanceJob = {
 type MaintenanceChangedFile = {
   path: string;
   change: "created" | "updated" | "deleted";
-};
-
-export type MemoryMaintenanceNotice = {
-  type: "self_improve_review_notice";
-  status: "queued" | "completed" | "failed" | "skipped";
-  skipped?: string;
-  targets?: string[];
-  hiddenTargetCount?: number;
-  changedCount?: number;
-};
-
-export type PendingMemoryMaintenanceNotice = {
-  id: string;
-  createdAt: string;
-  updatedAt: string;
-  agentDir: string;
-  sessionFile: string;
-  frontend?: RinFrontendIdentity;
-  notice: MemoryMaintenanceNotice;
 };
 
 type MaintenanceHistoryRecord = {
@@ -108,99 +81,6 @@ function normalizeAdditionalExtensionPaths(value: unknown) {
 
 async function ensureStateDir(agentDir: string) {
   await fs.mkdir(selfImproveStateDir(agentDir), { recursive: true });
-}
-
-function pendingNoticesPath(agentDir: string) {
-  return path.join(selfImproveStateDir(agentDir), PENDING_NOTICES_FILE);
-}
-
-function loadPendingNotices(
-  agentDir: string,
-): PendingMemoryMaintenanceNotice[] {
-  const root = resolveAgentDir(agentDir);
-  if (!root) return [];
-  const parsed = readJsonFile<unknown>(pendingNoticesPath(root), []);
-  return asArray<PendingMemoryMaintenanceNotice>(parsed).filter(
-    (item) =>
-      item &&
-      typeof item === "object" &&
-      safeString((item as any).sessionFile).trim() &&
-      safeString((item as any).notice?.type).trim() ===
-        "self_improve_review_notice",
-  );
-}
-
-async function savePendingNotices(
-  agentDir: string,
-  notices: PendingMemoryMaintenanceNotice[],
-) {
-  await ensureStateDir(agentDir);
-  writeJsonAtomic(pendingNoticesPath(agentDir), notices);
-}
-
-export async function appendPendingMemoryMaintenanceNotice(input: {
-  agentDir: string;
-  sessionFile: string;
-  frontend?: RinFrontendIdentity;
-  notice: MemoryMaintenanceNotice;
-}) {
-  const agentDir = resolveAgentDir(input.agentDir);
-  const sessionFile = resolveSessionFile(input.sessionFile);
-  if (!agentDir || !sessionFile) return;
-  const frontend = normalizeFrontendIdentity(input.frontend);
-  const now = nowIso();
-  const notices = loadPendingNotices(agentDir);
-  notices.push({
-    id: `maintenance_notice_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-    createdAt: now,
-    updatedAt: now,
-    agentDir,
-    sessionFile,
-    frontend,
-    notice: input.notice,
-  });
-  await savePendingNotices(agentDir, notices);
-}
-
-export type MemoryMaintenanceNoticeFilter = {
-  sessionFile?: string;
-  frontend?: RinFrontendIdentity;
-};
-
-export function filterMemoryMaintenanceNoticesForDisplay(
-  notices: PendingMemoryMaintenanceNotice[],
-  filter: MemoryMaintenanceNoticeFilter = {},
-) {
-  const frontend = normalizeFrontendIdentity(filter.frontend);
-  const taken: PendingMemoryMaintenanceNotice[] = [];
-  const remaining: PendingMemoryMaintenanceNotice[] = [];
-  for (const notice of notices) {
-    const noticeFrontend = normalizeFrontendIdentity(notice.frontend);
-    const matched = frontend
-      ? sameFrontendIdentity(noticeFrontend, frontend)
-      : true;
-    if (matched) {
-      taken.push(notice);
-    } else {
-      remaining.push(notice);
-    }
-  }
-  return { taken, remaining };
-}
-
-export async function takePendingMemoryMaintenanceNotices(input: {
-  agentDir: string;
-  sessionFile?: string;
-  frontend?: RinFrontendIdentity;
-}) {
-  const agentDir = resolveAgentDir(input.agentDir);
-  if (!agentDir) return [];
-  const { taken, remaining } = filterMemoryMaintenanceNoticesForDisplay(
-    loadPendingNotices(agentDir),
-    input,
-  );
-  if (taken.length) await savePendingNotices(agentDir, remaining);
-  return taken.map((entry) => entry.notice);
 }
 
 async function loadQueue(agentDir: string): Promise<MaintenanceJob[]> {
@@ -260,7 +140,6 @@ function createMaintenanceJob(
     leafId: leafId || undefined,
     trigger,
     snapshotKey: snapshotKey || undefined,
-    frontend: normalizeFrontendIdentity(input.frontend),
     additionalExtensionPaths: normalizeAdditionalExtensionPaths(
       input.additionalExtensionPaths,
     ),
@@ -279,7 +158,6 @@ async function enqueueMaintenanceJob(
     existing.trigger = nextJob.trigger;
     existing.leafId = nextJob.leafId;
     existing.snapshotKey = nextJob.snapshotKey;
-    existing.frontend = nextJob.frontend;
     existing.additionalExtensionPaths = nextJob.additionalExtensionPaths;
     existing.attempts = undefined;
     existing.lastError = undefined;
@@ -441,95 +319,10 @@ function truncateText(value: unknown, limit = 800) {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
-function selfImproveRelativePath(filePath: string) {
-  const normalized = safeString(filePath).replace(/\\/g, "/");
-  const marker = "/self_improve/";
-  const markerIndex = normalized.indexOf(marker);
-  if (markerIndex >= 0) return normalized.slice(markerIndex + marker.length);
-  if (normalized.startsWith("self_improve/")) {
-    return normalized.slice("self_improve/".length);
-  }
-  return normalized;
-}
-
-function stripMarkdownExtension(value: string) {
-  return value.replace(/\.(?:md|markdown)$/i, "");
-}
-
-function shortTargetName(value: string, maxLength = 42) {
-  const target = stripMarkdownExtension(safeString(value).trim());
-  if (!target) return "";
-  return target.length > maxLength
-    ? `${target.slice(0, Math.max(1, maxLength - 1))}…`
-    : target;
-}
-
-function changedFileTarget(filePath: string) {
-  const relative = selfImproveRelativePath(filePath);
-  const parts = relative.split("/").filter(Boolean);
-  if ((parts[0] === "prompts" || parts[0] === "skills") && parts[1]) {
-    return shortTargetName(parts[1]);
-  }
-  return shortTargetName(parts.at(-1) || relative, 32);
-}
-
-function summarizeChangedTargets(changedFiles: MaintenanceChangedFile[]) {
-  const targets: string[] = [];
-  const seen = new Set<string>();
-  for (const file of changedFiles) {
-    const target = changedFileTarget(file.path);
-    if (!target || seen.has(target)) continue;
-    seen.add(target);
-    targets.push(target);
-  }
-  const visible = targets.slice(0, 3);
-  return {
-    targets: visible,
-    hiddenTargetCount: Math.max(0, targets.length - visible.length),
-  };
-}
-
 function normalizeErrorMessage(error: unknown) {
   return safeString(
     (error as any)?.message || error || "maintenance_job_failed",
   ).trim();
-}
-
-export function buildMemoryMaintenanceNotice(input: {
-  status?: string;
-  changedFiles?: unknown;
-  changedCount?: number;
-  skipped?: string;
-}): MemoryMaintenanceNotice {
-  const status = safeString(input.status).trim();
-  const skipped = safeString(input.skipped).trim();
-  if (status === "queued") {
-    return { type: "self_improve_review_notice", status: "queued" };
-  }
-  if (status === "failed") {
-    return { type: "self_improve_review_notice", status: "failed" };
-  }
-  if (status === "skipped" || skipped) {
-    return {
-      type: "self_improve_review_notice",
-      status: "skipped",
-      skipped: skipped || undefined,
-    };
-  }
-  const changedFiles = normalizeChangedFiles(input.changedFiles);
-  const summary = summarizeChangedTargets(changedFiles);
-  const changedCount = Number.isFinite(input.changedCount)
-    ? Math.max(0, Math.floor(Number(input.changedCount)))
-    : changedFiles.length;
-  return {
-    type: "self_improve_review_notice",
-    status: "completed",
-    targets: summary.targets,
-    ...(summary.hiddenTargetCount
-      ? { hiddenTargetCount: summary.hiddenTargetCount }
-      : {}),
-    changedCount,
-  };
 }
 
 async function appendHistoryRecord(
@@ -586,10 +379,6 @@ export async function runMemoryMaintenanceJobNow(
     return {
       status: "skipped",
       skipped: "locked",
-      notice: buildMemoryMaintenanceNotice({
-        status: "skipped",
-        skipped: "locked",
-      }),
     };
   }
 
@@ -622,11 +411,6 @@ export async function runMemoryMaintenanceJobNow(
       return {
         status: "completed",
         result,
-        notice: buildMemoryMaintenanceNotice({
-          status: "completed",
-          changedFiles,
-          skipped,
-        }),
       };
     } catch (error: unknown) {
       const finishedAt = nowIso();
@@ -647,7 +431,6 @@ export async function runMemoryMaintenanceJobNow(
       return {
         status: "failed",
         error: message,
-        notice: buildMemoryMaintenanceNotice({ status: "failed" }),
       };
     }
   } finally {
@@ -662,7 +445,6 @@ export async function processQueuedMemoryJobs(agentDir: string) {
   if (!handle) return { skipped: "locked" };
   let processed = 0;
   let failed = 0;
-  const allChangedFiles: MaintenanceChangedFile[] = [];
   try {
     while (true) {
       const jobs = await loadQueue(resolvedAgentDir);
@@ -694,18 +476,7 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           outputPreview: truncateText((result as any)?.output) || undefined,
           changedFiles,
         });
-        await appendPendingMemoryMaintenanceNotice({
-          agentDir: resolvedAgentDir,
-          sessionFile: job.sessionFile,
-          frontend: job.frontend,
-          notice: buildMemoryMaintenanceNotice({
-            status: "completed",
-            changedFiles,
-            skipped,
-          }),
-        });
         processed += 1;
-        allChangedFiles.push(...changedFiles);
       } catch (error: unknown) {
         const finishedAt = nowIso();
         const message = normalizeErrorMessage(error);
@@ -724,12 +495,6 @@ export async function processQueuedMemoryJobs(agentDir: string) {
           attempts,
           error: message,
         });
-        await appendPendingMemoryMaintenanceNotice({
-          agentDir: resolvedAgentDir,
-          sessionFile: job.sessionFile,
-          frontend: job.frontend,
-          notice: buildMemoryMaintenanceNotice({ status: "failed" }),
-        });
         failed += 1;
       }
     }
@@ -738,10 +503,6 @@ export async function processQueuedMemoryJobs(agentDir: string) {
       processed,
       failed,
       retried: 0,
-      notice: buildMemoryMaintenanceNotice({
-        status: failed > 0 ? "failed" : "completed",
-        changedFiles: allChangedFiles,
-      }),
     };
   } finally {
     await releaseWorkerLock(resolvedAgentDir, handle);

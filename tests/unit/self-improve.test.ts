@@ -64,56 +64,6 @@ function queuePath(root) {
   return selfImprovePaths.maintenanceQueuePath(root);
 }
 
-test("pending self-improve notices support global and frontend filtering", async () => {
-  await withTempRoot(async (root) => {
-    const first = path.join(root, "sessions", "first.jsonl");
-    const second = path.join(root, "sessions", "second.jsonl");
-    await asyncJobs.appendPendingMemoryMaintenanceNotice({
-      agentDir: root,
-      sessionFile: first,
-      notice: NOTICE_NO_CHANGE,
-    });
-    await asyncJobs.appendPendingMemoryMaintenanceNotice({
-      agentDir: root,
-      sessionFile: second,
-      notice: NOTICE_CHANGED_SKILL_ONE,
-    });
-
-    assert.deepEqual(
-      await asyncJobs.takePendingMemoryMaintenanceNotices({ agentDir: root }),
-      [NOTICE_NO_CHANGE, NOTICE_CHANGED_SKILL_ONE],
-    );
-    await asyncJobs.appendPendingMemoryMaintenanceNotice({
-      agentDir: root,
-      sessionFile: first,
-      frontend: { kind: "test", key: "frontend-a" },
-      notice: NOTICE_NO_CHANGE,
-    });
-    await asyncJobs.appendPendingMemoryMaintenanceNotice({
-      agentDir: root,
-      sessionFile: first,
-      frontend: { kind: "test", key: "frontend-b" },
-      notice: NOTICE_CHANGED_SKILL_ONE,
-    });
-    assert.deepEqual(
-      await asyncJobs.takePendingMemoryMaintenanceNotices({
-        agentDir: root,
-        sessionFile: second,
-        frontend: { kind: "test", key: "frontend-a" },
-      }),
-      [NOTICE_NO_CHANGE],
-    );
-    assert.deepEqual(
-      await asyncJobs.takePendingMemoryMaintenanceNotices({
-        agentDir: root,
-        sessionFile: first,
-        frontend: { kind: "test", key: "frontend-b" },
-      }),
-      [NOTICE_CHANGED_SKILL_ONE],
-    );
-  });
-});
-
 function assistantFinal(text = "done") {
   return { role: "assistant", content: [{ type: "text", text }] };
 }
@@ -151,39 +101,6 @@ async function writeSessionWithAssistantFinals(sessionFile, count) {
 function historyPath(root) {
   return selfImprovePaths.maintenanceHistoryPath(root);
 }
-
-const NOTICE_QUEUED = {
-  type: "self_improve_review_notice",
-  status: "queued",
-};
-const NOTICE_CHANGED_SKILL_ONE = {
-  type: "self_improve_review_notice",
-  status: "completed",
-  targets: ["demo"],
-  changedCount: 1,
-};
-const NOTICE_CHANGED_PROMPT_SKILL = {
-  type: "self_improve_review_notice",
-  status: "completed",
-  targets: ["core_doctrine", "demo"],
-  changedCount: 2,
-};
-const NOTICE_CHANGED_MEMORY_INDEX_ONCE = {
-  type: "self_improve_review_notice",
-  status: "completed",
-  targets: ["memory-index", "short-term-memory"],
-  changedCount: 3,
-};
-const NOTICE_NO_CHANGE = {
-  type: "self_improve_review_notice",
-  status: "completed",
-  targets: [],
-  changedCount: 0,
-};
-const NOTICE_FAILED = {
-  type: "self_improve_review_notice",
-  status: "failed",
-};
 
 function selfImproveRoot(root) {
   return selfImprovePaths.resolveSelfImproveRoot(root);
@@ -439,66 +356,6 @@ test("automatic self-improve handlers run periodic reviews synchronously", async
     assert.equal(calls[0].snapshotKey, "review:5");
     assert.equal(calls[0].trigger, "self_improve:periodic_review");
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
-  });
-});
-
-test("periodic self-improve review records a frontend-scoped notice after final messages", async () => {
-  await withTempRoot(async (root) => {
-    const notices = [];
-    const frontend = { kind: "test", key: "periodic-owner" };
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runMemoryMaintenanceJobNow() {
-        return {
-          status: "completed",
-          result: {
-            changedFiles: [
-              { path: path.join(root, "self_improve", "skills", "demo.md") },
-            ],
-          },
-        };
-      },
-    });
-    const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(root, "sessions", "notice-periodic.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await writeSessionWithAssistantFinals(sessionFile, 5);
-    const ctx = {
-      agentDir: root,
-      emitEvent(event) {
-        notices.push(event);
-      },
-      sessionManager: {
-        getSessionId: () => "notice-periodic-review-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "assistant-5",
-        isPersisted: () => true,
-      },
-    };
-
-    await messageEnd({ message: assistantFinal("done 8"), frontend }, ctx);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-
-    assert.deepEqual(notices, []);
-    assert.deepEqual(
-      await asyncJobs.takePendingMemoryMaintenanceNotices({
-        agentDir: root,
-        sessionFile,
-        frontend: { kind: "test", key: "other" },
-      }),
-      [],
-    );
-    assert.deepEqual(
-      await asyncJobs.takePendingMemoryMaintenanceNotices({
-        agentDir: root,
-        sessionFile,
-        frontend,
-      }),
-      [NOTICE_CHANGED_SKILL_ONE],
-    );
   });
 });
 
@@ -798,46 +655,6 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
   });
 });
 
-test("self-improve review notices stay structured and distinct", () => {
-  assert.deepEqual(
-    asyncJobs.buildMemoryMaintenanceNotice({ status: "queued" }),
-    NOTICE_QUEUED,
-  );
-  assert.deepEqual(
-    asyncJobs.buildMemoryMaintenanceNotice({
-      status: "completed",
-      changedFiles: [
-        { path: "/tmp/rin/self_improve/prompts/core_doctrine.md" },
-        { path: "/tmp/rin/self_improve/skills/demo/SKILL.md" },
-      ],
-    }),
-    NOTICE_CHANGED_PROMPT_SKILL,
-  );
-  assert.deepEqual(
-    asyncJobs.buildMemoryMaintenanceNotice({
-      status: "completed",
-      changedFiles: [
-        {
-          path: "/tmp/rin/self_improve/skills/memory-index/transactions/2026-05/foo.md",
-        },
-        {
-          path: "/tmp/rin/self_improve/skills/memory-index/transactions/2026-05/bar.md",
-        },
-        { path: "/tmp/rin/self_improve/skills/short-term-memory/SKILL.md" },
-      ],
-    }),
-    NOTICE_CHANGED_MEMORY_INDEX_ONCE,
-  );
-  assert.deepEqual(
-    asyncJobs.buildMemoryMaintenanceNotice({ status: "completed" }),
-    NOTICE_NO_CHANGE,
-  );
-  assert.deepEqual(
-    asyncJobs.buildMemoryMaintenanceNotice({ status: "failed" }),
-    NOTICE_FAILED,
-  );
-});
-
 test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   const prompt = maintainer.buildSelfImproveReviewPrompt(
     "self_improve:periodic_review",
@@ -964,10 +781,9 @@ test("session reload does not trigger self-improve shutdown maintenance", async 
   });
 });
 
-test("real session shutdown queues frontend-scoped self-improve review maintenance without a core notice", async () => {
+test("real session shutdown queues self-improve review maintenance without a core notice", async () => {
   await withTempRoot(async (root) => {
     const notices = [];
-    const frontend = { kind: "test", key: "shutdown-owner" };
     const definition = selfImproveIndex.default({
       sendMessage() {},
       getThinkingLevel() {
@@ -991,13 +807,12 @@ test("real session shutdown queues frontend-scoped self-improve review maintenan
       },
     };
 
-    await shutdown({ frontend }, ctx);
+    await shutdown({}, ctx);
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 1);
     assert.equal(queue[0].kind, "self_improve_review");
     assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
-    assert.deepEqual(queue[0].frontend, frontend);
     assert.deepEqual(notices, []);
   });
 });
@@ -1118,13 +933,11 @@ test("queued maintenance refresh clears stale retry metadata and normalizes exte
 
 test("queued maintenance drops invalid session jobs into history instead of blocking the queue", async () => {
   await withTempRoot(async (root) => {
-    const frontend = { kind: "test", key: "queued-owner" };
     await asyncJobs.enqueueMemoryMaintenanceJob({
       agentDir: root,
       sessionFile: path.join(root, "missing-session.jsonl"),
       trigger: "self_improve:periodic_review",
       snapshotKey: "review:5",
-      frontend,
     });
 
     const result = await asyncJobs.processQueuedMemoryJobs(root);
@@ -1146,22 +959,6 @@ test("queued maintenance drops invalid session jobs into history instead of bloc
     assert.match(
       String(history[0].error || ""),
       /maintenance_job_missing_session_file:/,
-    );
-    assert.deepEqual(
-      await asyncJobs.takePendingMemoryMaintenanceNotices({
-        agentDir: root,
-        sessionFile: path.join(root, "missing-session.jsonl"),
-        frontend: { kind: "test", key: "other" },
-      }),
-      [],
-    );
-    assert.deepEqual(
-      await asyncJobs.takePendingMemoryMaintenanceNotices({
-        agentDir: root,
-        sessionFile: path.join(root, "missing-session.jsonl"),
-        frontend,
-      }),
-      [NOTICE_FAILED],
     );
   });
 });

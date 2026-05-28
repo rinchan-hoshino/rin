@@ -6,8 +6,6 @@ import { existsSync, readFileSync } from "fs";
 import { isAssistantFinalMessage } from "../message-content.js";
 
 import {
-  appendPendingMemoryMaintenanceNotice,
-  buildMemoryMaintenanceNotice,
   enqueueMemoryMaintenanceJob,
   runMemoryMaintenanceJobNow,
   spawnQueuedMemoryWorker,
@@ -17,7 +15,6 @@ import {
   formatSelfImproveResult,
 } from "./lib.js";
 import { readSessionMetadata } from "../session/metadata.js";
-import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
 
 const DEFAULT_SELF_IMPROVE_REVIEW_EVERY_FINAL_MESSAGES = 5;
@@ -134,7 +131,6 @@ type SelfImproveReviewOptions = {
   leafId?: string;
   trigger: string;
   snapshotKey?: string;
-  frontend?: unknown;
 };
 
 function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
@@ -153,48 +149,17 @@ function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
     leafId: meta.leafId || undefined,
     trigger: opts.trigger,
     snapshotKey: opts.snapshotKey,
-    frontend: normalizeFrontendIdentity(opts.frontend ?? ctx?.frontend),
   };
-}
-
-function emitSelfImproveReviewNotice(ctx: any, notice: unknown) {
-  try {
-    ctx?.emitEvent?.(notice);
-  } catch {}
-}
-
-async function recordSelfImproveReviewNotice(
-  ctx: any,
-  job: ReturnType<typeof resolveReviewJob>,
-  notice: unknown,
-) {
-  if (!job || !notice || typeof notice !== "object") return;
-  await appendPendingMemoryMaintenanceNotice({
-    agentDir: job.agentDir,
-    sessionFile: job.sessionFile,
-    frontend: job.frontend ?? ctx?.frontend,
-    notice: notice as any,
-  });
 }
 
 async function enqueueSelfImproveReview(
   ctx: any,
   opts: SelfImproveReviewOptions,
-  options: { notifyQueued?: boolean } = {},
 ) {
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
   await enqueueMemoryMaintenanceJob(job);
-  const spawned = spawnQueuedMemoryWorker(job.agentDir);
-  if (!options.notifyQueued) return;
-  await recordSelfImproveReviewNotice(
-    ctx,
-    job,
-    buildMemoryMaintenanceNotice({
-      status: spawned ? "queued" : "skipped",
-      skipped: spawned ? "" : "worker-unavailable",
-    }),
-  );
+  spawnQueuedMemoryWorker(job.agentDir);
 }
 
 async function processSelfImproveReviewNow(
@@ -205,26 +170,12 @@ async function processSelfImproveReviewNow(
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
   try {
-    const result = await runner(job);
-    await recordSelfImproveReviewNotice(
-      ctx,
-      job,
-      (result as any)?.notice ||
-        buildMemoryMaintenanceNotice({
-          status: (result as any)?.status,
-          changedFiles: (result as any)?.result?.changedFiles,
-          skipped: (result as any)?.skipped,
-        }),
-    );
-    return result;
+    return await runner(job);
   } catch (error: any) {
-    const result = {
+    return {
       status: "failed",
       error: String(error?.message || error || "maintenance_job_failed"),
-      notice: buildMemoryMaintenanceNotice({ status: "failed" }),
     };
-    await recordSelfImproveReviewNotice(ctx, job, result.notice);
-    return result;
   }
 }
 
@@ -267,7 +218,6 @@ export default function selfImproveModule(
                 leafId: meta.leafId,
                 trigger: "self_improve:periodic_review",
                 snapshotKey: `review:${reviewFinalMessages}`,
-                frontend: event?.frontend,
               },
               runMemoryMaintenanceNow,
             );
@@ -286,7 +236,6 @@ export default function selfImproveModule(
             sessionFile: meta.sessionFile,
             leafId: meta.leafId,
             trigger: "self_improve:session_shutdown_review",
-            frontend: event?.frontend,
           });
           if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
         },

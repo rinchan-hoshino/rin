@@ -89,59 +89,6 @@ export function shouldDeferPassiveNoticeForTurnState(state: {
   return Boolean(state.liveTurn || state.isStreaming || state.turnActive);
 }
 
-export function shouldPullSelfImproveNoticesForTurnState(state: {
-  liveTurn?: unknown;
-  isStreaming?: boolean;
-  turnActive?: boolean;
-}) {
-  return !shouldDeferPassiveNoticeForTurnState(state);
-}
-
-export type SelfImproveNoticeCheckpointKind =
-  | "frontend_open"
-  | "new_session"
-  | "turn_complete";
-
-export async function runSelfImproveNoticeCheckpoint(
-  client: Pick<RinFrontendClient, "isConnected" | "request">,
-  input: {
-    kind: SelfImproveNoticeCheckpointKind;
-    sessionFile?: string;
-    frontendIdentity?: RinFrontendIdentity;
-    canPull?: boolean;
-    unfiltered?: boolean;
-  },
-) {
-  if (!client.isConnected() || input.canPull === false) return;
-  const sessionFile = safeString(input.sessionFile || "").trim() || undefined;
-  const frontendIdentity = normalizeFrontendIdentity(input.frontendIdentity);
-  if (!input.unfiltered && !frontendIdentity) return;
-  await client.request({
-    type: "flush_self_improve_notices",
-    sessionFile,
-    ...(frontendIdentity ? { frontendIdentity } : {}),
-    ...(input.unfiltered ? { unfiltered: true } : {}),
-  });
-}
-
-export async function flushPendingSelfImproveNotices(
-  client: Pick<RinFrontendClient, "isConnected" | "request">,
-  sessionFile?: string,
-  options: {
-    frontendIdentity?: RinFrontendIdentity;
-    canPull?: boolean;
-    unfiltered?: boolean;
-  } = {},
-) {
-  await runSelfImproveNoticeCheckpoint(client, {
-    kind: sessionFile ? "turn_complete" : "frontend_open",
-    sessionFile,
-    frontendIdentity: options.frontendIdentity,
-    canPull: options.canPull,
-    unfiltered: options.unfiltered,
-  });
-}
-
 function isAgentAlreadyProcessingError(error: unknown) {
   return safeString((error as any)?.message || error).includes(
     "Agent is already processing.",
@@ -167,7 +114,6 @@ export class RinFrontendTurnDriver {
   private readonly promptSource: string;
   private readonly commandResponses: RinFrontendCommandResponses;
   private readonly frontendIdentity: RinFrontendIdentity;
-  private readonly selfImproveNoticeSessionFile?: () => string | undefined;
   client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
@@ -193,7 +139,6 @@ export class RinFrontendTurnDriver {
     promptSource?: string;
     commandResponses?: Partial<RinFrontendCommandResponses>;
     frontendIdentity?: RinFrontendIdentity;
-    selfImproveNoticeSessionFile?: () => string | undefined;
   }) {
     this.clientFactory = options.clientFactory;
     this.promptSource = safeString(options.promptSource).trim() || "frontend";
@@ -203,7 +148,6 @@ export class RinFrontendTurnDriver {
     this.frontendIdentity =
       normalizeFrontendIdentity(options.frontendIdentity) ||
       sourceFrontendIdentity(this.promptSource);
-    this.selfImproveNoticeSessionFile = options.selfImproveNoticeSessionFile;
     this.backendEventTranslator = createRinFrontendBackendEventTranslator({
       commandResponses: this.commandResponses,
     });
@@ -410,7 +354,7 @@ export class RinFrontendTurnDriver {
   ) {
     if (
       options.deferDuringTurn !== false &&
-      !shouldPullSelfImproveNoticesForTurnState({
+      shouldDeferPassiveNoticeForTurnState({
         liveTurn: this.liveTurn,
         isStreaming: Boolean(this.frontendState.isStreaming),
         turnActive: Boolean(this.frontendState.turnActive),
@@ -512,34 +456,6 @@ export class RinFrontendTurnDriver {
     throw new Error("rin_disconnected:rpc_turn_queued_offline");
   }
 
-  async runSelfImproveNoticeCheckpoint(
-    kind: SelfImproveNoticeCheckpointKind,
-    sessionFile?: string,
-  ) {
-    if (!this.client) return;
-    await runSelfImproveNoticeCheckpoint(this.client, {
-      kind,
-      sessionFile: sessionFile || this.currentSessionFile(),
-      frontendIdentity: this.frontendIdentity,
-      canPull: shouldPullSelfImproveNoticesForTurnState({
-        liveTurn: this.liveTurn,
-        isStreaming: Boolean(this.frontendState.isStreaming),
-        turnActive: Boolean(this.frontendState.turnActive),
-      }),
-    });
-  }
-
-  private async flushPendingSelfImproveNotices(sessionFile?: string) {
-    const noticeSessionFile =
-      sessionFile ||
-      this.selfImproveNoticeSessionFile?.() ||
-      this.currentSessionFile();
-    await this.runSelfImproveNoticeCheckpoint(
-      noticeSessionFile ? "turn_complete" : "frontend_open",
-      noticeSessionFile,
-    );
-  }
-
   private async selectSessionTarget(sessionFile?: string) {
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return { changed: false };
@@ -590,7 +506,6 @@ export class RinFrontendTurnDriver {
       await this.refreshFrontendState(this.currentSessionFile()).catch(
         () => {},
       );
-      await this.flushPendingSelfImproveNotices().catch(() => {});
     } else if (wanted) {
       await this.selectSessionTarget(wanted);
     }

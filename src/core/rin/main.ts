@@ -17,6 +17,7 @@ import {
   safeString,
 } from "./shared.js";
 import { runUsage, runUsageInternal } from "./usage.js";
+import { runSelfImprove, runSelfImproveInternal } from "./self-improve.js";
 import { runRollback, runVersions } from "./versions.js";
 import { runTargetCommand } from "./targets.js";
 import { resolveTargetForName, runRinOnTarget } from "../rin-targets/runner.js";
@@ -33,6 +34,10 @@ const RIN_COMMANDS = [
   ["status", "Show live worker and scheduled task activity"],
   ["gui", "Start the cross-platform Rin GUI shell"],
   ["usage", "Show token telemetry dashboard and grouped usage stats"],
+  [
+    "self-improve",
+    "Show recent self-improve memory extraction runs and details",
+  ],
   ["versions", "List installed Rin runtime versions"],
   ["rollback", "Rollback the installed Rin runtime to the previous version"],
   ["memory-index", "Repair the memory search index from archived transcripts"],
@@ -50,6 +55,11 @@ const INTERNAL_COMMANDS = [
     marker: "__memory_index_internal",
     command: "memory-index",
     run: runMemoryIndexInternal,
+  },
+  {
+    marker: "__self_improve_internal",
+    command: "self-improve",
+    run: runSelfImproveInternal,
   },
   {
     marker: "__status_internal",
@@ -164,6 +174,8 @@ export async function startRinCli() {
     return await runGui(parsed, process.argv.slice(2));
   if (parsed.command === "usage")
     return await runUsage(parsed, process.argv.slice(2));
+  if (parsed.command === "self-improve")
+    return await runSelfImprove(parsed, process.argv.slice(2));
   if (parsed.command === "versions") return runVersions(parsed);
   if (parsed.command === "rollback") return await runRollback(parsed);
   if (parsed.command === "memory-index")

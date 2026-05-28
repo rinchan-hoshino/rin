@@ -23,6 +23,10 @@ const memoryIndex = await import(
 const status = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "status.js")).href
 );
+const selfImprove = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "self-improve.js"))
+    .href
+);
 const run = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "run.js")).href
 );
@@ -245,7 +249,7 @@ test("run parser supports Pi-style print, model, chatKey, json, and timeout opti
   assert.equal(run.shouldRunNonInteractive([], false), true);
 });
 
-test("usage, status, and memory-index parsers ignore wrapper args around the subcommand", () => {
+test("usage, status, self-improve, and memory-index parsers ignore wrapper args around the subcommand", () => {
   assert.deepEqual(
     usage.parseUsageArgs(["-u", "rin", "usage", "--events", "--limit", "5"]),
     {
@@ -323,6 +327,21 @@ test("usage, status, and memory-index parsers ignore wrapper args around the sub
     help: false,
   });
 
+  const selfImproveArgs = selfImprove.parseSelfImproveArgs([
+    "--user=rin",
+    "self-improve",
+    "--from",
+    "7d",
+    "--limit",
+    "5",
+    "--status",
+    "failed",
+  ]);
+  assert.equal(typeof selfImproveArgs.from, "string");
+  assert.equal(selfImproveArgs.limit, 5);
+  assert.equal(selfImproveArgs.status, "failed");
+  assert.equal(selfImproveArgs.help, false);
+
   assert.deepEqual(memoryIndex.parseMemoryIndexArgs(["memory-index"]), {
     action: "repair",
     help: false,
@@ -362,6 +381,48 @@ test("usage, status, and memory-index parsers ignore wrapper args around the sub
       help: true,
     },
   );
+});
+
+test("self-improve report renders recent extraction history", () => {
+  const agentDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-self-improve-report-"),
+  );
+  try {
+    const stateDir = path.join(agentDir, "self_improve", "state");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, "maintenance-history.jsonl"),
+      [
+        {
+          id: "run-1",
+          kind: "self_improve_review",
+          status: "completed",
+          trigger: "self_improve:periodic_review",
+          sessionFile: path.join(agentDir, "sessions", "demo.jsonl"),
+          startedAt: "2026-05-01T00:00:00.000Z",
+          finishedAt: "2026-05-01T00:01:00.000Z",
+          attempts: 1,
+          changedFiles: [
+            { path: "self_improve/skills/demo/SKILL.md", change: "updated" },
+          ],
+        },
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n") + "\n",
+      "utf8",
+    );
+
+    const report = selfImprove.renderSelfImproveReport(agentDir, {
+      limit: 10,
+      help: false,
+    });
+
+    assert.match(report, /Rin self-improve extraction/);
+    assert.match(report, /self_improve:periodic_review/);
+    assert.match(report, /updated:self_improve\/skills\/demo\/SKILL.md/);
+  } finally {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("captureInternalRinCommand forwards only subcommand args", () => {
@@ -476,6 +537,15 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
   assert.ok(memoryInternal);
   assert.equal(memoryInternal.run, memoryIndex.runMemoryIndexInternal);
   assert.deepEqual(memoryInternal.args, ["repair"]);
+
+  const selfImproveInternal = main.resolveInternalRinDispatch([
+    "__self_improve_internal",
+    "--limit",
+    "3",
+  ]);
+  assert.ok(selfImproveInternal);
+  assert.equal(selfImproveInternal.run, selfImprove.runSelfImproveInternal);
+  assert.deepEqual(selfImproveInternal.args, ["--limit", "3"]);
 
   const statusHelp = main.resolveInternalRinDispatch([
     "-u",

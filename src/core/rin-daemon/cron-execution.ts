@@ -15,10 +15,6 @@ import {
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
-import {
-  appendPendingMemoryMaintenanceNotice,
-  buildMemoryMaintenanceNotice,
-} from "../self-improve/async-jobs.js";
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
 import { resolveStoredSessionFile } from "../session/ref.js";
 import type { CronTaskFrontendBinding, CronTaskRecord } from "./cron.js";
@@ -302,17 +298,6 @@ async function appendCronMaintenanceHistoryRecord(
     })}\n`,
     "utf8",
   );
-  if (record.sessionFile) {
-    await appendPendingMemoryMaintenanceNotice({
-      agentDir,
-      sessionFile: record.sessionFile,
-      frontend: resolveCronTaskFrontend(task),
-      notice: buildMemoryMaintenanceNotice({
-        status: record.status,
-        changedCount: record.status === "completed" ? 0 : undefined,
-      }),
-    });
-  }
 }
 
 export async function executeCronAgentTask(

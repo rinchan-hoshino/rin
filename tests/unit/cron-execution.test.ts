@@ -883,7 +883,7 @@ test("cron chat-bound shell task toggles frontend working while running", async 
   }
 });
 
-test("built-in self-improve cron task writes maintenance history and pending notice", async () => {
+test("built-in self-improve cron task writes maintenance history", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const task = {
     id: "builtin_self_improve_sleep_consolidation_daily",
@@ -931,21 +931,7 @@ test("built-in self-improve cron task writes maintenance history and pending not
       "cron:builtin_self_improve_sleep_consolidation_daily",
     );
     assert.equal(rows[0].outputPreview, "maintenance done");
-    const pendingPath = path.join(
-      agentDir,
-      "self_improve",
-      "state",
-      "pending-notices.json",
-    );
-    const pending = JSON.parse(await fs.readFile(pendingPath, "utf8"));
-    assert.equal(pending.length, 1);
-    assert.equal(pending[0].sessionFile, rows[0].sessionFile);
-    assert.deepEqual(pending[0].notice, {
-      type: "self_improve_review_notice",
-      status: "completed",
-      targets: [],
-      changedCount: 0,
-    });
+    assert.equal(rows[0].sessionFile.endsWith("night.jsonl"), true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

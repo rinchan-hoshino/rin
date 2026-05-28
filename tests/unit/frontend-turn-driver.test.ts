@@ -8,13 +8,11 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const { RinFrontendTurnDriver, runSelfImproveNoticeCheckpoint } = await import(
+const { RinFrontendTurnDriver } = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "turn-driver.js"),
   ).href
 );
-
-const NOTICE_NO_CHANGE = "💡 Self-improve review completed with no changes.";
 
 function createDriver() {
   const client = createFrontendClient();
@@ -190,145 +188,6 @@ async function emitRpcTurnComplete(
     sessionFile,
   });
 }
-
-test("frontend SDK turn driver forwards passive notices while idle", async () => {
-  const driver = createDriver();
-  const seen: any[] = [];
-  driver.subscribe((event: any) => seen.push(event));
-
-  await driver.handleClientEvent({
-    type: "ui",
-    payload: {
-      type: "self_improve_review_notice",
-      status: "completed",
-      targets: [],
-      changedCount: 0,
-    },
-  });
-
-  assert.deepEqual(seen, [
-    {
-      type: "passive_notice",
-      text: NOTICE_NO_CHANGE,
-      level: "info",
-    },
-  ]);
-  assert.equal(driver.frontendPhase, "idle");
-});
-
-test("frontend SDK turn driver ignores pushed self-improve notices during active turns", async () => {
-  const driver = createDriver();
-  const seen: any[] = [];
-  driver.subscribe((event: any) => seen.push(event));
-
-  await emitDriverEvent(driver, {
-    type: "rpc_turn_event",
-    event: "start",
-    requestTag: "turn-a",
-  });
-  await driver.handleClientEvent({
-    type: "ui",
-    payload: {
-      type: "self_improve_review_notice",
-      status: "completed",
-      targets: [],
-      changedCount: 0,
-    },
-  });
-
-  assert.deepEqual(seen, [
-    { type: "frontend_status", phase: "working" },
-    { type: "turn_accepted" },
-  ]);
-
-  await emitRpcTurnComplete(driver, "turn-a", "final text");
-
-  assert.deepEqual(seen, [
-    { type: "frontend_status", phase: "working" },
-    { type: "turn_accepted" },
-    { type: "frontend_status", phase: "idle" },
-  ]);
-});
-
-test("frontend SDK turn driver does not pull self-improve notices on generic connect", async () => {
-  const driver = createDriver();
-  const client = (driver as any).testClient;
-
-  await driver.connect();
-
-  assert.deepEqual(
-    client.calls.filter((call: any) => call.type === "request"),
-    [],
-  );
-});
-
-test("frontend SDK self-improve checkpoint skips unscoped flushes without surfacing errors", async () => {
-  const client = createFrontendClient();
-  await client.connect();
-
-  await runSelfImproveNoticeCheckpoint(client, {
-    kind: "turn_complete",
-    sessionFile: "/tmp/current.jsonl",
-    frontendIdentity: { kind: "test", key: "frontend-a" },
-  });
-  await runSelfImproveNoticeCheckpoint(client, {
-    kind: "frontend_open",
-  });
-  await runSelfImproveNoticeCheckpoint(client, {
-    kind: "turn_complete",
-    sessionFile: "/tmp/current.jsonl",
-  });
-  await runSelfImproveNoticeCheckpoint(client, {
-    kind: "frontend_open",
-    unfiltered: true,
-  });
-  await runSelfImproveNoticeCheckpoint(client, {
-    kind: "new_session",
-    sessionFile: "/tmp/old.jsonl",
-    canPull: false,
-  });
-
-  assert.deepEqual(
-    client.calls.filter((call: any) => call.type === "request"),
-    [
-      {
-        type: "request",
-        command: {
-          type: "flush_self_improve_notices",
-          sessionFile: "/tmp/current.jsonl",
-          frontendIdentity: { kind: "test", key: "frontend-a" },
-        },
-      },
-      {
-        type: "request",
-        command: {
-          type: "flush_self_improve_notices",
-          sessionFile: undefined,
-          unfiltered: true,
-        },
-      },
-    ],
-  );
-});
-
-test("frontend SDK turn driver leaves turn-complete notice checkpoints to the frontend", async () => {
-  const driver = createDriver();
-  const client = (driver as any).testClient;
-  await driver.connect();
-  client.calls.length = 0;
-
-  const result = await driver.runTurn({ text: "hello" });
-
-  assert.equal(result.finalText, "frontend final");
-  assert.deepEqual(
-    client.calls.filter(
-      (call: any) =>
-        call.type === "request" &&
-        call.command?.type === "flush_self_improve_notices",
-    ),
-    [],
-  );
-});
 
 test("frontend SDK turn driver runs turns through a frontend client", async () => {
   const client = createFrontendClient();

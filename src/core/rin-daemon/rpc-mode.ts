@@ -10,7 +10,6 @@ import { requireSessionFile } from "../session/ref.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
-import { takePendingMemoryMaintenanceNotices } from "../self-improve/async-jobs.js";
 import { safeString } from "../text-utils.js";
 import {
   getCommandArgumentCompletions,
@@ -1037,32 +1036,6 @@ export async function runCustomRpcMode(
 
   await bindCurrentSession();
 
-  const flushPendingSelfImproveNotices = async (
-    options: {
-      sessionFile?: string;
-      frontendIdentity?: any;
-      unfiltered?: boolean;
-    } = {},
-  ) => {
-    const frontendIdentity = normalizeFrontendIdentity(
-      options.frontendIdentity,
-    );
-    if (!options.unfiltered && !frontendIdentity) return 0;
-    const profile = resolveRuntimeProfile({
-      cwd:
-        safeString(runtime.cwd || getSession()?.sessionManager?.getCwd?.()) ||
-        process.cwd(),
-      agentDir: safeString(runtime.services?.agentDir).trim() || undefined,
-    });
-    const notices = await takePendingMemoryMaintenanceNotices({
-      agentDir: profile.agentDir,
-      sessionFile: options.sessionFile,
-      frontend: frontendIdentity,
-    });
-    for (const notice of notices) output(notice);
-    return notices.length;
-  };
-
   const handleCommand = async (command: any) => {
     const session = getSession();
     const id = command?.id;
@@ -1155,14 +1128,6 @@ export async function runCustomRpcMode(
           type,
           getSessionState(session, { turnActive: isTurnActive() }),
         );
-      case "flush_self_improve_notices":
-        return run(id, type, async () => ({
-          flushed: await flushPendingSelfImproveNotices({
-            sessionFile: safeString(command.sessionFile).trim() || undefined,
-            frontendIdentity: command.frontendIdentity,
-            unfiltered: command.unfiltered === true,
-          }),
-        }));
       case "get_state":
         return done(
           id,
@@ -1408,10 +1373,6 @@ export async function runCustomRpcMode(
                 );
             await bindCurrentSession();
             const rebound = getSession();
-            await flushPendingSelfImproveNotices({
-              sessionFile: rebound?.sessionFile,
-              frontendIdentity: command.frontendIdentity,
-            });
             return {
               cancelled: Boolean(value?.cancelled),
               sessionFile: rebound?.sessionFile,
@@ -1436,10 +1397,6 @@ export async function runCustomRpcMode(
               .switchSession(sessionFile)
               .then(async (value: any) => {
                 await bindCurrentSession();
-                await flushPendingSelfImproveNotices({
-                  sessionFile: getSession()?.sessionFile,
-                  frontendIdentity: command.frontendIdentity,
-                });
                 const rebound = getSession();
                 return {
                   cancelled: Boolean(value?.cancelled),

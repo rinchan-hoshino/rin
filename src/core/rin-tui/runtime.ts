@@ -53,11 +53,7 @@ import {
   getSessionBranch,
 } from "../rin-frontend-sdk/state-utils.js";
 import { TUI_FRONTEND_IDENTITY } from "../rin-frontend-sdk/frontend-identity.js";
-import {
-  runSelfImproveNoticeCheckpoint,
-  shouldPullSelfImproveNoticesForTurnState,
-  submitNativeFrontendPromptTurn,
-} from "../rin-frontend-sdk/turn-driver.js";
+import { submitNativeFrontendPromptTurn } from "../rin-frontend-sdk/turn-driver.js";
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
 type PendingRpcOperation = {
@@ -430,7 +426,7 @@ export class RpcInteractiveSession {
     );
   }
 
-  async connect(options: { flushPendingSelfImproveNotices?: boolean } = {}) {
+  async connect() {
     this.disposed = false;
     this.startupPending = true;
     this.emitFrontendStatus(true);
@@ -453,10 +449,6 @@ export class RpcInteractiveSession {
         } as any);
         return;
       }
-      if ((event as any).type === "self_improve_review_notice") {
-        this.handleRpcEvent(event);
-        return;
-      }
       if (event.type !== "ui") return;
       const payload: any = event.payload;
       if (!payload || payload.type === "response") return;
@@ -470,9 +462,6 @@ export class RpcInteractiveSession {
       await this.client.connect();
       this.setRpcConnected(true);
       await this.refreshState(REFRESH_MESSAGES_AND_SESSION).catch(() => {});
-      if (options.flushPendingSelfImproveNotices !== false) {
-        await this.flushPendingSelfImproveNotices().catch(() => {});
-      }
       await this.modelRegistry.sync().catch(() => {});
     } catch (error) {
       this.handleConnectionLost();
@@ -481,30 +470,6 @@ export class RpcInteractiveSession {
       this.startupPending = false;
       this.emitFrontendStatus(true);
     }
-  }
-
-  async runSelfImproveNoticeCheckpoint(
-    kind: "frontend_open" | "new_session" | "turn_complete" = "frontend_open",
-    sessionFile?: string,
-    options: { unfiltered?: boolean } = {},
-  ) {
-    await runSelfImproveNoticeCheckpoint(this.client, {
-      kind,
-      sessionFile,
-      frontendIdentity: TUI_FRONTEND_IDENTITY,
-      unfiltered: options.unfiltered,
-      canPull: shouldPullSelfImproveNoticesForTurnState({
-        liveTurn: this.activeTurn,
-        isStreaming: this.isStreaming,
-        turnActive: this.remoteTurnRunning,
-      }),
-    });
-  }
-
-  async flushPendingSelfImproveNotices() {
-    await this.runSelfImproveNoticeCheckpoint("frontend_open", undefined, {
-      unfiltered: true,
-    });
   }
 
   async disconnect() {
@@ -655,12 +620,6 @@ export class RpcInteractiveSession {
         this.sessionId = safeString(data?.sessionId).trim() || this.sessionId;
       }
       await this.refreshState(REFRESH_ALL);
-      if (!data?.cancelled) {
-        await this.runSelfImproveNoticeCheckpoint(
-          "new_session",
-          String(this.sessionFile || ""),
-        ).catch(() => {});
-      }
       return !Boolean(data?.cancelled);
     } finally {
       this.setSessionOperationPending(false);
@@ -683,12 +642,6 @@ export class RpcInteractiveSession {
         this.sessionId = safeString(data?.sessionId).trim() || this.sessionId;
       }
       await this.refreshState(REFRESH_ALL);
-      if (!data?.cancelled) {
-        await this.runSelfImproveNoticeCheckpoint(
-          "new_session",
-          String(this.sessionFile || sessionPath || ""),
-        ).catch(() => {});
-      }
       return !Boolean(data?.cancelled);
     } finally {
       this.setSessionOperationPending(false);
@@ -1150,14 +1103,7 @@ export class RpcInteractiveSession {
       payload,
       () => this.queueRefreshStateAndRender(REFRESH_MESSAGES),
       () => this.queueRefreshStateAndRender(REFRESH_MESSAGES_AND_SESSION),
-    ).then(() => {
-      if (payload?.type !== "rpc_turn_event") return;
-      if (payload.event !== "complete" && payload.event !== "error") return;
-      void this.runSelfImproveNoticeCheckpoint(
-        "turn_complete",
-        String(payload.sessionFile || this.sessionFile || ""),
-      ).catch(() => {});
-    });
+    ).catch(() => {});
   }
 
   private async handleExtensionUiRequest(payload: any) {
