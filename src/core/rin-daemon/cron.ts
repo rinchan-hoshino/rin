@@ -65,7 +65,6 @@ export type CronTaskSessionBinding = {
 export type CronTaskFrontendBinding = {
   kind?: string;
   key: string;
-  deliverFinal?: boolean;
 };
 
 export type CronTaskThinkingLevel = AvailableThinkingLevel;
@@ -257,11 +256,9 @@ function normalizeTaskFrontend(
     "cron_frontend_key_required",
   );
   const kind = safeString((frontend as any).kind).trim() || undefined;
-  const deliverFinal = (frontend as any).deliverFinal !== false;
   return {
     ...(kind ? { kind } : {}),
     key,
-    deliverFinal,
   };
 }
 

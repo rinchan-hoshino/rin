@@ -407,7 +407,6 @@ test("cron frontend-bound no-session agent task uses frontend controller without
     assert.deepEqual(calls[0].promptMeta?.frontend, {
       kind: "gui",
       key: "desktop/main",
-      deliverFinal: true,
     });
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_frontend_bound");
@@ -430,7 +429,6 @@ test("cron scheduler persists generic frontend bindings", () => {
   assert.deepEqual(task.frontend, {
     kind: "tui",
     key: "terminal/main",
-    deliverFinal: true,
   });
 });
 
@@ -858,7 +856,8 @@ test("cron chat-bound task can bind frontend without final delivery", async () =
   const sent = [];
   const task = {
     id: "cron_silent_delivery",
-    frontend: { kind: "chat", key: "telegram/demo:1", deliverFinal: false },
+    frontend: { kind: "chat", key: "telegram/demo:1" },
+    deliverFinal: false,
     session: { mode: "none" },
     trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
     target: { kind: "agent_prompt", prompt: "hello" },
@@ -1220,7 +1219,6 @@ test("cron scheduler migrates persisted chatKey tasks to frontend chat bindings"
     assert.deepEqual(task.frontend, {
       kind: "chat",
       key: "telegram/demo:1",
-      deliverFinal: true,
     });
     assert.equal("chatKey" in task, false);
     scheduler.stop();
@@ -1230,7 +1228,6 @@ test("cron scheduler migrates persisted chatKey tasks to frontend chat bindings"
     assert.deepEqual(row.frontend, {
       kind: "chat",
       key: "telegram/demo:1",
-      deliverFinal: true,
     });
     assert.equal("chatKey" in row, false);
   } finally {

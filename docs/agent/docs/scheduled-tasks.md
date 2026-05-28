@@ -54,8 +54,8 @@ type Task = {
   name?: string;
   enabled?: boolean;
   // binds the task turn to a frontend/controller identity; use kind: "chat" for chat delivery
-  frontend?: { kind?: string; key: string; deliverFinal?: boolean } | null;
-  // for session_instruction, controls whether the inserted turn's final is posted to chat; default true
+  frontend?: { kind?: string; key: string } | null;
+  // controls whether the task final is posted to chat/frontends; default true
   deliverFinal?: boolean;
   model?: string;
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -207,7 +207,7 @@ Behavior:
 - Rin disposes/shuts down the no-session turn after completion, except special self-improve maintenance tasks.
 - If `frontend` is set, Rin binds the scheduled turn to that frontend/controller identity.
 - If `frontend.kind` is `"chat"`, the final task result is sent to that chat and may preserve a chat-bound session file for quote/resume context.
-- Set `frontend.deliverFinal: false` to bind the turn to that frontend without automatically displaying the task final; the agent can explicitly send a message through the SDK when useful.
+- Set root `deliverFinal: false` to bind the turn to that frontend without automatically displaying the task final; the agent can explicitly send a message through the SDK when useful.
 
 ### `session.mode: "dedicated"`
 
@@ -246,8 +246,7 @@ Runs an agent turn. Use this for owner-facing reports, summaries, checks that ne
 
 - `frontend` binds execution to a frontend/controller identity.
 - `frontend: { kind: "chat", key: "..." }` binds delivery to a chat bridge target.
-- `frontend: { kind: "chat", key: "...", deliverFinal: false }` binds the turn to that chat without automatically sending the final task text.
-- For `session.mode: "session_instruction"`, use root `deliverFinal: false` for the same silent-final behavior.
+- Set root `deliverFinal: false` to bind the turn without automatically sending the final task text.
 - `model` and `thinkingLevel` override the run when present.
 - Rin stores a summarized final result in `lastResultText`.
 - If the agent turn has no canonical final assistant text, the task records `lastError`.

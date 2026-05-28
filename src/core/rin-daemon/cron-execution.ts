@@ -160,7 +160,6 @@ function resolveCronTaskFrontend(task: CronTaskRecord) {
   return {
     key,
     ...(kind ? { kind } : {}),
-    deliverFinal: (frontend as any).deliverFinal !== false,
   };
 }
 
@@ -170,9 +169,10 @@ function cronTaskRunControllerKey(task: CronTaskRecord) {
 }
 
 function shouldDeliverCronTaskFinal(
+  task: CronTaskRecord,
   frontend: ReturnType<typeof resolveCronTaskFrontend>,
 ) {
-  return frontend?.kind === "chat" && frontend.deliverFinal !== false;
+  return task.deliverFinal !== false && frontend?.kind === "chat";
 }
 
 async function setCronTaskFrontendWorking(
@@ -467,7 +467,7 @@ export async function executeCronTask(
         outputPreview: text,
       };
       const frontend = resolveCronTaskFrontend(task);
-      const chatKey = shouldDeliverCronTaskFinal(frontend)
+      const chatKey = shouldDeliverCronTaskFinal(task, frontend)
         ? frontend?.key
         : undefined;
       if (chatKey && text) {
@@ -498,7 +498,7 @@ export async function executeCronTask(
         sessionFile: result.sessionFile,
       };
       const frontend = resolveCronTaskFrontend(task);
-      const chatKey = shouldDeliverCronTaskFinal(frontend)
+      const chatKey = shouldDeliverCronTaskFinal(task, frontend)
         ? frontend?.key
         : undefined;
       if (chatKey && result.text) {
