@@ -78,6 +78,47 @@ test("rpc prompt routes extension slash commands using daemon catalog authority"
   );
 });
 
+test("rpc bash forwards Pi exclude-from-context option to daemon", async () => {
+  const sent = [];
+  const session = new RpcInteractiveSession({
+    send(payload) {
+      sent.push(payload);
+      switch (payload.type) {
+        case "bash":
+          return Promise.resolve({ success: true, data: { exitCode: 0 } });
+        case "get_state":
+          return Promise.resolve({
+            success: true,
+            data: { sessionFile: "/tmp/s.jsonl", sessionId: "s" },
+          });
+        case "get_session_snapshot":
+          return Promise.resolve({ success: true, data: { entries: [] } });
+        default:
+          return Promise.resolve({ success: true, data: {} });
+      }
+    },
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+  });
+
+  await session.executeBash("echo hidden", undefined, {
+    excludeFromContext: true,
+  });
+
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "bash"),
+    {
+      type: "bash",
+      command: "echo hidden",
+      excludeFromContext: true,
+    },
+  );
+});
+
 test("rpc prompt routes frontend /new command to local new session", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({

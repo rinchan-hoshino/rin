@@ -619,7 +619,9 @@ test(
         setAutoCompactionEnabled: () => {},
         setAutoRetryEnabled: () => {},
         abortRetry: () => {},
-        executeBash: async () => {},
+        executeBash: async (command, _onChunk, options) => {
+          calls.push(["executeBash", command, options]);
+        },
         abortBash: async () => {},
         fork: async () => ({ cancelled: false, selectedText: "" }),
         navigateTree: async () => ({ cancelled: false }),
@@ -667,6 +669,12 @@ test(
           content: [{ type: "text", text: "hi" }],
           options: { deliverAs: "followUp" },
         },
+        {
+          id: "8",
+          type: "bash",
+          command: "echo hidden",
+          excludeFromContext: true,
+        },
       ];
       onData(
         Buffer.from(
@@ -692,6 +700,7 @@ test(
       assert.deepEqual(byId.get("5")?.success, true);
       assert.deepEqual(byId.get("6")?.data, { sent: true });
       assert.deepEqual(byId.get("7")?.data, { sent: true });
+      assert.equal(byId.get("8")?.success, true);
       assert.deepEqual(calls, [
         ["setActiveToolsByName", ["read"]],
         ["refreshTools"],
@@ -706,6 +715,7 @@ test(
           [{ type: "text", text: "hi" }],
           { deliverAs: "followUp" },
         ],
+        ["executeBash", "echo hidden", { excludeFromContext: true }],
       ]);
     } finally {
       process.stdin.on = stdinOn;

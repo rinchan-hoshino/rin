@@ -77,6 +77,8 @@ test("tui launcher parses pi extension resource options without leaking paths in
       "--prompt-template=./prompt.md",
       "--theme",
       "theme.json",
+      "--session-id",
+      "exact-session",
       "--plan",
       "strict",
       "hello",
@@ -99,6 +101,7 @@ test("tui launcher parses pi extension resource options without leaking paths in
     path.join("/repo", "theme.json"),
   ]);
   assert.equal(parsed.resources.extensionFlagValues?.get("plan"), "strict");
+  assert.equal(parsed.resources.extensionFlagValues?.has("session-id"), false);
 });
 
 test("rpc tui reuses a pre-initialized interactive mode without starting it twice", async () => {

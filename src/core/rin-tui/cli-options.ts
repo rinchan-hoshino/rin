@@ -35,6 +35,7 @@ const OPTIONS_WITH_VALUE = new Set([
   "--model",
   "--api-key",
   "--session",
+  "--session-id",
   "--fork",
   "--session-dir",
   "--models",

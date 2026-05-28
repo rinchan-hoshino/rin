@@ -722,10 +722,17 @@ export class RpcInteractiveSession {
     setRpcAutoCompaction(this as any, enabled);
   }
 
-  async executeBash(command: string) {
+  async executeBash(
+    command: string,
+    _onChunk?: (chunk: string) => void,
+    options?: { excludeFromContext?: boolean },
+  ) {
     this.isBashRunning = true;
     try {
-      const data = await this.call("bash", { command });
+      const data = await this.call("bash", {
+        command,
+        excludeFromContext: options?.excludeFromContext,
+      });
       await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
       return data;
     } finally {

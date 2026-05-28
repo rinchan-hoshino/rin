@@ -1203,7 +1203,11 @@ export async function runCustomRpcMode(
       case "abort_retry":
         return run(id, type, () => session.abortRetry());
       case "bash":
-        return run(id, type, () => session.executeBash(command.command));
+        return run(id, type, () =>
+          session.executeBash(command.command, undefined, {
+            excludeFromContext: command.excludeFromContext,
+          }),
+        );
       case "abort_bash":
         return run(id, type, () => session.abortBash());
       case "get_session_stats":
