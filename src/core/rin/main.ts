@@ -82,7 +82,7 @@ function createCli() {
     )
     .option("-u, --user <name>", "Run against a specific daemon user")
     .option("--target <name>", "Run against a configured Rin deployment target")
-    .option("--stable", "Use the stable release channel (default)")
+    .option("--stable", "Use the stable release channel")
     .option("--beta", "Use the beta release channel")
     .option("--nightly", "Use the nightly release channel")
     .option("--git", "Use the git release channel")

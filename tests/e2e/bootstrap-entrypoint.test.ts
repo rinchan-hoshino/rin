@@ -30,6 +30,14 @@ async function createSourceArchive(tempDir) {
   const sourceRoot = path.join(tempDir, "rin-main");
   await fs.mkdir(sourceRoot, { recursive: true });
   await fs.writeFile(path.join(sourceRoot, "package.json"), "{\n}\n", "utf8");
+  await fs.mkdir(path.join(sourceRoot, "dist", "app", "rin-install"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(sourceRoot, "dist", "app", "rin-install", "main.js"),
+    "export {};\n",
+    "utf8",
+  );
   await fs.writeFile(
     path.join(sourceRoot, "package-lock.json"),
     "{\n}\n",
@@ -138,7 +146,10 @@ const fields = [
 ];
 fs.appendFileSync(logPath, fields.join(":") + "\\n", "utf8");
 
-if (args[0] === "-") {
+if (args[0] === "-" && String(args[1] || "").endsWith("installer.json")) {
+  const release = JSON.parse(fs.readFileSync(args[1], "utf8")).currentRelease.release;
+  process.stdout.write(String(release.channel || "") + "\\n" + String(release.branch || "") + "\\n");
+} else if (args[0] === "-") {
   const fixtures = {
     beta: [
       "CHANNEL='beta'",
@@ -295,7 +306,7 @@ test("bootstrap scripts render progress without rin-install log prefixes", async
   );
 });
 
-test("stable install and update wrappers resolve release metadata before launching npm installer and leave no temp work dirs", async () => {
+test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);
     const manifestPath = await createReleaseManifest(tempDir);
@@ -304,11 +315,19 @@ test("stable install and update wrappers resolve release metadata before launchi
     const workRoot = path.join(tempDir, "work");
     await createFakeBin(fakeBin, logPath);
     await fs.mkdir(workRoot, { recursive: true });
+    const installDir = path.join(tempDir, "install");
+    await fs.mkdir(installDir, { recursive: true });
+    await fs.writeFile(
+      path.join(installDir, "installer.json"),
+      JSON.stringify({ currentRelease: { release: { channel: "stable" } } }),
+      "utf8",
+    );
 
     const env = {
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
       RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+      RIN_DIR: installDir,
       TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
@@ -328,20 +347,11 @@ test("stable install and update wrappers resolve release metadata before launchi
       log,
       /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/release-manifest\.json -o /,
     );
-    assert.equal(
-      /curl:-fsSL https:\/\/registry\.npmjs\.org\//.test(log),
-      false,
-    );
+    assert.match(log, /curl:-fsSL https:\/\/registry\.npmjs\.org\//);
     assert.equal(/npm:.*:ci --no-fund --no-audit/.test(log), false);
     assert.equal(/npm:.*:run build/.test(log), false);
-    assert.match(
-      log,
-      /npm:.*:exec --yes --package @hoshinorin\/rin@1\.2\.3 -- rin-install --release-file [^\n]+\n/,
-    );
-    assert.match(
-      log,
-      /npm:.*:exec --yes --package @hoshinorin\/rin@1\.2\.3 -- rin-install --release-file [^\s]+ --update/,
-    );
+    assert.equal(/npm:.*:exec --yes --package/.test(log), false);
+    assert.match(log, /npm:.*:install --omit=dev --no-fund --no-audit\n/);
 
     assert.deepEqual(await fs.readdir(workRoot), []);
   });
@@ -427,11 +437,19 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
       recursive: true,
       force: true,
     });
+    const installDir = path.join(tempDir, "install");
+    await fs.mkdir(installDir, { recursive: true });
+    await fs.writeFile(
+      path.join(installDir, "installer.json"),
+      JSON.stringify({ currentRelease: { release: { channel: "stable" } } }),
+      "utf8",
+    );
 
     const env = {
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
       RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+      RIN_DIR: installDir,
       TMPDIR: workRoot,
       RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
       RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
@@ -467,14 +485,8 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
       log,
       /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/release-manifest\.json -o /,
     );
-    assert.match(
-      log,
-      /npm:.*:exec --yes --package @hoshinorin\/rin@1\.2\.3 -- rin-install --release-file [^\n]+\n/,
-    );
-    assert.match(
-      log,
-      /npm:.*:exec --yes --package @hoshinorin\/rin@1\.2\.3 -- rin-install --release-file [^\s]+ --update/,
-    );
+    assert.equal(/npm:.*:exec --yes --package/.test(log), false);
+    assert.match(log, /npm:.*:install --omit=dev --no-fund --no-audit\n/);
     assert.deepEqual(await fs.readdir(workRoot), []);
   });
 });

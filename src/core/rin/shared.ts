@@ -35,6 +35,7 @@ import {
   defaultInstallDirForHome,
   installRecordCandidatesForHome,
   installSettingsPath,
+  installerManifestPath,
   launcherMetadataPathForHome,
   managedSystemdUnitCandidates,
 } from "../rin-install/paths.js";
@@ -42,7 +43,6 @@ import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import {
   type ReleaseChannel,
   type ResolvedRelease,
-  getReleasePackageName,
   getReleaseRepoUrl,
   loadReleaseManifestForNetwork,
   resolveReleaseRequest,
@@ -76,6 +76,7 @@ export type ParsedArgs = {
   releaseChannel: ReleaseChannel;
   releaseBranch: string;
   releaseVersion: string;
+  explicitReleaseChannel: boolean;
   updateAssumeYes: boolean;
 };
 
@@ -568,12 +569,19 @@ function resolveParsedReleaseArgs(
   command: ParsedArgs["command"],
   options: any,
   rawArgv: string[],
-): Pick<ParsedArgs, "releaseChannel" | "releaseBranch" | "releaseVersion"> {
+): Pick<
+  ParsedArgs,
+  | "releaseChannel"
+  | "releaseBranch"
+  | "releaseVersion"
+  | "explicitReleaseChannel"
+> {
   if (command !== "update") {
     return {
       releaseChannel: "stable",
       releaseBranch: "",
       releaseVersion: "",
+      explicitReleaseChannel: false,
     };
   }
 
@@ -588,6 +596,7 @@ function resolveParsedReleaseArgs(
     throw new Error("rin_release_channel_conflict");
   }
 
+  const explicitReleaseChannel = selectedChannels.length > 0;
   const releaseChannel = selectedChannels[0] || "stable";
   let releaseBranch = safeString(options.branch).trim();
   let releaseVersion = safeString(options.version).trim();
@@ -633,6 +642,7 @@ function resolveParsedReleaseArgs(
     releaseChannel,
     releaseBranch,
     releaseVersion,
+    explicitReleaseChannel,
   };
 }
 
@@ -664,13 +674,42 @@ export function resolveParsedArgs(
   };
 }
 
+function isReleaseChannel(value: string): value is ReleaseChannel {
+  return ["stable", "beta", "nightly", "git"].includes(value);
+}
+
+export function readInstalledUpdateReleasePreference(installDir: string): {
+  channel: ReleaseChannel;
+  branch: string;
+} {
+  const release = readJsonFile<any>(installerManifestPath(installDir), {})
+    ?.currentRelease?.release;
+  const channel = safeString(release?.channel).trim();
+  if (!isReleaseChannel(channel)) {
+    throw new Error("rin_update_installed_release_channel_missing");
+  }
+  if (channel !== "git") return { channel, branch: "" };
+  return { channel, branch: safeString(release?.branch).trim() };
+}
+
+function disablePackageRootPrepareScript(sourceRoot: string) {
+  const packageJsonPath = path.join(sourceRoot, "package.json");
+  const parsed = readJsonFile<any>(packageJsonPath, null);
+  if (!parsed?.scripts?.prepare) return;
+  delete parsed.scripts.prepare;
+  fs.writeFileSync(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`);
+}
+
 export async function runUpdate(parsed: ParsedArgs) {
   const installDir = resolveInstallDirForTarget(parsed);
   const i18n = createUpdateI18n(installDir, parsed.targetUser);
   const manifest = await loadReleaseManifestForNetwork();
+  const inheritedRelease = parsed.explicitReleaseChannel
+    ? null
+    : readInstalledUpdateReleasePreference(installDir);
   const requestedRelease = resolveReleaseRequest(manifest, {
-    channel: parsed.releaseChannel,
-    branch: parsed.releaseBranch,
+    channel: inheritedRelease?.channel || parsed.releaseChannel,
+    branch: parsed.releaseBranch || inheritedRelease?.branch || "",
     version: parsed.releaseVersion,
   });
   const resolvedRelease = resolveGitCommitForRelease(
@@ -698,41 +737,6 @@ export async function runUpdate(parsed: ParsedArgs) {
     });
     return releaseFile;
   };
-
-  if (resolvedRelease.channel === "stable") {
-    const packageName = getReleasePackageName(manifest);
-    const releaseDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "rin-update-release-"),
-    );
-    try {
-      const installerArgs = [
-        ...baseInstallerArgs,
-        "--release-file",
-        writeReleaseHandoffFile(releaseDir),
-      ];
-      await runInteractiveCommand(
-        npm,
-        [
-          "exec",
-          "--yes",
-          "--loglevel=error",
-          "--no-fund",
-          "--no-audit",
-          "--package",
-          `${packageName}@${resolvedRelease.version}`,
-          "--",
-          "rin-install",
-          ...installerArgs,
-        ],
-        { env: installerEnv },
-      );
-    } finally {
-      try {
-        fs.rmSync(releaseDir, { recursive: true, force: true });
-      } catch {}
-    }
-    return;
-  }
 
   const curl =
     process.platform === "win32"
@@ -806,7 +810,23 @@ export async function runUpdate(parsed: ParsedArgs) {
     );
 
     await runInstallerProgress(i18n.installingUpdateDependenciesMessage, () => {
-      if (fs.existsSync(path.join(sourceRoot, "package-lock.json"))) {
+      if (resolvedRelease.channel === "stable") {
+        disablePackageRootPrepareScript(sourceRoot);
+        runLoggedUpdateCommandSync(
+          npm,
+          [
+            "install",
+            "--omit=dev",
+            "--no-fund",
+            "--no-audit",
+            "--loglevel=error",
+          ],
+          i18n.installingUpdateDependenciesMessage,
+          logFile,
+          { cwd: sourceRoot, env: buildEnv },
+          i18n.buildUpdateCommandFailureHeader,
+        );
+      } else if (fs.existsSync(path.join(sourceRoot, "package-lock.json"))) {
         runLoggedUpdateCommandSync(
           npm,
           ["ci", "--no-fund", "--no-audit", "--loglevel=error"],
@@ -826,16 +846,18 @@ export async function runUpdate(parsed: ParsedArgs) {
         );
       }
     });
-    await runInstallerProgress(i18n.buildingUpdateRuntimeMessage, () =>
-      runLoggedUpdateCommandSync(
-        npm,
-        ["run", "build", "--silent"],
-        i18n.buildingUpdateRuntimeMessage,
-        logFile,
-        { cwd: sourceRoot, env: buildEnv },
-        i18n.buildUpdateCommandFailureHeader,
-      ),
-    );
+    if (resolvedRelease.channel !== "stable") {
+      await runInstallerProgress(i18n.buildingUpdateRuntimeMessage, () =>
+        runLoggedUpdateCommandSync(
+          npm,
+          ["run", "build", "--silent"],
+          i18n.buildingUpdateRuntimeMessage,
+          logFile,
+          { cwd: sourceRoot, env: buildEnv },
+          i18n.buildUpdateCommandFailureHeader,
+        ),
+      );
+    }
 
     await runInteractiveCommand(
       process.execPath,

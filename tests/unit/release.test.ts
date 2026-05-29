@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -15,11 +17,49 @@ const release = await import(
     .href
 );
 
-test("resolveParsedArgs defaults update channel to stable", () => {
+test("resolveParsedArgs marks omitted update channel as inherited", () => {
   const parsed = shared.resolveParsedArgs("update", {}, []);
   assert.equal(parsed.releaseChannel, "stable");
   assert.equal(parsed.releaseBranch, "");
   assert.equal(parsed.releaseVersion, "");
+  assert.equal(parsed.explicitReleaseChannel, false);
+});
+
+test("readInstalledUpdateReleasePreference inherits installed channel", async () => {
+  const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-release-"));
+  try {
+    await fs.writeFile(
+      path.join(installDir, "installer.json"),
+      JSON.stringify({
+        currentRelease: {
+          release: {
+            channel: "git",
+            branch: "main",
+            version: "deadbeef",
+          },
+        },
+      }),
+      "utf8",
+    );
+    assert.deepEqual(shared.readInstalledUpdateReleasePreference(installDir), {
+      channel: "git",
+      branch: "main",
+    });
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("readInstalledUpdateReleasePreference requires an installed channel", async () => {
+  const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-release-"));
+  try {
+    assert.throws(
+      () => shared.readInstalledUpdateReleasePreference(installDir),
+      /rin_update_installed_release_channel_missing/,
+    );
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
 });
 
 test("resolveParsedArgs accepts beta, nightly, and git selectors", () => {
@@ -30,6 +70,7 @@ test("resolveParsedArgs accepts beta, nightly, and git selectors", () => {
   assert.equal(betaParsed.releaseChannel, "beta");
   assert.equal(betaParsed.releaseBranch, "");
   assert.equal(betaParsed.releaseVersion, "");
+  assert.equal(betaParsed.explicitReleaseChannel, true);
 
   const nightlyParsed = shared.resolveParsedArgs("update", { nightly: true }, [
     "update",
