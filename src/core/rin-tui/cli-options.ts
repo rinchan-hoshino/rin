@@ -41,6 +41,8 @@ const OPTIONS_WITH_VALUE = new Set([
   "--models",
   "--tools",
   "-t",
+  "--exclude-tools",
+  "-xt",
   "--thinking",
   "--export",
   "--mode",
