@@ -36,12 +36,34 @@ function Show-Usage {
   @"
 Usage: install.ps1 [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
-Defaults to the stable release channel.
+Install defaults to the stable release channel. Update defaults to the previously installed release channel.
 --beta installs the current weekly beta candidate.
 --nightly installs the current nightly build.
 --git main or --git deadbeef selects a branch or ref directly.
 Legacy flags such as --branch/--version remain supported.
 "@ | Write-Host
+}
+
+function Inherit-UpdateChannel {
+  if ($script:mode -ne "update" -or $script:explicitChannel) { return }
+  $installDir = if ($env:RIN_DIR) { $env:RIN_DIR } elseif ($HOME) { Join-Path $HOME ".rin" } else { "" }
+  $manifestPath = if ($installDir) { Join-Path $installDir "installer.json" } else { "" }
+  if (-not $manifestPath -or -not (Test-Path -LiteralPath $manifestPath)) {
+    throw "rin update requires an existing installer.json release record; pass --stable/--beta/--nightly/--git to override"
+  }
+  try {
+    $release = (Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).currentRelease.release
+    $inheritedChannel = [string]$release.channel
+    if ($inheritedChannel -notin @("stable", "beta", "nightly", "git")) {
+      throw "rin update requires an existing installer.json release channel; pass --stable/--beta/--nightly/--git to override"
+    }
+    $script:channel = $inheritedChannel
+    if ($script:channel -eq "git" -and -not $script:branch -and -not $script:version) {
+      $script:branch = [string]$release.branch
+    }
+  } catch {
+    throw "rin update requires an existing installer.json release channel; pass --stable/--beta/--nightly/--git to override"
+  }
 }
 
 function Parse-Args([string[]]$Values) {
@@ -88,6 +110,8 @@ function Parse-Args([string[]]$Values) {
       $script:branch = $script:gitSelector
     }
   }
+
+  Inherit-UpdateChannel
 
   if ($script:branch -and $script:version) { throw "cannot combine --branch and --version" }
   if ($script:channel -eq "stable" -and $script:branch) { throw "stable does not support --branch" }
@@ -269,15 +293,6 @@ try {
   $release = Resolve-Release
   Write-Release-Handoff $release
 
-  if ($release.Channel -eq "stable") {
-    Say $launchLabel
-    $installArgs = @("exec", "--yes", "--package", "$($release.PackageName)@$($release.Version)", "--", "rin-install")
-    $installArgs += @("--release-file", $releaseFile)
-    if ($mode -eq "update") { $installArgs += "--update" }
-    npm @installArgs
-    exit $LASTEXITCODE
-  }
-
   $releaseArchiveUrl = $release.ArchiveUrl
   Invoke-WithSpinner $fetchLabel {
     Invoke-WebRequest -UseBasicParsing -Uri $using:releaseArchiveUrl -OutFile $using:archive
@@ -289,7 +304,21 @@ try {
   }
   Push-Location $srcDir
   try {
-    if (Test-Path -LiteralPath "package-lock.json") {
+    if ($release.Channel -eq "stable") {
+      Invoke-WithSpinner "Installing dependencies" {
+        Set-Location $using:srcDir
+        $packagePath = Join-Path $using:srcDir "package.json"
+        try {
+          $packageJson = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+          if ($packageJson.scripts -and (Get-Property $packageJson.scripts "prepare")) {
+            $packageJson.scripts.PSObject.Properties.Remove("prepare")
+            $packageJson | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding UTF8
+          }
+        } catch {}
+        npm install --omit=dev --no-fund --no-audit
+        if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
+      }
+    } elseif (Test-Path -LiteralPath "package-lock.json") {
       Invoke-WithSpinner "Installing dependencies" {
         Set-Location $using:srcDir
         npm ci --no-fund --no-audit
@@ -302,10 +331,12 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
       }
     }
-    Invoke-WithSpinner $buildLabel {
-      Set-Location $using:srcDir
-      npm run build
-      if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+    if ($release.Channel -ne "stable") {
+      Invoke-WithSpinner $buildLabel {
+        Set-Location $using:srcDir
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+      }
     }
     Say $launchLabel
     $installerArgs = @("dist/app/rin-install/main.js", "--release-file", $releaseFile)

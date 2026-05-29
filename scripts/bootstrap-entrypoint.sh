@@ -58,7 +58,7 @@ usage() {
   cat <<'EOF'
 Usage: install.sh [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
-Defaults to the stable release channel.
+Install defaults to the stable release channel. Update defaults to the previously installed release channel.
 `--beta` installs the current weekly beta candidate.
 `--nightly` installs the current nightly build.
 `--git main` or `--git deadbeef` selects a branch or ref directly.
@@ -183,6 +183,43 @@ read_option_value() {
   OPTION_VALUE=$1
 }
 
+inherit_update_channel() {
+  if [ "$MODE" != update ] || [ -n "${EXPLICIT_CHANNEL:-}" ]; then
+    return 0
+  fi
+  install_dir=${RIN_DIR:-${HOME:-}/.rin}
+  manifest_path="$install_dir/installer.json"
+  if [ ! -r "$manifest_path" ]; then
+    echo "rin update requires an existing installer.json release record; pass --stable/--beta/--nightly/--git to override" >&2
+    exit 1
+  fi
+  inherited=$(node - "$manifest_path" <<'NODE'
+const fs = require('node:fs');
+try {
+  const release = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))?.currentRelease?.release || {};
+  const channel = String(release.channel || '').trim();
+  if (!['stable', 'beta', 'nightly', 'git'].includes(channel)) process.exit(0);
+  const branch = channel === 'git' ? String(release.branch || '').trim() : '';
+  process.stdout.write(`${channel}\n${branch}\n`);
+} catch {}
+NODE
+)
+  inherited_channel=$(printf '%s\n' "$inherited" | sed -n '1p')
+  inherited_branch=$(printf '%s\n' "$inherited" | sed -n '2p')
+  case "$inherited_channel" in
+    stable|beta|nightly|git)
+      CHANNEL=$inherited_channel
+      if [ "$CHANNEL" = git ] && [ -z "$BRANCH" ] && [ -z "$VERSION" ] && [ -n "$inherited_branch" ]; then
+        BRANCH=$inherited_branch
+      fi
+      ;;
+    *)
+      echo "rin update requires an existing installer.json release channel; pass --stable/--beta/--nightly/--git to override" >&2
+      exit 1
+      ;;
+  esac
+}
+
 parse_args() {
   GIT_SELECTOR=
   EXPLICIT_CHANNEL=
@@ -272,6 +309,8 @@ parse_args() {
       BRANCH=$GIT_SELECTOR
     fi
   fi
+
+  inherit_update_channel
 
   if [ -n "$BRANCH" ] && [ -n "$VERSION" ]; then
     echo "cannot combine --branch and --version" >&2
@@ -441,16 +480,6 @@ launch_installer_entry() {
   node "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE"
 }
 
-launch_published_installer() {
-  package_spec=${PACKAGE_NAME}@${VERSION}
-  if [ "$MODE" = update ]; then
-    npm exec --yes --package "$package_spec" -- rin-install --release-file "$RELEASE_FILE" --update
-    return $?
-  fi
-
-  npm exec --yes --package "$package_spec" -- rin-install --release-file "$RELEASE_FILE"
-}
-
 INSTALLER_ENTRY='dist/app/rin-install/main.js'
 PACKAGE_NAME='@hoshinorin/rin'
 parse_args "$@"
@@ -466,27 +495,26 @@ const [file, channel, version, branch, ref, sourceLabel, archiveUrl] = process.a
 fs.writeFileSync(file, `${JSON.stringify({ channel, version, branch, ref, sourceLabel, archiveUrl })}\n`, { mode: 0o600 });
 NODE
 
-if [ "$CHANNEL" = stable ]; then
-  if command -v npm >/dev/null 2>&1; then
-    if has_tty; then
-      say "$LAUNCH_LABEL"
-      launch_published_installer </dev/tty >/dev/tty 2>&1
-      exit $?
-    fi
-    run_step "$LAUNCH_LABEL" launch_published_installer
-    exit 0
-  fi
-  echo "$NPM_ERROR" >&2
-  exit 1
-fi
-
 run_step "$FETCH_LABEL" fetch "$ARCHIVE_URL" "$ARCHIVE"
 mkdir -p "$SRC_DIR"
 run_step "$PREP_LABEL" tar -xzf "$ARCHIVE" -C "$SRC_DIR" --strip-components=1
 
 cd "$SRC_DIR"
 if command -v npm >/dev/null 2>&1; then
-  if [ -f package-lock.json ]; then
+  if [ "$CHANNEL" = stable ]; then
+    node - <<'NODE'
+const fs = require('node:fs');
+const file = 'package.json';
+try {
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (parsed && parsed.scripts && parsed.scripts.prepare) {
+    delete parsed.scripts.prepare;
+    fs.writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
+  }
+} catch {}
+NODE
+    run_step "Installing dependencies" npm install --omit=dev --no-fund --no-audit
+  elif [ -f package-lock.json ]; then
     run_step "Installing dependencies" npm ci --no-fund --no-audit
   else
     run_step "Installing dependencies" npm install --no-fund --no-audit
@@ -496,7 +524,9 @@ else
   exit 1
 fi
 
-run_step "$BUILD_LABEL" npm run build
+if [ "$CHANNEL" != stable ]; then
+  run_step "$BUILD_LABEL" npm run build
+fi
 say "$LAUNCH_LABEL"
 
 if has_tty; then
