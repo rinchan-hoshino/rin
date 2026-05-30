@@ -1164,6 +1164,7 @@ test("rpc startup submissions are buffered until the input loop starts", async (
       },
     },
     defaultEditor: {},
+    pendingUserInputs: [],
     editor: {
       addToHistory(text) {
         history.push(text);
@@ -1214,6 +1215,7 @@ test("rpc startup submission uses an already waiting input callback", async () =
       },
     },
     defaultEditor: {},
+    pendingUserInputs: [],
     editor: {
       addToHistory(text) {
         history.push(text);

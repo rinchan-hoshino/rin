@@ -76,6 +76,7 @@ Sessions are saved automatically to `~/.pi/agent/sessions/`, organized by workin
 pi -c                  # Continue most recent session
 pi -r                  # Browse and select a session
 pi --no-session        # Ephemeral mode; do not save
+pi --name "my task"    # Set session display name at startup
 pi --session <path|id> # Use a specific session file or session ID
 pi --fork <path|id>    # Fork a session into a new session file
 ```
@@ -178,6 +179,7 @@ cat README.md | pi -p "Summarize this text"
 | `--fork <path\|id>` | Fork a session file or partial UUID into a new session |
 | `--session-dir <dir>` | Custom session storage directory |
 | `--no-session` | Ephemeral mode; do not save |
+| `--name <name>`, `-n <name>` | Set session display name at startup |
 
 ### Tool Options
 
@@ -241,6 +243,9 @@ pi -p "Summarize this codebase"
 
 # Non-interactive with piped stdin
 cat README.md | pi -p "Summarize this text"
+
+# Named one-shot session
+pi --name "release audit" -p "Audit this repository"
 
 # Different model
 pi --provider openai --model gpt-4o "Help me refactor"

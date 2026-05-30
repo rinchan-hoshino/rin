@@ -57,7 +57,6 @@ const PRESERVE_SCROLLBACK_PATCH = Symbol.for(
   "rin.tui.preserve_scrollback_full_redraw",
 );
 const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
-const STARTUP_INPUT_QUEUE_KEY = "__rinStartupInputQueue";
 const RPC_TRANSPORT_STATUS_COMPONENT_KEY = "__rinRpcTransportStatusComponent";
 const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
 const RIN_UPDATE_NOTICE_KEY = "__rinUpdateNotice";
@@ -280,26 +279,6 @@ function getLocalUserEchoQueue(instance: any) {
 
 function resetLocalUserEchoQueue(instance: any) {
   instance[LOCAL_USER_ECHO_QUEUE_KEY] = [];
-}
-
-function getStartupInputQueue(instance: any) {
-  const queue = instance[STARTUP_INPUT_QUEUE_KEY];
-  if (Array.isArray(queue)) return queue;
-  const nextQueue: string[] = [];
-  instance[STARTUP_INPUT_QUEUE_KEY] = nextQueue;
-  return nextQueue;
-}
-
-function shouldBufferStartupInput(instance: any, text: string) {
-  if (!isRpcTransportControlled(instance)) return false;
-  if (instance?.onInputCallback) return false;
-  if (instance?.session?.isStreaming || instance?.session?.isCompacting) {
-    return false;
-  }
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (trimmed.startsWith("/") || trimmed.startsWith("!")) return false;
-  return true;
 }
 
 function shouldSuppressLocalUserEcho(instance: any, event: any) {
@@ -1067,34 +1046,6 @@ export async function applyRinTuiOverrides() {
         this?.ui?.terminal?.setTitle?.(
           sessionName ? `Rin - ${sessionName}` : "Rin",
         );
-      };
-  }
-
-  const originalSetupEditorSubmitHandler =
-    interactiveModeProto?.setupEditorSubmitHandler;
-  if (typeof originalSetupEditorSubmitHandler === "function") {
-    interactiveModeProto.setupEditorSubmitHandler =
-      function setupEditorSubmitHandlerWithStartupBuffer() {
-        originalSetupEditorSubmitHandler.call(this);
-        const originalSubmit = this.defaultEditor?.onSubmit;
-        if (typeof originalSubmit !== "function") return;
-        this.defaultEditor.onSubmit = async (text: string) => {
-          const normalized = String(text || "").trim();
-          const shouldBuffer = shouldBufferStartupInput(this, normalized);
-          await originalSubmit.call(this.defaultEditor, text);
-          if (shouldBuffer) getStartupInputQueue(this).push(normalized);
-        };
-      };
-  }
-
-  const originalGetUserInput = interactiveModeProto?.getUserInput;
-  if (typeof originalGetUserInput === "function") {
-    interactiveModeProto.getUserInput =
-      function getUserInputWithStartupBuffer() {
-        const queue = getStartupInputQueue(this);
-        const next = queue.shift();
-        if (next !== undefined) return Promise.resolve(next);
-        return originalGetUserInput.call(this);
       };
   }
 
