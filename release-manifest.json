@@ -52,9 +52,9 @@
     "promotionVersion": "0.2.0"
   },
   "nightly": {
-    "version": "0.2.0-nightly.20260529+dae3199",
-    "archiveUrl": "https://github.com/rinchan-hoshino/rin/archive/dae31996f6beb45894e0c0f5c2d06ab80baec184.tar.gz",
-    "ref": "dae31996f6beb45894e0c0f5c2d06ab80baec184",
+    "version": "0.2.0-nightly.20260530+fa9f645",
+    "archiveUrl": "https://github.com/rinchan-hoshino/rin/archive/fa9f645f578061b00417817b08fa83574d5c17a0.tar.gz",
+    "ref": "fa9f645f578061b00417817b08fa83574d5c17a0",
     "branch": "main"
   },
   "git": {
