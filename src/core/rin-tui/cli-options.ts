@@ -19,6 +19,7 @@ export type TuiParsedCliOptions = {
   initialMessage?: string;
   initialMessages?: string[];
   verbose?: boolean;
+  sessionName?: string;
   resources: TuiResourceOptions;
 };
 
@@ -105,6 +106,7 @@ export function parseTuiCliOptions(
     extensionFlagValues,
   };
 
+  let sessionName = "";
   let passThroughMessages = false;
   for (let index = 0; index < argv.length; index += 1) {
     const raw = argv[index];
@@ -217,6 +219,22 @@ export function parseTuiCliOptions(
       messages.push("Start Rin initialization.");
       continue;
     }
+    if (arg === "--name" || arg === "-n") {
+      const value = readValue(argv, index);
+      if (value !== undefined) {
+        sessionName = value;
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--name=")) {
+      sessionName = arg.slice("--name=".length);
+      continue;
+    }
+    if (arg.startsWith("-n=")) {
+      sessionName = arg.slice("-n=".length);
+      continue;
+    }
 
     if (OPTIONS_WITH_VALUE.has(arg)) {
       if (readValue(argv, index) !== undefined) index += 1;
@@ -268,6 +286,7 @@ export function parseTuiCliOptions(
     initialMessage: messages[0],
     initialMessages: messages.length > 1 ? messages.slice(1) : undefined,
     verbose: argv.includes("--verbose") || undefined,
+    sessionName: String(sessionName || "").trim() || undefined,
     resources,
   };
 }

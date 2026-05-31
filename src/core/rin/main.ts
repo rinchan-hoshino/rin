@@ -94,6 +94,7 @@ function createCli() {
     .option("--provider <name>", "Provider name for non-interactive mode")
     .option("--model <provider/model>", "Model for non-interactive mode")
     .option("--thinking <level>", "Thinking level for non-interactive mode")
+    .option("--name <name>", "Session display name for non-interactive mode")
     .option(
       "--chat-key <chatKey>",
       "Deliver non-interactive final answer to a chat",

@@ -1264,6 +1264,7 @@ export class ChatController {
       replyToMessageId?: string;
       incomingMessageId?: string;
       sessionFile?: string;
+      sessionName?: string;
       promptMeta?: PromptContextMeta;
       model?: string;
       thinkingLevel?: string;
@@ -1301,6 +1302,7 @@ export class ChatController {
         sessionFile: wantedSessionFile,
         restoreSessionFile,
         managedSessionLeaf,
+        sessionName: input.sessionName,
         resetModelOptionsFromSettings: true,
         promptContext: input.promptMeta,
         source: "chat-bridge",
@@ -1379,6 +1381,7 @@ export class ChatController {
           sessionFile: wantedSessionFile,
           restoreSessionFile,
           managedSessionLeaf,
+          sessionName: input.sessionName,
           resetModelOptionsFromSettings: true,
           promptContext: input.promptMeta,
           source: "chat-bridge",

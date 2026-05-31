@@ -335,6 +335,30 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller forwards startup session names to the frontend turn driver", async () => {
+  const controller = await createController();
+  let captured: any = undefined;
+  controller.driver.runTurn = async (input: any) => {
+    captured = input;
+    return {
+      finalText: "named final",
+      result: { messages: [{ type: "text", text: "named final" }] },
+      sessionId: "named-session",
+      sessionFile: "/tmp/named-session.jsonl",
+    };
+  };
+
+  const result = await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    sessionName: "daily audit",
+    deliverFinal: false,
+  });
+
+  assert.equal(captured.sessionName, "daily audit");
+  assert.equal(result.finalText, "named final");
+});
+
 test("chat controller delivers Pi-native overflow recovery finals", async () => {
   const controller = await createController();
   const deliveries = [];

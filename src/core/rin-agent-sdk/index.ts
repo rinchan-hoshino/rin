@@ -14,6 +14,7 @@ export type ChatRunTurnOptions = {
   text: string;
   sessionFile?: string;
   sessionId?: string;
+  sessionName?: string;
   managedSessionLeaf?: string;
   model?: string;
   thinkingLevel?: string;

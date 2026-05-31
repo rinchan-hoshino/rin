@@ -1177,6 +1177,14 @@ export function applyRinSettingsDefaults(settingsManager: any) {
   }
 }
 
+function applyStartupSessionName(sessionManager: any, sessionName?: unknown) {
+  const name = String(sessionName || "").trim();
+  if (!name || typeof sessionManager?.appendSessionInfo !== "function") return;
+  const current = String(sessionManager.getSessionName?.() || "").trim();
+  if (current === name) return;
+  sessionManager.appendSessionInfo(name);
+}
+
 export async function createConfiguredAgentSession(
   options: {
     cwd?: string;
@@ -1195,6 +1203,7 @@ export async function createConfiguredAgentSession(
     appendSystemPrompt?: string[];
     disabledRinCapabilities?: string[];
     sessionManager?: any;
+    sessionName?: string;
     modelRef?: string;
     thinkingLevel?: any;
   } = {},
@@ -1226,6 +1235,7 @@ export async function createConfiguredAgentSession(
   const initialSessionManager =
     options.sessionManager ||
     SessionManager.create(cwd, getRuntimeSessionDir(cwd, agentDir));
+  applyStartupSessionName(initialSessionManager, options.sessionName);
   patchSessionManagerConversationPersistence(initialSessionManager);
 
   const createRuntime = async ({

@@ -31,6 +31,7 @@ type TuiInteractiveOptions = Pick<
   InteractiveModeOptions,
   "initialMessage" | "initialMessages" | "verbose"
 > & {
+  sessionName?: string;
   rinStartupWarnings?: string[];
 };
 
@@ -163,6 +164,7 @@ export function resolveTuiInteractiveOptions(
     initialMessage: parsed.initialMessage,
     initialMessages: parsed.initialMessages,
     verbose: parsed.verbose,
+    sessionName: parsed.sessionName,
   };
 }
 
@@ -189,6 +191,7 @@ export async function prepareRpcSessionWorkerForInteractiveStartup(
     | "prepareForInteractiveStartup"
     | "connect"
     | "ensureSessionReady"
+    | "setSessionName"
     | "settingsManager"
   >,
   interactiveOptions: TuiInteractiveOptions,
@@ -204,6 +207,12 @@ export async function prepareRpcSessionWorkerForInteractiveStartup(
     rpcSession.ensureSessionReady(),
     "rpc_session_ready",
   );
+  if (interactiveOptions.sessionName) {
+    await waitForRpcStartupStep(
+      rpcSession.setSessionName(interactiveOptions.sessionName),
+      "rpc_session_name",
+    );
+  }
   profile.mark("rpc-session-created");
 }
 
@@ -251,6 +260,7 @@ async function startStdTui(
     additionalExtensionPaths: resourceOptions.additionalExtensionPaths,
     noExtensions: resourceOptions.noExtensions,
     extensionFlagValues: resourceOptions.extensionFlagValues,
+    sessionName: interactiveOptions.sessionName,
     additionalSkillPaths: resourceOptions.additionalSkillPaths,
     noSkills: resourceOptions.noSkills,
     additionalPromptTemplatePaths:

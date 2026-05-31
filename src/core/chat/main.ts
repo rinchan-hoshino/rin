@@ -253,6 +253,7 @@ export type ChatBridgeTurnPayload = {
   deliverFinal?: boolean;
   text: string;
   sessionFile?: string;
+  sessionName?: string;
   managedSessionLeaf?: string;
   model?: string;
   thinkingLevel?: string;
@@ -933,6 +934,7 @@ export async function startChatBridge(
         text,
         attachments: [],
         sessionFile,
+        sessionName: payload?.sessionName,
         managedSessionLeaf: payload?.managedSessionLeaf,
         model: payload?.model,
         thinkingLevel: payload?.thinkingLevel,

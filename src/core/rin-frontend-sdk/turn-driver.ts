@@ -269,6 +269,16 @@ export class RinFrontendTurnDriver {
     return safeString(this.frontendState.sessionFile || "").trim();
   }
 
+  private async applySessionName(sessionName?: string) {
+    const name = safeString(sessionName || "").trim();
+    if (!name || !this.client) return;
+    if (safeString(this.frontendState.sessionName || "").trim() === name) {
+      return;
+    }
+    await this.client.request({ type: "set_session_name", name });
+    this.frontendState.sessionName = name;
+  }
+
   private createTurnRequestTag() {
     return `frontend_turn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -979,6 +989,7 @@ export class RinFrontendTurnDriver {
     sessionFile?: string;
     restoreSessionFile?: string;
     managedSessionLeaf?: string;
+    sessionName?: string;
     model?: string;
     thinkingLevel?: string;
     resetModelOptionsFromSettings?: boolean;
@@ -1011,6 +1022,7 @@ export class RinFrontendTurnDriver {
       sessionFile || restoreSessionFile,
       targetSessionFile,
     );
+    await this.applySessionName(input.sessionName);
     const inputGate = this.inputSubmissionGate(targetSessionFile);
     if (input.resetModelOptionsFromSettings) {
       await this.resetModelOptionsFromSettings(targetSessionFile);

@@ -40,6 +40,7 @@ Options:
   --model <provider/model>       Model pattern or ID (supports provider/model)
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --session <file>               Use a specific session file
+  --name <name>                  Set the session display name
   --chat-key <chatKey>           Deliver the final answer to this chat as well
   --timeout <seconds>            Maximum wait time (default: 1800)
   --help, -h                     Show this help
@@ -48,6 +49,7 @@ Examples:
   rin -p "Summarize this repository"
   cat README.md | rin -p "Summarize this text"
   rin --mode json "List all .ts files in src/"
+  rin --name "release audit" -p "Audit this repository"
   rin --model openai/gpt-5.5 --thinking low -p "Draft release notes"
   rin -p --chat-key telegram/123:-100456 "Send a short status update"
 `);
@@ -375,7 +377,6 @@ async function runDetachedTurn(
 ): Promise<Record<string, unknown>> {
   const text = [options.prompt, ...options.messages].filter(Boolean).join("\n");
   const keepSession = Boolean(options.sessionFile);
-  if (options.sessionName) throw new Error("run_name_unsupported");
   const result = await requestDaemonCommand(
     {
       type: "chat_run_turn",
@@ -386,6 +387,7 @@ async function runDetachedTurn(
         ...(!keepSession
           ? { managedSessionLeaf: MANAGED_CLI_SESSION_LEAF }
           : {}),
+        ...(options.sessionName ? { sessionName: options.sessionName } : {}),
         model: options.model,
         thinkingLevel: options.thinkingLevel,
         controllerKey: `cli-${Date.now()}`,

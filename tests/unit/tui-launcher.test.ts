@@ -34,23 +34,36 @@ test("tui launcher resolves interactive startup options", () => {
     initialMessage: undefined,
     initialMessages: undefined,
     verbose: undefined,
+    sessionName: undefined,
   });
   assert.deepEqual(launcher.resolveTuiInteractiveOptions(["--verbose"]), {
     initialMessage: undefined,
     initialMessages: undefined,
     verbose: true,
+    sessionName: undefined,
   });
   assert.deepEqual(launcher.resolveTuiInteractiveOptions(["/init", "next"]), {
     initialMessage: "/init",
     initialMessages: ["next"],
     verbose: undefined,
+    sessionName: undefined,
   });
+  assert.deepEqual(
+    launcher.resolveTuiInteractiveOptions(["--name", "daily audit"]),
+    {
+      initialMessage: undefined,
+      initialMessages: undefined,
+      verbose: undefined,
+      sessionName: "daily audit",
+    },
+  );
   assert.deepEqual(
     launcher.resolveTuiInteractiveOptions(["--unknown", "--", "--literal"]),
     {
       initialMessage: "--literal",
       initialMessages: undefined,
       verbose: undefined,
+      sessionName: undefined,
     },
   );
 });
@@ -83,6 +96,8 @@ test("tui launcher parses pi extension resource options without leaking paths in
       "bash,write",
       "-xt",
       "read",
+      "--name",
+      "startup-name",
       "--plan",
       "strict",
       "hello",
@@ -91,6 +106,7 @@ test("tui launcher parses pi extension resource options without leaking paths in
   );
 
   assert.equal(parsed.initialMessage, "hello");
+  assert.equal(parsed.sessionName, "startup-name");
   assert.deepEqual(parsed.resources.additionalExtensionPaths, [
     path.join("/repo", "ext.ts"),
   ]);
@@ -106,6 +122,7 @@ test("tui launcher parses pi extension resource options without leaking paths in
   ]);
   assert.equal(parsed.resources.extensionFlagValues?.get("plan"), "strict");
   assert.equal(parsed.resources.extensionFlagValues?.has("session-id"), false);
+  assert.equal(parsed.resources.extensionFlagValues?.has("name"), false);
   assert.equal(
     parsed.resources.extensionFlagValues?.has("exclude-tools"),
     false,
@@ -146,8 +163,11 @@ test("rpc startup prepares the daemon worker before UI init", async () => {
       async ensureSessionReady() {
         calls.push("ensureSessionReady");
       },
+      async setSessionName(name: string) {
+        calls.push(`setSessionName:${name}`);
+      },
     },
-    { verbose: true },
+    { verbose: true, sessionName: "startup-name" },
     {
       mark(label: string) {
         calls.push(`mark:${label}`);
@@ -159,6 +179,7 @@ test("rpc startup prepares the daemon worker before UI init", async () => {
     "prepare",
     "connect",
     "ensureSessionReady",
+    "setSessionName:startup-name",
     "mark:rpc-session-created",
   ]);
 });

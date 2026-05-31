@@ -223,6 +223,36 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   });
 });
 
+test("frontend SDK turn driver applies startup session names before prompt submission", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "hello",
+    managedSessionLeaf: "telegram/1:2",
+    sessionName: "daily audit",
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  const renameIndex = client.calls.findIndex(
+    (call: any) =>
+      call.type === "request" && call.command?.type === "set_session_name",
+  );
+  const promptIndex = client.calls.findIndex(
+    (call: any) => call.type === "prompt",
+  );
+  assert.ok(renameIndex >= 0);
+  assert.ok(promptIndex > renameIndex);
+  assert.deepEqual(client.calls[renameIndex], {
+    type: "request",
+    command: { type: "set_session_name", name: "daily audit" },
+  });
+  assert.equal((driver as any).frontendState.sessionName, "daily audit");
+});
+
 test("frontend SDK turn driver routes compact through the native compact client method", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
