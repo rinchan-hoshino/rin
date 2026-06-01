@@ -44,6 +44,71 @@ test("Rin core capability events reach session subscribers without extension UI"
   ]);
 });
 
+test("Rin context hooks transform provider-bound messages after Pi extensions", async () => {
+  const calls: string[] = [];
+  const capabilitySet = capabilitySession.createRinCapabilitySet({
+    cwd: "/tmp/rin-capability-session-test",
+    agentDir: "/tmp/rin-capability-session-test",
+    definitions: [
+      {
+        name: "demo_context",
+        hooks: {
+          context: [
+            async (event: any) => {
+              calls.push(`rin:${event.messages[0].content}`);
+              return {
+                messages: [
+                  ...event.messages,
+                  { role: "system", content: "rin" },
+                ],
+              };
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const extensionRunner = {
+    hasHandlers(eventName: string) {
+      calls.push(`pi-has:${eventName}`);
+      return false;
+    },
+    async emit(event: any) {
+      calls.push(`pi-emit:${event.type}`);
+      return { messages: [{ role: "user", content: "pi" }], pi: true };
+    },
+    getRegisteredCommands() {
+      return [];
+    },
+  };
+  const session = {
+    _extensionRunner: extensionRunner,
+    subscribe() {
+      return () => {};
+    },
+  };
+
+  await capabilitySession.attachRinCapabilitiesToSession(session, {
+    capabilitySet,
+  });
+
+  assert.equal(session._extensionRunner.hasHandlers("context"), true);
+  const result = await session._extensionRunner.emit({
+    type: "context",
+    messages: [{ role: "user", content: "raw" }],
+  });
+
+  assert.deepEqual(calls, ["pi-has:context", "pi-emit:context", "rin:pi"]);
+  assert.deepEqual(result, {
+    messages: [
+      { role: "user", content: "pi" },
+      { role: "system", content: "rin" },
+    ],
+    pi: true,
+  });
+});
+
 test("Rin compaction hooks are exposed through Pi's native before-compact span", async () => {
   const calls: string[] = [];
   const capabilitySet = capabilitySession.createRinCapabilitySet({

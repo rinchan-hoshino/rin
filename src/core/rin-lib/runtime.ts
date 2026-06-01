@@ -2,7 +2,7 @@ import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { completeSimple } from "@earendil-works/pi-ai";
+import { completeSimple, isContextOverflow } from "@earendil-works/pi-ai";
 
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import todoCapability from "./todo.js";
@@ -35,6 +35,10 @@ import { compileSelfImproveSync } from "../self-improve/store.js";
 import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 import { formatPromptContextSystemPromptBlock } from "../rin-frontend-sdk/prompt-context.js";
+import {
+  pruneSessionContextEvent,
+  pruneSessionContextMessages,
+} from "./session-pruning.js";
 
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 
@@ -72,6 +76,12 @@ export function createRinCapabilityDefinitions(
             return await options.compactWithRinPrompt?.(event);
           },
         ],
+      },
+    },
+    {
+      name: "rin_session_pruning",
+      hooks: {
+        context: [(event: any) => pruneSessionContextEvent(event)],
       },
     },
   ];
@@ -649,10 +659,13 @@ const COMPACTION_REASON_TRACKING_KEY = Symbol.for(
 const COMPACTION_PERCENT_THRESHOLD_KEY = Symbol.for(
   "rin.compactionPercentThreshold",
 );
+const DEFAULT_RIN_COMPACTION_TRIGGER_PERCENT = 0.85;
 
 function normalizeCompactionTriggerPercent(value: unknown) {
   const percent = Number(value);
-  if (!Number.isFinite(percent) || percent <= 0 || percent >= 1) return 0.85;
+  if (!Number.isFinite(percent) || percent <= 0 || percent >= 1) {
+    return DEFAULT_RIN_COMPACTION_TRIGGER_PERCENT;
+  }
   return percent;
 }
 
@@ -666,18 +679,51 @@ function shouldTriggerRinPercentCompaction(
   const triggerPercent = normalizeCompactionTriggerPercent(
     settings?.triggerPercent,
   );
-  const reserveTokens = Number(settings?.reserveTokens || 0);
-  const reserveThreshold =
-    reserveTokens > 0 ? contextWindow - reserveTokens : contextWindow;
-  const percentThreshold = Math.floor(contextWindow * triggerPercent);
-  const threshold = Math.min(percentThreshold, reserveThreshold);
-  return contextTokens >= threshold;
+  return contextTokens >= Math.floor(contextWindow * triggerPercent);
+}
+
+function estimatePrunedContextTokens(
+  messages: any[],
+  helpers: { estimateContextTokens?: (messages: any[]) => any } = {},
+) {
+  const prunedMessages = pruneSessionContextMessages(messages || []);
+  const estimate = helpers.estimateContextTokens?.(prunedMessages);
+  const tokens = Number(estimate?.tokens || 0);
+  return Number.isFinite(tokens) ? tokens : 0;
+}
+
+export function applyRinPrunedContextUsage(
+  session: any,
+  helpers: { estimateContextTokens?: (messages: any[]) => any } = {},
+) {
+  if (!session || typeof session !== "object") return;
+  if (session.__rinPrunedContextUsageApplied) return;
+  if (typeof session.getContextUsage !== "function") return;
+  if (typeof helpers.estimateContextTokens !== "function") return;
+
+  const originalGetContextUsage = session.getContextUsage.bind(session);
+  session.getContextUsage = function getRinPrunedContextUsage() {
+    const current = originalGetContextUsage();
+    if (!current || current.tokens === null) return current;
+    const contextWindow = Number(
+      current.contextWindow || this.model?.contextWindow || 0,
+    );
+    if (!Number.isFinite(contextWindow) || contextWindow <= 0) return current;
+    const tokens = estimatePrunedContextTokens(this.messages, helpers);
+    return {
+      ...current,
+      tokens,
+      percent: (tokens / contextWindow) * 100,
+    };
+  };
+  session.__rinPrunedContextUsageApplied = true;
 }
 
 export function applyRinCompactionPercentThreshold(
   session: any,
   helpers: {
     calculateContextTokens?: (usage: any) => number;
+    estimateContextTokens?: (messages: any[]) => any;
     getLatestCompactionEntry?: (entries: any[]) => any;
   } = {},
 ) {
@@ -686,6 +732,7 @@ export function applyRinCompactionPercentThreshold(
   if (typeof session._checkCompaction !== "function") return;
   if (typeof session._runAutoCompaction !== "function") return;
   if (typeof helpers.calculateContextTokens !== "function") return;
+  if (typeof helpers.estimateContextTokens !== "function") return;
 
   const originalCheckCompaction = session._checkCompaction.bind(session);
   session._checkCompaction = async function patchedRinPercentCompaction(
@@ -699,12 +746,6 @@ export function applyRinCompactionPercentThreshold(
     if (skipAbortedCheck && assistantMessage?.stopReason === "aborted") {
       return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
     }
-    // Let Pi's native overflow/error recovery run unchanged; the percentage
-    // threshold is only an earlier threshold trigger for successful turns.
-    if (assistantMessage?.stopReason === "error") {
-      return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
-    }
-
     const contextWindow = Number(this.model?.contextWindow || 0);
     const compactionEntry = helpers.getLatestCompactionEntry?.(
       this.sessionManager?.getBranch?.() || [],
@@ -717,15 +758,28 @@ export function applyRinCompactionPercentThreshold(
       return false;
     }
 
-    const contextTokens = helpers.calculateContextTokens(
-      assistantMessage?.usage,
-    );
+    const sameModel =
+      this.model &&
+      assistantMessage?.provider === this.model.provider &&
+      assistantMessage?.model === this.model.id;
+    if (
+      assistantMessage?.stopReason === "error" &&
+      sameModel &&
+      isContextOverflow(assistantMessage, contextWindow)
+    ) {
+      return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
+    }
+
+    const contextTokens =
+      assistantMessage?.stopReason === "error"
+        ? estimatePrunedContextTokens(this.agent?.state?.messages, helpers)
+        : helpers.calculateContextTokens(assistantMessage?.usage);
     if (
       shouldTriggerRinPercentCompaction(contextTokens, contextWindow, settings)
     ) {
       return await this._runAutoCompaction("threshold", false);
     }
-    return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
+    return false;
   };
 
   session[COMPACTION_PERCENT_THRESHOLD_KEY] = { originalCheckCompaction };
@@ -1215,6 +1269,7 @@ export async function createConfiguredAgentSession(
     createAgentSessionRuntime,
     createAgentSessionServices,
     createAgentSessionFromServices,
+    estimateContextTokens,
     getLatestCompactionEntry,
     serializeConversation,
     SettingsManager,
@@ -1412,8 +1467,10 @@ export async function createConfiguredAgentSession(
     }
 
     applyRinCompactionReasonTracking(result.session);
+    applyRinPrunedContextUsage(result.session, { estimateContextTokens });
     applyRinCompactionPercentThreshold(result.session, {
       calculateContextTokens,
+      estimateContextTokens,
       getLatestCompactionEntry,
     });
 

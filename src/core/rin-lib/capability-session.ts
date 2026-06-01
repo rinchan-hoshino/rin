@@ -271,8 +271,12 @@ export function createRinCapabilitySet(options: {
   return capabilitySet;
 }
 
-const RIN_EXTENSION_RUNNER_EVENTS = new Set<string>(["session_before_compact"]);
+const RIN_EXTENSION_RUNNER_EVENTS = new Set<string>([
+  "context",
+  "session_before_compact",
+]);
 const RIN_EXTENSION_RUNNER_BEFORE_EVENTS = new Set<string>([
+  "context",
   "session_before_compact",
 ]);
 const RIN_EXTENSION_RUNNER_PATCH_KEY = Symbol.for(
@@ -391,11 +395,18 @@ function patchRinCapabilityExtensionRunner(
     if (RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type) && result?.cancel) {
       return result;
     }
+    const rinEvent =
+      type === "context" && Array.isArray(result?.messages)
+        ? { ...event, messages: result.messages }
+        : event;
     const rinResult = await state.capabilitySet.emit(
-      withRinEventMetadata(event, state.session),
+      withRinEventMetadata(rinEvent, state.session),
     );
     if (!RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type)) {
       return result || rinResult;
+    }
+    if (type === "context" && result && rinResult) {
+      return { ...result, ...rinResult };
     }
     if (rinResult?.cancel || rinResult?.compaction) {
       return rinResult;
