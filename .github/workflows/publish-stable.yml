@@ -66,7 +66,7 @@ jobs:
         run: npm publish --tag latest --access public
       - name: Update release manifest
         run: >-
-          npm run release:manifest --
+          npx --yes tsx scripts/release/update-release-manifest.ts
           --channel stable
           --version '${{ steps.plan.outputs.version }}'
           --ref '${{ steps.plan.outputs.beta_ref }}'
@@ -98,7 +98,7 @@ jobs:
             git -C "$bootstrap_dir" checkout --orphan "$bootstrap_branch"
             git -C "$bootstrap_dir" remote add origin "$remote_url"
           fi
-          npm run release:bootstrap -- --output "$bootstrap_dir" --branch "$bootstrap_branch"
+          npx --yes tsx scripts/release/export-bootstrap-branch.ts --output "$bootstrap_dir" --branch "$bootstrap_branch"
           git -C "$bootstrap_dir" config user.name 'github-actions[bot]'
           git -C "$bootstrap_dir" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C "$bootstrap_dir" add .
