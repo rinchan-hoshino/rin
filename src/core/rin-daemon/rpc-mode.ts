@@ -10,6 +10,12 @@ import { requireSessionFile } from "../session/ref.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import {
+  emitPiExtensionRunnerEvent,
+  emitPiSessionEvent,
+  refreshPiSessionToolRegistry,
+  rewritePiSessionManagerFile,
+} from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
 import {
   getCommandArgumentCompletions,
@@ -191,9 +197,7 @@ function repairOrphanToolResultEntries(session: any) {
   if (!removed) return 0;
   entries.splice(0, entries.length, ...keptEntries);
   rebuildSessionTreeIndexes(session, keptEntries);
-  if (typeof session?.sessionManager?._rewriteFile === "function") {
-    session.sessionManager._rewriteFile();
-  }
+  rewritePiSessionManagerFile(session?.sessionManager);
   if (Array.isArray(session?.agent?.state?.messages)) {
     const context = session.sessionManager?.buildSessionContext?.();
     if (Array.isArray(context?.messages)) {
@@ -269,7 +273,10 @@ function setSessionThinkingLevel(
   session.agent.state.thinkingLevel = effectiveLevel;
   if (effectiveLevel !== previousLevel) {
     session.sessionManager?.appendThinkingLevelChange?.(effectiveLevel);
-    session._emit?.({ type: "thinking_level_changed", level: effectiveLevel });
+    emitPiSessionEvent(session, {
+      type: "thinking_level_changed",
+      level: effectiveLevel,
+    });
   }
   return { level: effectiveLevel };
 }
@@ -302,7 +309,7 @@ async function setSessionModel(
     previousModel?.provider !== model.provider ||
     previousModel?.id !== model.id
   ) {
-    await session._extensionRunner?.emit?.({
+    await emitPiExtensionRunnerEvent(session, {
       type: "model_select",
       model,
       previousModel,
@@ -349,10 +356,7 @@ async function resetSessionModelOptionsFromSettings(session: any) {
 }
 
 async function forceFlushSessionFile(session: any) {
-  const manager = session?.sessionManager;
-  const rewriteFile = manager?._rewriteFile;
-  if (typeof rewriteFile !== "function") return;
-  await Promise.resolve(rewriteFile.call(manager));
+  await Promise.resolve(rewritePiSessionManagerFile(session?.sessionManager));
 }
 
 async function resumeInterruptedTurn(
@@ -1283,7 +1287,7 @@ export async function runCustomRpcMode(
         });
       }
       case "refresh_tools":
-        session._refreshToolRegistry?.();
+        refreshPiSessionToolRegistry(session);
         return done(id, type, {
           tools: session.getAllTools?.() || [],
         });

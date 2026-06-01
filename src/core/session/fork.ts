@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { asArray } from "../json-utils.js";
+import { buildPiSessionManagerIndex } from "../pi/session-host.js";
 import { nowIso } from "../time-utils.js";
 
 type ForkCapabilities = {
@@ -103,7 +104,7 @@ function createEphemeralForkManager(
   if (disableRoutineCompaction) {
     manager[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY] = true;
   }
-  manager._buildIndex?.();
+  buildPiSessionManagerIndex(manager);
   return manager;
 }
 

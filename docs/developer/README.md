@@ -20,6 +20,7 @@ Do not add planning documents, todo files, or ad-hoc AGENTS-style instruction fi
 - `architecture.md`: source layout, runtime layers, and major subsystem boundaries.
 - `testing.md`: test bucket and validation rules.
 - `gui.md`: GUI shell and installer implementation boundaries.
+- `pi-integration.md`: governed Rin/Pi adapter seams for private Pi imports, session host helpers, and TUI patches.
 - `release-trains.md`: stable, beta, nightly, git, and hotfix channel contract.
 - `releasing.md`: operator workflow for publishing release trains.
 - `first-stable-release-checklist.md`: first public stable release checklist.

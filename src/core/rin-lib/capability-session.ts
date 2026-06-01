@@ -6,7 +6,16 @@ import type {
   RinHookHandler,
 } from "./capability-types.js";
 import { normalizeStringList } from "../text-utils.js";
-import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import {
+  attachRinCapabilityExtensionBridge,
+  withRinEventMetadata,
+} from "../pi/internal-extension-bridge.js";
+import {
+  getPiSessionExtensionCommandContextActions,
+  getPiSessionExtensionUIContext,
+  refreshPiSessionToolRegistry,
+  shutdownPiSessionExtensionHost,
+} from "../pi/session-host.js";
 
 type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
 
@@ -271,42 +280,6 @@ export function createRinCapabilitySet(options: {
   return capabilitySet;
 }
 
-const RIN_EXTENSION_RUNNER_EVENTS = new Set<string>([
-  "context",
-  "session_before_compact",
-]);
-const RIN_EXTENSION_RUNNER_BEFORE_EVENTS = new Set<string>([
-  "context",
-  "session_before_compact",
-]);
-const RIN_EXTENSION_RUNNER_PATCH_KEY = Symbol.for(
-  "rin.capabilityExtensionRunnerPatch",
-);
-
-type RinExtensionRunnerPatchState = {
-  capabilitySet: RinCapabilitySet;
-  session: any;
-  originalHasHandlers: (eventName: string) => boolean;
-  originalEmit: (event: any) => Promise<any>;
-  originalEmitContext?: (messages: any[]) => Promise<any[]>;
-};
-
-function withRinEventMetadata(event: any, session: any) {
-  if (!event || typeof event !== "object") return event;
-  const type = String(event?.type || "").trim();
-  const frontend = normalizeFrontendIdentity(
-    event.frontend ?? session?.sessionManager?.__rinFrontend,
-  );
-  const next = frontend ? { ...event, frontend } : event;
-  if (type !== "session_before_compact" || next.reason) {
-    return next;
-  }
-  return {
-    ...next,
-    reason: String(session?.__rinCurrentCompactionReason || "").trim(),
-  };
-}
-
 const RIN_CORE_EVENT_EMITTER_PATCH_KEY = Symbol.for(
   "rin.coreEventEmitterPatch",
 );
@@ -346,99 +319,6 @@ function patchRinCoreEventEmitter(session: any) {
   };
 }
 
-function patchRinCapabilityExtensionRunner(
-  session: any,
-  capabilitySet: RinCapabilitySet,
-) {
-  const runner = session?._extensionRunner;
-  if (!runner || typeof runner !== "object") return;
-  const existing = runner[RIN_EXTENSION_RUNNER_PATCH_KEY] as
-    | RinExtensionRunnerPatchState
-    | undefined;
-  if (existing) {
-    existing.capabilitySet = capabilitySet;
-    existing.session = session;
-    return;
-  }
-  if (
-    typeof runner.hasHandlers !== "function" ||
-    typeof runner.emit !== "function"
-  ) {
-    return;
-  }
-
-  const state: RinExtensionRunnerPatchState = {
-    capabilitySet,
-    session,
-    originalHasHandlers: runner.hasHandlers.bind(runner),
-    originalEmit: runner.emit.bind(runner),
-    originalEmitContext:
-      typeof runner.emitContext === "function"
-        ? runner.emitContext.bind(runner)
-        : undefined,
-  };
-  runner[RIN_EXTENSION_RUNNER_PATCH_KEY] = state;
-
-  runner.hasHandlers = (eventName: string) => {
-    const type = String(eventName || "").trim();
-    return (
-      state.originalHasHandlers(eventName) ||
-      (RIN_EXTENSION_RUNNER_EVENTS.has(type) &&
-        state.capabilitySet.hasHandlers(type))
-    );
-  };
-
-  if (state.originalEmitContext) {
-    runner.emitContext = async (messages: any[]) => {
-      const result = await state.originalEmitContext?.(messages);
-      const currentMessages = Array.isArray(result) ? result : messages;
-      if (!state.capabilitySet.hasHandlers("context")) {
-        return currentMessages;
-      }
-      const rinResult = await state.capabilitySet.emit(
-        withRinEventMetadata(
-          { type: "context", messages: currentMessages },
-          state.session,
-        ),
-      );
-      return Array.isArray(rinResult?.messages)
-        ? rinResult.messages
-        : currentMessages;
-    };
-  }
-
-  runner.emit = async (event: any) => {
-    const result = await state.originalEmit(event);
-    const type = String(event?.type || "").trim();
-    if (
-      !RIN_EXTENSION_RUNNER_EVENTS.has(type) ||
-      !state.capabilitySet.hasHandlers(type)
-    ) {
-      return result;
-    }
-    if (RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type) && result?.cancel) {
-      return result;
-    }
-    const rinEvent =
-      type === "context" && Array.isArray(result?.messages)
-        ? { ...event, messages: result.messages }
-        : event;
-    const rinResult = await state.capabilitySet.emit(
-      withRinEventMetadata(rinEvent, state.session),
-    );
-    if (!RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type)) {
-      return result || rinResult;
-    }
-    if (type === "context" && result && rinResult) {
-      return { ...result, ...rinResult };
-    }
-    if (rinResult?.cancel || rinResult?.compaction) {
-      return rinResult;
-    }
-    return result || rinResult;
-  };
-}
-
 function bindCapabilitySetToSession(
   capabilitySet: RinCapabilitySet,
   session: any,
@@ -467,7 +347,7 @@ function bindCapabilitySetToSession(
       getActiveTools: () => session.getActiveToolNames?.() || [],
       getAllTools: () => session.getAllTools?.() || [],
       setActiveTools: (toolNames) => session.setActiveToolsByName?.(toolNames),
-      refreshTools: () => session._refreshToolRegistry?.(),
+      refreshTools: () => refreshPiSessionToolRegistry(session),
       setModel: async (model) => {
         if (!session.modelRegistry?.hasConfiguredAuth?.(model)) return false;
         await session.setModel?.(model);
@@ -485,7 +365,7 @@ function bindCapabilitySetToSession(
       },
       hasPendingMessages: () => session.pendingMessageCount > 0,
       shutdown: () => {
-        session._extensionShutdownHandler?.();
+        shutdownPiSessionExtensionHost(session);
       },
       getContextUsage: () => session.getContextUsage?.(),
       compact: (compactOptions) => {
@@ -505,8 +385,10 @@ function bindCapabilitySetToSession(
       getSystemPrompt: () => session.systemPrompt,
     },
   );
-  capabilitySet.setUIContext(session._extensionUIContext);
-  capabilitySet.bindCommandContext(session._extensionCommandContextActions);
+  capabilitySet.setUIContext(getPiSessionExtensionUIContext(session));
+  capabilitySet.bindCommandContext(
+    getPiSessionExtensionCommandContextActions(session),
+  );
 }
 
 async function emitSessionStart(
@@ -549,7 +431,7 @@ export async function attachRinCapabilitiesToSession(
   const capabilitySet = options.capabilitySet;
   patchRinCoreEventEmitter(session);
   bindCapabilitySetToSession(capabilitySet, session);
-  patchRinCapabilityExtensionRunner(session, capabilitySet);
+  attachRinCapabilityExtensionBridge(session, capabilitySet);
   subscribeRinCapabilityEvents(session, capabilitySet);
   session.__rinCapabilities = capabilitySet;
 

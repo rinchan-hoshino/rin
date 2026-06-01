@@ -1,3 +1,10 @@
+import {
+  getPiToolsManagerModuleUrl,
+  loadPiToolsManagerModule,
+  type PiEnsureTool,
+  type PiManagedTool,
+} from "../pi/private-api.js";
+
 const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 
 export type PreparePiManagedToolsOptions = {
@@ -7,12 +14,7 @@ export type PreparePiManagedToolsOptions = {
   installDir: string;
 };
 
-type PiManagedTool = "fd" | "rg";
-
-type EnsureTool = (
-  tool: PiManagedTool,
-  silent?: boolean,
-) => Promise<string | undefined>;
+type EnsureTool = PiEnsureTool;
 
 type PreparePiManagedToolsResult = {
   fd?: string;
@@ -53,14 +55,9 @@ function withTemporaryEnv<T>(
 }
 
 async function importPiEnsureTool(
-  toolsManagerModuleUrl = new URL(
-    "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js",
-    import.meta.url,
-  ).href,
+  toolsManagerModuleUrl = getPiToolsManagerModuleUrl(),
 ): Promise<EnsureTool> {
-  const module = (await import(toolsManagerModuleUrl)) as {
-    ensureTool?: EnsureTool;
-  };
+  const module = await loadPiToolsManagerModule(toolsManagerModuleUrl);
   if (typeof module.ensureTool !== "function") {
     throw new Error("rin_installer_fd_manager_unavailable");
   }
@@ -146,11 +143,7 @@ export async function preparePiManagedToolsForInstall(
   }
 
   const toolsManagerModuleUrl =
-    deps.toolsManagerModuleUrl ??
-    new URL(
-      "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js",
-      import.meta.url,
-    ).href;
+    deps.toolsManagerModuleUrl ?? getPiToolsManagerModuleUrl();
   const script = [
     `const moduleUrl = ${JSON.stringify(toolsManagerModuleUrl)};`,
     "const { ensureTool } = await import(moduleUrl);",

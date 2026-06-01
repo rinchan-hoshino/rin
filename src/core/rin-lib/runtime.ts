@@ -1,4 +1,3 @@
-import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -39,6 +38,23 @@ import {
   pruneSessionContextEvent,
   pruneSessionContextMessages,
 } from "./session-pruning.js";
+import {
+  bindPiSessionAutoCompactor,
+  bindPiSessionCompactionChecker,
+  bindPiSessionSystemPromptRebuilder,
+  bindPiSessionToolRegistryRefresher,
+  getPiSessionCompactionRequestAuth,
+  getPiSessionPromptToolState,
+  getPiSessionResourcePromptState,
+  patchPiSessionManagerConversationPersistence,
+  readPiSessionBaseSystemPrompt,
+  replacePiSessionAutoCompactor,
+  replacePiSessionCompactionChecker,
+  replacePiSessionSystemPromptRebuilder,
+  replacePiSessionToolRegistryRefresher,
+  runPiSessionAutoCompaction,
+  writePiSessionBaseSystemPrompt,
+} from "../pi/session-host.js";
 
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 
@@ -291,20 +307,12 @@ function buildSelfImprovePromptBlock(agentDir: string) {
 }
 
 function buildRinSystemPrompt(session: any, toolNames: string[]) {
-  const validToolNames = toolNames.filter((name) =>
-    session._toolRegistry.has(name),
-  );
-  const toolSnippets: Record<string, string> = {};
-  const promptGuidelines: string[] = [];
-  for (const name of validToolNames) {
-    const snippet = session._toolPromptSnippets.get(name);
-    if (snippet) toolSnippets[name] = snippet;
-    const toolGuidelineSet = session._toolPromptGuidelines.get(name);
-    if (toolGuidelineSet) promptGuidelines.push(...toolGuidelineSet);
-  }
+  const { validToolNames, toolSnippets, promptGuidelines } =
+    getPiSessionPromptToolState(session, toolNames);
+  const resourcePromptState = getPiSessionResourcePromptState(session);
 
   const promptAgentDir =
-    session._resourceLoader.agentDir ||
+    resourcePromptState.agentDir ||
     process.env.RIN_DIR ||
     resolveRuntimeProfile().agentDir;
   const uniqueGuidelines: string[] = [];
@@ -333,16 +341,13 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
       : "(none)";
 
   const guidelines = uniqueGuidelines.map((g) => `- ${g}`).join("\n");
-  const loaderSystemPrompt = session._resourceLoader.getSystemPrompt();
-  const appendSystemPromptList =
-    session._resourceLoader.getAppendSystemPrompt();
+  const loaderSystemPrompt = resourcePromptState.systemPrompt;
   const appendSystemPrompt =
-    appendSystemPromptList.length > 0
-      ? appendSystemPromptList.join("\n\n")
+    resourcePromptState.appendSystemPrompt.length > 0
+      ? resourcePromptState.appendSystemPrompt.join("\n\n")
       : "";
-  const loadedSkills = session._resourceLoader.getSkills().skills;
-  const loadedContextFiles =
-    session._resourceLoader.getAgentsFiles().agentsFiles;
+  const loadedSkills = resourcePromptState.skills;
+  const loadedContextFiles = resourcePromptState.agentsFiles;
   const runtimeAwarenessBlock = buildRinRuntimeAwarenessBlock();
   const docsBlock = buildRinDocsBlock(promptAgentDir);
   const configuredLanguageBlock = buildConfiguredLanguageSystemPrompt(
@@ -485,15 +490,7 @@ export function applySessionBaseSystemPrompt(
   session: any,
   systemPrompt: string,
 ) {
-  if (!session || typeof session !== "object") return;
-  const next = String(systemPrompt || "");
-  session._baseSystemPrompt = next;
-  if (session.agent?.state && typeof session.agent.state === "object") {
-    session.agent.state.systemPrompt = next;
-  }
-  if (typeof session.agent?.setSystemPrompt === "function") {
-    session.agent.setSystemPrompt(next);
-  }
+  writePiSessionBaseSystemPrompt(session, systemPrompt);
 }
 
 export function clearSessionBaseSystemPrompt(
@@ -519,14 +516,10 @@ export function ensureSessionBaseSystemPrompt(session: any): string {
     | LazySystemPromptState
     | undefined;
   if (!state || typeof state.compute !== "function") {
-    return String(
-      session._baseSystemPrompt || session.agent?.state?.systemPrompt || "",
-    );
+    return readPiSessionBaseSystemPrompt(session);
   }
   if (state.materialized) {
-    return String(
-      session._baseSystemPrompt || session.agent?.state?.systemPrompt || "",
-    );
+    return readPiSessionBaseSystemPrompt(session);
   }
   if (!state.ignorePersistedPrompt) {
     const persisted = readPersistedSessionBaseSystemPrompt(session);
@@ -556,10 +549,7 @@ export function appendPromptContextSystemPrompt(
 
 function applyRinPromptBuilder(session: any) {
   if (!session || typeof session !== "object") return;
-  const originalRebuild =
-    typeof session._rebuildSystemPrompt === "function"
-      ? session._rebuildSystemPrompt.bind(session)
-      : null;
+  const originalRebuild = bindPiSessionSystemPromptRebuilder(session);
   if (!originalRebuild) return;
 
   const computePrompt = (toolNames: string[]) => {
@@ -580,10 +570,10 @@ function applyRinPromptBuilder(session: any) {
   };
   session[LAZY_SYSTEM_PROMPT_STATE_KEY] = state;
 
-  session._rebuildSystemPrompt = () => {
+  replacePiSessionSystemPromptRebuilder(session, () => {
     if (!state.materialized) return "";
-    return String(session._baseSystemPrompt || "");
-  };
+    return readPiSessionBaseSystemPrompt(session);
+  });
 
   const originalPrompt =
     typeof session.prompt === "function" ? session.prompt.bind(session) : null;
@@ -729,58 +719,74 @@ export function applyRinCompactionPercentThreshold(
 ) {
   if (!session || typeof session !== "object") return;
   if (session[COMPACTION_PERCENT_THRESHOLD_KEY]) return;
-  if (typeof session._checkCompaction !== "function") return;
-  if (typeof session._runAutoCompaction !== "function") return;
+  const originalCheckCompaction = bindPiSessionCompactionChecker(session);
+  const originalRunAutoCompaction = bindPiSessionAutoCompactor(session);
+  if (!originalCheckCompaction || !originalRunAutoCompaction) return;
   if (typeof helpers.calculateContextTokens !== "function") return;
   if (typeof helpers.estimateContextTokens !== "function") return;
 
-  const originalCheckCompaction = session._checkCompaction.bind(session);
-  session._checkCompaction = async function patchedRinPercentCompaction(
-    assistantMessage: any,
-    skipAbortedCheck = true,
-  ) {
-    const settings = this.settingsManager?.getCompactionSettings?.();
-    if (!settings?.enabled) {
-      return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
-    }
-    if (skipAbortedCheck && assistantMessage?.stopReason === "aborted") {
-      return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
-    }
-    const contextWindow = Number(this.model?.contextWindow || 0);
-    const compactionEntry = helpers.getLatestCompactionEntry?.(
-      this.sessionManager?.getBranch?.() || [],
-    );
-    if (
-      compactionEntry &&
-      assistantMessage?.timestamp <=
-        new Date(compactionEntry.timestamp).getTime()
+  replacePiSessionCompactionChecker(
+    session,
+    async function patchedRinPercentCompaction(
+      assistantMessage: any,
+      skipAbortedCheck = true,
     ) {
+      const settings = this.settingsManager?.getCompactionSettings?.();
+      if (!settings?.enabled) {
+        return await originalCheckCompaction(
+          assistantMessage,
+          skipAbortedCheck,
+        );
+      }
+      if (skipAbortedCheck && assistantMessage?.stopReason === "aborted") {
+        return await originalCheckCompaction(
+          assistantMessage,
+          skipAbortedCheck,
+        );
+      }
+      const contextWindow = Number(this.model?.contextWindow || 0);
+      const compactionEntry = helpers.getLatestCompactionEntry?.(
+        this.sessionManager?.getBranch?.() || [],
+      );
+      if (
+        compactionEntry &&
+        assistantMessage?.timestamp <=
+          new Date(compactionEntry.timestamp).getTime()
+      ) {
+        return false;
+      }
+
+      const sameModel =
+        this.model &&
+        assistantMessage?.provider === this.model.provider &&
+        assistantMessage?.model === this.model.id;
+      if (
+        assistantMessage?.stopReason === "error" &&
+        sameModel &&
+        isContextOverflow(assistantMessage, contextWindow)
+      ) {
+        return await originalCheckCompaction(
+          assistantMessage,
+          skipAbortedCheck,
+        );
+      }
+
+      const contextTokens =
+        assistantMessage?.stopReason === "error"
+          ? estimatePrunedContextTokens(this.agent?.state?.messages, helpers)
+          : helpers.calculateContextTokens(assistantMessage?.usage);
+      if (
+        shouldTriggerRinPercentCompaction(
+          contextTokens,
+          contextWindow,
+          settings,
+        )
+      ) {
+        return await runPiSessionAutoCompaction(this, "threshold", false);
+      }
       return false;
-    }
-
-    const sameModel =
-      this.model &&
-      assistantMessage?.provider === this.model.provider &&
-      assistantMessage?.model === this.model.id;
-    if (
-      assistantMessage?.stopReason === "error" &&
-      sameModel &&
-      isContextOverflow(assistantMessage, contextWindow)
-    ) {
-      return await originalCheckCompaction(assistantMessage, skipAbortedCheck);
-    }
-
-    const contextTokens =
-      assistantMessage?.stopReason === "error"
-        ? estimatePrunedContextTokens(this.agent?.state?.messages, helpers)
-        : helpers.calculateContextTokens(assistantMessage?.usage);
-    if (
-      shouldTriggerRinPercentCompaction(contextTokens, contextWindow, settings)
-    ) {
-      return await this._runAutoCompaction("threshold", false);
-    }
-    return false;
-  };
+    },
+  );
 
   session[COMPACTION_PERCENT_THRESHOLD_KEY] = { originalCheckCompaction };
 }
@@ -799,19 +805,16 @@ export function applyRinCompactionReasonTracking(session: any) {
     }
   };
 
-  const originalRunAutoCompaction =
-    typeof session._runAutoCompaction === "function"
-      ? session._runAutoCompaction.bind(session)
-      : null;
+  const originalRunAutoCompaction = bindPiSessionAutoCompactor(session);
   if (originalRunAutoCompaction) {
-    session._runAutoCompaction = async function patchedRunAutoCompaction(
-      reason: string,
-      ...args: any[]
-    ) {
-      return await withReason(String(reason || "auto"), () =>
-        originalRunAutoCompaction(reason, ...args),
-      );
-    };
+    replacePiSessionAutoCompactor(
+      session,
+      async function patchedRunAutoCompaction(reason: string, ...args: any[]) {
+        return await withReason(String(reason || "auto"), () =>
+          originalRunAutoCompaction(reason, ...args),
+        );
+      },
+    );
   }
 
   const originalCompact =
@@ -863,9 +866,7 @@ function readCurrentSessionSystemPrompt(session: any) {
   } catch {
     return mergeActiveTurnSystemPrompt(
       session,
-      String(
-        session?._baseSystemPrompt || session?.agent?.state?.systemPrompt || "",
-      ),
+      String(readPiSessionBaseSystemPrompt(session)),
     );
   }
 }
@@ -911,21 +912,19 @@ export function applyAutoReloadAfterCompaction(session: any) {
     await runReload();
   };
 
-  const originalRunAutoCompaction =
-    typeof session._runAutoCompaction === "function"
-      ? session._runAutoCompaction.bind(session)
-      : null;
+  const originalRunAutoCompaction = bindPiSessionAutoCompactor(session);
   if (originalRunAutoCompaction) {
-    session._runAutoCompaction = async function patchedAutoReloadCompaction(
-      ...args: any[]
-    ) {
-      compactionDepth += 1;
-      try {
-        return await originalRunAutoCompaction(...args);
-      } finally {
-        await finishCompactionReload();
-      }
-    };
+    replacePiSessionAutoCompactor(
+      session,
+      async function patchedAutoReloadCompaction(...args: any[]) {
+        compactionDepth += 1;
+        try {
+          return await originalRunAutoCompaction(...args);
+        } finally {
+          await finishCompactionReload();
+        }
+      },
+    );
   }
 
   const originalCompact =
@@ -972,65 +971,6 @@ export {
 const RIN_RUNTIME_SESSION_SHUTDOWN_KEY = Symbol.for(
   "rin.runtimeSessionShutdown",
 );
-
-const RIN_SESSION_CONVERSATION_PERSIST_KEY = Symbol.for(
-  "rin.sessionConversationPersist",
-);
-
-function hasConversationMessageEntry(entries: unknown) {
-  return Array.isArray(entries)
-    ? entries.some(
-        (entry: any) =>
-          entry?.type === "message" &&
-          (entry?.message?.role === "user" ||
-            entry?.message?.role === "assistant"),
-      )
-    : false;
-}
-
-function patchSessionManagerConversationPersistence(sessionManager: any) {
-  if (!sessionManager || typeof sessionManager !== "object") return;
-  if (sessionManager[RIN_SESSION_CONVERSATION_PERSIST_KEY]) return;
-  const originalRewriteFile =
-    typeof sessionManager._rewriteFile === "function"
-      ? sessionManager._rewriteFile.bind(sessionManager)
-      : null;
-  const originalPersist =
-    typeof sessionManager._persist === "function"
-      ? sessionManager._persist.bind(sessionManager)
-      : null;
-  if (originalRewriteFile) {
-    sessionManager._rewriteFile = (...args: any[]) => {
-      if (
-        sessionManager.isPersisted?.() !== false &&
-        !hasConversationMessageEntry(sessionManager.fileEntries)
-      ) {
-        sessionManager.flushed = false;
-        return;
-      }
-      return originalRewriteFile(...args);
-    };
-  }
-  if (originalPersist) {
-    sessionManager._persist = (...args: any[]) => {
-      const result = originalPersist(...args);
-      if (
-        sessionManager.isPersisted?.() !== false &&
-        hasConversationMessageEntry(sessionManager.fileEntries) &&
-        sessionManager.sessionFile &&
-        !fsSync.existsSync(sessionManager.sessionFile)
-      ) {
-        originalRewriteFile?.();
-        sessionManager.flushed = true;
-      }
-      return result;
-    };
-  }
-  sessionManager[RIN_SESSION_CONVERSATION_PERSIST_KEY] = {
-    originalRewriteFile,
-    originalPersist,
-  };
-}
 
 function hasRinCapabilityHandlers(session: any, type: string) {
   const capabilitySet = session?.__rinCapabilities;
@@ -1205,15 +1145,13 @@ export function applyRinBackendToolExecutionLocks(
     }
 
     const originalRefreshToolRegistry =
-      typeof session._refreshToolRegistry === "function"
-        ? session._refreshToolRegistry.bind(session)
-        : null;
+      bindPiSessionToolRegistryRefresher(session);
     if (originalRefreshToolRegistry) {
-      session._refreshToolRegistry = (...args: any[]) => {
+      replacePiSessionToolRegistryRefresher(session, (...args: any[]) => {
         const result = originalRefreshToolRegistry(...args);
         wrapActiveTools();
         return result;
-      };
+      });
     }
     state.patched = true;
   }
@@ -1291,7 +1229,7 @@ export async function createConfiguredAgentSession(
     options.sessionManager ||
     SessionManager.create(cwd, getRuntimeSessionDir(cwd, agentDir));
   applyStartupSessionName(initialSessionManager, options.sessionName);
-  patchSessionManagerConversationPersistence(initialSessionManager);
+  patchPiSessionManagerConversationPersistence(initialSessionManager);
 
   const createRuntime = async ({
     cwd: runtimeCwd,
@@ -1308,7 +1246,7 @@ export async function createConfiguredAgentSession(
       process.chdir(runtimeCwd);
     }
     applyRuntimeProfileEnvironment({ agentDir: runtimeAgentDir });
-    patchSessionManagerConversationPersistence(sessionManager);
+    patchPiSessionManagerConversationPersistence(sessionManager);
 
     const settingsManager = SettingsManager.create(runtimeCwd, runtimeAgentDir);
     applyBundledRinExtensionAliases(settingsManager);
@@ -1364,10 +1302,10 @@ export async function createConfiguredAgentSession(
         return undefined;
       }
 
-      const { apiKey, headers } =
-        typeof session._getCompactionRequestAuth === "function"
-          ? await session._getCompactionRequestAuth(model)
-          : { apiKey: undefined, headers: undefined };
+      const { apiKey, headers } = await getPiSessionCompactionRequestAuth(
+        session,
+        model,
+      );
       const reserveTokens = Number(preparation?.settings?.reserveTokens || 0);
       const maxTokens = Math.min(
         Math.floor(0.8 * (reserveTokens || 16384)),

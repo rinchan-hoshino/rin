@@ -14,8 +14,7 @@ export async function loadRinInteractiveFooterModule() {
 }
 
 export async function loadRinInteractiveThemeModule() {
-  const { theme, initTheme } =
-    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
+  const { theme, initTheme } = await import("../pi/private-api.js");
   return { theme, initTheme };
 }
 

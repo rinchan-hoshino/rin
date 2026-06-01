@@ -25,7 +25,7 @@ import { TUI_FRONTEND_IDENTITY } from "../rin-frontend-sdk/frontend-identity.js"
 import { createFrontendSdkRuntimeWrapper } from "../rin-frontend-sdk/runtime-wrapper.js";
 import { RpcInteractiveSession } from "./runtime.js";
 import { createRpcRuntimeHost } from "./runtime-host.js";
-import { applyRinTuiOverrides } from "./upstream-overrides.js";
+import { applyRinTuiOverrides } from "../pi/tui-patches/index.js";
 
 type TuiInteractiveOptions = Pick<
   InteractiveModeOptions,

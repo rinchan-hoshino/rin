@@ -8,9 +8,13 @@ import {
   SessionManager,
   SessionSelectorComponent,
 } from "@earendil-works/pi-coding-agent";
-import { APP_NAME } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/config.js";
-import { formatKeyText } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/keybinding-hints.js";
-import { getToolPath } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js";
+import {
+  APP_NAME,
+  formatKeyText,
+  getToolPath,
+  onThemeChange,
+  theme,
+} from "../private-api.js";
 import {
   Loader,
   Markdown,
@@ -24,14 +28,9 @@ import {
 import {
   listBuiltInRinExtensionStates,
   setBuiltInRinExtensionState,
-} from "../rin-builtin-extension-controls.js";
+} from "../../rin-builtin-extension-controls.js";
 
-import {
-  onThemeChange,
-  theme,
-} from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-
-import { sleep } from "../platform/process.js";
+import { sleep } from "../../platform/process.js";
 import {
   checkForRinUpdateNotice,
   getCurrentRinVersion,
@@ -40,14 +39,17 @@ import {
   parsePackageVersion,
   readRinChangelogEntries,
   type RinUpdateNotice,
-} from "../rin-lib/update-notices.js";
-import { extractMessageText } from "../message-content.js";
-import { listBoundSessions, renameBoundSession } from "../session/factory.js";
+} from "../../rin-lib/update-notices.js";
+import { extractMessageText } from "../../message-content.js";
+import {
+  listBoundSessions,
+  renameBoundSession,
+} from "../../session/factory.js";
 import {
   getRinTuiRuntimeRole,
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RPC_FRONTEND_ROLE,
-} from "../tui-runtime-env.js";
+} from "../../tui-runtime-env.js";
 
 let applied = false;
 const ANSI_DIM = "\u001b[2m";

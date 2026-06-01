@@ -1,0 +1,282 @@
+import fsSync from "node:fs";
+
+// This file is Rin's controlled seam for Pi AgentSession/SessionManager
+// implementation details. Product code should call these semantic helpers
+// instead of reaching into Pi private fields directly.
+
+type AnyFn = (...args: any[]) => any;
+
+const PI_SESSION_PRIVATE = {
+  baseSystemPrompt: "_baseSystemPrompt",
+  buildIndex: "_buildIndex",
+  checkCompaction: "_checkCompaction",
+  emit: "_emit",
+  extensionCommandContextActions: "_extensionCommandContextActions",
+  extensionRunner: "_extensionRunner",
+  extensionShutdownHandler: "_extensionShutdownHandler",
+  extensionUIContext: "_extensionUIContext",
+  getCompactionRequestAuth: "_getCompactionRequestAuth",
+  persist: "_persist",
+  rebuildSystemPrompt: "_rebuildSystemPrompt",
+  refreshToolRegistry: "_refreshToolRegistry",
+  resourceLoader: "_resourceLoader",
+  rewriteFile: "_rewriteFile",
+  runAutoCompaction: "_runAutoCompaction",
+  toolPromptGuidelines: "_toolPromptGuidelines",
+  toolPromptSnippets: "_toolPromptSnippets",
+  toolRegistry: "_toolRegistry",
+} as const;
+
+const RIN_SESSION_CONVERSATION_PERSIST_KEY = Symbol.for(
+  "rin.sessionConversationPersist",
+);
+
+function bindMethod<T extends AnyFn = AnyFn>(target: any, key: string) {
+  const value = target?.[key];
+  return typeof value === "function" ? (value.bind(target) as T) : undefined;
+}
+
+function replaceMethod(target: any, key: string, replacement: AnyFn) {
+  if (!target || typeof target !== "object") return false;
+  target[key] = replacement;
+  return true;
+}
+
+export function readPiSessionBaseSystemPrompt(session: any) {
+  return String(
+    session?.[PI_SESSION_PRIVATE.baseSystemPrompt] ||
+      session?.agent?.state?.systemPrompt ||
+      "",
+  );
+}
+
+export function writePiSessionBaseSystemPrompt(
+  session: any,
+  systemPrompt: string,
+) {
+  if (!session || typeof session !== "object") return;
+  const next = String(systemPrompt || "");
+  session[PI_SESSION_PRIVATE.baseSystemPrompt] = next;
+  if (session.agent?.state && typeof session.agent.state === "object") {
+    session.agent.state.systemPrompt = next;
+  }
+  if (typeof session.agent?.setSystemPrompt === "function") {
+    session.agent.setSystemPrompt(next);
+  }
+}
+
+export function getPiSessionPromptToolState(session: any, toolNames: string[]) {
+  const registry = session?.[PI_SESSION_PRIVATE.toolRegistry];
+  const snippets = session?.[PI_SESSION_PRIVATE.toolPromptSnippets];
+  const guidelineMap = session?.[PI_SESSION_PRIVATE.toolPromptGuidelines];
+  const validToolNames = (Array.isArray(toolNames) ? toolNames : []).filter(
+    (name) => Boolean(registry?.has?.(name)),
+  );
+  const toolSnippets: Record<string, string> = {};
+  const promptGuidelines: string[] = [];
+  for (const name of validToolNames) {
+    const snippet = snippets?.get?.(name);
+    if (snippet) toolSnippets[name] = String(snippet);
+    const guidelineSet = guidelineMap?.get?.(name);
+    if (guidelineSet) {
+      promptGuidelines.push(
+        ...Array.from(guidelineSet).map((value) => String(value || "")),
+      );
+    }
+  }
+  return { validToolNames, toolSnippets, promptGuidelines };
+}
+
+export function getPiSessionResourcePromptState(session: any) {
+  const resourceLoader = session?.[PI_SESSION_PRIVATE.resourceLoader];
+  const appendSystemPrompt = resourceLoader?.getAppendSystemPrompt?.();
+  const skills = resourceLoader?.getSkills?.()?.skills;
+  const agentsFiles = resourceLoader?.getAgentsFiles?.()?.agentsFiles;
+  return {
+    agentDir: String(resourceLoader?.agentDir || ""),
+    systemPrompt: String(resourceLoader?.getSystemPrompt?.() || ""),
+    appendSystemPrompt: Array.isArray(appendSystemPrompt)
+      ? appendSystemPrompt
+      : [],
+    skills: Array.isArray(skills) ? skills : [],
+    agentsFiles: Array.isArray(agentsFiles) ? agentsFiles : [],
+  };
+}
+
+export function bindPiSessionSystemPromptRebuilder(session: any) {
+  return bindMethod(session, PI_SESSION_PRIVATE.rebuildSystemPrompt);
+}
+
+export function replacePiSessionSystemPromptRebuilder(
+  session: any,
+  replacement: AnyFn,
+) {
+  return replaceMethod(
+    session,
+    PI_SESSION_PRIVATE.rebuildSystemPrompt,
+    replacement,
+  );
+}
+
+export function bindPiSessionCompactionChecker(session: any) {
+  return bindMethod(session, PI_SESSION_PRIVATE.checkCompaction);
+}
+
+export function replacePiSessionCompactionChecker(
+  session: any,
+  replacement: AnyFn,
+) {
+  return replaceMethod(
+    session,
+    PI_SESSION_PRIVATE.checkCompaction,
+    replacement,
+  );
+}
+
+export function bindPiSessionAutoCompactor(session: any) {
+  return bindMethod(session, PI_SESSION_PRIVATE.runAutoCompaction);
+}
+
+export function replacePiSessionAutoCompactor(
+  session: any,
+  replacement: AnyFn,
+) {
+  return replaceMethod(
+    session,
+    PI_SESSION_PRIVATE.runAutoCompaction,
+    replacement,
+  );
+}
+
+export function runPiSessionAutoCompaction(
+  session: any,
+  reason: string,
+  willRetry: boolean,
+) {
+  return session?.[PI_SESSION_PRIVATE.runAutoCompaction]?.(reason, willRetry);
+}
+
+export function bindPiSessionToolRegistryRefresher(session: any) {
+  return bindMethod(session, PI_SESSION_PRIVATE.refreshToolRegistry);
+}
+
+export function replacePiSessionToolRegistryRefresher(
+  session: any,
+  replacement: AnyFn,
+) {
+  return replaceMethod(
+    session,
+    PI_SESSION_PRIVATE.refreshToolRegistry,
+    replacement,
+  );
+}
+
+export function refreshPiSessionToolRegistry(session: any) {
+  return session?.[PI_SESSION_PRIVATE.refreshToolRegistry]?.();
+}
+
+export function emitPiSessionEvent(session: any, event: any) {
+  return session?.[PI_SESSION_PRIVATE.emit]?.(event);
+}
+
+export function getPiExtensionRunner(session: any) {
+  return session?.[PI_SESSION_PRIVATE.extensionRunner];
+}
+
+export function emitPiExtensionRunnerEvent(session: any, event: any) {
+  return session?.[PI_SESSION_PRIVATE.extensionRunner]?.emit?.(event);
+}
+
+export function shutdownPiSessionExtensionHost(session: any) {
+  return session?.[PI_SESSION_PRIVATE.extensionShutdownHandler]?.();
+}
+
+export function getPiSessionExtensionUIContext(session: any) {
+  return session?.[PI_SESSION_PRIVATE.extensionUIContext];
+}
+
+export function getPiSessionExtensionCommandContextActions(session: any) {
+  return session?.[PI_SESSION_PRIVATE.extensionCommandContextActions];
+}
+
+export async function getPiSessionCompactionRequestAuth(
+  session: any,
+  model: any,
+) {
+  const getAuth = bindMethod(
+    session,
+    PI_SESSION_PRIVATE.getCompactionRequestAuth,
+  );
+  return typeof getAuth === "function"
+    ? await getAuth(model)
+    : { apiKey: undefined, headers: undefined };
+}
+
+function hasConversationMessageEntry(entries: unknown) {
+  return Array.isArray(entries)
+    ? entries.some(
+        (entry: any) =>
+          entry?.type === "message" &&
+          (entry?.message?.role === "user" ||
+            entry?.message?.role === "assistant"),
+      )
+    : false;
+}
+
+export function patchPiSessionManagerConversationPersistence(
+  sessionManager: any,
+) {
+  if (!sessionManager || typeof sessionManager !== "object") return;
+  if (sessionManager[RIN_SESSION_CONVERSATION_PERSIST_KEY]) return;
+  const originalRewriteFile = bindMethod(
+    sessionManager,
+    PI_SESSION_PRIVATE.rewriteFile,
+  );
+  const originalPersist = bindMethod(
+    sessionManager,
+    PI_SESSION_PRIVATE.persist,
+  );
+  if (originalRewriteFile) {
+    sessionManager[PI_SESSION_PRIVATE.rewriteFile] = (...args: any[]) => {
+      if (
+        sessionManager.isPersisted?.() !== false &&
+        !hasConversationMessageEntry(sessionManager.fileEntries)
+      ) {
+        sessionManager.flushed = false;
+        return;
+      }
+      return originalRewriteFile(...args);
+    };
+  }
+  if (originalPersist) {
+    sessionManager[PI_SESSION_PRIVATE.persist] = (...args: any[]) => {
+      const result = originalPersist(...args);
+      if (
+        sessionManager.isPersisted?.() !== false &&
+        hasConversationMessageEntry(sessionManager.fileEntries) &&
+        sessionManager.sessionFile &&
+        !fsSync.existsSync(sessionManager.sessionFile)
+      ) {
+        originalRewriteFile?.();
+        sessionManager.flushed = true;
+      }
+      return result;
+    };
+  }
+  sessionManager[RIN_SESSION_CONVERSATION_PERSIST_KEY] = {
+    originalRewriteFile,
+    originalPersist,
+  };
+}
+
+export function bindPiSessionManagerFileRewriter(sessionManager: any) {
+  return bindMethod(sessionManager, PI_SESSION_PRIVATE.rewriteFile);
+}
+
+export function rewritePiSessionManagerFile(sessionManager: any) {
+  return bindPiSessionManagerFileRewriter(sessionManager)?.();
+}
+
+export function buildPiSessionManagerIndex(sessionManager: any) {
+  return sessionManager?.[PI_SESSION_PRIVATE.buildIndex]?.();
+}

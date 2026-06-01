@@ -13,7 +13,7 @@ const rootDir = path.resolve(
 
 const overrides = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-tui", "upstream-overrides.js"),
+    path.join(rootDir, "dist", "core", "pi", "tui-patches", "index.js"),
   ).href
 );
 const loaderModule = await import(
@@ -32,19 +32,7 @@ const loaderModule = await import(
 const piTuiModule = await import("@earendil-works/pi-tui");
 const codingAgentModule = await import("@earendil-works/pi-coding-agent");
 const themeModule = await import(
-  pathToFileURL(
-    path.join(
-      rootDir,
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-      "dist",
-      "modes",
-      "interactive",
-      "theme",
-      "theme.js",
-    ),
-  ).href
+  pathToFileURL(path.join(rootDir, "dist", "core", "pi", "private-api.js")).href
 );
 const tuiRuntimeEnv = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "tui-runtime-env.js")).href

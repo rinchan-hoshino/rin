@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { initializePiInteractiveModeWithoutManagedToolEnsure } from "../../src/core/rin-tui/upstream-overrides.js";
+import { initializePiInteractiveModeWithoutManagedToolEnsure } from "../../src/core/pi/tui-patches/index.js";
 
 test("Rin TUI startup override does not call Pi managed-tool ensure", async () => {
   const calls: string[] = [];
