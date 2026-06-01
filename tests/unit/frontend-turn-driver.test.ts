@@ -189,6 +189,33 @@ async function emitRpcTurnComplete(
   });
 }
 
+async function waitUntil(predicate: () => boolean, message: string) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(message);
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+) {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 test("frontend SDK turn driver runs turns through a frontend client", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
@@ -296,6 +323,80 @@ test("frontend SDK turn driver uses configured built-in command responses", asyn
         frontendIdentity: { kind: "chat-bridge" },
       },
     },
+  );
+});
+
+test("frontend SDK /new interrupts an active turn before creating the new session", async () => {
+  const client = createFrontendClient();
+  let promptStarted = false;
+  let abortCalls = 0;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    promptStarted = true;
+    await new Promise(() => {});
+  };
+  client.abort = async () => {
+    abortCalls += 1;
+    client.calls.push({ type: "abort" });
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const activeTurn = driver.runTurn({ text: "still running" });
+  activeTurn.catch(() => {});
+  await waitUntil(() => promptStarted, "active turn did not start");
+
+  const result = await driver.runCommand("/new", {
+    managedSessionLeaf: "chat",
+  });
+
+  assert.equal(result.text, "Started a new session.");
+  assert.equal(abortCalls, 1);
+  await assert.rejects(
+    activeTurn,
+    /chat_turn_aborted/,
+    "the previous live turn should be settled as aborted",
+  );
+  assert.deepEqual(
+    client.calls
+      .filter((call: any) => ["abort", "newSession"].includes(call.type))
+      .map((call: any) => call.type),
+    ["abort", "newSession"],
+  );
+});
+
+test("frontend SDK keeps non-reset commands from interrupting active turns", async () => {
+  const client = createFrontendClient();
+  let abortCalls = 0;
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+  });
+  client.abort = async () => {
+    abortCalls += 1;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runCommand("/compact keep important facts");
+
+  assert.equal(result.text, "Compacted session.");
+  assert.equal(abortCalls, 0);
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "compact"),
+    [
+      {
+        type: "compact",
+        customInstructions: "keep important facts",
+        options: { sessionFile: "/tmp/frontend-chat.jsonl" },
+      },
+    ],
   );
 });
 

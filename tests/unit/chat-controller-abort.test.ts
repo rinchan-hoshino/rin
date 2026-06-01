@@ -161,6 +161,81 @@ test("chat controller settles an abort while prompt submission is still pending"
   assert.deepEqual(deliveries, ["Aborted current operation."]);
 });
 
+test("chat controller treats /new as a reset barrier for an active turn", async () => {
+  const controller = await createController();
+  const deliveries: string[] = [];
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+  };
+
+  let sessionFile = "/tmp/reset-old-chat.jsonl";
+  let sessionId = "session-old";
+  let promptRequestTag = "";
+  let abortCalled = false;
+  let newSessionCalled = false;
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => sessionId,
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({ sessionFile, sessionId }),
+    agent: {
+      abort: () => {
+        abortCalled = true;
+      },
+    },
+    newSession: async () => {
+      newSessionCalled = true;
+      sessionFile = "/tmp/reset-new-chat.jsonl";
+      sessionId = "session-new";
+      return true;
+    },
+    prompt: async (_text: string, options: { requestTag?: string } = {}) => {
+      promptRequestTag = options.requestTag || "";
+      await new Promise(() => {});
+    },
+  };
+
+  const activeTurn = controller.runTurn({
+    text: "active before new",
+    attachments: [],
+    replyToMessageId: "m1",
+    incomingMessageId: "m1",
+  });
+  activeTurn.catch(() => {});
+  await waitUntil(() => Boolean(promptRequestTag), "active turn did not start");
+
+  await withTimeout(
+    controller.runCommand("/new", "m-new", "m-new"),
+    100,
+    "/new command was delayed by the active turn",
+  );
+  const result = await withTimeout(
+    activeTurn,
+    100,
+    "active turn did not settle after /new reset",
+  );
+
+  assert.equal(abortCalled, true);
+  assert.equal(newSessionCalled, true);
+  assert.deepEqual(result, {
+    aborted: true,
+    sessionId: "session-new",
+    sessionFile: "/tmp/reset-new-chat.jsonl",
+  });
+  assert.equal(
+    (controller as any).currentSessionFile(),
+    "/tmp/reset-new-chat.jsonl",
+  );
+  assert.deepEqual(deliveries, ["Started a new session."]);
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.canSteerActiveTurn(), false);
+});
+
 test("chat controller suppresses aborted turn errors and queues later text as a fresh prompt", async () => {
   const controller = await createController();
   const deliveries: string[] = [];

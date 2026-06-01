@@ -2,6 +2,8 @@ import { isDaemonBuiltinSlashCommand } from "../rin-lib/rpc.js";
 import { safeString } from "../text-utils.js";
 import {
   frontendCommandNameFromLine,
+  isFrontendAbortCommand,
+  isFrontendNewSessionCommand,
   parseFrontendCompactCommand,
 } from "./command-responses.js";
 
@@ -57,9 +59,16 @@ export function isFrontendSessionCommandLine(commandLine: string) {
   return Boolean(getRinFrontendSessionCommandSpec(commandLine));
 }
 
+export type RinNonInteractiveCommandActiveTurnHandling =
+  | "none"
+  | "abort"
+  | "interrupt_then_run";
+
 export type RinNonInteractiveCommandInteractionPolicy = {
   skipSessionRecovery: boolean;
   acceptInboundBeforeExecution: boolean;
+  activeTurnHandling: RinNonInteractiveCommandActiveTurnHandling;
+  bypassAdmissionWait: boolean;
 };
 
 export const RIN_NON_INTERACTIVE_COMMAND_NAMES = [
@@ -92,11 +101,29 @@ export function isRinNonInteractiveCommandExposed(commandName: unknown) {
 export function getRinNonInteractiveCommandInteractionPolicy(
   commandName: unknown,
 ): RinNonInteractiveCommandInteractionPolicy {
-  const nextName = safeString(commandName).trim().replace(/^\//, "");
+  const raw = safeString(commandName).trim();
+  const isCommandLine = raw.startsWith("/");
+  const nextName = isCommandLine
+    ? frontendCommandNameFromLine(raw)
+    : raw.replace(/^\//, "");
+  const exactAbort = isCommandLine
+    ? isFrontendAbortCommand(raw)
+    : nextName === "abort";
+  const exactNewSession = isCommandLine
+    ? isFrontendNewSessionCommand(raw)
+    : nextName === "new";
+  const activeTurnHandling: RinNonInteractiveCommandActiveTurnHandling =
+    exactAbort ? "abort" : exactNewSession ? "interrupt_then_run" : "none";
+  const isExactOnlyControl = nextName === "abort" || nextName === "new";
   return {
-    skipSessionRecovery: CLI_SKIP_SESSION_RECOVERY_COMMANDS.has(nextName),
+    skipSessionRecovery:
+      CLI_SKIP_SESSION_RECOVERY_COMMANDS.has(nextName) &&
+      (!isCommandLine || exactNewSession),
     acceptInboundBeforeExecution:
-      CLI_ACCEPT_BEFORE_EXECUTION_COMMANDS.has(nextName),
+      CLI_ACCEPT_BEFORE_EXECUTION_COMMANDS.has(nextName) &&
+      (!isCommandLine || !isExactOnlyControl || exactAbort || exactNewSession),
+    activeTurnHandling,
+    bypassAdmissionWait: activeTurnHandling !== "none",
   };
 }
 

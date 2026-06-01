@@ -1138,8 +1138,11 @@ export class ChatController {
   ) {
     this.rememberPromptChatType(promptMeta);
     const commandName = frontendCommandNameFromLine(commandLine);
+    const commandPolicy =
+      getRinNonInteractiveCommandInteractionPolicy(commandLine);
     const hadActiveTurn = this.hasActiveTurn();
-    const abortingActiveTurn = commandName === "abort" && hadActiveTurn;
+    const abortingActiveTurn =
+      commandPolicy.activeTurnHandling === "abort" && hadActiveTurn;
     if (abortingActiveTurn) {
       this.lastActivityAt = Date.now();
       try {
@@ -1184,8 +1187,6 @@ export class ChatController {
         incomingMessageId,
       );
     }
-    const commandPolicy =
-      getRinNonInteractiveCommandInteractionPolicy(commandName);
     const skipSessionRecovery = commandPolicy.skipSessionRecovery;
     // Slash commands are controls; reply-bound session files belong to prompt turns only.
     const explicitSessionFile = "";
@@ -1193,7 +1194,7 @@ export class ChatController {
       ? ""
       : this.getRecoverableSessionFile();
     const managedSessionLeaf =
-      commandName === "new"
+      commandPolicy.skipSessionRecovery && commandName === "new"
         ? MANAGED_CHAT_SESSION_LEAF
         : !restoreSessionFile
           ? this.managedSessionLeafForFreshChat()

@@ -6,12 +6,12 @@ import {
 import {
   applyFrontendBuiltinCommandText,
   frontendCommandNameFromLine,
-  isFrontendAbortCommand,
   isFrontendNewSessionCommand,
   parseFrontendCompactCommand,
   resolveRinFrontendCommandResponses,
   type RinFrontendCommandResponses,
 } from "./command-responses.js";
+import { getRinNonInteractiveCommandInteractionPolicy } from "./command-dispatcher.js";
 import { sleep } from "../platform/process.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
@@ -544,15 +544,19 @@ export class RinFrontendTurnDriver {
     const managedSessionLeaf = safeString(
       options.managedSessionLeaf || "",
     ).trim();
-    if (
-      isFrontendAbortCommand(commandLine) &&
-      (this.liveTurn || this.isStreaming())
-    ) {
-      return {
-        handled: true,
-        text: this.commandResponses.abort,
-        ...this.interruptActiveTurnLikeTui(),
-      };
+    const interactionPolicy =
+      getRinNonInteractiveCommandInteractionPolicy(commandLine);
+    if (this.isTurnActive()) {
+      if (interactionPolicy.activeTurnHandling === "abort") {
+        return {
+          handled: true,
+          text: this.commandResponses.abort,
+          ...this.interruptActiveTurnLikeTui(),
+        };
+      }
+      if (interactionPolicy.activeTurnHandling === "interrupt_then_run") {
+        this.interruptActiveTurnLikeTui();
+      }
     }
     await this.connect();
     if (!this.client) throw new Error("frontend_session_not_connected");
@@ -602,7 +606,9 @@ export class RinFrontendTurnDriver {
           sessionFile: targetSessionFile || undefined,
         })
       : await this.runCommandForSession(commandLine, targetSessionFile);
-    if (isFrontendAbortCommand(commandLine)) this.rejectLiveTurnAsAborted();
+    if (interactionPolicy.activeTurnHandling === "abort") {
+      this.rejectLiveTurnAsAborted();
+    }
     const normalizedData = applyFrontendBuiltinCommandText(
       commandName,
       data,

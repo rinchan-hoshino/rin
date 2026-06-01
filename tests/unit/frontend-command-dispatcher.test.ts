@@ -49,10 +49,30 @@ test("non-interactive command exposure and degraded interaction policy live in f
     "model",
   ]);
   assert.deepEqual(
+    dispatcher.getRinNonInteractiveCommandInteractionPolicy("abort"),
+    {
+      skipSessionRecovery: false,
+      acceptInboundBeforeExecution: true,
+      activeTurnHandling: "abort",
+      bypassAdmissionWait: true,
+    },
+  );
+  assert.deepEqual(
     dispatcher.getRinNonInteractiveCommandInteractionPolicy("new"),
     {
       skipSessionRecovery: true,
       acceptInboundBeforeExecution: true,
+      activeTurnHandling: "interrupt_then_run",
+      bypassAdmissionWait: true,
+    },
+  );
+  assert.deepEqual(
+    dispatcher.getRinNonInteractiveCommandInteractionPolicy("compact"),
+    {
+      skipSessionRecovery: false,
+      acceptInboundBeforeExecution: true,
+      activeTurnHandling: "none",
+      bypassAdmissionWait: false,
     },
   );
   assert.deepEqual(
@@ -60,6 +80,17 @@ test("non-interactive command exposure and degraded interaction policy live in f
     {
       skipSessionRecovery: false,
       acceptInboundBeforeExecution: false,
+      activeTurnHandling: "none",
+      bypassAdmissionWait: false,
+    },
+  );
+  assert.deepEqual(
+    dispatcher.getRinNonInteractiveCommandInteractionPolicy("/new with args"),
+    {
+      skipSessionRecovery: false,
+      acceptInboundBeforeExecution: false,
+      activeTurnHandling: "none",
+      bypassAdmissionWait: false,
     },
   );
 });

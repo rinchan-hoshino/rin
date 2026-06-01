@@ -1191,7 +1191,7 @@ test("chat controller starts /new immediately through the TUI new-session path",
     ),
   ]);
   assert.equal(newCommand.text, "Started a new session.");
-  assert.equal(backendAbortCalled, false);
+  assert.equal(backendAbortCalled, true);
   assert.deepEqual(await firstTurn, {
     aborted: true,
     sessionId: "session-new",

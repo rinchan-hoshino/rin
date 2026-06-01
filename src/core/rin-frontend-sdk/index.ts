@@ -55,6 +55,7 @@ export {
   type RinFrontendCommandCatalogItem,
   type RinFrontendCommandRoute,
   type RinFrontendCommandRouteKind,
+  type RinNonInteractiveCommandActiveTurnHandling,
   type RinNonInteractiveCommandInteractionPolicy,
   type RinFrontendCommandSpec,
 } from "./command-dispatcher.js";

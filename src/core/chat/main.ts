@@ -7,7 +7,10 @@ import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
-import type { RinFrontendTurnClient } from "../rin-frontend-sdk/index.js";
+import {
+  getRinNonInteractiveCommandInteractionPolicy,
+  type RinFrontendTurnClient,
+} from "../rin-frontend-sdk/index.js";
 import { nowIso } from "../time-utils.js";
 import {
   executeChatBridgeCode,
@@ -730,7 +733,7 @@ export async function startChatBridge(
       task,
     );
 
-  const isAbortCommandJob = (job: ClaimedChatInboxJob) => {
+  const canCommandBypassAdmissionWait = (job: ClaimedChatInboxJob) => {
     const { envelope } = job;
     const queuedSession = restoreChatInboxSession(
       envelope,
@@ -747,7 +750,10 @@ export async function startChatBridge(
       elementsToText(queuedElements),
       commandRows,
     );
-    return command?.name === "abort";
+    if (!command) return false;
+    const commandLine = `/${command.name}${command.argsText ? ` ${command.argsText}` : ""}`;
+    return getRinNonInteractiveCommandInteractionPolicy(commandLine)
+      .bypassAdmissionWait;
   };
 
   const prepareClaimedInboxJob = async (
@@ -821,7 +827,7 @@ export async function startChatBridge(
 
   const chatKeyWorkers = createChatKeyWorkerPool<ClaimedChatInboxJob>({
     prepare: (job) => prepareClaimedInboxJob(job),
-    canBypassAdmissionWait: (job) => isAbortCommandJob(job),
+    canBypassAdmissionWait: (job) => canCommandBypassAdmissionWait(job),
     onPrepareError: (job, chatKey, error) => {
       logger.warn(
         `chat inbox prepare failed chatKey=${chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,

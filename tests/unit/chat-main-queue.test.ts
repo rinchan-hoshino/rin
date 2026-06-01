@@ -755,11 +755,6 @@ test("chat main routes active-turn /new through the chatKey worker immediately",
       }
       const baselineNewSessionCalls = newSessionCalls.length;
       app.emit("message", makeMessage("m-new", "/new"));
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      if (newSessionCalls.length !== baselineNewSessionCalls) {
-        throw new Error(JSON.stringify({ stage: "new-before-accepted", newSessionCalls }));
-      }
-      releasePromptStart();
 
       const deadline = Date.now() + 5000;
       let rows = [];
@@ -775,6 +770,7 @@ test("chat main routes active-turn /new through the chatKey worker immediately",
         }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
+      releasePromptStart();
       if (
         promptTags.length !== 1 ||
         newSessionCalls.length <= baselineNewSessionCalls ||
