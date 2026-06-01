@@ -1,4 +1,4 @@
-export const RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS = 3;
+export const RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS = 4;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "[old tool result omitted to save context.]";
 

@@ -118,6 +118,8 @@ test("Rin percent compaction estimates error fallback from pruned context", asyn
           { role: "user", content: "recent 2" },
           { role: "assistant", content: "ok" },
           { role: "user", content: "recent 3" },
+          { role: "assistant", content: "ok" },
+          { role: "user", content: "recent 4" },
           { role: "assistant", content: "temporary upstream error" },
         ],
       },
@@ -167,6 +169,8 @@ test("Rin context usage reports the pruned provider-bound estimate", () => {
       { role: "user", content: "recent 2" },
       { role: "assistant", content: "ok" },
       { role: "user", content: "recent 3" },
+      { role: "assistant", content: "ok" },
+      { role: "user", content: "recent 4" },
       { role: "assistant", content: "ok" },
     ],
     getContextUsage() {

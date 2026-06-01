@@ -14,7 +14,7 @@ const pruning = await import(
   ).href
 );
 
-test("session pruning omits old tool results while preserving the recent three turns", () => {
+test("session pruning omits old tool results while preserving the recent four turns", () => {
   const messages = [
     { role: "user", content: "turn 1" },
     { role: "toolResult", content: "old output" },
@@ -27,6 +27,9 @@ test("session pruning omits old tool results while preserving the recent three t
     { role: "assistant", content: "done 3" },
     { role: "user", content: "turn 4" },
     { role: "toolResult", content: "recent output 4" },
+    { role: "assistant", content: "done 4" },
+    { role: "user", content: "turn 5" },
+    { role: "toolResult", content: "recent output 5" },
   ];
 
   const result = pruning.pruneSessionContextMessages(messages);
@@ -39,10 +42,11 @@ test("session pruning omits old tool results while preserving the recent three t
   assert.equal(result[4].content, "recent output 2");
   assert.equal(result[7].content, "recent output 3");
   assert.equal(result[10].content, "recent output 4");
+  assert.equal(result[13].content, "recent output 5");
   assert.equal(messages[1].content, "old output");
 });
 
-test("session pruning is a no-op until more than three user turns exist", () => {
+test("session pruning is a no-op until more than four user turns exist", () => {
   const messages = [
     { role: "user", content: "turn 1" },
     { role: "toolResult", content: "output 1" },
@@ -50,6 +54,8 @@ test("session pruning is a no-op until more than three user turns exist", () => 
     { role: "toolResult", content: "output 2" },
     { role: "user", content: "turn 3" },
     { role: "toolResult", content: "output 3" },
+    { role: "user", content: "turn 4" },
+    { role: "toolResult", content: "output 4" },
   ];
 
   assert.equal(pruning.pruneSessionContextMessages(messages), messages);
@@ -65,6 +71,8 @@ test("session pruning keeps tool-result content shape stable and is idempotent",
     { role: "assistant", content: "done 3" },
     { role: "user", content: "turn 4" },
     { role: "assistant", content: "done 4" },
+    { role: "user", content: "turn 5" },
+    { role: "assistant", content: "done 5" },
   ];
 
   const once = pruning.pruneSessionContextMessages(messages);
