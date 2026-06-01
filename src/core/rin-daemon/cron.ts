@@ -778,6 +778,38 @@ export class CronScheduler {
     );
   }
 
+  private mergeFinishedExecutionTask(task: CronTaskRecord) {
+    const current = this.tasks.get(task.id);
+    if (!current || current === task) return current;
+
+    const currentNextRunAt = safeString(current.nextRunAt).trim();
+    current.lastStartedAt = task.lastStartedAt;
+    current.lastFinishedAt = task.lastFinishedAt;
+    current.lastResultText = task.lastResultText;
+    current.lastError = task.lastError;
+    current.runCount = Math.max(
+      Number(current.runCount || 0),
+      Number(task.runCount || 0),
+    );
+    current.updatedAt = task.updatedAt;
+
+    if (task.dedicatedSessionFile) {
+      current.dedicatedSessionFile = task.dedicatedSessionFile;
+    }
+    if (task.dedicatedSessionPersistent !== undefined) {
+      current.dedicatedSessionPersistent = task.dedicatedSessionPersistent;
+    }
+
+    if (!currentNextRunAt) {
+      current.completedAt = task.completedAt;
+      current.completionReason = task.completionReason;
+      current.enabled = task.enabled;
+      current.nextRunAt = task.nextRunAt;
+    }
+
+    return current;
+  }
+
   private installBuiltInTasks() {
     const builtins = [
       createBuiltInMemoryIndexRepairTask(this.options.agentDir),
@@ -863,9 +895,10 @@ export class CronScheduler {
       ) {
         task.nextRunAt = computeNextRunAt(task, Date.now());
       }
-      if (task.completedAt) this.terminateTaskSession(task);
     } finally {
+      const currentTask = this.mergeFinishedExecutionTask(task);
       this.activeExecutions.delete(task.id);
+      if (currentTask?.completedAt) this.terminateTaskSession(currentTask);
       this.save();
     }
   }

@@ -56,13 +56,9 @@ function shouldStopTask(task: CronTaskRecord, referenceTs: number) {
   return Number.isFinite(stopTs) && referenceTs > stopTs;
 }
 
-function computeOnceNextRunAt(
-  trigger: CronTaskTrigger,
-  runCount: number,
-  referenceTs: number,
-) {
+function computeOnceNextRunAt(trigger: CronTaskTrigger, referenceTs: number) {
   const runTs = Date.parse(trigger.runAt);
-  if (!Number.isFinite(runTs) || runTs <= referenceTs || runCount > 0) {
+  if (!Number.isFinite(runTs) || runTs <= referenceTs) {
     return undefined;
   }
   return new Date(runTs).toISOString();
@@ -148,5 +144,5 @@ export function computeNextRunAt(task: CronTaskRecord, referenceTs: number) {
     return nextCronAt(task.trigger.expression, referenceTs);
   }
 
-  return computeOnceNextRunAt(task.trigger, task.runCount, referenceTs);
+  return computeOnceNextRunAt(task.trigger, referenceTs);
 }

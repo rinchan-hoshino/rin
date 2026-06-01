@@ -47,6 +47,24 @@ test("cron utils compute next run for once triggers", () => {
     Date.parse("2026-03-31T11:59:00.000Z"),
   );
   assert.equal(once, "2026-03-31T12:00:00.000Z");
+
+  const selfRescheduledOnce = cronUtils.computeNextRunAt(
+    {
+      id: "a",
+      createdAt: "",
+      updatedAt: "",
+      enabled: true,
+      cwd: "",
+      chatKey: undefined,
+      trigger: { runAt: "2026-03-31T12:00:00.000Z" },
+      session: { mode: "dedicated" },
+      target: { kind: "shell_command", command: "echo hi" },
+      runCount: 3,
+      running: false,
+    },
+    Date.parse("2026-03-31T11:59:00.000Z"),
+  );
+  assert.equal(selfRescheduledOnce, "2026-03-31T12:00:00.000Z");
 });
 
 test("cron utils compute next cron tick", () => {

@@ -72,6 +72,74 @@ test("cron scheduler derives one-time triggers when no interval is set", () => {
   assert.equal(task.trigger.runAt, "2026-04-10T00:00:00.000Z");
 });
 
+test("cron scheduler keeps future one-time reschedules across task upserts", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  const taskId = "cron_self_reschedule_once";
+  const firstRunAt = "2099-04-10T00:00:00.000Z";
+  const nextRunAt = "2099-04-11T00:00:00.000Z";
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: firstRunAt },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+    scheduler.tasks.get(taskId).runCount = 3;
+    scheduler.rescheduleOneTimeTask(taskId, nextRunAt);
+
+    const updated = scheduler.upsertTask({
+      id: taskId,
+      target: { kind: "agent_prompt", prompt: "updated" },
+    });
+
+    assert.equal(updated.trigger.runAt, nextRunAt);
+    assert.equal(updated.nextRunAt, nextRunAt);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler preserves finish metadata when a running once task self-reschedules", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_self_reschedule_during_run";
+  const startRunAt = "2099-04-10T00:00:00.000Z";
+  const nextRunAt = "2099-04-11T00:00:00.000Z";
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        scheduler.rescheduleOneTimeTask(taskId, nextRunAt);
+        return { finalText: "done after self-reschedule" };
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: startRunAt },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+
+    scheduler.runTaskNow(taskId);
+    for (let i = 0; i < 50 && scheduler.getTask(taskId).running; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const task = scheduler.getTask(taskId);
+    assert.equal(task.running, false);
+    assert.equal(task.enabled, true);
+    assert.equal(task.completedAt, undefined);
+    assert.equal(task.trigger.runAt, nextRunAt);
+    assert.equal(task.nextRunAt, nextRunAt);
+    assert.equal(task.lastResultText, "done after self-reschedule");
+    assert.match(task.lastFinishedAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron scheduler rejects removed specific session mode", () => {
   const scheduler = new cronMod.CronScheduler({
     agentDir: "/tmp/rin-agent",
