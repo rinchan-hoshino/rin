@@ -288,6 +288,7 @@ type RinExtensionRunnerPatchState = {
   session: any;
   originalHasHandlers: (eventName: string) => boolean;
   originalEmit: (event: any) => Promise<any>;
+  originalEmitContext?: (messages: any[]) => Promise<any[]>;
 };
 
 function withRinEventMetadata(event: any, session: any) {
@@ -371,6 +372,10 @@ function patchRinCapabilityExtensionRunner(
     session,
     originalHasHandlers: runner.hasHandlers.bind(runner),
     originalEmit: runner.emit.bind(runner),
+    originalEmitContext:
+      typeof runner.emitContext === "function"
+        ? runner.emitContext.bind(runner)
+        : undefined,
   };
   runner[RIN_EXTENSION_RUNNER_PATCH_KEY] = state;
 
@@ -382,6 +387,25 @@ function patchRinCapabilityExtensionRunner(
         state.capabilitySet.hasHandlers(type))
     );
   };
+
+  if (state.originalEmitContext) {
+    runner.emitContext = async (messages: any[]) => {
+      const result = await state.originalEmitContext?.(messages);
+      const currentMessages = Array.isArray(result) ? result : messages;
+      if (!state.capabilitySet.hasHandlers("context")) {
+        return currentMessages;
+      }
+      const rinResult = await state.capabilitySet.emit(
+        withRinEventMetadata(
+          { type: "context", messages: currentMessages },
+          state.session,
+        ),
+      );
+      return Array.isArray(rinResult?.messages)
+        ? rinResult.messages
+        : currentMessages;
+    };
+  }
 
   runner.emit = async (event: any) => {
     const result = await state.originalEmit(event);

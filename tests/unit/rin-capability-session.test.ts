@@ -44,7 +44,7 @@ test("Rin core capability events reach session subscribers without extension UI"
   ]);
 });
 
-test("Rin context hooks transform provider-bound messages after Pi extensions", async () => {
+test("Rin context hooks transform provider-bound messages after Pi emitContext", async () => {
   const calls: string[] = [];
   const capabilitySet = capabilitySession.createRinCapabilitySet({
     cwd: "/tmp/rin-capability-session-test",
@@ -78,6 +78,10 @@ test("Rin context hooks transform provider-bound messages after Pi extensions", 
       calls.push(`pi-emit:${event.type}`);
       return { messages: [{ role: "user", content: "pi" }], pi: true };
     },
+    async emitContext(messages: any[]) {
+      calls.push(`pi-context:${messages[0].content}`);
+      return [{ role: "user", content: "pi" }];
+    },
     getRegisteredCommands() {
       return [];
     },
@@ -94,19 +98,15 @@ test("Rin context hooks transform provider-bound messages after Pi extensions", 
   });
 
   assert.equal(session._extensionRunner.hasHandlers("context"), true);
-  const result = await session._extensionRunner.emit({
-    type: "context",
-    messages: [{ role: "user", content: "raw" }],
-  });
+  const result = await session._extensionRunner.emitContext([
+    { role: "user", content: "raw" },
+  ]);
 
-  assert.deepEqual(calls, ["pi-has:context", "pi-emit:context", "rin:pi"]);
-  assert.deepEqual(result, {
-    messages: [
-      { role: "user", content: "pi" },
-      { role: "system", content: "rin" },
-    ],
-    pi: true,
-  });
+  assert.deepEqual(calls, ["pi-has:context", "pi-context:raw", "rin:pi"]);
+  assert.deepEqual(result, [
+    { role: "user", content: "pi" },
+    { role: "system", content: "rin" },
+  ]);
 });
 
 test("Rin compaction hooks are exposed through Pi's native before-compact span", async () => {
