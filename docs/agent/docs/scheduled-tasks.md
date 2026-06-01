@@ -197,9 +197,13 @@ Set `condition: null` to remove an existing condition.
 
 ## Sessions
 
+Choose `session.mode` by where the scheduled agent turn should get conversational context. This is not the task's durable state store: when a workflow needs reliable progress, facts, ledgers, or decisions, keep that state in an explicit file, issue, database, task system, or service and let each run read it.
+
 ### `session.mode: "none"`
 
-Default and preferred for independent reminders, simple checks, shell diagnostics, and polished chat reports that do not need cross-run memory.
+Default and preferred for ordinary one-time and periodic tasks: reminders, daily or weekly reports, simple checks, shell diagnostics, polished chat reports, and workflows whose history is stored explicitly outside the agent session.
+
+Use `none` even when the task has long-running state, as long as each run can reconstruct what it needs from the task prompt plus external state. Ordinary recurring tasks should not use a dedicated session just because they recur.
 
 Behavior:
 
@@ -211,7 +215,7 @@ Behavior:
 
 ### `session.mode: "dedicated"`
 
-Use only when future runs need prior task context. Rin derives the session path from the task id:
+Use only when the task is intentionally a task-owned agent thread and its first run should differ from later runs. The clearest signal is that `target.prompt` is a start/setup prompt and `target.continuationPrompt` is a distinct every-run continuation prompt. Rin derives the session path from the task id:
 
 ```text
 ~/.rin/sessions/managed/task/<task-id>.jsonl
@@ -223,11 +227,13 @@ Behavior:
 - Later runs use `target.continuationPrompt` when provided; otherwise they reuse `target.prompt`.
 - The dedicated session persists across runs.
 
-Avoid dedicated sessions for routine reports unless the task truly benefits from history; stale context can add noise.
+Do not use dedicated sessions for routine periodic reports, reminders, or checks. Do not use them merely to remember progress; store durable progress explicitly and use `none`. Dedicated sessions can carry stale context, old assumptions, and extra token cost, so choose them only when the persistent conversation itself is the intended context.
 
 ### `session.mode: "session_instruction"`
 
-Use for a follow-up inserted into an existing chat session. It can be one-time or recurring.
+Use when the scheduled turn must be inserted into an existing stored chat session. It can be one-time or recurring, and its context comes from `session.sessionFile`, not from a task-owned session.
+
+Use this for chat-thread follow-ups such as “come back to this conversation later and ask about the pending review”. Do not use it as general task memory.
 
 Requirements enforced by the scheduler:
 
@@ -311,20 +317,21 @@ await rin.tasks.upsert({
 });
 ```
 
-Create a dedicated recurring task:
+Create a dedicated recurring task with a distinct continuation prompt:
 
 ```js
 await rin.tasks.upsert({
-  id: "cron_weekly_watch",
-  name: "Weekly watch with memory",
+  id: "cron_guided_thread",
+  name: "Guided recurring thread",
   enabled: true,
   trigger: { expression: "0 9 * * 1", timezone: "local" },
   session: { mode: "dedicated" },
   target: {
     kind: "agent_prompt",
-    prompt: "Start the weekly watch ledger and report the first status.",
+    prompt:
+      "Start this task's dedicated agent thread: introduce the objective once, run the first check, and report the setup status.",
     continuationPrompt:
-      "Continue the weekly watch ledger. Report only meaningful changes.",
+      "Continue this task's dedicated agent thread. Do not repeat setup; run the next check and report only new findings or blockers.",
   },
 });
 ```
@@ -443,9 +450,9 @@ Use `shell_command` when raw machine output is acceptable. Use `agent_prompt` wh
 
 If a task only needs a model when an external state changes, put the cheap state test in `condition` or in a lightweight script called by an `agent_prompt` task. This prevents empty periodic model turns.
 
-### Prefer `session.mode: "none"` unless continuity is required
+### Prefer `session.mode: "none"` unless the prompt flow needs a task-owned thread
 
-Dedicated sessions are powerful but add persistent context. Use them only when the task's next run really needs the previous run's reasoning or ledger.
+Ordinary periodic tasks should use `none`. Use `dedicated` only when the task has a real first-run vs later-run split, expressed as `target.prompt` plus a distinct `target.continuationPrompt`, and the persistent conversation is intentionally part of the task context. Needing progress or history alone is not enough; store durable state explicitly and keep the scheduled runs clean.
 
 ### Give tasks stable, descriptive ids
 

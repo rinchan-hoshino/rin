@@ -64,6 +64,12 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(agentSdk, /"dist", "core", "rin-agent-sdk", "index\.js"/);
   assert.doesNotMatch(agentSdk, /"src", "core", "rin-agent-sdk", "index\.ts"/);
   assert.match(scheduledTasks, /`session\.mode: "dedicated"`/);
+  assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
+  assert.match(
+    scheduledTasks,
+    /Ordinary recurring tasks should not use a dedicated session/,
+  );
+  assert.match(scheduledTasks, /store durable state explicitly/);
   assert.match(scheduledTasks, /code: string/);
   assert.match(
     scheduledTasks,
