@@ -33,6 +33,7 @@ function createFrontendClient() {
   let listener: any = null;
   let connected = false;
   let sessionFile = "/tmp/frontend-chat.jsonl";
+  let activeTools = ["read", "bash", "edit", "write", "web_search"];
   return {
     calls,
     async connect() {
@@ -107,6 +108,15 @@ function createFrontendClient() {
       }
       if (command.type === "run_command") {
         return await this.runCommand(String(command.commandLine || ""));
+      }
+      if (command.type === "get_active_tools") {
+        return { tools: [...activeTools] };
+      }
+      if (command.type === "set_active_tools") {
+        activeTools = Array.isArray(command.toolNames)
+          ? [...command.toolNames]
+          : [];
+        return { tools: [...activeTools] };
       }
       return {};
     },
@@ -278,6 +288,46 @@ test("frontend SDK turn driver applies startup session names before prompt submi
     command: { type: "set_session_name", name: "daily audit" },
   });
   assert.equal((driver as any).frontendState.sessionName, "daily audit");
+});
+
+test("frontend SDK turn driver applies Pi tool startup options before prompt submission", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "hello",
+    managedSessionLeaf: "telegram/1:2",
+    tools: ["read", "grep"],
+    excludeTools: ["grep"],
+    noTools: "builtin",
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  const newSessionCall = client.calls.find(
+    (call: any) => call.type === "newSession",
+  );
+  assert.deepEqual(newSessionCall.options.resourceOptions, {
+    tools: ["read", "grep"],
+    excludeTools: ["grep"],
+    noTools: "builtin",
+  });
+  const setToolsIndex = client.calls.findIndex(
+    (call: any) =>
+      call.type === "request" && call.command?.type === "set_active_tools",
+  );
+  const promptIndex = client.calls.findIndex(
+    (call: any) => call.type === "prompt",
+  );
+  assert.ok(setToolsIndex >= 0);
+  assert.ok(promptIndex > setToolsIndex);
+  assert.deepEqual(client.calls[setToolsIndex].command, {
+    type: "set_active_tools",
+    toolNames: ["read"],
+    sessionFile: "/tmp/frontend-managed.jsonl",
+  });
 });
 
 test("frontend SDK turn driver routes compact through the native compact client method", async () => {

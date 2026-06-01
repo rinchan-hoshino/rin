@@ -95,6 +95,16 @@ function createCli() {
     .option("--model <provider/model>", "Model for non-interactive mode")
     .option("--thinking <level>", "Thinking level for non-interactive mode")
     .option("--name <name>", "Session display name for non-interactive mode")
+    .option("-t, --tools <tools>", "Tool allowlist for non-interactive mode")
+    .option(
+      "-xt, --exclude-tools <tools>",
+      "Tool denylist for non-interactive mode",
+    )
+    .option("-nt, --no-tools", "Disable all tools in non-interactive mode")
+    .option(
+      "-nbt, --no-builtin-tools",
+      "Disable built-in tools in non-interactive mode",
+    )
     .option(
       "--chat-key <chatKey>",
       "Deliver non-interactive final answer to a chat",

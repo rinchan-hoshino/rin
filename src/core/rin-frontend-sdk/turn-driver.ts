@@ -15,6 +15,12 @@ import { getRinNonInteractiveCommandInteractionPolicy } from "./command-dispatch
 import { sleep } from "../platform/process.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
+import {
+  hasRinToolStartupOptions,
+  resolveRinActiveToolNames,
+  serializeRinToolStartupOptions,
+  type RinToolStartupOptions,
+} from "../rin-lib/tool-options.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
 import {
   normalizeFrontendIdentity,
@@ -76,6 +82,7 @@ export type RinFrontendTurnClient = RinFrontendClient & {
   ensureSessionReady?: (
     restoreSessionFile?: string,
     managedSessionLeaf?: string,
+    toolOptions?: RinToolStartupOptions,
   ) => Promise<Record<string, unknown>>;
   terminateSession?: () => Promise<unknown>;
   consumeQueuedOfflineOperation?: (requestTag?: string) => boolean;
@@ -492,12 +499,14 @@ export class RinFrontendTurnDriver {
   private async ensureSessionReady(
     restoreSessionFile = "",
     managedSessionLeaf = "",
+    toolOptions?: RinToolStartupOptions,
   ) {
     if (!this.client) throw new Error("frontend_session_not_connected");
     if (this.client.ensureSessionReady) {
       const ready = await this.client.ensureSessionReady(
         restoreSessionFile,
         managedSessionLeaf,
+        toolOptions,
       );
       this.frontendState = { ...this.frontendState, ...(ready || {}) };
       return ready;
@@ -507,9 +516,13 @@ export class RinFrontendTurnDriver {
     const managedLeaf = safeString(managedSessionLeaf || "").trim();
     await this.refreshFrontendState(wanted).catch(() => {});
     if (managedLeaf && !wanted) {
+      const serializedToolOptions = serializeRinToolStartupOptions(toolOptions);
       const value = await this.client.newSession({
         managedSessionLeaf: managedLeaf,
         frontendIdentity: this.frontendIdentity,
+        ...(hasRinToolStartupOptions(serializedToolOptions)
+          ? { resourceOptions: serializedToolOptions }
+          : {}),
       });
       if (value?.cancelled) throw new Error("rin_new_session_cancelled");
       this.updateFrontendStateFrom(value);
@@ -523,6 +536,33 @@ export class RinFrontendTurnDriver {
       sessionId: this.currentSessionId() || undefined,
       sessionFile: this.currentSessionFile() || undefined,
     };
+  }
+
+  private async applyTurnToolOptions(
+    options: RinToolStartupOptions | undefined,
+    sessionFile?: string,
+  ) {
+    if (!hasRinToolStartupOptions(options)) return;
+    if (!this.client) throw new Error("frontend_session_not_connected");
+    const wanted = safeString(sessionFile || "").trim();
+    const target = wanted ? { sessionFile: wanted } : {};
+    const hasExplicitToolAllowlist = options?.tools !== undefined;
+    const activeTools = hasExplicitToolAllowlist
+      ? []
+      : await this.client
+          .request<{ tools?: unknown[] }>({
+            type: "get_active_tools",
+            ...target,
+          })
+          .then((data) => data?.tools)
+          .catch(() => []);
+    const toolNames = resolveRinActiveToolNames(activeTools, options);
+    await this.client.request({
+      type: "set_active_tools",
+      toolNames,
+      ...target,
+    });
+    await this.refreshFrontendState(wanted).catch(() => {});
   }
 
   async runCommand(
@@ -903,21 +943,23 @@ export class RinFrontendTurnDriver {
     return this.normalizeTurnCompletion(await liveTurn.promise);
   }
 
-  async submitTurn(input: {
-    text: string;
-    images?: any[];
-    sessionFile?: string;
-    restoreSessionFile?: string;
-    managedSessionLeaf?: string;
-    model?: string;
-    thinkingLevel?: string;
-    resetModelOptionsFromSettings?: boolean;
-    promptContext?: RinPromptContext;
-    source?: string;
-    requestTag?: string;
-    streamingBehavior?: "steer" | "followUp";
-    assumeSessionReady?: boolean;
-  }): Promise<RinFrontendTurnResult> {
+  async submitTurn(
+    input: {
+      text: string;
+      images?: any[];
+      sessionFile?: string;
+      restoreSessionFile?: string;
+      managedSessionLeaf?: string;
+      model?: string;
+      thinkingLevel?: string;
+      resetModelOptionsFromSettings?: boolean;
+      promptContext?: RinPromptContext;
+      source?: string;
+      requestTag?: string;
+      streamingBehavior?: "steer" | "followUp";
+      assumeSessionReady?: boolean;
+    } & RinToolStartupOptions,
+  ): Promise<RinFrontendTurnResult> {
     const promptSource = safeString(input.source).trim() || this.promptSource;
     const sessionFile = safeString(input.sessionFile || "").trim();
     const restoreSessionFile = safeString(
@@ -944,6 +986,7 @@ export class RinFrontendTurnDriver {
       ready = await this.ensureSessionReady(
         sessionFile || restoreSessionFile,
         managedSessionLeaf,
+        input,
       );
     }
     const targetSessionFile = this.sessionFileFromReady(
@@ -957,6 +1000,7 @@ export class RinFrontendTurnDriver {
     if (input.resetModelOptionsFromSettings) {
       await this.resetModelOptionsFromSettings(targetSessionFile);
     }
+    await this.applyTurnToolOptions(input, targetSessionFile);
     await this.applyTurnModelOptions(
       {
         model: input.model,
@@ -989,20 +1033,22 @@ export class RinFrontendTurnDriver {
     };
   }
 
-  async runTurn(input: {
-    text: string;
-    images?: any[];
-    sessionFile?: string;
-    restoreSessionFile?: string;
-    managedSessionLeaf?: string;
-    sessionName?: string;
-    model?: string;
-    thinkingLevel?: string;
-    resetModelOptionsFromSettings?: boolean;
-    promptContext?: RinPromptContext;
-    source?: string;
-    streamingBehavior?: "steer" | "follow";
-  }): Promise<RinFrontendTurnResult> {
+  async runTurn(
+    input: {
+      text: string;
+      images?: any[];
+      sessionFile?: string;
+      restoreSessionFile?: string;
+      managedSessionLeaf?: string;
+      sessionName?: string;
+      model?: string;
+      thinkingLevel?: string;
+      resetModelOptionsFromSettings?: boolean;
+      promptContext?: RinPromptContext;
+      source?: string;
+      streamingBehavior?: "steer" | "follow";
+    } & RinToolStartupOptions,
+  ): Promise<RinFrontendTurnResult> {
     const promptSource = safeString(input.source).trim() || this.promptSource;
     const sessionFile = safeString(input.sessionFile || "").trim();
     const restoreSessionFile = safeString(
@@ -1019,6 +1065,7 @@ export class RinFrontendTurnDriver {
     const ready = await this.ensureSessionReady(
       sessionFile || restoreSessionFile,
       managedSessionLeaf,
+      input,
     );
     const targetSessionFile = this.sessionFileFromReady(
       ready,
@@ -1029,6 +1076,7 @@ export class RinFrontendTurnDriver {
       targetSessionFile,
     );
     await this.applySessionName(input.sessionName);
+    await this.applyTurnToolOptions(input, targetSessionFile);
     const inputGate = this.inputSubmissionGate(targetSessionFile);
     if (input.resetModelOptionsFromSettings) {
       await this.resetModelOptionsFromSettings(targetSessionFile);

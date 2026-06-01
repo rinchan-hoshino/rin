@@ -9,8 +9,9 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
 import { runCustomRpcMode } from "./rpc-mode.js";
+import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 
-type WorkerResourceOptions = {
+type WorkerResourceOptions = RinToolStartupOptions & {
   additionalExtensionPaths?: string[];
   noExtensions?: boolean;
   extensionFlagValues?: Array<[string, boolean | string]>;
@@ -82,6 +83,9 @@ export async function startWorker(options: WorkerResourceOptions = {}) {
     additionalExtensionPaths: mergedOptions.additionalExtensionPaths,
     noExtensions: mergedOptions.noExtensions,
     extensionFlagValues: new Map(mergedOptions.extensionFlagValues || []),
+    tools: mergedOptions.tools,
+    excludeTools: mergedOptions.excludeTools,
+    noTools: mergedOptions.noTools,
     additionalSkillPaths: mergedOptions.additionalSkillPaths,
     noSkills: mergedOptions.noSkills,
     additionalPromptTemplatePaths: mergedOptions.additionalPromptTemplatePaths,

@@ -1,6 +1,11 @@
 import path from "node:path";
 
-export type TuiResourceOptions = {
+import {
+  parseRinToolNameList,
+  type RinToolStartupOptions,
+} from "../rin-lib/tool-options.js";
+
+export type TuiResourceOptions = RinToolStartupOptions & {
   additionalExtensionPaths: string[];
   noExtensions?: boolean;
   extensionFlagValues?: Map<string, boolean | string>;
@@ -217,6 +222,40 @@ export function parseTuiCliOptions(
       resources.appendSystemPrompt = resources.appendSystemPrompt ?? [];
       resources.appendSystemPrompt.push(buildTuiOnboardingPrompt());
       messages.push("Start Rin initialization.");
+      continue;
+    }
+    if (arg === "--tools" || arg === "-t") {
+      const value = readValue(argv, index);
+      if (value !== undefined) {
+        resources.tools = parseRinToolNameList(value);
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--tools=")) {
+      resources.tools = parseRinToolNameList(arg.slice("--tools=".length));
+      continue;
+    }
+    if (arg === "--exclude-tools" || arg === "-xt") {
+      const value = readValue(argv, index);
+      if (value !== undefined) {
+        resources.excludeTools = parseRinToolNameList(value);
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--exclude-tools=")) {
+      resources.excludeTools = parseRinToolNameList(
+        arg.slice("--exclude-tools=".length),
+      );
+      continue;
+    }
+    if (arg === "--no-tools" || arg === "-nt") {
+      resources.noTools = "all";
+      continue;
+    }
+    if (arg === "--no-builtin-tools" || arg === "-nbt") {
+      resources.noTools = "builtin";
       continue;
     }
     if (arg === "--name" || arg === "-n") {

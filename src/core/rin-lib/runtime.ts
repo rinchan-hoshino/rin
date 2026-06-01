@@ -34,6 +34,7 @@ import { compileSelfImproveSync } from "../self-improve/store.js";
 import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 import { formatPromptContextSystemPromptBlock } from "../rin-frontend-sdk/prompt-context.js";
+import type { RinToolStartupOptions } from "./tool-options.js";
 import {
   pruneSessionContextEvent,
   pruneSessionContextMessages,
@@ -1178,7 +1179,7 @@ function applyStartupSessionName(sessionManager: any, sessionName?: unknown) {
 }
 
 export async function createConfiguredAgentSession(
-  options: {
+  options: RinToolStartupOptions & {
     cwd?: string;
     agentDir?: string;
     additionalExtensionPaths?: string[];
@@ -1397,6 +1398,9 @@ export async function createConfiguredAgentSession(
       sessionStartEvent,
       model: resolvedModel,
       thinkingLevel: options.thinkingLevel,
+      tools: options.tools,
+      excludeTools: options.excludeTools,
+      noTools: options.noTools,
       customTools: rinCapabilities.getToolDefinitions(),
     });
     sessionRef.current = result.session;

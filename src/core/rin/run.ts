@@ -9,11 +9,15 @@ import {
   type ParsedArgs,
   safeString,
 } from "./shared.js";
+import {
+  parseRinToolNameList,
+  type RinToolStartupOptions,
+} from "../rin-lib/tool-options.js";
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const VALID_MODES = new Set(["text", "json"]);
 
-export type RunCliOptions = {
+export type RunCliOptions = RinToolStartupOptions & {
   messages: string[];
   prompt: string;
   sessionFile?: string;
@@ -41,6 +45,10 @@ Options:
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --session <file>               Use a specific session file
   --name <name>                  Set the session display name
+  --tools, -t <tools>            Comma-separated allowlist of tool names
+  --exclude-tools, -xt <tools>   Comma-separated denylist of tool names
+  --no-tools, -nt                Disable all tools by default
+  --no-builtin-tools, -nbt       Disable built-in tools by default
   --chat-key <chatKey>           Deliver the final answer to this chat as well
   --timeout <seconds>            Maximum wait time (default: 1800)
   --help, -h                     Show this help
@@ -155,6 +163,9 @@ export async function parseRunArgs(
   let provider = "";
   let model = "";
   let thinkingLevel = "";
+  let tools: string[] | undefined;
+  let excludeTools: string[] | undefined;
+  let noTools: "all" | "builtin" | undefined;
   let chatKey = "";
   let timeoutValue = "";
   let outputMode: "text" | "json" = "text";
@@ -246,6 +257,40 @@ export async function parseRunArgs(
       sessionFile = arg.slice("--session=".length);
       continue;
     }
+    if (arg === "--tools" || arg === "-t") {
+      index = appendInlineValue(
+        args,
+        index,
+        (value) => (tools = parseRinToolNameList(value)),
+        "run_tools_value_required",
+      );
+      continue;
+    }
+    if (arg.startsWith("--tools=")) {
+      tools = parseRinToolNameList(arg.slice("--tools=".length));
+      continue;
+    }
+    if (arg === "--exclude-tools" || arg === "-xt") {
+      index = appendInlineValue(
+        args,
+        index,
+        (value) => (excludeTools = parseRinToolNameList(value)),
+        "run_exclude_tools_value_required",
+      );
+      continue;
+    }
+    if (arg.startsWith("--exclude-tools=")) {
+      excludeTools = parseRinToolNameList(arg.slice("--exclude-tools=".length));
+      continue;
+    }
+    if (arg === "--no-tools" || arg === "-nt") {
+      noTools = "all";
+      continue;
+    }
+    if (arg === "--no-builtin-tools" || arg === "-nbt") {
+      noTools = "builtin";
+      continue;
+    }
     if (arg === "--no-session") {
       sessionFile = "";
       continue;
@@ -332,6 +377,9 @@ export async function parseRunArgs(
       ? `${providerModel.provider}/${providerModel.modelId}`
       : undefined,
     thinkingLevel: safeString(thinkingLevel).trim() || undefined,
+    ...(tools !== undefined ? { tools } : {}),
+    ...(excludeTools !== undefined ? { excludeTools } : {}),
+    ...(noTools !== undefined ? { noTools } : {}),
     chatKey: safeString(chatKey).trim() || undefined,
     outputMode,
     timeoutMs: parseTimeoutMs(timeoutValue),
@@ -388,6 +436,11 @@ async function runDetachedTurn(
           ? { managedSessionLeaf: MANAGED_CLI_SESSION_LEAF }
           : {}),
         ...(options.sessionName ? { sessionName: options.sessionName } : {}),
+        ...(options.tools !== undefined ? { tools: options.tools } : {}),
+        ...(options.excludeTools !== undefined
+          ? { excludeTools: options.excludeTools }
+          : {}),
+        ...(options.noTools !== undefined ? { noTools: options.noTools } : {}),
         model: options.model,
         thinkingLevel: options.thinkingLevel,
         controllerKey: `cli-${Date.now()}`,

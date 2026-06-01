@@ -124,6 +124,27 @@ test("configured session persists once a user starts a real conversation", async
   }
 });
 
+test("configured sessions forward Pi tool startup options", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-tool-options-"));
+  const agentDir = path.join(root, "agent");
+  await fs.mkdir(agentDir, { recursive: true });
+
+  const runtime = await runtimeMod.createConfiguredAgentSession({
+    cwd: root,
+    agentDir,
+    tools: ["read", "grep"],
+    excludeTools: ["grep"],
+    noTools: "builtin",
+  });
+
+  try {
+    assert.deepEqual(runtime.session.getActiveToolNames(), ["read"]);
+  } finally {
+    await runtime.runtime?.dispose?.().catch?.(() => {});
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("std configured session keeps daemon-independent Rin tools usable without daemon", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-std-runtime-"));
   const agentDir = path.join(root, "agent");

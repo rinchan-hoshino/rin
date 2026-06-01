@@ -95,6 +95,7 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "../rin-frontend-sdk/frontend-identity.js";
+import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import {
   enqueueChatOutboxPayload,
   type ChatOutboxPayload,
@@ -247,7 +248,7 @@ function parseInboundCommand(
   return { name, argsText };
 }
 
-export type ChatBridgeTurnPayload = {
+export type ChatBridgeTurnPayload = RinToolStartupOptions & {
   chatKey?: string;
   controllerKey?: string;
   affectChatBinding?: boolean;
@@ -942,6 +943,9 @@ export async function startChatBridge(
         sessionFile,
         sessionName: payload?.sessionName,
         managedSessionLeaf: payload?.managedSessionLeaf,
+        tools: payload?.tools,
+        excludeTools: payload?.excludeTools,
+        noTools: payload?.noTools,
         model: payload?.model,
         thinkingLevel: payload?.thinkingLevel,
         promptMeta: payload?.promptMeta,

@@ -185,6 +185,8 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.match(output, /--mode <mode>/);
   assert.match(output, /--chat-key <chatKey>/);
   assert.match(output, /--name <name>/);
+  assert.match(output, /--tools <tools>/);
+  assert.match(output, /--exclude-tools <tools>/);
   assert.match(output, /--yes/);
   assert.doesNotMatch(output, /--bind-chat-session/);
   assert.doesNotMatch(output, /\n\s+run\s+Run one non-interactive Rin turn/);
@@ -206,6 +208,8 @@ test("print help shows the Pi-style non-interactive CLI contract", () => {
   assert.match(output, /--print, -p/);
   assert.match(output, /--chat-key <chatKey>/);
   assert.match(output, /--name <name>/);
+  assert.match(output, /--tools, -t <tools>/);
+  assert.match(output, /--exclude-tools, -xt <tools>/);
   assert.doesNotMatch(output, /--bind-chat-session/);
 });
 
@@ -221,6 +225,10 @@ test("run parser supports Pi-style print, model, chatKey, json, timeout, and nam
       "telegram/1:2",
       "--name",
       "daily check",
+      "--tools",
+      "read,grep",
+      "--exclude-tools=grep",
+      "--no-builtin-tools",
       "--mode",
       "json",
       "--timeout",
@@ -237,6 +245,9 @@ test("run parser supports Pi-style print, model, chatKey, json, timeout, and nam
     provider: undefined,
     model: "openai/gpt-5.5",
     thinkingLevel: "low",
+    tools: ["read", "grep"],
+    excludeTools: ["grep"],
+    noTools: "builtin",
     chatKey: "telegram/1:2",
     outputMode: "json",
     timeoutMs: 12500,

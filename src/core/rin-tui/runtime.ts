@@ -11,6 +11,7 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
 import { createRinCapabilityDefinitions } from "../rin-lib/runtime.js";
+import { serializeRinToolStartupOptions } from "../rin-lib/tool-options.js";
 import webSearchModule from "../rin-web-search/index.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
@@ -159,6 +160,7 @@ function normalizeQueuedMessages(value: any) {
 
 function serializeRpcResourceOptions(options: TuiResourceOptions) {
   return {
+    ...serializeRinToolStartupOptions(options),
     additionalExtensionPaths: [...(options.additionalExtensionPaths || [])],
     noExtensions: options.noExtensions,
     extensionFlagValues: Array.from(
@@ -364,6 +366,7 @@ export class RpcInteractiveSession {
       ? { additionalExtensionPaths: extensionOptions }
       : extensionOptions;
     this.extensionOptions = {
+      ...serializeRinToolStartupOptions(normalizedExtensionOptions),
       additionalExtensionPaths: [
         ...(normalizedExtensionOptions.additionalExtensionPaths ?? []),
       ],

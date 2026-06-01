@@ -18,6 +18,7 @@ import {
 } from "../rin-frontend-sdk/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import { nowIso } from "../time-utils.js";
+import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import {
   readChatCommandResponses,
   resolveChatCommandResponses,
@@ -1259,7 +1260,7 @@ export class ChatController {
   }
 
   async runTurn(
-    input: {
+    input: RinToolStartupOptions & {
       text: string;
       attachments: SavedAttachment[];
       replyToMessageId?: string;
@@ -1304,6 +1305,9 @@ export class ChatController {
         restoreSessionFile,
         managedSessionLeaf,
         sessionName: input.sessionName,
+        tools: input.tools,
+        excludeTools: input.excludeTools,
+        noTools: input.noTools,
         resetModelOptionsFromSettings: true,
         promptContext: input.promptMeta,
         source: "chat-bridge",
@@ -1383,6 +1387,9 @@ export class ChatController {
           restoreSessionFile,
           managedSessionLeaf,
           sessionName: input.sessionName,
+          tools: input.tools,
+          excludeTools: input.excludeTools,
+          noTools: input.noTools,
           resetModelOptionsFromSettings: true,
           promptContext: input.promptMeta,
           source: "chat-bridge",

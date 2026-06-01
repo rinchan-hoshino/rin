@@ -92,10 +92,13 @@ test("tui launcher parses pi extension resource options without leaking paths in
       "theme.json",
       "--session-id",
       "exact-session",
+      "--tools",
+      "read,grep",
       "--exclude-tools",
       "bash,write",
       "-xt",
       "read",
+      "--no-builtin-tools",
       "--name",
       "startup-name",
       "--plan",
@@ -120,6 +123,9 @@ test("tui launcher parses pi extension resource options without leaking paths in
   assert.deepEqual(parsed.resources.additionalThemePaths, [
     path.join("/repo", "theme.json"),
   ]);
+  assert.deepEqual(parsed.resources.tools, ["read", "grep"]);
+  assert.deepEqual(parsed.resources.excludeTools, ["read"]);
+  assert.equal(parsed.resources.noTools, "builtin");
   assert.equal(parsed.resources.extensionFlagValues?.get("plan"), "strict");
   assert.equal(parsed.resources.extensionFlagValues?.has("session-id"), false);
   assert.equal(parsed.resources.extensionFlagValues?.has("name"), false);

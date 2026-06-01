@@ -4,6 +4,7 @@ import type {
 } from "../rin-lib/rpc-types.js";
 import type { RinFrontendIdentity } from "./frontend-identity.js";
 import type { PromptContextMeta } from "./prompt-context.js";
+import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 
 export type RinRpcCommand = {
   id?: string;
@@ -188,6 +189,7 @@ export type RinNewSessionOptions = {
   managedSessionLeaf?: string;
   parentSession?: string;
   frontendIdentity?: RinFrontendIdentity;
+  resourceOptions?: RinToolStartupOptions & Record<string, unknown>;
 };
 
 export type RinNewSessionResult = RinSessionState & {
@@ -235,6 +237,11 @@ export interface RinFrontendClient {
     options?: { frontendIdentity?: RinFrontendIdentity },
   ): Promise<void>;
   newSession(options?: RinNewSessionOptions): Promise<RinNewSessionResult>;
+  ensureSessionReady?(
+    restoreSessionFile?: string,
+    managedSessionLeaf?: string,
+    toolOptions?: RinToolStartupOptions,
+  ): Promise<RinSessionState>;
   listModels(): Promise<RinFrontendModelItem[]>;
   setModel(
     provider: string,
