@@ -4,7 +4,11 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "./frontend-identity.js";
-import type { RinFrontendClient, RinPromptOptions } from "./types.js";
+import type {
+  RinFrontendClient,
+  RinPromptContext,
+  RinPromptOptions,
+} from "./types.js";
 
 export type RinFrontendInputSubmissionGate = {
   isCompacting?: () => boolean;
@@ -21,7 +25,7 @@ export type RinFrontendPromptTurnInput = {
   frontendIdentity?: RinFrontendIdentity;
   requestTag?: string;
   streamingBehavior?: "steer" | "followUp";
-  promptContext?: unknown;
+  promptContext?: RinPromptContext;
   sessionFile?: string;
   sessionId?: string;
   gate?: RinFrontendInputSubmissionGate;

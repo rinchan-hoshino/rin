@@ -53,6 +53,16 @@ test("rpc frontend reports Starting during initial TUI startup", () => {
   });
 });
 
+test("rpc session manager exposes Pi persistence helpers", () => {
+  const session = new RpcInteractiveSession(createClient());
+
+  assert.equal(session.sessionManager.isPersisted(), false);
+  assert.equal(session.sessionManager.usesDefaultSessionDir(), false);
+
+  session.sessionFile = "/tmp/demo-session.jsonl";
+  assert.equal(session.sessionManager.isPersisted(), true);
+});
+
 test("rpc frontend stays idle while loading resume sessions", async () => {
   const pending = deferred();
   const session = new RpcInteractiveSession(

@@ -15,7 +15,7 @@ import {
 import {
   injectPromptContextHeader,
   type PromptContextMeta,
-} from "../chat-bridge/prompt-context.js";
+} from "../rin-frontend-sdk/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import { nowIso } from "../time-utils.js";
 import {

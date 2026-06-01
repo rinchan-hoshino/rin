@@ -69,6 +69,13 @@ export {
 } from "./frontend-identity.js";
 
 export {
+  formatPromptContext,
+  formatPromptContextSystemPromptBlock,
+  injectPromptContextHeader,
+  type PromptContextMeta,
+} from "./prompt-context.js";
+
+export {
   handleRinRpcSessionEvent,
   type RinRpcSessionEventRefresh,
   type RinRpcSessionEventTarget,

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   formatPromptContext,
   formatPromptContextSystemPromptBlock,
-} from "../../src/core/chat-bridge/prompt-context.js";
+} from "../../src/core/rin-frontend-sdk/prompt-context.js";
 import { appendPromptContextSystemPrompt } from "../../src/core/rin-lib/runtime.js";
 
 test("chat prompt context leaves user text clean and moves metadata to system block", () => {
@@ -62,16 +62,36 @@ test("chat prompt context includes reply id without quoted message payload", () 
   assert.equal(systemBlock.includes("  - content:"), false);
 });
 
-test("chat prompt context keeps scheduled-task-only metadata out of the system prompt", () => {
+test("scheduled task prompt context renders a task block without pretending to be chat", () => {
   const systemBlock = formatPromptContextSystemPromptBlock({
     source: "scheduled-task",
-    chatKey: "telegram/1:2",
-    taskId: "cron_current_session",
-    taskName: "Current Session Follow-up",
-    scheduledTaskInitiator: "agent",
+    taskId: "cron_demo",
+    taskName: "Demo Task",
+    taskContextKind: "scheduled-task",
   });
 
-  assert.equal(systemBlock, "");
+  assert.ok(systemBlock.includes("Scheduled task context:"));
+  assert.ok(systemBlock.includes("- task id: cron_demo"));
+  assert.ok(systemBlock.includes("- task name: Demo Task"));
+  assert.equal(systemBlock.includes("runtime note:"), false);
+  assert.equal(systemBlock.includes("operational rule:"), false);
+  assert.equal(systemBlock.includes("Chat context:"), false);
+  assert.equal(systemBlock.includes("Chat binding context:"), false);
+});
+
+test("scheduled task prompt context can describe a non-chat frontend binding", () => {
+  const systemBlock = formatPromptContextSystemPromptBlock({
+    source: "scheduled-task",
+    taskId: "cron_frontend_bound",
+    taskContextKind: "scheduled-task",
+    frontend: { kind: "gui", key: "desktop/main" },
+  });
+
+  assert.ok(systemBlock.includes("Scheduled task context:"));
+  assert.ok(systemBlock.includes("Frontend binding context:"));
+  assert.ok(systemBlock.includes("- frontend kind: gui"));
+  assert.ok(systemBlock.includes("- frontend key: desktop/main"));
+  assert.equal(systemBlock.includes("Chat binding context:"), false);
 });
 
 test("chat prompt context does not rewrite sender-authored header-shaped text", () => {

@@ -98,7 +98,7 @@ jobs:
             git -C "$bootstrap_dir" checkout --orphan "$bootstrap_branch"
             git -C "$bootstrap_dir" remote add origin "$remote_url"
           fi
-          npx --yes tsx scripts/release/export-bootstrap-branch.ts --output "$bootstrap_dir" --branch "$bootstrap_branch"
+          npm run release:bootstrap -- --output "$bootstrap_dir" --branch "$bootstrap_branch"
           git -C "$bootstrap_dir" config user.name 'github-actions[bot]'
           git -C "$bootstrap_dir" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git -C "$bootstrap_dir" add .

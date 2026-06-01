@@ -400,6 +400,8 @@ export class RpcInteractiveSession {
     this.sessionManager = {
       getSessionFile: () => this.sessionFile,
       getSessionId: () => this.sessionId,
+      isPersisted: () => Boolean(this.sessionFile),
+      usesDefaultSessionDir: () => false,
       getHeader: () => null,
       getEntry: (id: string) => this.entryById.get(id),
       getLabel: (id: string) => this.labelsById.get(id),

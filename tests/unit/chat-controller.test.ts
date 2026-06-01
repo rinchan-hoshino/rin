@@ -2618,7 +2618,6 @@ test("chat controller sends a session-file prompt through conversation binding",
     sessionFile,
     promptMeta: {
       source: "scheduled-task",
-      scheduledTaskInitiator: "agent",
       taskId: "cron_current_session",
     },
   });
@@ -2673,7 +2672,6 @@ test("chat controller can run a session-file prompt without final delivery", asy
     deliverFinal: false,
     promptMeta: {
       source: "scheduled-task",
-      scheduledTaskInitiator: "agent",
       taskId: "cron_silent_current_session",
     },
   });

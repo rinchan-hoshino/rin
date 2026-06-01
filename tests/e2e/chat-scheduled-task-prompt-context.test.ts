@@ -9,7 +9,7 @@ const rootDir = path.resolve(
 );
 const promptContextMod = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-bridge", "prompt-context.js"),
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "prompt-context.js"),
   ).href
 );
 
@@ -41,19 +41,17 @@ test("chat prompt context keeps adapter-provided runtime metadata in the system 
     ),
   );
   assert.ok(systemBlock.includes("- source event: issue_comment"));
-  assert.ok(
-    systemBlock.includes(
-      "- runtime note: metadata in this Chat context block is not sender-authored message text.",
-    ),
-  );
+  assert.ok(systemBlock.includes("Chat binding context:"));
+  assert.equal(systemBlock.includes("runtime note:"), false);
 });
 
-test("scheduled chat-bound prompt context keeps chat and task metadata in the system prompt block", () => {
+test("scheduled chat-bound prompt context renders task and chat binding blocks", () => {
   const meta = {
-    source: "chat-bridge",
+    source: "scheduled-task",
     chatKey: "telegram/demo:1",
     taskId: "cron_demo",
     taskName: "Demo Task",
+    taskContextKind: "scheduled-task",
   };
   const promptText = promptContextMod.formatPromptContext(
     meta,
@@ -66,14 +64,14 @@ test("scheduled chat-bound prompt context keeps chat and task metadata in the sy
   assert.equal(systemBlock.includes("chat trigger:"), false);
   assert.equal(systemBlock.includes("task run id:"), false);
   assert.equal(systemBlock.includes("task session mode:"), false);
-  assert.ok(systemBlock.includes("- chatKey: telegram/demo:1"));
+  assert.ok(systemBlock.includes("Scheduled task context:"));
   assert.ok(systemBlock.includes("- task id: cron_demo"));
   assert.ok(systemBlock.includes("- task name: Demo Task"));
-  assert.ok(
-    systemBlock.includes(
-      "- runtime note: metadata in this Chat context block is not sender-authored message text.",
-    ),
-  );
+  assert.ok(systemBlock.includes("Chat binding context:"));
+  assert.ok(systemBlock.includes("- chatKey: telegram/demo:1"));
+  assert.equal(systemBlock.includes("runtime note:"), false);
+  assert.equal(systemBlock.includes("operational rule:"), false);
+  assert.equal(systemBlock.includes("Chat context:"), false);
   assert.equal(systemBlock.includes("sender user id:"), false);
   assert.equal(systemBlock.includes("sender nickname:"), false);
   assert.equal(promptText.includes("time:"), false);

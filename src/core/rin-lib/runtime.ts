@@ -34,7 +34,7 @@ import {
 import { compileSelfImproveSync } from "../self-improve/store.js";
 import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
-import { formatPromptContextSystemPromptBlock } from "../chat-bridge/prompt-context.js";
+import { formatPromptContextSystemPromptBlock } from "../rin-frontend-sdk/prompt-context.js";
 
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 

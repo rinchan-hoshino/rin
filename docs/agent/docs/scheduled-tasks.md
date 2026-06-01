@@ -236,7 +236,7 @@ Requirements enforced by the scheduler:
 - `session.sessionFile` must point to an existing stored session with a chat binding.
 - Set root `deliverFinal: false` when the inserted turn should update the session without automatically posting its final text to chat.
 
-Runtime prompt metadata marks this as an agent-initiated scheduled task without adding task metadata to the normal system prompt.
+Rin inserts the follow-up into the existing session without scheduled-task prompt-context injection.
 
 ## Targets and delivery
 

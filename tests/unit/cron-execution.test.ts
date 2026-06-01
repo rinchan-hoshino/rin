@@ -231,6 +231,7 @@ test("cron dedicated agent task creates and then preserves its bound session", a
       ],
     );
     assert.equal(calls[0].promptMeta?.taskId, "cron_dedicated");
+    assert.equal(calls[0].promptMeta?.taskContextKind, "scheduled-task");
     assert.equal("triggerKind" in (calls[0].promptMeta || {}), false);
     assert.equal("taskRunId" in (calls[0].promptMeta || {}), false);
     assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
@@ -308,6 +309,7 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
       },
     );
     assert.equal(calls[0].promptMeta?.taskId, "cron_seeded");
+    assert.equal(calls[0].promptMeta?.taskContextKind, "scheduled-task");
     assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -410,6 +412,7 @@ test("cron frontend-bound no-session agent task uses frontend controller without
     });
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_frontend_bound");
+    assert.equal(calls[0].promptMeta?.taskContextKind, "scheduled-task");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -493,9 +496,11 @@ test("cron chat-bound no-session agent task preserves session file for quote res
       await fs.readFile(transientSessionFile, "utf8"),
       "temporary session",
     );
+    assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_chat_bound");
     assert.equal(calls[0].shutdownAfterTurn, true);
     assert.equal(calls[0].promptMeta?.taskName, "Chat Bound Task");
+    assert.equal(calls[0].promptMeta?.taskContextKind, "scheduled-task");
     assert.equal("triggerKind" in (calls[0].promptMeta || {}), false);
     assert.equal("taskRunId" in (calls[0].promptMeta || {}), false);
     assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
@@ -581,10 +586,7 @@ test("cron current-session instruction derives chat binding from session file me
         thinkingLevel: "low",
       },
     );
-    assert.equal(calls[0].promptMeta?.source, "scheduled-task");
-    assert.equal(calls[0].promptMeta?.taskId, "cron_current_session");
-    assert.equal(calls[0].promptMeta?.taskName, "Current Session Follow-up");
-    assert.equal(calls[0].promptMeta?.scheduledTaskInitiator, "agent");
+    assert.equal(calls[0].promptMeta, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

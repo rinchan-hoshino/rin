@@ -87,7 +87,7 @@ import {
   listChatRuntimeAdapterEntries,
 } from "./runtime-config.js";
 import { composeChatKey, loadIdentity, trustOf } from "./support.js";
-import type { PromptContextMeta } from "../chat-bridge/prompt-context.js";
+import type { PromptContextMeta } from "../rin-frontend-sdk/prompt-context.js";
 import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,

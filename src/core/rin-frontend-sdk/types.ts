@@ -3,6 +3,7 @@ import type {
   RinRpcResponseEnvelope,
 } from "../rin-lib/rpc-types.js";
 import type { RinFrontendIdentity } from "./frontend-identity.js";
+import type { PromptContextMeta } from "./prompt-context.js";
 
 export type RinRpcCommand = {
   id?: string;
@@ -193,22 +194,7 @@ export type RinNewSessionResult = RinSessionState & {
   cancelled?: boolean;
 };
 
-export type RinPromptContext = {
-  source?: string;
-  sentAt?: number;
-  chatKey?: string;
-  chatName?: string;
-  chatType?: string;
-  userId?: string;
-  nickname?: string;
-  groupNickname?: string;
-  identity?: string;
-  replyToMessageId?: string;
-  taskId?: string;
-  taskName?: string;
-  scheduledTaskInitiator?: string;
-  attachedFiles?: Array<{ name?: string; path?: string }>;
-};
+export type RinPromptContext = PromptContextMeta;
 
 export type RinPromptOptions = {
   images?: unknown[];

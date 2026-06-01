@@ -199,27 +199,13 @@ function buildCronTaskPromptContext(task: CronTaskRecord) {
   const taskName = String(task.name || "").trim();
   const frontend = resolveCronTaskFrontend(task);
   return {
-    source: frontend?.kind === "chat" ? "chat-bridge" : "scheduled-task",
+    source: "scheduled-task",
     sentAt: Date.now(),
     ...(frontend?.kind === "chat" ? { chatKey: frontend.key } : {}),
     frontend,
     taskId: task.id,
     taskName: taskName || undefined,
-  };
-}
-
-function buildCronSessionInstructionPromptContext(
-  task: CronTaskRecord,
-  chatKey: string,
-) {
-  const taskName = String(task.name || "").trim();
-  return {
-    source: "scheduled-task",
-    sentAt: Date.now(),
-    chatKey,
-    taskId: task.id,
-    taskName: taskName || undefined,
-    scheduledTaskInitiator: "agent",
+    taskContextKind: "scheduled-task",
   };
 }
 
@@ -425,7 +411,6 @@ export async function executeCronSessionInstructionTask(
     sessionFile,
     ...(task.model ? { model: task.model } : {}),
     ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
-    promptMeta: buildCronSessionInstructionPromptContext(task, chatKey),
   });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
