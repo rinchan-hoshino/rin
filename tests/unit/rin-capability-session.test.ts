@@ -109,6 +109,38 @@ test("Rin context hooks transform provider-bound messages after Pi emitContext",
   ]);
 });
 
+test("Rin compaction hook errors propagate instead of falling back to Pi summarization", async () => {
+  const recorded: any[] = [];
+  const capabilitySet = capabilitySession.createRinCapabilitySet({
+    cwd: "/tmp/rin-capability-session-test",
+    agentDir: "/tmp/rin-capability-session-test",
+    sessionManager: {
+      appendCustomEntry(type: string, data: any) {
+        recorded.push({ type, data });
+      },
+    },
+    definitions: [
+      {
+        name: "demo_failing_compaction",
+        hooks: {
+          session_before_compact: [
+            async () => {
+              throw new Error("summary failed");
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  await assert.rejects(
+    () => capabilitySet.emit({ type: "session_before_compact" }),
+    /summary failed/,
+  );
+  assert.equal(recorded[0].type, "rin_core_capability_error");
+  assert.equal(recorded[0].data.event, "session_before_compact");
+});
+
 test("Rin compaction hooks are exposed through Pi's native before-compact span", async () => {
   const calls: string[] = [];
   const capabilitySet = capabilitySession.createRinCapabilitySet({

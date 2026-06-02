@@ -93,6 +93,48 @@ test("Rin percent compaction defaults to 85 percent", async () => {
   assert.equal(autoCompactions, 1);
 });
 
+test("Rin percent compaction respects the earlier Pi reserve-token threshold", async () => {
+  let contextTokens = 799;
+  const calls: string[] = [];
+  const session = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85, reserveTokens: 200 };
+      },
+    },
+    model: { contextWindow: 1000 },
+    sessionManager: {
+      getBranch() {
+        return [];
+      },
+    },
+    async _checkCompaction() {
+      return false;
+    },
+    async _runAutoCompaction(reason: string, retry: boolean) {
+      calls.push(`${reason}:${retry}`);
+      return "compacted";
+    },
+  };
+
+  runtimeMod.applyRinCompactionPercentThreshold(session, {
+    calculateContextTokens: () => contextTokens,
+    estimateContextTokens: () => ({ tokens: contextTokens }),
+    getLatestCompactionEntry: () => undefined,
+  });
+
+  assert.equal(
+    await session._checkCompaction({ timestamp: Date.now() }),
+    false,
+  );
+  contextTokens = 800;
+  assert.equal(
+    await session._checkCompaction({ timestamp: Date.now() }),
+    "compacted",
+  );
+  assert.deepEqual(calls, ["threshold:false"]);
+});
+
 test("Rin percent compaction estimates error fallback from pruned context", async () => {
   let autoCompactions = 0;
   let nativeChecks = 0;
@@ -191,6 +233,175 @@ test("Rin context usage reports the pruned provider-bound estimate", () => {
     contextWindow: 1000,
     percent: 1,
   });
+});
+
+test("Rin 85% provider preflight calls Pi overflow auto-compaction before the provider call", async () => {
+  const calls: string[] = [];
+  const transformInputs: any[][] = [];
+  const originalMessages = [
+    { role: "user", content: "turn 1" },
+    { role: "toolResult", content: "huge old output" },
+    { role: "assistant", content: "done 1" },
+    { role: "user", content: "turn 2" },
+    { role: "assistant", content: "done 2" },
+    { role: "user", content: "turn 3" },
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    { role: "assistant", content: "done 4" },
+    { role: "user", content: "turn 5" },
+    { role: "toolResult", content: "fresh tool output" },
+  ];
+  const compactedMessages = [
+    { role: "compactionSummary", summary: "summary" },
+    { role: "user", content: "turn 5" },
+    { role: "toolResult", content: "fresh tool output" },
+  ];
+  const session: any = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1000 },
+    get isCompacting() {
+      return false;
+    },
+    agent: {
+      state: { messages: originalMessages },
+      transformContext: async (messages: any[]) => {
+        transformInputs.push(messages);
+        return messages.some((message) => message.content === "huge old output")
+          ? messages.map((message) =>
+              message.content === "huge old output"
+                ? { ...message, content: "[old tool result omitted]" }
+                : message,
+            )
+          : messages;
+      },
+    },
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: session.agent.state.messages };
+      },
+    },
+    async _runAutoCompaction(reason: string, willRetry: boolean) {
+      calls.push(`${reason}:${willRetry}`);
+      this.agent.state.messages = compactedMessages;
+      return true;
+    },
+  };
+
+  runtimeMod.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: (messages: any[]) => ({
+      tokens: messages.some((message) => message.summary === "summary")
+        ? 10
+        : 900,
+    }),
+  });
+
+  const loopMessages = originalMessages.slice();
+  const providerMessages = await session.agent.transformContext(loopMessages);
+
+  assert.deepEqual(calls, ["overflow:true"]);
+  assert.deepEqual(loopMessages, compactedMessages);
+  assert.equal(providerMessages, compactedMessages);
+  assert.equal(transformInputs.length, 2);
+  assert.equal(
+    session.agent.state.messages.some(
+      (message: any) => message.stopReason === "error",
+    ),
+    false,
+  );
+});
+
+test("Rin 85% provider preflight can run again after a new tail message", async () => {
+  const calls: string[] = [];
+  const firstTail = { role: "toolResult", content: "first huge output" };
+  const secondTail = { role: "toolResult", content: "second huge output" };
+  const firstMessages = [
+    { role: "user", content: "old" },
+    { role: "assistant", content: "done" },
+    { role: "user", content: "current" },
+    firstTail,
+  ];
+  const secondMessages = [{ role: "user", content: "current" }, secondTail];
+  const compactedMessages = [{ role: "user", content: "kept" }];
+  const session: any = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1000 },
+    get isCompacting() {
+      return false;
+    },
+    agent: {
+      state: { messages: firstMessages },
+      transformContext: async (nextMessages: any[]) => nextMessages,
+    },
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: session.agent.state.messages };
+      },
+    },
+    async _runAutoCompaction(reason: string, willRetry: boolean) {
+      calls.push(`${reason}:${willRetry}`);
+      this.agent.state.messages = compactedMessages;
+      return true;
+    },
+  };
+
+  runtimeMod.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: (messages: any[]) => ({
+      tokens: messages === compactedMessages ? 10 : 900,
+    }),
+  });
+
+  await session.agent.transformContext(firstMessages);
+  session.agent.state.messages = secondMessages;
+  await session.agent.transformContext(secondMessages);
+
+  assert.deepEqual(calls, ["overflow:true", "overflow:true"]);
+});
+
+test("Rin 85% provider preflight does not compact from an assistant-final context", async () => {
+  const calls: string[] = [];
+  const messages = [
+    { role: "user", content: "turn" },
+    { role: "assistant", content: "final", stopReason: "stop" },
+  ];
+  const session: any = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1000 },
+    get isCompacting() {
+      return false;
+    },
+    agent: {
+      state: { messages },
+      transformContext: async (nextMessages: any[]) => nextMessages,
+    },
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: session.agent.state.messages };
+      },
+    },
+    async _runAutoCompaction(reason: string, willRetry: boolean) {
+      calls.push(`${reason}:${willRetry}`);
+      return true;
+    },
+  };
+
+  runtimeMod.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: () => ({ tokens: 900 }),
+  });
+
+  assert.equal(await session.agent.transformContext(messages), messages);
+  assert.deepEqual(calls, []);
 });
 
 test("runtime session shutdown emits Rin capability hooks without extension-runner bridging", async () => {
@@ -310,6 +521,59 @@ test("applyAutoReloadAfterCompaction queues one extra reload while a reload is i
   await waitForTimers();
   await waitForTimers();
   assert.equal(reloadCount, 2);
+});
+
+test("Rin compaction summary chunks oversized history before calling the model", async () => {
+  const prompts = [];
+  const result = await runtimeMod.completeRinCompactionSummaryBudgeted({
+    model: { contextWindow: 1200, maxTokens: 200 },
+    messages: Array.from({ length: 6 }, (_, index) => ({
+      role: "user",
+      text: `message-${index} ${"x".repeat(500)}`,
+    })),
+    instruction: "Summarize.",
+    maxTokens: 100,
+    promptBudgetTokens: 220,
+    serializeMessages: (messages) =>
+      messages.map((message) => message.text).join("\n"),
+    completeSummary: async ({ promptText }) => {
+      prompts.push(promptText);
+      return `summary-${prompts.length}`;
+    },
+  });
+
+  assert.equal(result, `summary-${prompts.length}`);
+  assert.ok(prompts.length > 1);
+  for (const prompt of prompts) {
+    assert.ok(
+      runtimeMod.estimateRinCompactionTextTokens(prompt) <= 220,
+      `prompt exceeded budget: ${runtimeMod.estimateRinCompactionTextTokens(prompt)}`,
+    );
+  }
+});
+
+test("Rin compaction summary truncates a single oversized serialized message to the prompt budget", async () => {
+  const prompts = [];
+  await runtimeMod.completeRinCompactionSummaryBudgeted({
+    model: { contextWindow: 1200, maxTokens: 200 },
+    messages: [{ role: "user", text: "x".repeat(2000) }],
+    instruction: "Summarize.",
+    maxTokens: 100,
+    promptBudgetTokens: 180,
+    serializeMessages: (messages) =>
+      messages.map((message) => message.text).join("\n"),
+    completeSummary: async ({ promptText }) => {
+      prompts.push(promptText);
+      return "summary";
+    },
+  });
+
+  assert.equal(prompts.length, 1);
+  assert.ok(
+    runtimeMod.estimateRinCompactionTextTokens(prompts[0]) <= 180,
+    `prompt exceeded budget: ${runtimeMod.estimateRinCompactionTextTokens(prompts[0])}`,
+  );
+  assert.match(prompts[0], /truncated to fit compaction summarization budget/);
 });
 
 test("manual compaction waits for refresh before returning", async () => {

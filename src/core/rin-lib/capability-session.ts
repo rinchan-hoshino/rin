@@ -221,13 +221,15 @@ export function createRinCapabilitySet(options: {
     },
     async emit(event: any) {
       const ctx = createContext();
+      const eventName = String(event?.type || "");
       let result: any = undefined;
-      for (const handler of handlers.get(String(event?.type || "")) || []) {
+      for (const handler of handlers.get(eventName) || []) {
         try {
           const handlerResult = await handler(event, ctx);
           if (handlerResult) result = handlerResult;
         } catch (error: any) {
-          emitHandlerError(String(event?.type || "event"), error);
+          emitHandlerError(eventName || "event", error);
+          if (eventName === "session_before_compact") throw error;
         }
       }
       return result;

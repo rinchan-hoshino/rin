@@ -78,12 +78,33 @@ export function pruneSessionContextMessages(
   return changed ? pruned : list;
 }
 
-export function pruneSessionContextEvent(
-  event: any,
+export function mapMessagesToPrunedSessionContext(
+  messages: any[],
+  fullContextMessages: any[],
   options: SessionPruningOptions = {},
 ) {
-  if (!Array.isArray(event?.messages)) return undefined;
-  const messages = pruneSessionContextMessages(event.messages, options);
-  if (messages === event.messages) return undefined;
-  return { messages };
+  const list = Array.isArray(messages) ? messages : [];
+  const fullList = Array.isArray(fullContextMessages)
+    ? fullContextMessages
+    : [];
+  if (!list.length || !fullList.length) return list;
+
+  const prunedFullList = pruneSessionContextMessages(fullList, options);
+  if (prunedFullList === fullList) return list;
+
+  const replacements = new Map<any, any>();
+  fullList.forEach((message, index) => {
+    const replacement = prunedFullList[index];
+    if (replacement !== message) replacements.set(message, replacement);
+  });
+  if (!replacements.size) return list;
+
+  let changed = false;
+  const mapped = list.map((message) => {
+    const replacement = replacements.get(message);
+    if (!replacement) return message;
+    changed = true;
+    return replacement;
+  });
+  return changed ? mapped : list;
 }

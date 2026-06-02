@@ -57,6 +57,28 @@ test("tui stats compute session stats from entries", () => {
   assert.equal(emptyResult.tokens.total, 0);
 });
 
+test("tui stats get context usage estimates the pruned provider-bound context", () => {
+  const usage = stats.getContextUsage(
+    { contextWindow: 1000 },
+    [
+      { role: "user", content: "turn 1" },
+      { role: "toolResult", content: "x".repeat(4000) },
+      { role: "assistant", content: "done 1" },
+      { role: "user", content: "turn 2" },
+      { role: "assistant", content: "done 2" },
+      { role: "user", content: "turn 3" },
+      { role: "assistant", content: "done 3" },
+      { role: "user", content: "turn 4" },
+      { role: "assistant", content: "done 4" },
+      { role: "user", content: "turn 5" },
+      { role: "assistant", content: "done 5" },
+    ],
+    [],
+  );
+
+  assert.ok(usage.tokens < 100, `tokens=${usage.tokens}`);
+});
+
 test("tui stats get context usage preserves post-compaction unknown state", () => {
   const expected = {
     tokens: null,

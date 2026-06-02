@@ -1,6 +1,7 @@
 import { asArray } from "../json-utils.js";
 import { countToolCalls } from "../message-content.js";
 import { readUsageMetrics } from "../usage-metrics.js";
+import { buildProviderBoundContextMessages } from "../rin-lib/provider-context.js";
 import {
   calculateContextTokens,
   estimateContextTokens,
@@ -38,7 +39,8 @@ export function getContextUsage(model: any, messages: any[], branch: any[]) {
     }
   }
 
-  const tokens = Number(estimateContextTokens(nextMessages) || 0);
+  const providerMessages = buildProviderBoundContextMessages(nextMessages);
+  const tokens = Number(estimateContextTokens(providerMessages) || 0);
   return { tokens, contextWindow, percent: (tokens / contextWindow) * 100 };
 }
 
