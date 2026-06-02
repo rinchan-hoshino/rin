@@ -6,8 +6,9 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
 
 - Core Rin capabilities are available through native product code when their tools are present in the live tool list.
 - The core todo capability is always enabled and registers the `todo` tool plus `/todos` command.
-- Built-in optional extensions are packaged with Rin and are controlled through `settings.json -> extensions` with their `rin:` aliases.
+- Rin ships `rin:web-search` as the optional bundled Pi extension alias; it is controlled through `settings.json -> extensions`.
 - Fresh installs enable `rin:web-search` by default; existing installs keep their current settings until changed.
+- Rin does not ship bundled Browser Use or Computer Use extensions. For those tasks, use the live tool list first, then read `practices/browser-use.md` or `practices/computer-use.md`.
 - Background extensions run in Rin's background runtime and are not Pi session tools.
 - The current tool list and system prompt remain authoritative for a specific turn.
 
@@ -51,13 +52,11 @@ Rin's todo support is native core behavior, not a Pi extension.
 
 ## Bundled optional Pi extensions
 
-Rin ships optional web search and browser/computer control as normal Pi extension packages under the installed app. They are "built in" in the packaging sense: the code is included with the Rin installation, while settings decide which entries are active.
-
-Installed settings can use Rin aliases instead of installation-specific paths:
+Rin currently ships one optional foreground Pi extension alias:
 
 ```json
 {
-  "extensions": ["rin:web-search", "rin:browser-use", "rin:computer-use"]
+  "extensions": ["rin:web-search"]
 }
 ```
 
@@ -66,67 +65,26 @@ Installed settings can use Rin aliases instead of installation-specific paths:
   - registers `web_search`
   - gets pages directly when `q` is an HTTP(S) URL
   - uses Rin-managed SearXNG for search queries; fresh install enables this alias and prepares the SearXNG runtime, while manual enablement prepares it best-effort
-- `rin:browser-use`
-  - expands to the bundled `extensions/rin-browser-use` Pi package
-  - registers `browser_use`
-  - always drives the external `agent-browser` CLI
-  - reads optional configuration from `~/.rin/extensions/rin-browser-use.json`
-  - otherwise works out of the box with `agent-browser` from `PATH`, then falls back to `npx -y agent-browser`
-- `rin:computer-use`
-  - expands to the bundled `extensions/rin-computer-use` Pi package
-  - registers `computer_use`
-  - reads optional configuration from `~/.rin/extensions/rin-computer-use.json`
-  - otherwise works out of the box with platform backends: PowerShell/.NET on Windows, `screencapture` + `osascript`/`cliclick` on macOS, and screenshot tools + `xdotool` on Linux
-  - may install `cliclick` through Homebrew only when `allowInstall` is `true` in the extension config file
-
-Optional extension configuration uses Rin's extension-file convention. Rin does not create these files by default; create them only to override the open-box behavior.
-
-```jsonc
-// ~/.rin/extensions/rin-browser-use.json
-{
-  "command": "agent-browser",
-  "args": [],
-}
-```
-
-```jsonc
-// ~/.rin/extensions/rin-computer-use.json
-{
-  "adapter": {
-    "command": "my-computer-adapter",
-    "args": [],
-  },
-  "allowInstall": false,
-}
-```
 
 Use Pi resource filters with the alias to disable entries from a broader extension list:
 
 ```json
 {
-  "extensions": ["rin:browser-use", "rin:computer-use", "!rin:browser-use"]
+  "extensions": ["rin:web-search", "!rin:web-search"]
 }
 ```
 
 If `extensions` is missing or `[]`, `todo` stays on by default and optional extension tools are off for that runtime. Fresh installs write `rin:web-search` unless the installer selection disables it.
 
-### Enabling bundled browser/computer control
+### Browser and computer operation
 
-When a non-technical user asks to enable browser or computer control, edit their Rin `settings.json` rather than generating optional config files:
+Rin no longer includes bundled `rin:browser-use` or `rin:computer-use` aliases, packages, or default tools.
 
-```json
-{
-  "extensions": ["rin:browser-use", "rin:computer-use"]
-}
-```
-
-Keep the change minimal:
-
-- preserve existing `extensions` entries and append the needed `rin:` aliases if absent
-- do not create `~/.rin/extensions/rin-browser-use.json` or `~/.rin/extensions/rin-computer-use.json` unless the user needs a non-default command, adapter, timeout, or install policy
-- for `browser_use`, prefer the default path: use `agent-browser` from `PATH`, otherwise let the extension invoke latest `agent-browser` through `npx -y agent-browser`
-- for `computer_use`, inspect the host OS and install the smallest suitable native tool only when needed, such as `xdotool`/screenshot tools on Linux or `cliclick` on macOS; there is no adapter marketplace or curated adapter list to maintain
-- after changing extension settings, restart or reload the Rin session/daemon as appropriate so Pi resources are reloaded
+- Do not assume `browser_use` or `computer_use` exists unless it appears in the live tool list.
+- Do not add old `rin:browser-use` or `rin:computer-use` aliases to `settings.json`.
+- For browser automation patterns, read `practices/browser-use.md`.
+- For desktop automation patterns, read `practices/computer-use.md`.
+- If a user supplies a trusted third-party Pi extension for browser or computer control, configure it as a normal extension path/package under Pi's native extension rules, not as a Rin built-in alias.
 
 ## Background extensions
 

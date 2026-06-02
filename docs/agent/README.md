@@ -14,6 +14,7 @@ For Rin-specific behavior, these docs sit above upstream Pi docs.
 
 - `README.md`: entrypoint for Rin agent documentation.
 - `docs/`: agent-facing topic docs and Rin-over-Pi override guides.
+- `practices/`: recommended operating practices for environment-specific work.
 
 Developer-only architecture, testing, GUI, and release workflow documentation lives in `docs/developer/` in the repository source and is not installed as agent guidance.
 
@@ -37,6 +38,9 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 - `docs/scheduled-tasks.md`: scheduled task creation, inspection, update, deletion, and verification workflows.
 - `docs/chat-bridge.md`: chat bridge SDK/configuration workflows, stored chat paths, and adapter notes.
 - `docs/rich-text-output-format.md`: native mention, quote, attachment, and fallback syntax for rich outputs.
+- `practices/`: practice index for environment-specific work.
+- `practices/browser-use.md`: browser automation patterns for headless/headful and local/remote work.
+- `practices/computer-use.md`: desktop automation patterns for Linux, Windows, macOS, and local/remote work.
 
 ## Reading order
 
@@ -44,7 +48,8 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 2. Read `docs/execution-environment.md` to understand the current agent runtime and loop.
 3. Read `docs/pi-overrides.md` before relying on upstream Pi docs.
 4. Read the relevant topic entrypoint in `docs/`.
-5. Consult upstream Pi docs only as needed.
+5. Read the relevant practice page in `practices/` when the task needs browser or desktop operation.
+6. Consult upstream Pi docs only as needed.
 
 ## Notes
 

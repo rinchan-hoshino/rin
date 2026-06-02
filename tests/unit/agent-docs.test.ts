@@ -23,9 +23,14 @@ test("agent docs expose scheduled task operation workflow", () => {
   const nonInteractiveCli = readAgentDoc("docs/non-interactive-cli.md");
   const scheduledTasks = readAgentDoc("docs/scheduled-tasks.md");
   const agentSdk = readAgentDoc("docs/agent-sdk.md");
+  const practiceIndex = readAgentDoc("practices/README.md");
+  const browserUsePractice = readAgentDoc("practices/browser-use.md");
+  const computerUsePractice = readAgentDoc("practices/computer-use.md");
 
   assert.match(readme, /docs\/agent-sdk\.md/);
   assert.match(readme, /docs\/scheduled-tasks\.md/);
+  assert.match(readme, /practices\/browser-use\.md/);
+  assert.match(readme, /practices\/computer-use\.md/);
   assert.match(capabilities, /agent-sdk\.md/);
   assert.match(capabilities, /scheduled-tasks\.md/);
   assert.match(builtinCapabilities, /agent-sdk\.md/);
@@ -38,6 +43,18 @@ test("agent docs expose scheduled task operation workflow", () => {
     /do not assume a `run_subagent` tool exists/,
   );
   assert.doesNotMatch(builtinCapabilities, /provides `run_subagent`/);
+  assert.match(builtinCapabilities, /does not ship bundled Browser Use/);
+  assert.match(capabilities, /does not ship bundled `browser_use`/);
+
+  assert.match(practiceIndex, /# Practices/);
+  assert.doesNotMatch(practiceIndex, /Best Practices/i);
+  assert.match(browserUsePractice, /headless/);
+  assert.match(browserUsePractice, /headful/);
+  assert.match(browserUsePractice, /Remote browser use/);
+  assert.match(computerUsePractice, /Local Linux/);
+  assert.match(computerUsePractice, /Local Windows/);
+  assert.match(computerUsePractice, /Local macOS/);
+  assert.match(computerUsePractice, /Remote computer use/);
 
   for (const helper of [
     "rin.tasks.list",

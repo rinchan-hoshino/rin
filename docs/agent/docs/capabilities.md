@@ -13,7 +13,7 @@ Use this page as a quick entrypoint for Rin runtime capabilities. Follow the sys
 - **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, manual run-now starts, recurring agent automation, and conditional periodic checks. Scheduled tasks can include agent-authored TypeScript `condition` code; when it returns false, Rin skips the target and schedules the next tick. Read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, running, completing, pausing, resuming, deleting, or configuring conditional execution.
 - **Chat bridge:** chat sender identity comes from the platform, not the shell user. Read `docs/chat-bridge.md` for SDK/file workflows and adapter behavior; read `docs/rich-text-output-format.md` for native output objects.
 - **Todo:** the core todo capability is always enabled; it registers the `todo` tool and `/todos` command.
-- **Optional browser/computer tools:** disabled unless `settings.json -> extensions` includes `rin:browser-use` or `rin:computer-use`.
+- **Browser/computer operation:** Rin does not ship bundled `browser_use` or `computer_use` tools. Trust the live tool list; otherwise use `practices/browser-use.md` or `practices/computer-use.md`.
 - **Web search:** use `web_search` proactively for fresh or version-sensitive facts; direct URL mode fetches a known page.
 - **Status and usage:** use `rin status` / `rin status --json` for daemon activity and `rin usage` for token telemetry.
 - **Stable docs:** prefer `~/.rin/docs/rin/`, `~/.rin/docs/pi/`, and `~/.rin/docs/release/` over versioned release paths.
@@ -62,48 +62,26 @@ Key points for agents:
 - `/chat` configures official adapters in the TUI and enters platform selection directly.
 - Official adapter setup should use the minimum runnable fields, prefer polling/socket modes when supported, avoid webhook-only setup when possible, and include direct official links for required values.
 
-## Core todo and bundled Pi extensions
+## Core todo and bundled web search
 
 Rin always enables the core todo capability. It registers the `todo` tool for branch-aware checklists and `/todos` for the interactive TUI view directly from core code. It stays enabled even when optional Pi extensions are disabled.
 
 In daemon/RPC chat turns, Rin can withhold a premature final answer when the todo list still contains incomplete items and continue hidden work automatically. Hidden continuations stop when todos complete, when the todo state does not change between continuations, or after 64 continuations.
 
-Rin also ships optional browser/computer control as normal Pi extension packages under the installed app. They are packaged with Rin but stay off until enabled:
+Rin ships `rin:web-search` as the bundled optional foreground Pi extension. Fresh installs enable it by default unless the installer selection disables it.
 
 ```json
 {
-  "extensions": ["rin:browser-use", "rin:computer-use"]
-}
-```
-
-Optional config files are only for non-default behavior:
-
-```jsonc
-// ~/.rin/extensions/rin-browser-use.json
-{
-  "command": "agent-browser",
-  "args": [],
-}
-```
-
-```jsonc
-// ~/.rin/extensions/rin-computer-use.json
-{
-  "adapter": {
-    "command": "my-computer-adapter",
-    "args": [],
-  },
-  "allowInstall": false,
+  "extensions": ["rin:web-search"]
 }
 ```
 
 Notes:
 
 - Core todo registers `todo` from core code and is always on.
-- `rin:browser-use` registers `browser_use`, drives the external `agent-browser` CLI, uses `agent-browser` from PATH by default, then falls back to `npx -y agent-browser`.
-- `rin:computer-use` registers `computer_use` and uses platform backends for Windows, Linux, or macOS by default.
-- Use Pi resource filters such as `!rin:browser-use` to disable a previously enabled bundled resource.
-- For non-technical users, edit `settings.json` directly and avoid optional config files unless a non-default command, adapter, timeout, or install policy is required.
+- `rin:web-search` registers `web_search`, fetches HTTP(S) URLs directly, and uses Rin-managed SearXNG for search queries.
+- Use Pi resource filters such as `!rin:web-search` to disable a previously enabled bundled resource.
+- Browser and desktop automation are no longer Rin bundled aliases; read `practices/browser-use.md` and `practices/computer-use.md` when those tasks are needed.
 - After changing extension settings, restart or reload Rin so resources are reloaded.
 
 ## Background extensions

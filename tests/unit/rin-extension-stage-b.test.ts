@@ -112,15 +112,7 @@ function extensionToolNames(loader: DefaultResourceLoader) {
     );
 }
 
-function findExtensionTool(loader: DefaultResourceLoader, name: string) {
-  for (const extension of loader.getExtensions().extensions as any[]) {
-    const tool = extension.tools.get(name);
-    if (tool) return tool.definition;
-  }
-  return undefined;
-}
-
-test("stage B browser and computer use extensions stay disabled by default", async () => {
+test("removed browser and computer use tools stay absent by default", async () => {
   for (const settings of [{}, { extensions: [] }]) {
     const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
     try {
@@ -269,7 +261,7 @@ test("core todo remains enabled when optional extensions are disabled", async ()
   const originalCwd = process.cwd();
   for (const scenario of [
     { settings: {}, options: { noExtensions: true } },
-    { settings: { extensions: ["!rin:browser-use"] }, options: {} },
+    { settings: { extensions: ["!rin:web-search"] }, options: {} },
   ]) {
     const agentDir = await fs.mkdtemp(
       path.join(os.tmpdir(), "rin-builtin-todo-on-"),
@@ -293,11 +285,11 @@ test("core todo remains enabled when optional extensions are disabled", async ()
   }
 });
 
-test("stage B built-in extension controls update settings aliases", async () => {
+test("stage B built-in extension controls update web search settings alias", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
   try {
     await writeJson(path.join(agentDir, "settings.json"), {
-      extensions: ["rin:browser-use"],
+      extensions: ["rin:web-search"],
     });
     const settingsManager = SettingsManager.create(agentDir, agentDir);
 
@@ -305,31 +297,36 @@ test("stage B built-in extension controls update settings aliases", async () => 
       builtInExtensionControls
         .listBuiltInRinExtensionStates(settingsManager)
         .map((entry: any) => [entry.id, entry.enabled]),
-      [
-        ["rin:web-search", false],
-        ["rin:browser-use", true],
-        ["rin:computer-use", false],
-      ],
+      [["rin:web-search", true]],
     );
 
-    await builtInExtensionControls.enableBuiltInRinExtension(
-      settingsManager,
-      "rin:computer-use",
-    );
     await builtInExtensionControls.disableBuiltInRinExtension(
       settingsManager,
-      "rin:browser-use",
+      "rin:web-search",
     );
     await settingsManager.flush();
 
     const saved = JSON.parse(
       await fs.readFile(path.join(agentDir, "settings.json"), "utf8"),
     );
-    assert.deepEqual(saved.extensions, ["rin:computer-use"]);
+    assert.deepEqual(saved.extensions ?? [], []);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
+
+for (const removedAlias of ["rin:browser-use", "rin:computer-use"]) {
+  test(`stage B removed built-in extension alias is not expanded: ${removedAlias}`, () => {
+    assert.equal(
+      bundledExtensions.resolveBundledRinExtensionPath(removedAlias),
+      "",
+    );
+    assert.equal(
+      bundledExtensions.expandBundledRinExtensionEntry(removedAlias),
+      removedAlias,
+    );
+  });
+}
 
 test("stage B built-in extension entrypoints stay self-contained", async () => {
   const extensionsDir = path.join(rootDir, "extensions");
@@ -362,99 +359,6 @@ test("stage B web search loads as an external built-in extension", async () => {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
-
-test("stage B browser and computer use load as external Pi extensions and honor native filters", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
-  try {
-    await writeJson(path.join(agentDir, "settings.json"), {
-      extensions: ["rin:browser-use", "rin:computer-use", "!rin:browser-use"],
-    });
-    const loader = await createExtensionLoader(agentDir);
-    const toolNames = extensionToolNames(loader);
-
-    assert.equal(toolNames.includes("browser_use"), false);
-    assert.equal(toolNames.includes("computer_use"), true);
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("stage B external browser and computer use tools execute through adapters", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
-  const browserAdapterPath = path.join(agentDir, "agent-browser-adapter.js");
-  const computerAdapterPath = path.join(agentDir, "computer-adapter.js");
-  const previousRinDir = process.env.RIN_DIR;
-  try {
-    await fs.writeFile(
-      browserAdapterPath,
-      `process.stdout.write(JSON.stringify({ agentBrowser: true, args: process.argv.slice(2) }));\n`,
-      "utf8",
-    );
-    await fs.writeFile(
-      computerAdapterPath,
-      `process.stdin.setEncoding("utf8");
-let input = "";
-process.stdin.on("data", (chunk) => input += chunk);
-process.stdin.on("end", () => {
-  const payload = JSON.parse(input || "{}");
-  process.stdout.write(JSON.stringify({ ok: true, action: payload.action }));
-});
-`,
-      "utf8",
-    );
-    await writeJson(path.join(agentDir, "settings.json"), {
-      extensions: ["rin:browser-use", "rin:computer-use"],
-    });
-    await writeJson(path.join(agentDir, "extensions", "rin-browser-use.json"), {
-      command: process.execPath,
-      args: [browserAdapterPath],
-    });
-    await writeJson(
-      path.join(agentDir, "extensions", "rin-computer-use.json"),
-      {
-        adapter: {
-          command: process.execPath,
-          args: [computerAdapterPath],
-        },
-      },
-    );
-    process.env.RIN_DIR = agentDir;
-    const loader = await createExtensionLoader(agentDir);
-    const browserTool = findExtensionTool(loader, "browser_use");
-    const computerTool = findExtensionTool(loader, "computer_use");
-    assert.ok(browserTool);
-    assert.ok(computerTool);
-
-    const browserResult = await browserTool.execute(
-      "tool-call-1",
-      { action: "status" },
-      undefined,
-      undefined,
-      { cwd: agentDir },
-    );
-    const computerResult = await computerTool.execute(
-      "tool-call-2",
-      { action: "key", key: "Return" },
-      undefined,
-      undefined,
-      { cwd: agentDir },
-    );
-
-    assert.match(browserResult.content[0].text, /browser_use status/);
-    assert.match(browserResult.content[0].text, /agentBrowser/);
-    assert.match(browserResult.content[0].text, /cdp-url/);
-    assert.match(computerResult.content[0].text, /computer_use key/);
-    assert.match(computerResult.content[0].text, /ok/);
-  } finally {
-    restoreEnv("RIN_DIR", previousRinDir);
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-function restoreEnv(name: string, value: string | undefined) {
-  if (value === undefined) delete process.env[name];
-  else process.env[name] = value;
-}
 
 test("stage B background extension manager stays lightweight without configured background extensions", () => {
   const script = `

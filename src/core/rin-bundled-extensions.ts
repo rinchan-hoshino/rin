@@ -3,10 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { safeString } from "./text-utils.js";
 
-export type BuiltInRinExtensionId =
-  | "rin:web-search"
-  | "rin:browser-use"
-  | "rin:computer-use";
+export type BuiltInRinExtensionId = "rin:web-search";
 
 export type BuiltInRinExtensionDefinition = {
   id: BuiltInRinExtensionId;
@@ -34,18 +31,6 @@ export const BUILT_IN_RIN_EXTENSIONS: BuiltInRinExtensionDefinition[] = [
         await import("./rin-web-search/service.js");
       await prepareSearxngRuntime(agentDir).catch(() => undefined);
     },
-  },
-  {
-    id: "rin:browser-use",
-    label: "Browser use",
-    description: "Adds the browser_use tool for Rin-owned browser automation.",
-    directory: "rin-browser-use",
-  },
-  {
-    id: "rin:computer-use",
-    label: "Computer use",
-    description: "Adds the computer_use tool for Rin-owned desktop automation.",
-    directory: "rin-computer-use",
   },
 ];
 
