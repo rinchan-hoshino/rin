@@ -27,6 +27,7 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 
 - `docs/execution-environment.md`: how to understand the current agent runtime and what to verify before acting.
 - `docs/session-awareness.md`: how to avoid racing parallel sessions by checking active/recent Rin sessions, processes, worktrees, and background tasks.
+- `docs/non-interactive-cli.md`: how to spawn isolated delegated child runs with managed sessions.
 - `docs/runtime-layout.md`: runtime layout, stable paths, launcher ownership, and paths safe for agents to reference.
 - `docs/builtin-extensions.md`: builtin capabilities and default extra capabilities provided by Rin core.
 - `docs/capabilities.md`: compact agent-facing behavior and conventions for Rin features.

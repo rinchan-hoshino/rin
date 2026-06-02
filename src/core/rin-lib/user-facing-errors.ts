@@ -382,11 +382,15 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rpc_turn_final_output_missing: () =>
     "Rin finished the turn without a final reply.",
 
+  run_managed_session_value_required: () =>
+    "Run command needs a managed session name. Provide a leaf such as subagent.",
   run_mode_value_required: () =>
     "Run command needs a mode value. Choose text or json.",
   run_name_unsupported: () =>
     "This run mode does not support naming sessions. Remove the name option.",
   run_prompt_required: () => "Run command needs a prompt. Provide a prompt.",
+  run_session_conflict: () =>
+    "Choose either --session or --managed-session, not both.",
 
   search_memory_aborted: () => "Memory search was aborted.",
   searxng_start_failed: () =>

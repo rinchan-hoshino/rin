@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { requestDaemonCommand } from "../rin-daemon/client.js";
@@ -21,6 +22,7 @@ export type RunCliOptions = RinToolStartupOptions & {
   messages: string[];
   prompt: string;
   sessionFile?: string;
+  managedSessionLeaf?: string;
   sessionName?: string;
   provider?: string;
   model?: string;
@@ -44,6 +46,7 @@ Options:
   --model <provider/model>       Model pattern or ID (supports provider/model)
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --session <file>               Use a specific session file
+  --managed-session <leaf>       Create and keep a session under sessions/managed/<leaf>/
   --name <name>                  Set the session display name
   --tools, -t <tools>            Comma-separated allowlist of tool names
   --exclude-tools, -xt <tools>   Comma-separated denylist of tool names
@@ -57,6 +60,7 @@ Examples:
   rin -p "Summarize this repository"
   cat README.md | rin -p "Summarize this text"
   rin --mode json "List all .ts files in src/"
+  rin --mode json --managed-session subagent -p "Scout the auth module"
   rin --name "release audit" -p "Audit this repository"
   rin --model openai/gpt-5.5 --thinking low -p "Draft release notes"
   rin -p --chat-key telegram/123:-100456 "Send a short status update"
@@ -159,6 +163,7 @@ export async function parseRunArgs(
   const messages: string[] = [];
   const fileArgs: string[] = [];
   let sessionFile = "";
+  let managedSessionLeaf = "";
   let sessionName = "";
   let provider = "";
   let model = "";
@@ -257,6 +262,23 @@ export async function parseRunArgs(
       sessionFile = arg.slice("--session=".length);
       continue;
     }
+    if (arg === "--managed-session" || arg === "--managed-session-leaf") {
+      index = appendInlineValue(
+        args,
+        index,
+        (value) => (managedSessionLeaf = value),
+        "run_managed_session_value_required",
+      );
+      continue;
+    }
+    if (arg.startsWith("--managed-session=")) {
+      managedSessionLeaf = arg.slice("--managed-session=".length);
+      continue;
+    }
+    if (arg.startsWith("--managed-session-leaf=")) {
+      managedSessionLeaf = arg.slice("--managed-session-leaf=".length);
+      continue;
+    }
     if (arg === "--tools" || arg === "-t") {
       index = appendInlineValue(
         args,
@@ -293,6 +315,7 @@ export async function parseRunArgs(
     }
     if (arg === "--no-session") {
       sessionFile = "";
+      managedSessionLeaf = "";
       continue;
     }
     if (arg === "--name") {
@@ -366,11 +389,17 @@ export async function parseRunArgs(
   const additionalMessages = messages.length > 1 ? messages.slice(1) : [];
   const providerModel = resolveProviderModel(provider, model);
   if (model && !providerModel) throw new Error(`invalid_model:${model}`);
+  const normalizedSessionFile = safeString(sessionFile).trim();
+  const normalizedManagedSessionLeaf = safeString(managedSessionLeaf).trim();
+  if (normalizedSessionFile && normalizedManagedSessionLeaf) {
+    throw new Error("run_session_conflict");
+  }
 
   return {
     messages: additionalMessages,
     prompt,
-    sessionFile: safeString(sessionFile).trim() || undefined,
+    sessionFile: normalizedSessionFile || undefined,
+    managedSessionLeaf: normalizedManagedSessionLeaf || undefined,
     sessionName: safeString(sessionName).trim() || undefined,
     provider: safeString(provider).trim() || undefined,
     model: providerModel
@@ -424,7 +453,8 @@ async function runDetachedTurn(
   options: RunCliOptions,
 ): Promise<Record<string, unknown>> {
   const text = [options.prompt, ...options.messages].filter(Boolean).join("\n");
-  const keepSession = Boolean(options.sessionFile);
+  const managedSessionLeaf = safeString(options.managedSessionLeaf).trim();
+  const keepSession = Boolean(options.sessionFile || managedSessionLeaf);
   const result = await requestDaemonCommand(
     {
       type: "chat_run_turn",
@@ -432,8 +462,11 @@ async function runDetachedTurn(
         chatKey: options.chatKey,
         text,
         sessionFile: options.sessionFile,
-        ...(!keepSession
-          ? { managedSessionLeaf: MANAGED_CLI_SESSION_LEAF }
+        ...(!options.sessionFile
+          ? {
+              managedSessionLeaf:
+                managedSessionLeaf || MANAGED_CLI_SESSION_LEAF,
+            }
           : {}),
         ...(options.sessionName ? { sessionName: options.sessionName } : {}),
         ...(options.tools !== undefined ? { tools: options.tools } : {}),
@@ -443,7 +476,7 @@ async function runDetachedTurn(
         ...(options.noTools !== undefined ? { noTools: options.noTools } : {}),
         model: options.model,
         thinkingLevel: options.thinkingLevel,
-        controllerKey: `cli-${Date.now()}`,
+        controllerKey: `cli-${Date.now()}-${randomUUID().slice(0, 8)}`,
         affectChatBinding: false,
         disposeAfterTurn: true,
       },

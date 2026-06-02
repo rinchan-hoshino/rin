@@ -20,6 +20,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   const readme = readAgentDoc("README.md");
   const capabilities = readAgentDoc("docs/capabilities.md");
   const builtinCapabilities = readAgentDoc("docs/builtin-extensions.md");
+  const nonInteractiveCli = readAgentDoc("docs/non-interactive-cli.md");
   const scheduledTasks = readAgentDoc("docs/scheduled-tasks.md");
   const agentSdk = readAgentDoc("docs/agent-sdk.md");
 
@@ -29,6 +30,14 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(capabilities, /scheduled-tasks\.md/);
   assert.match(builtinCapabilities, /agent-sdk\.md/);
   assert.match(builtinCapabilities, /scheduled-tasks\.md/);
+  assert.match(capabilities, /Subagent \/ non-interactive work/);
+  assert.match(nonInteractiveCli, /--managed-session <leaf>/);
+  assert.match(nonInteractiveCli, /sessions\/managed\/<leaf>/);
+  assert.match(
+    builtinCapabilities,
+    /do not assume a `run_subagent` tool exists/,
+  );
+  assert.doesNotMatch(builtinCapabilities, /provides `run_subagent`/);
 
   for (const helper of [
     "rin.tasks.list",

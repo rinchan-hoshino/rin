@@ -26,8 +26,8 @@ This document helps agents distinguish Rin core capabilities from optional Pi ex
   - keeps the effective system prompt stable within a session
 - `tui-input-compat`
   - smooths over some TUI input compatibility issues
-- `subagent`
-  - provides `run_subagent` and `list_models`
+- delegated subagents
+  - use the non-interactive CLI pattern in `docs/non-interactive-cli.md`; do not assume a `run_subagent` tool exists unless it appears in the live tool list
 - `task`
   - scheduled task operations are documented local SDK workflows rather than agent tools
   - read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before operating scheduled tasks

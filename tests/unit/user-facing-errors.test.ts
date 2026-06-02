@@ -34,6 +34,14 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin could not find a session attached to this chat command.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("run_managed_session_value_required"),
+    "Run command needs a managed session name. Provide a leaf such as subagent.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("run_session_conflict"),
+    "Choose either --session or --managed-session, not both.",
+  );
+  assert.equal(
     formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
     "Rin finished the turn without a final reply.",
   );

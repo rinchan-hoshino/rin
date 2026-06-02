@@ -184,6 +184,7 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.match(output, /--print/);
   assert.match(output, /--mode <mode>/);
   assert.match(output, /--chat-key <chatKey>/);
+  assert.match(output, /--managed-session <leaf>/);
   assert.match(output, /--name <name>/);
   assert.match(output, /--tools <tools>/);
   assert.match(output, /--exclude-tools <tools>/);
@@ -207,6 +208,7 @@ test("print help shows the Pi-style non-interactive CLI contract", () => {
   );
   assert.match(output, /--print, -p/);
   assert.match(output, /--chat-key <chatKey>/);
+  assert.match(output, /--managed-session <leaf>/);
   assert.match(output, /--name <name>/);
   assert.match(output, /--tools, -t <tools>/);
   assert.match(output, /--exclude-tools, -xt <tools>/);
@@ -241,6 +243,7 @@ test("run parser supports Pi-style print, model, chatKey, json, timeout, and nam
     messages: [],
     prompt: "hello",
     sessionFile: undefined,
+    managedSessionLeaf: undefined,
     sessionName: "daily check",
     provider: undefined,
     model: "openai/gpt-5.5",
@@ -262,6 +265,34 @@ test("run parser supports Pi-style print, model, chatKey, json, timeout, and nam
   assert.equal(run.shouldRunNonInteractive(["-p"], true), true);
   assert.equal(run.shouldRunNonInteractive(["--mode", "json"], true), true);
   assert.equal(run.shouldRunNonInteractive([], false), true);
+});
+
+test("run parser supports managed session leaves for delegated non-interactive sessions", async () => {
+  const parsed = await run.parseRunArgs(
+    ["-p", "scout auth", "--managed-session", "subagent", "--name=Scout auth"],
+    "",
+  );
+
+  assert.equal(parsed.prompt, "scout auth");
+  assert.equal(parsed.sessionFile, undefined);
+  assert.equal(parsed.managedSessionLeaf, "subagent");
+  assert.equal(parsed.sessionName, "Scout auth");
+
+  await assert.rejects(
+    () =>
+      run.parseRunArgs(
+        [
+          "-p",
+          "hello",
+          "--session",
+          "/tmp/child.jsonl",
+          "--managed-session",
+          "subagent",
+        ],
+        "",
+      ),
+    /run_session_conflict/,
+  );
 });
 
 test("usage, status, memory, and memory-index parsers ignore wrapper args around the subcommand", () => {

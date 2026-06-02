@@ -95,6 +95,8 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(baseSystemPrompt.includes("Session awareness guidance:"));
   assert.ok(baseSystemPrompt.includes("docs/session-awareness.md"));
+  assert.ok(baseSystemPrompt.includes("Subagent guidance:"));
+  assert.ok(baseSystemPrompt.includes("docs/non-interactive-cli.md"));
   assert.ok(baseSystemPrompt.includes("Scheduled task guidance:"));
   assert.ok(baseSystemPrompt.includes("use Rin scheduled tasks first"));
   assert.equal(baseSystemPrompt.includes("condition.kind"), false);

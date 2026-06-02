@@ -7,7 +7,7 @@ Rin's agent working directory is usually `~/.rin/`.
 - `auth.json`: model authentication data
 - `settings.json`: Rin / pi settings
 - `i18n.json`: optional local i18n message catalog; currently supports chat command acknowledgement keys such as `chat.commandResponses.new`; absent or partial files fall back to built-in English text.
-- `sessions/`: user-facing session data; direct TUI sessions live at this root. Non-interactive CLI runs do not keep a session by default; when delegated work needs durable context, agents should create or reuse a dedicated session under `sessions/managed/<kind>/`.
+- `sessions/`: user-facing session data; direct TUI sessions live at this root. Non-interactive CLI runs do not keep a session by default; when delegated work needs durable context, agents should create or reuse a dedicated session under `sessions/managed/<kind>/`, usually via `rin --mode json --managed-session <kind> -p ...`.
 - `memory/`: markdown-backed memory data
 - `routines/`: routine prompts and task files
 - `data/`: runtime state grouped by owner: `core/`, `chat/`, `scheduler/`, `sidecars/`, `extensions/`, `features/`, and shared `runtime/` helpers

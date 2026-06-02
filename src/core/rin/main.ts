@@ -94,6 +94,10 @@ function createCli() {
     .option("--provider <name>", "Provider name for non-interactive mode")
     .option("--model <provider/model>", "Model for non-interactive mode")
     .option("--thinking <level>", "Thinking level for non-interactive mode")
+    .option(
+      "--managed-session <leaf>",
+      "Create and keep a non-interactive session under sessions/managed/<leaf>/",
+    )
     .option("--name <name>", "Session display name for non-interactive mode")
     .option("-t, --tools <tools>", "Tool allowlist for non-interactive mode")
     .option(
