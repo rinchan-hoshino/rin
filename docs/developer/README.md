@@ -2,6 +2,10 @@
 
 These documents are for maintainers changing Rin itself. They describe source layout, validation, release operations, and technical boundaries. They are repository documentation only; the installer does not copy them into the agent's `docs/rin/` guidance set.
 
+## Funding
+
+Rin's public sponsorship link is <https://ko-fi.com/THE_cattail>. Keep sponsorship copy voluntary and maintenance-focused: it must not promise feature priority, paid private support, or access to secrets/account operations.
+
 ## Documentation boundaries
 
 Use this decision table when adding or moving documentation:

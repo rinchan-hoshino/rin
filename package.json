@@ -94,5 +94,9 @@
   },
   "engines": {
     "node": ">=22.19.0"
+  },
+  "funding": {
+    "type": "ko-fi",
+    "url": "https://ko-fi.com/THE_cattail"
   }
 }

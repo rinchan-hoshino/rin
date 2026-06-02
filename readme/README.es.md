@@ -18,6 +18,10 @@ Rin es un asistente local de IA de propósito general con memoria, herramientas,
 > [!WARNING]
 > Rin todavía es joven. Trata el uso diario como experimental: puedes encontrar bordes ásperos, documentación incompleta, comportamiento inestable, coste de tokens/API o cambios incompatibles ocasionales.
 
+## Apoyar a Rin
+
+Si Rin te ahorra tiempo, puedes apoyar su mantenimiento en [Ko-fi](https://ko-fi.com/THE_cattail). El patrocinio es voluntario y ayuda a cubrir costes continuos de mantenimiento; no compra prioridad de funciones ni compromisos de soporte privado.
+
 ## Instalación
 
 > [!TIP]
