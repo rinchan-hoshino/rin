@@ -258,6 +258,15 @@ test("message content helpers classify assistant finals with chat-compatible too
   );
   assert.equal(
     messageContent.isAssistantFinalMessage({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "provider failed",
+      content: [{ type: "text", text: "provider failed" }],
+    }),
+    false,
+  );
+  assert.equal(
+    messageContent.isAssistantFinalMessage({
       role: "user",
       content: [{ type: "text", text: "user text" }],
     }),

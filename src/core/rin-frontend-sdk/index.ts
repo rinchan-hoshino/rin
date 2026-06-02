@@ -93,6 +93,15 @@ export {
 } from "./turn-driver.js";
 
 export {
+  captureRinTurnCompletionBaseline,
+  collectRinTurnCompletionMessages,
+  resolveRinTurnCompletionAfterPromptSettled,
+  resolveRinTurnFailureMessage,
+  type RinTurnCompletionBaseline,
+  type RinTurnCompletionResolution,
+} from "./turn-completion.js";
+
+export {
   RinDaemonFrontendClient,
   type RinDaemonFrontendClientTransportOptions,
 } from "./daemon-client.js";

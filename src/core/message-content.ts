@@ -190,8 +190,19 @@ export function countToolCalls(content: any) {
   return extractToolCallParts(content).length;
 }
 
+export function isAssistantFailedMessage(message: any) {
+  if (String(message?.role || "").trim() !== "assistant") return false;
+  const stopReason = safeString(message?.stopReason).trim();
+  return (
+    stopReason === "error" ||
+    stopReason === "aborted" ||
+    Boolean(safeString(message?.errorMessage).trim())
+  );
+}
+
 export function extractAssistantFinalText(message: any) {
   if (String(message?.role || "").trim() !== "assistant") return "";
+  if (isAssistantFailedMessage(message)) return "";
   if (countToolCalls(message?.content) > 0) return "";
   return safeString(
     extractMessageText(message?.content, {

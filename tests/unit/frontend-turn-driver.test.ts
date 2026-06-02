@@ -1183,6 +1183,47 @@ test("frontend SDK turn driver does not emit text-only assistant messages as int
   assert.deepEqual(interimTexts, []);
 });
 
+test("frontend SDK turn driver keeps steering open across failed assistant messages", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  let releasePrompt!: () => void;
+  let requestTag = "";
+  const promptGate = new Promise<void>((resolve) => {
+    releasePrompt = resolve;
+  });
+  client.prompt = async (_text: string, options: any = {}) => {
+    requestTag = options.requestTag;
+    await emitDriverEvent(driver, { type: "agent_start" });
+    await emitDriverEvent(driver, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage:
+          'Codex error: {"error":{"code":"context_length_exceeded"}}',
+        content: [
+          {
+            type: "text",
+            text: 'Codex error: {"error":{"code":"context_length_exceeded"}}',
+          },
+        ],
+      },
+    });
+    await promptGate;
+  };
+
+  const resultPromise = driver.runTurn({ text: "hello" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(driver.canSteerActiveTurn(), true);
+
+  await emitRpcTurnComplete(driver, requestTag, "continued after compaction");
+  releasePrompt();
+  const result = await resultPromise;
+
+  assert.equal(result.finalText, "continued after compaction");
+});
+
 test("frontend SDK turn driver completes Pi-native overflow recovery", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
@@ -1195,7 +1236,12 @@ test("frontend SDK turn driver completes Pi-native overflow recovery", async () 
         stopReason: "error",
         errorMessage:
           'Codex error: {"error":{"code":"context_length_exceeded"}}',
-        content: [],
+        content: [
+          {
+            type: "text",
+            text: 'Codex error: {"error":{"code":"context_length_exceeded"}}',
+          },
+        ],
       },
     });
     await emitDriverEvent(driver, { type: "agent_end" });

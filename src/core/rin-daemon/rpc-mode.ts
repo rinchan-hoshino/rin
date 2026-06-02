@@ -7,9 +7,13 @@ import { fail, ok } from "../rin-lib/rpc.js";
 import { listBoundSessions, renameBoundSession } from "../session/factory.js";
 import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
-import { resolveTurnCompletion } from "../session/turn-result.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import {
+  captureRinTurnCompletionBaseline,
+  resolveRinTurnCompletionAfterPromptSettled,
+  resolveRinTurnFailureMessage,
+} from "../rin-frontend-sdk/turn-completion.js";
 import {
   emitPiExtensionRunnerEvent,
   emitPiSessionEvent,
@@ -457,77 +461,8 @@ async function createManagedNewSession(
   return { cancelled: false };
 }
 
-function messageTimestampMs(message: any) {
-  const raw = message?.timestamp ?? message?.message?.timestamp;
-  const numeric = Number(raw);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric;
-  const parsed = Date.parse(safeString(raw));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function collectTurnCompletionMessages(
-  session: any,
-  options: {
-    lastCompletedAssistantMessage?: any;
-    baselineSessionMessageCount?: number;
-    baselineAgentMessageCount?: number;
-    turnStartedAtMs?: number;
-  } = {},
-) {
-  const messages: any[] = [];
-  const seen = new Set<any>();
-  const add = (message: any) => {
-    if (!message || typeof message !== "object" || seen.has(message)) return;
-    const timestamp = messageTimestampMs(message);
-    if (
-      timestamp > 0 &&
-      typeof options.turnStartedAtMs === "number" &&
-      timestamp < options.turnStartedAtMs - 1000
-    ) {
-      return;
-    }
-    seen.add(message);
-    messages.push(message);
-  };
-
-  add(options.lastCompletedAssistantMessage);
-  return messages;
-}
-
-function resolveTurnFailureMessage(session: any, messages: any[]) {
-  const stateError = safeString(session?.agent?.state?.errorMessage).trim();
-  if (stateError) return stateError;
-
-  for (const message of [...messages].reverse()) {
-    if (safeString(message?.role).trim() !== "assistant") continue;
-    const errorMessage = safeString(message?.errorMessage).trim();
-    if (errorMessage) return errorMessage;
-  }
-  return "";
-}
-
 async function settleTurnCompletionEvents() {
   await new Promise<void>((resolve) => setImmediate(resolve));
-}
-
-function resolveTurnCompletionFromTurnBoundary(
-  options: Parameters<typeof collectTurnCompletionMessages>[1],
-) {
-  const messages = collectTurnCompletionMessages(null, options);
-  return {
-    messages,
-    completion: resolveTurnCompletion({ messages }),
-  };
-}
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-  return { promise, resolve, reject };
 }
 
 export async function runCustomRpcMode(
@@ -797,44 +732,7 @@ export async function runCustomRpcMode(
     options: { forceTurnEvents?: boolean } = {},
   ) => {
     const turnSession = getSession();
-    const baselineSessionMessageCount = Array.isArray(turnSession?.messages)
-      ? turnSession.messages.length
-      : undefined;
-    const baselineAgentMessageCount = Array.isArray(
-      turnSession?.agent?.state?.messages,
-    )
-      ? turnSession.agent.state.messages.length
-      : undefined;
-    const turnStartedAtMs = Date.now();
-    let lastCompletedAssistantMessage: any = null;
-    const turnCompletion = createDeferred<{
-      finalText: string;
-      result: any;
-    }>();
-    const tryResolveTurnCompletion = () => {
-      const { completion } = resolveTurnCompletionFromTurnBoundary({
-        lastCompletedAssistantMessage,
-        baselineSessionMessageCount,
-        baselineAgentMessageCount,
-        turnStartedAtMs,
-      });
-      if (!completion.finalText) return false;
-      turnCompletion.resolve({
-        finalText: completion.finalText,
-        result: completion.result,
-      });
-      return true;
-    };
-    const rawUnsubscribeTurnSession = turnSession.subscribe?.((event: any) => {
-      if (event?.type !== "message_end") return;
-      if (event?.message?.role !== "assistant") return;
-      lastCompletedAssistantMessage = event.message;
-      tryResolveTurnCompletion();
-    });
-    const unsubscribeTurnSession =
-      typeof rawUnsubscribeTurnSession === "function"
-        ? rawUnsubscribeTurnSession
-        : undefined;
+    const baseline = captureRinTurnCompletionBaseline(turnSession);
     const promise = (async () => {
       const forceTurnEvents = options.forceTurnEvents === true;
       emitTurnEvent(
@@ -861,30 +759,19 @@ export async function runCustomRpcMode(
             }, TURN_HEARTBEAT_INTERVAL_MS)
           : null;
       try {
-        const taskPromise = task();
-        taskPromise
-          .then(async () => {
-            await settleTurnCompletionEvents();
-            if (tryResolveTurnCompletion()) return;
-            const { messages } = resolveTurnCompletionFromTurnBoundary({
-              lastCompletedAssistantMessage,
-              baselineSessionMessageCount,
-              baselineAgentMessageCount,
-              turnStartedAtMs,
-            });
-            const failureMessage = resolveTurnFailureMessage(
-              turnSession,
-              messages,
-            );
-            turnCompletion.reject(
-              new Error(failureMessage || "rpc_turn_final_output_missing"),
-            );
-          })
-          .catch((error) => {
-            if (tryResolveTurnCompletion()) return;
-            turnCompletion.reject(error);
+        await task();
+        await settleTurnCompletionEvents();
+        const { messages, completion } =
+          resolveRinTurnCompletionAfterPromptSettled(turnSession, {
+            baseline,
           });
-        const completion = await turnCompletion.promise;
+        if (!completion.finalText) {
+          const failureMessage = resolveRinTurnFailureMessage(
+            turnSession,
+            messages,
+          );
+          throw new Error(failureMessage || "rpc_turn_final_output_missing");
+        }
         emitTurnEvent(
           "complete",
           requestTag,
@@ -896,7 +783,6 @@ export async function runCustomRpcMode(
           },
           forceTurnEvents,
         );
-        taskPromise.catch(() => {});
       } catch (error: any) {
         emitTurnEvent(
           "error",
@@ -908,7 +794,6 @@ export async function runCustomRpcMode(
         );
         throw error;
       } finally {
-        unsubscribeTurnSession?.();
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         if (activeTurnPromise === promise) activeTurnPromise = null;
       }

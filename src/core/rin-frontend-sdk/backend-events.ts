@@ -3,6 +3,7 @@ import {
   extractAssistantFinalText,
   extractMessageText,
   extractTextBeforeFirstToolCall,
+  isAssistantFailedMessage,
 } from "../message-content.js";
 import { safeString } from "../text-utils.js";
 import {
@@ -192,6 +193,7 @@ export function createRinFrontendBackendEventTranslator(
             : [];
         case "message_end": {
           if (payload?.message?.role !== "assistant") return [];
+          if (isAssistantFailedMessage(payload.message)) return [];
           const text = assistantText(payload.message);
           if (text) latestAssistantText = text;
           const finalText = extractAssistantFinalText(payload.message);

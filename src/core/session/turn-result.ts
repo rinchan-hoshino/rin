@@ -7,6 +7,7 @@ import {
   extractExistingFilePaths,
   extractImageParts,
   extractMessageText,
+  isAssistantFailedMessage,
 } from "../message-content.js";
 import { safeString } from "../text-utils.js";
 
@@ -139,6 +140,7 @@ function findLastAssistantDeliverableMessage(messages: any[]) {
   for (const message of [...messages].reverse()) {
     if (isSessionSummaryLikeMessage(message)) continue;
     if (safeString(message?.role) !== "assistant") continue;
+    if (isAssistantFailedMessage(message)) return null;
     if (countToolCalls(message?.content) > 0) continue;
     const text = extractMessageText(message.content, { trim: true });
     if (text || extractImageParts(message.content).length > 0) return message;

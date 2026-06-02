@@ -97,6 +97,26 @@ test("turn result builder ignores compaction and session summaries as non-final 
   );
 });
 
+test("turn result builder treats failed assistant messages as non-deliverable boundaries", () => {
+  assert.deepEqual(
+    turnResult.resolveTurnCompletion({
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "previous final must not leak" }],
+        },
+        {
+          role: "assistant",
+          stopReason: "error",
+          errorMessage: "provider failed",
+          content: [{ type: "text", text: "provider failed" }],
+        },
+      ],
+    }),
+    { finalText: "", result: { messages: [] } },
+  );
+});
+
 test("turn result builder ignores assistant tool-call prefaces as non-final output", () => {
   assert.deepEqual(
     turnResult.buildTurnResultFromMessages([

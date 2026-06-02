@@ -19,6 +19,17 @@ function wait(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function testSessionManager(getMessages = () => []) {
+  return {
+    buildSessionContext: () => ({ messages: getMessages() }),
+    getEntries: () => [],
+    getTree: () => [],
+    getLeafId: () => null,
+    getCwd: () => process.cwd(),
+    getSessionDir: () => process.cwd(),
+  };
+}
+
 test(
   "rpc mode sleep_session disposes the session without emitting runtime shutdown",
   { concurrency: false },
@@ -264,13 +275,7 @@ test(
         },
         subscribe: () => () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         prompt: async () => {},
         sendCustomMessage: async () => {},
@@ -453,13 +458,7 @@ test(
         },
         subscribe: () => () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         prompt: async () => {},
         sendCustomMessage: async () => {},
@@ -1166,13 +1165,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -1273,13 +1266,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -1382,13 +1369,7 @@ test(
           },
         },
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         prompt: async () => {},
         sendCustomMessage: async () => {},
@@ -1508,13 +1489,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -1590,7 +1565,7 @@ test(
 );
 
 test(
-  "rpc mode resolves prompt completion from turn messages without post-agent event queues",
+  "rpc mode waits for prompt lifecycle before resolving turn messages",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -1652,13 +1627,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -1704,19 +1673,34 @@ test(
       );
       await wait(20);
 
-      const events = lines
-        .join("")
-        .trim()
-        .split(/\n+/)
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean);
+      const parseEvents = () =>
+        lines
+          .join("")
+          .trim()
+          .split(/\n+/)
+          .filter(Boolean)
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean);
+
+      assert.equal(
+        parseEvents().some(
+          (event) =>
+            event.type === "rpc_turn_event" && event.event === "complete",
+        ),
+        false,
+      );
+      assert.equal(promptSettled, false);
+
+      resolvePostAgentQueue?.();
+      await wait(20);
+
+      const events = parseEvents();
       const completion = events.find(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
@@ -1727,7 +1711,7 @@ test(
         messages: [{ type: "text", text: "final before compaction" }],
       });
       assert.equal(waitForIdleCalled, false);
-      assert.equal(promptSettled, false);
+      assert.equal(promptSettled, true);
     } finally {
       resolvePostAgentQueue?.();
       process.stdin.on = stdinOn;
@@ -1792,13 +1776,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: stateMessages,
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -1940,13 +1918,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: stateMessages,
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2065,7 +2037,12 @@ test(
         prompt: async () => {
           const errorMessage = {
             role: "assistant",
-            content: [],
+            content: [
+              {
+                type: "text",
+                text: "Codex error: context_length_exceeded",
+              },
+            ],
             stopReason: "error",
             errorMessage: "context_length_exceeded",
           };
@@ -2096,13 +2073,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: stateMessages,
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2218,6 +2189,10 @@ test(
         },
         prompt: async (_message, options) => {
           promptSources.push(options?.source || "");
+          const assistantMessage = {
+            role: "assistant",
+            content: [{ type: "text", text: "original final" }],
+          };
           branch.push({
             type: "message",
             message: {
@@ -2230,12 +2205,10 @@ test(
               },
             },
           });
+          branch.push({ type: "message", message: assistantMessage });
           emit({
             type: "message_end",
-            message: {
-              role: "assistant",
-              content: [{ type: "text", text: "original final" }],
-            },
+            message: assistantMessage,
           });
         },
         sendCustomMessage: async () => {},
@@ -2369,13 +2342,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2454,7 +2421,7 @@ test(
 );
 
 test(
-  "rpc mode keeps canonical finalText even when session messages lag behind",
+  "rpc mode does not complete from message_end when the branch source has no final",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2498,13 +2465,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2567,11 +2528,12 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
-      assert.equal(completion?.requestTag, "tag-1");
-      assert.equal(completion?.finalText, "late final text");
-      assert.deepEqual(completion?.result, {
-        messages: [{ type: "text", text: "late final text" }],
-      });
+      assert.equal(completion, undefined);
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      );
+      assert.equal(error?.requestTag, "tag-1");
+      assert.equal(error?.error, "rpc_turn_final_output_missing");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2580,7 +2542,7 @@ test(
 );
 
 test(
-  "rpc mode waits one turn-completion tick for a delayed assistant message_end",
+  "rpc mode waits one turn-completion tick for a delayed branch write",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2615,8 +2577,8 @@ test(
             role: "assistant",
             content: [{ type: "text", text: "delayed final text" }],
           };
-          session.messages = [assistantMessage];
           setImmediate(() => {
+            session.messages = [assistantMessage];
             for (const handler of sessionSubscribers) {
               handler({ type: "message_end", message: assistantMessage });
             }
@@ -2627,13 +2589,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2709,7 +2665,7 @@ test(
 );
 
 test(
-  "rpc mode rejects agent-state final text without message_end final signal",
+  "rpc mode resolves persisted final text after prompt settles without message_end",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2757,13 +2713,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: stateMessages,
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2826,12 +2776,17 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
-      assert.equal(completion, undefined);
-      const error = events.find(
-        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      assert.equal(completion?.requestTag, "tag-1");
+      assert.equal(completion?.finalText, "final from stored session");
+      assert.deepEqual(completion?.result, {
+        messages: [{ type: "text", text: "final from stored session" }],
+      });
+      assert.equal(
+        events.some(
+          (event) => event.type === "rpc_turn_event" && event.event === "error",
+        ),
+        false,
       );
-      assert.equal(error?.requestTag, "tag-1");
-      assert.equal(error?.error, "rpc_turn_final_output_missing");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2873,13 +2828,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2979,13 +2928,7 @@ test(
         },
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -3108,13 +3051,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -3229,13 +3166,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -3638,13 +3569,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => []),
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -3715,7 +3640,7 @@ test(
       await wait(20);
 
       assert.deepEqual(bindCalls, ["first", "second"]);
-      assert.equal(unsubscribeCount, 2);
+      assert.equal(unsubscribeCount, 1);
       assert.deepEqual(prompts, [
         [
           "second",
@@ -4390,13 +4315,7 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          getEntries: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
+        sessionManager: testSessionManager(() => session.messages || []),
         messages: [
           {
             role: "assistant",
