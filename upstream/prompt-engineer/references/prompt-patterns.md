@@ -20,13 +20,13 @@
     └─────────────┘              └─────────────┘              └─────────────┘
 ```
 
-| Pattern          | Best For                      | Token Cost  | Reliability |
-| ---------------- | ----------------------------- | ----------- | ----------- |
-| Zero-shot        | Simple, well-defined tasks    | Low         | Medium      |
-| Few-shot         | Tasks needing format guidance | Medium      | High        |
-| Chain-of-Thought | Reasoning, math, logic        | Medium-High | High        |
-| ReAct            | Multi-step tasks with tools   | High        | Very High   |
-| Tree-of-Thoughts | Complex problem solving       | Very High   | Very High   |
+| Pattern | Best For | Token Cost | Reliability |
+|---------|----------|------------|-------------|
+| Zero-shot | Simple, well-defined tasks | Low | Medium |
+| Few-shot | Tasks needing format guidance | Medium | High |
+| Chain-of-Thought | Reasoning, math, logic | Medium-High | High |
+| ReAct | Multi-step tasks with tools | High | Very High |
+| Tree-of-Thoughts | Complex problem solving | Very High | Very High |
 
 ---
 
@@ -147,12 +147,12 @@ Comment:
 
 ### Few-Shot Selection Strategies
 
-| Strategy              | Description                      | Best For                       |
-| --------------------- | -------------------------------- | ------------------------------ |
-| Diverse               | Cover different cases/categories | Classification, categorization |
-| Similar               | Match examples to input type     | Consistent formatting          |
-| Increasing complexity | Start simple, build up           | Complex reasoning tasks        |
-| Edge cases            | Include boundary cases           | Robust handling                |
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| Diverse | Cover different cases/categories | Classification, categorization |
+| Similar | Match examples to input type | Consistent formatting |
+| Increasing complexity | Start simple, build up | Complex reasoning tasks |
+| Edge cases | Include boundary cases | Robust handling |
 
 ### Example Selection Guidelines
 
@@ -267,12 +267,12 @@ def calculate_average(numbers):
 
 ### CoT Variants
 
-| Variant          | Technique                     | Use Case                    |
-| ---------------- | ----------------------------- | --------------------------- |
-| Zero-shot CoT    | "Think step by step"          | Quick reasoning tasks       |
-| Manual CoT       | Explicit step examples        | Complex domain problems     |
-| Self-consistency | Generate multiple paths, vote | High-stakes decisions       |
-| Least-to-most    | Decompose into subproblems    | Complex multi-part problems |
+| Variant | Technique | Use Case |
+|---------|-----------|----------|
+| Zero-shot CoT | "Think step by step" | Quick reasoning tasks |
+| Manual CoT | Explicit step examples | Complex domain problems |
+| Self-consistency | Generate multiple paths, vote | High-stakes decisions |
+| Least-to-most | Decompose into subproblems | Complex multi-part problems |
 
 ---
 

@@ -23,12 +23,12 @@ The context window is a scarce resource — an **attention budget**. Every token
 
 ### Context Components
 
-| Component                   | Purpose                                  | Persistence           |
-| --------------------------- | ---------------------------------------- | --------------------- |
-| **System Prompt**           | Identity, permanent rules, output format | Static across session |
-| **Few-Shot Examples**       | Demonstrations of desired behavior       | Static or semi-static |
-| **Conversation History**    | Short-term memory (user interactions)    | Grows per turn        |
-| **Retrieved Context (RAG)** | Long-term memory or external knowledge   | Dynamic per query     |
+| Component | Purpose | Persistence |
+|-----------|---------|-------------|
+| **System Prompt** | Identity, permanent rules, output format | Static across session |
+| **Few-Shot Examples** | Demonstrations of desired behavior | Static or semi-static |
+| **Conversation History** | Short-term memory (user interactions) | Grows per turn |
+| **Retrieved Context (RAG)** | Long-term memory or external knowledge | Dynamic per query |
 
 ### Structuring Context with XML Tags
 
@@ -83,8 +83,7 @@ prompt = system_prompt + long_history + instruction_reminder + user_query
 **Symptom:** Irrelevant or conflicting information from previous turns confuses the agent, producing contradictory or stale outputs.
 
 **Mitigation:**
-
-- Explicitly invalidate outdated information: _"Ignore the previous constraint about X; focus only on Y."_
+- Explicitly invalidate outdated information: *"Ignore the previous constraint about X; focus only on Y."*
 - When context shifts significantly, insert a clear boundary marker
 - Summarize and replace older turns rather than accumulating verbatim history
 
@@ -93,7 +92,6 @@ prompt = system_prompt + long_history + instruction_reminder + user_query
 **Symptom:** Too much irrelevant detail reduces reasoning quality, even when the answer exists in context.
 
 **Mitigation:**
-
 - Filter RAG results to only highly relevant documents
 - Summarize verbose tool outputs before injecting into context
 - Remove redundant or low-information turns from history
@@ -104,12 +102,12 @@ prompt = system_prompt + long_history + instruction_reminder + user_query
 
 A tiered strategy for managing context across long sessions:
 
-| Bucket                       | Content                           | Treatment                  |
-| ---------------------------- | --------------------------------- | -------------------------- |
-| **1. Critical Instructions** | System prompt, core constraints   | Always present, verbatim   |
-| **2. Immediate Context**     | Last 3-5 conversation turns       | Verbatim, always included  |
-| **3. Relevant History**      | Semantically matched past context | Retrieved via search (RAG) |
-| **4. Archived History**      | Everything else                   | Summarized or discarded    |
+| Bucket | Content | Treatment |
+|--------|---------|-----------|
+| **1. Critical Instructions** | System prompt, core constraints | Always present, verbatim |
+| **2. Immediate Context** | Last 3-5 conversation turns | Verbatim, always included |
+| **3. Relevant History** | Semantically matched past context | Retrieved via search (RAG) |
+| **4. Archived History** | Everything else | Summarized or discarded |
 
 This prevents unbounded context growth while preserving the most important information. As conversation length increases, content migrates from Bucket 2 to Bucket 3 or 4.
 
@@ -121,12 +119,12 @@ This prevents unbounded context growth while preserving the most important infor
 
 Reduce token usage without losing semantic meaning:
 
-| Technique                                            | Token Savings     | Risk                                |
-| ---------------------------------------------------- | ----------------- | ----------------------------------- |
-| Whitespace removal                                   | Minor (1-5%)      | Low                                 |
-| Comment/syntax stripping                             | Moderate (10-20%) | Low for data, higher for code       |
-| Format conversion (verbose JSON to compact YAML/CSV) | Moderate (15-30%) | Medium — verify parsability         |
-| Extractive summarization of history                  | High (30-50%)     | Medium — potential information loss |
+| Technique | Token Savings | Risk |
+|-----------|--------------|------|
+| Whitespace removal | Minor (1-5%) | Low |
+| Comment/syntax stripping | Moderate (10-20%) | Low for data, higher for code |
+| Format conversion (verbose JSON to compact YAML/CSV) | Moderate (15-30%) | Medium — verify parsability |
+| Extractive summarization of history | High (30-50%) | Medium — potential information loss |
 
 ### KV-Cache Optimization
 
@@ -141,12 +139,12 @@ This allows the model's KV-cache to skip recomputation of the static prefix, red
 
 Tool outputs can be disproportionately large relative to their information content:
 
-| Problem                                         | Solution                                                |
-| ----------------------------------------------- | ------------------------------------------------------- |
-| Huge tool output (e.g., full directory listing) | Truncate to first N lines                               |
-| Verbose structured data                         | Summarize: _"Found 50 files, mainly .py"_               |
-| Reading entire files                            | Use targeted tools (grep, symbol lookup) instead of cat |
-| Raw API responses                               | Extract only the fields needed for the current task     |
+| Problem | Solution |
+|---------|----------|
+| Huge tool output (e.g., full directory listing) | Truncate to first N lines |
+| Verbose structured data | Summarize: *"Found 50 files, mainly .py"* |
+| Reading entire files | Use targeted tools (grep, symbol lookup) instead of cat |
+| Raw API responses | Extract only the fields needed for the current task |
 
 ---
 
@@ -155,7 +153,7 @@ Tool outputs can be disproportionately large relative to their information conte
 In long conversations (10+ turns), instruction adherence naturally degrades. Counter this with periodic refocusing:
 
 - Every 5-10 turns, restate the current goal or constraints
-- Use explicit checkpoints: _"To confirm, we are currently working on [Goal]. Is this correct?"_
+- Use explicit checkpoints: *"To confirm, we are currently working on [Goal]. Is this correct?"*
 - After major context shifts, insert a summary of the new direction
 
 ---
@@ -164,11 +162,11 @@ In long conversations (10+ turns), instruction adherence naturally degrades. Cou
 
 Measure context management effectiveness with:
 
-| Metric                    | What It Tests                                            | How to Measure                                                |
-| ------------------------- | -------------------------------------------------------- | ------------------------------------------------------------- |
-| **Recall Rate**           | Can the agent retrieve a specific fact from mid-context? | Insert known facts at various positions, query for them       |
-| **Instruction Adherence** | Does the agent follow constraints after many turns?      | Test negative constraints (e.g., "no code") at turn 5, 10, 20 |
-| **SNR Impact**            | Does adding context improve or degrade output quality?   | Compare accuracy with/without additional context              |
+| Metric | What It Tests | How to Measure |
+|--------|---------------|----------------|
+| **Recall Rate** | Can the agent retrieve a specific fact from mid-context? | Insert known facts at various positions, query for them |
+| **Instruction Adherence** | Does the agent follow constraints after many turns? | Test negative constraints (e.g., "no code") at turn 5, 10, 20 |
+| **SNR Impact** | Does adding context improve or degrade output quality? | Compare accuracy with/without additional context |
 
 ---
 

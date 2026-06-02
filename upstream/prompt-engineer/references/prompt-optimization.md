@@ -35,33 +35,27 @@ Before optimizing, establish clear metrics and baseline performance.
 ## Prompt Baseline Document
 
 ### Prompt Version: v1.0.0
-
 ### Date: YYYY-MM-DD
-
 ### Model: claude-opus-4-5-20251101
 
 ### Task Definition
-
 [What should the prompt accomplish?]
 
 ### Success Criteria
-
 - Primary metric: [e.g., accuracy >= 95%]
 - Secondary metrics: [e.g., latency < 2s, cost < $0.01/request]
 
 ### Test Set
-
 - Size: [number of test cases]
 - Source: [how test cases were collected]
 - Categories: [breakdown by type/difficulty]
 
 ### Baseline Results
-
-| Metric       | Value  | Target |
-| ------------ | ------ | ------ |
-| Accuracy     | 82%    | 95%    |
-| Avg latency  | 1.8s   | <2s    |
-| Avg tokens   | 450    | <300   |
+| Metric | Value | Target |
+|--------|-------|--------|
+| Accuracy | 82% | 95% |
+| Avg latency | 1.8s | <2s |
+| Avg tokens | 450 | <300 |
 | Cost/request | $0.015 | <$0.01 |
 ```
 
@@ -95,14 +89,14 @@ When prompts underperform, diagnose the root cause before changing anything.
 
 ### Failure Category Analysis
 
-| Failure Type           | Symptoms                        | Common Causes                              |
-| ---------------------- | ------------------------------- | ------------------------------------------ |
-| **Format errors**      | Wrong structure, missing fields | Unclear format spec, no examples           |
-| **Hallucinations**     | Made-up facts, wrong answers    | Lack of grounding, vague instructions      |
-| **Inconsistency**      | Same input, different outputs   | Ambiguous instructions, high temperature   |
-| **Over-verbosity**     | Too much explanation            | No length constraints, wrong audience      |
-| **Under-performance**  | Low accuracy across board       | Wrong pattern choice, insufficient context |
-| **Edge case failures** | Breaks on unusual inputs        | Missing constraint handling                |
+| Failure Type | Symptoms | Common Causes |
+|--------------|----------|---------------|
+| **Format errors** | Wrong structure, missing fields | Unclear format spec, no examples |
+| **Hallucinations** | Made-up facts, wrong answers | Lack of grounding, vague instructions |
+| **Inconsistency** | Same input, different outputs | Ambiguous instructions, high temperature |
+| **Over-verbosity** | Too much explanation | No length constraints, wrong audience |
+| **Under-performance** | Low accuracy across board | Wrong pattern choice, insufficient context |
+| **Edge case failures** | Breaks on unusual inputs | Missing constraint handling |
 
 ### Diagnostic Questions
 
@@ -110,26 +104,22 @@ When prompts underperform, diagnose the root cause before changing anything.
 ## Prompt Diagnostic Checklist
 
 ### 1. Instruction Clarity
-
 - [ ] Is the task unambiguously defined?
 - [ ] Are constraints explicit?
 - [ ] Is the output format specified?
 
 ### 2. Context Sufficiency
-
 - [ ] Does the model have all needed information?
 - [ ] Are examples representative of real inputs?
 - [ ] Is domain knowledge assumed correctly?
 
 ### 3. Edge Case Coverage
-
 - [ ] Empty inputs?
 - [ ] Maximum length inputs?
 - [ ] Invalid/malformed inputs?
 - [ ] Ambiguous cases?
 
 ### 4. Instruction Conflicts
-
 - [ ] Do any instructions contradict each other?
 - [ ] Do examples match the instructions?
 - [ ] Are constraints achievable together?
@@ -179,7 +169,6 @@ def analyze_failures(results: list) -> dict:
 **Problem:** Vague or ambiguous instructions leading to inconsistent outputs.
 
 **Before:**
-
 ```
 Summarize this article.
 
@@ -187,7 +176,6 @@ Summarize this article.
 ```
 
 **After:**
-
 ```
 Summarize the following article in exactly 2-3 sentences.
 Focus on the main conclusion and key supporting evidence.
@@ -205,7 +193,6 @@ Summary:
 **Problem:** Outputs that are technically correct but don't meet practical needs.
 
 **Before:**
-
 ```
 Extract the email addresses from this text.
 
@@ -213,7 +200,6 @@ Extract the email addresses from this text.
 ```
 
 **After:**
-
 ```
 Extract all valid email addresses from the following text.
 
@@ -257,13 +243,11 @@ def calibrate_examples(example_pool: list, real_inputs: list, k: int = 5) -> lis
 **Problem:** Model produces correct content but wrong structure.
 
 **Before:**
-
 ```
 Analyze this code for security issues.
 ```
 
 **After:**
-
 ```
 Analyze this code for security issues using the following structure:
 
@@ -290,18 +274,17 @@ Code:
 
 ### Token Reduction Strategies
 
-| Strategy                      | Savings | Risk   | When to Use         |
-| ----------------------------- | ------- | ------ | ------------------- |
-| Remove redundant instructions | 10-20%  | Low    | Always              |
-| Shorten examples              | 20-40%  | Medium | Token-constrained   |
-| Use abbreviations/symbols     | 5-15%   | Medium | Technical audiences |
-| Compress context              | 30-50%  | High   | Very long inputs    |
-| Switch to zero-shot           | 40-60%  | High   | Simple tasks        |
+| Strategy | Savings | Risk | When to Use |
+|----------|---------|------|-------------|
+| Remove redundant instructions | 10-20% | Low | Always |
+| Shorten examples | 20-40% | Medium | Token-constrained |
+| Use abbreviations/symbols | 5-15% | Medium | Technical audiences |
+| Compress context | 30-50% | High | Very long inputs |
+| Switch to zero-shot | 40-60% | High | Simple tasks |
 
 ### Before/After: Token Reduction
 
 **Before (180 tokens):**
-
 ```
 You are a helpful assistant that specializes in analyzing customer feedback
 and extracting sentiment information. Your task is to read the customer
@@ -317,7 +300,6 @@ Sentiment:
 ```
 
 **After (45 tokens):**
-
 ```
 Classify sentiment as: positive, negative, or neutral.
 Reply with one word only.
@@ -505,35 +487,28 @@ prompts:
 ## Prompt Change Record
 
 ### Version: v2.0.0 -> v2.1.0
-
 ### Date: 2024-02-15
-
 ### Author: [name]
 
 ### Problem Statement
-
 Accuracy dropped to 85% on sarcastic reviews (edge case category).
 
 ### Hypothesis
-
 Current examples don't include sarcastic tone, causing misclassification.
 
 ### Changes Made
-
 1. Added 2 sarcastic review examples
 2. Added instruction: "Consider tone and context, not just words"
 3. Removed verbose instruction paragraph (token optimization)
 
 ### Test Results
-
-| Metric           | v2.0.0 | v2.1.0 | Change |
-| ---------------- | ------ | ------ | ------ |
-| Overall accuracy | 89%    | 94%    | +5%    |
-| Sarcasm accuracy | 62%    | 91%    | +29%   |
-| Tokens           | 156    | 109    | -30%   |
+| Metric | v2.0.0 | v2.1.0 | Change |
+|--------|--------|--------|--------|
+| Overall accuracy | 89% | 94% | +5% |
+| Sarcasm accuracy | 62% | 91% | +29% |
+| Tokens | 156 | 109 | -30% |
 
 ### Rollback Plan
-
 Revert to v2.0.0 if accuracy drops below 90% in production.
 ```
 
@@ -541,14 +516,14 @@ Revert to v2.0.0 if accuracy drops below 90% in production.
 
 ## Common Optimization Mistakes
 
-| Mistake                         | Why It's Wrong                | Better Approach          |
-| ------------------------------- | ----------------------------- | ------------------------ |
-| Multiple changes at once        | Can't identify what worked    | One change per iteration |
-| Testing on training examples    | Overfitting to test set       | Hold out validation set  |
-| Optimizing for edge cases first | May hurt common case          | Fix common cases first   |
-| Ignoring latency/cost           | Production constraints matter | Track all metrics        |
-| No baseline measurement         | Can't prove improvement       | Always measure first     |
-| Skipping failure analysis       | Symptoms vs. root cause       | Diagnose before changing |
+| Mistake | Why It's Wrong | Better Approach |
+|---------|----------------|-----------------|
+| Multiple changes at once | Can't identify what worked | One change per iteration |
+| Testing on training examples | Overfitting to test set | Hold out validation set |
+| Optimizing for edge cases first | May hurt common case | Fix common cases first |
+| Ignoring latency/cost | Production constraints matter | Track all metrics |
+| No baseline measurement | Can't prove improvement | Always measure first |
+| Skipping failure analysis | Symptoms vs. root cause | Diagnose before changing |
 
 ---
 

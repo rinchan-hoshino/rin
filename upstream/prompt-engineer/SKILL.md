@@ -41,21 +41,20 @@ Expert prompt engineer specializing in designing, optimizing, and evaluating pro
 
 Load detailed guidance based on context:
 
-| Topic              | Reference                             | Load When                                                    |
-| ------------------ | ------------------------------------- | ------------------------------------------------------------ |
-| Prompt Patterns    | `references/prompt-patterns.md`       | Zero-shot, few-shot, chain-of-thought, ReAct                 |
-| Optimization       | `references/prompt-optimization.md`   | Iterative refinement, A/B testing, token reduction           |
-| Evaluation         | `references/evaluation-frameworks.md` | Metrics, test suites, automated evaluation                   |
-| Structured Outputs | `references/structured-outputs.md`    | JSON mode, function calling, schema design                   |
-| System Prompts     | `references/system-prompts.md`        | Persona design, guardrails, injection defense                |
-| Context Management | `references/context-management.md`    | Attention budget, degradation patterns, context optimization |
+| Topic | Reference | Load When |
+|-------|-----------|-----------|
+| Prompt Patterns | `references/prompt-patterns.md` | Zero-shot, few-shot, chain-of-thought, ReAct |
+| Optimization | `references/prompt-optimization.md` | Iterative refinement, A/B testing, token reduction |
+| Evaluation | `references/evaluation-frameworks.md` | Metrics, test suites, automated evaluation |
+| Structured Outputs | `references/structured-outputs.md` | JSON mode, function calling, schema design |
+| System Prompts | `references/system-prompts.md` | Persona design, guardrails, injection defense |
+| Context Management | `references/context-management.md` | Attention budget, degradation patterns, context optimization |
 
 ## Prompt Examples
 
 ### Zero-shot vs. Few-shot
 
 **Zero-shot (baseline):**
-
 ```
 Classify the sentiment of the following review as Positive, Negative, or Neutral.
 
@@ -64,7 +63,6 @@ Sentiment:
 ```
 
 **Few-shot (improved reliability):**
-
 ```
 Classify the sentiment of the following review as Positive, Negative, or Neutral.
 
@@ -84,7 +82,6 @@ Sentiment:
 ### Before/After Optimization
 
 **Before (vague, inconsistent outputs):**
-
 ```
 Summarize this document.
 
@@ -92,7 +89,6 @@ Summarize this document.
 ```
 
 **After (structured, token-efficient):**
-
 ```
 Summarize the document below in exactly 3 bullet points. Each bullet must be one sentence and start with an action verb. Do not include opinions or information not present in the document.
 
@@ -105,7 +101,6 @@ Summary:
 ## Constraints
 
 ### MUST DO
-
 - Test prompts with diverse, realistic inputs including edge cases
 - Measure performance with quantitative metrics (accuracy, consistency)
 - Version prompts and track changes systematically
@@ -116,7 +111,6 @@ Summary:
 - Test across model versions before production deployment
 
 ### MUST NOT DO
-
 - Deploy prompts without systematic evaluation on test cases
 - Use few-shot examples that contradict instructions
 - Ignore model-specific capabilities and limitations
@@ -129,7 +123,6 @@ Summary:
 ## Output Templates
 
 When delivering prompt work, provide:
-
 1. Final prompt with clear sections (role, task, constraints, format)
 2. Test cases and evaluation results
 3. Usage instructions (temperature, max tokens, model version)
