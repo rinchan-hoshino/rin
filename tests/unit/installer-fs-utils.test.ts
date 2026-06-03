@@ -199,7 +199,7 @@ test("syncTree warns when a replaced backup cannot be removed", async () => {
   await fs.rm(tempRoot, { recursive: true, force: true });
 });
 
-test("syncInstalledDocs copies upstream mirrors into installed doc locations", async () => {
+test("syncInstalledDocs installs Rin-owned and selected upstream builtin skills", async () => {
   const tempRoot = await fs.mkdtemp(path.join(tempBaseDir, "rin-install-src-"));
   const installDir = await fs.mkdtemp(
     path.join(tempBaseDir, "rin-install-dst-"),
@@ -209,6 +209,28 @@ test("syncInstalledDocs copies upstream mirrors into installed doc locations", a
   await fs.writeFile(
     path.join(tempRoot, "docs", "agent", "README.md"),
     "# Rin agent docs\n",
+    "utf8",
+  );
+  await fs.mkdir(
+    path.join(
+      tempRoot,
+      "docs",
+      "agent",
+      "builtin-skills",
+      "rin-prompt-engineering",
+    ),
+    { recursive: true },
+  );
+  await fs.writeFile(
+    path.join(
+      tempRoot,
+      "docs",
+      "agent",
+      "builtin-skills",
+      "rin-prompt-engineering",
+      "SKILL.md",
+    ),
+    "# Rin Prompt Engineering\n",
     "utf8",
   );
   await fs.mkdir(path.join(tempRoot, "docs", "release"), { recursive: true });
@@ -304,7 +326,7 @@ test("syncInstalledDocs copies upstream mirrors into installed doc locations", a
       "docs",
       "rin",
       "builtin-skills",
-      "prompt-engineer",
+      "rin-prompt-engineering",
       "SKILL.md",
     ),
   );
@@ -316,6 +338,18 @@ test("syncInstalledDocs copies upstream mirrors into installed doc locations", a
       "builtin-skills",
       "skill-creator",
       "SKILL.md",
+    ),
+  );
+  await assert.rejects(
+    fs.access(
+      path.join(
+        installDir,
+        "docs",
+        "rin",
+        "builtin-skills",
+        "prompt-engineer",
+        "SKILL.md",
+      ),
     ),
   );
   await assert.rejects(

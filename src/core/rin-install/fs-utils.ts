@@ -87,10 +87,7 @@ const INSTALLED_PI_DOC_NAMES = [
   "_upstream.json",
 ] as const;
 
-const INSTALLED_BUILTIN_SKILL_NAMES = [
-  "skill-creator",
-  "prompt-engineer",
-] as const;
+const INSTALLED_UPSTREAM_BUILTIN_SKILL_NAMES = ["skill-creator"] as const;
 
 const RUNTIME_COPY_ENTRY_NAMES = [
   "dist",
@@ -505,7 +502,7 @@ export function buildInstalledManagedFilesManifest(
     rinDocFiles,
     path.join(sourceRoot, "docs", "agent"),
   );
-  for (const skillName of INSTALLED_BUILTIN_SKILL_NAMES) {
+  for (const skillName of INSTALLED_UPSTREAM_BUILTIN_SKILL_NAMES) {
     collectManagedFilesFromSource(
       rinDocFiles,
       path.join(sourceRoot, "upstream", skillName),
@@ -554,7 +551,7 @@ export function syncInstalledDocs(
     elevated,
     deps,
   );
-  for (const skillName of INSTALLED_BUILTIN_SKILL_NAMES) {
+  for (const skillName of INSTALLED_UPSTREAM_BUILTIN_SKILL_NAMES) {
     syncInstalledDocTree(
       path.join(sourceRoot, "upstream", skillName),
       installedBuiltinSkillRoot(installDir, skillName),

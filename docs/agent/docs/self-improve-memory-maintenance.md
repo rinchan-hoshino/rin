@@ -97,7 +97,7 @@ Use these fixed destinations under `<agentDir>/self_improve/skills`:
 
 ## Skill lifecycle
 
-Follow the skill-creator skill when creating or editing skills. Follow the prompt-engineer skill when writing prompts, descriptions, docs, and reusable instructions.
+Follow the skill-creator skill when creating or editing skills. Follow the rin-prompt-engineering skill when writing prompts, descriptions, docs, task prompts, and reusable instructions.
 
 Prefer broad reusable workflows over narrow fragments. Keep, merge, move, delete, or turn skills into intentional aliases according to their current value.
 

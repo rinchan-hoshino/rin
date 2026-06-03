@@ -15,6 +15,7 @@ For Rin-specific behavior, these docs sit above upstream Pi docs.
 - `README.md`: entrypoint for Rin agent documentation.
 - `docs/`: agent-facing topic docs and Rin-over-Pi override guides.
 - `practices/`: recommended operating practices for environment-specific work.
+- `builtin-skills/`: Rin-owned builtin skills installed under `~/.rin/docs/rin/builtin-skills/`.
 
 Developer-only architecture, testing, GUI, and release workflow documentation lives in `docs/developer/` in the repository source and is not installed as agent guidance.
 
@@ -57,4 +58,4 @@ Developer-only architecture, testing, GUI, and release workflow documentation li
 - Installed Rin builtin skills: `~/.rin/docs/rin/builtin-skills/`.
 - Installed upstream Pi reference docs: `~/.rin/docs/pi/`.
 - Repository source for this installed doc set: `docs/agent/`.
-- Repository source for installed builtin skills: `upstream/skill-creator/` and other skill mirrors under `upstream/`.
+- Repository source for installed builtin skills: Rin-owned skills under `docs/agent/builtin-skills/`, plus selected external mirrors such as `upstream/skill-creator/`.
