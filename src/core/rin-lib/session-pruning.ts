@@ -1,3 +1,8 @@
+import {
+  buildPiToolContinuationPlan,
+  extractAssistantToolCallIds,
+} from "../pi/tool-continuation.js";
+
 export const RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS = 4;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "[old tool result omitted to save context.]";
@@ -16,6 +21,10 @@ function normalizeProtectRecentTurns(value: unknown) {
 
 function isUserMessage(message: any) {
   return String(message?.role || "").trim() === "user";
+}
+
+function isAssistantMessage(message: any) {
+  return String(message?.role || "").trim() === "assistant";
 }
 
 function isToolResultMessage(message: any) {
@@ -57,25 +66,110 @@ function omittedContentFor(content: any) {
   return RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT;
 }
 
-export function pruneSessionContextMessages(
+function createProviderVisibleMessagePlan(messages: any[]) {
+  const input = Array.isArray(messages) ? messages : [];
+  const piPlan = buildPiToolContinuationPlan(input);
+  const validToolCallIds = new Set<string>();
+  const invalidToolCallIds = new Set<string>();
+  const droppedMessages = new Set<any>();
+  let changed = false;
+  const filtered: any[] = [];
+
+  for (let index = 0; index < input.length; index += 1) {
+    const message = input[index];
+    if (
+      isAssistantMessage(message) &&
+      !piPlan.visibleMessageIndexes.has(index)
+    ) {
+      for (const id of extractAssistantToolCallIds(message)) {
+        invalidToolCallIds.add(id);
+      }
+      droppedMessages.add(message);
+      changed = true;
+      continue;
+    }
+
+    if (isAssistantMessage(message)) {
+      const toolCalls =
+        piPlan.visibleToolCallPartsByMessageIndex.get(index) || [];
+      for (const toolCall of toolCalls) {
+        const id = String(toolCall?.id || "").trim();
+        if (!id) continue;
+        validToolCallIds.add(id);
+        invalidToolCallIds.delete(id);
+      }
+      filtered.push(message);
+      continue;
+    }
+
+    if (isToolResultMessage(message)) {
+      const toolCallId = String(message?.toolCallId || "").trim();
+      if (
+        toolCallId &&
+        (invalidToolCallIds.has(toolCallId) ||
+          !validToolCallIds.has(toolCallId))
+      ) {
+        droppedMessages.add(message);
+        changed = true;
+        continue;
+      }
+    }
+
+    filtered.push(message);
+  }
+
+  return {
+    messages: changed ? filtered : input,
+    changed,
+    droppedMessages,
+  };
+}
+
+function createProviderBoundPrunePlan(
   messages: any[],
   options: SessionPruningOptions = {},
 ) {
-  const list = Array.isArray(messages) ? messages : [];
+  const input = Array.isArray(messages) ? messages : [];
+  const visible = createProviderVisibleMessagePlan(input);
   const protectedStart = findProtectedContextStart(
-    list,
+    visible.messages,
     normalizeProtectRecentTurns(options.protectRecentTurns),
   );
-  let changed = false;
-  const pruned = list.map((message, index) => {
+  const replacements = new Map<any, any>();
+  let changed = visible.changed;
+  const pruned = visible.messages.map((message, index) => {
     if (index >= protectedStart || !isToolResultMessage(message)) {
       return message;
     }
     if (isAlreadyOmitted(message?.content)) return message;
+    const replacement = {
+      ...message,
+      content: omittedContentFor(message?.content),
+    };
+    replacements.set(message, replacement);
     changed = true;
-    return { ...message, content: omittedContentFor(message?.content) };
+    return replacement;
   });
-  return changed ? pruned : list;
+
+  return {
+    messages: changed ? pruned : input,
+    changed,
+    replacements,
+    droppedMessages: visible.droppedMessages,
+  };
+}
+
+export function dropProviderInvalidToolMessages(messages: any[]) {
+  const input = Array.isArray(messages) ? messages : [];
+  const plan = createProviderVisibleMessagePlan(input);
+  return plan.changed ? plan.messages : input;
+}
+
+export function pruneSessionContextMessages(
+  messages: any[],
+  options: SessionPruningOptions = {},
+) {
+  return createProviderBoundPrunePlan(messages, options).messages;
 }
 
 export function mapMessagesToPrunedSessionContext(
@@ -89,22 +183,23 @@ export function mapMessagesToPrunedSessionContext(
     : [];
   if (!list.length || !fullList.length) return list;
 
-  const prunedFullList = pruneSessionContextMessages(fullList, options);
-  if (prunedFullList === fullList) return list;
-
-  const replacements = new Map<any, any>();
-  fullList.forEach((message, index) => {
-    const replacement = prunedFullList[index];
-    if (replacement !== message) replacements.set(message, replacement);
-  });
-  if (!replacements.size) return list;
+  const plan = createProviderBoundPrunePlan(fullList, options);
+  if (!plan.changed) return list;
 
   let changed = false;
-  const mapped = list.map((message) => {
-    const replacement = replacements.get(message);
-    if (!replacement) return message;
-    changed = true;
-    return replacement;
-  });
+  const mapped: any[] = [];
+  for (const message of list) {
+    if (plan.droppedMessages.has(message)) {
+      changed = true;
+      continue;
+    }
+    if (plan.replacements.has(message)) {
+      mapped.push(plan.replacements.get(message));
+      changed = true;
+      continue;
+    }
+    mapped.push(message);
+  }
+
   return changed ? mapped : list;
 }

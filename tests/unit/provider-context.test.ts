@@ -14,7 +14,7 @@ const providerContext = await import(
   ).href
 );
 
-test("provider-bound context policy omits old tool results for model-bound contexts", () => {
+test("provider-bound context policy omits old tool results", () => {
   const messages = [
     { role: "user", content: "turn 1" },
     { role: "toolResult", content: "huge old output" },
@@ -38,6 +38,164 @@ test("provider-bound context policy omits old tool results for model-bound conte
     "[old tool result omitted to save context.]",
   );
   assert.equal(messages[1].content, "huge old output");
+});
+
+for (const stopReason of ["error", "aborted"] as const) {
+  test(`provider-bound context drops ${stopReason} assistant tool calls and their tool results`, () => {
+    const incompleteAssistant = {
+      role: "assistant",
+      stopReason,
+      errorMessage: stopReason === "error" ? "WebSocket error" : undefined,
+      content: [
+        { type: "text", text: "working preface" },
+        { type: "toolCall", name: "write", id: "call-broken" },
+      ],
+    };
+    const interruptedResult = {
+      role: "toolResult",
+      toolCallId: "call-broken",
+      content: "The tool was interrupted because the daemon exited.",
+    };
+    const messages = [
+      { role: "user", content: "start" },
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", name: "read", id: "call-ok" }],
+      },
+      { role: "toolResult", toolCallId: "call-ok", content: "ok" },
+      incompleteAssistant,
+      interruptedResult,
+      { role: "user", content: "next" },
+    ];
+
+    const providerMessages =
+      providerContext.buildProviderBoundContextMessages(messages);
+
+    assert.notEqual(providerMessages, messages);
+    assert.equal(providerMessages.includes(incompleteAssistant), false);
+    assert.equal(providerMessages.includes(interruptedResult), false);
+    assert.equal(
+      providerMessages.some(
+        (message: any) => message?.toolCallId === "call-broken",
+      ),
+      false,
+    );
+    assert.equal(
+      providerMessages.some(
+        (message: any) => message?.toolCallId === "call-ok",
+      ),
+      true,
+    );
+    assert.equal(messages.includes(incompleteAssistant), true);
+    assert.equal(messages.includes(interruptedResult), true);
+  });
+}
+
+test("provider-bound context pruning does not depend on model", () => {
+  const incompleteAssistant = {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "WebSocket error",
+    content: [{ type: "toolCall", name: "write", id: "call-broken" }],
+  };
+  const interruptedResult = {
+    role: "toolResult",
+    toolCallId: "call-broken",
+    content: "The tool was interrupted because the daemon exited.",
+  };
+  const messages = [
+    { role: "user", content: "start" },
+    incompleteAssistant,
+    interruptedResult,
+    { role: "user", content: "next" },
+  ];
+
+  const providerMessages =
+    providerContext.buildProviderBoundContextMessages(messages);
+
+  assert.deepEqual(providerMessages, [messages[0], messages[3]]);
+});
+
+test("provider-bound context drops incomplete assistant messages without tool calls", () => {
+  const incompleteAssistant = {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "WebSocket error",
+    content: [{ type: "text", text: "partial text" }],
+  };
+  const messages = [
+    { role: "user", content: "start" },
+    incompleteAssistant,
+    { role: "user", content: "next" },
+  ];
+
+  const providerMessages =
+    providerContext.buildProviderBoundContextMessages(messages);
+
+  assert.deepEqual(providerMessages, [messages[0], messages[2]]);
+});
+
+test("provider-bound context drops orphan tool results without dropping later turns", () => {
+  const orphan = {
+    role: "toolResult",
+    toolCallId: "call-missing",
+    content: "orphan output",
+  };
+  const messages = [
+    { role: "user", content: "start" },
+    orphan,
+    { role: "user", content: "next" },
+  ];
+
+  const providerMessages =
+    providerContext.buildProviderBoundContextMessages(messages);
+
+  assert.deepEqual(providerMessages, [messages[0], messages[2]]);
+  assert.equal(messages.includes(orphan), true);
+});
+
+test("provider-bound context maps compaction slices without shifting dropped messages", () => {
+  const incompleteAssistant = {
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: "WebSocket error",
+    content: [{ type: "toolCall", name: "write", id: "call-broken" }],
+  };
+  const interruptedResult = {
+    role: "toolResult",
+    toolCallId: "call-broken",
+    content: "The tool was interrupted because the daemon exited.",
+  };
+  const oldToolResult = { role: "toolResult", content: "huge old output" };
+  const summarizedSlice = [
+    incompleteAssistant,
+    interruptedResult,
+    oldToolResult,
+  ];
+  const fullContext = [
+    { role: "user", content: "turn 1" },
+    incompleteAssistant,
+    interruptedResult,
+    oldToolResult,
+    { role: "assistant", content: "done 1" },
+    { role: "user", content: "turn 2" },
+    { role: "assistant", content: "done 2" },
+    { role: "user", content: "turn 3" },
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    { role: "assistant", content: "done 4" },
+    { role: "user", content: "turn 5" },
+    { role: "assistant", content: "done 5" },
+  ];
+
+  const mapped = providerContext.mapMessagesToProviderBoundContext(
+    summarizedSlice,
+    fullContext,
+  );
+
+  assert.equal(mapped.length, 1);
+  assert.equal(mapped[0].content, "[old tool result omitted to save context.]");
+  assert.equal(oldToolResult.content, "huge old output");
 });
 
 test("provider-bound context policy maps compaction slices through the full context view", () => {

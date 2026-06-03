@@ -1,6 +1,9 @@
 import { getLatestCompactionEntry } from "@earendil-works/pi-coding-agent";
 
-import { extractToolCallParts } from "../message-content.js";
+import {
+  extractPiContinuableToolCallIds,
+  extractPiContinuableToolCallParts,
+} from "../pi/tool-continuation.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { createInterruptedToolResultMessage } from "../rin-lib/interruption.js";
 import { fail, ok } from "../rin-lib/rpc.js";
@@ -115,10 +118,7 @@ function ensureInterruptedAssistantPersisted(session: any, message: any) {
 }
 
 function messageToolCallIds(message: any) {
-  if (message?.role !== "assistant") return [];
-  return extractToolCallParts(message.content)
-    .map((part) => safeString(part?.id).trim())
-    .filter(Boolean);
+  return extractPiContinuableToolCallIds(message);
 }
 
 function toolResultHasMatchingAncestor(
@@ -158,7 +158,7 @@ function rebuildSessionTreeIndexes(session: any, keptEntries: any[]) {
   }
 }
 
-function repairOrphanToolResultEntries(session: any) {
+function repairProviderInvalidToolResultEntries(session: any) {
   const entries = getSessionEntries(session);
   if (!entries.length) return 0;
   const byId = new Map<string, any>(
@@ -220,7 +220,7 @@ function appendInterruptedToolResults(
     : [];
   const lastMessage = messages[messages.length - 1];
   if (!lastMessage || lastMessage.role !== "assistant") return false;
-  const toolCalls = extractToolCallParts(lastMessage.content);
+  const toolCalls = extractPiContinuableToolCallParts(lastMessage);
   if (!toolCalls.length) return false;
 
   const persistToSession = options.persistToSession !== false;
@@ -872,7 +872,7 @@ export async function runCustomRpcMode(
   let unsubscribeSessionEvents: (() => void) | undefined;
   const bindCurrentSession = async () => {
     const session = getSession();
-    repairOrphanToolResultEntries(session);
+    repairProviderInvalidToolResultEntries(session);
     await session.bindExtensions({
       uiContext: createExtensionUiContext(),
       commandContextActions: {
