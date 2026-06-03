@@ -22,7 +22,6 @@ import {
   resolveRinTurnFailureMessage,
 } from "../rin-frontend-sdk/turn-completion.js";
 import {
-  emitPiExtensionRunnerEvent,
   emitPiSessionEvent,
   refreshPiSessionToolRegistry,
   rewritePiSessionManagerFile,
@@ -308,22 +307,10 @@ async function setSessionModel(
   ) {
     throw new Error(`No API key for ${model.provider}/${model.id}`);
   }
-  const previousModel = session.model;
   const thinkingLevel = safeString(session.thinkingLevel).trim() || "medium";
   session.agent.state.model = model;
   session.sessionManager?.appendModelChange?.(model.provider, model.id);
   setSessionThinkingLevel(session, thinkingLevel, { persistSettings: false });
-  if (
-    previousModel?.provider !== model.provider ||
-    previousModel?.id !== model.id
-  ) {
-    await emitPiExtensionRunnerEvent(session, {
-      type: "model_select",
-      model,
-      previousModel,
-      source: "set",
-    });
-  }
   return model;
 }
 

@@ -6,7 +6,6 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
-import { createRinCapabilitySet } from "../rin-lib/capability-session.js";
 import {
   collectRuntimeSlashCommands,
   getOAuthStateFromModelRegistry,
@@ -37,7 +36,6 @@ type CatalogContext = {
   modelRegistry: any;
   resourceLoader: any;
   extensionRunner: any;
-  rinCapabilities: any;
 };
 
 function normalizeAdditionalExtensionPaths(value: string[] | undefined) {
@@ -139,20 +137,6 @@ async function createCatalogContext(
     null,
     modelRegistry,
   );
-  const { createRinCapabilityDefinitions } =
-    await import("../rin-lib/runtime.js");
-  const rinCapabilities = createRinCapabilitySet({
-    cwd,
-    agentDir,
-    modelRegistry,
-    definitions: createRinCapabilityDefinitions({
-      cwd,
-      agentDir,
-      getThinkingLevel: () => "medium",
-      sendMessage: () => {},
-    }),
-  });
-
   return {
     cwd,
     agentDir,
@@ -161,7 +145,6 @@ async function createCatalogContext(
     modelRegistry,
     resourceLoader,
     extensionRunner,
-    rinCapabilities,
   };
 }
 

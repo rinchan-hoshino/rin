@@ -724,7 +724,7 @@ test(
 );
 
 test(
-  "rpc mode applies non-persistent model changes without calling the settings-backed setter",
+  "rpc mode applies non-persistent model changes without calling the settings-backed setter or extension events",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -732,6 +732,7 @@ test(
     const handlers = new Map();
     const lines = [];
     const appendedModels: string[] = [];
+    const extensionEvents: any[] = [];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -759,6 +760,12 @@ test(
         agent: {
           state: { model: null, thinkingLevel: "high" },
           waitForIdle: async () => {},
+        },
+        _extensionRunner: {
+          emit: async (event: any) => {
+            extensionEvents.push(event);
+            await new Promise(() => {});
+          },
         },
         bindExtensions: async () => {},
         subscribe: () => () => {},
@@ -833,6 +840,7 @@ test(
 
       assert.equal(session.agent.state.model, targetModel);
       assert.deepEqual(appendedModels, ["openai-codex/gpt-5.5"]);
+      assert.deepEqual(extensionEvents, []);
       const response = lines
         .map((line) => {
           try {
@@ -853,7 +861,7 @@ test(
 );
 
 test(
-  "rpc mode resets model options from settings without full session reload",
+  "rpc mode resets model options from settings without full session reload or extension events",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -863,6 +871,7 @@ test(
     const appendedModels: string[] = [];
     const appendedLevels: string[] = [];
     const calls: string[] = [];
+    const extensionEvents: any[] = [];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -893,6 +902,12 @@ test(
         agent: {
           state: { model: null, thinkingLevel: "low" },
           waitForIdle: async () => {},
+        },
+        _extensionRunner: {
+          emit: async (event: any) => {
+            extensionEvents.push(event);
+            await new Promise(() => {});
+          },
         },
         bindExtensions: async () => {},
         subscribe: () => () => {},
@@ -979,6 +994,7 @@ test(
       await wait(20);
 
       assert.deepEqual(calls, ["settings.reload"]);
+      assert.deepEqual(extensionEvents, []);
       assert.equal(session.agent.state.model, targetModel);
       assert.equal(session.agent.state.thinkingLevel, "high");
       assert.deepEqual(appendedModels, ["openai-codex/gpt-5.5"]);

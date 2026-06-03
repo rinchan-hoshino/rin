@@ -183,10 +183,6 @@ export function getPiExtensionRunner(session: any) {
   return session?.[PI_SESSION_PRIVATE.extensionRunner];
 }
 
-export function emitPiExtensionRunnerEvent(session: any, event: any) {
-  return session?.[PI_SESSION_PRIVATE.extensionRunner]?.emit?.(event);
-}
-
 export function shutdownPiSessionExtensionHost(session: any) {
   return session?.[PI_SESSION_PRIVATE.extensionShutdownHandler]?.();
 }
