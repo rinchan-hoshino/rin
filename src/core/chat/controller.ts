@@ -179,6 +179,7 @@ export class ChatController {
   pendingPassiveNotices: string[] = [];
   awaitingTurnSettle = false;
   turnAbortRequested = false;
+  turnAbortGeneration = 0;
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
   commandResponses?: ChatCommandResponses;
@@ -267,6 +268,7 @@ export class ChatController {
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
     this.turnAbortRequested = false;
+    this.turnAbortGeneration = 0;
     this.driver.dispose();
   }
 
@@ -287,6 +289,7 @@ export class ChatController {
   async clearProcessingState() {
     this.awaitingTurnSettle = false;
     this.turnAbortRequested = false;
+    this.turnAbortGeneration += 1;
     this.stagedDelivery = null;
     await this.clearWorkingReaction().catch(() => {});
     await this.clearCompactionWorkingReaction().catch(() => {});
@@ -358,6 +361,10 @@ export class ChatController {
     const current = this.currentIncomingMessageId();
     const target = safeString(messageId || "").trim();
     return !current || !target || current === target;
+  }
+
+  private hasCurrentTurnMatching(messageId?: string) {
+    return Boolean(this.currentTurn) && this.currentTurnMatches(messageId);
   }
 
   private clearCurrentTurnFor(messageId?: string) {
@@ -1144,9 +1151,13 @@ export class ChatController {
     const hadActiveTurn = this.hasActiveTurn();
     const abortingActiveTurn =
       commandPolicy.activeTurnHandling === "abort" && hadActiveTurn;
+    const interruptingActiveTurn =
+      commandPolicy.activeTurnHandling === "interrupt_then_run" &&
+      hadActiveTurn;
     if (abortingActiveTurn) {
       this.lastActivityAt = Date.now();
       try {
+        this.turnAbortGeneration += 1;
         this.turnAbortRequested = true;
         const data: any = {
           ...this.driver.interruptActiveTurnLikeTui(),
@@ -1201,12 +1212,21 @@ export class ChatController {
           ? this.managedSessionLeafForFreshChat()
           : undefined;
     this.lastActivityAt = Date.now();
-    this.setActiveCommandTurnInput({ incomingMessageId, replyToMessageId });
-    await this.connect({ restoreSession: !skipSessionRecovery });
-    if (commandPolicy.acceptInboundBeforeExecution) {
-      this.markAcceptedMessage(incomingMessageId);
+    if (interruptingActiveTurn) {
+      this.turnAbortGeneration += 1;
+      this.turnAbortRequested = true;
     }
+    this.setActiveCommandTurnInput({ incomingMessageId, replyToMessageId });
     try {
+      if (interruptingActiveTurn) {
+        await this.connect({ restoreSession: true });
+        this.driver.interruptActiveTurnLikeTui();
+      }
+      await this.connect({ restoreSession: !skipSessionRecovery });
+      if (commandPolicy.acceptInboundBeforeExecution) {
+        this.markAcceptedMessage(incomingMessageId);
+      }
+
       let data: any = await this.driver.runCommand(commandLine, {
         skipSessionRecovery,
         restoreSessionFile,
@@ -1247,6 +1267,7 @@ export class ChatController {
       throw error;
     } finally {
       this.awaitingTurnSettle = false;
+      if (interruptingActiveTurn) this.turnAbortRequested = false;
       await this.clearWorkingReaction().catch(() => {});
       this.clearCurrentTurn();
       this.clearActiveCommandTurnInput();
@@ -1354,6 +1375,7 @@ export class ChatController {
     }
 
     return await this.runExclusiveTurn(async () => {
+      const turnAbortGeneration = this.turnAbortGeneration;
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
         this.resolveSessionFileForUse(rawWantedSessionFile);
@@ -1380,6 +1402,9 @@ export class ChatController {
         });
       }
       try {
+        if (this.turnAbortGeneration !== turnAbortGeneration) {
+          throw new Error("chat_turn_aborted");
+        }
         const result = await this.driver.runTurn({
           text: formatPromptForChatContext(text, input.promptMeta),
           images,
@@ -1434,11 +1459,16 @@ export class ChatController {
           (error as any)?.message || error,
         ).trim();
         if (errorMessage === "chat_turn_aborted") {
+          const ownsCurrentTurn = this.hasCurrentTurnMatching(
+            input.incomingMessageId,
+          );
           const abortedSession = normalizeSessionRef(error);
           this.markProcessedMessage(input.incomingMessageId, false);
           await this.clearWorkingReactionFor(input.incomingMessageId);
           this.clearCurrentTurnFor(input.incomingMessageId);
-          if (this.currentTurnMatches(input.incomingMessageId)) {
+          if (ownsCurrentTurn) {
+            this.awaitingTurnSettle = false;
+            this.turnAbortRequested = false;
             this.stagedDelivery = null;
           }
           this.saveState();
@@ -1475,15 +1505,20 @@ export class ChatController {
             });
           }
         }
+        const ownsCurrentTurn = this.hasCurrentTurnMatching(
+          input.incomingMessageId,
+        );
         await this.clearWorkingReactionFor(input.incomingMessageId);
         this.clearCurrentTurnFor(input.incomingMessageId);
-        if (this.currentTurnMatches(input.incomingMessageId)) {
+        if (ownsCurrentTurn) {
+          this.awaitingTurnSettle = false;
+          this.turnAbortRequested = false;
           this.stagedDelivery = null;
         }
         this.saveState();
         throw error;
       } finally {
-        if (this.currentTurnMatches(input.incomingMessageId)) {
+        if (this.hasCurrentTurnMatching(input.incomingMessageId)) {
           this.awaitingTurnSettle = false;
           this.turnAbortRequested = false;
         }

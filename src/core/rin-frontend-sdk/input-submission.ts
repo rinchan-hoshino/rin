@@ -12,11 +12,18 @@ import type {
 
 export type RinFrontendInputSubmissionGate = {
   isCompacting?: () => boolean;
+  isAborted?: () => boolean;
+  abortErrorMessage?: string;
   refresh?: () => Promise<unknown>;
   onWaiting?: () => void;
   timeoutMs?: number;
   pollMs?: number;
 };
+
+function throwIfInputSubmissionAborted(gate?: RinFrontendInputSubmissionGate) {
+  if (!gate?.isAborted?.()) return;
+  throw new Error(gate.abortErrorMessage || "frontend_input_aborted");
+}
 
 export type RinFrontendPromptTurnInput = {
   text: string;
@@ -34,6 +41,7 @@ export type RinFrontendPromptTurnInput = {
 export async function waitForFrontendInputSubmissionReady(
   gate?: RinFrontendInputSubmissionGate,
 ) {
+  throwIfInputSubmissionAborted(gate);
   const isCompacting = gate?.isCompacting;
   if (!isCompacting?.()) return;
   gate?.onWaiting?.();
@@ -41,10 +49,12 @@ export async function waitForFrontendInputSubmissionReady(
   const pollMs = gate?.pollMs ?? 500;
   const deadline = Date.now() + timeoutMs;
   while (isCompacting()) {
+    throwIfInputSubmissionAborted(gate);
     if (Date.now() > deadline) throw new Error("frontend_compaction_timeout");
     await sleep(pollMs);
     await gate?.refresh?.().catch(() => undefined);
   }
+  throwIfInputSubmissionAborted(gate);
 }
 
 export async function submitNativeFrontendPromptTurn(
@@ -52,6 +62,7 @@ export async function submitNativeFrontendPromptTurn(
   input: RinFrontendPromptTurnInput,
 ): Promise<void> {
   await waitForFrontendInputSubmissionReady(input.gate);
+  throwIfInputSubmissionAborted(input.gate);
   const promptOptions: RinPromptOptions = {
     images: input.images,
     streamingBehavior: input.streamingBehavior,

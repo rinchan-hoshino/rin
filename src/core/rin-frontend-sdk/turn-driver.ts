@@ -139,6 +139,8 @@ export class RinFrontendTurnDriver {
   private liveTurnRecoveryContext: {
     sessionFile?: string;
   } | null = null;
+  private turnInterruptionSeq = 0;
+  private pendingTurnCount = 0;
 
   constructor(options: {
     clientFactory: () => RinFrontendTurnClient;
@@ -317,8 +319,19 @@ export class RinFrontendTurnDriver {
 
   private rejectLiveTurnAsAborted() {
     this.clearAssistantInterimState();
+    this.frontendState.turnActive = false;
+    this.frontendState.isStreaming = false;
     this.setFrontendPhase("idle");
     this.failLiveTurn(new Error("chat_turn_aborted"));
+  }
+
+  private isTurnInterrupted(interruptionSeq: number) {
+    return this.turnInterruptionSeq !== interruptionSeq;
+  }
+
+  private throwIfTurnInterrupted(interruptionSeq: number) {
+    if (!this.isTurnInterrupted(interruptionSeq)) return;
+    throw new Error("chat_turn_aborted");
   }
 
   private isStreaming() {
@@ -331,9 +344,14 @@ export class RinFrontendTurnDriver {
     return Boolean(this.frontendState.isCompacting);
   }
 
-  private inputSubmissionGate(sessionFile?: string) {
+  private inputSubmissionGate(sessionFile?: string, interruptionSeq?: number) {
+    const hasInterruptionSeq = typeof interruptionSeq === "number";
     return {
       isCompacting: () => this.isCompacting(),
+      isAborted: hasInterruptionSeq
+        ? () => this.isTurnInterrupted(interruptionSeq)
+        : undefined,
+      abortErrorMessage: hasInterruptionSeq ? "chat_turn_aborted" : undefined,
       refresh: () => this.refreshFrontendState(sessionFile),
       onWaiting: () => this.setFrontendPhase("working"),
     };
@@ -370,15 +388,21 @@ export class RinFrontendTurnDriver {
     this.emit(event);
   }
 
-  interruptActiveTurnLikeTui() {
-    this.rejectLiveTurnAsAborted();
-    try {
-      void this.client?.abort?.().catch(() => {});
-    } catch {}
+  private abortedTurnSessionRef() {
     return {
       sessionId: this.currentSessionId() || undefined,
       sessionFile: this.currentSessionFile() || undefined,
     };
+  }
+
+  interruptActiveTurnLikeTui() {
+    const result = this.abortedTurnSessionRef();
+    this.turnInterruptionSeq += 1;
+    this.rejectLiveTurnAsAborted();
+    try {
+      void this.client?.abort?.().catch(() => {});
+    } catch {}
+    return result;
   }
 
   private resetAssistantSegmentTracking() {
@@ -386,11 +410,17 @@ export class RinFrontendTurnDriver {
     this.assistantFinalReplyCommitted = false;
   }
 
-  private isTurnActive() {
+  private hasRemoteOrLiveTurnActive() {
     return Boolean(
       this.liveTurn ||
       this.frontendState.isStreaming ||
       this.frontendState.turnActive,
+    );
+  }
+
+  private isTurnActive() {
+    return Boolean(
+      this.pendingTurnCount > 0 || this.hasRemoteOrLiveTurnActive(),
     );
   }
 
@@ -406,8 +436,19 @@ export class RinFrontendTurnDriver {
     return Boolean(this.client);
   }
 
+  private terminalRpcTurnPayloadMatchesLiveTurn(payload: any) {
+    if (!payload || payload.type !== "rpc_turn_event") return true;
+    if (payload.event !== "complete" && payload.event !== "error") {
+      return true;
+    }
+    if (!this.liveTurn) return false;
+    const current = safeString(this.liveTurn.requestTag || "").trim();
+    const incoming = safeString(payload.requestTag || "").trim();
+    return !(current && incoming && current !== incoming);
+  }
+
   canSteerActiveTurn() {
-    if (!this.isTurnActive()) return false;
+    if (!this.hasRemoteOrLiveTurnActive()) return false;
     return !this.assistantFinalReplyCommitted;
   }
 
@@ -994,153 +1035,73 @@ export class RinFrontendTurnDriver {
       streamingBehavior?: "steer" | "follow";
     } & RinToolStartupOptions,
   ): Promise<RinFrontendTurnResult> {
-    const promptSource = safeString(input.source).trim() || this.promptSource;
-    const sessionFile = safeString(input.sessionFile || "").trim();
-    const restoreSessionFile = safeString(
-      input.restoreSessionFile || "",
-    ).trim();
-    const managedSessionLeaf = safeString(
-      input.managedSessionLeaf || "",
-    ).trim();
-    await this.connect();
-    if (!this.client) throw new Error("frontend_session_not_connected");
-    if (sessionFile && !sessionFileExists(sessionFile)) {
-      throw missingSessionFileError(sessionFile);
-    }
-    const ready = await this.ensureSessionReady(
-      sessionFile || restoreSessionFile,
-      managedSessionLeaf,
-      input,
-    );
-    const targetSessionFile = this.sessionFileFromReady(
-      ready,
-      sessionFile || restoreSessionFile,
-    );
-    this.assertTargetSessionReady(
-      sessionFile || restoreSessionFile,
-      targetSessionFile,
-    );
-    await this.applySessionName(input.sessionName);
-    await this.applyTurnToolOptions(input, targetSessionFile);
-    const inputGate = this.inputSubmissionGate(targetSessionFile);
-    if (input.resetModelOptionsFromSettings) {
-      await this.resetModelOptionsFromSettings(targetSessionFile);
-    }
-    await this.applyTurnModelOptions(
-      {
-        model: input.model,
-        thinkingLevel: input.thinkingLevel,
-      },
-      targetSessionFile,
-    );
-    const text = safeString(input.text).trim();
-    const images = Array.isArray(input.images) ? input.images : [];
-
-    if (this.isTurnActive()) {
-      if (input.streamingBehavior !== "steer") {
-        return await this.followActiveTurn(ready);
+    const turnInterruptionSeq = this.turnInterruptionSeq;
+    this.pendingTurnCount += 1;
+    try {
+      const promptSource = safeString(input.source).trim() || this.promptSource;
+      const sessionFile = safeString(input.sessionFile || "").trim();
+      const restoreSessionFile = safeString(
+        input.restoreSessionFile || "",
+      ).trim();
+      const managedSessionLeaf = safeString(
+        input.managedSessionLeaf || "",
+      ).trim();
+      await this.connect();
+      if (!this.client) throw new Error("frontend_session_not_connected");
+      if (sessionFile && !sessionFileExists(sessionFile)) {
+        throw missingSessionFileError(sessionFile);
       }
-      this.clearAssistantInterimState();
-      const requestTag = this.createTurnRequestTag();
-      await submitNativeFrontendPromptTurn(this.client, {
-        text,
-        images,
-        source: promptSource,
-        frontendIdentity: this.frontendIdentity,
-        streamingBehavior: "steer",
-        requestTag,
-        promptContext: input.promptContext,
-        sessionFile: targetSessionFile,
-        gate: inputGate,
-      });
-      this.throwIfQueuedOffline(requestTag);
-      return {
-        steered: true,
-        sessionId:
-          safeString(ready?.sessionId || this.currentSessionId()).trim() ||
-          undefined,
-        sessionFile:
-          safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
-          undefined,
-      };
-    }
-
-    if (input.streamingBehavior !== "steer") {
-      const existing = await this.resolveSubmittedTurnForSession(
-        targetSessionFile,
-        { text, sentAt: input.promptContext?.sentAt },
+      const ready = await this.ensureSessionReady(
+        sessionFile || restoreSessionFile,
+        managedSessionLeaf,
+        input,
       );
-      if (existing) {
-        if ("submitted" in existing) {
-          return await this.waitForExistingSubmittedTurn(
-            { text, sentAt: input.promptContext?.sentAt },
-            ready,
-          );
-        }
-        return existing;
+      const targetSessionFile = this.sessionFileFromReady(
+        ready,
+        sessionFile || restoreSessionFile,
+      );
+      this.assertTargetSessionReady(
+        sessionFile || restoreSessionFile,
+        targetSessionFile,
+      );
+      await this.applySessionName(input.sessionName);
+      await this.applyTurnToolOptions(input, targetSessionFile);
+      const inputGate = this.inputSubmissionGate(
+        targetSessionFile,
+        turnInterruptionSeq,
+      );
+      if (input.resetModelOptionsFromSettings) {
+        await this.resetModelOptionsFromSettings(targetSessionFile);
       }
-    }
+      await this.applyTurnModelOptions(
+        {
+          model: input.model,
+          thinkingLevel: input.thinkingLevel,
+        },
+        targetSessionFile,
+      );
+      const text = safeString(input.text).trim();
+      const images = Array.isArray(input.images) ? input.images : [];
+      this.throwIfTurnInterrupted(turnInterruptionSeq);
 
-    this.resetAssistantSegmentTracking();
-    this.latestAssistantText = "";
-    const requestTag = this.createTurnRequestTag();
-    const liveTurn = this.startLiveTurn(requestTag);
-    this.setFrontendPhase("sending");
-    this.liveTurnRecoveryContext = {
-      sessionFile:
-        safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
-        undefined,
-    };
-    const promptSubmission = (async () => {
-      await submitNativeFrontendPromptTurn(this.client!, {
-        text,
-        images,
-        source: promptSource,
-        requestTag,
-        promptContext: input.promptContext,
-        sessionFile: targetSessionFile,
-        gate: inputGate,
-      });
-      this.throwIfQueuedOffline(requestTag);
-    })();
-    promptSubmission.catch(() => {});
-
-    const firstResult = await Promise.race([
-      promptSubmission.then(
-        () => ({ type: "prompt_submitted" as const }),
-        (error: unknown) => ({ type: "prompt_error" as const, error }),
-      ),
-      liveTurn.promise.then(
-        (completion) => ({ type: "turn_complete" as const, completion }),
-        (error: unknown) => ({ type: "turn_error" as const, error }),
-      ),
-    ]);
-
-    if (firstResult.type === "prompt_error") {
-      const error = firstResult.error;
-      if (isRecoverableConnectionError(error)) {
-        await this.recoverLiveTurnAfterDisconnect(error);
-        return await liveTurn.promise;
-      }
-      if (isAgentAlreadyProcessingError(error)) {
+      if (this.hasRemoteOrLiveTurnActive()) {
         if (input.streamingBehavior !== "steer") {
           return await this.followActiveTurn(ready);
         }
-        if (this.liveTurn === liveTurn) this.liveTurn = null;
-        this.liveTurnRecoveryContext = null;
         this.clearAssistantInterimState();
-        const steerRequestTag = this.createTurnRequestTag();
+        const requestTag = this.createTurnRequestTag();
         await submitNativeFrontendPromptTurn(this.client, {
           text,
           images,
           source: promptSource,
+          frontendIdentity: this.frontendIdentity,
           streamingBehavior: "steer",
-          requestTag: steerRequestTag,
+          requestTag,
           promptContext: input.promptContext,
           sessionFile: targetSessionFile,
           gate: inputGate,
         });
-        this.throwIfQueuedOffline(steerRequestTag);
+        this.throwIfQueuedOffline(requestTag);
         return {
           steered: true,
           sessionId:
@@ -1152,45 +1113,139 @@ export class RinFrontendTurnDriver {
             ).trim() || undefined,
         };
       }
-      this.failLiveTurn(
-        error instanceof Error
-          ? error
-          : new Error(String(error || "frontend_turn_failed")),
-      );
-      this.liveTurnRecoveryContext = null;
-      throw error;
-    }
-    if (firstResult.type === "turn_error") {
-      if (isRecoverableConnectionError(firstResult.error)) {
-        await this.recoverLiveTurnAfterDisconnect(firstResult.error);
-        return await liveTurn.promise;
-      }
-      this.liveTurnRecoveryContext = null;
-      throw firstResult.error;
-    }
 
-    const completion =
-      firstResult.type === "turn_complete"
-        ? firstResult.completion
-        : await liveTurn.promise;
-    const finalText = safeString((completion as any)?.finalText).trim();
-    if (!finalText) {
+      if (input.streamingBehavior !== "steer") {
+        const existing = await this.resolveSubmittedTurnForSession(
+          targetSessionFile,
+          { text, sentAt: input.promptContext?.sentAt },
+        );
+        this.throwIfTurnInterrupted(turnInterruptionSeq);
+        if (existing) {
+          if ("submitted" in existing) {
+            return await this.waitForExistingSubmittedTurn(
+              { text, sentAt: input.promptContext?.sentAt },
+              ready,
+            );
+          }
+          return existing;
+        }
+      }
+
+      this.throwIfTurnInterrupted(turnInterruptionSeq);
+      this.resetAssistantSegmentTracking();
+      this.latestAssistantText = "";
+      const requestTag = this.createTurnRequestTag();
+      const liveTurn = this.startLiveTurn(requestTag);
+      this.setFrontendPhase("sending");
+      this.liveTurnRecoveryContext = {
+        sessionFile:
+          safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
+          undefined,
+      };
+      const promptSubmission = (async () => {
+        this.throwIfTurnInterrupted(turnInterruptionSeq);
+        await submitNativeFrontendPromptTurn(this.client!, {
+          text,
+          images,
+          source: promptSource,
+          requestTag,
+          promptContext: input.promptContext,
+          sessionFile: targetSessionFile,
+          gate: inputGate,
+        });
+        this.throwIfQueuedOffline(requestTag);
+      })();
+      promptSubmission.catch(() => {});
+
+      const firstResult = await Promise.race([
+        promptSubmission.then(
+          () => ({ type: "prompt_submitted" as const }),
+          (error: unknown) => ({ type: "prompt_error" as const, error }),
+        ),
+        liveTurn.promise.then(
+          (completion) => ({ type: "turn_complete" as const, completion }),
+          (error: unknown) => ({ type: "turn_error" as const, error }),
+        ),
+      ]);
+
+      if (firstResult.type === "prompt_error") {
+        const error = firstResult.error;
+        if (isRecoverableConnectionError(error)) {
+          await this.recoverLiveTurnAfterDisconnect(error);
+          return await liveTurn.promise;
+        }
+        if (isAgentAlreadyProcessingError(error)) {
+          if (input.streamingBehavior !== "steer") {
+            return await this.followActiveTurn(ready);
+          }
+          if (this.liveTurn === liveTurn) this.liveTurn = null;
+          this.liveTurnRecoveryContext = null;
+          this.clearAssistantInterimState();
+          const steerRequestTag = this.createTurnRequestTag();
+          await submitNativeFrontendPromptTurn(this.client, {
+            text,
+            images,
+            source: promptSource,
+            streamingBehavior: "steer",
+            requestTag: steerRequestTag,
+            promptContext: input.promptContext,
+            sessionFile: targetSessionFile,
+            gate: inputGate,
+          });
+          this.throwIfQueuedOffline(steerRequestTag);
+          return {
+            steered: true,
+            sessionId:
+              safeString(ready?.sessionId || this.currentSessionId()).trim() ||
+              undefined,
+            sessionFile:
+              safeString(
+                ready?.sessionFile || this.currentSessionFile(),
+              ).trim() || undefined,
+          };
+        }
+        this.failLiveTurn(
+          error instanceof Error
+            ? error
+            : new Error(String(error || "frontend_turn_failed")),
+        );
+        this.liveTurnRecoveryContext = null;
+        throw error;
+      }
+      if (firstResult.type === "turn_error") {
+        if (isRecoverableConnectionError(firstResult.error)) {
+          await this.recoverLiveTurnAfterDisconnect(firstResult.error);
+          return await liveTurn.promise;
+        }
+        this.liveTurnRecoveryContext = null;
+        throw firstResult.error;
+      }
+
+      const completion =
+        firstResult.type === "turn_complete"
+          ? firstResult.completion
+          : await liveTurn.promise;
+      const finalText = safeString((completion as any)?.finalText).trim();
+      if (!finalText) {
+        this.liveTurnRecoveryContext = null;
+        throw new Error("rpc_turn_final_output_missing");
+      }
+      this.latestAssistantText = finalText;
       this.liveTurnRecoveryContext = null;
-      throw new Error("rpc_turn_final_output_missing");
+      return {
+        finalText,
+        result: completion?.result,
+        sessionId:
+          safeString(completion?.sessionId || this.currentSessionId()).trim() ||
+          undefined,
+        sessionFile:
+          safeString(
+            completion?.sessionFile || this.currentSessionFile(),
+          ).trim() || undefined,
+      };
+    } finally {
+      this.pendingTurnCount = Math.max(0, this.pendingTurnCount - 1);
     }
-    this.latestAssistantText = finalText;
-    this.liveTurnRecoveryContext = null;
-    return {
-      finalText,
-      result: completion?.result,
-      sessionId:
-        safeString(completion?.sessionId || this.currentSessionId()).trim() ||
-        undefined,
-      sessionFile:
-        safeString(
-          completion?.sessionFile || this.currentSessionFile(),
-        ).trim() || undefined,
-    };
   }
 
   async handleClientEvent(event: any) {
@@ -1201,6 +1256,7 @@ export class RinFrontendTurnDriver {
     }
     if (event.type === "ui") {
       const payload: any = event.payload;
+      if (!this.terminalRpcTurnPayloadMatchesLiveTurn(payload)) return;
       if (
         payload?.type === "agent_start" ||
         payload?.type === "agent_end" ||
@@ -1325,12 +1381,12 @@ export class RinFrontendTurnDriver {
         this.assistantFinalReplyCommitted = true;
         return;
       case "turn_complete": {
-        this.frontendState.turnActive = false;
-        this.frontendState.isStreaming = false;
         if (!this.liveTurn) return;
         const current = safeString(this.liveTurn.requestTag || "").trim();
         const incoming = safeString(event.requestTag || "").trim();
         if (current && incoming && current !== incoming) return;
+        this.frontendState.turnActive = false;
+        this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);
         const finalText = safeString(event.finalText).trim();
         if (!finalText) {
@@ -1348,6 +1404,10 @@ export class RinFrontendTurnDriver {
         return;
       }
       case "turn_error": {
+        if (!this.liveTurn) return;
+        const current = safeString(this.liveTurn.requestTag || "").trim();
+        const incoming = safeString(event.requestTag || "").trim();
+        if (current && incoming && current !== incoming) return;
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);

@@ -1209,6 +1209,75 @@ test("chat controller starts /new immediately through the TUI new-session path",
   assert.equal(controller.state.sessionFile, "new-chat.jsonl");
 });
 
+test("chat controller /new aborts a visible turn before driver live turn exists", async () => {
+  const controller = await createController();
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  const originalBeginVisible =
+    controller.beginVisibleProcessingTurn.bind(controller);
+  let markVisibleEntered!: () => void;
+  let releaseVisible!: () => void;
+  const visibleEntered = new Promise<void>((resolve) => {
+    markVisibleEntered = resolve;
+  });
+  const visibleReleased = new Promise<void>((resolve) => {
+    releaseVisible = resolve;
+  });
+  controller.beginVisibleProcessingTurn = async (input: any) => {
+    await originalBeginVisible(input);
+    markVisibleEntered();
+    await visibleReleased;
+  };
+
+  let promptCalled = false;
+  let abortCalled = false;
+  controller.driver.runTurn = async () => {
+    promptCalled = true;
+    return { finalText: "should not be submitted" };
+  };
+  controller.driver.interruptActiveTurnLikeTui = () => {
+    abortCalled = true;
+    return { sessionFile: "/tmp/old-chat.jsonl" };
+  };
+  controller.driver.runCommand = async (commandLine: string) => {
+    assert.equal(commandLine, "/new");
+    return {
+      handled: true,
+      text: "Started a new session.",
+      sessionFile: "/tmp/new-chat.jsonl",
+      sessionId: "session-new",
+    };
+  };
+  controller.driver.currentSessionFile = () => "/tmp/new-chat.jsonl";
+  controller.driver.currentSessionId = () => "session-new";
+
+  const firstTurn = controller.runTurn({
+    text: "/ne",
+    attachments: [],
+    replyToMessageId: "m-old",
+    incomingMessageId: "m-old",
+  });
+  await visibleEntered;
+
+  const newCommandPromise = controller.runCommand("/new", "m-new", "m-new");
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseVisible();
+  const [newCommand, aborted] = await Promise.all([
+    newCommandPromise,
+    firstTurn,
+  ]);
+
+  assert.equal(newCommand.text, "Started a new session.");
+  assert.equal(abortCalled, true);
+  assert.equal(promptCalled, false);
+  assert.equal(aborted.aborted, true);
+  assert.deepEqual(deliveries, ["Started a new session."]);
+});
+
 test("chat controller keeps /status immediate during an active chat turn", async () => {
   const controller = await createController("cron/detached:test");
   const calls = [];
