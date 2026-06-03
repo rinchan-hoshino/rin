@@ -2558,14 +2558,25 @@ test(
 );
 
 test(
-  "rpc mode waits one turn-completion tick for a delayed branch write",
+  "rpc mode resolves final text from canonical branch entries after the turn baseline leaf",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines = [];
-    const sessionSubscribers = new Set();
+    const branchEntries: any[] = [
+      {
+        type: "message",
+        id: "base-entry",
+        parentId: null,
+        message: {
+          role: "assistant",
+          timestamp: Date.now() - 10_000,
+          content: [{ type: "text", text: "previous final" }],
+        },
+      },
+    ];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -2582,22 +2593,21 @@ test(
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
         sessionId: "session-1",
-        agent: { waitForIdle: async () => {} },
+        agent: { state: { messages: [] }, waitForIdle: async () => {} },
         bindExtensions: async () => {},
-        subscribe: (handler) => {
-          sessionSubscribers.add(handler);
-          return () => sessionSubscribers.delete(handler);
-        },
+        subscribe: () => () => {},
         prompt: async () => {
           const assistantMessage = {
             role: "assistant",
-            content: [{ type: "text", text: "delayed final text" }],
+            timestamp: Date.now(),
+            content: [{ type: "text", text: "branch entry final" }],
           };
-          setImmediate(() => {
-            session.messages = [assistantMessage];
-            for (const handler of sessionSubscribers) {
-              handler({ type: "message_end", message: assistantMessage });
-            }
+          session.agent.state.messages = [assistantMessage];
+          branchEntries.push({
+            type: "message",
+            id: "final-entry",
+            parentId: "base-entry",
+            message: assistantMessage,
           });
         },
         sendCustomMessage: async () => {},
@@ -2605,11 +2615,19 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          buildSessionContext: () => ({ messages: [] }),
+          getBranch: () => branchEntries,
+          getLeafId: () => "base-entry",
+          getEntries: () => branchEntries,
+          getTree: () => [],
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "delayed final text",
+        getLastAssistantText: () => "branch entry final",
         setThinkingLevel: () => {},
         cycleThinkingLevel: () => undefined,
         setSteeringMode: () => {},
@@ -2669,10 +2687,16 @@ test(
           event.type === "rpc_turn_event" && event.event === "complete",
       );
       assert.equal(completion?.requestTag, "tag-1");
-      assert.equal(completion?.finalText, "delayed final text");
+      assert.equal(completion?.finalText, "branch entry final");
       assert.deepEqual(completion?.result, {
-        messages: [{ type: "text", text: "delayed final text" }],
+        messages: [{ type: "text", text: "branch entry final" }],
       });
+      assert.equal(
+        events.some(
+          (event) => event.type === "rpc_turn_event" && event.event === "error",
+        ),
+        false,
+      );
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

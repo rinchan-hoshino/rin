@@ -365,6 +365,84 @@ test("Rin 85% provider preflight can run again after a new tail message", async 
   assert.deepEqual(calls, ["overflow:true", "overflow:true"]);
 });
 
+test("Rin 85% mid-turn threshold compacts between tool-use turns", async () => {
+  const calls: string[] = [];
+  let branch: any[] = [];
+  const assistantMessage = {
+    role: "assistant",
+    stopReason: "toolUse",
+    timestamp: Date.now(),
+    usage: { totalTokens: 900 },
+    provider: "openai-codex",
+    model: "gpt-5.5",
+    content: [{ type: "toolCall", name: "bash" }],
+  };
+  const compactedMessages = [
+    { role: "compactionSummary", summary: "summary" },
+    { role: "toolResult", content: "fresh output" },
+  ];
+  const session: any = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1000 },
+    get isCompacting() {
+      return false;
+    },
+    agent: {
+      state: {
+        systemPrompt: "system prompt",
+        messages: [assistantMessage],
+        tools: [{ name: "bash" }],
+      },
+      prepareNextTurn: async () => ({ thinkingLevel: "low" }),
+    },
+    _lastAssistantMessage: assistantMessage,
+    sessionManager: {
+      getBranch() {
+        return branch;
+      },
+      buildSessionContext() {
+        return { messages: session.agent.state.messages };
+      },
+    },
+    async _checkCompaction() {
+      return false;
+    },
+    async _runAutoCompaction(reason: string, willRetry: boolean) {
+      calls.push(`${reason}:${willRetry}`);
+      branch = [
+        {
+          type: "compaction",
+          id: "compact-1",
+          timestamp: new Date().toISOString(),
+        },
+      ];
+      this.agent.state.messages = compactedMessages;
+      return false;
+    },
+  };
+
+  runtimeMod.applyRinCompactionPercentThreshold(session, {
+    calculateContextTokens: (usage: any) => usage.totalTokens,
+    estimateContextTokens: () => ({ tokens: 900 }),
+    getLatestCompactionEntry: (entries: any[]) =>
+      entries.find((entry) => entry.type === "compaction") || null,
+  });
+
+  const snapshot = await session.agent.prepareNextTurn();
+
+  assert.deepEqual(calls, ["threshold:false"]);
+  assert.equal(snapshot.thinkingLevel, "low");
+  assert.deepEqual(snapshot.context, {
+    systemPrompt: "system prompt",
+    messages: compactedMessages,
+    tools: [{ name: "bash" }],
+  });
+});
+
 test("Rin 85% provider preflight does not compact from an assistant-final context", async () => {
   const calls: string[] = [];
   const messages = [

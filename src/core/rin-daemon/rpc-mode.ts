@@ -453,10 +453,6 @@ async function createManagedNewSession(
   return { cancelled: false };
 }
 
-async function settleTurnCompletionEvents() {
-  await new Promise<void>((resolve) => setImmediate(resolve));
-}
-
 export async function runCustomRpcMode(
   runtimeOrSession: any,
   deps: {
@@ -752,7 +748,6 @@ export async function runCustomRpcMode(
           : null;
       try {
         await task();
-        await settleTurnCompletionEvents();
         const { messages, completion } =
           resolveRinTurnCompletionAfterPromptSettled(turnSession, {
             baseline,

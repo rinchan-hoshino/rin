@@ -879,6 +879,9 @@ const COMPACTION_PERCENT_THRESHOLD_KEY = Symbol.for(
 const PROVIDER_OVERFLOW_PREFLIGHT_KEY = Symbol.for(
   "rin.providerOverflowPreflight",
 );
+const MID_TURN_THRESHOLD_COMPACTION_KEY = Symbol.for(
+  "rin.midTurnThresholdCompaction",
+);
 const DEFAULT_RIN_COMPACTION_TRIGGER_PERCENT = 0.85;
 
 function normalizeCompactionTriggerPercent(value: unknown) {
@@ -971,6 +974,78 @@ function syncProviderPreflightMessages(target: any[], source: any[]) {
   target.splice(0, target.length, ...source);
 }
 
+function getLatestRinCompactionEntry(session: any, helpers: any) {
+  return (
+    helpers.getLatestCompactionEntry?.(
+      session?.sessionManager?.getBranch?.() || [],
+    ) || null
+  );
+}
+
+function getRinCompactionEntryKey(entry: any) {
+  if (!entry) return "";
+  return `${entry.id || ""}:${entry.timestamp || ""}`;
+}
+
+function buildRinAgentLoopContextSnapshot(session: any, fallbackContext?: any) {
+  const state = session?.agent?.state || {};
+  const messages = getSessionProviderContextMessages(session).slice();
+  const tools = Array.isArray(state.tools)
+    ? state.tools.slice()
+    : fallbackContext?.tools;
+  return {
+    ...(fallbackContext || {}),
+    systemPrompt:
+      typeof state.systemPrompt === "string"
+        ? state.systemPrompt
+        : fallbackContext?.systemPrompt,
+    messages,
+    tools,
+  };
+}
+
+async function maybeRunRinMidTurnThresholdCompaction(
+  session: any,
+  assistantMessage: any,
+  settings: any,
+  helpers: {
+    calculateContextTokens?: (usage: any) => number;
+    getLatestCompactionEntry?: (entries: any[]) => any;
+  },
+) {
+  if (assistantMessage?.stopReason !== "toolUse") return false;
+  if (session.isCompacting) return false;
+
+  const contextWindow = Number(session.model?.contextWindow || 0);
+  const compactionEntry = getLatestRinCompactionEntry(session, helpers);
+  if (
+    compactionEntry &&
+    assistantMessage?.timestamp <= new Date(compactionEntry.timestamp).getTime()
+  ) {
+    return false;
+  }
+
+  const contextTokens = helpers.calculateContextTokens?.(
+    assistantMessage?.usage,
+  );
+  if (
+    !shouldTriggerRinPercentCompaction(
+      Number(contextTokens),
+      contextWindow,
+      settings,
+    )
+  ) {
+    return false;
+  }
+
+  const beforeKey = getRinCompactionEntryKey(compactionEntry);
+  await runPiSessionAutoCompaction(session, "threshold", false);
+  const afterKey = getRinCompactionEntryKey(
+    getLatestRinCompactionEntry(session, helpers),
+  );
+  return Boolean(afterKey && afterKey !== beforeKey);
+}
+
 export function applyRinProviderOverflowPreflight(
   session: any,
   helpers: { estimateContextTokens?: (messages: any[]) => any } = {},
@@ -1052,6 +1127,42 @@ export function applyRinCompactionPercentThreshold(
   if (!originalCheckCompaction || !originalRunAutoCompaction) return;
   if (typeof helpers.calculateContextTokens !== "function") return;
   if (typeof helpers.estimateContextTokens !== "function") return;
+
+  const agent = session.agent;
+  if (
+    agent &&
+    typeof agent === "object" &&
+    !session[MID_TURN_THRESHOLD_COMPACTION_KEY]
+  ) {
+    const originalPrepareNextTurn =
+      typeof agent.prepareNextTurn === "function"
+        ? agent.prepareNextTurn.bind(agent)
+        : undefined;
+    agent.prepareNextTurn = async function rinMidTurnThresholdPrepareNextTurn(
+      signal?: AbortSignal,
+    ) {
+      const originalSnapshot = originalPrepareNextTurn
+        ? await originalPrepareNextTurn(signal)
+        : undefined;
+      const settings = session.settingsManager?.getCompactionSettings?.();
+      if (!settings?.enabled) return originalSnapshot;
+      const compacted = await maybeRunRinMidTurnThresholdCompaction(
+        session,
+        session._lastAssistantMessage,
+        settings,
+        helpers,
+      );
+      if (!compacted) return originalSnapshot;
+      return {
+        ...(originalSnapshot || {}),
+        context: buildRinAgentLoopContextSnapshot(
+          session,
+          originalSnapshot?.context,
+        ),
+      };
+    };
+    session[MID_TURN_THRESHOLD_COMPACTION_KEY] = { originalPrepareNextTurn };
+  }
 
   replacePiSessionCompactionChecker(
     session,

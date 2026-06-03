@@ -5,6 +5,8 @@ import { safeString } from "../text-utils.js";
 export type RinTurnCompletionBaseline = {
   turnStartedAtMs: number;
   branchMessageCount: number;
+  branchLeafId?: string | null;
+  hasBranchLeafId: boolean;
 };
 
 export type RinTurnCompletionResolution = {
@@ -25,12 +27,25 @@ function entryMessage(entry: any) {
     : null;
 }
 
+function readCurrentBranchEntries(session: any) {
+  return callArray(session?.sessionManager?.getBranch?.());
+}
+
 function readCurrentBranchMessages(session: any) {
   const context = session?.sessionManager?.buildSessionContext?.();
   if (Array.isArray(context?.messages)) return context.messages;
-  return callArray(session?.sessionManager?.getBranch?.())
-    .map(entryMessage)
-    .filter(Boolean);
+  return readCurrentBranchEntries(session).map(entryMessage).filter(Boolean);
+}
+
+function readCurrentBranchLeafId(session: any) {
+  if (typeof session?.sessionManager?.getLeafId !== "function") {
+    return { hasBranchLeafId: false, branchLeafId: undefined };
+  }
+  const leafId = session.sessionManager.getLeafId();
+  return {
+    hasBranchLeafId: true,
+    branchLeafId: leafId === null ? null : safeString(leafId).trim(),
+  };
 }
 
 function messageTimestampMs(message: any) {
@@ -51,10 +66,37 @@ export function captureRinTurnCompletionBaseline(
   session: any,
   turnStartedAtMs = Date.now(),
 ): RinTurnCompletionBaseline {
+  const leaf = readCurrentBranchLeafId(session);
   return {
     turnStartedAtMs,
     branchMessageCount: readCurrentBranchMessages(session).length,
+    ...leaf,
   };
+}
+
+function collectRinTurnCompletionMessagesFromBranchEntries(
+  session: any,
+  baseline: RinTurnCompletionBaseline,
+) {
+  if (!baseline.hasBranchLeafId) return null;
+  const branchEntries = readCurrentBranchEntries(session);
+  if (!branchEntries.length) return null;
+
+  let candidateEntries = branchEntries;
+  if (baseline.branchLeafId) {
+    const baselineIndex = branchEntries.findIndex(
+      (entry) => safeString(entry?.id).trim() === baseline.branchLeafId,
+    );
+    candidateEntries =
+      baselineIndex >= 0 ? branchEntries.slice(baselineIndex + 1) : [];
+  }
+
+  return candidateEntries
+    .map(entryMessage)
+    .filter(Boolean)
+    .filter((message) =>
+      isCurrentTurnMessage(message, baseline.turnStartedAtMs),
+    );
 }
 
 export function collectRinTurnCompletionMessages(
@@ -63,6 +105,12 @@ export function collectRinTurnCompletionMessages(
     baseline: RinTurnCompletionBaseline;
   },
 ) {
+  const branchEntryMessages = collectRinTurnCompletionMessagesFromBranchEntries(
+    session,
+    options.baseline,
+  );
+  if (branchEntryMessages) return branchEntryMessages;
+
   const branchMessages = readCurrentBranchMessages(session);
   const baselineCount = Math.max(
     0,
