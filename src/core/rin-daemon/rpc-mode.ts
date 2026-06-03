@@ -16,6 +16,7 @@ import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
   captureRinTurnCompletionBaseline,
   resolveRinTurnCompletionAfterPromptSettled,
@@ -1143,6 +1144,20 @@ export async function runCustomRpcMode(
         return done(id, type, { text: session.getLastAssistantText() });
       case "get_messages":
         return done(id, type, { messages: session.messages });
+      case "resolve_submitted_turn": {
+        const resolved = resolveSubmittedTurnFromMessages(session.messages, {
+          text: safeString(command.text).trim(),
+          sentAt: Number(command.sentAt || 0),
+        });
+        if (resolved && !("submitted" in resolved)) {
+          return done(id, type, {
+            ...resolved,
+            sessionId: session.sessionId,
+            sessionFile: session.sessionFile,
+          });
+        }
+        return done(id, type, resolved);
+      }
       case "get_active_tools":
         return done(id, type, {
           tools: session.getActiveToolNames?.() || [],

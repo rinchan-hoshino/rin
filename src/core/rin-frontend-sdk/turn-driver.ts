@@ -13,8 +13,8 @@ import {
 } from "./command-responses.js";
 import { getRinNonInteractiveCommandInteractionPolicy } from "./command-dispatcher.js";
 import { sleep } from "../platform/process.js";
-import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
+import type { RinSubmittedTurnResolution } from "./submitted-turn.js";
 import {
   hasRinToolStartupOptions,
   resolveRinActiveToolNames,
@@ -138,7 +138,6 @@ export class RinFrontendTurnDriver {
   private reconnectingTurnPromise: Promise<void> | null = null;
   private liveTurnRecoveryContext: {
     sessionFile?: string;
-    baselineMessages: unknown[];
   } | null = null;
 
   constructor(options: {
@@ -240,17 +239,6 @@ export class RinFrontendTurnDriver {
       type: "get_state",
       sessionFile: wanted,
     });
-  }
-
-  private async getMessagesForSession(sessionFile?: string) {
-    if (!this.client) return [];
-    const wanted = safeString(sessionFile || "").trim();
-    if (!wanted) return await this.client.getMessages();
-    const data: any = await this.client.request({
-      type: "get_messages",
-      sessionFile: wanted,
-    });
-    return Array.isArray(data?.messages) ? data.messages : [];
   }
 
   private async refreshFrontendState(sessionFile?: string) {
@@ -770,70 +758,39 @@ export class RinFrontendTurnDriver {
     };
   }
 
-  private messageRole(message: unknown) {
-    const value =
-      message && typeof message === "object" ? (message as any) : {};
-    return safeString(value?.message?.role || value?.role).trim();
-  }
-
-  private messageText(message: unknown) {
-    const value =
-      message && typeof message === "object" ? (message as any) : {};
-    const content = value?.message?.content ?? value?.content;
-    if (typeof content === "string") return safeString(content).trim();
-    if (Array.isArray(content)) {
-      return content
-        .map((part) =>
-          typeof part === "string"
-            ? part
-            : safeString(part?.text || part?.content || part?.attrs?.content),
-        )
-        .join("")
-        .trim();
-    }
-    return safeString(value?.text).trim();
-  }
-
-  private messageTimestampMs(message: unknown) {
-    const value =
-      message && typeof message === "object" ? (message as any) : {};
-    const raw = value?.message?.timestamp ?? value?.timestamp;
-    const numeric = Number(raw);
-    if (Number.isFinite(numeric) && numeric > 0) return numeric;
-    const parsed = Date.parse(safeString(raw));
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  private resolveExistingSubmittedTurnFromMessages(
-    messages: unknown[],
+  private async resolveSubmittedTurnForSession(
+    sessionFile: string | undefined,
     input: { text: string; sentAt?: number },
-  ): RinFrontendTurnResult | { submitted: true } | null {
+  ): Promise<RinSubmittedTurnResolution> {
+    if (!this.client) return null;
     const sentAt = Number(input.sentAt || 0);
     if (!Number.isFinite(sentAt) || sentAt <= 0) return null;
-    const promptText = safeString(input.text).trim();
-    if (!promptText) return null;
-    let submittedIndex = -1;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (this.messageRole(message) !== "user") continue;
-      if (this.messageTimestampMs(message) < sentAt) continue;
-      if (this.messageText(message) !== promptText) continue;
-      submittedIndex = index;
-      break;
-    }
-    if (submittedIndex < 0) return null;
-    const completion = resolveTurnCompletion({
-      messages: messages.slice(submittedIndex + 1),
-    });
-    const finalText = safeString(completion.finalText).trim();
-    if (!finalText) return { submitted: true };
+    const text = safeString(input.text).trim();
+    if (!text) return null;
+    const wanted = safeString(sessionFile || "").trim();
+    const resolved: any = await this.client
+      .request({
+        type: "resolve_submitted_turn",
+        text,
+        sentAt,
+        ...(wanted ? { sessionFile: wanted } : {}),
+      })
+      .catch(() => null);
+    if (!resolved) return null;
+    if (resolved.submitted) return { submitted: true };
+    const finalText = safeString(resolved.finalText).trim();
+    if (!finalText) return null;
     this.latestAssistantText = finalText;
     this.setFrontendPhase("idle");
     return {
       finalText,
-      result: completion.result,
-      sessionId: this.currentSessionId() || undefined,
-      sessionFile: this.currentSessionFile() || undefined,
+      result: resolved.result,
+      sessionId:
+        safeString(resolved.sessionId || this.currentSessionId()).trim() ||
+        undefined,
+      sessionFile:
+        safeString(resolved.sessionFile || this.currentSessionFile()).trim() ||
+        undefined,
     };
   }
 
@@ -849,23 +806,17 @@ export class RinFrontendTurnDriver {
     const targetSessionFile = this.sessionFileFromReady(ready);
     this.liveTurnRecoveryContext = {
       sessionFile: targetSessionFile || undefined,
-      baselineMessages: [],
     };
     this.setFrontendPhase("working");
     let deadline = Date.now() + 120_000;
     while (this.liveTurn === liveTurn && Date.now() < deadline) {
-      const messages = await this.getMessagesForSession(
+      const recovered = await this.resolveSubmittedTurnForSession(
         targetSessionFile,
-      ).catch(() => []);
-      if (Array.isArray(messages)) {
-        const recovered = this.resolveExistingSubmittedTurnFromMessages(
-          messages,
-          input,
-        );
-        if (recovered && !("submitted" in recovered)) {
-          liveTurn.resolve(recovered);
-          break;
-        }
+        input,
+      );
+      if (recovered && !("submitted" in recovered)) {
+        liveTurn.resolve(recovered);
+        break;
       }
       const state = await this.refreshFrontendState(targetSessionFile).catch(
         () => ({}),
@@ -901,14 +852,8 @@ export class RinFrontendTurnDriver {
     this.latestAssistantText = "";
     const liveTurn = this.liveTurn || this.startLiveTurn("");
     liveTurn.requestTag = "";
-    const baselineMessages = await this.getMessagesForSession(
-      targetSessionFile,
-    ).catch(() => []);
     this.liveTurnRecoveryContext = {
       sessionFile: targetSessionFile || undefined,
-      baselineMessages: Array.isArray(baselineMessages)
-        ? [...baselineMessages]
-        : [],
     };
     this.setFrontendPhase("working");
     while (this.liveTurn === liveTurn) {
@@ -1121,31 +1066,23 @@ export class RinFrontendTurnDriver {
     }
 
     if (input.streamingBehavior !== "steer") {
-      const messages = await this.getMessagesForSession(
+      const existing = await this.resolveSubmittedTurnForSession(
         targetSessionFile,
-      ).catch(() => []);
-      if (Array.isArray(messages)) {
-        const existing = this.resolveExistingSubmittedTurnFromMessages(
-          messages,
-          { text, sentAt: input.promptContext?.sentAt },
-        );
-        if (existing) {
-          if ("submitted" in existing) {
-            return await this.waitForExistingSubmittedTurn(
-              { text, sentAt: input.promptContext?.sentAt },
-              ready,
-            );
-          }
-          return existing;
+        { text, sentAt: input.promptContext?.sentAt },
+      );
+      if (existing) {
+        if ("submitted" in existing) {
+          return await this.waitForExistingSubmittedTurn(
+            { text, sentAt: input.promptContext?.sentAt },
+            ready,
+          );
         }
+        return existing;
       }
     }
 
     this.resetAssistantSegmentTracking();
     this.latestAssistantText = "";
-    const baselineMessages = await this.getMessagesForSession(
-      targetSessionFile,
-    ).catch(() => []);
     const requestTag = this.createTurnRequestTag();
     const liveTurn = this.startLiveTurn(requestTag);
     this.setFrontendPhase("sending");
@@ -1153,9 +1090,6 @@ export class RinFrontendTurnDriver {
       sessionFile:
         safeString(ready?.sessionFile || this.currentSessionFile()).trim() ||
         undefined,
-      baselineMessages: Array.isArray(baselineMessages)
-        ? [...baselineMessages]
-        : [],
     };
     const promptSubmission = (async () => {
       await submitNativeFrontendPromptTurn(this.client!, {

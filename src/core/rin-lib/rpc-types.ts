@@ -8,6 +8,7 @@ export type RinRpcCommandType =
   | "get_state"
   | "cycle_model"
   | "get_messages"
+  | "resolve_submitted_turn"
   | "get_session_snapshot"
   | "get_commands"
   | "get_all_models"

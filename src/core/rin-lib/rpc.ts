@@ -82,6 +82,7 @@ const SESSION_SCOPED_COMMAND_NAMES = [
   "get_fork_messages",
   "get_last_assistant_text",
   "get_messages",
+  "resolve_submitted_turn",
   "get_active_tools",
   "get_all_tools",
   "set_active_tools",

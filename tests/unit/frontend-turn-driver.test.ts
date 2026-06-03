@@ -13,6 +13,11 @@ const { RinFrontendTurnDriver } = await import(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "turn-driver.js"),
   ).href
 );
+const { resolveSubmittedTurnFromMessages } = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "submitted-turn.js"),
+  ).href
+);
 
 function createDriver() {
   const client = createFrontendClient();
@@ -105,6 +110,12 @@ function createFrontendClient() {
       if (command.type === "get_state") return await this.getState();
       if (command.type === "get_messages") {
         return { messages: await this.getMessages() };
+      }
+      if (command.type === "resolve_submitted_turn") {
+        return resolveSubmittedTurnFromMessages(await this.getMessages(), {
+          text: String(command.text || ""),
+          sentAt: Number(command.sentAt || 0),
+        });
       }
       if (command.type === "run_command") {
         return await this.runCommand(String(command.commandLine || ""));
@@ -628,11 +639,18 @@ test("frontend SDK turn driver carries sessionFile on restored turn RPCs", async
     .filter((call: any) => call.type === "request")
     .map((call: any) => call.command)
     .filter((command: any) =>
-      ["get_state", "get_messages"].includes(command.type),
+      ["get_state", "resolve_submitted_turn"].includes(command.type),
     );
   assert.ok(scopedCommands.length >= 2);
   assert.ok(
     scopedCommands.every((command: any) => command.sessionFile === sessionFile),
+  );
+  assert.equal(
+    client.calls.some(
+      (call: any) =>
+        call.type === "request" && call.command.type === "get_messages",
+    ),
+    false,
   );
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.options.sessionFile, sessionFile);
@@ -1546,8 +1564,9 @@ test("frontend SDK turn driver does not resolve interrupted prompts from session
         .filter((call: any) => call.type === "request")
         .every(
           (call: any) =>
-            !["get_state", "get_messages"].includes(call.command.type) ||
-            call.command.sessionFile === "/tmp/frontend-chat.jsonl",
+            !["get_state", "get_messages", "resolve_submitted_turn"].includes(
+              call.command.type,
+            ) || call.command.sessionFile === "/tmp/frontend-chat.jsonl",
         ),
     );
   } finally {

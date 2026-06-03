@@ -240,6 +240,7 @@ export async function startDaemon(
     Record<RinRpcCommandType, DaemonCommandHandler>
   > = {
     get_messages: () => ({ data: { messages: [] } }),
+    resolve_submitted_turn: () => ({ data: null }),
     get_session_snapshot: () => ({
       data: { entries: [], leafId: null },
     }),
