@@ -5,6 +5,10 @@ import {
 } from "../rin-lib/profile.js";
 import { normalizeBoundSessionList } from "./listing.js";
 import {
+  listBoundSessionPage as listFastBoundSessionPage,
+  type BoundSessionPage,
+} from "./paged-listing.js";
+import {
   requireExistingSessionFile,
   requireSessionFile,
   readSessionFile,
@@ -40,14 +44,42 @@ export async function openBoundSession(options: {
   });
 }
 
+export async function listBoundSessionPage(
+  options: {
+    cwd?: string;
+    agentDir?: string;
+    sessionDir?: string;
+    limit?: unknown;
+    offset?: unknown;
+  } = {},
+): Promise<BoundSessionPage> {
+  const { cwd, agentDir } = resolveRuntimeProfile(options);
+  const sessionDir = options.sessionDir || getRuntimeSessionDir(cwd, agentDir);
+  const page = await listFastBoundSessionPage({
+    sessionDir,
+    cwd,
+    limit: options.limit,
+    offset: options.offset,
+  });
+  return {
+    ...page,
+    sessions: normalizeBoundSessionList(page.sessions),
+  };
+}
+
 export async function listBoundSessions(
   options: {
     cwd?: string;
     agentDir?: string;
     sessionDir?: string;
     SessionManager?: any;
+    limit?: unknown;
+    offset?: unknown;
   } = {},
 ) {
+  if (options.limit !== undefined || options.offset !== undefined) {
+    return (await listBoundSessionPage(options)).sessions;
+  }
   const { cwd, agentDir } = resolveRuntimeProfile(options);
   const sessionDir = options.sessionDir || getRuntimeSessionDir(cwd, agentDir);
   const { SessionManager } = options.SessionManager

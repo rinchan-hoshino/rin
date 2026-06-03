@@ -42,7 +42,7 @@ import {
 } from "../../rin-lib/update-notices.js";
 import { extractMessageText } from "../../message-content.js";
 import {
-  listBoundSessions,
+  listBoundSessionPage,
   renameBoundSession,
 } from "../../session/factory.js";
 import {
@@ -64,6 +64,7 @@ const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
 const RIN_UPDATE_NOTICE_KEY = "__rinUpdateNotice";
 const RIN_UPDATE_NOTIFICATION_COMPONENT_KEY =
   "__rinUpdateNotificationComponent";
+const SESSION_SELECTOR_PAGE_SIZE = 30;
 const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "starting",
   "connecting",
@@ -955,43 +956,251 @@ function enhanceBuiltInExtensionSettings(instance: any) {
   };
 }
 
-function createSessionSelectorLoaders(instance: any) {
-  if (!isRpcTransportControlled(instance)) {
-    const loadSessions = () =>
-      listBoundSessions({
-        cwd: instance.sessionManager.getCwd(),
-        SessionManager,
-      });
-    return {
-      currentSessionsLoader: loadSessions,
-      allSessionsLoader: loadSessions,
-      renameSession: async (
-        sessionFilePath: string,
-        nextName: string | undefined,
-      ) =>
-        await renameSessionIfNamed(
-          (path, name) => renameBoundSession(path, name, { SessionManager }),
-          sessionFilePath,
-          nextName,
-        ),
-    };
-  }
+type SessionSelectorPageFetch = (options: {
+  offset: number;
+  limit: number;
+}) => Promise<unknown>;
 
-  const loadRemoteSessions = async () =>
-    (await instance.session.listSessions("all")).map((session: any) => ({
-      ...session,
-      cwd: undefined,
-    }));
+type SessionSelectorPageState = {
+  sessions: any[];
+  total: number;
+  nextOffset: number;
+  hasMore: boolean;
+  loading: boolean;
+  loadInitial: (
+    onProgress?: (loaded: number, total: number) => void,
+  ) => Promise<any[]>;
+  loadNext: (selector: any, scope: "current" | "all") => Promise<void>;
+};
+
+type SessionSelectorPageStates = {
+  current: SessionSelectorPageState;
+  all: SessionSelectorPageState;
+};
+
+function normalizeSessionSelectorPage(
+  value: unknown,
+  fallbackOffset: number,
+  fallbackLimit: number,
+) {
+  const source = value && typeof value === "object" ? (value as any) : {};
+  const sessions = Array.isArray(value)
+    ? value
+    : Array.isArray(source.sessions)
+      ? source.sessions
+      : [];
+  const offset = Number.isFinite(Number(source.offset))
+    ? Math.max(0, Number(source.offset))
+    : fallbackOffset;
+  const limit = Number.isFinite(Number(source.limit))
+    ? Math.max(1, Number(source.limit))
+    : fallbackLimit;
+  const total = Number.isFinite(Number(source.total))
+    ? Math.max(0, Number(source.total))
+    : sessions.length;
+  const nextOffset = Number.isFinite(Number(source.nextOffset))
+    ? Math.max(0, Number(source.nextOffset))
+    : offset + sessions.length;
+  return {
+    sessions,
+    offset,
+    limit,
+    total,
+    nextOffset,
+    hasMore: Boolean(source.hasMore) || nextOffset < total,
+  };
+}
+
+function mergeSessionPages(existing: any[], next: any[]): any[] {
+  const seen = new Set<string>();
+  const merged = [];
+  for (const session of [...existing, ...next]) {
+    const key = String(session?.path || session?.id || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(session);
+  }
+  return merged;
+}
+
+function updateSelectorPageSessions(
+  selector: any,
+  scope: "current" | "all",
+  state: SessionSelectorPageState,
+) {
+  if (!selector) return;
+  if (scope === "all") {
+    selector.allSessions = state.sessions;
+  } else {
+    selector.currentSessions = state.sessions;
+  }
+  if (selector.scope !== scope) return;
+  selector.sessionList?.setSessions?.(state.sessions, scope === "all");
+  selector.header?.setProgress?.(
+    state.sessions.length,
+    state.total || state.sessions.length,
+  );
+  selector.requestRender?.();
+}
+
+function createSessionSelectorPageState(
+  fetchPage: SessionSelectorPageFetch,
+): SessionSelectorPageState {
+  const state: SessionSelectorPageState = {
+    sessions: [],
+    total: 0,
+    nextOffset: 0,
+    hasMore: true,
+    loading: false,
+    async loadInitial(onProgress) {
+      state.sessions = [];
+      state.total = 0;
+      state.nextOffset = 0;
+      state.hasMore = true;
+      state.loading = true;
+      try {
+        const page = normalizeSessionSelectorPage(
+          await fetchPage({ offset: 0, limit: SESSION_SELECTOR_PAGE_SIZE }),
+          0,
+          SESSION_SELECTOR_PAGE_SIZE,
+        );
+        state.sessions = page.sessions;
+        state.total = page.total;
+        state.nextOffset = page.nextOffset;
+        state.hasMore = page.hasMore;
+        onProgress?.(
+          state.sessions.length,
+          state.total || state.sessions.length,
+        );
+        return state.sessions;
+      } finally {
+        state.loading = false;
+      }
+    },
+    async loadNext(selector, scope) {
+      if (state.loading || !state.hasMore) return;
+      state.loading = true;
+      try {
+        const page = normalizeSessionSelectorPage(
+          await fetchPage({
+            offset: state.nextOffset,
+            limit: SESSION_SELECTOR_PAGE_SIZE,
+          }),
+          state.nextOffset,
+          SESSION_SELECTOR_PAGE_SIZE,
+        );
+        state.sessions = mergeSessionPages(state.sessions, page.sessions);
+        state.total = page.total;
+        state.nextOffset = page.nextOffset;
+        state.hasMore = page.hasMore;
+        updateSelectorPageSessions(selector, scope, state);
+      } catch (error) {
+        selector?.header?.setStatusMessage?.(
+          {
+            type: "error",
+            message: `Failed to load more sessions: ${error instanceof Error ? error.message : String(error)}`,
+          },
+          4000,
+        );
+        selector?.requestRender?.();
+      } finally {
+        state.loading = false;
+      }
+    },
+  };
+  return state;
+}
+
+function maybeLoadNextSessionSelectorPage(
+  selector: any,
+  states: SessionSelectorPageStates,
+) {
+  const scope = selector?.scope === "all" ? "all" : "current";
+  const state = states[scope];
+  if (!state?.hasMore || state.loading) return;
+  const sessionList = selector?.sessionList;
+  const filteredCount = Array.isArray(sessionList?.filteredSessions)
+    ? sessionList.filteredSessions.length
+    : 0;
+  const selectedIndex = Number.isFinite(Number(sessionList?.selectedIndex))
+    ? Number(sessionList.selectedIndex)
+    : 0;
+  if (filteredCount === 0 || selectedIndex >= filteredCount - 3) {
+    void state.loadNext(selector, scope);
+  }
+}
+
+function attachSessionSelectorPagination(
+  selector: any,
+  states: SessionSelectorPageStates,
+) {
+  if (
+    !selector?.sessionList ||
+    typeof selector.sessionList.handleInput !== "function"
+  ) {
+    return;
+  }
+  Object.defineProperty(selector, "__rinSessionPagination", {
+    value: states,
+    configurable: true,
+  });
+  const originalHandleInput = selector.sessionList.handleInput.bind(
+    selector.sessionList,
+  );
+  selector.sessionList.handleInput = (data: unknown) => {
+    originalHandleInput(data);
+    maybeLoadNextSessionSelectorPage(selector, states);
+  };
+}
+
+function createSessionSelectorLoaders(instance: any) {
+  const createLocalState = () =>
+    createSessionSelectorPageState(
+      async ({ offset, limit }) =>
+        await listBoundSessionPage({
+          cwd: instance.sessionManager.getCwd(),
+          offset,
+          limit,
+        }),
+    );
+
+  const createRemoteState = () =>
+    createSessionSelectorPageState(async ({ offset, limit }) => {
+      if (typeof instance.session?.listSessionPage === "function") {
+        return await instance.session.listSessionPage("all", { offset, limit });
+      }
+      return {
+        sessions: (await instance.session.listSessions("all")).map(
+          (session: any) => ({
+            ...session,
+            cwd: undefined,
+          }),
+        ),
+        offset: 0,
+        limit: Number.MAX_SAFE_INTEGER,
+        hasMore: false,
+      };
+    });
+
+  const pageStates: SessionSelectorPageStates = isRpcTransportControlled(
+    instance,
+  )
+    ? { current: createRemoteState(), all: createRemoteState() }
+    : { current: createLocalState(), all: createLocalState() };
 
   return {
-    currentSessionsLoader: loadRemoteSessions,
-    allSessionsLoader: loadRemoteSessions,
+    currentSessionsLoader: pageStates.current.loadInitial,
+    allSessionsLoader: pageStates.all.loadInitial,
+    pageStates,
     renameSession: async (
       sessionFilePath: string,
       nextName: string | undefined,
     ) =>
       await renameSessionIfNamed(
-        (path, name) => instance.session.renameSession(path, name),
+        (path, name) =>
+          isRpcTransportControlled(instance)
+            ? instance.session.renameSession(path, name)
+            : renameBoundSession(path, name, { SessionManager }),
         sessionFilePath,
         nextName,
       ),
@@ -1186,8 +1395,12 @@ export async function applyRinTuiOverrides() {
     interactiveModeProto.showSessionSelector =
       function showSessionSelectorFromRootSessionDir() {
         this.showSelector((done: any) => {
-          const { currentSessionsLoader, allSessionsLoader, renameSession } =
-            createSessionSelectorLoaders(this);
+          const {
+            currentSessionsLoader,
+            allSessionsLoader,
+            renameSession,
+            pageStates,
+          } = createSessionSelectorLoaders(this);
           const selector = new SessionSelectorComponent(
             currentSessionsLoader,
             allSessionsLoader,
@@ -1211,6 +1424,7 @@ export async function applyRinTuiOverrides() {
             this.sessionManager.getSessionFile(),
           );
           configureRootSessionSelectorPresentation(selector);
+          attachSessionSelectorPagination(selector, pageStates);
           return { component: selector, focus: selector };
         });
       };

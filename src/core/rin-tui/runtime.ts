@@ -659,15 +659,42 @@ export class RpcInteractiveSession {
       await this.refreshState(REFRESH_SESSION);
   }
 
-  async listSessions(
+  async listSessionPage(
     scope: "all" = "all",
-    _onProgress?: (loaded: number, total: number) => void,
+    options: { offset?: number; limit?: number } = {},
   ) {
     if (!this.client.isConnected()) {
       await this.waitForDaemonAvailable();
     }
-    const data = await this.call("list_sessions", { scope });
-    return normalizeBoundSessionList(data?.sessions);
+    const data = await this.call("list_sessions", { scope, ...options });
+    const sessions = normalizeBoundSessionList(data?.sessions);
+    const offset = Number.isFinite(Number(data?.offset))
+      ? Math.max(0, Number(data.offset))
+      : options.offset || 0;
+    const limit = Number.isFinite(Number(data?.limit))
+      ? Math.max(1, Number(data.limit))
+      : options.limit || sessions.length;
+    const total = Number.isFinite(Number(data?.total))
+      ? Math.max(0, Number(data.total))
+      : sessions.length;
+    const nextOffset = Number.isFinite(Number(data?.nextOffset))
+      ? Math.max(0, Number(data.nextOffset))
+      : offset + sessions.length;
+    return {
+      sessions,
+      offset,
+      limit,
+      total,
+      hasMore: Boolean(data?.hasMore) || nextOffset < total,
+      nextOffset,
+    };
+  }
+
+  async listSessions(
+    scope: "all" = "all",
+    _onProgress?: (loaded: number, total: number) => void,
+  ) {
+    return (await this.listSessionPage(scope)).sessions;
   }
 
   async setModel(model: any) {

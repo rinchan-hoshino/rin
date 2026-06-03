@@ -7,7 +7,11 @@ import {
 import { parseJsonl } from "../rin-lib/common.js";
 import { createInterruptedToolResultMessage } from "../rin-lib/interruption.js";
 import { fail, ok } from "../rin-lib/rpc.js";
-import { listBoundSessions, renameBoundSession } from "../session/factory.js";
+import {
+  listBoundSessionPage,
+  listBoundSessions,
+  renameBoundSession,
+} from "../session/factory.js";
 import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
 import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
@@ -1313,6 +1317,21 @@ export async function runCustomRpcMode(
           (value) => ({ text: value.selectedText, cancelled: value.cancelled }),
         );
       case "list_sessions": {
+        if (command.limit !== undefined || command.offset !== undefined) {
+          const currentSession = getSession();
+          return done(
+            id,
+            type,
+            await listBoundSessionPage({
+              cwd:
+                safeString(runtime.cwd).trim() ||
+                safeString(currentSession?.sessionManager?.getCwd?.()).trim(),
+              agentDir: safeString(runtime.services?.agentDir).trim(),
+              limit: command.limit,
+              offset: command.offset,
+            }),
+          );
+        }
         const sessions = await listBoundSessions({ SessionManager });
         return done(id, type, { sessions });
       }

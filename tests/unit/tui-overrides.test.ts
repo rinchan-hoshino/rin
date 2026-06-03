@@ -55,6 +55,45 @@ async function withTempDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
+async function writeTuiSessionRecord(agentDir, options) {
+  const sessionDir = path.join(agentDir, "sessions");
+  await fs.mkdir(sessionDir, { recursive: true });
+  const sessionPath = path.join(sessionDir, `${options.id}.jsonl`);
+  await fs.writeFile(
+    sessionPath,
+    [
+      {
+        type: "session",
+        version: 3,
+        id: options.id,
+        timestamp: "2026-04-18T00:00:00.000Z",
+        cwd: options.cwd,
+      },
+      {
+        type: "message",
+        id: `${options.id}-user`,
+        timestamp: "2026-04-18T00:01:00.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: options.firstMessage }],
+        },
+      },
+      {
+        type: "message",
+        id: `${options.id}-assistant`,
+        timestamp: "2026-04-18T00:02:00.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "assistant reply" }],
+        },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+  );
+  return sessionPath;
+}
+
 test("todo tool coalescing hides earlier consecutive checklist results", () => {
   const todoComponent = (toolCallId: string, hidden = false) => ({
     toolName: "todo",
@@ -807,98 +846,92 @@ test("rpc working status only reattaches an existing Pi-owned loader", async () 
 test("local session selector reuses bound session helpers for canonicalized list and rename", async () => {
   await overrides.applyRinTuiOverrides();
 
-  const originalRinDir = process.env.RIN_DIR;
-  process.env.RIN_DIR = "/tmp/.rin";
-  const listed = [];
-  const renamed = [];
-  let selector;
-  const originalList = codingAgentModule.SessionManager.list;
-  const originalOpen = codingAgentModule.SessionManager.open;
+  await withTempDir(async (agentDir) => {
+    const originalRinDir = process.env.RIN_DIR;
+    process.env.RIN_DIR = agentDir;
+    const renamed = [];
+    let selector;
+    const originalOpen = codingAgentModule.SessionManager.open;
+    const cwd = "/tmp/project";
+    const sessionPath = await writeTuiSessionRecord(agentDir, {
+      id: "session-1",
+      cwd,
+      firstMessage: "Legacy title",
+    });
 
-  codingAgentModule.SessionManager.list = async (_cwd, dir) => {
-    listed.push(dir);
-    return [
-      {
-        id: "session-1",
-        title: "Legacy title",
-        subtitle: "2026-04-18T00:00:00.000Z",
+    codingAgentModule.SessionManager.open = (targetPath) => ({
+      appendSessionInfo(name) {
+        renamed.push([targetPath, name]);
       },
-    ];
-  };
-  codingAgentModule.SessionManager.open = (sessionPath) => ({
-    appendSessionInfo(name) {
-      renamed.push([sessionPath, name]);
-    },
-  });
+    });
 
-  try {
-    const instance = {
-      sessionManager: {
-        getSessionFile: () => "/tmp/demo.jsonl",
-        getCwd: () => "/tmp/project",
-        getSessionDir: () => "/tmp/.rin/sessions/--home-rin--",
-      },
-      keybindings: {},
-      ui: { requestRender() {} },
-      showSelector(factory) {
-        selector = factory(() => {}).component;
-        return selector;
-      },
-      handleResumeSession: async () => {},
-      shutdown: async () => {},
-    };
+    try {
+      const instance = {
+        sessionManager: {
+          getSessionFile: () => sessionPath,
+          getCwd: () => cwd,
+          getSessionDir: () => path.join(agentDir, "sessions", "encoded"),
+        },
+        keybindings: {},
+        ui: { requestRender() {} },
+        showSelector(factory) {
+          selector = factory(() => {}).component;
+          return selector;
+        },
+        handleResumeSession: async () => {},
+        shutdown: async () => {},
+      };
 
-    codingAgentModule.InteractiveMode.prototype.showSessionSelector.call(
-      instance,
-    );
+      codingAgentModule.InteractiveMode.prototype.showSessionSelector.call(
+        instance,
+      );
 
-    const headerLines = selector.header.render(100);
-    const headerText = headerLines.join("\n");
-    assert.doesNotMatch(headerText, /Current|Folder|Directory/);
-    assert.equal(piTuiModule.visibleWidth(headerLines[0]), 100);
-    assert.ok(headerLines[0].endsWith(`Threaded${ESC}[39m`));
-    selector.sessionList.setSessions([], false);
-    assert.doesNotMatch(
-      selector.sessionList.render(100).join("\n"),
-      /current folder/i,
-    );
+      const headerLines = selector.header.render(100);
+      const headerText = headerLines.join("\n");
+      assert.doesNotMatch(headerText, /Current|Folder|Directory/);
+      assert.equal(piTuiModule.visibleWidth(headerLines[0]), 100);
+      assert.ok(headerLines[0].endsWith(`Threaded${ESC}[39m`));
+      selector.sessionList.setSessions([], false);
+      assert.doesNotMatch(
+        selector.sessionList.render(100).join("\n"),
+        /current folder/i,
+      );
 
-    const sessions = await selector.currentSessionsLoader();
-    await selector.renameSession("/tmp/demo.jsonl", "renamed");
+      const sessions = await selector.currentSessionsLoader();
+      await selector.renameSession(sessionPath, "renamed");
 
-    assert.deepEqual(listed, ["/tmp/.rin/sessions", "/tmp/.rin/sessions"]);
-    assert.deepEqual(
-      {
-        id: sessions[0]?.id,
-        path: sessions[0]?.path,
-        name: sessions[0]?.name,
-        firstMessage: sessions[0]?.firstMessage,
-        modified: sessions[0]?.modified?.toISOString(),
-        messageCount: sessions[0]?.messageCount,
-        cwd: sessions[0]?.cwd,
-        allMessagesText: sessions[0]?.allMessagesText,
-      },
-      {
-        id: "session-1",
-        path: "session-1",
-        name: undefined,
-        firstMessage: "Legacy title",
-        modified: "2026-04-18T00:00:00.000Z",
-        messageCount: 0,
-        cwd: undefined,
-        allMessagesText: "Legacy title",
-      },
-    );
-    assert.deepEqual(renamed, [["/tmp/demo.jsonl", "renamed"]]);
-  } finally {
-    if (originalRinDir === undefined) {
-      delete process.env.RIN_DIR;
-    } else {
-      process.env.RIN_DIR = originalRinDir;
+      assert.deepEqual(
+        {
+          id: sessions[0]?.id,
+          path: sessions[0]?.path,
+          name: sessions[0]?.name,
+          firstMessage: sessions[0]?.firstMessage,
+          modified: sessions[0]?.modified?.toISOString(),
+          messageCount: sessions[0]?.messageCount,
+          cwd: sessions[0]?.cwd,
+          allMessagesText: sessions[0]?.allMessagesText,
+        },
+        {
+          id: "session-1",
+          path: sessionPath,
+          name: undefined,
+          firstMessage: "Legacy title",
+          modified: "2026-04-18T00:02:00.000Z",
+          messageCount: 2,
+          cwd: undefined,
+          allMessagesText: "Legacy title assistant reply",
+        },
+      );
+      assert.deepEqual(renamed, [[sessionPath, "renamed"]]);
+    } finally {
+      if (originalRinDir === undefined) {
+        delete process.env.RIN_DIR;
+      } else {
+        process.env.RIN_DIR = originalRinDir;
+      }
+      codingAgentModule.SessionManager.open = originalOpen;
     }
-    codingAgentModule.SessionManager.list = originalList;
-    codingAgentModule.SessionManager.open = originalOpen;
-  }
+  });
 });
 
 test("rpc session selector loads sessions through the daemon instead of local SessionManager", async () => {
@@ -966,6 +999,81 @@ test("rpc session selector loads sessions through the daemon instead of local Se
   assert.equal(sessions[0].cwd, undefined);
   assert.equal(sessions[0].allMessagesText, "demo follow up");
   assert.deepEqual(renamed, [["/tmp/demo.jsonl", "renamed"]]);
+});
+
+test("rpc session selector can append additional session pages", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const calls = [];
+  let selector;
+  const instance = {
+    session: {
+      getFrontendStatusEvent() {
+        return {
+          type: "rpc_frontend_status",
+          phase: "idle",
+          connected: true,
+        };
+      },
+      async listSessionPage(_scope, options) {
+        calls.push(options);
+        const offset = options.offset || 0;
+        return {
+          sessions: [
+            {
+              id: `page-${offset + 1}`,
+              path: `/tmp/page-${offset + 1}.jsonl`,
+              firstMessage: `page ${offset + 1}`,
+              modified: new Date(`2026-04-1${offset + 1}T00:00:00.000Z`),
+              messageCount: 1,
+              allMessagesText: `page ${offset + 1}`,
+            },
+          ],
+          offset,
+          limit: options.limit,
+          total: 2,
+          hasMore: offset === 0,
+          nextOffset: offset + 1,
+        };
+      },
+      async renameSession() {},
+    },
+    sessionManager: {
+      getSessionFile: () => "/tmp/demo.jsonl",
+      getCwd: () => "/tmp",
+      getSessionDir: () => "/tmp/.sessions",
+    },
+    keybindings: {},
+    ui: { requestRender() {} },
+    showSelector(factory) {
+      selector = factory(() => {}).component;
+      return selector;
+    },
+    handleResumeSession: async () => {},
+    shutdown: async () => {},
+  };
+
+  codingAgentModule.InteractiveMode.prototype.showSessionSelector.call(
+    instance,
+  );
+
+  const firstPage = await selector.currentSessionsLoader();
+  selector.currentSessions = firstPage;
+  selector.sessionList.setSessions(firstPage, true);
+  await selector.__rinSessionPagination.current.loadNext(selector, "current");
+
+  assert.equal(
+    calls.some((call) => call.offset === 0 && call.limit === 30),
+    true,
+  );
+  assert.equal(
+    calls.some((call) => call.offset === 1 && call.limit === 30),
+    true,
+  );
+  assert.deepEqual(
+    selector.currentSessions.map((session) => session.id),
+    ["page-1", "page-2"],
+  );
 });
 
 test("session selector rename ignores blank names", async () => {

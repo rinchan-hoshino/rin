@@ -15,6 +15,7 @@ export type BoundSessionListItem = {
   modified: Date;
   messageCount: number;
   cwd?: string;
+  parentSessionPath?: string;
   allMessagesText: string;
 };
 
@@ -34,6 +35,7 @@ type BoundSessionSource = {
   subtitle?: unknown;
   messageCount?: unknown;
   cwd?: unknown;
+  parentSessionPath?: unknown;
   allMessagesText?: unknown;
 };
 
@@ -58,6 +60,8 @@ function isBoundSessionListItem(value: unknown): value is BoundSessionListItem {
     Number.isFinite((value as BoundSessionListItem).messageCount) &&
     ((value as BoundSessionListItem).cwd === undefined ||
       typeof (value as BoundSessionListItem).cwd === "string") &&
+    ((value as BoundSessionListItem).parentSessionPath === undefined ||
+      typeof (value as BoundSessionListItem).parentSessionPath === "string") &&
     typeof (value as BoundSessionListItem).allMessagesText === "string",
   );
 }
@@ -170,6 +174,7 @@ function normalizeBoundSessionDetails(
     source?.title,
     sessionPath,
   );
+  const parentSessionPath = normalizeSessionValue(source?.parentSessionPath);
   const item = {
     id: normalizeSessionText(source?.id, sessionPath),
     path: sessionPath,
@@ -178,6 +183,7 @@ function normalizeBoundSessionDetails(
     modified: resolveBoundSessionModified(source),
     messageCount: normalizeSessionCount(source?.messageCount),
     cwd: undefined,
+    ...(parentSessionPath ? { parentSessionPath } : {}),
     allMessagesText: normalizeSessionText(
       source?.allMessagesText,
       firstMessage,

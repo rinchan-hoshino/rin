@@ -28,7 +28,11 @@ import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
-import { listBoundSessions, renameBoundSession } from "../session/factory.js";
+import {
+  listBoundSessionPage,
+  listBoundSessions,
+  renameBoundSession,
+} from "../session/factory.js";
 import { getWebSearchStatus } from "../rin-web-search/service.js";
 import { CronScheduler } from "./cron.js";
 import {
@@ -460,6 +464,26 @@ export async function startDaemon(
       return true;
     }
     if (type === "list_sessions") {
+      const hasPagination =
+        command.limit !== undefined || command.offset !== undefined;
+      if (hasPagination) {
+        writeLine(
+          connection.socket,
+          response(
+            id,
+            type,
+            true,
+            await listBoundSessionPage({
+              cwd: runtime.cwd,
+              agentDir: runtime.agentDir,
+              limit: command.limit,
+              offset: command.offset,
+            }),
+          ),
+        );
+        return true;
+      }
+
       const { SessionManager } = await getSessionManagerModule();
       writeLine(
         connection.socket,
