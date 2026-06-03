@@ -69,8 +69,32 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.match(baseSystemPrompt, /\nCurrent date: \d{4}-\d{2}-\d{2}$/);
   assert.equal(baseSystemPrompt.includes("Current working directory:"), false);
   assert.ok(baseSystemPrompt.includes("- search_memory:"));
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Search archived session history for past-conversation evidence.",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Use search_memory when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters",
+    ),
+  );
+  assert.equal(
+    baseSystemPrompt.includes("better to search and confirm than to guess"),
+    false,
+  );
   assert.equal(baseSystemPrompt.includes("- save_prompts:"), false);
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
+  assert.ok(baseSystemPrompt.includes("Maintain the current branch checklist"));
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist",
+    ),
+  );
+  assert.equal(
+    baseSystemPrompt.includes("Manage the current session todo checklist"),
+    false,
+  );
   assert.equal(baseSystemPrompt.includes("Markdown rich-object syntax"), false);
   assert.equal(
     baseSystemPrompt.includes("Native at: [@name](at:<platform-user-id>)"),
@@ -90,26 +114,32 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("Rin and Pi documentation:"));
   assert.ok(
     baseSystemPrompt.includes(
-      "Start with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md",
+      "Start runtime work with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md; then read only the narrow topic doc needed for the task.",
     ),
   );
-  assert.ok(baseSystemPrompt.includes("Session awareness guidance:"));
-  assert.ok(baseSystemPrompt.includes("docs/session-awareness.md"));
-  assert.ok(baseSystemPrompt.includes("Subagent guidance:"));
-  assert.ok(baseSystemPrompt.includes("docs/non-interactive-cli.md"));
-  assert.ok(baseSystemPrompt.includes("Scheduled task guidance:"));
-  assert.ok(baseSystemPrompt.includes("use Rin scheduled tasks first"));
+  assert.equal(baseSystemPrompt.includes("Session awareness guidance:"), false);
+  assert.equal(baseSystemPrompt.includes("Subagent guidance:"), false);
+  assert.equal(baseSystemPrompt.includes("Scheduled task guidance:"), false);
+  assert.equal(baseSystemPrompt.includes("Rich text guidance:"), false);
+  assert.ok(
+    baseSystemPrompt.includes(
+      "session awareness -> docs/session-awareness.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/agent-sdk.md + docs/scheduled-tasks.md",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "rich chat output -> docs/rich-text-output-format.md",
+    ),
+  );
   assert.equal(baseSystemPrompt.includes("condition.kind"), false);
-  assert.ok(baseSystemPrompt.includes("Rich text guidance:"));
-  assert.ok(baseSystemPrompt.includes("prefer Rin native rich output syntax"));
-  assert.ok(baseSystemPrompt.includes("docs/rich-text-output-format.md"));
   assert.equal(
     baseSystemPrompt.includes(
       "attach it directly with native rich syntax such as [image: name](local-path) instead of replying with only its path",
     ),
     false,
   );
-  assert.ok(baseSystemPrompt.includes("Chat bridge guidance:"));
+  assert.equal(baseSystemPrompt.includes("Chat bridge guidance:"), false);
+  assert.ok(baseSystemPrompt.includes("chat bridge -> docs/chat-bridge.md"));
   assert.equal(
     baseSystemPrompt.includes("Memory and self-improvement guidance:"),
     false,
@@ -434,12 +464,12 @@ test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async
 
   const projectContextIdx = finalSystemPrompt.indexOf("# Project Context");
   const rolePrefaceIdx = finalSystemPrompt.indexOf(
-    "Always use this agent profile as the standing role and speaking guide.",
+    "Use this agent profile as the standing role, voice, and response-style contract.",
   );
   const agentProfileIdx = finalSystemPrompt.indexOf("Agent profile:");
   const promptsIdx = finalSystemPrompt.indexOf("User profile:");
   const methodologyPrefaceIdx = finalSystemPrompt.indexOf(
-    "Always follow this core doctrine as the standing methodology.",
+    "Follow this core doctrine as the standing methodology and decision contract.",
   );
   const coreDoctrineIdx = finalSystemPrompt.indexOf("Core doctrine:");
   const skillsIdx = finalSystemPrompt.indexOf("<available_skills>");
@@ -451,6 +481,18 @@ test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async
   assert.notEqual(methodologyPrefaceIdx, -1);
   assert.notEqual(coreDoctrineIdx, -1);
   assert.notEqual(skillsIdx, -1);
+  assert.equal(
+    finalSystemPrompt.includes(
+      "Always use this agent profile as the standing role and speaking guide.",
+    ),
+    false,
+  );
+  assert.equal(
+    finalSystemPrompt.includes(
+      "Always follow this core doctrine as the standing methodology.",
+    ),
+    false,
+  );
   assert.ok(projectContextIdx < agentProfileIdx);
   assert.ok(agentProfileIdx < rolePrefaceIdx);
   assert.ok(rolePrefaceIdx < promptsIdx);

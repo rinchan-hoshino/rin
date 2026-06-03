@@ -38,7 +38,7 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: "reload",
     description: "Reload keybindings, extensions, skills, prompts, and themes",
   },
-  { name: "quit", description: "Quit pi" },
+  { name: "quit", description: "Quit rin" },
 ] satisfies BuiltinSlashCommand[];
 
 const DAEMON_BUILTIN_SLASH_COMMAND_NAMES = new Set(["todos", "chat"]);

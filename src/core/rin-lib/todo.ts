@@ -34,8 +34,16 @@ interface TodoDetails {
 
 const TodoParams: any = Type.Object({
   action: StringEnum(["list", "add", "toggle", "clear"] as const),
-  text: Type.Optional(Type.String({ description: "Todo text (for add)." })),
-  id: Type.Optional(Type.Number({ description: "Todo ID (for toggle)." })),
+  text: Type.Optional(
+    Type.String({
+      description: "Checklist item as a concrete branch-execution action.",
+    }),
+  ),
+  id: Type.Optional(
+    Type.Number({
+      description: "Checklist item ID whose completion state changes.",
+    }),
+  ),
 });
 
 function normalizeTodoId(value: unknown): number | undefined {
@@ -248,13 +256,11 @@ export default function todoCapability(): RinCapabilityDefinition {
     name: "todo",
     label: "Checklist",
     description:
-      "Manage the current session todo checklist. Actions: list, add (text), toggle (id), clear.",
+      "Maintain the current branch execution checklist: planned, active, and completed work.",
     promptSnippet:
-      "Manage the current branch todo checklist: list items, add concrete steps, toggle completion, or clear it.",
+      "Maintain the current branch checklist: add concrete actions, list state, toggle completed work, or clear retired checklists.",
     promptGuidelines: [
-      "Use todo for multi-step task tracking when a structured checklist would reduce missed work.",
-      "Keep todo current: add concrete steps before long work and toggle items as they are completed.",
-      "Todo output is user-visible checklist state; read and write actions should leave the checklist display current.",
+      "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
     ],
     parameters: TodoParams,
 

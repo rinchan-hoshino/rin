@@ -46,12 +46,12 @@ function buildPromptBlock(
       const slot = trimText(doc?.self_improve_prompt_slot);
       if (slot === "agent_profile") {
         lines.push(
-          "Always use this agent profile as the standing role and speaking guide.",
+          "Use this agent profile as the standing role, voice, and response-style contract.",
         );
       }
       if (slot === "core_doctrine") {
         lines.push(
-          "Always follow this core doctrine as the standing methodology.",
+          "Follow this core doctrine as the standing methodology and decision contract.",
         );
       }
     }

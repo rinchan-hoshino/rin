@@ -10,10 +10,6 @@ import {
   runMemoryMaintenanceJobNow,
   spawnQueuedMemoryWorker,
 } from "./async-jobs.js";
-import {
-  formatSelfImproveAgentResult,
-  formatSelfImproveResult,
-} from "./lib.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
 

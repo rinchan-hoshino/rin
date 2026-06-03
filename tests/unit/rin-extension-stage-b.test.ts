@@ -147,6 +147,17 @@ test("core todo loads from configured runtime without extension paths", async ()
     try {
       const todoTool = configured.session.getToolDefinition("todo");
       assert.ok(todoTool);
+      assert.equal(
+        todoTool.description,
+        "Maintain the current branch execution checklist: planned, active, and completed work.",
+      );
+      assert.match(
+        todoTool.promptSnippet,
+        /Maintain the current branch checklist/,
+      );
+      assert.deepEqual(todoTool.promptGuidelines, [
+        "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
+      ]);
 
       const added = await todoTool.execute(
         "tool-call-1",

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -22,6 +23,39 @@ test("getManagedSkillPaths includes agent memory skills and builtin skills", () 
     "/tmp/rin-home/self_improve/skills",
     "/tmp/rin-home/docs/rin/builtin-skills",
   ]);
+});
+
+test("Rin compaction prompts keep continuation handoff contract", async () => {
+  const runtimeText = await fs.readFile(
+    path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"),
+    "utf8",
+  );
+
+  assert.ok(
+    runtimeText.includes(
+      "Write a compact, faithful continuation handoff for the next LLM. Optimize for safe resumption: actionable context only, no invented facts.",
+    ),
+  );
+  assert.ok(
+    runtimeText.includes(
+      "Condense the conversation above into the exact continuation handoff below.",
+    ),
+  );
+  assert.ok(
+    runtimeText.includes(
+      "Preserve only task-critical facts: user intent, constraints, authority boundaries, corrections, current state, completed work, blockers, and next actions.",
+    ),
+  );
+  assert.ok(
+    runtimeText.includes(
+      "Include files only if the suffix or next action depends on them.",
+    ),
+  );
+  assert.equal(
+    runtimeText.includes("Create a concise, faithful handoff summary"),
+    false,
+  );
+  assert.equal(runtimeText.includes("Do not list files unless needed."), false);
 });
 
 test("compaction reason tracking annotates native before-compact hooks", async () => {

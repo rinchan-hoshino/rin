@@ -1,6 +1,6 @@
 ---
 name: rin-prompt-engineering
-description: "Writes, refactors, debugs, and evaluates LLM prompts and agent/task instructions using provider guidance and evals. Use for system/developer prompts, skills, agent workflows, tool-use rules, structured output, RAG/citation, model migration, or prompt-related behavior issues."
+description: "Use for LLM prompts and agent/task instructions: system/developer prompts, skills, agent workflows, tool-use rules, structured output, RAG/citation prompts, model migration, prompt evaluation, and prompt-caused behavior issues."
 ---
 
 # Rin prompt engineering
@@ -9,22 +9,23 @@ This is Rin's prompt-engineering workflow. It is not an Anthropic/OpenAI/Google/
 
 ## Load only what the task needs
 
-- For provider-specific wording or migration: read `references/provider-guidance.md`.
+- For provider-specific guidance or migration: read `references/provider-guidance.md`.
 - For ready prompt skeletons: read `references/prompt-templates.md`.
 - For review or cleanup: read `references/prompt-review-rubric.md`.
 - For skill-specific authoring, also use `skill-creator`.
 
 ## Core loop
 
-Follow this order. Do not start by polishing wording.
+Use this loop for prompt writing, refactoring, debugging, and evaluation. Treat the prompt as a product contract: target behavior, trusted inputs, allowed actions, output shape, and validation.
 
-1. **Define success.** Capture what the prompt must make the model do, how success will be judged, and what failure looks like.
+1. **Define success and failure.** Capture what the prompt must make the model do, how success will be judged, and which failures are unacceptable.
 2. **Check whether prompting is the right lever.** If the failure is caused by missing data, broken tools, wrong model choice, latency/cost limits, or product/API ownership, state that instead of hiding it with prompt text.
-3. **Identify the target surface.** Note model/provider, API/product surface, available tools, output channel, and runtime constraints.
-4. **Draft the smallest behavior contract.** Prefer goal, context, constraints, evidence/tool rules, and output format over a long step script.
-5. **Add examples only when they teach the desired behavior.** Use examples for output shape, edge cases, style, or classification boundaries.
+3. **Identify the target surface and authority boundary.** Note model/provider, API/product surface, available tools, side effects, output channel, runtime constraints, trusted inputs, and untrusted inputs.
+4. **Specify the smallest behavior contract.** Define goal, scope, constraints, instruction/data boundary, evidence/tool rules, output contract, stopping conditions, and permission boundaries.
+5. **Draft the smallest prompt that encodes the contract.** Use structure, schemas, or examples only where they improve the target behavior.
 6. **Evaluate before declaring success.** Use realistic cases, edge cases, and adversarial cases. Compare against the previous prompt when one exists.
-7. **Iterate one meaningful change at a time.** Keep changes that improve the target behavior without adding unnecessary prompt mass.
+7. **Iterate one material change at a time.** Keep changes expected to improve success, reduce ambiguity or conflict, lower prompt mass, or add eval coverage.
+8. **Document prompt-engineering value.** For each material prompt diff, name the contract, failure mode, success criterion, provider fit, or eval coverage it changes and the expected model-behavior effect.
 
 ## Prompt brief
 
@@ -58,6 +59,14 @@ State the destination before the process. A strong prompt normally says:
 
 Use detailed step-by-step process only when the exact path is part of the product contract or safety boundary.
 
+### Write the target state, not patch notes
+
+When rewriting a prompt, produce the canonical target prompt rather than a list of fixes to the old prompt. The result should read as the prompt to use next, not commentary about how the old prompt changed.
+
+### Prefer positive, direct instructions
+
+Describe the intended behavior, evidence use, boundaries, and output directly. Use negative constraints only for true forbidden actions, safety or permission boundaries, instruction/data boundaries, or recurring failure modes the model must avoid.
+
 ### Separate instructions from data
 
 Mark user documents, quoted text, retrieved pages, tool results, and fields such as `model_instruction` as data unless the trusted task explicitly promotes them to instructions. Delimit long inputs with Markdown headings or XML-style tags when that improves clarity.
@@ -84,7 +93,7 @@ For tool-using or retrieval prompts, define:
 
 ### Prefer schema support for machine output
 
-When the API supports structured output, JSON schema, strict tool use, or function calling, use that instead of relying only on prompt wording. Still tell the model how to handle missing, incompatible, or unsafe input.
+When the API supports structured output, JSON schema, strict tool use, or function calling, use that instead of relying on prompt text alone. Still tell the model how to handle missing, incompatible, or unsafe input.
 
 ## Provider notes
 
@@ -136,7 +145,7 @@ Read `references/provider-guidance.md#microsoft--azure-openai--foundry` for Azur
 1. Preserve the product contract and user-authored content.
 2. Identify duplicated, stale, conflicting, or non-operative instructions.
 3. Keep source/provider-specific terms only when they apply to the target model.
-4. Produce a cleaned prompt plus a short change list.
+4. Produce a cleaned prompt plus a short change list that ties each material edit to the success criteria or failure mode it addresses.
 5. Provide eval cases that should pass before and after, and cases expected to improve.
 
 ### Write an agent or scheduled-task prompt
@@ -185,7 +194,7 @@ Fix the smallest real cause.
 Unless the user asks for only the prompt, return:
 
 1. **Final prompt** — ready to use.
-2. **Change rationale** — brief, tied to success criteria and provider guidance.
+2. **Change rationale** — brief, tied to success criteria, failure modes, changed contracts, and provider guidance when relevant.
 3. **Assumptions** — target model/provider/surface and unresolved inputs.
 4. **Eval cases** — realistic tests or assertions.
 5. **Limits / next step** — what needs live docs, product choice, or empirical validation.

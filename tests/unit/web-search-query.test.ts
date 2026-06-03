@@ -381,6 +381,33 @@ test("web search service reuses Rin-managed sidecar state", async () => {
   );
 });
 
+test("web search tool prompt contract describes search and URL modes", () => {
+  const registeredTool = webSearchIndex
+    .default()
+    .tools.find((tool: any) => tool.name === "web_search");
+
+  assert.equal(
+    registeredTool.description,
+    "Search the web, or fetch readable content from an HTTP(S) URL.",
+  );
+  assert.equal(
+    registeredTool.promptSnippet,
+    "Search the web or fetch readable content from a specific HTTP(S) page.",
+  );
+  assert.deepEqual(registeredTool.promptGuidelines, [
+    "Use web_search when current, external, source-dependent, or version-sensitive web information matters.",
+    "Use web_search URL mode when a specific HTTP(S) page is the evidence source.",
+  ]);
+  assert.match(
+    registeredTool.parameters.properties.q.description,
+    /Web search query or HTTP\(S\) URL/,
+  );
+  assert.match(
+    registeredTool.parameters.properties.limit.description,
+    /Range: 1-8/,
+  );
+});
+
 test("web search tool output exposes provider attempts to the agent on sidecar failure", async () => {
   const registeredTool = webSearchIndex
     .default()

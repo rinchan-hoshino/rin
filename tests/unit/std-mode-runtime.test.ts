@@ -52,7 +52,8 @@ test("Rin backend serializes web_search execution without tool-side metadata", a
   const baseTool = {
     name: "web_search",
     label: "Web Search",
-    description: "Search or fetch web pages.",
+    description:
+      "Search the web, or fetch readable content from an HTTP(S) URL.",
     execute: async (toolCallId: string) => {
       events.push(`start:${toolCallId}`);
       if (toolCallId === "first") {
@@ -214,35 +215,70 @@ test("std configured session keeps daemon-independent Rin tools usable without d
         ),
       "web_search should be provided by the built-in extension loader",
     );
-    const memoryResult = await session
-      .getToolDefinition("search_memory")
-      .execute("tool-memory", { limit: 1 }, undefined, undefined, {
+    const memoryTool = session.getToolDefinition("search_memory");
+    assert.equal(
+      memoryTool.description,
+      "Search archived session history by query, or browse recent sessions when query is omitted.",
+    );
+    assert.equal(
+      memoryTool.promptSnippet,
+      "Search archived session history for past-conversation evidence.",
+    );
+    assert.deepEqual(memoryTool.promptGuidelines, [
+      "Use search_memory when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
+    ]);
+    assert.match(
+      memoryTool.parameters.properties.query.description,
+      /Session-memory search query/,
+    );
+
+    const memoryResult = await memoryTool.execute(
+      "tool-memory",
+      { limit: 1 },
+      undefined,
+      undefined,
+      {
         agentDir,
-      });
+      },
+    );
     assert.match(memoryResult.content[0].text, /search_memory recent/);
     assert.equal(memoryResult.details.emptyMessage, "No memory results found.");
 
-    const fetchResult = await session
-      .getToolDefinition("web_search")
-      .execute(
-        "tool-fetch",
-        { q: `http://127.0.0.1:${address?.port}/demo` },
-        undefined,
-        undefined,
-        { agentDir },
-      );
+    const webTool = session.getToolDefinition("web_search");
+    assert.equal(
+      webTool.description,
+      "Search the web, or fetch readable content from an HTTP(S) URL.",
+    );
+    assert.equal(
+      webTool.promptSnippet,
+      "Search the web or fetch readable content from a specific HTTP(S) page.",
+    );
+    assert.deepEqual(webTool.promptGuidelines, [
+      "Use web_search when current, external, source-dependent, or version-sensitive web information matters.",
+      "Use web_search URL mode when a specific HTTP(S) page is the evidence source.",
+    ]);
+    assert.match(
+      webTool.parameters.properties.q.description,
+      /Web search query or HTTP\(S\) URL/,
+    );
+
+    const fetchResult = await webTool.execute(
+      "tool-fetch",
+      { q: `http://127.0.0.1:${address?.port}/demo` },
+      undefined,
+      undefined,
+      { agentDir },
+    );
     assert.match(fetchResult.content[0].text, /std fetch ok/);
     assert.equal(fetchResult.details.mode, "fetch");
 
-    const searchResult = await session
-      .getToolDefinition("web_search")
-      .execute(
-        "tool-search",
-        { q: "rin std smoke", limit: 1 },
-        undefined,
-        undefined,
-        { agentDir },
-      );
+    const searchResult = await webTool.execute(
+      "tool-search",
+      { q: "rin std smoke", limit: 1 },
+      undefined,
+      undefined,
+      { agentDir },
+    );
     assert.equal(searchResult.isError, false);
     assert.match(searchResult.content[0].text, /web_search 0/);
   } finally {

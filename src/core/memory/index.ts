@@ -48,7 +48,7 @@ const searchMemoryParams = Type.Object({
   query: Type.Optional(
     Type.String({
       description:
-        "Optional search query for past sessions. Leave it empty to browse recent sessions directly. For broad recall, prefer a few distinctive keywords joined by OR; use quoted phrases for exact wording when needed. If you do not have a good search phrase yet, call search_memory without a query first.",
+        "Session-memory search query. Omit it to browse recent sessions; use distinctive keywords, OR, or quoted exact wording when useful.",
     }),
   ),
   limit: Type.Optional(
@@ -440,11 +440,11 @@ export default function memoryModule(
         name: "search_memory",
         label: "Search Memory",
         description:
-          "Search past sessions for long-term recall, or browse recent sessions directly when no query is provided.",
-        promptSnippet: "Search archived session history.",
+          "Search archived session history by query, or browse recent sessions when query is omitted.",
+        promptSnippet:
+          "Search archived session history for past-conversation evidence.",
         promptGuidelines: [
-          "Use search_memory proactively for past-conversation recall when the user references earlier work or relevant cross-session context may matter; better to search and confirm than to guess or ask them to repeat themselves.",
-          "If you do not have a good search phrase yet, call search_memory without a query to browse recent sessions first.",
+          "Use search_memory when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
         ],
         parameters: searchMemoryParams,
         execute: async (_toolCallId, params, signal, onUpdate, ctx) =>

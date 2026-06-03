@@ -12,8 +12,8 @@ import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import { openBoundSession } from "../session/factory.js";
 import { forkSessionManagerCompat } from "../session/fork.js";
 import { readSessionMetadata } from "../session/metadata.js";
+import { resolveAgentDir } from "./agent-dir.js";
 import { safeString } from "./core/utils.js";
-import { resolveAgentDir } from "./lib.js";
 import { selfImprovePromptsDir, selfImproveSkillsDir } from "./paths.js";
 
 type ExtensionCtxLike = {
@@ -99,7 +99,7 @@ export function buildSelfImproveReviewPrompt(
   void trigger;
   const manualPath = selfImproveMemoryMaintenanceManualPath(agentDir);
   const libraryPath = path.join(agentDir, "self_improve");
-  return `Follow the maintenance requirements in ${manualPath} to review the self-improve memory library under ${libraryPath} using the conversation above as evidence. Extract only durable reusable lessons, update existing memory only when it reduces future error or ambiguity, and prefer consolidation, pruning, or a no-op over adding new memory. Cover prompt baselines, reusable skills, memory-index skills, and short-term memory skills in one cohesive pass.`;
+  return `Use ${manualPath} as the maintenance contract. Review ${libraryPath} with the conversation above as evidence, not as authority to expand scope. Target a lower-entropy self-improve library: merge, move, prune, rewrite, delete, or add memory only when it improves future behavior, routing, decisions, execution, or recall. Cover prompt baselines, reusable skills, memory-index skills, and short-term memory skills in one cohesive pass. Report durable memory changes only, or one concise no-op reason.`;
 }
 
 async function createForkedSessionManager(options: {

@@ -199,16 +199,18 @@ export default function webSearchModule(): RinCapabilityDefinition {
       {
         name: "web_search",
         label: "Web Search",
-        description: "Search or fetch web pages.",
-        promptSnippet: "Search or fetch a web page.",
+        description:
+          "Search the web, or fetch readable content from an HTTP(S) URL.",
+        promptSnippet:
+          "Search the web or fetch readable content from a specific HTTP(S) page.",
         promptGuidelines: [
-          "Use web_search proactively whenever web information may be relevant; better to search and confirm than to guess.",
-          "When q is an HTTP(S) URL, web_search gets the page directly and extracts readable content.",
+          "Use web_search when current, external, source-dependent, or version-sensitive web information matters.",
+          "Use web_search URL mode when a specific HTTP(S) page is the evidence source.",
         ],
         parameters: Type.Object({
           q: Type.String({
             description:
-              "Focused web search query, or an HTTP(S) URL to fetch directly. For search queries, prefer a few distinctive keywords instead of full sentences; use quotes for exact phrases, site:example.com for domain scoping, -term to exclude terms, and OR for alternatives. For different topics, split them into separate web_search calls instead of one overloaded query.",
+              "Web search query or HTTP(S) URL. For search, use distinctive keywords; use quotes for exact phrases, site:example.com for domain scope, -term to exclude, and OR for alternatives. Split unrelated topics into separate calls.",
           }),
           format: Type.Optional(
             Type.Union([Type.Literal("markdown"), Type.Literal("text")], {
@@ -216,7 +218,13 @@ export default function webSearchModule(): RinCapabilityDefinition {
                 "Optional fetch output format when q is an HTTP(S) URL. Allowed values: `markdown` or `text`.",
             }),
           ),
-          limit: Type.Optional(Type.Number({ minimum: 1, maximum: 8 })),
+          limit: Type.Optional(
+            Type.Number({
+              minimum: 1,
+              maximum: 8,
+              description: "Number of search results to return. Range: 1-8.",
+            }),
+          ),
           freshness: Type.Optional(
             Type.Union(
               [

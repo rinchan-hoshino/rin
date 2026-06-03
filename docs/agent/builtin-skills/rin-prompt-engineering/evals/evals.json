@@ -34,7 +34,7 @@
     {
       "id": 6,
       "prompt": "这个 skill 写得像论文，触发描述也不准。请按 skill 编写规范和提示词工程原则重写。",
-      "expected_output": "Uses skill-creator plus rin-prompt-engineering: concise SKILL.md, clear third-person description with triggers, progressive disclosure, references for long material, eval prompts, and a short rationale tied to success criteria.",
+      "expected_output": "Uses skill-creator plus rin-prompt-engineering: concise SKILL.md, trigger-focused description, canonical target-state prompt text rather than patch notes, positive direct instructions as a separate drafting rule, progressive disclosure, references for long material, eval prompts, and a short rationale tied to success criteria.",
       "files": []
     }
   ]

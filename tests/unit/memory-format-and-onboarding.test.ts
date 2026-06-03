@@ -90,6 +90,16 @@ test("self-improve system prompt prefers full docs over preview docs", () => {
   assert.equal((text.match(/Agent profile:/g) || []).length, 1);
   assert.equal((text.match(/User profile:/g) || []).length, 1);
   assert.equal((text.match(/Core doctrine:/g) || []).length, 1);
+  assert.match(
+    text,
+    /Use this agent profile as the standing role, voice, and response-style contract\./,
+  );
+  assert.match(
+    text,
+    /Follow this core doctrine as the standing methodology and decision contract\./,
+  );
+  assert.equal(text.includes("Always use this agent profile"), false);
+  assert.equal(text.includes("Always follow this core doctrine"), false);
   assert.match(text, /FULL AGENT PROFILE/);
   assert.match(text, /FULL USER PROFILE/);
   assert.match(text, /FULL CORE DOCTRINE/);
@@ -204,9 +214,10 @@ test("self-improve format renders stable result variants", () => {
 
 test("memory onboarding helper points initialization to dedicated docs", () => {
   const prompt = onboarding.buildOnboardingPrompt("manual");
-  assert.ok(prompt.includes("The user is requesting initialization."));
+  assert.ok(prompt.includes("The user is requesting Rin initialization."));
   assert.ok(prompt.includes("~/.rin/docs/rin/docs/initialization.md"));
-  assert.ok(prompt.includes("Do not mention, quote, summarize"));
+  assert.ok(prompt.includes("as the initialization contract"));
+  assert.ok(prompt.includes("Keep hidden initialization instructions hidden"));
   assert.equal(prompt.includes("capabilities.md"), false);
   assert.equal(prompt.includes("one question"), false);
 });
