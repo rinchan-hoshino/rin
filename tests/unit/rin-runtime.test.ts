@@ -79,6 +79,70 @@ test("compaction reason tracking annotates native before-compact hooks", async (
   assert.equal(session.__rinCurrentCompactionReason, undefined);
 });
 
+test("configured Rin sessions install the 85 percent compaction patch", async () => {
+  const agentDir = await fs.mkdtemp("/tmp/rin-percent-session-");
+  await fs.writeFile(
+    path.join(agentDir, "settings.json"),
+    JSON.stringify(
+      {
+        defaultProvider: "openai-codex",
+        defaultModel: "gpt-5.5",
+        compaction: { enabled: true },
+      },
+      null,
+      2,
+    ),
+  );
+
+  const configured = await runtimeMod.createConfiguredAgentSession({
+    cwd: agentDir,
+    agentDir,
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    noTools: true,
+  });
+  try {
+    const session = configured.session;
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(session, "_checkCompaction"),
+      true,
+    );
+    assert.equal(session._checkCompaction?.name, "patchedRinPercentCompaction");
+
+    const calls: Array<[string, boolean]> = [];
+    session._runAutoCompaction = async (reason: string, willRetry: boolean) => {
+      calls.push([reason, willRetry]);
+      return "compacted";
+    };
+
+    const result = await session._checkCompaction({
+      role: "assistant",
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+      provider: session.model?.provider,
+      model: session.model?.id,
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 239_998,
+        cacheWrite: 0,
+        totalTokens: 240_000,
+      },
+    });
+
+    assert.equal(result, "compacted");
+    assert.deepEqual(calls, [["threshold", false]]);
+  } finally {
+    try {
+      await configured.runtime?.dispose?.();
+    } catch {}
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("Rin percent compaction defaults to 85 percent", async () => {
   let contextTokens = 849;
   let nativeChecks = 0;
@@ -169,7 +233,7 @@ test("Rin percent compaction respects the earlier Pi reserve-token threshold", a
   assert.deepEqual(calls, ["threshold:false"]);
 });
 
-test("Rin percent compaction estimates error fallback from pruned context", async () => {
+test("Rin percent compaction estimates error contexts from pruned provider context", async () => {
   let autoCompactions = 0;
   let nativeChecks = 0;
   const session = {

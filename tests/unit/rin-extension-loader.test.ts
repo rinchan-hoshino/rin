@@ -49,6 +49,26 @@ test("Rin agent runtime owns the composed resource loading boundary", async () =
   const rinRuntime = await loaderModule.loadRinAgentRuntime();
   assert.equal(typeof rinRuntime.DefaultResourceLoader, "function");
   assert.equal(typeof rinRuntime.createAgentSessionServices, "function");
+  assert.equal(typeof rinRuntime.calculateContextTokens, "function");
+  assert.equal(typeof rinRuntime.estimateContextTokens, "function");
+
+  const estimate = rinRuntime.estimateContextTokens([
+    { role: "user", content: [{ type: "text", text: "prompt" }] },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "answer" }],
+      stopReason: "stop",
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 20,
+        cacheWrite: 0,
+        totalTokens: 35,
+      },
+    },
+    { role: "toolResult", content: [{ type: "text", text: "abcd" }] },
+  ]);
+  assert.equal(estimate, 36);
 });
 
 test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface", async () => {
