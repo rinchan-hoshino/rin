@@ -2,7 +2,7 @@
 
 Use this document when a self-improve review must turn conversation evidence into durable future behavior.
 
-A distillation pass writes behavior contracts for future runs: prompt baselines, skills, memory-index pointers, and short-term continuity.
+A distillation pass is a compiler from evidence to future behavior. It writes behavior contracts for future runs: prompt baselines, skills, memory-index pointers, and short-term continuity.
 
 Memory and self-improve stay separate:
 
@@ -21,14 +21,16 @@ Target surface:
 
 Goal:
 
-- lower guidance entropy while preserving or improving future behavior.
+- distill only proven behavior changes into the smallest durable guidance that will be loaded when needed;
+- preserve the trigger cues needed to recognize the same failure or work class again;
+- reduce guidance entropy only after the evidence, trigger, behavior delta, and owning surface are clear.
 
-Trusted inputs:
+Inputs and authority:
 
-- existing self-improve artifacts;
-- current conversation evidence;
-- owner corrections and repeated feedback;
-- current repository/runtime docs for the surface being edited.
+- conversation evidence, especially owner corrections, frustration, repeated reminders, and repeated assistant failures;
+- authoritative docs for the surface being edited;
+- verified repository/runtime behavior when it proves the behavior need;
+- existing self-improve artifacts as review context for merge, move, prune, or revision, not as independent authority for new doctrine.
 
 Output contract:
 
@@ -36,17 +38,32 @@ Output contract:
 - merged, moved, deleted, or pruned artifacts;
 - cleanup work performed;
 - one concise unchanged reason when the library already satisfies the contract;
-- candidates routed to product work, memory retrieval, or owner clarification.
+- candidates routed to product work, memory retrieval, owner clarification, or left unchanged with the reason.
+
+## Core rule
+
+Distill only proven behavior changes.
+
+For each candidate lesson, identify:
+
+- **Evidence:** the trusted conversation evidence, correction, repeated failure, authoritative doc, or verified runtime/repository behavior that proves the lesson.
+- **Trigger:** the future situation, wording, surface, or work class that should make the agent use the lesson.
+- **Behavior delta:** what the agent must do differently in future runs.
+- **Owning surface:** the narrowest self-improve surface that can carry the lesson and be loaded when needed.
+
+If any field is missing, do not write the candidate as self-improve guidance. Existing artifacts can prove cleanup needs, overlap, or stale state; they do not by themselves prove a new standing rule.
 
 ## Success criteria
 
 A successful distillation pass makes future behavior easier to trigger and execute:
 
+- each changed guidance line can name its evidence, trigger, behavior delta, and owning surface;
 - the new or revised guidance changes future behavior, routing, decisions, execution, or recall;
+- trigger cues are preserved, including exact wording when that wording is needed to recognize the future failure again;
 - each lesson has one canonical owner;
-- prompt baselines stay compact and resident-worthy;
+- prompt baselines stay compact, resident-worthy, and limited to stable cross-turn invariants;
 - skills stay workflow-shaped and discoverable by description;
-- memory-index pointers support retrieval of original evidence;
+- memory-index pointers support retrieval of repeated, correction-based, disputed, or resident-prompt evidence;
 - short-term continuity contains active handoff state;
 - stale, duplicated, conflicting, or misplaced guidance is merged, moved, or removed;
 - final output names the artifacts changed and the behavior contract each change improves.
@@ -63,7 +80,7 @@ Inspect the surfaces that can own the lesson:
 - `short-term-memory/SKILL.md`;
 - `<agentDir>/self_improve/state/skill-usage.json` when present.
 
-Use owner corrections, frustration, repeated reminders, and repeated assistant failures as high-salience evidence. Extract the reusable behavior lesson and file it in the smallest self-improve surface that will affect later behavior.
+Review high-salience conversation evidence before lower-salience artifact cleanup: owner corrections, frustration, repeated reminders, and repeated assistant failures. File only the reusable behavior delta in the smallest self-improve surface that will affect later behavior.
 
 ## Behavior contract
 
@@ -72,21 +89,24 @@ Run one cohesive same-class pass:
 1. Read the current prompt baselines.
 2. Read the matching skill and any umbrella skill that owns the same work class.
 3. Check `skill-usage.json` for stale, overlapping, or rarely used skills worth merging, aliasing, pruning, or reshaping.
-4. Extract candidate lessons as reusable target behavior rather than incident detail.
-5. Keep candidates that change future behavior, routing, decisions, execution, or recall.
-6. Choose the smallest correct destination using the priority list below.
-7. Merge overlapping guidance into one canonical owner.
-8. Rewrite the destination as compact target-state guidance.
-9. Update existing same-topic memory-index transactions with dated bullets and monthly index keywords when evidence needs retrieval.
-10. Prune stale short-term continuity records and move active state to the narrowest current owner.
-11. Validate skill frontmatter after editing skills.
-12. Report changed self-improve artifacts or one concise unchanged reason.
+4. Review high-salience conversation evidence first: owner corrections, repeated reminders, frustration, and repeated assistant failures.
+5. Extract candidate lessons with evidence, trigger, behavior delta, and the narrowest owning surface.
+6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, or recall.
+7. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, or only restate existing artifact wording.
+8. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
+9. Choose the smallest correct destination using the priority list below.
+10. Merge overlapping guidance into one canonical owner.
+11. Rewrite the destination as compact target-state guidance only after the trigger and behavior delta are preserved.
+12. Update memory-index when evidence is repeated, correction-based, disputed, or used to justify resident prompt-baseline guidance.
+13. Prune stale short-term continuity records and move active state to the narrowest current owner.
+14. Validate skill frontmatter after editing skills.
+15. Report changed self-improve artifacts or one concise unchanged reason.
 
 ## Destination contract
 
-Choose the first destination that satisfies the lesson's future-use contract:
+Choose the first destination that satisfies the lesson's future-use contract and the core rule:
 
-1. **Prompt baseline:** the rule applies across most future turns and belongs in `agent_profile`, `user_profile`, or `core_doctrine`.
+1. **Prompt baseline:** the rule is a stable cross-turn invariant that belongs in `agent_profile`, `user_profile`, or `core_doctrine` and should remain resident in most future turns.
 2. **Current skill:** the conversation used a skill and revealed a reusable gap in that skill.
 3. **Umbrella skill:** a broader existing skill cleanly owns the work class.
 4. **Skill `references/`:** reusable evidence, examples, command traces, or longer notes help future skill use while keeping `SKILL.md` concise.
@@ -110,9 +130,9 @@ Location: `<agentDir>/self_improve/prompts/*.md`
 - `user_profile.md`: stable user identity and compact always-relevant user facts.
 - `core_doctrine.md`: durable methodology, values, and decision rules.
 
-Use prompt baselines for resident identity, user identity, and doctrine invariants. Put procedures, examples, durable domain facts, troubleshooting detail, and retrieval pointers in skills or memory-index destinations.
+Prompt baselines have the highest bar because they stay resident in future turns. Use them only for agent identity, user identity, and doctrine invariants that pass the core rule and apply across most future turns. Put procedures, examples, durable domain facts, troubleshooting detail, incident summaries, implementation vocabulary, and retrieval pointers in skills or memory-index destinations.
 
-Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic and shrink overgrown slots during review.
+Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic and shrink overgrown slots during review. A prompt-baseline change based on repeated, correction-based, or disputed evidence should have a memory-index pointer that can retrieve the original evidence.
 
 ### Reusable skills
 
@@ -130,7 +150,7 @@ Create a new ordinary skill when the trigger is reusable, the scope is class-lev
 
 Memory-index transactions are retrieval pointers and compact evidence buckets. They support future lookup of original memory evidence while transcript archives remain the evidence source.
 
-Use one evolving memory-index transaction for repeated same-topic evidence. Update the monthly index line with date ranges and keywords.
+Use one evolving memory-index transaction for repeated same-topic evidence. Update the monthly index line with date ranges and keywords. Update memory-index when evidence is repeated, correction-based, disputed, or used to justify resident prompt-baseline guidance.
 
 ### Short-term continuity
 
@@ -148,7 +168,10 @@ Use `disable-model-invocation: true` for skills that should remain explicit/manu
 
 Before reporting success, check the revised library against these prompt-engineering criteria:
 
-- **Success criterion:** each changed line or file improves a named future behavior, routing decision, execution step, or recall path.
+- **Evidence gate:** every changed guidance line traces to trusted evidence, an authoritative doc, or verified behavior.
+- **Behavior delta:** every changed guidance line changes a named future behavior, routing decision, execution step, or recall path.
+- **Trigger preservation:** compression keeps the wording or conditions needed to recognize the same failure again.
+- **Destination fit:** each lesson lives in the narrowest surface that will be loaded when needed.
 - **Instruction/data boundary:** original wording, chronology, and provenance stay retrievable through memory surfaces while self-improve stores distilled guidance.
 - **Output contract:** the final report names changed artifacts and the behavior contract each artifact now owns.
 - **Entropy:** duplicate, stale, conflicting, or misplaced guidance shrinks rather than spreads.
@@ -164,4 +187,4 @@ Report self-improve artifact changes:
 - merged, moved, deleted, or pruned self-improve artifacts;
 - cleanup performed without new guidance;
 - one concise unchanged reason when the review leaves the library as-is;
-- candidates routed to product work, memory retrieval, or owner clarification.
+- candidates routed to product work, memory retrieval, owner clarification, or left unchanged with the reason.

@@ -1231,7 +1231,7 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")}. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records. Distill conversation evidence and existing guidance into lower-entropy behavior contracts that improve future behavior, routing, decisions, execution, or recall. Merge canonical owners, move misplaced guidance, prune stale short-term records, and report changed artifacts or one concise unchanged reason.`,
+      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")}. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records. Apply the manual's evidence, trigger, behavior delta, and owning surface gate; merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, or recall. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /Trigger:/);
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
@@ -1242,12 +1242,14 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
       sleep.target.prompt,
       /patch the skill that was in play/,
     );
+    assert.doesNotMatch(sleep.target.prompt, /lower-entropy/);
     assert.match(sleep.target.prompt, /prompt baselines/);
     assert.match(sleep.target.prompt, /reusable skills/);
     assert.match(sleep.target.prompt, /memory-index pointers/);
     assert.match(sleep.target.prompt, /short-term continuity records/);
-    assert.match(sleep.target.prompt, /lower-entropy behavior contracts/);
-    assert.match(sleep.target.prompt, /Merge canonical owners/);
+    assert.match(sleep.target.prompt, /evidence, trigger, behavior delta/);
+    assert.match(sleep.target.prompt, /proven behavior changes/);
+    assert.match(sleep.target.prompt, /routed candidates/);
     assert.doesNotMatch(sleep.target.prompt, /no-change result as exceptional/);
     assert.doesNotMatch(sleep.target.prompt, /one concise no-op reason/);
     assert.doesNotMatch(sleep.target.prompt, /read-only guidance/);

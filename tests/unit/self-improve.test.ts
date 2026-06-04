@@ -666,17 +666,22 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   );
   assert.equal(
     prompt,
-    "Use /tmp/rin-agent/docs/rin/docs/self-improve-distillation.md as the self-improve distillation contract. Review /tmp/rin-agent/self_improve with the conversation above as evidence for this scoped pass. Target lower-entropy self-improve guidance: merge, move, prune, rewrite, delete, or add distilled guidance when it improves future behavior, routing, decisions, execution, or recall. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed self-improve artifacts, cleanup work, or one concise unchanged reason.",
+    "Use /tmp/rin-agent/docs/rin/docs/self-improve-distillation.md as the self-improve distillation contract. Review /tmp/rin-agent/self_improve with the conversation above as evidence for this scoped pass. Distill only proven behavior changes that pass the manual's evidence, trigger, behavior delta, and owning surface gate; then merge, move, prune, rewrite, delete, or add self-improve guidance when it improves future behavior, routing, decisions, execution, or recall. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.",
   );
   assert.doesNotMatch(prompt, /Trigger:/);
   assert.doesNotMatch(prompt, /self_improve:periodic_review/);
   assert.doesNotMatch(prompt, /Review priorities:/);
   assert.doesNotMatch(prompt, /explicit owner corrections/);
+  assert.doesNotMatch(prompt, /lower-entropy/);
   assert.match(prompt, /prompt baselines, reusable skills/);
   assert.match(prompt, /as the self-improve distillation contract/);
   assert.match(prompt, /evidence for this scoped pass/);
-  assert.match(prompt, /Target lower-entropy self-improve guidance/);
-  assert.match(prompt, /Report changed self-improve artifacts/);
+  assert.match(prompt, /Distill only proven behavior changes/);
+  assert.match(
+    prompt,
+    /evidence, trigger, behavior delta, and owning surface gate/,
+  );
+  assert.match(prompt, /Report changed artifacts/);
   assert.doesNotMatch(prompt, /self_improve_manage/);
   assert.doesNotMatch(prompt, /skill-read contract/);
 });
@@ -694,11 +699,21 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /writes behavior contracts for future runs/);
   assert.match(manual, /## Prompt brief/);
   assert.doesNotMatch(manual, /Cosmetic wording cleanup/);
+  assert.match(manual, /## Core rule/);
+  assert.match(manual, /Distill only proven behavior changes/);
   assert.match(manual, /## Success criteria/);
   assert.match(manual, /## Behavior contract/);
   assert.match(manual, /## Evaluation checks/);
   assert.match(manual, /skill-usage\.json/);
-  assert.match(manual, /reusable target behavior rather than incident detail/);
+  assert.match(manual, /\*\*Evidence:\*\*/);
+  assert.match(manual, /\*\*Trigger:\*\*/);
+  assert.match(manual, /\*\*Behavior delta:\*\*/);
+  assert.match(manual, /\*\*Owning surface:\*\*/);
+  assert.doesNotMatch(
+    manual,
+    /reusable target behavior rather than incident detail/,
+  );
+  assert.doesNotMatch(manual, /lower guidance entropy/);
   assert.match(
     manual,
     /change future behavior, routing, decisions, execution, or recall/,

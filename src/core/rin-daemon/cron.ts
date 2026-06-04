@@ -318,7 +318,7 @@ function createBuiltInSelfImproveSleepConsolidationTask(
     "self-improve-distillation.md",
   );
   const libraryPath = path.join(agentDir, "self_improve");
-  const prompt = `Follow the self-improve distillation contract in ${manualPath}. Review ${libraryPath}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records. Distill conversation evidence and existing guidance into lower-entropy behavior contracts that improve future behavior, routing, decisions, execution, or recall. Merge canonical owners, move misplaced guidance, prune stale short-term records, and report changed artifacts or one concise unchanged reason.`;
+  const prompt = `Follow the self-improve distillation contract in ${manualPath}. Review ${libraryPath}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records. Apply the manual's evidence, trigger, behavior delta, and owning surface gate; merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, or recall. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`;
   const task: CronTaskRecord = {
     id: "builtin_self_improve_sleep_consolidation_daily",
     builtIn: true,
