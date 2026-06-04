@@ -1,58 +1,52 @@
-# Builtin Capabilities
+# Builtin Extensions and Capability Sources
 
-This document helps agents distinguish Rin core capabilities from optional Pi extensions. For general usage guidance, start with `docs/capabilities.md`; use this page when you need to know whether a tool is core, optional, or background-only.
+Use this page to identify where a Rin capability comes from: native Rin core, bundled optional foreground Pi extension, live third-party tool, practice document, or Rin background extension runtime. For task-level usage, start with `docs/capabilities.md`.
 
-## Quick reference
+The live tool list remains authoritative for the current turn.
 
-- Core Rin capabilities are available through native product code when their tools are present in the live tool list.
-- The core todo capability is always enabled and registers the `todo` tool plus `/todos` command.
-- Rin ships `rin:web-search` as the optional bundled Pi extension alias; it is controlled through `settings.json -> extensions`.
-- Fresh installs enable `rin:web-search` by default; existing installs keep their current settings until changed.
-- Rin does not ship bundled Browser Use or Computer Use extensions. For those tasks, use the live tool list first, then read `practices/browser-use.md` or `practices/computer-use.md`.
-- Background extensions run in Rin's background runtime and are not Pi session tools.
-- The current tool list and system prompt remain authoritative for a specific turn.
+## Capability source map
 
-## Default extra capabilities
+| Source                                   | Provides                                                                                                                                                                | Configuration surface                                                                                         | Agent route                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, scheduled-task SDK workflows, chat setup, token usage | built into Rin                                                                                                | use live tools, CLI, SDK, or topic docs                        |
+| Bundled optional foreground Pi extension | `rin:web-search` alias registering `web_search`                                                                                                                         | `settings.json -> extensions`                                                                                 | use `web_search` when present                                  |
+| Browser/desktop operation                | browser or computer tools supplied by the live runtime, plus documented practice patterns                                                                               | live tool list or external Pi extension config                                                                | read `practices/browser-use.md` or `practices/computer-use.md` |
+| Background extension runtime             | trusted long-running services, chat adapters, and external memory providers                                                                                             | `settings.json -> rinExtensions.backgroundServices` or trusted extension entries with background capabilities | inspect runtime state and relevant extension config            |
 
-- `memory`
-  - provides `search_memory`, transcript archiving, and the searchable session-history index
-- `self-improve`
-  - provides compact prompt baselines, agent-managed skills, periodic review, and hidden nightly consolidation
-- Rin system prompt assembly
-  - adds Rin's default stance, tool guidance, configured baselines, and available skill metadata
-  - keeps the effective base system prompt stable within a session until the session is refreshed or reloaded
-- `message-header`
-  - adds message metadata such as `sent at`; adds chat-specific context in chat bridge scenarios
-- `freeze-session-runtime`
-  - keeps the effective system prompt stable within a session
-- `tui-input-compat`
-  - smooths over some TUI input compatibility issues
-- delegated subagents
-  - use the non-interactive CLI pattern in `docs/non-interactive-cli.md`; do not assume a `run_subagent` tool exists unless it appears in the live tool list
-- `task`
-  - scheduled task operations are documented local SDK workflows rather than agent tools
-  - read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before operating scheduled tasks
-- `chat`
-  - provides `/chat` for official adapter setup inside the TUI
-  - chat sending, chat turn control, stored-message lookup, log inspection, and identity updates are documented SDK/file workflows rather than agent tools
-  - `/chat` enters platform selection directly, keeps installer-only opt-in confirmation, prefers the minimum runnable fields, defaults to polling / socket modes when supported, and includes direct official links for required values
-- `token-usage`
-  - records detailed token telemetry under `~/.rin/data/core/usage/usage.db`
-  - powers the charted `rin usage` text dashboard, grouped usage queries, and best-effort configured provider account/quota display
+## Rin core capabilities
 
-## Core todo capability
+These capabilities are native Rin behavior rather than optional Pi extensions:
 
-Rin's todo support is native core behavior, not a Pi extension.
+- `memory`: `search_memory`, transcript archiving, and searchable session-history index.
+- `self-improve`: compact distilled guidance in prompt baselines, agent-managed skills, periodic review, and hidden nightly consolidation.
+- system prompt assembly: Rin default stance, tool guidance, configured baselines, and available skill metadata.
+- message metadata: `sent at` and chat-specific prompt context when applicable.
+- frozen session runtime: stable effective system prompt within a session until refresh or reload.
+- TUI input compatibility: Rin-owned compatibility handling for interactive input.
+- todo: `todo` tool and `/todos` command.
+- task: scheduled task workflows through the local Rin Agent SDK.
+- chat: `/chat`, adapter setup, SDK/file workflows, stored-message lookup, and identity/trust data paths.
+- token usage: telemetry under `~/.rin/data/core/usage/usage.db` and the `rin usage` dashboard.
 
-- always enabled
-- registers `todo` for branch-aware task checklists and `/todos` for the interactive TUI view
-- stores state in session tool result details, so forks and session branches reconstruct the matching todo list
-- remains enabled even when optional Pi extensions are disabled; it is part of Rin's reliability path rather than a user-toggleable component
-- in daemon/RPC chat turns, if a final answer is produced while todos are still incomplete, Rin may withhold that final answer and silently continue work; hidden continuations stop when todos complete, when the todo state does not change between continuations, or after 64 continuations
+Read the topic document for the capability before operating it:
 
-## Bundled optional Pi extensions
+- memory and self-improve: `docs/memory-layering.md`, `docs/self-improve-distillation.md`.
+- scheduled tasks: `docs/agent-sdk.md`, `docs/scheduled-tasks.md`.
+- chat: `docs/chat-bridge.md`, `docs/rich-text-output-format.md`.
+- delegated child runs: `docs/non-interactive-cli.md`.
 
-Rin currently ships one optional foreground Pi extension alias:
+## Core todo
+
+Rin core always provides todo support. It registers:
+
+- `todo`: current-branch execution checklist tool.
+- `/todos`: interactive TUI command for the current checklist.
+
+Todo state is reconstructed from session tool-result details, so forks and session branches can recover the matching checklist. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
+
+## Bundled optional foreground extension: `rin:web-search`
+
+Rin ships one bundled optional foreground Pi extension alias:
 
 ```json
 {
@@ -60,13 +54,16 @@ Rin currently ships one optional foreground Pi extension alias:
 }
 ```
 
-- `rin:web-search`
-  - expands to the bundled `extensions/rin-web-search` Pi package
-  - registers `web_search`
-  - gets pages directly when `q` is an HTTP(S) URL
-  - uses Rin-managed SearXNG for search queries; fresh install enables this alias and prepares the SearXNG runtime, while manual enablement prepares it best-effort
+`rin:web-search` expands to the bundled `extensions/rin-web-search` Pi package and registers `web_search`.
 
-Use Pi resource filters with the alias to disable entries from a broader extension list:
+`web_search` modes:
+
+- search query: uses Rin-managed SearXNG;
+- HTTP(S) URL: fetches readable content from the specific page.
+
+Fresh installs enable `rin:web-search` by default unless the installer selection disables it. Existing installs keep their current `settings.json -> extensions` value.
+
+Use Pi resource filters with the alias when a broader extension list needs filtering:
 
 ```json
 {
@@ -74,25 +71,35 @@ Use Pi resource filters with the alias to disable entries from a broader extensi
 }
 ```
 
-If `extensions` is missing or `[]`, `todo` stays on by default and optional extension tools are off for that runtime. Fresh installs write `rin:web-search` unless the installer selection disables it.
+When `extensions` is missing or empty, Rin core capabilities remain available and optional foreground extension tools follow the configured extension state.
 
-### Browser and computer operation
+## Browser and desktop operation
 
-Rin no longer includes bundled `rin:browser-use` or `rin:computer-use` aliases, packages, or default tools.
+Browser and desktop tools are live-runtime capabilities. Use them when they appear in the live tool list.
 
-- Do not assume `browser_use` or `computer_use` exists unless it appears in the live tool list.
-- Do not add old `rin:browser-use` or `rin:computer-use` aliases to `settings.json`.
-- For browser automation patterns, read `practices/browser-use.md`.
-- For desktop automation patterns, read `practices/computer-use.md`.
-- If a user supplies a trusted third-party Pi extension for browser or computer control, configure it as a normal extension path/package under Pi's native extension rules, not as a Rin built-in alias.
+Use practice docs for documented patterns and setup guidance:
+
+- browser automation: `practices/browser-use.md`.
+- desktop automation: `practices/computer-use.md`.
+
+Trusted third-party Pi extensions for browser or computer control are configured through normal Pi extension rules as explicit extension paths or packages.
 
 ## Background extensions
 
-- disabled unless listed under `settings.json -> rinExtensions.backgroundServices` or a local/package extension exposes background capabilities
-- run as trusted Node.js packages in Rin's background runtime for long-running async work
-- may install or update configured npm packages under `~/.rin/data/extensions/runtime` during startup
-- do not run in std/maintenance mode
-- may register chat adapters with `ctx.registerChatAdapter(...)`
-- may register external memory providers with `ctx.registerMemoryProvider(...)`; providers can implement `search`, `listRecent`, and `write`, and can return remote `reference` or `url` values instead of local transcript paths
+Background extensions run in Rin's background runtime as trusted Node.js packages. They are used for long-running async services, chat adapters, and external memory providers.
 
-Configure background services only when the user intentionally wants a background extension such as an external event bridge or a trusted memory backend. Keep the normal chat adapters under `settings.json -> chat`, not background services.
+Configuration sources:
+
+- `settings.json -> rinExtensions.backgroundServices`;
+- trusted local/package extension entries that expose background capabilities.
+
+Background services may install or update configured npm packages under `~/.rin/data/extensions/runtime` during startup. Restart or reload Rin after editing background extension settings.
+
+Background extensions can register:
+
+- chat adapters with `ctx.registerChatAdapter(...)`;
+- external memory providers with `ctx.registerMemoryProvider(...)`.
+
+Memory providers may implement `search`, `listRecent`, and `write`, and may return remote `reference` or `url` values instead of local transcript paths.
+
+Keep normal built-in chat adapter configuration under `settings.json -> chat`. Use background services for intentionally configured background event bridges, custom chat adapters, or trusted external memory backends.

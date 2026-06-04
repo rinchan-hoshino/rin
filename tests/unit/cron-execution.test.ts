@@ -986,7 +986,7 @@ test("cron chat-bound shell task toggles frontend working while running", async 
   }
 });
 
-test("built-in self-improve cron task writes maintenance history", async () => {
+test("built-in self-improve cron task writes distillation history", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const task = {
     id: "builtin_self_improve_sleep_consolidation_daily",
@@ -995,7 +995,7 @@ test("built-in self-improve cron task writes maintenance history", async () => {
     target: {
       kind: "agent_prompt",
       prompt:
-        "Follow the manual at /tmp/rin/docs/rin/docs/self-improve-memory-maintenance.md to optimize memory.",
+        "Follow the manual at /tmp/rin/docs/rin/docs/self-improve-distillation.md to optimize self-improve guidance.",
     },
     runCount: 4,
     lastStartedAt: "2026-05-08T09:33:09.353Z",
@@ -1005,7 +1005,7 @@ test("built-in self-improve cron task writes maintenance history", async () => {
       agentDir,
       chat: {
         runTurn: async () => ({
-          finalText: "maintenance done",
+          finalText: "distillation done",
           sessionFile: path.join(
             agentDir,
             "sessions",
@@ -1033,7 +1033,7 @@ test("built-in self-improve cron task writes maintenance history", async () => {
       rows[0].trigger,
       "cron:builtin_self_improve_sleep_consolidation_daily",
     );
-    assert.equal(rows[0].outputPreview, "maintenance done");
+    assert.equal(rows[0].outputPreview, "distillation done");
     assert.equal(rows[0].sessionFile.endsWith("night.jsonl"), true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1200,7 +1200,7 @@ test("cron task condition accepts function bodies with return", async () => {
   }
 });
 
-test("cron scheduler installs built-in daily memory maintenance tasks", async () => {
+test("cron scheduler installs built-in daily memory and self-improve distillation tasks", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
@@ -1231,7 +1231,7 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the maintenance requirements in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-memory-maintenance.md")} to improve the entire current self-improve memory library under ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index skills, and short-term memory skills. Actively reduce entropy in one cohesive pass: delete obsolete or low-value material, merge redundant skills and memory-index topics, move misplaced details to the smallest correct destination, prune stale short-term records, and rewrite verbose rules compactly.`,
+      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")}. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records. Distill conversation evidence and existing guidance into lower-entropy behavior contracts that improve future behavior, routing, decisions, execution, or recall. Merge canonical owners, move misplaced guidance, prune stale short-term records, and report changed artifacts or one concise unchanged reason.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /Trigger:/);
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
@@ -1244,10 +1244,10 @@ test("cron scheduler installs built-in daily memory maintenance tasks", async ()
     );
     assert.match(sleep.target.prompt, /prompt baselines/);
     assert.match(sleep.target.prompt, /reusable skills/);
-    assert.match(sleep.target.prompt, /memory-index skills/);
-    assert.match(sleep.target.prompt, /short-term memory skills/);
-    assert.match(sleep.target.prompt, /delete obsolete or low-value material/);
-    assert.match(sleep.target.prompt, /merge redundant skills/);
+    assert.match(sleep.target.prompt, /memory-index pointers/);
+    assert.match(sleep.target.prompt, /short-term continuity records/);
+    assert.match(sleep.target.prompt, /lower-entropy behavior contracts/);
+    assert.match(sleep.target.prompt, /Merge canonical owners/);
     assert.doesNotMatch(sleep.target.prompt, /no-change result as exceptional/);
     assert.doesNotMatch(sleep.target.prompt, /one concise no-op reason/);
     assert.doesNotMatch(sleep.target.prompt, /read-only guidance/);

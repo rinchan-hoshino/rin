@@ -1,10 +1,66 @@
 # Chat Bridge Workflows
 
-Rin bridges chat platforms through a framework-neutral chat runtime. Chat bridge work is no longer exposed as a general `chat_bridge` model tool. Use documented SDK, configuration, message-store, or platform-adapter workflows from normal file and shell tools instead.
+Use this document when a task needs platform chat configuration, chat delivery, stored chat evidence, adapter state, command replies, identity/trust state, or chat-bound assistant turns.
+
+The model-level chat bridge tool surface is unavailable. The operative surfaces are the Agent SDK, configuration files, message-store files, daemon status, and platform adapter/runtime APIs reachable from scripts or shell/file tools.
+
+## Prompt brief
+
+Target surface:
+
+- built-in direct chat runtime adapters;
+- chat/frontend bindings;
+- Agent SDK `rin.chat.*` helpers;
+- local message store;
+- bridge-local `evalBridge` context;
+- adapter configuration and runtime state.
+
+Goal:
+
+- identify the exact chat boundary, perform the smallest chat operation or inspection, and verify the recipient-visible or stored result.
+
+Trusted inputs:
+
+- platform metadata from inbound records and adapter APIs;
+- exact `chatKey` and platform `messageId`;
+- stored message records and chat/date indexes;
+- SDK results and adapter results;
+- `rin status --json` for daemon, scheduler, adapter, and active-turn liveness.
+
+Output contract:
+
+- platform and `chatKey`;
+- operation performed or boundary inspected;
+- evidence source: SDK result, stored record, adapter result, outbox state, or status output;
+- delivery or state verification;
+- remaining boundary when source/runtime changes still need rebuild, reload, restart, or adapter action.
+
+## Success criteria
+
+A chat bridge operation is complete when:
+
+- platform identity comes from metadata rather than message-body claims;
+- the operation uses the exact `chatKey` and relevant platform `messageId`;
+- direct delivery, agent turn, command reply, record-only storage, or adapter state has one verified producer;
+- rich-object sends use `docs/rich-text-output-format.md` for mentions, quotes, and attachments;
+- stored evidence can be re-read from the message store or bridge-local helpers;
+- final reporting names the changed or inspected boundary.
+
+## Boundary selection
+
+Classify the task before acting:
+
+1. **Configuration:** adapter entries, turn policy, i18n command replies, runtime reload/restart.
+2. **Inbound message:** platform event, normalization, trust/allow state, message store, inbox, turn start.
+3. **Assistant turn:** frontend binding, controller key, active run, final delivery.
+4. **Outbound delivery:** SDK send, outbox payload, rich objects, adapter result, platform send result.
+5. **Stored evidence:** message record, message-id index, chat/date index, plain log view.
+6. **Identity/trust:** platform `userId`, nickname, trust records, quote metadata.
+7. **Adapter liveness:** login state, WebSocket/API connection, platform-specific probe.
 
 ## Built-in direct runtime adapters
 
-The built-in direct runtime currently includes:
+Rin's built-in direct chat runtime supports these adapter families:
 
 - Telegram
 - OneBot
@@ -14,18 +70,113 @@ The built-in direct runtime currently includes:
 - Slack
 - Minecraft / QueQiao
 
-## When to use which path
+Use `/chat` in the TUI for interactive setup of official built-in adapters. For scripted setup, edit `settings.json -> chat` with the same adapter boundary and reload/restart the chat runtime according to the operation.
 
-- Use `/chat` in the TUI to configure official built-in adapters.
-- Use adapter configuration under `settings.json -> chat` for scripted setup of built-in adapters.
-- Use the agent SDK for daemon-backed chat operations that agents commonly need: send an outbox payload, run a detached chat turn, terminate a detached turn, or execute chat-bridge helper code.
-- Use the chat runtime/adapter SDK from a script when you need lower-level live platform actions such as replying, reacting, moderation, or platform API lookup.
-- Read the local message store directly when you only need already stored chat context.
-- Update saved identity/trust data through the documented identity store or SDK path instead of a model tool.
+## Chat key and identity contract
+
+`chatKey` identifies the platform target:
+
+```text
+platform[/botId]:chatId
+```
+
+Examples:
+
+```text
+telegram/123456:7890
+telegram/123456:-1001234567890
+onebot/2301401877:private:123456
+onebot/2301401877:1067390680
+qq:123456789
+lark:oc_xxx
+```
+
+Rules:
+
+- `telegram` and `onebot` require `botId`; other built-in platforms use `platform:chatId` unless their adapter layer documents a stricter shape.
+- Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
+- OneBot private chats commonly use `private:<userId>`; group chats use the group id.
+- Keep `messageId` separate from `chatKey`; quote/reply delivery needs the platform message id.
+- Treat platform metadata as authoritative: use platform `userId`, `nickname`, `trust`, and stored quote metadata from the inbound record or bridge runtime.
+
+## Agent SDK chat operations
+
+Import the SDK as shown in `docs/agent-sdk.md`; examples below assume `const rin = createRinAgentSdk()`.
+
+Direct outbox delivery:
+
+```js
+await rin.chat.send({
+  chatKey: "telegram/123456:7890",
+  text: "Ready.",
+});
+```
+
+Agent turn for a chat/frontend identity:
+
+```js
+const result = await rin.chat.runTurn({
+  chatKey: "telegram/123456:7890",
+  text: "Summarize the latest stored status update for this room.",
+  controllerKey: `agent-${Date.now()}`,
+  affectChatBinding: false,
+  disposeAfterTurn: true,
+});
+```
+
+Adapter-supported signals and active-turn control:
+
+```js
+await rin.chat.typing("telegram/123456:7890");
+await rin.chat.react({
+  chatKey: "telegram/123456:7890",
+  messageId: "message-id",
+  emoji: "👍",
+});
+await rin.chat.terminateTurn("agent-controller-key");
+```
+
+Bridge-local inspection or repair:
+
+```js
+const result = await rin.chat.evalBridge({
+  currentChatKey: "telegram/123456:7890",
+  requestId: "agent-chat-inspect",
+  code: `
+    const log = store.listLog("2026-06-03");
+    return log.entries.slice(-5).map((entry) => ({
+      messageId: entry.messageId,
+      role: entry.role,
+      text: entry.text,
+      receivedAt: entry.receivedAt,
+    }));
+  `,
+});
+```
+
+Bridge runtime context includes `chat`, `bot`, `internal`, `store`, `identity`, and `helpers` for the current chat when `currentChatKey` is set. For detached helper code that names a target chat explicitly, use `helpers.useChat(chatKey)`:
+
+```js
+await rin.chat.evalBridge({
+  requestId: "agent-detached-send",
+  code: `
+    const scoped = helpers.useChat("telegram/123456:7890");
+    return await scoped.helpers.send("Ready.");
+  `,
+});
+```
+
+EvalBridge contract:
+
+- Return a small filtered result.
+- Prefer `store.getMessage(messageId, chatKey?)` or `store.listLog(date, chatKey?)` for chat-local evidence.
+- Use `identity.getTrust(userId, platform?)` and `identity.setTrust(...)` for authorized trust data operations.
+- Use adapter `internal` APIs for platform-specific inspection or repair beyond the higher-level SDK.
+- Legacy globals such as `chat_bridge` model tool and `list_chat_log(...)` are absent from current Rin agent turns.
 
 ## Incoming turn policy
 
-By default, an allowed incoming chat message starts an agent turn after Rin stores the message. To make a chat record-only for external schedulers, autonomous tasks, or manual processing, configure `settings.json -> chat.turnPolicy.byChatKey`:
+Allowed inbound chat messages normally start an agent turn after Rin stores the message. Configure record-only chats under `settings.json -> chat.turnPolicy.byChatKey` when a scheduled task, SDK call, or optional extension will inspect stored messages and decide how to respond.
 
 ```json
 {
@@ -42,44 +193,16 @@ By default, an allowed incoming chat message starts an agent turn after Rin stor
 
 Modes:
 
-- `start_on_message`: default behavior; allowed incoming messages start an agent turn.
-- `record_only`: store inbound chat messages, but do not start an agent turn for normal messages in that chat. Chat commands are still handled by the command path.
+- `start_on_message`: allowed inbound messages start an agent turn.
+- `record_only`: inbound messages are stored while normal agent turns stay idle; chat commands still use the command path.
 
-Use `record_only` only when another explicit path, such as a scheduled task, SDK call, or optional background extension, will inspect stored messages and decide whether to respond. Core chat storage does not wake tasks by itself.
-
-Agent SDK examples:
-
-```js
-import path from "node:path";
-import { pathToFileURL } from "node:url";
-
-const rinAppDir = path.join(process.env.HOME, ".rin", "app", "current");
-const sdkUrl = pathToFileURL(
-  path.join(rinAppDir, "dist", "core", "rin-agent-sdk", "index.js"),
-).href;
-const { createRinAgentSdk } = await import(sdkUrl);
-
-const rin = createRinAgentSdk();
-
-await rin.chat.send({
-  chatKey: "telegram/123456:7890",
-  text: "Ready.",
-});
-
-await rin.chat.runTurn({
-  chatKey: "telegram/123456:7890",
-  text: "Summarize the last status update for this room.",
-  controllerKey: `agent-${Date.now()}`,
-  affectChatBinding: false,
-  disposeAfterTurn: true,
-});
-```
+Core chat storage records messages. Automation for record-only chats comes from the scheduled task or background producer that inspects the store.
 
 ## Command acknowledgement text
 
-Rin does not ask the agent to write routine chat command acknowledgements such as `/new`, `/abort`, `/compact`, or `/reload`. These replies come from configuration so they are predictable and do not create temporary agent turns.
+Routine chat command acknowledgements such as `/new`, `/abort`, `/compact`, and `/reload` come from i18n/configuration so commands stay predictable and avoid temporary agent turns.
 
-If `~/.rin/i18n.json` is absent, Rin uses the built-in English replies. To customize them, create or edit that generic i18n catalog with chat command message IDs:
+If `~/.rin/i18n.json` is absent, Rin uses built-in English replies. To customize command replies, create or edit that generic i18n catalog:
 
 ```json
 {
@@ -91,39 +214,91 @@ If `~/.rin/i18n.json` is absent, Rin uses the built-in English replies. To custo
 }
 ```
 
-Nested JSON is also accepted, for example `{"chat":{"commandResponses":{"new":"Started a new session."}}}`. All entries are optional. Missing or blank entries fall back to the built-in English text.
+Nested JSON is also accepted:
 
-When a user asks to change these command replies, edit `~/.rin/i18n.json`. Do not put these replies in `settings.json`.
+```json
+{
+  "chat": {
+    "commandResponses": {
+      "new": "Started a new session."
+    }
+  }
+}
+```
 
-## Rich message parts
+All entries are optional. Missing or blank entries fall back to the built-in English text. Command replies live in the i18n catalog rather than `settings.json`.
 
-Use `docs/rich-text-output-format.md` for native mention, quote, attachment, and fallback syntax.
+## Rich message delivery
+
+Use `docs/rich-text-output-format.md` for native mention, quote, image, file, video, audio, sticker, and fallback syntax.
+
+Delivery contract:
+
+- quote replies use the exact platform `messageId`;
+- native mentions use the exact platform user id;
+- files/images use local paths or recipient-accessible URLs;
+- generated image/file delivery uses rich-object syntax such as `[image: preview](local-path)` or structured SDK `parts`;
+- recipient-visible attachment delivery is proven by outbox/platform result or a stored delivery record.
 
 ## Stored chat context
 
-For plain inspection of already stored chat records, read the local message store directly with `read` or `bash`.
-
-Normal installs store chat records under:
+Read the local message store directly when you need already stored chat evidence. Normal installs store records under:
 
 ```text
 <agentDir>/data/chat/message-store/
 ```
 
-Replace `<agentDir>` with the active Rin agent directory, usually `~/.rin`.
+For a normal agent install, `<agentDir>` is usually `~/.rin`.
 
 Useful paths:
 
 - records: `data/chat/message-store/records/<first-two-record-key-chars>/<recordKey>.json`
 - message-id index: `data/chat/message-store/indexes/by-message-id/<first-two-index-key-chars>/<indexKey>.json`
 - chat/date index: `data/chat/message-store/indexes/by-chat-date/<platform>/<botId-if-present>/<chatId>/<YYYY-MM-DD>.json`
+- plain log view: `data/chat/message-store/chat-log-view/<platform>/<botId-if-present>/<chatId>/<YYYY-MM-DD>.txt`
+- evalBridge audit: `data/chat/eval/<YYYY-MM-DD>.jsonl`
 
-Cookbook:
+Stored records may include:
 
-1. known `chatKey` and `messageId`: compute the record key, then read the matching record JSON
-2. known `messageId` only: read the message-id index, then read each relative record path it lists
-3. known `chatKey` and date: read the chat/date index, then read the listed record keys and sort by `receivedAt` / `processedAt`
+```ts
+type StoredChatMessage = {
+  recordKey: string;
+  messageId: string;
+  role?: "user" | "assistant";
+  replyToMessageId?: string;
+  sessionFile?: string;
+  acceptedAt?: string;
+  processedAt?: string;
+  chatKey: string;
+  platform: string;
+  botId?: string;
+  chatId: string;
+  chatType?: "private" | "group";
+  receivedAt: string;
+  platformTimestamp?: number;
+  userId?: string;
+  nickname?: string;
+  trust?: string;
+  text?: string;
+  strippedContent?: string;
+  elements?: Array<{ type: string; attrs?: Record<string, string> }>;
+  quote?: {
+    messageId?: string;
+    userId?: string;
+    nickname?: string;
+    content?: string;
+  };
+};
+```
 
-When both `chatKey` and `messageId` are known, the record key is SHA-1 of `chatKey + "\n" + messageId`:
+Lookup contract:
+
+1. Known `chatKey` and `messageId`: compute the record key, then read the record JSON.
+2. Known `messageId` only: read the message-id index, then read each relative record path it lists.
+3. Known `chatKey` and date: read the chat/date index, then read the listed records and sort by `receivedAt` / `processedAt`.
+4. Around local midnight or cross-timezone reports, inspect adjacent date indexes.
+
+Record key for known `chatKey` and `messageId`:
 
 ```sh
 agent_dir="$HOME/.rin"
@@ -133,7 +308,7 @@ record_key=$(node -e 'const crypto=require("crypto"); const [chatKey,messageId]=
 record_path="$agent_dir/data/chat/message-store/records/${record_key:0:2}/$record_key.json"
 ```
 
-When only `messageId` is known, read the message-id index first; it contains relative record paths:
+Message-id index path:
 
 ```sh
 agent_dir="$HOME/.rin"
@@ -142,4 +317,22 @@ index_key=$(node -e 'const crypto=require("crypto"); console.log(crypto.createHa
 index_path="$agent_dir/data/chat/message-store/indexes/by-message-id/${index_key:0:2}/$index_key.json"
 ```
 
-When listing one chat/date, read the chat/date index to get `recordKeys`, then read the matching record files.
+For chat/date lookup, read the chat/date index to get `recordKeys`, then read matching record files from `records/`.
+
+## Troubleshooting contract
+
+1. Preserve the exact visible symptom: platform, chat key, message id, text, attachment, command, error, timestamp, and expected behavior.
+2. Locate the first producer boundary: adapter connection, inbound normalization, message store, inbox queue, controller command path, frontend turn driver, daemon worker, outbox, platform send path, or renderer.
+3. Inspect that boundary with SDK reads, message-store reads, adapter-local probes, or `rin status --json`.
+4. Add or run the smallest focused test for source changes.
+5. Report the producer boundary, evidence, and remaining runtime/deploy step.
+
+Common boundary checks:
+
+- **Message stored but turn idle:** inspect `turnPolicy`, trust/allow rules, inbox state, active turn state, and controller errors.
+- **Record-only chat idle:** confirm the scheduled task/background producer that reads stored messages.
+- **Slash command mismatch:** command acknowledgements are config/i18n output; verify the command path switched sessions for `/new`.
+- **OneBot/QQ after NapCat relogin:** separate platform login from Rin bridge connectivity; check Rin runtime status, WebSocket connection, and an adapter-level login probe.
+- **Outbound text queued:** inspect outbox payload, `replyTo` metadata, platform error, and message-store accepted/processed state.
+- **Attachment missing:** verify the file exists, rich-object or structured `parts` attachment was sent, and the adapter produced a delivery result.
+- **Config change idle:** confirm the active `~/.rin/settings.json`, adapter entries, runtime reload/restart, and running app path.

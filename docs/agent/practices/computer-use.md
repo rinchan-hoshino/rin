@@ -1,53 +1,99 @@
 # Computer Use Practices
 
-Rin does not ship a built-in `computer_use` extension. Use these patterns when a task needs desktop or OS interaction and the live tool list does not already provide a dedicated computer-control tool.
+Use this page when a task needs desktop or OS interaction and the current live tools require the agent to choose a control path.
+
+The job of this page is selection and evidence: choose command, OS-native automation, visible desktop automation, or remote desktop; act in the target user session; capture artifacts; verify the visible or file-level result.
 
 ## Selection rule
 
-Prefer the least visual interface that can finish the task:
+Choose the least visual path that proves the required fact:
 
-1. File/API/CLI/log access.
-2. OS-native automation in the owning user session.
-3. Screen inspection plus mouse/keyboard input.
-4. Remote desktop only when the target machine or visible UI is remote.
+- **File/API/CLI/log access** for stable state, configuration, processes, services, installers, and reproducible diagnostics.
+- **OS-native automation** for scriptable application actions through DBus, AppleScript/JXA, PowerShell, app CLIs, registry/query commands, or platform APIs.
+- **Window-level automation** for UI state that has semantic controls, accessibility names, window handles, or app automation APIs.
+- **Screen plus input** for last-mile work where the visual state is the proof or the application exposes the required control only visually.
+- **Remote desktop** for a visible UI running on another machine.
 
-Always verify the active machine, user, display session, and authority before sending input.
+Before input, identify the target host, OS, desktop user, session, active window, display scale, and success state.
 
-## Local Linux
+## Local Linux path
 
-- Prefer shell commands, project CLIs, DBus commands, and config files before GUI input.
-- Check the display stack first: `XDG_SESSION_TYPE`, `DISPLAY`, `WAYLAND_DISPLAY`, and the desktop environment.
-- For screenshots, use the installed desktop's tool when available, such as `gnome-screenshot`, `spectacle`, `grim`, `import`, or `scrot`.
-- For input on X11, `xdotool` is the usual minimal option. On Wayland, use compositor-specific tools such as `wtype` only when the compositor allows it.
-- Do not install screenshot/input packages or attach to a live desktop without user authority.
+Prefer shell commands, project CLIs, DBus commands, desktop portals, app-specific tools, and config files for reproducible checks.
 
-## Local Windows
+For visible desktop work, establish:
 
-- Prefer PowerShell, app CLIs, registry/query commands, logs, and file edits before GUI input.
-- For a VM or owner Windows machine, use the approved Windows-agent, SSH, PowerShell Direct, or WinRM path for that machine.
-- For screenshots or UI automation, use Windows-native APIs from the owning desktop session; avoid mixing service/session-0 execution with an interactive user desktop.
-- GUI clicks should be last-mile actions after confirming the target window, scale/DPI, and current focus.
+- `XDG_SESSION_TYPE`;
+- `DISPLAY`;
+- `WAYLAND_DISPLAY`;
+- desktop environment or compositor;
+- target window title/class/process.
 
-## Local macOS
+Useful tools by layer:
 
-- Prefer CLI tools, app-specific commands, Shortcuts, and AppleScript before raw mouse/keyboard control.
-- Use `screencapture` for screenshots and `osascript` for AppleScript/JXA when the app exposes scriptable actions.
-- Use tools such as `cliclick` only when they are already installed or the user approves installing them.
-- Screen Recording and Accessibility permissions are account-scoped. If automation fails because permission is missing, report that exact permission boundary.
+- screenshots: `gnome-screenshot`, `spectacle`, `grim`, `import`, `scrot`;
+- X11 windows/input: `xdotool`, `wmctrl`, `xprop`, `xwininfo`;
+- Wayland input: compositor-specific tools such as `wtype` where the compositor supports them;
+- app state: DBus, desktop portals, app CLIs, logs, config files.
 
-## Remote computer use
+## Local Windows path
 
-Remote control has two independent questions: command access and visible desktop access.
+Prefer PowerShell, app CLIs, event logs, registry/query commands, service controls, and file inspection for reproducible checks.
 
-- **Remote Linux:** use SSH for commands. For GUI work, confirm the remote display (`DISPLAY`/Wayland) or use an explicit VNC/RDP/noVNC session owned by the target user.
-- **Remote Windows:** use PowerShell remoting, SSH, WinRM, or PowerShell Direct for commands. Use RDP or the approved Windows-agent path for visible desktop work.
-- **Remote macOS:** use SSH for commands and AppleScript only against a logged-in GUI session with the required permissions. For visible work, use Screen Sharing/VNC under the owning account.
-- Never expose control ports publicly. Tunnel them over SSH/VPN or bind them to loopback.
+For visible desktop work, run inside the interactive desktop session for the target user. Keep service/session-0 commands separate from UI actions in the logged-in session.
 
-## Operating checklist
+Useful tools by layer:
 
-1. State the target host, OS, user/session, and local vs remote path.
-2. Take a read-only observation first: file state, process/window list, or screenshot.
-3. Plan the smallest input sequence and avoid coordinate clicks when a semantic control exists.
-4. After action, verify the visible or file-level result.
-5. Preserve user-authored content and avoid hidden fallback behavior that masks the real boundary.
+- system state: PowerShell, `Get-Process`, `Get-Service`, Event Viewer logs, registry queries;
+- app state: app CLIs, COM/PowerShell automation, log files, config files;
+- UI state: UI Automation, accessibility names, window handles, screenshots;
+- last-mile input: mouse/keyboard actions after confirming target window, focus, scale/DPI, and control position.
+
+## Local macOS path
+
+Prefer CLI tools, app-specific commands, Shortcuts, AppleScript, and JXA for reproducible checks.
+
+For visible desktop work, run inside the logged-in GUI user session. Screen Recording and Accessibility permissions are account-scoped; report the exact permission requested by the operating system for observation or input.
+
+Useful tools by layer:
+
+- screenshots: `screencapture`;
+- app automation: `osascript`, AppleScript, JXA, Shortcuts;
+- app state: app CLIs, logs, preferences, config files;
+- last-mile input: existing installed input tools or the live desktop tool list after confirming window, focus, and scale.
+
+## Remote computer path
+
+Remote work has two separate paths: command access and visible desktop access.
+
+- **Remote Linux:** use SSH for command work. For GUI work, use the remote display owned by the target user or an explicit VNC/RDP/noVNC session.
+- **Remote Windows:** use PowerShell remoting, SSH, WinRM, or PowerShell Direct for command work. Use RDP or a live runtime desktop tool for visible desktop work.
+- **Remote macOS:** use SSH for command work. Use Screen Sharing/VNC for visible work inside the owning GUI session.
+
+For remote control endpoints, bind to loopback or tunnel through SSH/VPN. Label artifacts by host and session so the report clearly distinguishes remote evidence from local evidence.
+
+## Evidence bundle
+
+A useful computer-use evidence bundle names:
+
+- target host, OS, desktop user/session, and local vs remote path;
+- selected control layer: CLI/API, OS-native automation, window-level automation, screen plus input, or remote desktop;
+- baseline observation: file state, process/window list, screenshot, or app status;
+- action sequence at a concise level;
+- final verification: screenshot, window state, file state, service state, log line, app result, or test output;
+- artifact paths for screenshots, logs, traces, exports, or downloaded files.
+
+Keep raw artifacts compact in the final response. Name paths and summarize findings instead of pasting large logs or screenshots as text.
+
+## Practical workflow
+
+1. State the target host, OS, desktop user/session, and selected control path.
+2. Capture a read-only baseline observation.
+3. Prefer semantic controls, app APIs, and OS-native automation before coordinates.
+4. Use coordinates as a last-mile action after a screenshot confirms target window, scale, focus, and control.
+5. Verify the final state through the same layer that matters to the user: visible screen, app state, file state, service state, or test output.
+6. Close temporary sessions, collect artifacts, and report the evidence bundle.
+
+## Read next
+
+- Browser-specific page state, headless/headful browser choice, and downloads: `browser-use.md`.
+- Chat delivery of screenshots/files: `../docs/rich-text-output-format.md`.

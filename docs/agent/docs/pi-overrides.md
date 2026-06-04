@@ -1,51 +1,69 @@
 # Pi Overrides in Rin
 
-This document explains how to interpret upstream pi documentation when operating inside Rin.
+Use this document when upstream Pi docs are relevant to a Rin task.
 
-## Rule of precedence
+Rin docs are the installed Rin layer. Pi docs are the upstream base layer. A Rin task uses Pi docs through the Rin layer.
 
-When Rin docs and upstream Pi docs overlap on Rin-specific behavior:
+## Override contract
 
-- prefer Rin docs first
-- use upstream Pi docs as the base reference only when Rin docs do not override the topic
-- if there is any conflict about Rin behavior, Rin docs take precedence
+For Rin behavior, choose authority in this order:
 
-## What changes in Rin
+1. current system prompt and live tool list for this turn;
+2. installed Rin docs for Rin runtime behavior;
+3. narrow Rin topic docs for the surface being changed;
+4. upstream Pi docs for base behavior outside Rin coverage;
+5. live state from the target runtime, repository, daemon, or service.
+
+When Rin docs and Pi docs describe the same Rin surface differently, apply the Rin document and cite the Rin surface used.
+
+## Resolution flow
+
+1. Identify the target surface: runtime path, memory/retrieval, self-improve, capability/tooling, chat bridge, scheduled task, extension, or upstream Pi base behavior.
+2. Read the narrow Rin topic document for that surface.
+3. Use Pi docs for the base implementation model when the Rin topic document delegates or leaves the behavior open.
+4. Verify with live state when the task depends on installed files, daemon state, tool availability, or service configuration.
+5. Report the effective authority: Rin doc, Pi doc, or live state.
+
+## Rin interpretation map
 
 ### Runtime paths
 
-Do not assume upstream pi runtime paths like `~/.pi/...` apply directly.
-In Rin, prefer the stable paths under `~/.rin/...`.
-See `docs/runtime-layout.md` for the authoritative layout.
+Use Rin stable paths under `~/.rin/...`. Runtime layout, launcher ownership, install manifests, app releases, and update/rollback paths are defined in `docs/runtime-layout.md`.
 
-### Memory
+### Memory and self-improve
 
-Rin separates always-on prompt baselines, skills, and transcript archives.
-Do not assume upstream pi memory behavior or prompt injection rules apply unchanged.
-See `docs/memory-layering.md` and `docs/capabilities.md` for agent-facing behavior.
+Use Rin terminology:
 
-### Builtin capabilities
+- memory preserves original evidence and retrieval;
+- self-improve stores distilled reusable guidance.
 
-Rin registers additional capabilities such as memory, scheduled-task pause/resume control, chat bridge configuration, and bundled optional extensions such as web search with URL fetching.
-Do not reason from upstream pi defaults alone.
-See `docs/builtin-extensions.md` and `docs/capabilities.md`.
+Read `docs/memory-layering.md`, `docs/self-improve-distillation.md`, and `docs/capabilities.md` before changing either surface.
+
+### Capabilities
+
+Use the live tool list for the current turn and Rin capability docs for installed behavior. Rin agent-facing surfaces include archived memory search, core todo, scheduled tasks, chat bridge configuration, and bundled web search with URL fetching.
+
+Read `docs/builtin-extensions.md` and `docs/capabilities.md` for the current Rin layer.
 
 ### Documentation paths
 
-Rin installs stable documentation under:
+Use installed stable documentation paths:
 
-- `~/.rin/docs/rin/...`
-- `~/.rin/docs/pi/...`
+- `~/.rin/docs/rin/...`: Rin-specific agent docs.
+- `~/.rin/docs/pi/...`: upstream Pi reference docs installed with Rin.
 
-Prefer these stable installed paths over release-specific paths.
+## Report contract
 
-### Rin-specific behavior
+When a task used Pi docs, report:
 
-When the task involves Rin runtime behavior, launcher layout, daemon behavior, memory, scheduled tasks, chat bridge behavior, or other Rin-owned features, read Rin docs first and treat them as authoritative.
+- the Rin surface affected;
+- the Rin doc that governed the decision;
+- the Pi doc or concept used as base reference;
+- the live-state verification when it affected the result.
 
-## Recommended reading order
+## Read next
 
-1. `README.md`
-2. `docs/pi-overrides.md`
-3. the relevant topic document such as `docs/runtime-layout.md`, `docs/builtin-extensions.md`, `docs/memory-layering.md`, or `docs/capabilities.md`
-4. upstream pi docs only as needed, with Rin overrides in mind
+- Turn-level environment and live target checks: `docs/execution-environment.md`.
+- Installed runtime paths and manifests: `docs/runtime-layout.md`.
+- Capability surfaces: `docs/capabilities.md` and `docs/builtin-extensions.md`.
+- Memory/self-improve destination choice: `docs/memory-layering.md`.

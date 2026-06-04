@@ -1,8 +1,8 @@
 import {
-  MemoryDoc,
-  MemoryEvent,
-  MEMORY_PROMPT_SLOTS,
-  MemoryRelationGraph,
+  SelfImproveDoc,
+  SelfImproveEvent,
+  SELF_IMPROVE_PROMPT_SLOTS,
+  SelfImproveRelationGraph,
 } from "./core/types.js";
 import { safeString } from "./core/utils.js";
 
@@ -13,9 +13,9 @@ function promptLine(slot: string, body: string): string {
 }
 
 export function compileFromDocsAndEvents(
-  docs: MemoryDoc[],
-  _events: MemoryEvent[],
-  _graph: MemoryRelationGraph,
+  docs: SelfImproveDoc[],
+  _events: SelfImproveEvent[],
+  _graph: SelfImproveRelationGraph,
   params: Record<string, any> = {},
   root = "",
 ) {
@@ -26,19 +26,19 @@ export function compileFromDocsAndEvents(
       (doc) =>
         doc.exposure === "self_improve_prompts" &&
         doc.canonical &&
-        MEMORY_PROMPT_SLOTS.includes(doc.self_improve_prompt_slot as any),
+        SELF_IMPROVE_PROMPT_SLOTS.includes(doc.self_improve_prompt_slot as any),
     )
     .sort(
       (a, b) =>
-        MEMORY_PROMPT_SLOTS.indexOf(a.self_improve_prompt_slot as any) -
-        MEMORY_PROMPT_SLOTS.indexOf(b.self_improve_prompt_slot as any),
+        SELF_IMPROVE_PROMPT_SLOTS.indexOf(a.self_improve_prompt_slot as any) -
+        SELF_IMPROVE_PROMPT_SLOTS.indexOf(b.self_improve_prompt_slot as any),
     );
 
   return {
     root,
     query,
     domain_query: domainQuery,
-    self_improve_prompt_slots: MEMORY_PROMPT_SLOTS,
+    self_improve_prompt_slots: SELF_IMPROVE_PROMPT_SLOTS,
     self_improve_prompt_context: prompts
       .map((doc) => promptLine(doc.self_improve_prompt_slot, doc.content))
       .filter(Boolean)

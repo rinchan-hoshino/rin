@@ -189,6 +189,12 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.match(output, /--tools <tools>/);
   assert.match(output, /--exclude-tools <tools>/);
   assert.match(output, /--yes/);
+  assert.match(
+    output,
+    /\n\s+self\s+Show recent self-improve distillation runs and details/,
+  );
+  assert.doesNotMatch(output, /\n\s+memory\s+Compatibility alias/);
+  assert.doesNotMatch(output, /\n\s+self-improve\s+/);
   assert.doesNotMatch(output, /--bind-chat-session/);
   assert.doesNotMatch(output, /\n\s+run\s+Run one non-interactive Rin turn/);
   assert.doesNotMatch(output, /--sessions\b/);
@@ -295,7 +301,7 @@ test("run parser supports managed session leaves for delegated non-interactive s
   );
 });
 
-test("usage, status, memory, and memory-index parsers ignore wrapper args around the subcommand", () => {
+test("usage, status, self, and memory-index parsers ignore wrapper args around the subcommand", () => {
   assert.deepEqual(
     usage.parseUsageArgs(["-u", "rin", "usage", "--events", "--limit", "5"]),
     {
@@ -375,7 +381,7 @@ test("usage, status, memory, and memory-index parsers ignore wrapper args around
 
   const selfImproveArgs = selfImprove.parseSelfImproveArgs([
     "--user=rin",
-    "memory",
+    "self",
     "--from",
     "7d",
     "--limit",
@@ -429,7 +435,7 @@ test("usage, status, memory, and memory-index parsers ignore wrapper args around
   );
 });
 
-test("memory report renders recent extraction history", () => {
+test("self-improve report renders recent distillation history", () => {
   const agentDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "rin-self-improve-report-"),
   );
@@ -463,7 +469,7 @@ test("memory report renders recent extraction history", () => {
       help: false,
     });
 
-    assert.match(report, /Rin memory extraction/);
+    assert.match(report, /Rin self-improve distillation/);
     assert.match(report, /self_improve:periodic_review/);
     assert.match(report, /updated:self_improve\/skills\/demo\/SKILL.md/);
   } finally {
@@ -584,15 +590,23 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
   assert.equal(memoryInternal.run, memoryIndex.runMemoryIndexInternal);
   assert.deepEqual(memoryInternal.args, ["repair"]);
 
-  const memoryHelp = main.resolveInternalRinDispatch([
+  const selfHelp = main.resolveInternalRinDispatch([
+    "-u",
+    "rin",
+    "self",
+    "--help",
+  ]);
+  assert.ok(selfHelp);
+  assert.equal(selfHelp.run, selfImprove.runSelfImproveInternal);
+  assert.deepEqual(selfHelp.args, ["--help"]);
+
+  const removedMemoryAlias = main.resolveInternalRinDispatch([
     "-u",
     "rin",
     "memory",
     "--help",
   ]);
-  assert.ok(memoryHelp);
-  assert.equal(memoryHelp.run, selfImprove.runSelfImproveInternal);
-  assert.deepEqual(memoryHelp.args, ["--help"]);
+  assert.equal(removedMemoryAlias, undefined);
 
   const selfImproveInternal = main.resolveInternalRinDispatch([
     "__self_improve_internal",

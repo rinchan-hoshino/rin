@@ -1,25 +1,183 @@
 # Rich Text Output Format
 
-Use this when a Rin output needs native platform objects instead of plain text.
+Use this document when a Rin reply or chat send needs native platform objects: mentions, quote/reply targets, images, files, video, audio, or stickers.
 
-Rin accepts structured rich parts from code and Markdown rich-object syntax from model replies. If a target adapter cannot send a requested object natively, Rin keeps the message readable as plain text.
+Rich output is an output contract. It must provide the exact ids or resource paths an adapter needs, plus readable fallback text for platforms with different native support.
+
+## Prompt brief
+
+Target surface:
+
+- model final replies that include rich-object Markdown;
+- SDK/outbox sends with structured `parts`;
+- adapter renderers that convert rich objects to platform-native messages.
+
+Goal:
+
+- express native chat objects in a format Rin can parse and adapters can deliver, while keeping recipient-visible text useful across fallback paths.
+
+Trusted inputs:
+
+- platform user ids from chat metadata or adapter APIs;
+- platform message ids from inbound records or stored quote metadata;
+- local artifact paths on the machine running Rin;
+- recipient-accessible URLs;
+- SDK/outbox delivery results.
+
+Output contract:
+
+- visible explanatory text;
+- exact mention ids, quote ids, and attachment paths/URLs;
+- rich-object Markdown or structured `parts`;
+- delivery verification when the attachment or native object matters.
+
+## Success criteria
+
+A rich output is correct when:
+
+- every native mention has an exact platform user id;
+- every quote/reply target has an exact platform message id;
+- every attachment has a local `path` or accessible `url`;
+- visible text remains understandable when an adapter falls back to plain text;
+- important file/image delivery is verified through outbox, adapter, platform result, or stored delivery evidence.
 
 ## Markdown rich-object syntax
 
-| Intent         | Syntax                               | Notes                                                                  |
-| -------------- | ------------------------------------ | ---------------------------------------------------------------------- |
-| Native mention | `[@name](at:<platform-user-id>)`     | Use the exact platform user id. Raw `@name` text is visible text only. |
-| Quote reply    | `[quote:<message-id>]`               | Uses the exact platform message id as the reply target.                |
-| Image          | `[image: name](url-or-local-path)`   | `name` should be a readable filename or short label.                   |
-| File           | `[file: name](url-or-local-path)`    | Use for generic file attachments.                                      |
-| Video          | `[video: name](url-or-local-path)`   | Use only when the target can receive video.                            |
-| Audio          | `[audio: name](url-or-local-path)`   | Use only when the target can receive audio.                            |
-| Sticker        | `[sticker: name](url-or-local-path)` | Use only when the target can receive stickers.                         |
+| Intent         | Syntax                                | Contract                                                                                |
+| -------------- | ------------------------------------- | --------------------------------------------------------------------------------------- |
+| Native mention | `[@name](at:<platform-user-id>)`      | `platform-user-id` is the exact platform user id.                                       |
+| Native mention | `[@name](mention:<platform-user-id>)` | Alias for `at:`. Prefer `at:` in new examples.                                          |
+| Quote reply    | `[quote:<message-id>]`                | `message-id` is the exact platform message id.                                          |
+| Quote reply    | `[label](quote:<message-id>)`         | Link-form quote; the link target supplies the reply id.                                 |
+| Image          | `[image: name](url-or-local-path)`    | `name` is a readable label or filename; target is local path or URL.                    |
+| Image          | `![alt](url-or-local-path)`           | Standard Markdown image syntax also creates an image object.                            |
+| File           | `[file: name](url-or-local-path)`     | Generic attachment object.                                                              |
+| Video          | `[video: name](url-or-local-path)`    | Video attachment object for adapters that support video.                                |
+| Audio          | `[audio: name](url-or-local-path)`    | Audio attachment object for adapters that support audio.                                |
+| Sticker        | `[sticker: name](url-or-local-path)`  | Sticker attachment object for adapters that support the target sticker resource format. |
 
-## Practical rules
+Example:
 
-- Use native mentions only when the exact platform user id is known.
-- Use quote replies only with the exact platform message id from the current context or message store.
-- Prefer local files or already accessible URLs for attachments; do not expose private credentials in attachment URLs.
-- When a reply includes an image or file intended for the recipient, attach it directly with the matching rich-object syntax such as `[image: preview](local-path)`.
-- Keep fallback text understandable because unsupported rich objects degrade to readable plain text.
+```md
+Hi [@Alice](at:12345), please check this.
+
+[quote:987654321]
+Replying to the exact platform message.
+
+Here is the preview: [image: room-plan.png](/tmp/rin/room-plan.png)
+
+Full log: [file: debug-log.txt](/tmp/rin/debug-log.txt)
+```
+
+Markdown contract:
+
+- Raw `@name` is visible text; native mention syntax supplies the platform id.
+- The first quote object supplies the reply target for adapters that support reply/quote delivery.
+- Quote context belongs in visible text when recipient understanding depends on it.
+- Local paths refer to files on the machine running Rin. Prefer absolute paths for generated artifacts.
+- URLs should be reachable by the adapter/recipient and free of credential-bearing query data.
+- Media/file labels become fallback text and sometimes attachment names.
+
+## Structured `parts` for scripts
+
+Use `parts` when scripting a chat send with the Agent SDK or outbox payloads. Structured parts avoid Markdown parsing ambiguity and make mixed text, quote targets, mentions, and attachments explicit.
+
+```js
+await rin.chat.send({
+  chatKey: "telegram/123456:7890",
+  parts: [
+    { type: "quote", id: "987654321" },
+    { type: "text", text: "Hi " },
+    { type: "at", id: "12345", name: "Alice" },
+    { type: "text", text: ", here is the preview." },
+    { type: "image", path: "/tmp/rin/preview.png", mimeType: "image/png" },
+    {
+      type: "file",
+      path: "/tmp/rin/debug-log.txt",
+      name: "debug-log.txt",
+      mimeType: "text/plain",
+    },
+  ],
+});
+```
+
+Supported part shapes:
+
+```ts
+type ChatMessagePart =
+  | { type: "text"; text: string }
+  | { type: "markdown"; text: string }
+  | { type: "at"; id: string; name?: string }
+  | { type: "quote"; id: string }
+  | { type: "image"; path?: string; url?: string; mimeType?: string }
+  | {
+      type: "file";
+      path?: string;
+      url?: string;
+      name?: string;
+      mimeType?: string;
+    }
+  | {
+      type: "video" | "audio" | "sticker";
+      path?: string;
+      url?: string;
+      name?: string;
+      mimeType?: string;
+    };
+```
+
+Structured part contract:
+
+- `at.id` supplies the platform user id.
+- `quote.id` supplies the platform message id. The first quote part becomes the reply target.
+- Media/file parts supply either `path` or `url`.
+- `file.name`, video/audio/sticker `name`, and `mimeType` improve adapter behavior and fallback records.
+- `text` is plain text. `markdown` may contain normal Markdown plus rich-object syntax.
+
+## Platform behavior and fallback
+
+Adapters choose the best native representation they support:
+
+- Telegram renders supported Markdown as HTML and native mentions as `tg://user?id=...` links.
+- OneBot renders native mentions as CQ at elements and strips unsupported Markdown formatting from plain text.
+- Discord and Slack generally preserve Markdown-style text and map reply/thread behavior through their adapter APIs.
+- Other adapters may strip Markdown formatting or send readable fallback text.
+
+Fallback contract:
+
+- Include a readable display name in text when human context matters.
+- Include enough visible quote context for readers when native quote delivery is unavailable.
+- Treat sticker/video/audio delivery as complete after adapter result or stored delivery evidence confirms it.
+- Verify owner-visible delivery for important generated artifacts.
+
+## Attachment delivery contract
+
+When a generated or local artifact should reach the recipient:
+
+1. Verify the file exists at the path to send.
+2. Send `[image: name](path)` / `[file: name](path)` in a final reply, or a structured `parts` attachment in SDK code.
+3. Include short visible text describing the attachment.
+4. Verify the outbox/platform result when delivery matters.
+
+Example final text:
+
+```md
+Here is the preview: [image: preview.png](/tmp/rin/preview.png)
+```
+
+## Validation checks
+
+Before sending rich output, check:
+
+- exact platform user id for native mention;
+- exact platform message id for quote/reply;
+- existing local path or reachable URL for attachment;
+- readable fallback text;
+- delivery evidence path for important attachments;
+- chat identity/log lookup path in `docs/chat-bridge.md` when an id is missing.
+
+## Read next
+
+- Chat identity, logs, adapters, outbox, and delivery troubleshooting: `docs/chat-bridge.md`.
+- SDK import and `rin.chat.send` / `rin.chat.evalBridge`: `docs/agent-sdk.md`.
+- Scheduled chat delivery: `docs/scheduled-tasks.md`.

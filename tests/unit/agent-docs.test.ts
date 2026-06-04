@@ -19,42 +19,103 @@ function readAgentDoc(relativePath: string) {
 test("agent docs expose scheduled task operation workflow", () => {
   const readme = readAgentDoc("README.md");
   const capabilities = readAgentDoc("docs/capabilities.md");
+  const executionEnvironment = readAgentDoc("docs/execution-environment.md");
   const builtinCapabilities = readAgentDoc("docs/builtin-extensions.md");
+  const sessionAwareness = readAgentDoc("docs/session-awareness.md");
   const nonInteractiveCli = readAgentDoc("docs/non-interactive-cli.md");
+  const piOverrides = readAgentDoc("docs/pi-overrides.md");
+  const runtimeLayout = readAgentDoc("docs/runtime-layout.md");
   const scheduledTasks = readAgentDoc("docs/scheduled-tasks.md");
   const agentSdk = readAgentDoc("docs/agent-sdk.md");
+  const chatBridge = readAgentDoc("docs/chat-bridge.md");
+  const richText = readAgentDoc("docs/rich-text-output-format.md");
+  const initialization = readAgentDoc("docs/initialization.md");
   const practiceIndex = readAgentDoc("practices/README.md");
   const browserUsePractice = readAgentDoc("practices/browser-use.md");
   const computerUsePractice = readAgentDoc("practices/computer-use.md");
 
   assert.match(readme, /docs\/agent-sdk\.md/);
   assert.match(readme, /docs\/scheduled-tasks\.md/);
+  assert.match(readme, /docs\/chat-bridge\.md/);
+  assert.match(readme, /docs\/initialization\.md/);
   assert.match(readme, /practices\/browser-use\.md/);
   assert.match(readme, /practices\/computer-use\.md/);
   assert.match(capabilities, /agent-sdk\.md/);
   assert.match(capabilities, /scheduled-tasks\.md/);
+  assert.match(capabilities, /chat-bridge\.md/);
   assert.match(builtinCapabilities, /agent-sdk\.md/);
   assert.match(builtinCapabilities, /scheduled-tasks\.md/);
-  assert.match(capabilities, /Subagent \/ non-interactive work/);
+  assert.match(capabilities, /Non-interactive child runs/);
+  assert.match(executionEnvironment, /## Prompt brief/);
+  assert.match(executionEnvironment, /## Live capability contract/);
+  assert.match(executionEnvironment, /## Target alignment contract/);
+  assert.match(executionEnvironment, /## Validation contract/);
+  assert.match(
+    executionEnvironment,
+    /Documentation examples describe possible capability surfaces/,
+  );
+  assert.match(executionEnvironment, /docs\/self-improve-distillation\.md/);
+  assert.match(capabilities, /memory preserves original evidence/);
+  assert.match(capabilities, /self-improve stores distilled guidance/);
+  assert.match(capabilities, /docs\/self-improve-distillation\.md/);
+  assert.match(sessionAwareness, /## Prompt brief/);
+  assert.match(sessionAwareness, /## Owner evidence map/);
+  assert.match(sessionAwareness, /## Coordination contract/);
+  assert.match(sessionAwareness, /## Freshness contract/);
+  assert.match(sessionAwareness, /## Report contract/);
+  assert.match(sessionAwareness, /Assign one owner to each write boundary/);
+  assert.match(sessionAwareness, /docs\/non-interactive-cli\.md/);
+  assert.match(sessionAwareness, /docs\/scheduled-tasks\.md/);
   assert.match(nonInteractiveCli, /--managed-session <leaf>/);
   assert.match(nonInteractiveCli, /sessions\/managed\/<leaf>/);
-  assert.match(
-    builtinCapabilities,
-    /do not assume a `run_subagent` tool exists/,
-  );
+  assert.match(piOverrides, /## Override contract/);
+  assert.match(piOverrides, /## Resolution flow/);
+  assert.match(piOverrides, /## Report contract/);
+  assert.match(piOverrides, /docs\/self-improve-distillation\.md/);
+  assert.match(piOverrides, /Report the effective authority/);
+  assert.match(runtimeLayout, /## Locator contract/);
+  assert.match(runtimeLayout, /## Installed runtime entrypoint/);
+  assert.match(runtimeLayout, /## Update and rollback contract/);
+  assert.match(runtimeLayout, /## Source checkout boundary/);
+  assert.match(runtimeLayout, /## Report contract/);
+  assert.match(runtimeLayout, /<targetHome>\/\.rin\/installer\.json/);
+  assert.match(runtimeLayout, /<installDir>\/installer\.json/);
+  assert.match(runtimeLayout, /app\/current\//);
+  assert.match(builtinCapabilities, /Capability source map/);
+  assert.match(builtinCapabilities, /Bundled optional foreground Pi extension/);
+  assert.match(builtinCapabilities, /Browser and desktop operation/);
   assert.doesNotMatch(builtinCapabilities, /provides `run_subagent`/);
-  assert.match(builtinCapabilities, /does not ship bundled Browser Use/);
-  assert.match(capabilities, /does not ship bundled `browser_use`/);
+  assert.doesNotMatch(builtinCapabilities, /rin:browser-use/);
+  assert.doesNotMatch(capabilities, /bundled `browser_use`/);
 
   assert.match(practiceIndex, /# Practices/);
+  assert.match(practiceIndex, /## Selection contract/);
+  assert.match(practiceIndex, /## Output contract/);
+  assert.match(practiceIndex, /browser-use\.md/);
+  assert.match(practiceIndex, /computer-use\.md/);
+  assert.match(practiceIndex, /selected practice page/);
   assert.doesNotMatch(practiceIndex, /Best Practices/i);
-  assert.match(browserUsePractice, /headless/);
-  assert.match(browserUsePractice, /headful/);
-  assert.match(browserUsePractice, /Remote browser use/);
-  assert.match(computerUsePractice, /Local Linux/);
-  assert.match(computerUsePractice, /Local Windows/);
-  assert.match(computerUsePractice, /Local macOS/);
-  assert.match(computerUsePractice, /Remote computer use/);
+  assert.doesNotMatch(practiceIndex, /Do not/);
+  assert.match(browserUsePractice, /Selection rule/);
+  assert.match(browserUsePractice, /Direct HTTP\/API/);
+  assert.match(browserUsePractice, /Headless browser path/);
+  assert.match(browserUsePractice, /Headful browser path/);
+  assert.match(browserUsePractice, /Remote browser path/);
+  assert.match(browserUsePractice, /Evidence bundle/);
+  assert.doesNotMatch(browserUsePractice, /approved browser\/account workflow/);
+  assert.doesNotMatch(browserUsePractice, /rinchan-vm-browser-workflow/);
+  assert.doesNotMatch(browserUsePractice, /Rin does not ship/);
+  assert.doesNotMatch(browserUsePractice, /Do not/);
+  assert.match(computerUsePractice, /Selection rule/);
+  assert.match(computerUsePractice, /Local Linux path/);
+  assert.match(computerUsePractice, /Local Windows path/);
+  assert.match(computerUsePractice, /Local macOS path/);
+  assert.match(computerUsePractice, /Remote computer path/);
+  assert.match(computerUsePractice, /Evidence bundle/);
+  assert.doesNotMatch(computerUsePractice, /Rin does not ship/);
+  assert.doesNotMatch(computerUsePractice, /Do not/);
+  assert.doesNotMatch(computerUsePractice, /approved Windows-agent/);
+  assert.doesNotMatch(computerUsePractice, /RinWin11/);
 
   for (const helper of [
     "rin.tasks.list",
@@ -87,21 +148,68 @@ test("agent docs expose scheduled task operation workflow", () => {
     assert.doesNotMatch(capabilities, new RegExp(command));
   }
 
+  assert.match(agentSdk, /## Prompt brief/);
+  assert.match(agentSdk, /## Success criteria/);
+  assert.match(agentSdk, /## Final report contract/);
   assert.match(agentSdk, /"dist", "core", "rin-agent-sdk", "index\.js"/);
   assert.doesNotMatch(agentSdk, /"src", "core", "rin-agent-sdk", "index\.ts"/);
+  assert.match(
+    chatBridge,
+    /The model-level chat bridge tool surface is unavailable/,
+  );
+  assert.match(chatBridge, /## Boundary selection/);
+  assert.match(chatBridge, /platform\[\/botId\]:chatId/);
+  assert.match(chatBridge, /Treat platform metadata as authoritative/);
+  assert.match(chatBridge, /rin\.chat\.evalBridge/);
+  assert.match(chatBridge, /helpers\.useChat\(chatKey\)/);
+  assert.match(chatBridge, /chat\.turnPolicy\.byChatKey/);
+  assert.match(chatBridge, /record_only/);
+  assert.match(chatBridge, /docs\/rich-text-output-format\.md/);
+  assert.match(chatBridge, /data\/chat\/message-store/);
+  assert.match(chatBridge, /data\/chat\/eval\/<YYYY-MM-DD>\.jsonl/);
+  assert.doesNotMatch(
+    chatBridge,
+    /Use `docs\/rich-text-output-format\.md` for native mention, quote, attachment, and fallback syntax\.\s*$/,
+  );
+  assert.match(richText, /Markdown rich-object syntax/);
+  assert.match(richText, /`\[@name\]\(at:<platform-user-id>\)`/);
+  assert.match(richText, /`\[quote:<message-id>\]`/);
+  assert.match(richText, /`!\[alt\]\(url-or-local-path\)`/);
+  assert.match(richText, /Structured `parts` for scripts/);
+  assert.match(richText, /type: "video" \| "audio" \| "sticker"/);
+  assert.match(richText, /## Attachment delivery contract/);
+  assert.match(richText, /## Validation checks/);
+  assert.match(richText, /chat identity\/log lookup path/);
+  assert.match(initialization, /Ask one focused question at a time/);
+  assert.match(initialization, /Route other material to its proper surface/);
+  assert.match(initialization, /Conversation contract/);
+  assert.match(initialization, /agent_profile/);
+  assert.match(initialization, /user_profile/);
+  assert.match(initialization, /core_doctrine/);
+  assert.match(initialization, /docs\/memory-layering\.md/);
+  assert.match(
+    initialization,
+    /builtin-skills\/rin-prompt-engineering\/SKILL\.md/,
+  );
+  assert.doesNotMatch(initialization, /save_prompts/);
   assert.match(scheduledTasks, /`session\.mode: "dedicated"`/);
   assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
   assert.match(
     scheduledTasks,
-    /Ordinary recurring tasks should not use a dedicated session/,
+    /Ordinary recurring tasks use external state instead of a dedicated session/,
   );
-  assert.match(scheduledTasks, /store durable state explicitly/);
+  assert.match(scheduledTasks, /Store reliable facts, progress, ledgers/);
   assert.match(scheduledTasks, /code: string/);
   assert.match(
     scheduledTasks,
     /termination\?: \{ maxRuns\?: number; stopAt\?: string \}/,
   );
   assert.match(scheduledTasks, /session\.mode: "session_instruction"/);
+  assert.match(scheduledTasks, /## Prompt brief/);
+  assert.match(scheduledTasks, /## Success criteria/);
+  assert.match(scheduledTasks, /Task prompt contract/);
+  assert.match(scheduledTasks, /`rin-prompt-engineering`/);
+  assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
   assert.match(
     scheduledTasks,
     /Use `condition` when the schedule should wake only if agent-authored TypeScript returns true/,

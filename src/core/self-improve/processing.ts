@@ -1,5 +1,8 @@
 import { safeString } from "./core/utils.js";
-import { MEMORY_PROMPT_LIMITS, MEMORY_PROMPT_SLOTS } from "./core/types.js";
+import {
+  SELF_IMPROVE_PROMPT_LIMITS,
+  SELF_IMPROVE_PROMPT_SLOTS,
+} from "./core/types.js";
 
 export function normalizePromptListContent(text: string) {
   return safeString(text)
@@ -19,9 +22,9 @@ export function countPromptLines(text: string) {
 
 export function assertSelfImprovePromptSlot(slotInput: string) {
   const slot = safeString(slotInput).trim();
-  if (!MEMORY_PROMPT_SLOTS.includes(slot as any)) {
+  if (!SELF_IMPROVE_PROMPT_SLOTS.includes(slot as any)) {
     throw new Error(
-      `self_improve_prompt_slot_required:${MEMORY_PROMPT_SLOTS.join(",")}`,
+      `self_improve_prompt_slot_required:${SELF_IMPROVE_PROMPT_SLOTS.join(",")}`,
     );
   }
   return slot;
@@ -33,7 +36,7 @@ export function describeSelfImprovePromptSlot(options: {
 }) {
   const slot = assertSelfImprovePromptSlot(options.slot);
   const content = normalizePromptListContent(options.existingContent || "");
-  const limits = MEMORY_PROMPT_LIMITS[slot];
+  const limits = SELF_IMPROVE_PROMPT_LIMITS[slot];
   return {
     slot,
     name: slot.replace(/_/g, " "),

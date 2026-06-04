@@ -3,11 +3,11 @@ import fssync from "node:fs";
 import path from "node:path";
 
 import {
-  MemoryDoc,
-  MEMORY_PROMPT_LIMITS,
-  MEMORY_PROMPT_SLOTS,
+  SelfImproveDoc,
+  SELF_IMPROVE_PROMPT_LIMITS,
+  SELF_IMPROVE_PROMPT_SLOTS,
 } from "./core/types.js";
-import { previewMemoryDoc } from "./core/schema.js";
+import { previewSelfImproveDoc } from "./core/schema.js";
 import { nowIso, safeString } from "./core/utils.js";
 
 export async function walkMarkdownFiles(dirPath: string): Promise<string[]> {
@@ -29,9 +29,12 @@ function selfImprovePromptsDir(rootDir: string) {
   return path.join(rootDir, "prompts");
 }
 
-function promptDocFromFile(filePath: string, text: string): MemoryDoc | null {
+function promptDocFromFile(
+  filePath: string,
+  text: string,
+): SelfImproveDoc | null {
   const slot = path.basename(filePath, ".md").trim();
-  if (!MEMORY_PROMPT_SLOTS.includes(slot as any)) return null;
+  if (!SELF_IMPROVE_PROMPT_SLOTS.includes(slot as any)) return null;
   const content = safeString(text).trim();
   if (!content) return null;
   const now = nowIso();
@@ -59,9 +62,11 @@ function promptDocFromFile(filePath: string, text: string): MemoryDoc | null {
   };
 }
 
-export async function loadMemoryDocs(rootDir: string): Promise<MemoryDoc[]> {
+export async function loadSelfImproveDocs(
+  rootDir: string,
+): Promise<SelfImproveDoc[]> {
   const files = await walkMarkdownFiles(selfImprovePromptsDir(rootDir));
-  const docs: MemoryDoc[] = [];
+  const docs: SelfImproveDoc[] = [];
   for (const filePath of files) {
     const doc = promptDocFromFile(
       filePath,
@@ -72,8 +77,8 @@ export async function loadMemoryDocs(rootDir: string): Promise<MemoryDoc[]> {
   return docs;
 }
 
-export function loadMemoryDocsSync(rootDir: string): MemoryDoc[] {
-  const docs: MemoryDoc[] = [];
+export function loadSelfImproveDocsSync(rootDir: string): SelfImproveDoc[] {
+  const docs: SelfImproveDoc[] = [];
   const visit = (dirPath: string) => {
     if (!fssync.existsSync(dirPath)) return;
     const entries = fssync.readdirSync(dirPath, { withFileTypes: true });
@@ -97,16 +102,16 @@ export function loadMemoryDocsSync(rootDir: string): MemoryDoc[] {
   );
 }
 
-export async function resolveMemoryDoc(
+export async function resolveSelfImproveDoc(
   rootDir: string,
   query: string,
-): Promise<MemoryDoc | null> {
+): Promise<SelfImproveDoc | null> {
   const raw = safeString(query).trim();
   if (!raw) return null;
   const abs = path.isAbsolute(raw) ? raw : path.join(rootDir, raw);
   if (fssync.existsSync(abs) && abs.endsWith(".md"))
     return promptDocFromFile(abs, await fs.readFile(abs, "utf8"));
-  const docs = await loadMemoryDocs(rootDir);
+  const docs = await loadSelfImproveDocs(rootDir);
   return (
     docs.find(
       (doc) => doc.id === raw || doc.self_improve_prompt_slot === raw,
@@ -114,18 +119,18 @@ export async function resolveMemoryDoc(
   );
 }
 
-export function memoryPromptPath(rootDir: string, slot: string): string {
+export function selfImprovePromptPath(rootDir: string, slot: string): string {
   return path.join(rootDir, "prompts", `${slot}.md`);
 }
 
-export function assertMemoryPromptDoc(doc: MemoryDoc): void {
+export function assertSelfImprovePromptDoc(doc: SelfImproveDoc): void {
   const slot = safeString(doc.self_improve_prompt_slot).trim();
-  if (!MEMORY_PROMPT_SLOTS.includes(slot as any)) {
+  if (!SELF_IMPROVE_PROMPT_SLOTS.includes(slot as any)) {
     throw new Error(
-      `self_improve_prompt_slot_required:${MEMORY_PROMPT_SLOTS.join(",")}`,
+      `self_improve_prompt_slot_required:${SELF_IMPROVE_PROMPT_SLOTS.join(",")}`,
     );
   }
-  const limits = MEMORY_PROMPT_LIMITS[slot];
+  const limits = SELF_IMPROVE_PROMPT_LIMITS[slot];
   if (!limits) throw new Error(`self_improve_prompt_slot_invalid:${slot}`);
   if (!limits.fidelity.includes(doc.fidelity))
     throw new Error(
@@ -141,11 +146,11 @@ export function assertMemoryPromptDoc(doc: MemoryDoc): void {
     );
 }
 
-export async function writeMemoryDoc(doc: MemoryDoc) {
+export async function writeSelfImproveDoc(doc: SelfImproveDoc) {
   await fs.mkdir(path.dirname(doc.path), { recursive: true });
   await fs.writeFile(doc.path, `${safeString(doc.content).trim()}\n`, "utf8");
 }
 
-export function previewDocs(docs: MemoryDoc[]) {
-  return docs.map(previewMemoryDoc);
+export function previewDocs(docs: SelfImproveDoc[]) {
+  return docs.map(previewSelfImproveDoc);
 }

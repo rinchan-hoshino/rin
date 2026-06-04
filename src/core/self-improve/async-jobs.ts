@@ -168,7 +168,7 @@ async function enqueueMaintenanceJob(
   await saveQueue(nextJob.agentDir, jobs);
 }
 
-export async function enqueueMemoryMaintenanceJob(
+export async function enqueueSelfImproveMaintenanceJob(
   input: Omit<MaintenanceJob, "id" | "createdAt" | "updatedAt" | "kind">,
 ) {
   await enqueueMaintenanceJob({
@@ -363,7 +363,7 @@ async function processJob(job: MaintenanceJob) {
   });
 }
 
-export async function runMemoryMaintenanceJobNow(
+export async function runSelfImproveMaintenanceJobNow(
   input: Omit<MaintenanceJob, "id" | "createdAt" | "updatedAt" | "kind">,
 ) {
   const job = createMaintenanceJob({
@@ -438,7 +438,7 @@ export async function runMemoryMaintenanceJobNow(
   }
 }
 
-export async function processQueuedMemoryJobs(agentDir: string) {
+export async function processQueuedSelfImproveJobs(agentDir: string) {
   const resolvedAgentDir = resolveAgentDir(agentDir);
   if (!resolvedAgentDir) return { skipped: "no-agent-dir" };
   const handle = await acquireWorkerLock(resolvedAgentDir);

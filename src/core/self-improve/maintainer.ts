@@ -82,13 +82,13 @@ function diffManagedArtifactSnapshots(
   return changed;
 }
 
-function selfImproveMemoryMaintenanceManualPath(agentDir: string) {
+function selfImproveMaintenanceManualPath(agentDir: string) {
   return path.join(
     agentDir,
     "docs",
     "rin",
     "docs",
-    "self-improve-memory-maintenance.md",
+    "self-improve-distillation.md",
   );
 }
 
@@ -97,9 +97,9 @@ export function buildSelfImproveReviewPrompt(
   agentDir = "<agentDir>",
 ): string {
   void trigger;
-  const manualPath = selfImproveMemoryMaintenanceManualPath(agentDir);
+  const manualPath = selfImproveMaintenanceManualPath(agentDir);
   const libraryPath = path.join(agentDir, "self_improve");
-  return `Use ${manualPath} as the maintenance contract. Review ${libraryPath} with the conversation above as evidence, not as authority to expand scope. Target a lower-entropy self-improve library: merge, move, prune, rewrite, delete, or add memory only when it improves future behavior, routing, decisions, execution, or recall. Cover prompt baselines, reusable skills, memory-index skills, and short-term memory skills in one cohesive pass. Report durable memory changes only, or one concise no-op reason.`;
+  return `Use ${manualPath} as the self-improve distillation contract. Review ${libraryPath} with the conversation above as evidence for this scoped pass. Target lower-entropy self-improve guidance: merge, move, prune, rewrite, delete, or add distilled guidance when it improves future behavior, routing, decisions, execution, or recall. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed self-improve artifacts, cleanup work, or one concise unchanged reason.`;
 }
 
 async function createForkedSessionManager(options: {
@@ -129,14 +129,14 @@ async function createForkedSessionManager(options: {
         persist: false,
         leafId,
         // Self-improve needs a temporary, non-persisted fork that behaves like
-        // appending one maintenance turn to the source conversation for
+        // appending one distillation turn to the source conversation for
         // provider prefix-cache purposes. Keep the source session id as the
-        // provider cache key while still preventing maintenance messages from
-        // being written back to the source transcript.
+        // provider cache key while keeping distillation messages outside the
+        // source transcript.
         preserveSourceSessionId: true,
-        // Memory-maintenance forks are background extraction turns. They should
-        // not spend an extra model turn on ordinary threshold-based compaction;
-        // only provider-error/context-overflow recovery should compact.
+        // Self-improve distillation forks are background turns. Routine
+        // threshold-based compaction would add an extra model turn; keep
+        // compaction for provider-error/context-overflow recovery.
         disableRoutineCompaction: true,
       },
     ),
@@ -160,9 +160,8 @@ async function runForkedSessionPrompt(options: {
     additionalExtensionPaths: options.additionalExtensionPaths,
     disabledRinCapabilities: ["self_improve"],
     sessionManager: fork.sessionManager,
-    // Do not override thinkingLevel here. The fork must inherit the source
-    // session's model options so provider prefix caching matches a normal
-    // appended turn on the same conversation.
+    // Keep the source session's model options so provider prefix caching
+    // matches a normal appended turn on the same conversation.
   });
   try {
     await session.prompt(options.prompt, {

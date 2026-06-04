@@ -2,20 +2,20 @@
 
 Rin's builtin self-improvement module.
 
-Public tool: none. Prompt baseline writes are handled by internal self-improve maintenance flows.
+Public tool: none. Self-improve writes are handled by internal distillation flows.
 
 ## Responsibilities
 
-This module owns:
+This module owns distilled guidance that changes future agent behavior:
 
 - always-on prompt baselines under `~/.rin/self_improve/prompts`
 - agent-managed reusable skills under `~/.rin/self_improve/skills`
 - onboarding for resident self-improve prompts
 - periodic and session-shutdown self-improve review; periodic review defaults to every 5 real agent final messages and is configurable via `settings.json -> selfImprove.reviewEveryTurns`; user steering inputs and assistant tool-call-only/interim messages do not count
 
-It does not own session-history recall. That belongs to the `memory` module.
+It does not own original session-history recall. Original evidence and retrieval belong to the `memory` module.
 
-In the layered memory model, self-improve owns compact control memory and procedural/cortical memory: prompt baselines for stable every-turn identity and doctrine, and skills for reusable workflows, knowledge, concepts, durable facts, and compact memory indexes that should be loaded only when relevant.
+`self_improve` may contain memory-index pointers for discoverability, but those pointers support retrieval of original evidence; they do not replace transcript archives.
 
 ## Prompt slots
 
@@ -23,11 +23,12 @@ In the layered memory model, self-improve owns compact control memory and proced
 - `user_profile`
 - `core_doctrine`
 
-`agent_profile` stores Rin's stable role, tone, behavior style, and standing expectations for how Rin should generally respond. `user_profile` stores the user's identity knowledge. `core_doctrine` stores durable methodology, worldview, and values. Durable facts, reference material, operating knowledge, and concepts are consolidated through skills and transcript memory.
+`agent_profile` stores Rin's stable role, voice, behavior style, and standing response expectations. `user_profile` stores stable user identity knowledge. `core_doctrine` stores durable methodology and decision rules.
 
-Prompt slots are identified directly by filename under `~/.rin/self_improve/prompts/`.
-For example, `~/.rin/self_improve/prompts/agent_profile.md` is the `agent_profile` slot.
-These prompt files are stored as markdown list items.
-Internal maintenance should treat the current file content as canonical and rewrite each slot as a full revised replacement rather than as an append-only patch.
+Durable procedures, reusable examples, workflows, and distilled domain facts belong in skills. Original wording, evidence, chronology, and provenance stay in memory/retrieval surfaces.
 
-Current limit design keeps resident memory deliberately tight: `agent_profile` 8 lines, `user_profile` 4 lines, and `core_doctrine` 32 lines.
+Prompt slots are identified directly by filename under `~/.rin/self_improve/prompts/`. For example, `~/.rin/self_improve/prompts/agent_profile.md` is the `agent_profile` slot. These prompt files are stored as markdown list items.
+
+Internal distillation should treat the current file content as canonical and rewrite each slot as a full revised replacement rather than as an append-only patch.
+
+Current limit design keeps resident self-improve guidance deliberately tight: `agent_profile` 8 lines, `user_profile` 4 lines, and `core_doctrine` 32 lines.

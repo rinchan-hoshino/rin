@@ -1,103 +1,115 @@
-# Memory Layering
+# Memory and Self-improve Boundary
 
-Rin keeps three memory layers so the system prompt stays compact while detailed experience remains recoverable.
+Use this document to choose between Rin memory and Rin self-improve surfaces.
 
-## Mental model
+Terminology:
 
-Use a human-memory analogy as a design aid, not as a claim that Rin stores memory like a brain:
+- **Memory** is original material plus retrieval: archived transcripts, exact wording, evidence, chronology, provenance, and indexes that help find those originals.
+- **Self-improve** is distilled guidance: compact prompt baselines, reusable skills, and short-term continuity records that change future agent behavior.
 
-- **Always-on prompt baselines are stable control memory.** They contain only stable identity, standing user identity, and durable methods or values that must influence every turn.
-- **Skills are cortical/procedural memory.** They store reusable workflows, checklists, examples, branching playbooks, domain knowledge, concepts, and durable facts that should be loaded when the current task matches their descriptions rather than repeated in the system prompt.
-- **Transcript archives are episodic memory.** They preserve original session material for later recall through `search_memory`; they should not be summarized into always-on text unless they change future behavior.
+Keep these concepts separate even when implementation paths overlap. For example, memory-index files may live under `self_improve/skills` for skill-based discovery, but their job is to point back to memory evidence, not to replace the original evidence.
 
-This is an engineering analogy only: core constraints stay always active, procedural detail is indexed by skill descriptions, and raw session data remains available by lookup instead of bloating the system prompt.
+## Surface model
 
-## Layer responsibilities
+| Concept      | Surface               | Storage                                                        | Use when                                                                                                   |
+| ------------ | --------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Memory       | Transcript archives   | archived session memory                                        | Original conversation text, evidence, wording, chronology, or provenance matters                           |
+| Memory       | Memory index pointers | `self_improve/skills/memory-index/...`                         | A compact dated handle helps retrieve original evidence later                                              |
+| Self-improve | Prompt baselines      | `self_improve/prompts/*.md`                                    | A compact distilled rule must influence most turns                                                         |
+| Self-improve | Reusable skills       | `self_improve/skills/<skill>/`                                 | A reusable workflow, procedure, playbook, example, or distilled domain fact should load for matching tasks |
+| Self-improve | Short-term continuity | `self_improve/skills/short-term-memory/SKILL.md` or task files | Active distilled handoff state guides current work                                                         |
 
-### Always-on prompt baselines
+Use the least resident self-improve surface that changes future behavior. Use memory retrieval when original evidence matters.
 
-Use prompt baselines only for compact rules that must be present every turn:
+## Memory surfaces
 
-- `agent_profile`: stable role, tone, behavior style, and standing response expectations.
-- `user_profile`: stable user identity knowledge.
+Memory preserves source material and makes it findable.
+
+Use `search_memory` when the task depends on:
+
+- past conversations;
+- unfinished work;
+- original wording;
+- evidence or chronology;
+- cross-session continuity.
+
+Keep raw event evidence in transcript archives. Add a memory-index pointer only when future lookup needs a stable topic/date/keyword handle.
+
+Use one evolving memory-index transaction for repeated same-topic evidence. Update the monthly index line with date ranges and keywords instead of creating many near-duplicate transaction files.
+
+## Self-improve surfaces
+
+Self-improve stores distilled guidance the agent should use later.
+
+### Prompt baselines
+
+Prompt baselines are compact rules that should influence most turns.
+
+Active prompt slots:
+
+- `agent_profile`: stable agent role, voice, behavior style, and standing response expectations.
+- `user_profile`: stable user identity and compact always-relevant user facts.
 - `core_doctrine`: durable methodology, values, and decision rules.
 
-The active prompt baseline set is `agent_profile`, `user_profile`, and `core_doctrine`. Durable facts, reference material, operating knowledge, and concepts are consolidated through skills; raw event evidence belongs in transcript memory.
+Write prompt-baseline lines as dense target behavior. Use one line per topic. Replace superseded lines instead of appending parallel guidance.
 
-Keep each line dense and reusable. If a point needs steps, examples, exceptions, or a checklist, move it into a skill and leave only a short pointer or principle in the prompt baseline.
+Use a skill instead of a prompt baseline when the material needs steps, examples, exceptions, troubleshooting, domain detail, or a checklist.
 
-Example: keep "Prefer restore-oriented official data exports over API-only archives" in `core_doctrine` if it must affect every backup decision; put the TickTick/Notion export facts, validation steps, storage layout, and restore checklist in a skill.
+### Reusable skills
 
-### Skills
+Skills hold reusable procedural and domain guidance.
 
-Use skills for reusable behavior that should be triggered by context:
+Use a skill for:
 
-- operational workflows,
-- debugging and validation checklists,
-- domain-specific playbooks,
-- examples that teach how to act,
-- procedures that would bloat the always-on prompt if inlined.
+- operational workflows;
+- debugging or validation checklists;
+- domain-specific playbooks;
+- examples that teach behavior;
+- distilled facts useful only for matching tasks;
+- references that would bloat the resident prompt.
 
-Skill descriptions are the retrieval handles. Write them so the agent can recognize the situations, keywords, and boundaries that make the skill relevant. Keep detailed instructions in the skill body, not in the prompt baseline.
+Skill descriptions are retrieval handles for distilled guidance. Put detailed instructions in `SKILL.md` or `references/`, not in prompt baselines.
 
-### Transcript archives
+Use composite skills with clear headings for related recurring material. A new skill is useful when it has a distinct recurring trigger and no existing skill is a clean home.
 
-Use `search_memory` when the task depends on past conversations, unfinished work, original wording, or evidence that should not be permanently injected into every turn.
+### Short-term continuity
 
-Transcript archives are the source for episodic recall. They can inform consolidation, but most raw events should remain archived rather than promoted. When wording, evidence, chronology, or user intent matters, search the transcript instead of relying on a reconstructed summary.
+Short-term continuity records contain distilled active state, such as current goal, blocker, handoff state, pending validation, or nearby next action. Remove or merge them when they stop guiding current work.
 
-## Consolidation triggers
+## Write-selection flow
 
-Rin runs memory review during fixed-round periodic maintenance and on real session shutdown. Idle daemon worker sleep is not session shutdown and does not trigger shutdown memory maintenance. The periodic threshold is counted from real agent final messages, is configurable with `settings.json -> selfImprove.reviewEveryTurns`, and defaults to `5`; user steering inputs and assistant tool-call-only/interim messages do not count.
+When adding or consolidating information, choose the destination in this order:
 
-Daily sleep-style consolidation should use the same rules as a scheduled maintenance pass: revisit short-term memory, merge repeated observations, refresh indexes, and demote or delete stale material rather than adding more resident prompt text.
+1. **Memory only:** original wording, evidence, chronology, or provenance is enough; use transcript archives and `search_memory`.
+2. **Memory index pointer:** future lookup needs a compact dated handle to original evidence.
+3. **Prompt baseline:** distilled guidance must influence most future turns and fits one compact line.
+4. **Current matching skill:** distilled workflow or domain guidance belongs in the active skill.
+5. **Umbrella skill:** a broader existing skill cleanly owns the class of distilled guidance.
+6. **Skill reference:** reusable evidence, examples, commands, or traces are useful but too bulky for `SKILL.md`.
+7. **New skill:** the distilled trigger is recurring, reusable, and not owned by an existing skill.
+8. **Short-term continuity:** distilled state is active temporary handoff context.
+9. **No self-improve write:** the material is already covered or does not improve future behavior, routing, execution, or recall.
 
 ## Consolidation rules
 
-When reviewing a conversation or adding durable memory, classify the material before writing:
+A self-improve consolidation pass should reduce guidance entropy:
 
-1. **Every-turn identity or doctrine invariant?** Put the shortest useful version in the smallest fitting prompt baseline slot.
-2. **Reusable workflow, multi-step policy, durable fact, reference material, or concept?** Create or update a skill.
-3. **Original event, evidence, chronology, or historical context?** Leave it in transcript memory; create or update a directory-managed memory-index skill only when a compact time/keyword index would help retrieve it later.
-4. **Temporary task state?** Keep it in the active session, current work files, or a short-lived directory-managed short-term event-memory skill; remove it after it stops guiding current work.
+- merge duplicate same-topic guidance into one canonical owner;
+- move misplaced content to the surface that owns it;
+- replace stale wording with current target behavior;
+- delete obsolete aliases, stale short-term records, and narrow fragments without recurring triggers;
+- keep `SKILL.md` as the operational entry point and move bulky evidence to `references/`;
+- preserve original evidence through memory archives or memory-index pointers when provenance matters.
 
-Promotion should be selective. These decisions are deliberate consolidation work, not automatic background promotion:
-
-- Score attention/emotion salience from the current work, with explicit owner corrections and strong negative feedback treated as high-salience signals.
-- Score repetition across observations as a stability signal.
-- Link each candidate to existing prompt lines, skills, or transcript indexes before deciding whether to add, merge, correct, supersede, or discard it.
-- Encode by memory type: procedure/reflex -> workflow skill; knowledge/concept/fact -> knowledge skill; event pointer -> directory-managed memory-index skill; temporary active goal -> directory-managed short-term event-memory skill or work file.
-- Prefer present-tense target behavior over historical explanations.
-- Remove stale or superseded prompt lines when a better skill or fact replaces them.
-
-## Skill index and progressive disclosure
-
-Skills must not become one file per fact. Keep the visible skill index small by using composite skills and progressive disclosure:
-
-1. Broad skill descriptions act as the first-level retrieval index.
-2. Skill frontmatter aliases/tags and clear headings act as second-level keyword handles.
-3. Detailed facts, examples, emotional-reflex rules, and transcript pointers stay inside the matched skill body.
-4. Memory-index skills group event pointers by time and keyword instead of creating a separate skill for every episode.
-5. Short-term event-memory skills are directory-managed, short-lived, and should be merged, promoted, or deleted during sleep-style consolidation; they should not become permanent skill-index entries by default.
-
-This keeps system prompt skill metadata compact while still allowing deeper recall after a relevant skill is selected.
-
-## Non-goals
-
-This model does not mean:
-
-- every past conversation should be summarized into durable prompts;
-- every repeated topic deserves a new skill;
-- transcript archives replace concise prompt baselines for facts needed every turn;
-- skills should duplicate stable identity or preference facts;
-- every durable fact should become its own skill.
+Use `docs/self-improve-distillation.md` for the full self-improve distillation workflow.
 
 ## Retrieval flow
 
-At task time, use the least resident sufficient layer:
+At task time:
 
-1. Follow the always-on prompt baselines for stable posture and constraints.
-2. Use available skill descriptions to load relevant procedural detail.
-3. Search transcript memory only when original context, evidence, or cross-session continuity matters.
+1. Follow prompt baselines for standing posture and constraints.
+2. Load the matching skill when its description fits the task.
+3. Use `search_memory` when original context, evidence, wording, chronology, or cross-session continuity matters.
+4. Inspect concrete memory or self-improve files only after the retrieval layer points to them.
 
-This keeps the resident prompt small while preserving deeper memory through targeted reactivation.
+This keeps distilled guidance compact while preserving original evidence through targeted memory retrieval.

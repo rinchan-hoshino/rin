@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 
-import { processQueuedMemoryJobs } from "./async-jobs.js";
+import { processQueuedSelfImproveJobs } from "./async-jobs.js";
 import { safeString } from "./core/utils.js";
 import { resolveAgentDir } from "./agent-dir.js";
 
@@ -21,7 +21,7 @@ function readAgentDirArgValue() {
 export async function runMemoryWorker() {
   const agentDirArg = readAgentDirArgValue();
   if (!agentDirArg) return;
-  await processQueuedMemoryJobs(resolveAgentDir(agentDirArg));
+  await processQueuedSelfImproveJobs(resolveAgentDir(agentDirArg));
 }
 
 const isDirectEntry =

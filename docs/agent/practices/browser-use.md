@@ -1,49 +1,94 @@
 # Browser Use Practices
 
-Rin does not ship a built-in `browser_use` extension. Use these patterns when a task needs browser automation and the live tool list does not already provide a dedicated browser-control tool.
+Use this page when a task needs a browser path and the current live tools or project harness require the agent to choose how to drive it.
+
+The job of this page is selection and evidence: choose headless or headful, choose local or remote, use the owning profile boundary, capture artifacts, and verify the visible or page-level result.
 
 ## Selection rule
 
-Choose by what the browser must prove:
+Choose the smallest browser path that proves the required fact:
 
-- Use **headless** for deterministic, login-free, CI-like, or page-inspection work.
-- Use **headful** for account flows, visual checks, extension-dependent behavior, downloads, consent dialogs, CAPTCHAs, or pages that behave differently without a visible browser.
-- Prefer direct HTTP/API access when a browser is not needed.
+- **Direct HTTP/API** for stable endpoints, downloads, metadata, and static page content.
+- **Headless browser** for deterministic navigation, login-free page inspection, JavaScript-rendered pages, CI-like checks, screenshots, PDFs, and download capture.
+- **Headful browser** for account flows, visual layout checks, extension-dependent behavior, downloads that need the desktop shell, consent dialogs, human-verification surfaces, and pages that behave differently with a visible browser.
+- **Existing profile** when saved cookies, account state, browser extensions, or site trust are part of the requested proof.
+- **Fresh isolated profile** for reproducible checks where account state is irrelevant.
 
-## Headless browser use
+## Headless browser path
 
-- Use project-local Playwright, Puppeteer, Selenium, or another already-approved browser harness when available.
-- Keep a fresh isolated profile unless the task explicitly requires an existing account session.
-- Record enough evidence to debug: URL, status, console/network errors, screenshot, DOM snapshot, trace, or downloaded artifact.
-- Set timeouts and close browsers so background processes do not survive the turn.
-- Do not use headless mode to bypass site rules, account protections, or human-verification boundaries.
+Use a project-local Playwright, Puppeteer, Selenium, WebDriver, CDP, or test harness when the repository already provides one. Keep the run reproducible:
 
-## Headful browser use
+- create a fresh temporary user-data directory for isolated checks;
+- set explicit navigation/action timeouts;
+- collect the URL, status, console errors, network failures, screenshot, DOM snapshot, trace, and downloaded artifacts that explain the result;
+- close the browser and remove temporary profiles after verification;
+- store artifacts under the task workspace or another path the final report can name clearly.
 
-- Use headful mode when the human-visible page state matters.
-- Confirm the browser profile owner before using saved sessions, cookies, or credentials.
-- Prefer semantic automation through Playwright/Selenium/CDP selectors; use screen coordinates only as a last step after a screenshot confirms the target.
-- Stop at irreversible confirmations unless the user explicitly names the exact control to press.
-- For owner-owned credentials or profiles, repair through the owning browser/account path; do not print secrets or move cookies into a different boundary.
+Good headless tasks:
 
-## Local browser use
+- verify a public page renders expected text;
+- collect a screenshot/PDF for a known URL;
+- reproduce a login-free web bug;
+- inspect console/network failures after navigation;
+- run the repository's browser tests.
 
-- Prefer a project-local harness and local browser binaries for reproducible tests.
-- For local headless work, use an isolated temporary user-data directory and clean it up.
-- For local headful work, launch in the owning desktop session. Check `DISPLAY`/Wayland on Linux, the logged-in user on macOS, and the interactive desktop session on Windows.
-- If an existing browser profile is required, use the approved profile path and avoid changing it for unrelated tasks.
+## Headful browser path
 
-## Remote browser use
+Use headful mode when the visible browser state is the evidence or when the site path is account/profile dependent.
 
-- For remote headless work, run the browser on the remote host and collect artifacts back through SSH, a workspace, or the test harness.
-- For remote headful work, use an explicit remote desktop path such as RDP, VNC/noVNC, Screen Sharing, or an approved browser VM/agent.
-- If using CDP or WebDriver remotely, bind to loopback and reach it through an SSH/VPN tunnel. Do not expose browser debugging ports to the public network.
-- Keep local-vs-remote artifacts clear: a screenshot from the remote browser proves the remote page, not the local desktop.
+Before input, establish:
+
+- target machine and desktop session;
+- browser app and profile path;
+- account/profile owner;
+- current URL and visible page state;
+- the exact UI state that counts as success.
+
+Prefer semantic browser automation through selectors, accessibility names, WebDriver, Playwright locators, or CDP. Use coordinates only as a last-mile action after a screenshot identifies the target window, scale, focus, and control.
+
+## Local browser path
+
+For local browser work:
+
+- use the repository's browser test harness and browser binaries when available;
+- place temporary profiles and downloads under the task workspace or `/tmp` with a clear prefix;
+- for Linux headful runs, confirm `DISPLAY`, `WAYLAND_DISPLAY`, and `XDG_SESSION_TYPE`;
+- for macOS headful runs, run inside the logged-in GUI user session;
+- for Windows headful runs, run inside the interactive desktop session for the target user;
+- leave an existing profile exactly in its owning boundary and record only the profile identity needed for the report.
+
+## Remote browser path
+
+For remote browser work, keep the proof tied to the machine where the page ran.
+
+- Run remote headless browsers on the remote host and collect artifacts back through SSH, the workspace, or the project harness.
+- Run remote headful browsers through an explicit visible path such as RDP, VNC/noVNC, Screen Sharing, or an approved browser VM/agent.
+- Publish CDP/WebDriver endpoints through loopback plus SSH/VPN tunnel.
+- Label artifacts by host and browser path so the report clearly distinguishes remote screenshots from local desktop screenshots.
+
+## Evidence bundle
+
+A useful browser evidence bundle names:
+
+- target URL and final URL;
+- browser path: direct HTTP/API, headless, headful, local, remote, existing profile, or isolated profile;
+- status/result and relevant console/network errors;
+- screenshot, DOM snapshot, trace, downloaded file, or test output path;
+- account/profile boundary when it affects the result;
+- final verification step.
+
+Keep raw artifacts compact in the final response. Name paths and summarize findings instead of pasting large HTML, logs, or binary output.
 
 ## Practical workflow
 
-1. Verify the target site, account boundary, and whether headless or headful is required.
-2. Start with a minimal navigation or status check.
-3. Capture evidence before mutation: screenshot, DOM/snapshot, URL, and relevant console/network failures.
-4. Perform the smallest action sequence.
-5. Verify the final state and close or intentionally leave the browser according to the task boundary.
+1. State the target site, required proof, and selected browser path.
+2. Start with a read-only navigation or status check.
+3. Capture baseline evidence before a page mutation.
+4. Perform the smallest action sequence that reaches the target state.
+5. Verify the final state with a visible screenshot, DOM/test assertion, downloaded artifact, or platform result.
+6. Close temporary browser state and report the evidence bundle.
+
+## Read next
+
+- Desktop/session control and screenshots outside the browser: `computer-use.md`.
+- Chat delivery of screenshots/files: `../docs/rich-text-output-format.md`.

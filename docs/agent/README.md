@@ -1,61 +1,48 @@
 # Rin Agent Docs
 
-These documents are for agents operating inside Rin. This source tree is `docs/agent/`, but the installer installs it as `~/.rin/docs/rin/`. It should not be mixed with user README content or developer-maintainer notes.
+This directory is the source for Rin-installed agent guidance. It is installed as `~/.rin/docs/rin/` and is written for agents operating inside Rin, not for end-user README content or developer-maintainer notes.
 
-## Priority
+## Authority
 
-For Rin-specific behavior, these docs sit above upstream Pi docs.
+Use these docs as the Rin-specific layer above upstream Pi docs.
 
-- Read Rin docs first when the task involves Rin behavior.
-- Use upstream Pi docs as the base reference only when Rin docs do not cover the topic.
-- If Rin docs and Pi docs conflict on Rin behavior, Rin docs take precedence.
+- For Rin runtime behavior, launcher layout, daemon behavior, memory, scheduled tasks, chat bridge behavior, builtin extensions, and other Rin-owned features, read Rin docs first.
+- Use upstream Pi docs as the base reference for topics not covered by Rin.
+- When Rin docs and Pi docs conflict on Rin behavior, Rin docs take precedence.
 
-## Structure
+## Reading path
 
-- `README.md`: entrypoint for Rin agent documentation.
-- `docs/`: agent-facing topic docs and Rin-over-Pi override guides.
-- `practices/`: recommended operating practices for environment-specific work.
-- `builtin-skills/`: Rin-owned builtin skills installed under `~/.rin/docs/rin/builtin-skills/`.
+1. Start here.
+2. Read `docs/execution-environment.md` to identify the live runtime, loop boundary, tools, paths, and environment ownership.
+3. Read `docs/pi-overrides.md` before relying on upstream Pi docs.
+4. Read the narrow topic document for the task.
+5. Read a practice page only when the task needs browser or desktop operation.
+6. Consult upstream Pi docs only for uncovered topics, with Rin overrides applied.
 
-Developer-only architecture, testing, GUI, and release workflow documentation lives in `docs/developer/` in the repository source and is not installed as agent guidance.
+## Topic map
 
-## Start here
-
-- `docs/execution-environment.md`: agent identity, agent loop, environment inspection, self-improvement memory, and user-environment boundaries.
-- `docs/session-awareness.md`: how to inspect what other sessions, processes, and scheduled/background tasks did recently or are doing now.
-- `docs/pi-overrides.md`: how to interpret upstream Pi docs inside Rin, including where Rin changes the meaning.
-
-## Topic entrypoints
-
-- `docs/execution-environment.md`: how to understand the current agent runtime and what to verify before acting.
-- `docs/session-awareness.md`: how to avoid racing parallel sessions by checking active/recent Rin sessions, processes, worktrees, and background tasks.
-- `docs/non-interactive-cli.md`: how to spawn isolated delegated child runs with managed sessions.
-- `docs/runtime-layout.md`: runtime layout, stable paths, launcher ownership, and paths safe for agents to reference.
-- `docs/builtin-extensions.md`: builtin capabilities and default extra capabilities provided by Rin core.
-- `docs/capabilities.md`: compact agent-facing behavior and conventions for Rin features.
-- `docs/memory-layering.md`: how to choose between always-on prompt baselines, skills, and transcript memory.
-- `docs/self-improve-memory-maintenance.md`: shared requirements for self-improve review and consolidation prompts.
-- `docs/agent-sdk.md`: local SDK helpers for daemon-backed task and chat operations that agents should not perform through raw RPC payloads.
-- `docs/scheduled-tasks.md`: scheduled task creation, inspection, update, deletion, and verification workflows.
+- `docs/execution-environment.md`: agent runtime, loop boundary, environment inspection, self-improvement surfaces, and user-environment ownership.
+- `docs/pi-overrides.md`: how Rin changes interpretation of upstream Pi docs.
+- `docs/session-awareness.md`: inspecting active/recent sessions, processes, worktrees, chat turns, and scheduled/background tasks.
+- `docs/non-interactive-cli.md`: spawning isolated delegated child runs with managed sessions.
+- `docs/runtime-layout.md`: stable paths, launcher ownership, app releases, and paths safe for agents to reference.
+- `docs/capabilities.md`: compact behavior and conventions for Rin agent-facing features.
+- `docs/builtin-extensions.md`: builtin and bundled optional capabilities provided by Rin core.
+- `docs/memory-layering.md`: choosing between memory evidence/retrieval and distilled self-improve guidance.
+- `docs/self-improve-distillation.md`: prompt-engineering contract for self-improve distillation passes.
+- `docs/initialization.md`: initialization flow for durable user and assistant preferences.
+- `docs/agent-sdk.md`: local SDK helpers for daemon-backed task and chat operations.
+- `docs/scheduled-tasks.md`: scheduled task creation, inspection, update, deletion, and verification.
 - `docs/chat-bridge.md`: chat bridge SDK/configuration workflows, stored chat paths, and adapter notes.
-- `docs/rich-text-output-format.md`: native mention, quote, attachment, and fallback syntax for rich outputs.
-- `practices/`: practice index for environment-specific work.
+- `docs/rich-text-output-format.md`: native mentions, quotes/replies, attachments, files/images, and fallback syntax.
 - `practices/browser-use.md`: browser automation patterns for headless/headful and local/remote work.
 - `practices/computer-use.md`: desktop automation patterns for Linux, Windows, macOS, and local/remote work.
 
-## Reading order
-
-1. Start with `README.md`.
-2. Read `docs/execution-environment.md` to understand the current agent runtime and loop.
-3. Read `docs/pi-overrides.md` before relying on upstream Pi docs.
-4. Read the relevant topic entrypoint in `docs/`.
-5. Read the relevant practice page in `practices/` when the task needs browser or desktop operation.
-6. Consult upstream Pi docs only as needed.
-
-## Notes
+## Source and installed locations
 
 - Installed Rin agent docs: `~/.rin/docs/rin/`.
 - Installed Rin builtin skills: `~/.rin/docs/rin/builtin-skills/`.
 - Installed upstream Pi reference docs: `~/.rin/docs/pi/`.
-- Repository source for this installed doc set: `docs/agent/`.
-- Repository source for installed builtin skills: Rin-owned skills under `docs/agent/builtin-skills/`, plus selected external mirrors such as `upstream/skill-creator/`.
+- Source for this installed doc set: `docs/agent/`.
+- Source for Rin-owned installed builtin skills: `docs/agent/builtin-skills/`.
+- Developer-only architecture, testing, GUI, and release workflow docs live in repository `docs/developer/` and are not installed as agent guidance.

@@ -1,46 +1,83 @@
 # Execution Environment
 
-This document orients agents that are running inside Rin.
+Use this document to orient a turn running inside Rin.
 
-## Agent, not chatbot
+Execution-environment work is a turn-target contract. The agent identifies where the current tools run, which capabilities are live, which external target the user intends, and what validation proves the result.
 
-When you run inside Rin, you are an LLM executing in Rin's agent runtime, not a plain chatbot page and not an independent process outside Rin.
+## Prompt brief
 
-That means you should keep two facts active:
+Target surface:
 
-- **Model role:** you are the model inside an agent loop. You reason from the current prompt, context, tools, and verified state; you do not have hidden continuity after a turn unless Rin starts another loop.
-- **Runtime owner:** Rin owns the loop, tool registry, session state, installed agent docs, configured agent directory, memory/skill surfaces, scheduled tasks, and chat bridges. Treat those live Rin surfaces as the operating environment for the turn.
+- current Rin agent turn;
+- live tool registry and system prompt;
+- shell/daemon/browser/chat/repository/remote host reached by the current tools;
+- installed Rin docs and persistent state surfaces.
 
-You are expected to do useful work during a turn when the user asks for it, not only describe what a user could do manually. Depending on the active runtime and configured capabilities, you may be able to:
+Goal:
 
-- inspect files and directories
-- run shell commands
-- edit or create files
-- search the web or fetch a URL through web search URL mode
-- recall archived session history
-- manage self-improvement prompts and skills
-- run isolated work through the non-interactive CLI
-- pause or resume scheduled tasks
-- interact with configured chat bridges through documented SDK/file workflows
+- align the live execution environment with the user's intended target before changing or reporting state.
 
-The current tool list and system prompt are authoritative for what is actually available in a given turn. Do not assume a capability exists just because it is described here; verify the live tool list and relevant docs.
+Trusted inputs:
 
-## Agent loop
+- current system prompt and live tool list;
+- `pwd`, `whoami`, `hostname`, OS, environment variables, and process context;
+- `rin status`, `rin status --json`, and `rin usage`;
+- repository state and local project instructions for source work;
+- target-specific docs named by this page and adjacent topic docs.
 
-A user input starts one bounded Rin agent loop.
+Output contract:
 
-During the loop, you can read context, use tools, modify state when appropriate, validate results, and then send one final response. After the final response is sent, that loop is complete. You will not keep acting in that same loop until the user sends another input or an explicitly scheduled/background mechanism triggers a new turn.
+- current execution host/user/cwd when relevant;
+- live capability surface used;
+- intended target and any mismatch resolved;
+- validation command or evidence path;
+- final state, blocker, or next boundary.
 
-Implications:
+## Success criteria
 
-- finish concrete work before the final response when the request is clear and safe
-- do not promise that you will keep working after the final response unless you created or verified a scheduled/background process
-- if you need more information before acting, ask before making irreversible changes
-- report completed work, validation, and blockers in the final response
+A turn is environment-aligned when:
 
-## Inspecting the current environment
+- live tools and current system prompt define the capability surface;
+- shell, daemon, repository, browser, chat, or remote target identity is known for the work being performed;
+- installed Rin docs are used for Rin behavior and Pi docs are routed through `docs/pi-overrides.md`;
+- source checkout work and installed-runtime work are treated as separate targets;
+- final reporting names the validation performed and the state observed.
 
-The current environment is the environment where this agent process and its tools run. It may be a daemon worker, a non-interactive CLI run, a container, a VM, or a remote machine.
+## Runtime identity contract
+
+Inside Rin, the assistant is an LLM inside an agent runtime. Rin owns the loop, live tool registry, session state, installed docs, configured agent directory, memory and skill surfaces, scheduled tasks, and chat bridges.
+
+Keep these runtime facts active:
+
+- the live system prompt and live tool list define available capabilities for the current turn;
+- Rin docs describe the installed runtime layer;
+- upstream Pi docs supply base behavior through the override contract in `docs/pi-overrides.md`;
+- the current shell, daemon worker, browser, chat account, repository, or remote host may differ from the user's intended personal machine or target account.
+
+## Turn boundary contract
+
+A user input starts one bounded Rin agent loop. During that loop, use available tools, inspect state, make authorized changes, validate results, and send one final response.
+
+Work that continues after the final response needs an inspectable producer: scheduled task, background service, or delegated non-interactive run.
+
+A final response reports:
+
+- completed work;
+- validation performed;
+- current state;
+- blocker or remaining decision.
+
+## Live capability contract
+
+Use the current tool list as the source of truth. Rin installations may provide tools for file I/O, shell commands, editing, web search or URL fetch, archived session recall, self-improvement storage, non-interactive child runs, scheduled-task operations, and chat bridge operations.
+
+Documentation examples describe possible capability surfaces. The live tool list proves availability for the current turn.
+
+Read `docs/capabilities.md` for the installed capability index.
+
+## Environment inspection contract
+
+The current environment is where this agent process and its tools run: daemon worker, non-interactive CLI run, container, VM, local host, or remote machine.
 
 Useful starting checks:
 
@@ -52,7 +89,7 @@ uname -a
 env | grep -E '^(RIN_DIR|PI_AGENT_DIR|HOME|SHELL|PATH)='
 ```
 
-For Rin-specific state, prefer stable runtime paths and commands:
+Rin runtime checks:
 
 ```sh
 rin status
@@ -60,17 +97,17 @@ rin status --json
 rin usage
 ```
 
-Useful stable paths include:
+Stable Rin paths:
 
-- `~/.rin/docs/rin/`: Rin-specific agent docs
-- `~/.rin/docs/pi/`: upstream Pi reference docs installed with Rin
-- `~/.rin/settings.json`: Rin / Pi settings
-- `~/.rin/sessions/`: session records
-- `~/.rin/memory/`: memory data
-- `~/.rin/self_improve/`: self-improvement prompts and skills
-- `~/.rin/app/current/`: current installed runtime entrypoint for audit or emergency repair
+- `~/.rin/docs/rin/`: Rin-specific agent docs.
+- `~/.rin/docs/pi/`: upstream Pi reference docs installed with Rin.
+- `~/.rin/settings.json`: Rin/Pi settings.
+- `~/.rin/sessions/`: session records.
+- `~/.rin/memory/`: memory evidence and retrieval data.
+- `~/.rin/self_improve/`: distilled self-improve guidance, prompts, skills, and indexes.
+- `~/.rin/app/current/`: current installed runtime entrypoint.
 
-When operating in a repository or project, also inspect the local project state before acting:
+For repository work, inspect project state before choosing validation commands:
 
 ```sh
 git status --short
@@ -78,40 +115,57 @@ git branch --show-current
 git rev-parse --show-toplevel
 ```
 
-Then read the local README, project instructions, package scripts, or CI config before choosing validation commands.
+Then read local project instructions, package scripts, hook config, and CI config that apply to the intended repository.
 
-Avoid printing secrets from `auth.json`, environment variables, credentials files, browser profiles, or service configs. Inspect only the minimum needed fields and redact sensitive values in user-facing output.
+## Persistent state contract
 
-## Self-improvement and traceable memory
+Rin state can outlive the current turn. Use the state surface that matches the question:
 
-Rin is a self-improving, memory-capable agent environment.
+- memory evidence and recall through archived transcripts, memory tools, and session files;
+- distilled self-improve prompt baselines under `~/.rin/self_improve/prompts`;
+- reusable self-improve skills under `~/.rin/self_improve/skills`;
+- scheduled tasks and daemon state under `~/.rin/data/`;
+- managed sessions under `~/.rin/sessions/managed/`.
 
-Relevant state may exist across turns and sessions:
+When past work matters, search memory or inspect the relevant original files. Store new distilled guidance in the narrowest fitting self-improve surface:
 
-- archived conversation/session recall through memory tools
-- always-on self-improvement prompt baselines under `~/.rin/self_improve/prompts`
-- reusable procedures and playbooks under `~/.rin/self_improve/skills`
-- session files under `~/.rin/sessions/`
-- scheduled tasks and daemon state under `~/.rin/data/`
+- baseline identity, preferences, and compact operating facts in prompt baselines;
+- reusable procedures, examples, and workflows in skills;
+- transient task progress in the active session or a task-specific work file.
 
-Not all stored state is injected into every prompt. If past work matters, search memory or inspect the relevant stored files instead of assuming the current context is complete.
+Use `docs/memory-layering.md` and `docs/self-improve-distillation.md` for destination choice and distillation work.
 
-When saving durable learning, prefer the right storage target:
+## Target alignment contract
 
-- stable identity, baseline preferences, and compact operating facts belong in self-improvement prompts
-- reusable procedures, checklists, examples, and workflows belong in skills
-- transient task progress belongs in the current session or a task-specific work file, not in always-on prompts
+Before changing state, align the live tool target with the user's intended target.
 
-## This may not be the user's own environment
+Common target boundaries:
 
-The machine or account you can access may not be the machine or account the user is personally operating.
+- chat bridge sender identity and platform chat;
+- daemon worker account and service environment;
+- non-interactive child session, working directory, and model;
+- browser, GUI, phone, or remote-server host;
+- repository root, branch, worktree, and canonical workspace;
+- installed runtime path behind `~/.rin/app/current/`.
 
-Examples:
+For tasks tied to a specific host, chat, repository, account, browser profile, device, or service, verify that the current tools point at that target before modifying files or state.
 
-- in chat bridge turns, the sender is a chat-platform user, not necessarily the local shell user
-- a daemon worker may run under a dedicated service account
-- a non-interactive CLI run may use a different working directory, model, or context
-- browser, GUI, phone, or remote-server state may live on another host
-- a project checkout may be a temporary clone rather than the user's canonical workspace
+## Validation contract
 
-Before making assumptions about files, installed software, network access, browser login state, devices, or ownership, verify the live environment. If the user asked for work on a specific host, chat, repository, account, or device, confirm that your current tools are pointed at that target before changing state.
+Choose validation that proves the target state:
+
+- command output, file diff, or test result for repository/source work;
+- `rin status --json` for daemon, scheduled task, worker, or runtime liveness;
+- message store, SDK result, adapter result, or platform evidence for chat work;
+- screenshot, DOM assertion, file artifact, or app state for browser/desktop work;
+- manifest, service file, and `app/current/` target for installed-runtime work.
+
+Report the validation source and the observed state. For multi-step work, keep the current branch checklist updated through the `todo` tool when available.
+
+## Read next
+
+- Rin-over-Pi authority resolution: `docs/pi-overrides.md`.
+- Installed runtime files and manifests: `docs/runtime-layout.md`.
+- Capability index: `docs/capabilities.md`.
+- Session/process/worktree overlap: `docs/session-awareness.md`.
+- Non-interactive child runs: `docs/non-interactive-cli.md`.

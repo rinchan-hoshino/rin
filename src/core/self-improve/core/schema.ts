@@ -3,19 +3,19 @@ import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import type {
-  MemoryDoc,
-  MemoryExposure,
-  MemoryFidelity,
-  MemoryKind,
-  MemoryScope,
-  MemoryStatus,
+  SelfImproveDoc,
+  SelfImproveExposure,
+  SelfImproveFidelity,
+  SelfImproveKind,
+  SelfImproveScope,
+  SelfImproveStatus,
 } from "./types.js";
 import { nowIso, normalizeList, safeString, slugify } from "./utils.js";
 
 export function ensureExposure(
   value: string,
-  fallback: MemoryExposure = "self_improve_skills",
-): MemoryExposure {
+  fallback: SelfImproveExposure = "self_improve_skills",
+): SelfImproveExposure {
   const normalized = safeString(value).trim();
   if (normalized === "self_improve_prompts") return "self_improve_prompts";
   if (normalized === "self_improve_skills" || !normalized)
@@ -25,8 +25,8 @@ export function ensureExposure(
 
 export function ensureFidelity(
   value: string,
-  fallback: MemoryFidelity = "fuzzy",
-): MemoryFidelity {
+  fallback: SelfImproveFidelity = "fuzzy",
+): SelfImproveFidelity {
   const normalized = safeString(value).trim();
   if (normalized === "exact" || normalized === "fuzzy") return normalized;
   return fallback;
@@ -34,8 +34,8 @@ export function ensureFidelity(
 
 export function ensureScope(
   value: string,
-  fallback: MemoryScope = "project",
-): MemoryScope {
+  fallback: SelfImproveScope = "project",
+): SelfImproveScope {
   const normalized = safeString(value).trim();
   if (
     normalized === "global" ||
@@ -49,8 +49,8 @@ export function ensureScope(
 
 export function ensureKind(
   value: string,
-  fallback: MemoryKind = "fact",
-): MemoryKind {
+  fallback: SelfImproveKind = "fact",
+): SelfImproveKind {
   const normalized = safeString(value).trim();
   if (
     normalized === "skill" ||
@@ -74,8 +74,8 @@ export function ensureKind(
 
 export function ensureStatus(
   value: string,
-  fallback: MemoryStatus = "active",
-): MemoryStatus {
+  fallback: SelfImproveStatus = "active",
+): SelfImproveStatus {
   const normalized = safeString(value).trim();
   if (
     normalized === "active" ||
@@ -98,7 +98,7 @@ export function normalizeFrontmatter(
   raw: Record<string, any>,
   filePath: string,
   content: string,
-): MemoryDoc {
+): SelfImproveDoc {
   const exposure = ensureExposure(
     safeString(frontmatterValue(raw, "exposure") || "self_improve_skills"),
   );
@@ -165,7 +165,10 @@ export function normalizeFrontmatter(
   };
 }
 
-export function parseMarkdownDoc(filePath: string, text: string): MemoryDoc {
+export function parseMarkdownDoc(
+  filePath: string,
+  text: string,
+): SelfImproveDoc {
   const raw = safeString(text);
   const match = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) return normalizeFrontmatter({}, filePath, raw.trim());
@@ -182,7 +185,7 @@ export function parseMarkdownDoc(filePath: string, text: string): MemoryDoc {
   );
 }
 
-export function renderMarkdownDoc(doc: MemoryDoc): string {
+export function renderMarkdownDoc(doc: SelfImproveDoc): string {
   const fm = {
     name: doc.name,
     ...(doc.description ? { description: doc.description } : {}),
@@ -209,7 +212,9 @@ export function renderMarkdownDoc(doc: MemoryDoc): string {
   return `---\n${yaml}\n---\n${safeString(doc.content).trim()}\n`;
 }
 
-export function previewMemoryDoc(doc: MemoryDoc): Record<string, any> {
+export function previewSelfImproveDoc(
+  doc: SelfImproveDoc,
+): Record<string, any> {
   return {
     id: doc.id,
     name: doc.name,

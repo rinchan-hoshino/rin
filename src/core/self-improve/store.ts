@@ -1,21 +1,21 @@
 import fs from "node:fs/promises";
 import fssync from "node:fs";
 
-import { MemoryDoc, MEMORY_PROMPT_SLOTS } from "./core/types.js";
+import { SelfImproveDoc, SELF_IMPROVE_PROMPT_SLOTS } from "./core/types.js";
 import {
   ensureFidelity,
   ensureKind,
   ensureScope,
   ensureStatus,
-  previewMemoryDoc,
+  previewSelfImproveDoc,
 } from "./core/schema.js";
 import { compileFromDocsAndEvents } from "./compile.js";
 import {
-  assertMemoryPromptDoc,
-  loadMemoryDocs,
-  loadMemoryDocsSync,
-  memoryPromptPath,
-  writeMemoryDoc,
+  assertSelfImprovePromptDoc,
+  loadSelfImproveDocs,
+  loadSelfImproveDocsSync,
+  selfImprovePromptPath,
+  writeSelfImproveDoc,
 } from "./docs.js";
 import { activeDocsOnly } from "./relevance.js";
 import { normalizePromptListContent } from "./processing.js";
@@ -46,7 +46,7 @@ export async function ensureSelfImproveLayout(
 
 export async function loadActiveSelfImproveDocs(rootOverride = "") {
   const root = await ensureSelfImproveLayout(rootOverride);
-  return activeDocsOnly(await loadMemoryDocs(root));
+  return activeDocsOnly(await loadSelfImproveDocs(root));
 }
 
 export async function saveSelfImprovePromptDoc(
@@ -59,7 +59,7 @@ export async function saveSelfImprovePromptDoc(
   const selfImprovePromptSlot = safeString(
     params.selfImprovePromptSlot || params.residentSlot || "",
   ).trim();
-  const doc: MemoryDoc = {
+  const doc: SelfImproveDoc = {
     id:
       safeString(params.id || "").trim() ||
       slugify(selfImprovePromptSlot, selfImprovePromptSlot),
@@ -83,15 +83,15 @@ export async function saveSelfImprovePromptDoc(
     status: ensureStatus(safeString(params.status || "active")),
     supersedes: normalizeList(params.supersedes || []),
     canonical: true,
-    path: memoryPromptPath(root, selfImprovePromptSlot),
+    path: selfImprovePromptPath(root, selfImprovePromptSlot),
     content,
   };
-  assertMemoryPromptDoc(doc);
-  await writeMemoryDoc(doc);
+  assertSelfImprovePromptDoc(doc);
+  await writeSelfImproveDoc(doc);
   return {
     status: "ok",
     action: "save_self_improve_prompt",
-    doc: previewMemoryDoc(doc),
+    doc: previewSelfImproveDoc(doc),
   };
 }
 
@@ -103,12 +103,12 @@ export async function removeSelfImprovePromptDoc(
   const slot = safeString(
     params.selfImprovePromptSlot || params.residentSlot || "",
   ).trim();
-  if (!MEMORY_PROMPT_SLOTS.includes(slot as any)) {
+  if (!SELF_IMPROVE_PROMPT_SLOTS.includes(slot as any)) {
     throw new Error(
-      `self_improve_prompt_slot_required:${MEMORY_PROMPT_SLOTS.join(",")}`,
+      `self_improve_prompt_slot_required:${SELF_IMPROVE_PROMPT_SLOTS.join(",")}`,
     );
   }
-  const targetPath = memoryPromptPath(root, slot);
+  const targetPath = selfImprovePromptPath(root, slot);
   await fs.rm(targetPath, { force: true });
   return {
     status: "ok",
@@ -123,7 +123,7 @@ export async function compileSelfImprove(
   rootOverride = "",
 ) {
   const root = await ensureSelfImproveLayout(rootOverride);
-  const docs = activeDocsOnly(await loadMemoryDocs(root));
+  const docs = activeDocsOnly(await loadSelfImproveDocs(root));
   return compileFromDocsAndEvents(
     docs,
     [],
@@ -147,7 +147,7 @@ export function compileSelfImproveSync(
       root,
     );
   }
-  const docs = activeDocsOnly(loadMemoryDocsSync(root));
+  const docs = activeDocsOnly(loadSelfImproveDocsSync(root));
   return compileFromDocsAndEvents(
     docs,
     [],

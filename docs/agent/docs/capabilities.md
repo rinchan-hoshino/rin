@@ -1,74 +1,50 @@
 # Agent-facing Capabilities
 
-Use this page as a quick entrypoint for Rin runtime capabilities. Follow the system prompt for standing identity, doctrine, and response style; this document only describes runtime facts and where to read next.
+Use this page as Rin's capability index. It tells agents what runtime surfaces exist, when they matter, and which topic document to read next. Use the live tool list and current system prompt as the source of truth for the current turn.
 
-## Quick reference
+## Capability index
 
-- **Run Rin:** recommend `rin`. It normally uses daemon + RPC TUI mode and falls back to temporary maintenance mode only when the daemon is unavailable.
-- **Update Rin:** use `rin update --yes` for non-interactive automation, or `rin update` when a human can confirm the plan. If PATH is missing the launcher, try `~/.local/bin/rin update --yes`; if the launcher is absent, repair the installation instead of running release files directly.
-- **Rollback:** use `rin rollback`; missing `previousRelease` metadata is a repair problem, not a reason to guess from old symlinks.
-- **Memory:** prompt baselines stay compact; reusable procedures and facts belong in skills; archived sessions are searched with `search_memory`. Read `docs/memory-layering.md` before changing memory content.
-- **Subagent / non-interactive work:** for isolated scouting, review, verification, or bounded parallel work, use `rin -p` with managed sessions, often adding `--mode json`, after reading `docs/non-interactive-cli.md`.
-- **Initialization:** if the user asks to initialize or reset preferences, read `docs/initialization.md`.
-- **Scheduled tasks:** use Rin scheduled tasks, not systemd timers, for reminders, delayed follow-ups, periodic checks, cron jobs, manual run-now starts, recurring agent automation, and conditional periodic checks. Scheduled tasks can include agent-authored TypeScript `condition` code; when it returns false, Rin skips the target and schedules the next tick. Read `~/.rin/docs/rin/docs/agent-sdk.md` and `~/.rin/docs/rin/docs/scheduled-tasks.md` before creating, inspecting, updating, running, completing, pausing, resuming, deleting, or configuring conditional execution.
-- **Chat bridge:** chat sender identity comes from the platform, not the shell user. Read `docs/chat-bridge.md` for SDK/file workflows and adapter behavior; read `docs/rich-text-output-format.md` for native output objects.
-- **Todo:** the core todo capability is always enabled; it registers the `todo` tool and `/todos` command.
-- **Browser/computer operation:** Rin does not ship bundled `browser_use` or `computer_use` tools. Trust the live tool list; otherwise use `practices/browser-use.md` or `practices/computer-use.md`.
-- **Web search:** use `web_search` proactively for fresh or version-sensitive facts; direct URL mode fetches a known page.
-- **Status and usage:** use `rin status` / `rin status --json` for daemon activity and `rin usage` for token telemetry.
-- **Stable docs:** prefer `~/.rin/docs/rin/`, `~/.rin/docs/pi/`, and `~/.rin/docs/release/` over versioned release paths.
+| Capability                    | Use when                                                                                                                | Entry point                                                         | Read next                                                      |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Rin launcher                  | Starting, status checks, update, rollback, or installed-runtime maintenance                                             | `rin`, `rin status`, `rin update`, `rin rollback`                   | `docs/runtime-layout.md`                                       |
+| Runtime status and usage      | Checking daemon activity, workers, scheduled tasks, or token telemetry                                                  | `rin status`, `rin status --json`, `rin usage`                      | `docs/execution-environment.md`, `docs/runtime-layout.md`      |
+| Memory and self-improve       | Choosing between original evidence/retrieval and distilled reusable guidance                                            | `search_memory`, prompt baselines, skills                           | `docs/memory-layering.md`, `docs/self-improve-distillation.md` |
+| Non-interactive child runs    | Isolated scouting, review, verification, comparison, or bounded draft work                                              | `rin -p`, `--mode json`, `--managed-session`                        | `docs/non-interactive-cli.md`, `docs/session-awareness.md`     |
+| Scheduled tasks               | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                 | Rin Agent SDK `rin.tasks.*`                                         | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
+| Chat bridge                   | Chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns       | `/chat`, `settings.json -> chat`, Rin Agent SDK, chat message store | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
+| Todo                          | Current-branch execution checklist during multi-step work                                                               | `todo` tool, `/todos`                                               | live tool schema                                               |
+| Web search                    | Current, external, source-dependent, or version-sensitive web evidence; direct HTTP(S) page fetch                       | `web_search`, `rin:web-search` extension                            | `docs/builtin-extensions.md`                                   |
+| Browser and desktop operation | Web or desktop work when a live browser/computer tool is present, or a task needs documented manual automation patterns | live tool list, practice docs                                       | `practices/browser-use.md`, `practices/computer-use.md`        |
+| Background extensions         | Trusted long-running async extensions or external event/memory providers                                                | `settings.json -> rinExtensions.backgroundServices`                 | `docs/builtin-extensions.md`                                   |
+| Initialization                | Owner asks to initialize, reset, or establish preferences                                                               | initialization prompt flow                                          | `docs/initialization.md`                                       |
 
-## Update and rollback details
+## Launcher, update, and rollback
 
-Rin installs a `rin` launcher for both the installer user and the selected daemon target user when those accounts differ. Keep `rin update` as the normal update entrypoint:
+Use the `rin` launcher as the installed-runtime entrypoint.
 
-1. Run `rin update --yes` for non-interactive automation, or `rin update` when a human can confirm the plan.
-2. If PATH does not include the launcher, run `~/.local/bin/rin update --yes` for non-interactive automation.
-3. If the launcher is missing, audit the installed metadata in `docs/runtime-layout.md` and repair the launcher.
+- `rin`: normal interactive launch.
+- `rin status` / `rin status --json`: daemon, worker, and scheduled-task state.
+- `rin usage`: token telemetry and usage dashboard.
+- `rin update`: interactive installed-runtime update.
+- `rin update --yes`: non-interactive update after target ownership is known.
+- `rin rollback`: switch to the `previousRelease` recorded in the install manifest.
 
-Release-channel defaults:
+Use `docs/runtime-layout.md` to audit launcher ownership, `installDir`, manifests, services, `app/current`, and release directories. Source checkout maintenance and installed-runtime maintenance are different surfaces.
 
-- `rin update`: stable release channel
-- `rin update --beta`: current weekly beta candidate
-- `rin update --nightly`: current nightly build pinned from `main`
-- `rin update --git`: `main`
-- `rin update --git <name>`: named branch or ref
-- `--branch` / `--version`: explicit stable/git selectors when needed
-- `--yes`: skips the final update confirmation prompt; use it only after the target user and install directory are known
+## Memory and self-improve
 
-`rin rollback` switches to the `previousRelease` recorded in `installer.json`, updates the manifest so another rollback can switch back, and restarts the daemon. If no `previousRelease` is recorded, treat that as missing rollback metadata instead of guessing from ad-hoc `current.old` files.
+Rin separates memory from self-improve:
 
-Keep installed-runtime maintenance separate from repo-checkout maintenance. Updating a source checkout is not the same as updating the installed runtime under `~/.rin/`.
+- memory preserves original evidence and supports retrieval through archived transcripts, memory indexes, and `search_memory`;
+- self-improve stores distilled guidance in prompt baselines, reusable skills, and short-term continuity records.
 
-## Memory and self-improve details
-
-- Always-on baselines live under `~/.rin/self_improve/prompts` and should stay compact.
-- Agent-managed skills live under `~/.rin/self_improve/skills` and should hold reusable procedures, playbooks, examples, domain facts, and compact indexes.
-- `search_memory` recalls archived session history when original wording, evidence, or cross-session continuity matters.
-- Memory recall summarizes matched sessions with the active model at fixed `low` thinking.
-- Periodic memory review runs every `selfImprove.reviewEveryTurns` real agent final messages and defaults to `5`; review also runs on real session shutdown. Idle daemon worker sleep is not session shutdown and does not trigger shutdown memory maintenance.
-- A hidden built-in nightly task performs sleep-style self-improve consolidation.
-- Not all self-improve content is injected into the prompt automatically.
-
-## Chat bridge details
-
-Rin's direct built-in chat bridge currently includes Telegram, OneBot, QQ, Feishu / Lark, Discord, Slack, and Minecraft / QueQiao.
-
-Key points for agents:
-
-- The prompt may include `chatKey`, chat name, sender identity, and related context.
-- Rich text output format lives in `docs/rich-text-output-format.md`; use it for native mentions, quotes, attachments, and fallback behavior.
-- Chat sending, stored-message lookup, log inspection, and identity updates are SDK/file workflows rather than model tools.
-- `/chat` configures official adapters in the TUI and enters platform selection directly.
-- Official adapter setup should use the minimum runnable fields, prefer polling/socket modes when supported, avoid webhook-only setup when possible, and include direct official links for required values.
+Read `docs/memory-layering.md` before choosing a destination. Read `docs/self-improve-distillation.md` before running or editing self-improve distillation prompts.
 
 ## Core todo and bundled web search
 
-Rin always enables the core todo capability. It registers the `todo` tool for branch-aware checklists and `/todos` for the interactive TUI view directly from core code. It stays enabled even when optional Pi extensions are disabled.
+The core todo capability registers the `todo` tool and `/todos` command from Rin core. Use it for current-branch execution checklists when the live tool list includes `todo`.
 
-In daemon/RPC chat turns, Rin can withhold a premature final answer when the todo list still contains incomplete items and continue hidden work automatically. Hidden continuations stop when todos complete, when the todo state does not change between continuations, or after 64 continuations.
-
-Rin ships `rin:web-search` as the bundled optional foreground Pi extension. Fresh installs enable it by default unless the installer selection disables it.
+Rin ships `rin:web-search` as the bundled optional foreground Pi extension alias:
 
 ```json
 {
@@ -76,53 +52,42 @@ Rin ships `rin:web-search` as the bundled optional foreground Pi extension. Fres
 }
 ```
 
-Notes:
+`rin:web-search` registers `web_search`. Search mode uses Rin-managed SearXNG; URL mode fetches readable content from a specific HTTP(S) page. Fresh installs enable the alias by default unless installer selection disables it. Existing installs follow their current `settings.json -> extensions` value.
 
-- Core todo registers `todo` from core code and is always on.
-- `rin:web-search` registers `web_search`, fetches HTTP(S) URLs directly, and uses Rin-managed SearXNG for search queries.
-- Use Pi resource filters such as `!rin:web-search` to disable a previously enabled bundled resource.
-- Browser and desktop automation are no longer Rin bundled aliases; read `practices/browser-use.md` and `practices/computer-use.md` when those tasks are needed.
-- After changing extension settings, restart or reload Rin so resources are reloaded.
+Use Pi resource filters such as `!rin:web-search` to disable the alias from a broader extension list.
+
+## Chat bridge
+
+Rin's direct built-in chat bridge currently includes Telegram, OneBot, QQ, Feishu / Lark, Discord, Slack, and Minecraft / QueQiao.
+
+Use `docs/chat-bridge.md` for:
+
+- `/chat` adapter setup;
+- `settings.json -> chat` configuration;
+- SDK-backed chat sending and detached chat turns;
+- stored message lookup;
+- identity/trust data updates;
+- adapter-specific files, logs, and operation notes.
+
+Use `docs/rich-text-output-format.md` for native mentions, quotes/replies, attachments, files/images, and fallback syntax.
 
 ## Background extensions
 
-Background extensions are configured under `settings.json -> rinExtensions.backgroundServices`, or discovered from normal Rin/Pi extension entries that expose background capabilities. They are trusted Node.js packages loaded by Rin's background runtime for long-running async work. They are a Rin extension capability layer, not a separate extension type that extension authors need to target.
+Background extensions are trusted Node.js packages loaded by Rin's background runtime for long-running async work. They are configured through `settings.json -> rinExtensions.backgroundServices` or discovered from trusted Rin/Pi extension entries that expose background capabilities.
 
-```json
-{
-  "rinExtensions": {
-    "backgroundServices": [
-      {
-        "name": "example-service",
-        "packageName": "rin-background-service-example",
-        "version": "latest",
-        "config": {}
-      }
-    ]
-  }
-}
-```
+Use them for intentionally configured background event bridges, chat adapters, or memory providers. Restart or reload Rin after changing background extension settings.
 
-Use only trusted package names and versions. Packages may be installed or updated under `~/.rin/data/extensions/runtime` during startup; restart Rin after editing background extension settings.
+## Browser and computer operation
 
-## Web search details
+Use browser or desktop automation tools from the live tool list when they are present. Use the practice docs for documented manual or tool-specific patterns:
 
-Use fresh web search for latest, time-sensitive, version-sensitive, or otherwise changeable information. When `q` is an HTTP(S) URL, `web_search` fetches that page directly with a browser-like user agent and extracts readable content.
-
-Default web search uses a Rin-managed local SearXNG sidecar so users can search without provider API keys, external search setup, or a Rin-managed search service. The installer prepares the SearXNG runtime; the daemon starts and keeps the sidecar warm; web-search calls use an already-running sidecar and never install SearXNG. The sidecar runs on loopback, stores its runtime, state, and generated settings under Rin's own `data/sidecars/web-search` directory, and does not write into the user's project files.
-
-## Runtime status and token usage
-
-- `rin status`: current worker and scheduled-task snapshot
-- `rin status --watch`: live refreshing view
-- `rin status --json`: raw `daemon_activity` RPC payload
-- RPC clients can call `daemon_activity` directly for the same real-time state
-- `daemon_activity` includes a top-level `schemaVersion` and redacts scheduled task prompt/command bodies
-- Token telemetry is stored under `~/.rin/data/core/usage/usage.db`
-- `rin usage` shows a text dashboard, configured provider account/quota data when available, and grouped usage queries
+- `practices/browser-use.md`
+- `practices/computer-use.md`
 
 ## Stable documentation paths
 
-- `~/.rin/docs/rin/`: Rin-specific agent docs
-- `~/.rin/docs/pi/`: installed upstream Pi docs
-- `~/.rin/docs/release/`: release-note metadata used by `/changelog`
+Prefer stable installed doc paths in agent guidance:
+
+- `~/.rin/docs/rin/`: Rin-specific agent docs.
+- `~/.rin/docs/pi/`: installed upstream Pi docs.
+- `~/.rin/docs/release/`: release-note metadata used by `/changelog`.

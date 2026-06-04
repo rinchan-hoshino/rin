@@ -26,6 +26,6 @@ This module owns:
 - transcript recall summarization via the active model at fixed `low` thinking
 - recall summaries are steered to fuse the overall session context with why the current query matched
 
-It does not own always-on prompts or agent-managed skills. Those belong to the `self-improve` module.
+It does not own distilled guidance, always-on prompts, or agent-managed skills. Those belong to the `self-improve` module.
 
-In the layered memory model, this module owns episodic memory: original session material that can be reactivated through targeted recall instead of being copied into the always-on prompt.
+In Rin terminology, memory means original session material plus retrieval: archived transcripts, exact wording, evidence, chronology, provenance, search index, and recall summaries. Distilled reusable guidance belongs to self-improve.

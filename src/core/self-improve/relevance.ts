@@ -1,4 +1,8 @@
-import { CHRONICLE_TAG, MemoryDoc, MemoryEvent } from "./core/types.js";
+import {
+  CHRONICLE_TAG,
+  SelfImproveDoc,
+  SelfImproveEvent,
+} from "./core/types.js";
 import {
   cjkBigrams,
   conceptTokens,
@@ -35,15 +39,15 @@ function normalizeHaystack(parts: Array<string | undefined>): string {
   return normalizeNeedle(parts.filter(Boolean).join(" \n "));
 }
 
-function normalizeDocTags(doc: Partial<MemoryDoc>): string[] {
+function normalizeDocTags(doc: Partial<SelfImproveDoc>): string[] {
   return normalizeList(doc?.tags);
 }
 
-function normalizeDocAliases(doc: Partial<MemoryDoc>): string[] {
+function normalizeDocAliases(doc: Partial<SelfImproveDoc>): string[] {
   return normalizeList(doc?.aliases);
 }
 
-function normalizeEventTags(event: Partial<MemoryEvent>): string[] {
+function normalizeEventTags(event: Partial<SelfImproveEvent>): string[] {
   return normalizeList(event?.tags);
 }
 
@@ -53,7 +57,10 @@ function normalizeFeatureValues(values: string[]): string[] {
   );
 }
 
-function sharedNormalizedDocTags(a: Partial<MemoryDoc>, b: Partial<MemoryDoc>) {
+function sharedNormalizedDocTags(
+  a: Partial<SelfImproveDoc>,
+  b: Partial<SelfImproveDoc>,
+) {
   const bTagSet = new Set(normalizeFeatureValues(normalizeDocTags(b)));
   return normalizeFeatureValues(normalizeDocTags(a)).filter((tag) =>
     bTagSet.has(tag),
@@ -90,7 +97,7 @@ function scoreTextMatches(
   return score;
 }
 
-export function lexicalScore(query: string, doc: MemoryDoc): number {
+export function lexicalScore(query: string, doc: SelfImproveDoc): number {
   const normalizedQuery = normalizeRelevanceQuery(query);
   const tags = normalizeDocTags(doc);
   const aliases = normalizeDocAliases(doc);
@@ -123,7 +130,7 @@ export function lexicalScore(query: string, doc: MemoryDoc): number {
   return score;
 }
 
-export function eventScore(query: string, event: MemoryEvent): number {
+export function eventScore(query: string, event: SelfImproveEvent): number {
   const normalizedQuery = normalizeRelevanceQuery(query);
   const haystack = normalizeHaystack([
     safeString(event?.kind),
@@ -145,7 +152,7 @@ export function eventScore(query: string, event: MemoryEvent): number {
 }
 
 export function excerptForRecall(
-  doc: MemoryDoc,
+  doc: SelfImproveDoc,
   query: string,
   max = 240,
 ): string {
@@ -165,7 +172,7 @@ export function excerptForRecall(
   return `${start > 0 ? "…" : ""}${slice}${end < text.length ? "…" : ""}`;
 }
 
-function memoryRelationFeatures(doc: MemoryDoc): string[] {
+function selfImproveRelationFeatures(doc: SelfImproveDoc): string[] {
   const contentSample = safeString(doc?.content)
     .split(/\n+/)
     .slice(0, 12)
@@ -184,11 +191,11 @@ function memoryRelationFeatures(doc: MemoryDoc): string[] {
 }
 
 export function relationScore(
-  a: MemoryDoc,
-  b: MemoryDoc,
+  a: SelfImproveDoc,
+  b: SelfImproveDoc,
 ): { score: number; reason: string } {
-  const aFeatures = new Set(memoryRelationFeatures(a));
-  const bFeatures = new Set(memoryRelationFeatures(b));
+  const aFeatures = new Set(selfImproveRelationFeatures(a));
+  const bFeatures = new Set(selfImproveRelationFeatures(b));
   let overlap = 0;
   for (const feature of aFeatures) {
     if (bFeatures.has(feature)) overlap += 1;
@@ -214,7 +221,7 @@ export function shouldInjectRecentHistory(query: string): boolean {
   return RECENT_HISTORY_QUERY_RE.test(safeString(query));
 }
 
-export function activeDocsOnly(docs: MemoryDoc[]): MemoryDoc[] {
+export function activeDocsOnly(docs: SelfImproveDoc[]): SelfImproveDoc[] {
   return Array.isArray(docs)
     ? docs.filter((doc) => doc?.status === "active")
     : [];

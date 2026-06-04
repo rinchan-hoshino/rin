@@ -1,108 +1,190 @@
 # Runtime Layout
 
-Rin's agent working directory is usually `~/.rin/`.
+Use this document when a task needs to locate Rin runtime files, installed documentation, launcher metadata, install manifests, service files, or the active app release.
 
-## Top-level layout
+Runtime layout work is a target-identification contract. The agent must identify the active agent directory, the installed runtime entrypoint, and the owner account before changing or reporting installed-runtime state.
 
-- `auth.json`: model authentication data
-- `settings.json`: Rin / pi settings
-- `i18n.json`: optional local i18n message catalog; currently supports chat command acknowledgement keys such as `chat.commandResponses.new`; absent or partial files fall back to built-in English text.
-- `sessions/`: user-facing session data; direct TUI sessions live at this root. Non-interactive CLI runs do not keep a session by default; when delegated work needs durable context, agents should create or reuse a dedicated session under `sessions/managed/<kind>/`, usually via `rin --mode json --managed-session <kind> -p ...`.
-- `memory/`: markdown-backed memory data
-- `routines/`: routine prompts and task files
-- `data/`: runtime state grouped by owner: `core/`, `chat/`, `scheduler/`, `sidecars/`, `extensions/`, `features/`, and shared `runtime/` helpers
-- `docs/rin/`: Rin-specific agent docs
-- `docs/pi/`: installed copies of upstream Pi docs
-- `docs/release/`: release-note metadata used by `/changelog`
-- `app/current/`: the currently active runtime
-- `app/releases/<timestamp>/`: runtime release directories
+## Prompt brief
 
-## User-scoped launcher paths
+Target surface:
 
-Rin launchers are user-scoped, not global.
+- agent directory under `~/.rin/` or a custom `installDir`;
+- installed docs under `docs/rin/`, `docs/pi/`, and `docs/release/`;
+- launcher metadata and service files;
+- installer manifests;
+- `app/current/` and `app/releases/<id>/`.
+
+Goal:
+
+- determine the real installed runtime target and verify which files, launcher, service, and release are active.
+
+Trusted inputs:
+
+- `rin status` / `rin status --json`;
+- launcher metadata;
+- target-home locator manifest;
+- install manifest inside `installDir`;
+- managed service files;
+- filesystem state for `app/current/` and release directories.
+
+Output contract:
+
+- target user and install directory;
+- manifest path used;
+- active runtime entrypoint;
+- current and previous release names when relevant;
+- service or launcher ownership evidence when relevant;
+- source checkout vs installed runtime boundary when both are present.
+
+## Success criteria
+
+A runtime-layout inspection is complete when:
+
+- `installDir` and `targetUser` come from a manifest, launcher, service, or explicit live state;
+- `app/current/` identifies the active installed runtime entrypoint;
+- source checkout paths and installed runtime paths are treated as separate surfaces;
+- docs paths are resolved through the installed `docs/rin/` and `docs/pi/` roots;
+- update, rollback, SDK import, or installed-runtime edits name the verified target.
+
+## Agent directory contract
+
+The default agent directory is usually `~/.rin/`. Custom installs may use another `installDir`; use manifests to confirm the real target.
+
+Common top-level paths under the agent directory:
+
+- `auth.json`: model authentication data.
+- `settings.json`: Rin/Pi settings.
+- `i18n.json`: optional local i18n catalog, including chat command acknowledgement strings.
+- `sessions/`: user-facing session data.
+- `sessions/managed/<kind>/`: durable managed sessions for delegated or non-interactive work.
+- `memory/`: markdown-backed memory data.
+- `self_improve/`: prompt baselines, skills, indexes, and distilled guidance.
+- `routines/`: routine prompts and task files.
+- `data/`: runtime state grouped by owner, including `core/`, `chat/`, `scheduler/`, `sidecars/`, `extensions/`, `features/`, and shared `runtime/` helpers.
+- `docs/rin/`: installed Rin-specific agent docs.
+- `docs/pi/`: installed upstream Pi reference docs.
+- `docs/release/`: release-note metadata used by `/changelog`.
+- `app/current/`: stable entrypoint for the active installed runtime.
+- `app/releases/<id>/`: installed runtime release directories.
+
+Use `docs/execution-environment.md` for turn-level environment inspection and `docs/capabilities.md` for runtime feature behavior.
+
+## Stable path contract
+
+Use stable paths for agent guidance, durable references, scripts, and diagnostics:
+
+- `~/.rin/docs/rin/...`
+- `~/.rin/docs/pi/...`
+- `~/.rin/docs/release/...`
+- `~/.rin/settings.json`
+- `~/.rin/i18n.json`
+- `~/.rin/auth.json`
+- `~/.rin/sessions/...`
+- `~/.rin/memory/...`
+- `~/.rin/self_improve/...`
+- `~/.rin/app/current/...`
+
+Use `app/current/...` for the active runtime. Use `app/releases/<id>/...` when auditing a release recorded in the manifest.
+
+## Locator contract
+
+Find installed-runtime ownership in this order when the task depends on the active installation:
+
+1. `rin status --json` for live daemon/runtime data.
+2. `<targetHome>/.rin/installer.json` as the stable locator manifest under the target home.
+3. `<installDir>/installer.json` as the primary install manifest once `installDir` is known.
+4. User launcher metadata:
+   - Linux: `~/.config/rin/install.json`
+   - macOS: `~/Library/Application Support/rin/install.json`
+5. Managed service files:
+   - Linux user service: `~/.config/systemd/user/rin-daemon*.service`
+   - macOS launch agent: `~/Library/LaunchAgents/com.rin.daemon.*.plist`
+
+These surfaces identify:
+
+- `installDir`;
+- `targetUser`;
+- active release metadata in `currentRelease`;
+- rollback metadata in `previousRelease`;
+- installer-managed file inventory under `managedFiles.trees`;
+- service `RIN_DIR` for daemon launch context.
+
+## Launcher and service contract
+
+Rin launchers are user-scoped.
 
 Typical launcher paths:
 
 - `~/.local/bin/rin`
 - `~/.local/bin/rin-install`
 
-Launcher metadata is also user-scoped.
+The installer can write launchers for both the installer user and the daemon target user when those accounts differ. Launcher metadata records the current user's default `targetUser` and `installDir`.
 
-Typical metadata paths:
+For normal agent operation, call `rin`. For launcher repair or ownership audits, compare:
 
-- Linux: `~/.config/rin/install.json`
-- macOS: `~/Library/Application Support/rin/install.json`
+- launcher path;
+- launcher metadata;
+- target-home locator manifest;
+- install manifest;
+- service `RIN_DIR`.
 
-The installer writes these launchers for both the current installer user and the selected daemon target user when those accounts differ. If the current shell PATH does not include the launcher directory, the installer prints the absolute launcher path and a PATH hint instead of relying on a bare `rin` command.
+## Installed runtime entrypoint
 
-This metadata records the current user's default `targetUser` and `installDir`. It is useful when recovering or auditing an installed target, but normal agent-facing guidance should use the `rin` command instead of asking agents to locate runtime entry files.
+`app/current/` points at the active installed runtime. The target behind the symlink may change during update or rollback, while `app/current/` remains the stable entrypoint.
 
-Important implications for the agent:
+Use `app/current/` for:
 
-- prefer the `rin` command for normal use and self-update
-- if either expected account has no `rin` launcher, treat that as an installation repair or migration issue rather than normal runtime discovery work
-- keep the current installer user, daemon target user, and current local execution account distinct when auditing ownership or permissions
+- reading installed runtime resources;
+- importing installed SDK modules from scripts;
+- inspecting the active build output;
+- verifying that an installed update contains expected files.
 
-## Install manifests and service files
+Use a specific `app/releases/<id>/` path for auditing a recorded release.
 
-Besides launchers, Rin exposes install ownership through stable metadata and managed service files.
+## Update and rollback contract
 
-Useful locations:
+Use the `rin` launcher for installed-runtime maintenance:
 
-- `<installDir>/installer.json`: install manifest written into the target runtime directory
-- `<targetHome>/.rin/installer.json`: stable locator manifest under the target home; for custom install dirs it points to the real `installDir`
-- Linux user service: `~/.config/systemd/user/rin-daemon*.service`
-- macOS launch agent: `~/Library/LaunchAgents/com.rin.daemon.*.plist`
+```sh
+rin update
+rin update --yes
+rin rollback
+```
 
-These files are the main way to audit `installDir` and `targetUser` or repair an installation whose launchers are missing.
-They also record installed-runtime release state: `currentRelease` describes the active `app/releases/...` entry, and `previousRelease` is the authoritative `rin rollback` target.
-The installer-owned file inventory lives in `<installDir>/installer.json` under `managedFiles.trees`; older installs may still have the migrated legacy file `<installDir>/data/.managed/install-home.json`.
-Service files expose the runtime directory through `RIN_DIR`, and once `installDir` is known the next stop should be `<installDir>/installer.json`.
+Before update or rollback, verify target ownership through:
 
-## Installed update path
+- `<targetHome>/.rin/installer.json`;
+- `<installDir>/installer.json`;
+- Linux service files under `~/.config/systemd/user/rin-daemon*.service`;
+- macOS launch agents under `~/Library/LaunchAgents/com.rin.daemon.*.plist`.
 
-Keep `rin update` as the canonical workflow. If the launcher is missing for an account that should have it, repair or rerun the installer/update path so the launcher is restored instead of documenting ad-hoc direct runtime entry invocations as the normal agent workflow.
+After update or rollback, verify:
 
-Typical places to audit `installDir` during repair:
+- `app/current/` target;
+- `currentRelease` and `previousRelease` in `<installDir>/installer.json`;
+- `rin status` or `rin status --json` for the running daemon layer when daemon liveness matters.
 
-- `<targetHome>/.rin/installer.json`
-- Linux: `~/.config/systemd/user/rin-daemon*.service`
-- macOS: `~/Library/LaunchAgents/com.rin.daemon.*.plist`
-- default target-home install directory: `<targetHome>/.rin/`
+## Source checkout boundary
 
-This keeps installed-runtime maintenance separate from repo-checkout maintenance.
-Do not treat rerunning `install.sh`, ad-hoc rebuilds, or repo-local `git pull` workflows as the normal way to update an already installed Rin runtime.
+Source checkout maintenance and installed runtime maintenance are different surfaces. A repository checkout can contain newer source than the runtime behind `~/.rin/app/current/`.
 
-## `app/current/`
+For source work, inspect the repository root, branch, status, scripts, and tests. For installed-runtime work, inspect `installDir`, manifests, service files, and `app/current/`.
 
-`app/current/` is the stable entrypoint for the currently active runtime.
+## Documentation install contract
 
-For the agent, the important part is:
+Rin-specific agent docs are installed under stable `docs/rin/` paths so system prompts and agent guidance can refer to them across updates.
 
-- treat it as the stable path for the current runtime version
-- do not depend on a specific `app/releases/<timestamp>/...` path
-- if you must reference read-only resources from the current runtime, prefer entering through `app/current/`
+Installed upstream Pi docs live under `docs/pi/`. Release-note metadata lives under `docs/release/` so changelog content stays separate from agent guidance.
 
-The contents behind it may be fully refreshed during updates.
+## Report contract
 
-## Stable vs unstable paths
+For runtime-layout work, report:
 
-Prefer these stable paths when possible:
-
-- `~/.rin/docs/rin/...`
-- `~/.rin/docs/pi/...`
-- `~/.rin/settings.json`
-- `~/.rin/i18n.json`
-- `~/.rin/auth.json`
-- `~/.rin/sessions/...`
-- `~/.rin/memory/...`
-- `~/.rin/app/current/...`
-
-Avoid baking a specific `app/releases/<timestamp>/...` path into long-lived configs or instructions.
-
-## Documentation install policy
-
-Rin-specific agent docs are installed into the stable `docs/rin/` path rather than a release-specific directory.
-This lets the system prompt point to stable documentation paths across updates.
-
-Release-note metadata is installed separately under `docs/release/` so agent guidance does not mix with changelog content.
+- target user;
+- install directory;
+- manifest path used;
+- active runtime entrypoint;
+- current/previous release when relevant;
+- launcher or service ownership evidence when relevant;
+- validation performed;
+- source checkout vs installed runtime boundary when it affects the result.

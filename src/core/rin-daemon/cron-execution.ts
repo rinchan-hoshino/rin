@@ -243,20 +243,20 @@ export function resolveCronSessionInstructionChatKey(
   return { chatKey, sessionFile: resolvedSessionFile };
 }
 
-function isSelfImproveExtractionTask(task: CronTaskRecord) {
+function isSelfImproveDistillationTask(task: CronTaskRecord) {
   if (task.id === "builtin_self_improve_sleep_consolidation_daily") return true;
   if (task.target.kind !== "agent_prompt") return false;
   const prompt = [task.target.prompt, task.target.continuationPrompt]
     .map((value) => String(value || ""))
     .join("\n");
-  return prompt.includes("self-improve-memory-maintenance.md");
+  return prompt.includes("self-improve-distillation.md");
 }
 
 function shouldShutdownTaskSessionAfterRun(
   task: CronTaskRecord,
   sessionMode: string,
 ) {
-  return sessionMode === "none" && !isSelfImproveExtractionTask(task);
+  return sessionMode === "none" && !isSelfImproveDistillationTask(task);
 }
 
 async function appendCronMaintenanceHistoryRecord(
@@ -271,7 +271,7 @@ async function appendCronMaintenanceHistoryRecord(
     sessionFile?: string;
   },
 ) {
-  if (!isSelfImproveExtractionTask(task)) return;
+  if (!isSelfImproveDistillationTask(task)) return;
   const filePath = maintenanceHistoryPath(agentDir);
   await mkdir(path.dirname(filePath), { recursive: true });
   await appendFile(
@@ -355,7 +355,7 @@ export async function executeCronAgentTask(
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
   const keepChatBoundSession = Boolean(chatKey && nextSessionFile);
   const keepSelfImproveSession = Boolean(
-    isSelfImproveExtractionTask(task) && nextSessionFile,
+    isSelfImproveDistillationTask(task) && nextSessionFile,
   );
   if (sessionMode === "dedicated") {
     if (dedicatedSessionFile) {

@@ -6,8 +6,8 @@ import { existsSync, readFileSync } from "fs";
 import { isAssistantFinalMessage } from "../message-content.js";
 
 import {
-  enqueueMemoryMaintenanceJob,
-  runMemoryMaintenanceJobNow,
+  enqueueSelfImproveMaintenanceJob,
+  runSelfImproveMaintenanceJobNow,
   spawnQueuedMemoryWorker,
 } from "./async-jobs.js";
 import { readSessionMetadata } from "../session/metadata.js";
@@ -116,10 +116,11 @@ function resolveFinalMessageCount(
   return state.finalMessages + 1;
 }
 
-type MemoryMaintenanceJobNowRunner = typeof runMemoryMaintenanceJobNow;
+type SelfImproveMaintenanceJobNowRunner =
+  typeof runSelfImproveMaintenanceJobNow;
 
 type SelfImproveModuleOptions = RinCapabilityOptions & {
-  runMemoryMaintenanceJobNow?: MemoryMaintenanceJobNowRunner;
+  runSelfImproveMaintenanceJobNow?: SelfImproveMaintenanceJobNowRunner;
 };
 
 type SelfImproveReviewOptions = {
@@ -154,14 +155,14 @@ async function enqueueSelfImproveReview(
 ) {
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
-  await enqueueMemoryMaintenanceJob(job);
+  await enqueueSelfImproveMaintenanceJob(job);
   spawnQueuedMemoryWorker(job.agentDir);
 }
 
 async function processSelfImproveReviewNow(
   ctx: any,
   opts: SelfImproveReviewOptions,
-  runner: MemoryMaintenanceJobNowRunner,
+  runner: SelfImproveMaintenanceJobNowRunner,
 ) {
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
@@ -178,9 +179,9 @@ async function processSelfImproveReviewNow(
 export default function selfImproveModule(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition {
-  const runMemoryMaintenanceNow =
-    (options as SelfImproveModuleOptions).runMemoryMaintenanceJobNow ||
-    runMemoryMaintenanceJobNow;
+  const runSelfImproveMaintenanceNow =
+    (options as SelfImproveModuleOptions).runSelfImproveMaintenanceJobNow ||
+    runSelfImproveMaintenanceJobNow;
   return {
     name: "self_improve",
     tools: [],
@@ -215,7 +216,7 @@ export default function selfImproveModule(
                 trigger: "self_improve:periodic_review",
                 snapshotKey: `review:${reviewFinalMessages}`,
               },
-              runMemoryMaintenanceNow,
+              runSelfImproveMaintenanceNow,
             );
           }
         },

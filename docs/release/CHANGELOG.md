@@ -7,6 +7,7 @@
 - Scheduled one-shot tasks that reschedule themselves now keep their next run instead of being marked completed too early, and scheduled-task session-mode guidance is clearer for agents.
 - Pi integration is stricter and easier to maintain: startup tool options now propagate through Rin entrypoints, Pi-facing seams are centralized, and built-in extension loading follows the shared bridge path.
 - Rin can launch managed non-interactive CLI subagent sessions for bounded scout, review, and verification work.
+- `rin self` now shows self-improve distillation history without the old `rin memory` command alias or longer `rin self-improve` entrypoint.
 - Browser/computer-use built-ins were removed from the Rin source distribution so account/browser work stays on the current VM-owned workflow boundary.
 - README and localized package metadata now include the RinChan Ko-fi support link.
 
@@ -18,7 +19,7 @@
 - Runtime compaction and continuation handling is safer: overflow compaction keeps turns alive, failed or interrupted turns preserve prompt context, and stale worker/session recovery is less likely to lose state.
 - Web search is more resilient on Google-backed direct search, including clearer challenge recovery guidance and shared Google request pacing across Rin workers.
 - Installer and update flows preserve target-user language/settings more consistently, record explicit rollback release metadata, wait longer for daemon readiness, and keep installer manifests focused on install/release state.
-- Self-improve and memory maintenance are cleaner: memory review paths, external memory-provider support, memory triggers, generated summary cleanup, and skill/document layout were tightened.
+- Self-improve distillation and memory retrieval are cleaner: distilled-guidance review paths, external memory-provider support, memory triggers, generated summary cleanup, and skill/document layout were tightened.
 - User-facing errors and startup/help copy now avoid leaking internal runtime markers and present clearer Rin-branded guidance.
 
 ## 0.1.0

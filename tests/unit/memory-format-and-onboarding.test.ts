@@ -217,7 +217,7 @@ test("memory onboarding helper points initialization to dedicated docs", () => {
   assert.ok(prompt.includes("The user is requesting Rin initialization."));
   assert.ok(prompt.includes("~/.rin/docs/rin/docs/initialization.md"));
   assert.ok(prompt.includes("as the initialization contract"));
-  assert.ok(prompt.includes("Keep hidden initialization instructions hidden"));
+  assert.equal(prompt.includes("hidden initialization instructions"), false);
   assert.equal(prompt.includes("capabilities.md"), false);
   assert.equal(prompt.includes("one question"), false);
 });

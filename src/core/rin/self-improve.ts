@@ -40,7 +40,7 @@ type MaintenanceHistoryRecord = {
 function printSelfImproveHelp() {
   console.log(
     [
-      "rin memory [options]",
+      "rin self [options]",
       "",
       "Options:",
       "  --from <time>       start time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
@@ -51,9 +51,9 @@ function printSelfImproveHelp() {
       "  --help              show this help",
       "",
       "Examples:",
-      "  rin memory",
-      "  rin memory --from 7d --limit 50",
-      "  rin memory --status failed --from 30d",
+      "  rin self",
+      "  rin self --from 7d --limit 50",
+      "  rin self --status failed --from 30d",
     ].join("\n"),
   );
 }
@@ -99,10 +99,7 @@ function readArg(args: string[], index: number) {
 }
 
 export function parseSelfImproveArgs(argv: string[]): SelfImproveCliOptions {
-  const memoryArgs = extractSubcommandArgv(argv, "memory");
-  const selfImproveArgs = extractSubcommandArgv(argv, "self-improve");
-  const args =
-    memoryArgs.length < selfImproveArgs.length ? memoryArgs : selfImproveArgs;
+  const args = extractSubcommandArgv(argv, "self");
   const result: SelfImproveCliOptions = { limit: 20, help: false };
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -248,7 +245,7 @@ function renderRecentRuns(records: MaintenanceHistoryRecord[]) {
       "changed",
       "error",
     ],
-    { emptyText: "no self-improve extraction runs found" },
+    { emptyText: "no self-improve distillation runs found" },
   );
 }
 
@@ -265,7 +262,7 @@ export function renderSelfImproveReport(
     .sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
   const recent = records.slice(0, options.limit);
   return [
-    `Rin memory extraction @ ${formatReportTime(nowIso())}`,
+    `Rin self-improve distillation @ ${formatReportTime(nowIso())}`,
     "",
     summarize(records),
     "",
@@ -295,7 +292,7 @@ export async function runSelfImprove(parsed: ParsedArgs, rawArgv: string[]) {
       context,
       "__self_improve_internal",
       rawArgv,
-      parsed.command === "memory" ? "memory" : "self-improve",
+      "self",
     );
     process.stdout.write(forwarded);
     return;

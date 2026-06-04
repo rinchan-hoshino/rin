@@ -1,12 +1,67 @@
 # Session Awareness
 
-Rin can run multiple agent sessions, workers, frontends, chat bridge turns, non-interactive CLI runs, and scheduled/background tasks at the same time. Your current turn is only one vantage point.
+Use this document when the current turn may overlap with other Rin sessions, workers, chat turns, non-interactive child runs, scheduled/background tasks, processes, worktrees, or repository activity.
 
-Use this guide when you need to know what other sessions did recently or are doing now, especially before editing shared files, claiming a task is idle, deleting worktrees, committing, rebasing, restarting services, or starting duplicate validation.
+Session awareness is a coordination contract. The agent identifies the shared boundary, finds the freshest owner evidence, chooses one writer for that boundary, and reports the coordination state before acting on shared or long-lived state.
 
-## What to check first
+## Prompt brief
 
-Start with low-risk inventory commands:
+Target surface:
+
+- Rin sessions and managed child sessions;
+- daemon workers and scheduled/background tasks;
+- chat-bound turns and message stores;
+- OS processes and generated artifacts;
+- repository branches, worktrees, commits, issues, and PRs;
+- installed-runtime files and services.
+
+Goal:
+
+- prevent duplicate, stale, or conflicting writes by identifying the active owner and freshest authoritative state for the boundary being touched.
+
+Trusted inputs:
+
+- `rin status` / `rin status --json`;
+- session files under `~/.rin/sessions/`;
+- scheduled task records and liveness state;
+- process lists, working directories, logs, and output files;
+- repository status, branches, worktrees, commits, and remotes;
+- platform metadata and stored chat records;
+- archived memory for older decisions and wording.
+
+Output contract:
+
+- boundary checked;
+- evidence surfaces inspected;
+- active or recent owner found;
+- coordination action chosen;
+- final writer or intentionally separate lane;
+- validation or next coordination step.
+
+## Success criteria
+
+Session-aware work is complete when:
+
+- the shared boundary is named before mutation;
+- recent and live owner evidence is checked for that boundary;
+- the chosen action uses the freshest authoritative state;
+- each write boundary has one responsible owner;
+- final reporting names surfaces checked, owner state, conflict state, and action taken.
+
+## Check triggers
+
+Use session awareness before work that touches shared or long-lived state:
+
+- editing repository files, rebasing, committing, pushing, or deleting worktrees;
+- claiming work is idle, complete, blocked, or still running;
+- starting duplicate validation, builds, tests, or background producers;
+- pausing, resuming, completing, deleting, or replacing scheduled tasks;
+- restarting services, updating installed runtimes, or changing daemon state;
+- answering from earlier conversation context, chat history, or another session's work.
+
+## Boundary inventory
+
+Start with low-risk state discovery:
 
 ```sh
 rin status
@@ -16,7 +71,7 @@ find ~/.rin/sessions -maxdepth 3 -type f | sort | tail -40
 ps -ef | grep -E 'rin|node|tsx|npm|git|gh' | grep -v grep
 ```
 
-Then inspect the target project:
+For repository work:
 
 ```sh
 git status --short
@@ -25,50 +80,81 @@ git worktree list
 git log --oneline --decorate -20
 ```
 
-If a command shows another active or recent owner of the same boundary, pause before making changes. Read enough state to avoid racing it, then coordinate through the durable issue, task, worktree, or chat record.
+Use these commands as an index. Follow up with the specific session file, task record, process working directory, log, commit, PR, or chat record that owns the boundary you are about to touch.
 
-## Find what other sessions did
+## Owner evidence map
 
-Use the source that matches the age and precision you need:
+Choose the evidence surface that matches the boundary:
 
-- **Archived prior sessions:** use `search_memory` when you need original context, evidence, chronology, or why a decision exists. Leave the query empty to browse recent archived sessions if you do not know the search terms yet.
-- **Recent stored sessions:** inspect `~/.rin/sessions/` when a session may be too recent to appear in memory or when you need the exact stored session file.
-- **Chat-bound work:** read the relevant chat bridge docs and stored chat paths when platform replies, quotes, or chat-session binding matter.
-- **Repository work:** inspect branches, worktrees, commits, uncommitted changes, and issue/PR comments before assuming a repository task is untouched.
-- **Scheduled/background work:** inspect scheduled task state before saying work will or will not continue after this turn.
+- **Archived memory:** original wording, evidence, chronology, older decisions, and cross-session rationale.
+- **Stored sessions:** recent exact session files and managed child-session records.
+- **Live daemon state:** workers, scheduled tasks, active/running state, and redacted prompt/command metadata.
+- **Processes:** command lines, working directories, logs, output files, and child-agent runs.
+- **Repositories:** branches, worktrees, commits, locks, uncommitted changes, remotes, issues, and PR comments.
+- **Scheduled/background tasks:** task records, active producer state, next run time, and last result/error.
+- **Chat-bound work:** platform sender metadata, message ids, reply/quote records, chat-session binding, and stored chat paths.
+- **Installed runtime:** manifests, service files, `app/current/`, release metadata, and daemon liveness.
 
-Do not treat memory summaries, old PRs, installed files, or a single worktree as complete proof. Prefer the freshest authoritative source for the boundary you are about to touch.
+## Coordination contract
 
-## Find what other sessions are doing now
+When another owner appears to touch the same boundary:
 
-Use live state for active work:
+1. Name the boundary: repository, branch, worktree, issue/PR, chat, task, service, runtime file, or generated artifact.
+2. Identify the freshest owner evidence: active process, session file, task record, log/output file, commit, PR comment, chat record, scheduler state, or service state.
+3. Choose the coordinating action:
+   - wait for the active owner;
+   - read more state;
+   - continue in a separate lane with a separate write boundary;
+   - adopt the existing lane with authority;
+   - report the conflict and stop at the coordination boundary.
+4. Preserve useful coordination evidence: process IDs, log paths, branch names, commits, task IDs, worktree paths, or rollback points.
+5. Assign one owner to each write boundary before making changes.
 
-- `rin status` / `rin status --json` for daemon and runtime state
-- `rin usage` for recent session/model activity
-- process listings for running `rin`, `node`, `tsx`, `npm`, `git`, `gh`, test, build, or validation processes
-- repository lock files, worktrees, and command output files for active source-control or validation work
-- scheduled task state for queued, running, paused, recurring, or skipped background jobs
+## Freshness contract
 
-A running process is evidence to investigate, not automatically the root cause or owner. Check its command, working directory, logs/output, and related session/task record when available.
+Use the freshest authoritative source for the boundary:
 
-## How to avoid conflicts
+- live process and daemon state for active work;
+- scheduler task record plus liveness check for background jobs;
+- current worktree and remote branch state for source work;
+- platform metadata and stored chat records for chat work;
+- install manifest, service file, and `app/current/` for installed-runtime work;
+- archived memory for older decisions, wording, and rationale.
 
-When another session or process appears to own the same work:
+Memory summaries, old PR comments, installed files, and a single checkout are leads. Promote a lead to authority only when it is the owning surface for the boundary.
 
-1. Identify the boundary: repository, branch, worktree, issue/PR, chat, scheduled task, service, or runtime file.
-2. Identify the freshest owner evidence: active process, session file, task record, issue/PR update, or recent commit.
-3. Avoid duplicate writes. Do not edit the same files, rebase the same branch, delete the same worktree, kill the same process, or publish the same release unless the owner explicitly asked you to take over.
-4. If takeover is needed, preserve evidence first: save logs, note process IDs, record branches/commits, and make rollback possible.
-5. If the safe action is unclear, report the conflict and the exact state you found instead of guessing.
+## Common boundary contracts
 
-## Reporting session-aware findings
+### Repository/source work
 
-Keep reports short and actionable:
+Check `git status --short`, current branch, worktrees, recent commits, and remote branch state. For shared branches or PRs, inspect recent comments, checks, and pushes before editing or claiming status.
 
-- what you checked
-- what other session/process/task activity exists, if any
-- whether it conflicts with the requested action
-- what you changed or intentionally did not change
-- what owner action or authority is needed, if any
+### Scheduled/background tasks
 
-Avoid dumping raw session files or logs. Quote only the minimum relevant lines and redact secrets.
+Read the task record and liveness state before pausing, resuming, completing, deleting, replacing, or claiming future work. Use `docs/scheduled-tasks.md` for task operations.
+
+### Non-interactive child runs
+
+Treat child output as evidence owned by the parent lane. Read child session files or JSON output, verify claims in the parent lane, then choose accepted edits or conclusions. Use `docs/non-interactive-cli.md` for delegation shape.
+
+### Chat-bound work
+
+Use platform metadata and stored chat records for sender identity, message ids, replies, quotes, and chat-session binding. Use `docs/chat-bridge.md` for chat storage and adapter surfaces.
+
+### Installed runtime work
+
+Use `docs/runtime-layout.md` to identify the active installed runtime, target user, manifest, service, and `app/current/` before update, rollback, restart, or installed-file inspection.
+
+## Report contract
+
+Report session-aware findings in operational terms:
+
+- boundary checked;
+- surfaces inspected;
+- active or recent owners found;
+- conflict status;
+- coordinating action taken;
+- writer chosen or separate lane used;
+- authority, blocker, or next coordination step.
+
+Quote only the minimum relevant log/session lines needed to identify the boundary and owner.
