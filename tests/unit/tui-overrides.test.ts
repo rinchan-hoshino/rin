@@ -31,6 +31,9 @@ const loaderModule = await import(
 );
 const piTuiModule = await import("@earendil-works/pi-tui");
 const codingAgentModule = await import("@earendil-works/pi-coding-agent");
+const todoModule = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href
+);
 const themeModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "pi", "private-api.js")).href
 );
@@ -93,6 +96,43 @@ async function writeTuiSessionRecord(agentDir, options) {
   );
   return sessionPath;
 }
+
+test("todo pending call renderer shows checklist state instead of a blank row", async () => {
+  themeModule.initTheme("dark", false);
+
+  const todoTool = todoModule.default().tools[0];
+  const component = new codingAgentModule.ToolExecutionComponent(
+    "todo",
+    "todo-call-1",
+    { action: "add", text: "Wire core todo" },
+    {},
+    todoTool,
+    { requestRender() {}, stopped: false },
+    rootDir,
+  );
+
+  const initialRender = component.render(80).join("\n");
+  assert.match(initialRender, /○ No todos/);
+  assert.doesNotMatch(initialRender, /Wire core todo|add/);
+
+  component.markExecutionStarted();
+  assert.match(component.render(80).join("\n"), /○ No todos/);
+  component.setArgsComplete();
+  assert.match(component.render(80).join("\n"), /○ No todos/);
+
+  const result = await todoTool.execute(
+    "todo-call-1",
+    { action: "add", text: "Wire core todo" },
+    undefined,
+    undefined,
+    {},
+  );
+  component.updateResult({ ...result, isError: false }, false);
+
+  const settledRender = component.render(80).join("\n");
+  assert.doesNotMatch(settledRender, /○ No todos/);
+  assert.equal(settledRender.match(/Wire core todo/g)?.length, 1);
+});
 
 test("todo tool coalescing hides earlier consecutive checklist results", () => {
   const todoComponent = (toolCallId: string, hidden = false) => ({

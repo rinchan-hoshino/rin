@@ -7,12 +7,7 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import {
-  Container,
-  matchesKey,
-  Text,
-  truncateToWidth,
-} from "@earendil-works/pi-tui";
+import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type {
   RinCapabilityDefinition,
@@ -375,8 +370,9 @@ export default function todoCapability(): RinCapabilityDefinition {
       }
     },
 
-    renderCall(_args: any, _theme, _context) {
-      return new Container();
+    renderCall(_args: any, theme, context) {
+      if (context?.isPartial === false) return renderTodoText("");
+      return renderTodoText(formatTodoChecklistRender(todos, false, theme));
     },
 
     renderResult(result, { expanded }, theme, _context) {
