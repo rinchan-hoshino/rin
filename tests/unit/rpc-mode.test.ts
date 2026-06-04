@@ -253,6 +253,7 @@ test(
     const handlers = new Map();
     const lines = [];
     let boundUiContext;
+    let boundMode;
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -272,6 +273,7 @@ test(
         agent: { waitForIdle: async () => {} },
         bindExtensions: async (bindings) => {
           boundUiContext = bindings.uiContext;
+          boundMode = bindings.mode;
         },
         subscribe: () => () => {},
         modelRegistry: { getAvailable: async () => [] },
@@ -316,6 +318,7 @@ test(
       });
       await wait(0);
       assert.equal(typeof boundUiContext?.confirm, "function");
+      assert.equal(boundMode, "rpc");
 
       const confirmation = boundUiContext.confirm("Confirm", "Proceed?");
       await wait(0);

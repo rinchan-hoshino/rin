@@ -790,7 +790,8 @@ function applyRinPromptBuilder(session: any) {
   };
   session[LAZY_SYSTEM_PROMPT_STATE_KEY] = state;
 
-  replacePiSessionSystemPromptRebuilder(session, () => {
+  replacePiSessionSystemPromptRebuilder(session, (toolNames: string[] = []) => {
+    originalRebuild(Array.isArray(toolNames) ? toolNames : []);
     if (!state.materialized) return "";
     return readPiSessionBaseSystemPrompt(session);
   });

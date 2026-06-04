@@ -182,6 +182,24 @@ test("buildFinalAppSystemPrompt injects configured language from settings", asyn
   assert.ok(finalSystemPrompt.includes("Preferred language: zh_CN"));
 });
 
+test("Pi system prompt options track Rin lazy prompt tool changes", async (t) => {
+  const cwd = makeTempDir(t, "rin-prompt-options-cwd-");
+  const agentDir = makeTempDir(t, "rin-prompt-options-agent-");
+
+  const { session, runtime } = await runtimeMod.createConfiguredAgentSession({
+    cwd,
+    agentDir,
+  });
+  session.setActiveToolsByName(["read"]);
+
+  const options = session._extensionRunner
+    .createCommandContext()
+    .getSystemPromptOptions();
+  assert.deepEqual(options.selectedTools, ["read"]);
+  assert.equal(String(session._baseSystemPrompt || ""), "");
+  await runtime.dispose();
+});
+
 test("system prompt stays frozen until reload", async (t) => {
   const cwd = makeTempDir(t, "rin-frozen-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-frozen-prompt-agent-");

@@ -188,10 +188,30 @@ Verified excerpts:
 
 > “Put most tool-specific guidance in the tool descriptions themselves: what the tool does, when to use it, required inputs, side effects, retry safety, and common error modes.”
 
+> “Drop the current date. The model is already aware of the current UTC date.”
+
+> “Codex can apply the recommended changes in this guide with the OpenAI Docs Skill”
+
 Use in Rin prompt work:
 
 - For GPT-5.5 migrations, reduce the prompt stack first, then add only measured controls.
 - Move tool-specific behavior into tool descriptions when the platform supports it.
+- Treat current-date removal as model-specific GPT-5.5 migration advice; preserve Rin's runtime date unless the target prompt surface and evals show it is unnecessary.
+
+### OpenAI Docs Skill candidate
+
+Source: `https://github.com/openai/skills/tree/main/skills/.curated/openai-docs`
+
+Verified excerpts:
+
+> “This skill also owns model selection, API model migration, and prompt-upgrade guidance.”
+
+> “For model-selection, "latest model", or default-model questions, fetch `https://developers.openai.com/api/docs/guides/latest-model.md` first.”
+
+Use in Rin prompt work:
+
+- Treat `openai-docs` as first-party OpenAI-specific prompt-upgrade guidance, not as a provider-neutral prompt-engineer replacement.
+- Do not mirror or install it in place of Rin's own prompt skill or the community `prompt-engineer` mirror without product direction.
 
 ### Structured outputs
 

@@ -862,6 +862,7 @@ export async function runCustomRpcMode(
     repairProviderInvalidToolResultEntries(session);
     await session.bindExtensions({
       uiContext: createExtensionUiContext(),
+      mode: "rpc",
       commandContextActions: {
         waitForIdle: () => getSession().agent.waitForIdle(),
         newSession: async (options) => {
