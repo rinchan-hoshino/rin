@@ -453,6 +453,11 @@ export async function attachRinCapabilitiesToSession(
   if (originalReload) {
     session.reload = async (...args: any[]) => {
       const result = await originalReload(...args);
+      attachRinCapabilityExtensionBridge(session, capabilitySet);
+      capabilitySet.setUIContext(getPiSessionExtensionUIContext(session));
+      capabilitySet.bindCommandContext(
+        getPiSessionExtensionCommandContextActions(session),
+      );
       await emitSessionStart(capabilitySet, "reload");
       return result;
     };

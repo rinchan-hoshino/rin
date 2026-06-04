@@ -412,6 +412,113 @@ test("Rin 85% provider preflight calls Pi overflow auto-compaction before the pr
   );
 });
 
+test("Rin provider preflight ignores stale assistant usage kept after compaction", async () => {
+  const calls: string[] = [];
+  const staleAssistant = {
+    role: "assistant",
+    content: [{ type: "toolCall", name: "bash" }],
+    stopReason: "toolUse",
+    timestamp: 1000,
+    usage: { totalTokens: 900 },
+  };
+  const messages = [
+    { role: "compactionSummary", summary: "summary", timestamp: 2000 },
+    staleAssistant,
+    { role: "toolResult", content: "fresh output" },
+  ];
+  const session: any = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1000 },
+    get isCompacting() {
+      return false;
+    },
+    agent: {
+      state: { messages },
+      transformContext: async (nextMessages: any[]) => nextMessages,
+    },
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: session.agent.state.messages };
+      },
+    },
+    async _runAutoCompaction(reason: string, willRetry: boolean) {
+      calls.push(`${reason}:${willRetry}`);
+      return true;
+    },
+  };
+
+  runtimeMod.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: (nextMessages: any[]) => ({
+      tokens: nextMessages.some((message) => message.usage?.totalTokens === 900)
+        ? 900
+        : 10,
+    }),
+  });
+
+  assert.equal(await session.agent.transformContext(messages), messages);
+  assert.deepEqual(calls, []);
+});
+
+test("Rin provider preflight still uses post-compaction assistant usage", async () => {
+  const calls: string[] = [];
+  const messages = [
+    { role: "compactionSummary", summary: "summary", timestamp: 2000 },
+    {
+      role: "assistant",
+      content: "new tool use",
+      stopReason: "toolUse",
+      timestamp: 3000,
+      usage: { totalTokens: 900 },
+    },
+    { role: "toolResult", content: "fresh output" },
+  ];
+  const compactedMessages = [{ role: "user", content: "kept" }];
+  const session: any = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1000 },
+    get isCompacting() {
+      return false;
+    },
+    agent: {
+      state: { messages },
+      transformContext: async (nextMessages: any[]) => nextMessages,
+    },
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: session.agent.state.messages };
+      },
+    },
+    async _runAutoCompaction(reason: string, willRetry: boolean) {
+      calls.push(`${reason}:${willRetry}`);
+      this.agent.state.messages = compactedMessages;
+      return true;
+    },
+  };
+
+  runtimeMod.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: (nextMessages: any[]) => ({
+      tokens: nextMessages.some((message) => message.usage?.totalTokens === 900)
+        ? 900
+        : 10,
+    }),
+  });
+
+  const loopMessages = messages.slice();
+  const providerMessages = await session.agent.transformContext(loopMessages);
+
+  assert.deepEqual(calls, ["overflow:true"]);
+  assert.deepEqual(loopMessages, compactedMessages);
+  assert.equal(providerMessages, compactedMessages);
+});
+
 test("Rin 85% provider preflight can run again after a new tail message", async () => {
   const calls: string[] = [];
   const firstTail = { role: "toolResult", content: "first huge output" };

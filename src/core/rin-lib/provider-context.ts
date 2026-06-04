@@ -45,6 +45,50 @@ export function normalizeContextTokenEstimate(estimate: any) {
   return Number.isFinite(tokens) ? tokens : 0;
 }
 
+function readMessageTimestampMs(message: any) {
+  const timestamp = message?.timestamp;
+  if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+    return timestamp;
+  }
+  if (typeof timestamp === "string" && timestamp.trim()) {
+    const parsed = Date.parse(timestamp);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function findLatestCompactionSummaryTimestamp(messages: any[]) {
+  let latest = 0;
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (String(message?.role || "") !== "compactionSummary") continue;
+    const timestamp = readMessageTimestampMs(message);
+    if (timestamp && timestamp > latest) latest = timestamp;
+  }
+  return latest;
+}
+
+export function stripStaleAssistantUsageAfterCompaction(messages: any[]) {
+  const latestCompactionTimestamp =
+    findLatestCompactionSummaryTimestamp(messages);
+  if (!latestCompactionTimestamp) return messages;
+
+  let changed = false;
+  const sanitized = messages.map((message) => {
+    if (String(message?.role || "") !== "assistant" || !message?.usage) {
+      return message;
+    }
+    const timestamp = readMessageTimestampMs(message);
+    if (!timestamp || timestamp > latestCompactionTimestamp) return message;
+
+    const rest = { ...message };
+    delete rest.usage;
+    changed = true;
+    return rest;
+  });
+
+  return changed ? sanitized : messages;
+}
+
 export function estimateProviderBoundContextTokens(
   messages: any[],
   estimateContextTokens: EstimateContextTokens | undefined,
@@ -55,5 +99,9 @@ export function estimateProviderBoundContextTokens(
     messages || [],
     options,
   );
-  return normalizeContextTokenEstimate(estimateContextTokens(providerMessages));
+  return normalizeContextTokenEstimate(
+    estimateContextTokens(
+      stripStaleAssistantUsageAfterCompaction(providerMessages),
+    ),
+  );
 }

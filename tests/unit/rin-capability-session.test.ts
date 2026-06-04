@@ -209,3 +209,80 @@ test("Rin compaction hooks are exposed through Pi's native before-compact span",
   assert.deepEqual(result, { rinResult: true });
   assert.equal(session._extensionRunner.hasHandlers("session_shutdown"), false);
 });
+
+test("Rin capability bridge is reattached to Pi extension runner after reload", async () => {
+  const calls: string[] = [];
+  const capabilitySet = capabilitySession.createRinCapabilitySet({
+    cwd: "/tmp/rin-capability-session-test",
+    agentDir: "/tmp/rin-capability-session-test",
+    definitions: [
+      {
+        name: "demo_context_after_reload",
+        hooks: {
+          context: [
+            async (event: any) => {
+              calls.push(`rin:${event.messages[0].content}`);
+              return {
+                messages: [
+                  ...event.messages,
+                  { role: "system", content: "rin" },
+                ],
+              };
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const makeRunner = (label: string) => ({
+    hasHandlers(eventName: string) {
+      calls.push(`${label}-has:${eventName}`);
+      return false;
+    },
+    async emit(event: any) {
+      calls.push(`${label}-emit:${event.type}`);
+      return undefined;
+    },
+    async emitContext(messages: any[]) {
+      calls.push(`${label}-context:${messages[0].content}`);
+      return messages;
+    },
+    getRegisteredCommands() {
+      return [];
+    },
+  });
+
+  const session = {
+    _extensionRunner: makeRunner("before"),
+    async reload() {
+      calls.push("reload");
+      this._extensionRunner = makeRunner("after");
+    },
+    subscribe() {
+      return () => {};
+    },
+  };
+
+  await capabilitySession.attachRinCapabilitiesToSession(session, {
+    capabilitySet,
+  });
+
+  calls.length = 0;
+  await session.reload();
+  assert.equal(session._extensionRunner.hasHandlers("context"), true);
+  const result = await session._extensionRunner.emitContext([
+    { role: "user", content: "raw" },
+  ]);
+
+  assert.deepEqual(calls, [
+    "reload",
+    "after-has:context",
+    "after-context:raw",
+    "rin:raw",
+  ]);
+  assert.deepEqual(result, [
+    { role: "user", content: "raw" },
+    { role: "system", content: "rin" },
+  ]);
+});
