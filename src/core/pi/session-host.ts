@@ -8,11 +8,13 @@ type AnyFn = (...args: any[]) => any;
 
 const PI_SESSION_PRIVATE = {
   baseSystemPrompt: "_baseSystemPrompt",
+  baseSystemPromptOptions: "_baseSystemPromptOptions",
   buildIndex: "_buildIndex",
   checkCompaction: "_checkCompaction",
   emit: "_emit",
   extensionCommandContextActions: "_extensionCommandContextActions",
   extensionRunner: "_extensionRunner",
+  extensionMode: "_extensionMode",
   extensionShutdownHandler: "_extensionShutdownHandler",
   extensionUIContext: "_extensionUIContext",
   getCompactionRequestAuth: "_getCompactionRequestAuth",
@@ -42,12 +44,38 @@ function replaceMethod(target: any, key: string, replacement: AnyFn) {
   return true;
 }
 
+export type PiExtensionMode = "tui" | "rpc" | "json" | "print";
+
+const PI_EXTENSION_MODES = new Set<PiExtensionMode>([
+  "tui",
+  "rpc",
+  "json",
+  "print",
+]);
+
+function normalizePiExtensionMode(value: unknown): PiExtensionMode {
+  const text = String(value || "").trim();
+  return PI_EXTENSION_MODES.has(text as PiExtensionMode)
+    ? (text as PiExtensionMode)
+    : "print";
+}
+
 export function readPiSessionBaseSystemPrompt(session: any) {
   return String(
     session?.[PI_SESSION_PRIVATE.baseSystemPrompt] ||
       session?.agent?.state?.systemPrompt ||
       "",
   );
+}
+
+export function readPiSessionBaseSystemPromptOptions(
+  session: any,
+  fallbackCwd = "",
+) {
+  const value = session?.[PI_SESSION_PRIVATE.baseSystemPromptOptions];
+  if (value && typeof value === "object") return value;
+  const cwd = String(fallbackCwd || "").trim();
+  return cwd ? { cwd } : {};
 }
 
 export function writePiSessionBaseSystemPrompt(
@@ -181,6 +209,13 @@ export function emitPiSessionEvent(session: any, event: any) {
 
 export function getPiExtensionRunner(session: any) {
   return session?.[PI_SESSION_PRIVATE.extensionRunner];
+}
+
+export function getPiSessionExtensionMode(session: any): PiExtensionMode {
+  return normalizePiExtensionMode(
+    session?.[PI_SESSION_PRIVATE.extensionMode] ??
+      getPiExtensionRunner(session)?.mode,
+  );
 }
 
 export function shutdownPiSessionExtensionHost(session: any) {

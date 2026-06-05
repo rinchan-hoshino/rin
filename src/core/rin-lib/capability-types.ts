@@ -3,6 +3,8 @@ import type { RinFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.
 
 export type RinHookHandler = (event: any, ctx: any) => Promise<any> | any;
 
+export type RinCapabilityMode = "tui" | "rpc" | "json" | "print";
+
 export type RinCapabilityOptions = {
   readonly cwd: string;
   readonly agentDir: string;
@@ -20,6 +22,7 @@ export type RinCapabilityDefinition = {
 
 export type RinCapabilityContext = {
   ui: any;
+  mode: RinCapabilityMode;
   hasUI: boolean;
   cwd: string;
   agentDir: string;

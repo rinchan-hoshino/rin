@@ -109,6 +109,48 @@ test("Rin context hooks transform provider-bound messages after Pi emitContext",
   ]);
 });
 
+test("Rin capability context exposes Pi extension mode and prompt options", async () => {
+  const capabilitySet = capabilitySession.createRinCapabilitySet({
+    cwd: "/tmp/rin-capability-session-test",
+    agentDir: "/tmp/rin-capability-session-test",
+    definitions: [],
+  });
+  const session = {
+    _baseSystemPromptOptions: {
+      cwd: "/tmp/rin-capability-session-test",
+      tools: ["read"],
+    },
+    _extensionMode: "rpc",
+    _extensionRunner: {
+      hasHandlers() {
+        return false;
+      },
+      async emit() {
+        return undefined;
+      },
+      getRegisteredCommands() {
+        return [];
+      },
+    },
+    subscribe() {
+      return () => {};
+    },
+  };
+
+  await capabilitySession.attachRinCapabilitiesToSession(session, {
+    capabilitySet,
+  });
+
+  assert.equal(capabilitySet.createContext().mode, "rpc");
+  assert.deepEqual(
+    capabilitySet.createCommandContext().getSystemPromptOptions(),
+    {
+      cwd: "/tmp/rin-capability-session-test",
+      tools: ["read"],
+    },
+  );
+});
+
 test("Rin compaction hook errors propagate instead of falling back to Pi summarization", async () => {
   const recorded: any[] = [];
   const capabilitySet = capabilitySession.createRinCapabilitySet({

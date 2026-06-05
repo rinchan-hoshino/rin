@@ -3,6 +3,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type {
   RinCapabilityContext,
   RinCapabilityDefinition,
+  RinCapabilityMode,
   RinHookHandler,
 } from "./capability-types.js";
 import { normalizeStringList } from "../text-utils.js";
@@ -12,7 +13,9 @@ import {
 } from "../pi/internal-extension-bridge.js";
 import {
   getPiSessionExtensionCommandContextActions,
+  getPiSessionExtensionMode,
   getPiSessionExtensionUIContext,
+  readPiSessionBaseSystemPromptOptions,
   refreshPiSessionToolRegistry,
   shutdownPiSessionExtensionHost,
 } from "../pi/session-host.js";
@@ -51,6 +54,7 @@ type ContextActions = {
   getContextUsage: () => any;
   compact: (options?: any) => void;
   getSystemPrompt: () => string;
+  getSystemPromptOptions: () => any;
 };
 
 type CommandContextActions = {
@@ -72,7 +76,7 @@ export type RinCapabilitySet = {
     coreActions?: Partial<CoreActions>,
     contextActions?: Partial<ContextActions>,
   ) => void;
-  setUIContext: (uiContext?: any) => void;
+  setUIContext: (uiContext?: any, mode?: RinCapabilityMode) => void;
   bindCommandContext: (actions?: Partial<CommandContextActions>) => void;
   hasHandlers: (eventName: string) => boolean;
   emit: (event: any) => Promise<any>;
@@ -101,6 +105,20 @@ const noOpUIContext = {
   setEditorComponent: () => {},
 };
 
+const RIN_CAPABILITY_MODES = new Set<RinCapabilityMode>([
+  "tui",
+  "rpc",
+  "json",
+  "print",
+]);
+
+function normalizeCapabilityMode(value: unknown): RinCapabilityMode {
+  const text = String(value || "").trim();
+  return RIN_CAPABILITY_MODES.has(text as RinCapabilityMode)
+    ? (text as RinCapabilityMode)
+    : "print";
+}
+
 const noOpCoreActions: CoreActions = {
   sendMessage: () => {},
   emitEvent: () => {},
@@ -128,6 +146,7 @@ const noOpContextActions: ContextActions = {
   getContextUsage: () => undefined,
   compact: () => {},
   getSystemPrompt: () => "",
+  getSystemPromptOptions: () => ({}),
 };
 
 const noOpCommandContextActions: CommandContextActions = {
@@ -157,6 +176,7 @@ export function createRinCapabilitySet(options: {
   const handlers = new Map<string, RinHookHandler[]>();
   const tools = new Map<string, RegisteredTool>();
   let uiContext: any = noOpUIContext;
+  let mode: RinCapabilityMode = "print";
   let coreActions: CoreActions = noOpCoreActions;
   let contextActions: ContextActions = noOpContextActions;
   let commandContextActions: CommandContextActions = noOpCommandContextActions;
@@ -165,6 +185,7 @@ export function createRinCapabilitySet(options: {
     const getModel = contextActions.getModel;
     return {
       ui: uiContext,
+      mode,
       hasUI: uiContext !== noOpUIContext,
       cwd: options.cwd,
       agentDir: options.agentDir,
@@ -207,8 +228,9 @@ export function createRinCapabilitySet(options: {
       coreActions = { ...noOpCoreActions, ...(core || {}) };
       contextActions = { ...noOpContextActions, ...(context || {}) };
     },
-    setUIContext(nextUiContext?: any) {
+    setUIContext(nextUiContext?: any, nextMode?: RinCapabilityMode) {
       uiContext = nextUiContext || noOpUIContext;
+      mode = normalizeCapabilityMode(nextMode);
     },
     bindCommandContext(actions?: Partial<CommandContextActions>) {
       commandContextActions = {
@@ -241,6 +263,7 @@ export function createRinCapabilitySet(options: {
     createCommandContext() {
       return {
         ...createContext(),
+        getSystemPromptOptions: () => contextActions.getSystemPromptOptions(),
         waitForIdle: () => commandContextActions.waitForIdle(),
         newSession: (sessionOptions?: any) =>
           commandContextActions.newSession(sessionOptions),
@@ -385,9 +408,14 @@ function bindCapabilitySetToSession(
         })();
       },
       getSystemPrompt: () => session.systemPrompt,
+      getSystemPromptOptions: () =>
+        readPiSessionBaseSystemPromptOptions(session, capabilitySet.cwd),
     },
   );
-  capabilitySet.setUIContext(getPiSessionExtensionUIContext(session));
+  capabilitySet.setUIContext(
+    getPiSessionExtensionUIContext(session),
+    getPiSessionExtensionMode(session),
+  );
   capabilitySet.bindCommandContext(
     getPiSessionExtensionCommandContextActions(session),
   );
@@ -454,7 +482,10 @@ export async function attachRinCapabilitiesToSession(
     session.reload = async (...args: any[]) => {
       const result = await originalReload(...args);
       attachRinCapabilityExtensionBridge(session, capabilitySet);
-      capabilitySet.setUIContext(getPiSessionExtensionUIContext(session));
+      capabilitySet.setUIContext(
+        getPiSessionExtensionUIContext(session),
+        getPiSessionExtensionMode(session),
+      );
       capabilitySet.bindCommandContext(
         getPiSessionExtensionCommandContextActions(session),
       );

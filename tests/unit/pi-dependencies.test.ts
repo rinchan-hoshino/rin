@@ -95,7 +95,7 @@ test("Pi session private members stay behind Rin's session host", () => {
     "src/core/pi/internal-extension-bridge.ts",
   ]);
   const memberPattern =
-    /(?:\.|\[\s*["'])_(?:baseSystemPrompt|buildIndex|checkCompaction|emit|extensionCommandContextActions|extensionRunner|extensionShutdownHandler|extensionUIContext|getCompactionRequestAuth|persist|rebuildSystemPrompt|refreshToolRegistry|resourceLoader|rewriteFile|runAutoCompaction|toolPromptGuidelines|toolPromptSnippets|toolRegistry)\b/;
+    /(?:\.|\[\s*["'])_(?:baseSystemPrompt|baseSystemPromptOptions|buildIndex|checkCompaction|emit|extensionCommandContextActions|extensionMode|extensionRunner|extensionShutdownHandler|extensionUIContext|getCompactionRequestAuth|persist|rebuildSystemPrompt|refreshToolRegistry|resourceLoader|rewriteFile|runAutoCompaction|toolPromptGuidelines|toolPromptSnippets|toolRegistry)\b/;
   const violations: string[] = [];
   for (const filePath of listSourceFiles(path.join(rootDir, "src", "core"))) {
     const relative = relativePath(filePath);
