@@ -58,5 +58,8 @@ Use this checklist to review a prompt rewrite before calling it done.
 
 - Remove repeated, stale, contradictory, or non-operative instructions.
 - Keep the smallest prompt that preserves the product contract.
-- Do not add a technique unless it is tied to the goal, provider guidance, or eval result.
+- Positive-instruction check: the prompt describes what the agent should do. It describes what the agent should not do only for strict forbidden zones such as safety, permission, credential/data boundaries, irreversible side effects, or owner-defined hard exclusions.
+- Patch-like edit check: no sentence contains a phrase that visibly reads as appended after the fact and can be removed without changing executable behavior. Rewrite the sentence around the owned behavior, evidence, decision rule, or output; remove the phrase when no behavior remains.
+- Review behavior rather than keyword absence; a prompt can still be patch-like after every "not" or "avoid" token is removed.
+- Add a technique only when it is tied to the goal, provider guidance, or eval result.
 - Keep long source quotes, examples, and templates in references rather than bloating the runtime prompt.

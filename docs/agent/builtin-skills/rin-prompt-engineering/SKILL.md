@@ -63,9 +63,13 @@ Use detailed step-by-step process only when the exact path is part of the produc
 
 When rewriting a prompt, produce the canonical target prompt rather than a list of fixes to the old prompt. The result should read as the prompt to use next, not commentary about how the old prompt changed.
 
-### Prefer positive, direct instructions
+A patch-like edit is a phrase that visibly reads as appended after the fact and can be removed without changing executable behavior. When one appears, rewrite the sentence around the behavior, evidence, decision rule, or output it should own; if no behavior remains, remove the phrase.
 
-Describe the intended behavior, evidence use, boundaries, and output directly. Use negative constraints only for true forbidden actions, safety or permission boundaries, instruction/data boundaries, or recurring failure modes the model must avoid.
+### Write positive, direct instructions
+
+Positive instruction means the prompt describes what the agent should do. Describe what the agent should not do only for strict forbidden zones: safety, permission, credential/data boundaries, irreversible side effects, or owner-defined hard exclusions.
+
+Review by behavior rather than keyword absence. A valid forbidden-zone boundary may contain words such as "not" or "avoid", and a prompt can remain patch-like after those words are removed.
 
 ### Separate instructions from data
 
