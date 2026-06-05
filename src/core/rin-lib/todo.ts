@@ -5,7 +5,6 @@
  * branches reconstruct the todo list that belongs to that branch.
  */
 
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -20,25 +19,31 @@ export interface Todo {
   done: boolean;
 }
 
+type TodoDetailsAction = "write" | "list" | "add" | "toggle" | "clear";
+
 interface TodoDetails {
-  action: "list" | "add" | "toggle" | "clear";
+  action: TodoDetailsAction;
   todos: Todo[];
   nextId: number;
   error?: string;
 }
 
+const TodoItemParams: any = Type.Object({
+  text: Type.String({
+    description: "Checklist item as a concrete branch-execution action.",
+  }),
+  done: Type.Optional(
+    Type.Boolean({
+      description: "Whether this checklist item is completed.",
+    }),
+  ),
+});
+
 const TodoParams: any = Type.Object({
-  action: StringEnum(["list", "add", "toggle", "clear"] as const),
-  text: Type.Optional(
-    Type.String({
-      description: "Checklist item as a concrete branch-execution action.",
-    }),
-  ),
-  id: Type.Optional(
-    Type.Number({
-      description: "Checklist item ID whose completion state changes.",
-    }),
-  ),
+  todos: Type.Array(TodoItemParams, {
+    description:
+      "Complete ordered checklist for the current branch. This replaces all previous todos; include every item that should remain.",
+  }),
 });
 
 function normalizeTodoId(value: unknown): number | undefined {
@@ -51,7 +56,8 @@ function normalizeTodoId(value: unknown): number | undefined {
   return Number.isSafeInteger(id) ? id : undefined;
 }
 
-const TODO_ACTIONS = new Set<TodoDetails["action"]>([
+const TODO_ACTIONS = new Set<TodoDetailsAction>([
+  "write",
   "list",
   "add",
   "toggle",
@@ -71,6 +77,23 @@ function normalizeNextTodoId(todoList: Todo[], value: unknown) {
   const next = Number(value);
   if (Number.isSafeInteger(next) && next > 0) return next;
   return Math.max(0, ...todoList.map((todo) => todo.id)) + 1;
+}
+
+function normalizeTodoWriteItems(value: unknown): Todo[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const nextTodos: Todo[] = [];
+  for (const item of value) {
+    const record = item && typeof item === "object" ? (item as any) : null;
+    const text = typeof record?.text === "string" ? record.text.trim() : "";
+    if (!text) return undefined;
+    nextTodos.push({
+      id: nextTodos.length + 1,
+      text,
+      done: Boolean(record.done),
+    });
+  }
+  return nextTodos;
 }
 
 function readTodoDetails(value: unknown): TodoDetails | undefined {
@@ -222,7 +245,7 @@ export default function todoCapability(): RinCapabilityDefinition {
   let nextId = 1;
 
   const snapshot = (
-    action: TodoDetails["action"],
+    action: TodoDetailsAction,
     error?: string,
   ): TodoDetails => ({
     action,
@@ -251,127 +274,51 @@ export default function todoCapability(): RinCapabilityDefinition {
     name: "todo",
     label: "Checklist",
     description:
-      "Maintain the current branch execution checklist: planned, active, and completed work.",
+      "Replace the current branch execution checklist with a complete ordered list.",
     promptSnippet:
-      "Maintain the current branch checklist: add concrete actions, list state, toggle completed work, or clear retired checklists.",
+      "Rewrite the current branch checklist in one call by passing the complete desired todos array.",
     promptGuidelines: [
       "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
+      "Always pass the complete desired checklist; omitted items are removed. Use an empty todos array to clear the checklist.",
     ],
     parameters: TodoParams,
 
     async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
-      switch (params.action) {
-        case "list":
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: formatTodoChecklistContent(todos),
-              },
-            ],
-            details: snapshot("list"),
-          };
-
-        case "add": {
-          if (!params.text) {
-            return {
-              content: [
-                { type: "text" as const, text: "Error: text required for add" },
-              ],
-              details: snapshot("add", "text required"),
-            };
-          }
-          const newTodo: Todo = {
-            id: nextId++,
-            text: params.text,
-            done: false,
-          };
-          todos.push(newTodo);
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: formatTodoChecklistContent(todos),
-              },
-            ],
-            details: snapshot("add"),
-          };
-        }
-
-        case "toggle": {
-          if (params.id === undefined) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: "Error: id required for toggle",
-                },
-              ],
-              details: snapshot("toggle", "id required"),
-            };
-          }
-          const id = normalizeTodoId(params.id);
-          if (id === undefined) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: "Error: id must be a todo number for toggle",
-                },
-              ],
-              details: snapshot("toggle", "id must be a todo number"),
-            };
-          }
-          const todo = todos.find((item) => item.id === id);
-          if (!todo) {
-            return {
-              content: [
-                { type: "text" as const, text: `Todo #${id} not found` },
-              ],
-              details: snapshot("toggle", `#${id} not found`),
-            };
-          }
-          todo.done = !todo.done;
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: formatTodoChecklistContent(todos),
-              },
-            ],
-            details: snapshot("toggle"),
-          };
-        }
-
-        case "clear": {
-          todos = [];
-          nextId = 1;
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: formatTodoChecklistContent(todos),
-              },
-            ],
-            details: snapshot("clear"),
-          };
-        }
-
-        default:
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Unknown action: ${params.action}`,
-              },
-            ],
-            details: snapshot("list", `unknown action: ${params.action}`),
-          };
+      const nextTodos = normalizeTodoWriteItems(params.todos);
+      if (!nextTodos) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "Error: todos must be a complete array of non-empty todo items",
+            },
+          ],
+          details: snapshot(
+            "write",
+            "todos must be a complete array of non-empty todo items",
+          ),
+        };
       }
+
+      todos = nextTodos;
+      nextId = normalizeNextTodoId(todos, undefined);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: formatTodoChecklistContent(todos),
+          },
+        ],
+        details: snapshot("write"),
+      };
     },
 
-    renderCall(_args: any, _theme, _context) {
-      return renderTodoText("");
+    renderCall(args: any, theme, context) {
+      if (context?.isPartial === false) return renderTodoText("");
+      const nextTodos = normalizeTodoWriteItems(args?.todos);
+      return renderTodoText(
+        nextTodos ? formatTodoChecklistRender(nextTodos, false, theme) : "",
+      );
     },
 
     renderResult(result, { expanded }, theme, _context) {

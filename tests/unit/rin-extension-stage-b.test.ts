@@ -149,63 +149,52 @@ test("core todo loads from configured runtime without extension paths", async ()
       assert.ok(todoTool);
       assert.equal(
         todoTool.description,
-        "Maintain the current branch execution checklist: planned, active, and completed work.",
+        "Replace the current branch execution checklist with a complete ordered list.",
       );
-      assert.match(
-        todoTool.promptSnippet,
-        /Maintain the current branch checklist/,
-      );
+      assert.match(todoTool.promptSnippet, /complete desired todos array/);
       assert.deepEqual(todoTool.promptGuidelines, [
         "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
+        "Always pass the complete desired checklist; omitted items are removed. Use an empty todos array to clear the checklist.",
       ]);
 
-      const added = await todoTool.execute(
+      const written = await todoTool.execute(
         "tool-call-1",
-        { action: "add", text: "Wire core todo" },
+        { todos: [{ text: "Wire core todo" }] },
         undefined,
         undefined,
         { cwd: agentDir },
       );
-      const toggled = await todoTool.execute(
+      const rewritten = await todoTool.execute(
         "tool-call-2",
-        { action: "toggle", id: 1 },
-        undefined,
-        undefined,
-        { cwd: agentDir },
-      );
-      const toggledFromStringId = await todoTool.execute(
-        "tool-call-3",
-        { action: "toggle", id: "1" },
-        undefined,
-        undefined,
-        { cwd: agentDir },
-      );
-      const listed = await todoTool.execute(
-        "tool-call-4",
-        { action: "list" },
+        {
+          todos: [
+            { text: "Wire core todo", done: true },
+            { text: "Ship whole-list writer" },
+          ],
+        },
         undefined,
         undefined,
         { cwd: agentDir },
       );
       const cleared = await todoTool.execute(
-        "tool-call-5",
-        { action: "clear" },
+        "tool-call-3",
+        { todos: [] },
         undefined,
         undefined,
         { cwd: agentDir },
       );
 
-      assert.equal(added.content[0].text, "○ Wire core todo");
-      assert.equal(toggled.content[0].text, "✓ Wire core todo");
-      assert.deepEqual(toggled.details.todos, [
+      assert.equal(written.content[0].text, "○ Wire core todo");
+      assert.equal(
+        rewritten.content[0].text,
+        "✓ Wire core todo\n○ Ship whole-list writer",
+      );
+      assert.deepEqual(rewritten.details.todos, [
         { id: 1, text: "Wire core todo", done: true },
+        { id: 2, text: "Ship whole-list writer", done: false },
       ]);
-      assert.equal(toggledFromStringId.content[0].text, "○ Wire core todo");
-      assert.deepEqual(toggledFromStringId.details.todos, [
-        { id: 1, text: "Wire core todo", done: false },
-      ]);
-      assert.equal(listed.content[0].text, "○ Wire core todo");
       assert.equal(cleared.content[0].text, "○ No todos");
+      assert.deepEqual(cleared.details.todos, []);
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});
     }
@@ -257,15 +246,18 @@ test("core todo reconstructs around interrupted todo tool results", async () => 
     },
   } as any);
 
-  const listed = await todoTool.execute(
-    "tool-call-list",
-    { action: "list" },
+  const invalidWrite = await todoTool.execute(
+    "tool-call-invalid-write",
+    { todos: [{ text: "" }] },
     undefined,
     undefined,
     {},
   );
 
-  assert.equal(listed.content[0].text, "○ Preserve todo state");
+  assert.match(invalidWrite.content[0].text, /Error:/);
+  assert.deepEqual(invalidWrite.details.todos, [
+    { id: 1, text: "Preserve todo state", done: false },
+  ]);
 });
 
 test("core todo remains enabled when optional extensions are disabled", async () => {

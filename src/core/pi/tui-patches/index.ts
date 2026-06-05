@@ -71,11 +71,6 @@ const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "sending",
   "compacting",
 ]);
-const TODO_TOOL_COALESCE_EVENTS = new Set([
-  "tool_execution_start",
-  "tool_execution_end",
-  "agent_end",
-]);
 
 class RinStartupExpandableText extends Text {
   constructor(
@@ -306,68 +301,6 @@ function stripClearScrollback(data: string) {
   return data.includes(CLEAR_SCROLLBACK_SEQUENCE)
     ? data.split(CLEAR_SCROLLBACK_SEQUENCE).join("")
     : data;
-}
-
-function isTodoToolComponent(component: any) {
-  return String(component?.toolName || "") === "todo";
-}
-
-function isTodoOnlyAssistantComponent(component: any) {
-  const message = component?.lastMessage;
-  if (!message || message.role !== "assistant") return false;
-  const content = Array.isArray(message.content) ? message.content : [];
-  return (
-    content.length > 0 &&
-    content.every(
-      (part: any) =>
-        part?.type === "toolCall" && String(part?.name || "") === "todo",
-    )
-  );
-}
-
-function setTodoToolComponentHidden(component: any, hidden: boolean) {
-  if (!isTodoToolComponent(component)) return false;
-  if (component.hideComponent === hidden) return false;
-  component.invalidate?.();
-  component.hideComponent = hidden;
-  return true;
-}
-
-export function coalesceTodoToolComponentsInContainer(container: any) {
-  const children = Array.isArray(container?.children) ? container.children : [];
-  let changed = 0;
-  let run: any[] = [];
-
-  const flush = () => {
-    const todoComponents = run.filter(isTodoToolComponent);
-    if (todoComponents.length > 0) {
-      const settledTodoComponents = todoComponents.filter((component) =>
-        Boolean(component?.result),
-      );
-      const lastSettled = settledTodoComponents.at(-1);
-      for (const component of todoComponents) {
-        if (setTodoToolComponentHidden(component, component !== lastSettled)) {
-          changed += 1;
-        }
-      }
-    }
-    run = [];
-  };
-
-  for (const child of children) {
-    if (isTodoToolComponent(child) || isTodoOnlyAssistantComponent(child)) {
-      run.push(child);
-    } else {
-      flush();
-    }
-  }
-  flush();
-
-  return changed;
-}
-
-function shouldCoalesceTodoAfterEvent(event: any) {
-  return TODO_TOOL_COALESCE_EVENTS.has(String(event?.type || ""));
 }
 
 function clearCurrentSessionRenderState(instance: any) {
@@ -1349,26 +1282,6 @@ export async function applyRinTuiOverrides() {
       };
   }
 
-  const originalRenderSessionContext =
-    interactiveModeProto?.renderSessionContext;
-  if (typeof originalRenderSessionContext === "function") {
-    interactiveModeProto.renderSessionContext =
-      function renderSessionContextWithTodoCoalescing(
-        sessionContext: any,
-        options = {},
-      ) {
-        const result = originalRenderSessionContext.call(
-          this,
-          sessionContext,
-          options,
-        );
-        if (coalesceTodoToolComponentsInContainer(this.chatContainer) > 0) {
-          this.ui?.requestRender?.();
-        }
-        return result;
-      };
-  }
-
   const originalRebindCurrentSession =
     interactiveModeProto?.rebindCurrentSession;
   if (typeof originalRebindCurrentSession === "function") {
@@ -1501,16 +1414,9 @@ export async function applyRinTuiOverrides() {
       stopRpcTransportStatusComponent(this);
       await originalHandleEvent.call(this, event);
 
-      const todoCoalesced = shouldCoalesceTodoAfterEvent(event)
-        ? coalesceTodoToolComponentsInContainer(this.chatContainer)
-        : 0;
-
       syncRpcFrontendStatus(this);
       if (shouldReapplyLocalPiLoader) {
         syncLocalPiLoader(this);
-      }
-      if (todoCoalesced > 0) {
-        this.ui?.requestRender?.();
       }
     };
   }

@@ -85,10 +85,15 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.equal(baseSystemPrompt.includes("- save_prompts:"), false);
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
-  assert.ok(baseSystemPrompt.includes("Maintain the current branch checklist"));
+  assert.ok(baseSystemPrompt.includes("Rewrite the current branch checklist"));
   assert.ok(
     baseSystemPrompt.includes(
       "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Always pass the complete desired checklist; omitted items are removed",
     ),
   );
   assert.equal(

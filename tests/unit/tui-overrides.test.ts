@@ -31,9 +31,6 @@ const loaderModule = await import(
 );
 const piTuiModule = await import("@earendil-works/pi-tui");
 const codingAgentModule = await import("@earendil-works/pi-coding-agent");
-const todoModule = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href
-);
 const themeModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "pi", "private-api.js")).href
 );
@@ -96,124 +93,6 @@ async function writeTuiSessionRecord(agentDir, options) {
   );
   return sessionPath;
 }
-
-test("todo pending tool component stays hidden until result coalesces", () => {
-  themeModule.initTheme("dark", false);
-
-  const todoTool = todoModule.default().tools[0];
-  const previous = new codingAgentModule.ToolExecutionComponent(
-    "todo",
-    "todo-call-previous",
-    { action: "add", text: "Existing item" },
-    {},
-    todoTool,
-    { requestRender() {}, stopped: false },
-    rootDir,
-  );
-  previous.updateResult(
-    {
-      content: [{ type: "text", text: "" }],
-      details: {
-        action: "add",
-        todos: [{ id: 1, text: "Existing item", done: false }],
-        nextId: 2,
-      },
-      isError: false,
-    },
-    false,
-  );
-
-  const pending = new codingAgentModule.ToolExecutionComponent(
-    "todo",
-    "todo-call-pending",
-    { action: "add", text: "Wire core todo" },
-    {},
-    todoTool,
-    { requestRender() {}, stopped: false },
-    rootDir,
-  );
-  pending.markExecutionStarted();
-  pending.setArgsComplete();
-
-  const container = new piTuiModule.Container();
-  container.addChild(previous);
-  container.addChild(pending);
-  overrides.coalesceTodoToolComponentsInContainer(container);
-
-  assert.match(previous.render(80).join("\n"), /Existing item/);
-  assert.deepEqual(pending.render(80), []);
-
-  pending.updateResult(
-    {
-      content: [{ type: "text", text: "" }],
-      details: {
-        action: "add",
-        todos: [
-          { id: 1, text: "Existing item", done: false },
-          { id: 2, text: "Wire core todo", done: false },
-        ],
-        nextId: 3,
-      },
-      isError: false,
-    },
-    false,
-  );
-  overrides.coalesceTodoToolComponentsInContainer(container);
-
-  assert.deepEqual(previous.render(80), []);
-  const settledRender = pending.render(80).join("\n");
-  assert.doesNotMatch(settledRender, /No todos|Updating checklist/);
-  assert.equal(settledRender.match(/Wire core todo/g)?.length, 1);
-});
-
-test("todo tool coalescing hides earlier consecutive checklist results", () => {
-  const todoComponent = (toolCallId: string, hidden = false) => ({
-    toolName: "todo",
-    toolCallId,
-    result: { content: [], details: {} },
-    hideComponent: hidden,
-    invalidations: 0,
-    invalidate() {
-      this.invalidations += 1;
-    },
-  });
-  const todoOnlyAssistant = {
-    lastMessage: {
-      role: "assistant",
-      content: [{ type: "toolCall", name: "todo" }],
-    },
-  };
-  const textAssistant = {
-    lastMessage: {
-      role: "assistant",
-      content: [{ type: "text", text: "visible assistant text" }],
-    },
-  };
-
-  const first = todoComponent("todo-1");
-  const second = todoComponent("todo-2");
-  const third = todoComponent("todo-3");
-  const fourth = todoComponent("todo-4", true);
-
-  const changed = overrides.coalesceTodoToolComponentsInContainer({
-    children: [
-      first,
-      todoOnlyAssistant,
-      second,
-      textAssistant,
-      third,
-      todoOnlyAssistant,
-      fourth,
-      { toolName: "bash" },
-    ],
-  });
-
-  assert.equal(changed, 3);
-  assert.equal(first.hideComponent, true);
-  assert.equal(second.hideComponent, false);
-  assert.equal(third.hideComponent, true);
-  assert.equal(fourth.hideComponent, false);
-});
 
 test("terminal title override shows only session name", async () => {
   await overrides.applyRinTuiOverrides();

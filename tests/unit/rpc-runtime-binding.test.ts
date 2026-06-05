@@ -348,18 +348,22 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", () =>
   assert.equal(todoTool.renderShell, undefined);
 
   const todoCall = todoTool
-    .renderCall({ action: "add", text: "Wire core todo" }, theme, renderContext)
+    .renderCall(
+      { todos: [{ text: "Wire core todo", done: false }] },
+      theme,
+      renderContext,
+    )
     .render(80)
     .join("\n");
-  assert.equal(todoCall, "");
-  assert.doesNotMatch(todoCall, /Checklist|No todos|add|Wire core todo/);
+  assert.match(todoCall, /○ Wire core todo/);
+  assert.doesNotMatch(todoCall, /Checklist|add|toggle/);
 
   const todoResultLines = todoTool
     .renderResult(
       {
         content: [{ type: "text", text: "" }],
         details: {
-          action: "toggle",
+          action: "write",
           todos: [
             { id: 1, text: "Wire core todo", done: false },
             { id: 2, text: "Ship renderer", done: true },

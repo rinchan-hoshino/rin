@@ -2218,7 +2218,7 @@ test(
               role: "toolResult",
               toolName: "todo",
               details: {
-                action: "list",
+                action: "write",
                 todos: [{ id: 1, text: "unfinished work", done: false }],
                 nextId: 2,
               },
