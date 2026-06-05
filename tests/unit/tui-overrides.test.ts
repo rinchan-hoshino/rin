@@ -112,6 +112,70 @@ test("terminal title override shows only session name", async () => {
   assert.equal(title, "Rin - demo");
 });
 
+test("shutdown resume hint uses rin command name", async () => {
+  await overrides.applyRinTuiOverrides();
+  await withTempDir(async (dir) => {
+    const sessionId = "019e8caf-eeca-79c8-bf3d-a9603adceae2";
+    const sessionFile = path.join(dir, `${sessionId}.jsonl`);
+    await fs.writeFile(sessionFile, "{}\n");
+
+    const writes = [];
+    const originalWrite = process.stdout.write;
+    const originalExit = process.exit;
+    const originalIsTTY = process.stdout.isTTY;
+    Object.defineProperty(process.stdout, "isTTY", {
+      value: true,
+      configurable: true,
+    });
+    process.stdout.write = function write(chunk, ...args) {
+      writes.push(
+        typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
+      );
+      const callback = args.find((arg) => typeof arg === "function");
+      callback?.();
+      return true;
+    };
+    process.exit = ((code) => {
+      throw new Error(`exit:${code}`);
+    }) as never;
+
+    try {
+      await assert.rejects(
+        codingAgentModule.InteractiveMode.prototype.shutdown.call({
+          isShuttingDown: false,
+          unregisterSignalHandlers() {},
+          ui: { terminal: { async drainInput() {} } },
+          stop() {},
+          runtimeHost: { async dispose() {} },
+          sessionManager: {
+            isPersisted: () => true,
+            getSessionFile: () => sessionFile,
+            usesDefaultSessionDir: () => false,
+            getSessionDir: () => dir,
+            getSessionId: () => sessionId,
+          },
+        }),
+        /exit:0/,
+      );
+    } finally {
+      process.stdout.write = originalWrite;
+      process.exit = originalExit;
+      Object.defineProperty(process.stdout, "isTTY", {
+        value: originalIsTTY,
+        configurable: true,
+      });
+    }
+
+    const output = writes.join("");
+    assert.match(output, /To resume this session:/);
+    assert.ok(
+      output.includes(`rin --session-dir ${dir} --session ${sessionId}`),
+      output,
+    );
+    assert.doesNotMatch(output, /(^|\s)pi --session-dir/);
+  });
+});
+
 test("startup header override replaces upstream Pi branding with Rin", async () => {
   await overrides.applyRinTuiOverrides();
 

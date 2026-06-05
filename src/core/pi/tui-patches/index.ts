@@ -96,6 +96,91 @@ function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
 }
 
+const RESUME_SESSION_PROMPT_TEXT = "To resume this session:";
+const ANSI_ESCAPE_CHAR = "\u001b";
+
+function skipAnsiEscapeSequence(text: string, start: number) {
+  if (text[start] !== ANSI_ESCAPE_CHAR || text[start + 1] !== "[") {
+    return start;
+  }
+  let index = start + 2;
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+    if (code >= 0x40 && code <= 0x7e) return index + 1;
+    index += 1;
+  }
+  return start;
+}
+
+function skipAnsiAndWhitespace(text: string, start: number) {
+  let index = start;
+  while (index < text.length) {
+    const char = text[index];
+    if (/\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+    const nextIndex = skipAnsiEscapeSequence(text, index);
+    if (nextIndex !== index) {
+      index = nextIndex;
+      continue;
+    }
+    break;
+  }
+  return index;
+}
+
+export function rewriteRinResumeCommandOutput(chunk: unknown) {
+  if (typeof chunk !== "string") return chunk;
+
+  let output = chunk;
+  let searchFrom = 0;
+  while (searchFrom < output.length) {
+    const promptIndex = output.indexOf(RESUME_SESSION_PROMPT_TEXT, searchFrom);
+    if (promptIndex < 0) break;
+
+    const commandStart = skipAnsiAndWhitespace(
+      output,
+      promptIndex + RESUME_SESSION_PROMPT_TEXT.length,
+    );
+    const nextChar = output[commandStart + 2];
+    if (
+      output.startsWith("pi", commandStart) &&
+      (nextChar === undefined || /\s/.test(nextChar))
+    ) {
+      output = `${output.slice(0, commandStart)}rin${output.slice(commandStart + 2)}`;
+      searchFrom = commandStart + 3;
+      continue;
+    }
+
+    searchFrom = promptIndex + RESUME_SESSION_PROMPT_TEXT.length;
+  }
+  return output;
+}
+
+async function withRinResumeCommandOutput<T>(operation: () => T | Promise<T>) {
+  const stdout = process.stdout as any;
+  const originalWrite = stdout?.write;
+  if (typeof originalWrite !== "function") return await operation();
+
+  stdout.write = function writeWithRinResumeCommand(
+    chunk: unknown,
+    ...args: any[]
+  ) {
+    return originalWrite.call(
+      this,
+      rewriteRinResumeCommandOutput(chunk),
+      ...args,
+    );
+  };
+
+  try {
+    return await operation();
+  } finally {
+    stdout.write = originalWrite;
+  }
+}
+
 function currentRuntimeModeLabel() {
   const role = getRinTuiRuntimeRole();
   if (role === RIN_TUI_RPC_FRONTEND_ROLE) return "daemon";
@@ -1198,6 +1283,17 @@ export async function applyRinTuiOverrides() {
           sessionName ? `Rin - ${sessionName}` : "Rin",
         );
       };
+  }
+
+  const originalShutdown = interactiveModeProto?.shutdown;
+  if (typeof originalShutdown === "function") {
+    interactiveModeProto.shutdown = async function shutdownWithRinResumeCommand(
+      ...args: any[]
+    ) {
+      return await withRinResumeCommandOutput(() =>
+        originalShutdown.apply(this, args),
+      );
+    };
   }
 
   const originalRun = interactiveModeProto?.run;
