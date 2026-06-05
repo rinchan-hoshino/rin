@@ -71,7 +71,11 @@ const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "sending",
   "compacting",
 ]);
-const TODO_TOOL_COALESCE_EVENTS = new Set(["tool_execution_end", "agent_end"]);
+const TODO_TOOL_COALESCE_EVENTS = new Set([
+  "tool_execution_start",
+  "tool_execution_end",
+  "agent_end",
+]);
 
 class RinStartupExpandableText extends Text {
   constructor(
@@ -337,9 +341,12 @@ export function coalesceTodoToolComponentsInContainer(container: any) {
   const flush = () => {
     const todoComponents = run.filter(isTodoToolComponent);
     if (todoComponents.length > 0) {
-      const last = todoComponents[todoComponents.length - 1];
+      const settledTodoComponents = todoComponents.filter((component) =>
+        Boolean(component?.result),
+      );
+      const lastSettled = settledTodoComponents.at(-1);
       for (const component of todoComponents) {
-        if (setTodoToolComponentHidden(component, component !== last)) {
+        if (setTodoToolComponentHidden(component, component !== lastSettled)) {
           changed += 1;
         }
       }

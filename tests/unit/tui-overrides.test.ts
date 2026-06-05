@@ -97,40 +97,72 @@ async function writeTuiSessionRecord(agentDir, options) {
   return sessionPath;
 }
 
-test("todo pending call renderer shows checklist state instead of a blank row", async () => {
+test("todo pending tool component stays hidden until result coalesces", () => {
   themeModule.initTheme("dark", false);
 
   const todoTool = todoModule.default().tools[0];
-  const component = new codingAgentModule.ToolExecutionComponent(
+  const previous = new codingAgentModule.ToolExecutionComponent(
     "todo",
-    "todo-call-1",
+    "todo-call-previous",
+    { action: "add", text: "Existing item" },
+    {},
+    todoTool,
+    { requestRender() {}, stopped: false },
+    rootDir,
+  );
+  previous.updateResult(
+    {
+      content: [{ type: "text", text: "" }],
+      details: {
+        action: "add",
+        todos: [{ id: 1, text: "Existing item", done: false }],
+        nextId: 2,
+      },
+      isError: false,
+    },
+    false,
+  );
+
+  const pending = new codingAgentModule.ToolExecutionComponent(
+    "todo",
+    "todo-call-pending",
     { action: "add", text: "Wire core todo" },
     {},
     todoTool,
     { requestRender() {}, stopped: false },
     rootDir,
   );
+  pending.markExecutionStarted();
+  pending.setArgsComplete();
 
-  const initialRender = component.render(80).join("\n");
-  assert.match(initialRender, /○ No todos/);
-  assert.doesNotMatch(initialRender, /Wire core todo|add/);
+  const container = new piTuiModule.Container();
+  container.addChild(previous);
+  container.addChild(pending);
+  overrides.coalesceTodoToolComponentsInContainer(container);
 
-  component.markExecutionStarted();
-  assert.match(component.render(80).join("\n"), /○ No todos/);
-  component.setArgsComplete();
-  assert.match(component.render(80).join("\n"), /○ No todos/);
+  assert.match(previous.render(80).join("\n"), /Existing item/);
+  assert.deepEqual(pending.render(80), []);
 
-  const result = await todoTool.execute(
-    "todo-call-1",
-    { action: "add", text: "Wire core todo" },
-    undefined,
-    undefined,
-    {},
+  pending.updateResult(
+    {
+      content: [{ type: "text", text: "" }],
+      details: {
+        action: "add",
+        todos: [
+          { id: 1, text: "Existing item", done: false },
+          { id: 2, text: "Wire core todo", done: false },
+        ],
+        nextId: 3,
+      },
+      isError: false,
+    },
+    false,
   );
-  component.updateResult({ ...result, isError: false }, false);
+  overrides.coalesceTodoToolComponentsInContainer(container);
 
-  const settledRender = component.render(80).join("\n");
-  assert.doesNotMatch(settledRender, /○ No todos/);
+  assert.deepEqual(previous.render(80), []);
+  const settledRender = pending.render(80).join("\n");
+  assert.doesNotMatch(settledRender, /No todos|Updating checklist/);
   assert.equal(settledRender.match(/Wire core todo/g)?.length, 1);
 });
 
@@ -138,6 +170,7 @@ test("todo tool coalescing hides earlier consecutive checklist results", () => {
   const todoComponent = (toolCallId: string, hidden = false) => ({
     toolName: "todo",
     toolCallId,
+    result: { content: [], details: {} },
     hideComponent: hidden,
     invalidations: 0,
     invalidate() {

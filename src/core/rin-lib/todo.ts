@@ -370,9 +370,8 @@ export default function todoCapability(): RinCapabilityDefinition {
       }
     },
 
-    renderCall(_args: any, theme, context) {
-      if (context?.isPartial === false) return renderTodoText("");
-      return renderTodoText(formatTodoChecklistRender(todos, false, theme));
+    renderCall(_args: any, _theme, _context) {
+      return renderTodoText("");
     },
 
     renderResult(result, { expanded }, theme, _context) {
