@@ -1,11 +1,12 @@
 // Centralized access to Pi implementation details that Rin still needs while
-// keeping Pi as an npm dependency. Code outside src/core/pi should not import
-// node_modules/@earendil-works/pi-coding-agent/dist directly.
+// keeping Pi as an npm dependency. Prefer public Pi exports when available;
+// code outside src/core/pi should not import node_modules/@earendil-works/
+// pi-coding-agent/dist directly.
 
+export { initTheme } from "@earendil-works/pi-coding-agent";
 export { APP_NAME } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/config.js";
 export { formatKeyText } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/keybinding-hints.js";
 export {
-  initTheme,
   onThemeChange,
   theme,
 } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";

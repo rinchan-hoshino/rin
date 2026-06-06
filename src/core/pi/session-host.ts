@@ -116,7 +116,8 @@ export function getPiSessionPromptToolState(session: any, toolNames: string[]) {
 }
 
 export function getPiSessionResourcePromptState(session: any) {
-  const resourceLoader = session?.[PI_SESSION_PRIVATE.resourceLoader];
+  const resourceLoader =
+    session?.resourceLoader ?? session?.[PI_SESSION_PRIVATE.resourceLoader];
   const appendSystemPrompt = resourceLoader?.getAppendSystemPrompt?.();
   const skills = resourceLoader?.getSkills?.()?.skills;
   const agentsFiles = resourceLoader?.getAgentsFiles?.()?.agentsFiles;
@@ -208,13 +209,15 @@ export function emitPiSessionEvent(session: any, event: any) {
 }
 
 export function getPiExtensionRunner(session: any) {
-  return session?.[PI_SESSION_PRIVATE.extensionRunner];
+  return (
+    session?.extensionRunner ?? session?.[PI_SESSION_PRIVATE.extensionRunner]
+  );
 }
 
 export function getPiSessionExtensionMode(session: any): PiExtensionMode {
+  const runner = getPiExtensionRunner(session);
   return normalizePiExtensionMode(
-    session?.[PI_SESSION_PRIVATE.extensionMode] ??
-      getPiExtensionRunner(session)?.mode,
+    runner?.mode ?? session?.[PI_SESSION_PRIVATE.extensionMode],
   );
 }
 
