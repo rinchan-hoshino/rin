@@ -38,6 +38,7 @@ export type RinCapabilityContext = {
   getContextUsage: () => any;
   compact: (options?: any) => void;
   getSystemPrompt: () => string;
+  getSystemPromptOptions: () => any;
   getThinkingLevel: () => ThinkingLevel;
   emitEvent: (event: any) => void;
 };

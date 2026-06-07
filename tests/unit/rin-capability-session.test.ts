@@ -141,7 +141,12 @@ test("Rin capability context exposes Pi extension mode and prompt options", asyn
     capabilitySet,
   });
 
-  assert.equal(capabilitySet.createContext().mode, "rpc");
+  const context = capabilitySet.createContext();
+  assert.equal(context.mode, "rpc");
+  assert.deepEqual(context.getSystemPromptOptions(), {
+    cwd: "/tmp/rin-capability-session-test",
+    tools: ["read"],
+  });
   assert.deepEqual(
     capabilitySet.createCommandContext().getSystemPromptOptions(),
     {

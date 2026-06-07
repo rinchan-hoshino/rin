@@ -206,6 +206,7 @@ export function createRinCapabilitySet(options: {
       getContextUsage: () => contextActions.getContextUsage(),
       compact: (compactOptions?: any) => contextActions.compact(compactOptions),
       getSystemPrompt: () => contextActions.getSystemPrompt(),
+      getSystemPromptOptions: () => contextActions.getSystemPromptOptions(),
       getThinkingLevel: () => coreActions.getThinkingLevel(),
       emitEvent: (event: any) => coreActions.emitEvent(event),
     };
