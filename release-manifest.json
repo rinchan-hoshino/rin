@@ -51,10 +51,10 @@
     "promotedFromBetaVersion": "0.2.0-beta.20260601"
   },
   "beta": {
-    "version": "0.2.0-beta.20260601",
-    "archiveUrl": "https://github.com/rinchan-hoshino/rin/archive/fe2fd94b7f693403a650121c100e22e75357332b.tar.gz",
-    "ref": "fe2fd94b7f693403a650121c100e22e75357332b",
-    "promotionVersion": "0.2.0"
+    "version": "0.3.0-beta.20260608",
+    "archiveUrl": "https://github.com/rinchan-hoshino/rin/archive/2a5cf703bf62e6d4dd0268b30e86185065274802.tar.gz",
+    "ref": "2a5cf703bf62e6d4dd0268b30e86185065274802",
+    "promotionVersion": "0.3.0"
   },
   "nightly": {
     "version": "0.3.0-nightly.20260606+c3cc2e6",
