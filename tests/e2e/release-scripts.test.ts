@@ -143,14 +143,14 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
     assert.equal(next.beta.promotionVersion, "1.2.4");
     assert.equal(
       next.beta.archiveUrl,
-      "https://github.com/rinchan-hoshino/rin/archive/deadbeef.tar.gz",
+      "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/deadbeef",
     );
     assert.equal(next.nightly.version, "1.2.5-nightly.20260420+deadbee");
     assert.equal(next.nightly.ref, "deadbeef");
     assert.equal(next.nightly.branch, "main");
     assert.equal(
       next.nightly.archiveUrl,
-      "https://github.com/rinchan-hoshino/rin/archive/deadbeef.tar.gz",
+      "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/deadbeef",
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

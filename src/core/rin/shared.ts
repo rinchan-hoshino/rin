@@ -43,6 +43,7 @@ import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import {
   type ReleaseChannel,
   type ResolvedRelease,
+  buildGitHubRefArchiveUrl,
   getReleaseRepoUrl,
   loadReleaseManifestForNetwork,
   resolveReleaseRequest,
@@ -413,6 +414,7 @@ function resolveGitCommitForRelease(
       const shortHash = hash.slice(0, 12);
       return {
         ...release,
+        archiveUrl: buildGitHubRefArchiveUrl(repoUrl, hash),
         version: shortHash,
         ref: hash,
         sourceLabel: `${release.sourceLabel} @ ${shortHash}`,

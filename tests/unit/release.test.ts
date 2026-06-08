@@ -237,6 +237,16 @@ test("resolveReleaseRequest resolves stable beta nightly and git sources", () =>
     "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-1.2.3.tgz",
   );
 
+  const gitBranchResolved = release.resolveReleaseRequest(manifest, {
+    channel: "git",
+  });
+  assert.equal(gitBranchResolved.channel, "git");
+  assert.equal(gitBranchResolved.ref, "main");
+  assert.equal(
+    gitBranchResolved.archiveUrl,
+    "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/refs/heads/main",
+  );
+
   const gitResolved = release.resolveReleaseRequest(manifest, {
     channel: "git",
     version: "deadbeef",
@@ -245,7 +255,7 @@ test("resolveReleaseRequest resolves stable beta nightly and git sources", () =>
   assert.equal(gitResolved.ref, "deadbeef");
   assert.equal(
     gitResolved.archiveUrl,
-    "https://github.com/rinchan-hoshino/rin/archive/deadbeef.tar.gz",
+    "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/deadbeef",
   );
 });
 

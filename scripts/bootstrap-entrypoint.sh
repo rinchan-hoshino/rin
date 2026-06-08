@@ -354,11 +354,32 @@ const fs = require('node:fs');
 const [manifestPath, repoArg, packageArg, channelArg, branchArg, versionArg, bootstrapBranchArg] = process.argv.slice(2);
 const safeString = (value) => (value == null ? '' : String(value));
 const trimValue = (value) => safeString(value).trim();
-const repoUrl = trimValue(repoArg || 'https://github.com/rinchan-hoshino/rin').replace(/\.git$/i, '');
+const repoUrl = trimValue(repoArg || 'https://github.com/rinchan-hoshino/rin').replace(/\.git$/i, '').replace(/\/+$/g, '');
 const packageName = trimValue(packageArg || '@hoshinorin/rin');
 const channel = trimValue(channelArg || 'stable').toLowerCase() || 'stable';
 const branch = trimValue(branchArg);
 const version = trimValue(versionArg);
+const encodePath = (value) => String(value || 'main').split('/').map(encodeURIComponent).join('/');
+const githubCodeloadRepoPath = (value) => {
+  const normalized = trimValue(value).replace(/\.git$/i, '').replace(/\/+$/g, '');
+  const sshMatch = /^git@github\.com:([^/]+)\/([^/]+)$/i.exec(normalized);
+  if (sshMatch && sshMatch[1] && sshMatch[2]) return [sshMatch[1], sshMatch[2]].map(encodeURIComponent).join('/');
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.hostname.toLowerCase() !== 'github.com') return '';
+    const [owner, repo] = parsed.pathname.split('/').filter(Boolean);
+    if (!owner || !repo) return '';
+    return [owner, repo].map(encodeURIComponent).join('/');
+  } catch {
+    return '';
+  }
+};
+const buildRefArchiveUrlForRepo = (repo, ref) => {
+  const normalizedRepo = trimValue(repo).replace(/\.git$/i, '').replace(/\/+$/g, '');
+  const encodedRef = encodePath(ref);
+  const codeloadRepo = githubCodeloadRepoPath(normalizedRepo);
+  return codeloadRepo ? `https://codeload.github.com/${codeloadRepo}/tar.gz/${encodedRef}` : `${normalizedRepo}/archive/${encodedRef}.tar.gz`;
+};
 const buildNpmTarballUrl = (name, releaseVersion) => {
   const encodedName = encodeURIComponent(name || '@hoshinorin/rin');
   const fileBase = String(name || '@hoshinorin/rin').split('/').pop();
@@ -380,13 +401,13 @@ const defaultManifest = {
   },
   beta: {
     version: '0.1.0-beta.0',
-    archiveUrl: `${repoUrl}/archive/refs/heads/main.tar.gz`,
+    archiveUrl: buildRefArchiveUrlForRepo(repoUrl, 'refs/heads/main'),
     ref: 'main',
     promotionVersion: '0.1.0',
   },
   nightly: {
     version: '0.1.0-nightly.0',
-    archiveUrl: `${repoUrl}/archive/refs/heads/main.tar.gz`,
+    archiveUrl: buildRefArchiveUrlForRepo(repoUrl, 'refs/heads/main'),
     ref: 'main',
     branch: 'main',
   },
@@ -399,10 +420,10 @@ let manifest = defaultManifest;
 try {
   manifest = { ...defaultManifest, ...JSON.parse(fs.readFileSync(manifestPath, 'utf8')) };
 } catch {}
-const releaseRepoUrl = trimValue(manifest.repoUrl || repoUrl).replace(/\.git$/i, '');
+const releaseRepoUrl = trimValue(manifest.repoUrl || repoUrl).replace(/\.git$/i, '').replace(/\/+$/g, '');
 const releasePackageName = trimValue(manifest.packageName || packageName) || '@hoshinorin/rin';
-const buildRefArchiveUrl = (ref) => `${releaseRepoUrl}/archive/${String(ref || 'main').split('/').map(encodeURIComponent).join('/')}.tar.gz`;
-const buildBranchArchiveUrl = (name) => `${releaseRepoUrl}/archive/refs/heads/${String(name || 'main').split('/').map(encodeURIComponent).join('/')}.tar.gz`;
+const buildRefArchiveUrl = (ref) => buildRefArchiveUrlForRepo(releaseRepoUrl, ref);
+const buildBranchArchiveUrl = (name) => buildRefArchiveUrlForRepo(releaseRepoUrl, `refs/heads/${name || 'main'}`);
 const shellEscape = (value) => `'${String(value ?? '').replace(/'/g, `"'"'"'`)}'`;
 let resolved;
 if (branch && version) throw new Error('rin_release_branch_and_version_conflict');
