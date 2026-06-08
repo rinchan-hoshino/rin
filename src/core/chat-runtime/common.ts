@@ -222,10 +222,134 @@ export function fileUrl(filePath: string) {
   return pathToFileURL(path.resolve(filePath)).href;
 }
 
+function resolveLocalMediaPath(src: string) {
+  if (!src) return "";
+  if (src.startsWith("file://")) return fileURLToPath(src);
+  if (/^https?:\/\//i.test(src)) return "";
+  return path.resolve(src);
+}
+
+function mediaNameFromSource(src: string) {
+  const localPath = resolveLocalMediaPath(src);
+  if (localPath) return path.basename(localPath);
+  try {
+    const url = new URL(src);
+    return /^https?:$/i.test(url.protocol) ? path.basename(url.pathname) : "";
+  } catch {
+    return "";
+  }
+}
+
+export type StageChatMediaFromNodeOptions = {
+  cacheDir: string;
+  consumerDir?: string;
+  fallbackName?: string;
+  fallbackMimeType?: string;
+  type?: string;
+};
+
+let nextStagedChatMediaId = 1;
+
+function stagedChatMediaPath(cacheDir: string, fileName: string) {
+  const id = nextStagedChatMediaId++;
+  return path.join(cacheDir, `${Date.now()}-${id}-${fileName}`);
+}
+
+function consumerVisiblePath(
+  cacheDir: string,
+  filePath: string,
+  consumerDir?: string,
+) {
+  const nextConsumerDir = safeString(consumerDir).trim();
+  if (!nextConsumerDir) return filePath;
+  const normalizedCacheDir = path.resolve(cacheDir);
+  const relativePath = path.relative(normalizedCacheDir, filePath);
+  if (
+    !relativePath ||
+    relativePath.startsWith("..") ||
+    path.isAbsolute(relativePath)
+  ) {
+    return filePath;
+  }
+  return path.join(nextConsumerDir, relativePath);
+}
+
+function mediaSourceMissingError(filePath: string) {
+  return new Error(`chat_media_file_missing:${filePath}`);
+}
+
+export async function stageChatMediaFromNode(
+  node: any,
+  options: StageChatMediaFromNodeOptions,
+) {
+  const attrs = node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
+  const src = safeString(attrs.src || attrs.url || "").trim();
+  const mimeType =
+    safeString(attrs.mimeType || attrs.mime || "").trim() ||
+    safeString(options.fallbackMimeType).trim();
+  const fallbackName =
+    safeString(attrs.name).trim() ||
+    mediaNameFromSource(src) ||
+    safeString(options.fallbackName).trim() ||
+    safeString(options.type || node?.type).trim() ||
+    "file";
+  const fileName = ensureExtension(
+    ensureFileName(fallbackName, "file"),
+    mimeType,
+  );
+
+  if (Buffer.isBuffer(attrs.data)) {
+    const cacheDir = path.resolve(options.cacheDir);
+    ensureDir(cacheDir);
+    const savedPath = stagedChatMediaPath(cacheDir, fileName);
+    await fs.promises.writeFile(savedPath, attrs.data);
+    return {
+      src: fileUrl(
+        consumerVisiblePath(cacheDir, savedPath, options.consumerDir),
+      ),
+      path: savedPath,
+      name: path.basename(savedPath),
+      mimeType,
+      remote: false,
+    };
+  }
+
+  if (!src) return null;
+  if (/^https?:\/\//i.test(src)) {
+    return {
+      src,
+      name: fileName,
+      mimeType,
+      remote: true,
+    };
+  }
+
+  const sourcePath = resolveLocalMediaPath(src);
+  if (!sourcePath) return null;
+  const cacheDir = path.resolve(options.cacheDir);
+  ensureDir(cacheDir);
+  const savedPath = stagedChatMediaPath(cacheDir, fileName);
+  try {
+    await fs.promises.copyFile(sourcePath, savedPath);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") throw mediaSourceMissingError(sourcePath);
+    throw error;
+  }
+  return {
+    src: fileUrl(consumerVisiblePath(cacheDir, savedPath, options.consumerDir)),
+    path: savedPath,
+    name: path.basename(savedPath),
+    mimeType,
+    remote: false,
+  };
+}
+
 export async function readBinaryFromNode(node: any) {
   const attrs = node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
+  const src = safeString(attrs.src || attrs.url || "").trim();
   const name = ensureFileName(
     safeString(attrs.name).trim() ||
+      mediaNameFromSource(src) ||
       `${safeString(node?.type).trim() || "file"}`,
     "file",
   );
@@ -237,7 +361,6 @@ export async function readBinaryFromNode(node: any) {
       mimeType,
     };
   }
-  const src = safeString(attrs.src || attrs.url || "").trim();
   if (!src) return null;
   if (src.startsWith("file://")) {
     const filePath = fileURLToPath(src);

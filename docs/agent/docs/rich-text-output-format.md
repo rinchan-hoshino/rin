@@ -140,6 +140,7 @@ Adapters choose the best native representation they support:
 
 - Telegram renders supported Markdown as HTML and native mentions as `tg://user?id=...` links.
 - OneBot renders native mentions as CQ at elements and strips unsupported Markdown formatting from plain text.
+- OneBot local media is staged under `$HOME/.rin/data/chat-media/onebot`. If the OneBot implementation such as NapCat runs in Docker, mount the same path read-only into the container: `-v "$HOME/.rin/data/chat-media/onebot:$HOME/.rin/data/chat-media/onebot:ro"`.
 - Discord and Slack generally preserve Markdown-style text and map reply/thread behavior through their adapter APIs.
 - Other adapters may strip Markdown formatting or send readable fallback text.
 

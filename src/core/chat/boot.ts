@@ -131,7 +131,7 @@ function chatOutboxErrorMessage(error: unknown) {
 function isPermanentChatOutboxError(error: unknown) {
   const message = chatOutboxErrorMessage(error);
   return (
-    /^(invalid_chatKey|no_bot_for_platform|chat_outbox_empty_message|chat_outbox_invalid_part|unsupported_chat_part|chat_part_file_missing)\b/.test(
+    /^(invalid_chatKey|no_bot_for_platform|chat_outbox_empty_message|chat_outbox_invalid_part|unsupported_chat_part|chat_part_file_missing|chat_media_file_missing)\b/.test(
       message,
     ) ||
     /\b(?:forbidden|blocked|bot was kicked|chat not found|recipient not found|not enough rights|message thread not found)\b/i.test(

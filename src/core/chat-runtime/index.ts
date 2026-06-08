@@ -29,6 +29,7 @@ import {
   safeString,
   sleep,
   splitPlainText,
+  stageChatMediaFromNode,
 } from "./common.js";
 import {
   DiscordAdapter,
@@ -1062,6 +1063,74 @@ function isOneBotGroupChatId(chatId: string) {
   return Boolean(value) && !value.startsWith("private:");
 }
 
+export const ONEBOT_MEDIA_CACHE_RELATIVE_DIR = path.join(
+  "chat-media",
+  "onebot",
+);
+export const ONEBOT_MEDIA_DOCKER_MOUNT_PATH =
+  "$HOME/.rin/data/chat-media/onebot";
+export const ONEBOT_MEDIA_DOCKER_VOLUME_HINT = `-v "${ONEBOT_MEDIA_DOCKER_MOUNT_PATH}:${ONEBOT_MEDIA_DOCKER_MOUNT_PATH}:ro"`;
+
+function isOneBotLocalMediaAction(action: string) {
+  return /^(send_private_msg|send_group_msg|send_msg|upload_private_file|upload_group_file)$/.test(
+    safeString(action).trim(),
+  );
+}
+
+function oneBotParamsContainLocalMedia(params: any) {
+  const message = safeString(params?.message || params?.file || "");
+  return (
+    /\[CQ:(?:image|video|record|file),[^\]]*file=file:\/\//i.test(message) ||
+    /^file:\/\//i.test(message)
+  );
+}
+
+function oneBotFailureText(payload: any) {
+  return safeString(
+    payload?.wording ||
+      payload?.msg ||
+      payload?.message ||
+      "onebot_action_failed",
+  );
+}
+
+function isOneBotLocalMediaVisibilityFailure(
+  payload: any,
+  action: string,
+  params: any,
+) {
+  if (!isOneBotLocalMediaAction(action)) return false;
+  const message = oneBotFailureText(payload);
+  const retcode = Number(payload?.retcode);
+  const mediaSend =
+    oneBotParamsContainLocalMedia(params) ||
+    /ENOENT|file:\/\/|rich[- ]?media|媒体|文件/i.test(message);
+  if (!mediaSend) return false;
+  return (
+    retcode === 1200 ||
+    /ENOENT|no such file|not found|rich[- ]?media|无法读取/i.test(message)
+  );
+}
+
+export function formatOneBotActionFailureMessage(
+  payload: any,
+  action = "",
+  params?: any,
+) {
+  const message = oneBotFailureText(payload) || "onebot_action_failed";
+  if (!isOneBotLocalMediaVisibilityFailure(payload, action, params)) {
+    return message;
+  }
+  if (message.includes("OneBot/NapCat 无法读取 Rin 的本地媒体文件")) {
+    return message;
+  }
+  return [
+    message,
+    "OneBot/NapCat 无法读取 Rin 的本地媒体文件。如果 NapCat 在 Docker 中运行，请给容器添加只读挂载：",
+    ONEBOT_MEDIA_DOCKER_VOLUME_HINT,
+  ].join("\n");
+}
+
 class OneBotAdapter {
   private readonly app: ChatRuntimeApp;
   private readonly config: Record<string, any>;
@@ -1078,6 +1147,8 @@ class OneBotAdapter {
       resolve: (value: any) => void;
       reject: (error: unknown) => void;
       timer: NodeJS.Timeout;
+      action: string;
+      params: any;
     }
   >();
   readonly bot: any;
@@ -1091,7 +1162,7 @@ class OneBotAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:onebot", logger);
-    this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "onebot");
+    this.cacheDir = path.join(dataDir, ONEBOT_MEDIA_CACHE_RELATIVE_DIR);
     ensureDir(this.cacheDir);
     this.bot = {
       platform: "onebot",
@@ -1314,11 +1385,10 @@ class OneBotAdapter {
       ) {
         pending.reject(
           new Error(
-            safeString(
-              payload?.wording ||
-                payload?.msg ||
-                payload?.message ||
-                "onebot_action_failed",
+            formatOneBotActionFailureMessage(
+              payload,
+              pending.action,
+              pending.params,
             ),
           ),
         );
@@ -1348,7 +1418,7 @@ class OneBotAdapter {
         this.pending.delete(echo);
         reject(new Error(`onebot_action_timeout:${action}`));
       }, 20000);
-      this.pending.set(echo, { resolve, reject, timer });
+      this.pending.set(echo, { resolve, reject, timer, action, params });
       ws.send(
         JSON.stringify({
           action,
@@ -1359,37 +1429,16 @@ class OneBotAdapter {
     });
   }
 
-  private async cacheBinary(
-    data: Buffer,
-    mimeType: string,
-    fallbackName: string,
-  ) {
-    const fileName = ensureExtension(ensureFileName(fallbackName), mimeType);
-    ensureDir(this.cacheDir);
-    const fullPath = path.join(this.cacheDir, `${Date.now()}-${fileName}`);
-    try {
-      await fs.promises.writeFile(fullPath, data);
-    } catch (error: any) {
-      if (error?.code !== "ENOENT") throw error;
-      ensureDir(this.cacheDir);
-      await fs.promises.writeFile(fullPath, data);
-    }
-    return fullPath;
-  }
-
   private async normalizeOutboundMedia(node: any, type: "image" | "file") {
-    const payload = await readBinaryFromNode(node);
-    if (!payload) return "";
-    if (payload.url) {
-      return payload.url;
-    }
-    const saved = await this.cacheBinary(
-      payload.data,
-      safeString(payload.mimeType).trim() ||
-        (type === "image" ? "image/png" : "application/octet-stream"),
-      payload.name || `${type}-${Date.now()}`,
-    );
-    return fileUrl(saved);
+    const staged = await stageChatMediaFromNode(node, {
+      cacheDir: this.cacheDir,
+      consumerDir: this.cacheDir,
+      fallbackMimeType:
+        type === "image" ? "image/png" : "application/octet-stream",
+      fallbackName: `${type}-${Date.now()}`,
+      type,
+    });
+    return safeString(staged?.src).trim();
   }
 
   private async renderOutboundMessage(nodes: any[]) {

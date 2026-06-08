@@ -169,6 +169,48 @@ test("chat runtime common helpers preserve binary payload naming for buffers and
   }
 });
 
+test("chat runtime media stager copies local files to consumer-visible cache paths", async () => {
+  const tempDir = await fs.mkdtemp(
+    path.join(rootDir, ".tmp-rin-chat-runtime-"),
+  );
+  try {
+    const sourcePath = path.join(tempDir, "note");
+    const cacheDir = path.join(tempDir, "cache");
+    await fs.writeFile(sourcePath, "hello staged media\n", "utf8");
+
+    const staged = await chatRuntimeCommon.stageChatMediaFromNode(
+      chatRuntimeCommon.normalizeNode("file", {
+        src: sourcePath,
+        mimeType: "text/plain",
+      }),
+      { cacheDir, consumerDir: "/container/rin-media" },
+    );
+
+    assert.equal(staged?.remote, false);
+    assert.match(staged?.src || "", /^file:\/\/\/container\/rin-media\//);
+    assert.match(staged?.src || "", /note\.txt$/);
+    assert.equal(
+      await fs.readFile(staged?.path || "", "utf8"),
+      "hello staged media\n",
+    );
+
+    const remote = await chatRuntimeCommon.stageChatMediaFromNode(
+      chatRuntimeCommon.normalizeNode("image", {
+        src: "https://example.com/cat.png",
+      }),
+      { cacheDir },
+    );
+    assert.deepEqual(remote, {
+      src: "https://example.com/cat.png",
+      name: "cat.png",
+      mimeType: "",
+      remote: true,
+    });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("chat runtime common helper utilities share adapter concerns", async () => {
   const calls = [];
   const logger = chatRuntimeCommon.createPrefixedLogger("chat-runtime:test", {

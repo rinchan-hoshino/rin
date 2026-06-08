@@ -338,7 +338,7 @@ test("onebot adapter renders structured at as native CQ mention", async () => {
   });
 });
 
-test("onebot adapter recreates the outbound media cache directory before sending local images", async () => {
+test("onebot adapter stages all local media under the fixed chat-media directory", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
@@ -348,16 +348,14 @@ test("onebot adapter recreates the outbound media cache directory before sending
     const adapter = [...app.adapters][0];
     const h = runtime.createChatRuntimeH();
     const imagePath = path.join(agentDir, "avatar.png");
-    const cacheDir = path.join(
-      agentDir,
-      "data",
-      "chat",
-      "runtime-cache",
-      "onebot",
-    );
+    const videoPath = path.join(agentDir, "clip.mp4");
+    const filePath = path.join(agentDir, "notes.txt");
+    const mediaDir = path.join(agentDir, "data", "chat-media", "onebot");
     const calls: Array<{ action: string; params: any }> = [];
     await fs.writeFile(imagePath, Buffer.from("png"));
-    await fs.rm(cacheDir, { recursive: true, force: true });
+    await fs.writeFile(videoPath, Buffer.from("mp4"));
+    await fs.writeFile(filePath, Buffer.from("notes"));
+    await fs.rm(mediaDir, { recursive: true, force: true });
     adapter.callAction = async (action: string, params: any) => {
       calls.push({ action, params });
       return { message_id: "m1" };
@@ -365,20 +363,59 @@ test("onebot adapter recreates the outbound media cache directory before sending
 
     const result = await app.bots[0].sendMessage("private:2", [
       h.image(imagePath),
+      h("video", { src: videoPath, name: "clip.mp4", mimeType: "video/mp4" }),
+      h.file(filePath, "text/plain", { name: "notes.txt" }),
     ]);
 
     assert.deepEqual(result, ["m1"]);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].action, "send_private_msg");
+    assert.doesNotMatch(calls[0].params.message, /runtime-cache/);
     assert.match(
       calls[0].params.message,
-      /^\[CQ:image,file=file:\/\/.*chat\/runtime-cache\/onebot\/.*avatar\.png\]$/,
+      /\[CQ:image,file=file:\/\/.*data\/chat-media\/onebot\/.*avatar\.png\]/,
     );
-    const cachedPath = calls[0].params.message
-      .replace(/^\[CQ:image,file=file:\/\//, "")
-      .replace(/\]$/, "");
-    await assert.doesNotReject(fs.stat(decodeURIComponent(cachedPath)));
+    assert.match(
+      calls[0].params.message,
+      /\[CQ:video,file=file:\/\/.*data\/chat-media\/onebot\/.*clip\.mp4\]/,
+    );
+    assert.match(
+      calls[0].params.message,
+      /\[CQ:file,file=file:\/\/.*data\/chat-media\/onebot\/.*notes\.txt\]/,
+    );
+    const stagedPaths = [
+      ...calls[0].params.message.matchAll(/file:\/\/([^\]]+)/g),
+    ].map((match) => decodeURIComponent(match[1] || ""));
+    assert.equal(stagedPaths.length, 3);
+    for (const stagedPath of stagedPaths) {
+      await assert.doesNotReject(fs.stat(stagedPath));
+    }
   });
+});
+
+test("onebot media action failures include the fixed Docker mount hint", () => {
+  const message = runtime.formatOneBotActionFailureMessage(
+    {
+      status: "failed",
+      retcode: 1200,
+      message:
+        "ENOENT: no such file or directory, open '/home/rin/.rin/data/chat-media/onebot/avatar.png'",
+    },
+    "send_private_msg",
+    {
+      message:
+        "[CQ:image,file=file:///home/rin/.rin/data/chat-media/onebot/avatar.png]",
+    },
+  );
+
+  assert.match(
+    message,
+    /OneBot\/NapCat \u65e0\u6cd5\u8bfb\u53d6 Rin \u7684\u672c\u5730\u5a92\u4f53\u6587\u4ef6/u,
+  );
+  assert.match(
+    message,
+    /-v "\$HOME\/\.rin\/data\/chat-media\/onebot:\$HOME\/\.rin\/data\/chat-media\/onebot:ro"/,
+  );
 });
 
 test("discord adapter splits oversized text sends and keeps attachments on the first chunk", async () => {
