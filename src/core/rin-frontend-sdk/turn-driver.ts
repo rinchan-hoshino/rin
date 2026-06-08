@@ -110,6 +110,13 @@ function isRecoverableConnectionError(error: unknown) {
   );
 }
 
+function isRetryableSubmittedTurnError(error: unknown) {
+  const message = safeString((error as any)?.message || error).trim();
+  return /WebSocket (?:closed|error)\b|socket hang up|connect (?:ECONNRESET|EPIPE)\b|write EPIPE/.test(
+    message,
+  );
+}
+
 function sameFrontendSessionFile(left: unknown, right: unknown) {
   const leftText = safeString(left).trim();
   const rightText = safeString(right).trim();
@@ -829,6 +836,22 @@ export class RinFrontendTurnDriver {
     };
   }
 
+  private submittedTurnError(resolved: {
+    error?: string;
+    sessionId?: string;
+    sessionFile?: string;
+  }) {
+    const error = new Error(
+      safeString(resolved.error).trim() || "rpc_turn_failed",
+    ) as Error & {
+      sessionId?: string;
+      sessionFile?: string;
+    };
+    error.sessionId = safeString(resolved.sessionId).trim() || undefined;
+    error.sessionFile = safeString(resolved.sessionFile).trim() || undefined;
+    return error;
+  }
+
   private async resolveSubmittedTurnForSession(
     sessionFile: string | undefined,
     input: { text: string; sentAt?: number },
@@ -850,13 +873,11 @@ export class RinFrontendTurnDriver {
     if (!resolved) return null;
     const errorMessage = safeString(resolved.error).trim();
     if (errorMessage) {
-      const error = new Error(errorMessage) as Error & {
-        sessionId?: string;
-        sessionFile?: string;
+      return {
+        error: errorMessage,
+        sessionId: safeString(resolved.sessionId).trim() || undefined,
+        sessionFile: safeString(resolved.sessionFile).trim() || undefined,
       };
-      error.sessionId = safeString(resolved.sessionId).trim() || undefined;
-      error.sessionFile = safeString(resolved.sessionFile).trim() || undefined;
-      throw error;
     }
     if (resolved.submitted) return { submitted: true };
     const finalText = safeString(resolved.finalText).trim();
@@ -895,9 +916,12 @@ export class RinFrontendTurnDriver {
         targetSessionFile,
         input,
       );
-      if (recovered && !("submitted" in recovered)) {
-        liveTurn.resolve(recovered);
-        break;
+      if (recovered) {
+        if ("error" in recovered) throw this.submittedTurnError(recovered);
+        if (!("submitted" in recovered)) {
+          liveTurn.resolve(recovered);
+          break;
+        }
       }
       const state = await this.refreshFrontendState(targetSessionFile).catch(
         () => ({}),
@@ -1161,13 +1185,18 @@ export class RinFrontendTurnDriver {
         );
         this.throwIfTurnInterrupted(turnInterruptionSeq);
         if (existing) {
-          if ("submitted" in existing) {
+          if ("error" in existing) {
+            if (!isRetryableSubmittedTurnError(existing.error)) {
+              throw this.submittedTurnError(existing);
+            }
+          } else if ("submitted" in existing) {
             return await this.waitForExistingSubmittedTurn(
               { text, sentAt: input.promptContext?.sentAt },
               ready,
             );
+          } else {
+            return existing;
           }
-          return existing;
         }
       }
 

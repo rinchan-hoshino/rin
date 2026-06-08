@@ -765,67 +765,88 @@ test("submitted turn resolution preserves provider failure instead of final-miss
   assert.deepEqual(resolved, { error: "WebSocket error" });
 });
 
-test("frontend SDK turn driver surfaces restored submitted provider errors", async () => {
-  const originalNow = Date.now;
-  let now = 1778774600000;
-  (Date as any).now = () => now;
+test("frontend SDK turn driver resubmits restored transient submitted provider errors", async () => {
+  const client = createFrontendClient();
+  client.getMessages = async () => [
+    {
+      role: "user",
+      timestamp: 1778774583000,
+      content: "restored job",
+    },
+    {
+      role: "assistant",
+      timestamp: 1778774590000,
+      stopReason: "error",
+      errorMessage: "WebSocket error",
+      content: [
+        { type: "thinking", thinking: "working" },
+        { type: "toolCall", name: "write", arguments: {} },
+      ],
+    },
+  ];
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
 
-  try {
-    const client = createFrontendClient();
-    client.getState = async () => {
-      now += 121_000;
-      return {
-        sessionFile: "/tmp/frontend-chat.jsonl",
-        sessionId: "frontend-session",
-        isStreaming: false,
-        turnActive: false,
-      };
-    };
-    client.getMessages = async () => [
-      {
-        role: "user",
-        timestamp: 1778774583000,
-        content: "restored job",
-      },
-      {
-        role: "assistant",
-        timestamp: 1778774590000,
-        stopReason: "error",
-        errorMessage: "WebSocket error",
-        content: [
-          { type: "thinking", thinking: "working" },
-          { type: "toolCall", name: "write", arguments: {} },
-        ],
-      },
-    ];
-    client.prompt = async () => {
-      throw new Error("prompt_should_not_be_resubmitted");
-    };
-    const driver = new RinFrontendTurnDriver({
-      clientFactory: () => client,
-      promptSource: "chat-bridge",
-    });
+  const result = await driver.runTurn({
+    text: "restored job",
+    restoreSessionFile: "/tmp/frontend-chat.jsonl",
+    promptContext: {
+      source: "chat-bridge",
+      chatKey: "telegram/1:2",
+      sentAt: 1778774580000,
+    },
+  });
 
-    await assert.rejects(
-      () =>
-        driver.runTurn({
-          text: "restored job",
-          restoreSessionFile: "/tmp/frontend-chat.jsonl",
-          promptContext: {
-            source: "chat-bridge",
-            chatKey: "telegram/1:2",
-            sentAt: 1778774580000,
-          },
-        }),
-      /WebSocket error/,
-    );
-    assert.equal(
-      client.calls.some((call: any) => call.type === "prompt"),
-      false,
-    );
-  } finally {
-    (Date as any).now = originalNow;
-  }
+  assert.equal(result.finalText, "frontend final");
+  assert.equal(
+    client.calls.filter((call: any) => call.type === "prompt").length,
+    1,
+  );
+});
+
+test("frontend SDK turn driver surfaces restored submitted non-transient provider errors", async () => {
+  const client = createFrontendClient();
+  client.getMessages = async () => [
+    {
+      role: "user",
+      timestamp: 1778774583000,
+      content: "restored job",
+    },
+    {
+      role: "assistant",
+      timestamp: 1778774590000,
+      stopReason: "error",
+      errorMessage: "prompt is too long",
+      content: [{ type: "text", text: "failed" }],
+    },
+  ];
+  client.prompt = async () => {
+    throw new Error("prompt_should_not_be_resubmitted");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  await assert.rejects(
+    () =>
+      driver.runTurn({
+        text: "restored job",
+        restoreSessionFile: "/tmp/frontend-chat.jsonl",
+        promptContext: {
+          source: "chat-bridge",
+          chatKey: "telegram/1:2",
+          sentAt: 1778774580000,
+        },
+      }),
+    /prompt is too long/,
+  );
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
 });
 
 test("frontend SDK turn driver reselects a restored session even when cached state matches", async () => {
