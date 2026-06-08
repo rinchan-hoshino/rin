@@ -1481,7 +1481,6 @@ export class ChatController {
           };
         }
         const errorSession = normalizeSessionRef(error as any);
-        const transientTurnFailure = isTransientChatRuntimeError(error);
         const transientSessionFailure = shouldResetDriverOnTransientTurnError(
           error,
           {
@@ -1489,16 +1488,13 @@ export class ChatController {
             restoreSessionFile,
           },
         );
-        const errorSessionFile = this.updateStoredSessionFile(
-          errorSession.sessionFile,
-          this.driver.currentSessionFile(),
-        );
         if (transientSessionFailure) {
           this.driver.dispose();
-        } else if (
-          !transientTurnFailure &&
-          errorMessage !== "chat_restored_session_mismatch"
-        ) {
+        } else if (errorMessage !== "chat_restored_session_mismatch") {
+          const errorSessionFile = this.updateStoredSessionFile(
+            errorSession.sessionFile,
+            this.driver.currentSessionFile(),
+          );
           if (errorSession.sessionFile && errorMessage) {
             await this.deliverAssistantReply({
               text: formatChatRuntimeErrorForUser(errorMessage),

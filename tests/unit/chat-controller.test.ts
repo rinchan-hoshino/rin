@@ -1623,56 +1623,6 @@ test("chat controller keeps transient daemon command errors out of chat replies"
   assert.deepEqual(deliveries, []);
 });
 
-test("chat controller keeps transient turn errors with session refs out of chat replies", async () => {
-  const controller = await createController();
-  const deliveries = [];
-  controller.commitPendingDelivery = async function (clearProcessing = false) {
-    deliveries.push(this.stagedDelivery?.text || "");
-    this.stagedDelivery = null;
-    if (clearProcessing) this.currentTurn = null;
-  };
-  saveChatMessage(controller.agentDir, {
-    chatKey: controller.chatKey,
-    platform: "telegram",
-    botId: "1",
-    chatId: "2",
-    chatType: "private",
-    messageId: "m-websocket",
-    role: "user",
-    receivedAt: new Date().toISOString(),
-    text: "hello",
-  });
-
-  controller.driver.currentSessionFile = () => "/tmp/retry-chat.jsonl";
-  controller.driver.runTurn = async () => {
-    const error = new Error("WebSocket error") as Error & {
-      sessionId?: string;
-      sessionFile?: string;
-    };
-    error.sessionId = "session-retry";
-    error.sessionFile = "/tmp/retry-chat.jsonl";
-    throw error;
-  };
-
-  await assert.rejects(
-    controller.runTurn({
-      text: "hello",
-      attachments: [],
-      incomingMessageId: "m-websocket",
-      replyToMessageId: "m-websocket",
-    }),
-    /WebSocket error/,
-  );
-
-  assert.deepEqual(deliveries, []);
-  const stored = getChatMessage(
-    controller.agentDir,
-    controller.chatKey,
-    "m-websocket",
-  );
-  assert.equal(stored?.processedAt, undefined);
-});
-
 test("chat controller can expose external working indicators", async () => {
   const actions = [];
   const controller = await createController("telegram/1:2");
