@@ -183,13 +183,45 @@ read_option_value() {
   OPTION_VALUE=$1
 }
 
+read_launcher_install_dir() {
+  launcher_path=$1
+  if [ ! -r "$launcher_path" ]; then
+    return 0
+  fi
+  node - "$launcher_path" 2>/dev/null <<'NODE' || true
+const fs = require('node:fs');
+try {
+  const record = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) || {};
+  process.stdout.write(String(record.defaultInstallDir || record.installDir || '').trim());
+} catch {}
+NODE
+}
+
+resolve_update_install_dir() {
+  if [ -n "${RIN_DIR:-}" ]; then
+    printf '%s' "$RIN_DIR"
+    return 0
+  fi
+  home=${HOME:-}
+  if [ -n "$home" ]; then
+    for launcher_path in "$home/.config/rin/install.json" "$home/Library/Application Support/rin/install.json"; do
+      launcher_install_dir=$(read_launcher_install_dir "$launcher_path")
+      if [ -n "$launcher_install_dir" ]; then
+        printf '%s' "$launcher_install_dir"
+        return 0
+      fi
+    done
+    printf '%s' "$home/.rin"
+  fi
+}
+
 inherit_update_channel() {
   if [ "$MODE" != update ] || [ -n "${EXPLICIT_CHANNEL:-}" ]; then
     return 0
   fi
-  install_dir=${RIN_DIR:-${HOME:-}/.rin}
+  install_dir=$(resolve_update_install_dir)
   manifest_path="$install_dir/installer.json"
-  if [ ! -r "$manifest_path" ]; then
+  if [ -z "$install_dir" ] || [ ! -r "$manifest_path" ]; then
     echo "rin update requires an existing installer.json release record; pass --stable/--beta/--nightly/--git to override" >&2
     exit 1
   fi
