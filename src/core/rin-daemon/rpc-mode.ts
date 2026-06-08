@@ -375,6 +375,13 @@ async function resumeInterruptedTurn(
   return true;
 }
 
+function isWorkerLocalSessionReplacementCommand(commandLine: string) {
+  const trimmed = safeString(commandLine).trim();
+  if (trimmed === "/new") return true;
+  if (!trimmed.startsWith("/resume ")) return false;
+  return Boolean(trimmed.slice("/resume ".length).trim());
+}
+
 function canReuseCurrentSessionForNewSessionCommand(
   session: any,
   command: any,
@@ -1207,6 +1214,12 @@ export async function runCustomRpcMode(
           id,
           type,
           async () => {
+            if (isWorkerLocalSessionReplacementCommand(commandLine)) {
+              return {
+                handled: true,
+                text: "Session replacement commands must be routed through the frontend.",
+              };
+            }
             const builtinResult = await runBuiltinCommand(
               runtime,
               commandLine,

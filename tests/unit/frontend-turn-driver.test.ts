@@ -362,6 +362,25 @@ test("frontend SDK turn driver routes compact through the native compact client 
   );
 });
 
+test("frontend SDK turn driver handles /resume without worker run_command", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.listSessions = async () => [
+    { id: "abc", title: "Previous", path: "/tmp/resume-target.jsonl" },
+  ];
+
+  const result = await driver.runCommand("/resume abc");
+
+  assert.equal(result.text, "Resumed session: abc");
+  assert.equal(result.sessionFile, "/tmp/resume-target.jsonl");
+  assert.deepEqual(
+    client.calls.filter((call: any) =>
+      ["resumeSession", "runCommand"].includes(call.type),
+    ),
+    [{ type: "resumeSession", sessionFile: "/tmp/resume-target.jsonl" }],
+  );
+});
+
 test("frontend SDK turn driver uses configured built-in command responses", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({

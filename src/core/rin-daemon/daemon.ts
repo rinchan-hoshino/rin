@@ -411,11 +411,22 @@ export async function startDaemon(
         );
         return true;
       }
-      const worker = workerPool.ensureAttachedWorker(
-        connection,
-        command.resourceOptions,
+      const worker = await workerPool.selectSession(connection, selector);
+      if (!worker) {
+        writeLine(
+          connection.socket,
+          response(id, type, false, "rin_no_attached_session"),
+        );
+        return true;
+      }
+      writeLine(
+        connection.socket,
+        response(id, type, true, {
+          cancelled: false,
+          sessionFile: worker.sessionFile || selector.sessionFile,
+          sessionId: worker.sessionId || selector.sessionId,
+        }),
       );
-      workerPool.forwardToWorker(connection, worker, command);
       workerPool.evictDetachedWorkers();
       return true;
     }

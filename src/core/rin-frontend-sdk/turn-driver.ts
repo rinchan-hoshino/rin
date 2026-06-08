@@ -116,6 +116,12 @@ function sameFrontendSessionFile(left: unknown, right: unknown) {
   return Boolean(leftText && rightText && leftText === rightText);
 }
 
+function parseResumeCommandTarget(commandLine: string) {
+  const trimmed = safeString(commandLine).trim();
+  if (!trimmed.startsWith("/resume ")) return "";
+  return trimmed.slice("/resume ".length).trim();
+}
+
 export class RinFrontendTurnDriver {
   private readonly clientFactory: () => RinFrontendTurnClient;
   private readonly promptSource: string;
@@ -649,6 +655,30 @@ export class RinFrontendTurnDriver {
           : this.commandResponses.new,
         sessionId: this.currentSessionId() || undefined,
         sessionFile: this.currentSessionFile() || undefined,
+      };
+    }
+    const resumeTarget = parseResumeCommandTarget(commandLine);
+    if (resumeTarget) {
+      const sessions = await this.client.listSessions();
+      const match = sessions.find(
+        (item: any) =>
+          safeString(item?.id).trim() === resumeTarget ||
+          safeString(item?.path).trim() === resumeTarget,
+      );
+      if (!match) {
+        return { handled: true, text: `Session not found: ${resumeTarget}` };
+      }
+      const targetSession =
+        safeString((match as any)?.path).trim() || safeString(match.id).trim();
+      await this.client.resumeSession(targetSession, {
+        frontendIdentity: this.frontendIdentity,
+      });
+      await this.refreshFrontendState(targetSession).catch(() => {});
+      return {
+        handled: true,
+        text: `Resumed session: ${safeString(match.id).trim()}`,
+        sessionId: this.currentSessionId() || undefined,
+        sessionFile: this.currentSessionFile() || targetSession || undefined,
       };
     }
     if (sessionFile) {

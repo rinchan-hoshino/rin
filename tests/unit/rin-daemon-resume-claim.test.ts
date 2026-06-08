@@ -560,6 +560,122 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
+test("daemon switch_session reuses an already-open session worker", async () => {
+  const agentDir = await makeTempDir("rin-daemon-switch-reuse-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.js");
+  const logPath = path.join(agentDir, "commands.jsonl");
+  const firstSession = "/tmp/shared-session.jsonl";
+  const secondSession = "/tmp/other-session.jsonl";
+  await fs.writeFile(
+    workerPath,
+    `
+const fs = require("node:fs");
+const path = require("node:path");
+const process = require("node:process");
+const logPath = ${JSON.stringify(logPath)};
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+function log(command) { fs.appendFileSync(logPath, JSON.stringify({ pid: process.pid, type: command.type, sessionPath: command.sessionPath }) + "\\n"); }
+let sessionFile = "";
+let sessionId = "";
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    log(command);
+    if (command.type === "switch_session") {
+      sessionFile = command.sessionPath;
+      sessionId = path.basename(sessionFile, ".jsonl");
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false, sessionFile, sessionId } });
+      continue;
+    }
+    if (command.type === "get_state") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile, sessionId, isStreaming: false, isCompacting: false } });
+      continue;
+    }
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile, sessionId } });
+  }
+});
+`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  let firstClient;
+  let secondClient;
+  try {
+    await waitForSocket(socketPath);
+    firstClient = await openRpcConnection(socketPath);
+    secondClient = await openRpcConnection(socketPath);
+
+    assert.equal(
+      (
+        await firstClient.request({
+          id: "first-switch",
+          type: "switch_session",
+          sessionPath: firstSession,
+        })
+      ).success,
+      true,
+    );
+    assert.equal(
+      (
+        await secondClient.request({
+          id: "second-switch",
+          type: "switch_session",
+          sessionPath: secondSession,
+        })
+      ).success,
+      true,
+    );
+
+    const switchedToOpen = await secondClient.request({
+      id: "second-switch-open",
+      type: "switch_session",
+      sessionPath: firstSession,
+    });
+    const status = await rpc(socketPath, {
+      id: "status-after-switch",
+      type: "daemon_status",
+    });
+    const commandLog = (await fs.readFile(logPath, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const switchCommands = commandLog.filter(
+      (entry) => entry.type === "switch_session",
+    );
+    const firstSessionWorkers = status.data?.workers.filter(
+      (worker) => worker.sessionFile === firstSession,
+    );
+
+    assert.equal(switchedToOpen.success, true);
+    assert.equal(firstSessionWorkers.length, 1);
+    assert.equal(firstSessionWorkers[0].attachedConnections, 2);
+    assert.equal(
+      switchCommands.filter((entry) => entry.sessionPath === firstSession)
+        .length,
+      1,
+    );
+  } finally {
+    firstClient?.close();
+    secondClient?.close();
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("daemon auto-resumes sessions recorded as running before restart", async () => {
   const agentDir = await makeTempDir("rin-daemon-resume-");
   const socketPath = path.join(agentDir, "daemon.sock");

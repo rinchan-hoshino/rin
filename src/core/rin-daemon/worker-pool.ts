@@ -285,20 +285,6 @@ export class WorkerPool {
     this.requestWorker(worker, connection, command, true);
   }
 
-  ensureAttachedWorker(
-    connection: ConnectionState,
-    resourceOptions?: Record<string, unknown>,
-  ) {
-    if (resourceOptions) connection.resourceOptions = resourceOptions;
-    if (connection.attachedWorker) return connection.attachedWorker;
-    const worker = this.createWorker(
-      connection,
-      resourceOptions || connection.resourceOptions,
-    );
-    this.attachWorker(connection, worker);
-    return worker;
-  }
-
   hasSelectedSession(connection: ConnectionState) {
     return hasSessionSelector(this.getConnectionSelector(connection));
   }
@@ -1063,44 +1049,38 @@ export class WorkerPool {
         );
       }
     }
-    if (!selector.sessionFile) return;
+    const sessionFile = selector.sessionFile;
+    if (!sessionFile) return;
 
-    const existing = this.findWorkerBySelector(selector);
-    if (existing) {
-      for (const connection of liveConnections) {
-        this.attachWorker(connection, existing);
-        writeLine(connection.socket, {
-          type: "session_recovered",
-          sessionFile: selector.sessionFile,
-          sessionId: selector.sessionId,
-          resumed: false,
-        });
-      }
-      return;
-    }
+    void this.withSessionClaim(selector, async () => {
+      const existing = this.findWorkerBySelector(selector);
+      if (existing) return existing;
 
-    const replacement = this.createWorker();
-
-    void (async () => {
+      const replacement = this.createWorker();
       try {
         await this.sendInternalCommand(
           replacement,
-          createSwitchSessionCommand(selector.sessionFile),
+          createSwitchSessionCommand(sessionFile),
         );
         const existingAfterSwitch = this.findWorkerBySelector(selector);
         if (existingAfterSwitch && existingAfterSwitch !== replacement) {
           this.destroyWorker(replacement);
-          for (const connection of liveConnections) {
-            this.attachWorker(connection, existingAfterSwitch);
-          }
-          return;
+          return existingAfterSwitch;
         }
         this.setWorkerSessionRefs(replacement, selector);
+        return replacement;
+      } catch {
+        this.destroyWorker(replacement);
+        return undefined;
+      }
+    })
+      .then(async (recovered) => {
+        if (!recovered) return;
         for (const connection of liveConnections) {
-          this.attachWorker(connection, replacement);
+          this.attachWorker(connection, recovered);
         }
-        if (resumeTurn) {
-          await this.sendInternalCommand(replacement, {
+        if (resumeTurn && !this.isWorkerRunning(recovered)) {
+          await this.sendInternalCommand(recovered, {
             type: "resume_interrupted_turn",
             source: "worker-exit",
           });
@@ -1108,15 +1088,13 @@ export class WorkerPool {
         for (const connection of liveConnections) {
           writeLine(connection.socket, {
             type: "session_recovered",
-            sessionFile: selector.sessionFile,
+            sessionFile,
             sessionId: selector.sessionId,
             resumed: resumeTurn,
           });
         }
-      } catch {
-        this.destroyWorker(replacement);
-      }
-    })().catch(() => {});
+      })
+      .catch(() => {});
   }
 
   private getInternalCommandTimeoutMs(command: any) {

@@ -1250,6 +1250,109 @@ test(
 );
 
 test(
+  "rpc mode refuses worker-local session replacement commands",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const session = {
+      isStreaming: false,
+      isCompacting: false,
+      sessionFile: "/tmp/test-session.jsonl",
+      sessionId: "session-1",
+      agent: { waitForIdle: async () => {}, state: { messages: [] } },
+      bindExtensions: async () => {},
+      subscribe: () => () => {},
+      extensionRunner: { getCommand: () => undefined },
+      modelRegistry: { getAvailable: async () => [] },
+      sessionManager: testSessionManager(() => []),
+      messages: [],
+    };
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      void runCustomRpcMode(
+        {
+          session,
+          switchSession: async () => {
+            throw new Error("switch_session_should_be_daemon_owned");
+          },
+          newSession: async () => {
+            throw new Error("new_session_should_be_daemon_owned");
+          },
+        },
+        {
+          SessionManager: {
+            listAll: async () => [],
+            list: async () => [],
+            open: () => ({ appendSessionInfo() {} }),
+          },
+        },
+      );
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "run_command", commandLine: "/resume abc" })}\n`,
+        ),
+      );
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "2", type: "run_command", commandLine: "/new" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const responses = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter((line) => line?.type === "response");
+      assert.deepEqual(
+        responses.map((line) => [line.id, line.success, line.data]),
+        [
+          [
+            "1",
+            true,
+            {
+              handled: true,
+              text: "Session replacement commands must be routed through the frontend.",
+            },
+          ],
+          [
+            "2",
+            true,
+            {
+              handled: true,
+              text: "Session replacement commands must be routed through the frontend.",
+            },
+          ],
+        ],
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode executes /todos through the daemon builtin command path",
   { concurrency: false },
   async () => {
