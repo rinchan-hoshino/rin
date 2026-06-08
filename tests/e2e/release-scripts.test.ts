@@ -441,6 +441,21 @@ test("release workflows require changelog entries before expensive publish gates
   );
 });
 
+test("candidate-only release workflows run main-tree release scripts without local deps", () => {
+  for (const workflow of ["publish-stable.yml", "publish-hotfix.yml"]) {
+    const content = readWorkflow(workflow);
+    assert.match(
+      content,
+      /npx --yes tsx scripts\/release\/update-release-manifest\.ts/,
+    );
+    assert.match(
+      content,
+      /npx --yes tsx scripts\/release\/export-bootstrap-branch\.ts/,
+    );
+    assert.doesNotMatch(content, /npm run release:(?:manifest|bootstrap)/);
+  }
+});
+
 test("release workflows publish the public bootstrap branch", () => {
   for (const workflow of [
     "publish-nightly.yml",
@@ -450,10 +465,20 @@ test("release workflows publish the public bootstrap branch", () => {
   ]) {
     const content = readWorkflow(workflow);
     assert.match(content, /bootstrap_branch=bootstrap/);
-    assert.match(
-      content,
-      /npm run release:bootstrap -- --output "\$bootstrap_dir" --branch "\$bootstrap_branch"/,
-    );
+    if (
+      workflow === "publish-stable.yml" ||
+      workflow === "publish-hotfix.yml"
+    ) {
+      assert.match(
+        content,
+        /npx --yes tsx scripts\/release\/export-bootstrap-branch\.ts --output "\$bootstrap_dir" --branch "\$bootstrap_branch"/,
+      );
+    } else {
+      assert.match(
+        content,
+        /npm run release:bootstrap -- --output "\$bootstrap_dir" --branch "\$bootstrap_branch"/,
+      );
+    }
     assert.match(
       content,
       /git -C "\$bootstrap_dir" push origin "HEAD:\$bootstrap_branch"/,
