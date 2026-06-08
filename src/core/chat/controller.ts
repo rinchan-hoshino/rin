@@ -609,6 +609,47 @@ export class ChatController {
     ]);
   }
 
+  private async retargetVisibleProcessingTurn(input: {
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+  }) {
+    const incomingMessageId = safeString(input.incomingMessageId || "").trim();
+    const replyToMessageId =
+      safeString(input.replyToMessageId || "").trim() || incomingMessageId;
+    if (!incomingMessageId && !replyToMessageId) return;
+    await this.beginVisibleProcessingTurn({
+      incomingMessageId: incomingMessageId || undefined,
+      replyToMessageId: replyToMessageId || undefined,
+    });
+  }
+
+  private currentDeliveryTarget(input: {
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+  }) {
+    return {
+      incomingMessageId:
+        this.currentIncomingMessageId() ||
+        safeString(input.incomingMessageId || "").trim() ||
+        undefined,
+      replyToMessageId:
+        this.currentReplyToMessageId() ||
+        safeString(input.replyToMessageId || "").trim() ||
+        undefined,
+    };
+  }
+
+  private markOriginalProcessedIfRetargeted(
+    originalIncomingMessageId: unknown,
+    targetIncomingMessageId: unknown,
+    bindSession = true,
+  ) {
+    const original = safeString(originalIncomingMessageId).trim();
+    const target = safeString(targetIncomingMessageId).trim();
+    if (!original || !target || original === target) return;
+    this.markProcessedMessage(original, bindSession);
+  }
+
   private buildStatusText() {
     const lines = [`Status: ${this.frontendPhase}`, `Chat: ${this.chatKey}`];
     const policy = this.getWorkingIndicatorPolicy();
@@ -1344,7 +1385,15 @@ export class ChatController {
       );
       this.saveState();
       if (result.steered) {
-        this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
+        if (deliverFinal) {
+          await this.retargetVisibleProcessingTurn({
+            incomingMessageId: input.incomingMessageId,
+            replyToMessageId: input.replyToMessageId,
+          });
+        }
+        this.backendAcceptedIncomingMessageId = safeString(
+          input.incomingMessageId || "",
+        ).trim();
         this.markAcceptedMessage(input.incomingMessageId);
         return {
           steered: true,
@@ -1357,12 +1406,19 @@ export class ChatController {
           incomingMessageId: input.incomingMessageId,
           replyToMessageId: input.replyToMessageId,
         });
+        const deliveryTarget = this.currentDeliveryTarget(input);
         await this.deliverAssistantReply({
           text: result.finalText,
-          replyToMessageId: input.replyToMessageId,
+          replyToMessageId: deliveryTarget.replyToMessageId,
           sessionFile: result.sessionFile,
-          incomingMessageId: input.incomingMessageId,
+          incomingMessageId: deliveryTarget.incomingMessageId,
+          clearProcessing: true,
         });
+        this.markOriginalProcessedIfRetargeted(
+          input.incomingMessageId,
+          deliveryTarget.incomingMessageId,
+        );
+        this.awaitingTurnSettle = false;
         await new Promise((resolve) => setImmediate(resolve));
         await this.flushPendingPassiveNotices();
       }
@@ -1429,6 +1485,15 @@ export class ChatController {
         );
         this.saveState();
         if (result.steered) {
+          if (deliverFinal) {
+            await this.retargetVisibleProcessingTurn({
+              incomingMessageId: input.incomingMessageId,
+              replyToMessageId: input.replyToMessageId,
+            });
+          }
+          this.backendAcceptedIncomingMessageId = safeString(
+            input.incomingMessageId || "",
+          ).trim();
           this.markAcceptedMessage(input.incomingMessageId);
           return {
             steered: true,
@@ -1437,13 +1502,19 @@ export class ChatController {
           };
         }
         if (deliverFinal) {
+          const deliveryTarget = this.currentDeliveryTarget(input);
           await this.deliverAssistantReply({
             text: result.finalText,
-            replyToMessageId: input.replyToMessageId,
+            replyToMessageId: deliveryTarget.replyToMessageId,
             sessionFile: result.sessionFile,
-            incomingMessageId: input.incomingMessageId,
+            incomingMessageId: deliveryTarget.incomingMessageId,
             clearProcessing: true,
           });
+          this.markOriginalProcessedIfRetargeted(
+            input.incomingMessageId,
+            deliveryTarget.incomingMessageId,
+          );
+          this.awaitingTurnSettle = false;
           await new Promise((resolve) => setImmediate(resolve));
           await this.flushPendingPassiveNotices();
         }
@@ -1496,13 +1567,19 @@ export class ChatController {
             this.driver.currentSessionFile(),
           );
           if (errorSession.sessionFile && errorMessage) {
+            const deliveryTarget = this.currentDeliveryTarget(input);
             await this.deliverAssistantReply({
               text: formatChatRuntimeErrorForUser(errorMessage),
-              replyToMessageId: input.replyToMessageId,
-              incomingMessageId: input.incomingMessageId,
+              replyToMessageId: deliveryTarget.replyToMessageId,
+              incomingMessageId: deliveryTarget.incomingMessageId,
               sessionFile: errorSessionFile || this.currentSessionFile(),
               clearProcessing: true,
             });
+            this.markOriginalProcessedIfRetargeted(
+              input.incomingMessageId,
+              deliveryTarget.incomingMessageId,
+            );
+            this.awaitingTurnSettle = false;
           }
         }
         const ownsCurrentTurn = this.hasCurrentTurnMatching(

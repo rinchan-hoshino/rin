@@ -1397,7 +1397,7 @@ test("chat controller uses configured command responses for /compact and /reload
   }
 });
 
-test("chat controller leaves the working reaction on the active message while steering", async () => {
+test("chat controller retargets the working reaction to the latest steered message", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -1469,6 +1469,7 @@ test("chat controller leaves the working reaction on the active message while st
     text: "first",
     attachments: [],
     incomingMessageId: "m-first",
+    replyToMessageId: "m-first",
   });
   await firstPromptStarted;
 
@@ -1477,14 +1478,17 @@ test("chat controller leaves the working reaction on the active message while st
       text: "steer now",
       attachments: [],
       incomingMessageId: "m-steer",
+      replyToMessageId: "m-steer",
     },
     "steer",
   );
 
   assert.equal(steerResult.steered, true);
-  assert.deepEqual(actions, []);
-  assert.deepEqual(reactions, []);
-  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), false);
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-steer");
+  assert.equal(controller.currentTurn?.replyToMessageId, "m-steer");
+  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [["create", "2", "m-steer", "🤔"]]);
 
   releaseFirstPrompt();
   assert.equal((await firstTurn).finalText, "done");
@@ -3085,8 +3089,15 @@ test("chat controller lets steer bypass the owned turn queue while the current t
     resolveFirstPromptStarted = resolve;
   });
 
-  controller.commitPendingDelivery = async function (clearProcessing = false) {
-    deliveries.push(this.stagedDelivery?.text || "");
+  controller.commitPendingDelivery = async function (
+    clearProcessing = false,
+    postDelivery = undefined,
+  ) {
+    deliveries.push({
+      text: this.stagedDelivery?.text || "",
+      replyToMessageId: this.stagedDelivery?.replyToMessageId || null,
+      markProcessedMessageId: postDelivery?.markProcessed?.messageId || null,
+    });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
   };
@@ -3122,6 +3133,7 @@ test("chat controller lets steer bypass the owned turn queue while the current t
     text: "first",
     attachments: [],
     incomingMessageId: "m-first",
+    replyToMessageId: "m-first",
   });
   await firstPromptStarted;
 
@@ -3130,6 +3142,7 @@ test("chat controller lets steer bypass the owned turn queue while the current t
       text: "steer now",
       attachments: [],
       incomingMessageId: "m-steer-now",
+      replyToMessageId: "m-steer-now",
     },
     "steer",
   );
@@ -3143,7 +3156,13 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   releaseFirstPrompt();
   const firstResult = await firstTurn;
   assert.equal(firstResult.finalText, "done");
-  assert.deepEqual(deliveries, ["done"]);
+  assert.deepEqual(deliveries, [
+    {
+      text: "done",
+      replyToMessageId: "m-steer-now",
+      markProcessedMessageId: "m-steer-now",
+    },
+  ]);
 });
 
 test("chat controller queues follow-up after an assistant reply is committed", async () => {
