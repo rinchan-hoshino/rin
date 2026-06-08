@@ -848,6 +848,16 @@ export class RinFrontendTurnDriver {
       })
       .catch(() => null);
     if (!resolved) return null;
+    const errorMessage = safeString(resolved.error).trim();
+    if (errorMessage) {
+      const error = new Error(errorMessage) as Error & {
+        sessionId?: string;
+        sessionFile?: string;
+      };
+      error.sessionId = safeString(resolved.sessionId).trim() || undefined;
+      error.sessionFile = safeString(resolved.sessionFile).trim() || undefined;
+      throw error;
+    }
     if (resolved.submitted) return { submitted: true };
     const finalText = safeString(resolved.finalText).trim();
     if (!finalText) return null;

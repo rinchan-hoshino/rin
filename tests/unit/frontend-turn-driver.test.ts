@@ -740,6 +740,94 @@ test("frontend SDK turn driver resolves an already submitted restored turn witho
   );
 });
 
+test("submitted turn resolution preserves provider failure instead of final-missing", () => {
+  const resolved = resolveSubmittedTurnFromMessages(
+    [
+      {
+        role: "user",
+        timestamp: 1778774583000,
+        content: "restored job",
+      },
+      {
+        role: "assistant",
+        timestamp: 1778774590000,
+        stopReason: "error",
+        errorMessage: "WebSocket error",
+        content: [
+          { type: "thinking", thinking: "working" },
+          { type: "toolCall", name: "write", arguments: {} },
+        ],
+      },
+    ],
+    { text: "restored job", sentAt: 1778774580000 },
+  );
+
+  assert.deepEqual(resolved, { error: "WebSocket error" });
+});
+
+test("frontend SDK turn driver surfaces restored submitted provider errors", async () => {
+  const originalNow = Date.now;
+  let now = 1778774600000;
+  (Date as any).now = () => now;
+
+  try {
+    const client = createFrontendClient();
+    client.getState = async () => {
+      now += 121_000;
+      return {
+        sessionFile: "/tmp/frontend-chat.jsonl",
+        sessionId: "frontend-session",
+        isStreaming: false,
+        turnActive: false,
+      };
+    };
+    client.getMessages = async () => [
+      {
+        role: "user",
+        timestamp: 1778774583000,
+        content: "restored job",
+      },
+      {
+        role: "assistant",
+        timestamp: 1778774590000,
+        stopReason: "error",
+        errorMessage: "WebSocket error",
+        content: [
+          { type: "thinking", thinking: "working" },
+          { type: "toolCall", name: "write", arguments: {} },
+        ],
+      },
+    ];
+    client.prompt = async () => {
+      throw new Error("prompt_should_not_be_resubmitted");
+    };
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+    });
+
+    await assert.rejects(
+      () =>
+        driver.runTurn({
+          text: "restored job",
+          restoreSessionFile: "/tmp/frontend-chat.jsonl",
+          promptContext: {
+            source: "chat-bridge",
+            chatKey: "telegram/1:2",
+            sentAt: 1778774580000,
+          },
+        }),
+      /WebSocket error/,
+    );
+    assert.equal(
+      client.calls.some((call: any) => call.type === "prompt"),
+      false,
+    );
+  } finally {
+    (Date as any).now = originalNow;
+  }
+});
+
 test("frontend SDK turn driver reselects a restored session even when cached state matches", async () => {
   const client = createFrontendClient();
   const sessionFile = "/tmp/frontend-chat.jsonl";

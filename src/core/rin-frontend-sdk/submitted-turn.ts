@@ -1,8 +1,14 @@
+import { isAssistantFailedMessage } from "../message-content.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 
 export type RinSubmittedTurnResolution =
   | { submitted: true }
+  | {
+      error: string;
+      sessionId?: string;
+      sessionFile?: string;
+    }
   | {
       finalText: string;
       result?: unknown;
@@ -11,14 +17,20 @@ export type RinSubmittedTurnResolution =
     }
   | null;
 
-function messageRole(message: unknown) {
+function messageValue(message: unknown) {
   const value = message && typeof message === "object" ? (message as any) : {};
-  return safeString(value?.message?.role || value?.role).trim();
+  return value?.message && typeof value.message === "object"
+    ? value.message
+    : value;
+}
+
+function messageRole(message: unknown) {
+  return safeString(messageValue(message)?.role).trim();
 }
 
 function messageText(message: unknown) {
-  const value = message && typeof message === "object" ? (message as any) : {};
-  const content = value?.message?.content ?? value?.content;
+  const value = messageValue(message);
+  const content = value?.content;
   if (typeof content === "string") return safeString(content).trim();
   if (Array.isArray(content)) {
     return content
@@ -34,12 +46,26 @@ function messageText(message: unknown) {
 }
 
 function messageTimestampMs(message: unknown) {
-  const value = message && typeof message === "object" ? (message as any) : {};
-  const raw = value?.message?.timestamp ?? value?.timestamp;
+  const outer = message && typeof message === "object" ? (message as any) : {};
+  const raw = messageValue(message)?.timestamp ?? outer?.timestamp;
   const numeric = Number(raw);
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
   const parsed = Date.parse(safeString(raw));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function messageFailureError(message: unknown) {
+  const value = messageValue(message);
+  if (!isAssistantFailedMessage(value)) return "";
+  return safeString(value?.errorMessage || value?.error).trim();
+}
+
+function findSubmittedTurnFailure(messages: unknown[]) {
+  for (const message of [...messages].reverse()) {
+    const error = messageFailureError(message);
+    if (error) return error;
+  }
+  return "";
 }
 
 export function resolveSubmittedTurnFromMessages(
@@ -62,11 +88,14 @@ export function resolveSubmittedTurnFromMessages(
   }
   if (submittedIndex < 0) return null;
 
-  const completion = resolveTurnCompletion({
-    messages: messages.slice(submittedIndex + 1),
-  });
+  const turnMessages = messages.slice(submittedIndex + 1);
+  const completion = resolveTurnCompletion({ messages: turnMessages });
   const finalText = safeString(completion.finalText).trim();
-  if (!finalText) return { submitted: true };
+  if (!finalText) {
+    const error = findSubmittedTurnFailure(turnMessages);
+    if (error) return { error };
+    return { submitted: true };
+  }
   return {
     finalText,
     result: completion.result,
