@@ -1243,6 +1243,7 @@ test("rpc session resync redraw does not replay initial compaction status notice
     pendingMessagesContainer: { clear() {} },
     pendingTools: new Map(),
     statusContainer: { clear() {}, addChild() {} },
+    renderProjectTrustWarningIfNeeded() {},
   };
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
