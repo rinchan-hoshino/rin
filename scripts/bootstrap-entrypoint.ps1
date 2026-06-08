@@ -199,6 +199,17 @@ function Url-Encode-Path([string]$Value) {
   (($Value -split "/") | ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join "/"
 }
 
+function Get-GitHubCodeloadRepoPath([string]$RepoUrl) {
+  $normalized = ([string]$RepoUrl).Trim() -replace "\.git$", "" -replace "/+$", ""
+  if ($normalized -match "^git@github\.com:([^/]+)/([^/]+)$") {
+    return "$([System.Uri]::EscapeDataString($Matches[1]))/$([System.Uri]::EscapeDataString($Matches[2]))"
+  }
+  if ($normalized -match "^https?://github\.com/([^/]+)/([^/]+)$") {
+    return "$([System.Uri]::EscapeDataString($Matches[1]))/$([System.Uri]::EscapeDataString($Matches[2]))"
+  }
+  return ""
+}
+
 function Get-Property($Object, [string]$Name) {
   if ($null -eq $Object) { return $null }
   return $Object.PSObject.Properties[$Name].Value
@@ -208,11 +219,12 @@ function Resolve-Release {
   $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
   $packageName = if ($manifest.packageName) { [string]$manifest.packageName } else { "@hoshinorin/rin" }
   $releaseRepoUrl = if ($manifest.repoUrl) { [string]$manifest.repoUrl } else { $repoUrl }
-  $releaseRepoUrl = $releaseRepoUrl -replace "\.git$", ""
+  $releaseRepoUrl = $releaseRepoUrl -replace "\.git$", "" -replace "/+$", ""
   $fileBase = ($packageName -split "/")[-1]
+  $githubCodeloadRepo = Get-GitHubCodeloadRepoPath $releaseRepoUrl
   $buildNpmTarballUrl = { param($releaseVersion) "https://registry.npmjs.org/$([System.Uri]::EscapeDataString($packageName))/-/$fileBase-$releaseVersion.tgz" }
-  $buildRefArchiveUrl = { param($ref) "$releaseRepoUrl/archive/$(Url-Encode-Path $ref).tar.gz" }
-  $buildBranchArchiveUrl = { param($name) "$releaseRepoUrl/archive/refs/heads/$(Url-Encode-Path $name).tar.gz" }
+  $buildRefArchiveUrl = { param($ref) if ($githubCodeloadRepo) { "https://codeload.github.com/$githubCodeloadRepo/tar.gz/$(Url-Encode-Path $ref)" } else { "$releaseRepoUrl/archive/$(Url-Encode-Path $ref).tar.gz" } }
+  $buildBranchArchiveUrl = { param($name) & $buildRefArchiveUrl "refs/heads/$name" }
 
   if ($channel -eq "stable") {
     if ($branch) { throw "rin_stable_branch_not_supported" }
