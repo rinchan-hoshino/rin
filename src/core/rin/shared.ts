@@ -158,23 +158,50 @@ export function loadInstallConfig() {
   return loadInstallConfigForHome(os.homedir());
 }
 
+type TargetJsonReadOptions = {
+  targetUser?: string;
+  currentUser?: string;
+  readJson?: typeof readJsonFile;
+  readPrivilegedJson?: typeof readJsonFileWithPrivilege;
+};
+
+function shouldUsePrivilegedTargetRead(options: TargetJsonReadOptions = {}) {
+  const currentUser = safeString(
+    options.currentUser || os.userInfo().username,
+  ).trim();
+  const targetUser = safeString(options.targetUser || currentUser).trim();
+  return Boolean(targetUser && targetUser !== currentUser);
+}
+
+export function readTargetJsonFile<T>(
+  filePath: string,
+  fallback: T,
+  options: TargetJsonReadOptions = {},
+): T {
+  const reader = shouldUsePrivilegedTargetRead(options)
+    ? options.readPrivilegedJson || readJsonFileWithPrivilege
+    : options.readJson || readJsonFile;
+  return reader<T>(filePath, fallback);
+}
+
+export function readInstallerManifestForTarget<T = any>(
+  installDir: string,
+  options: TargetJsonReadOptions = {},
+): T {
+  return readTargetJsonFile<T>(
+    installerManifestPath(installDir),
+    {} as T,
+    options,
+  );
+}
+
 export function readUpdateDisplayLanguage(
   installDir: string,
-  options: {
-    targetUser?: string;
-    currentUser?: string;
-    readJson?: typeof readJsonFile;
-    readPrivilegedJson?: typeof readJsonFileWithPrivilege;
-  } = {},
+  options: TargetJsonReadOptions = {},
 ) {
-  const currentUser = safeString(options.currentUser || os.userInfo().username);
-  const targetUser = safeString(options.targetUser || currentUser);
-  const readSettings =
-    targetUser === currentUser
-      ? options.readJson || readJsonFile
-      : options.readPrivilegedJson || readJsonFileWithPrivilege;
   return normalizeLanguageTag(
-    readSettings<any>(installSettingsPath(installDir), {})?.language,
+    readTargetJsonFile<any>(installSettingsPath(installDir), {}, options)
+      ?.language,
     "",
   );
 }
@@ -194,6 +221,29 @@ export type TargetExecutionContext = TargetExecutionContextBase & {
   canConnectSocket: () => Promise<boolean>;
   queryDaemonStatus: () => Promise<any>;
 };
+
+export function resolveRuntimeAgentDirForTarget(
+  targetUser: string,
+  currentUser: string,
+  installDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const normalizedTargetUser = safeString(targetUser).trim();
+  const processUser = os.userInfo().username;
+  const normalizedCurrentUser = safeString(currentUser || processUser).trim();
+  const normalizedProcessUser = safeString(processUser).trim();
+  const normalizedInstallDir = safeString(installDir).trim();
+  const explicitRinDir = safeString(env[RIN_DIR_ENV]).trim();
+  if (
+    explicitRinDir &&
+    (!normalizedTargetUser ||
+      normalizedTargetUser === normalizedCurrentUser ||
+      normalizedTargetUser === normalizedProcessUser)
+  ) {
+    return explicitRinDir;
+  }
+  return normalizedInstallDir || explicitRinDir;
+}
 
 export function createTargetExecutionContext(
   parsed: ParsedArgs,
@@ -273,6 +323,20 @@ export function createTargetExecutionContext(
     canConnectSocket: canConnectSocketInContext,
     queryDaemonStatus: queryDaemonStatusInContext,
   };
+}
+
+export function targetPathExists(
+  context: Pick<TargetExecutionContext, "isTargetUser" | "capture">,
+  filePath: string,
+  fileExists: (filePath: string) => boolean = fs.existsSync,
+) {
+  if ((context as any).isTargetUser !== false) return fileExists(filePath);
+  try {
+    context.capture(["test", "-e", filePath], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function ensureDaemonAvailable(context: TargetExecutionContext) {
@@ -484,10 +548,14 @@ export function resolveInstallDirForTarget(parsed: ParsedArgs) {
 function daemonControlContext(parsed: ParsedArgs) {
   const repoRoot = repoRootFromHere();
   const targetUser = parsed.targetUser;
+  const currentUser = os.userInfo().username;
   const targetHome = readPasswdUser(targetUser)?.home || os.homedir();
   const installDir = parsed.installDir || defaultInstallDirForHome(targetHome);
-  const runtimeAgentDir =
-    safeString(process.env[RIN_DIR_ENV]).trim() || installDir;
+  const runtimeAgentDir = resolveRuntimeAgentDirForTarget(
+    targetUser,
+    currentUser,
+    installDir,
+  );
   const runtimeEnv = targetUserRuntimeEnv(targetUser, {
     [RIN_DIR_ENV]: runtimeAgentDir,
   });
@@ -500,7 +568,7 @@ function daemonControlContext(parsed: ParsedArgs) {
           : ""
       : "";
   const socketPath =
-    targetUser === os.userInfo().username
+    targetUser === currentUser
       ? socketPathForUser(targetUser)
       : bridgeDaemonSocketPath(installDir);
   return {
@@ -679,11 +747,14 @@ function isReleaseChannel(value: string): value is ReleaseChannel {
   return ["stable", "beta", "nightly", "git"].includes(value);
 }
 
-export function readInstalledUpdateReleasePreference(installDir: string): {
+export function readInstalledUpdateReleasePreference(
+  installDir: string,
+  options: TargetJsonReadOptions = {},
+): {
   channel: ReleaseChannel;
   branch: string;
 } {
-  const release = readJsonFile<any>(installerManifestPath(installDir), {})
+  const release = readInstallerManifestForTarget<any>(installDir, options)
     ?.currentRelease?.release;
   const channel = safeString(release?.channel).trim();
   if (!isReleaseChannel(channel)) {
@@ -707,7 +778,9 @@ export async function runUpdate(parsed: ParsedArgs) {
   const manifest = await loadReleaseManifestForNetwork();
   const inheritedRelease = parsed.explicitReleaseChannel
     ? null
-    : readInstalledUpdateReleasePreference(installDir);
+    : readInstalledUpdateReleasePreference(installDir, {
+        targetUser: parsed.targetUser,
+      });
   const requestedRelease = resolveReleaseRequest(manifest, {
     channel: inheritedRelease?.channel || parsed.releaseChannel,
     branch: parsed.releaseBranch || inheritedRelease?.branch || "",

@@ -1,7 +1,4 @@
-import fs from "node:fs";
-
 import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
-import { readJsonFile } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import {
   getWebSearchStatus,
@@ -11,6 +8,9 @@ import {
   createTargetExecutionContext,
   ensureDaemonAvailable,
   ParsedArgs,
+  readInstallerManifestForTarget,
+  targetPathExists,
+  type TargetExecutionContext,
 } from "./shared.js";
 
 type ManagedRuntimeService = {
@@ -19,13 +19,21 @@ type ManagedRuntimeService = {
   path?: string;
 };
 
-function readManagedRuntimeService(
-  context: ReturnType<typeof createTargetExecutionContext>,
+type ManagedRuntimeServiceReadContext = Pick<
+  TargetExecutionContext,
+  "installDir" | "targetUser" | "currentUser"
+> &
+  NonNullable<Parameters<typeof readInstallerManifestForTarget>[1]>;
+
+export function readManagedRuntimeService(
+  context: ManagedRuntimeServiceReadContext,
 ): ManagedRuntimeService {
-  const manifest = readJsonFile<any>(
-    `${context.installDir}/installer.json`,
-    {},
-  );
+  const manifest = readInstallerManifestForTarget<any>(context.installDir, {
+    targetUser: context.targetUser,
+    currentUser: context.currentUser,
+    readJson: context.readJson,
+    readPrivilegedJson: context.readPrivilegedJson,
+  });
   const service = manifest?.service;
   if (service?.kind === "systemd" && String(service.label || "").trim()) {
     return {
@@ -39,14 +47,12 @@ function readManagedRuntimeService(
   );
 }
 
-function managedRuntimeServiceForAction(
-  context: ReturnType<typeof createTargetExecutionContext>,
-) {
+function managedRuntimeServiceForAction(context: TargetExecutionContext) {
   const service = readManagedRuntimeService(context);
   if (service.kind !== "systemd" || !context.systemctl) {
     throw new Error(`rin_managed_service_unsupported:${service.kind}`);
   }
-  if (service.path && !fs.existsSync(service.path)) {
+  if (service.path && !targetPathExists(context, service.path)) {
     throw new Error(`rin_managed_service_missing_path:${service.path}`);
   }
   return service;

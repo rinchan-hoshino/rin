@@ -50,6 +50,41 @@ test("readInstalledUpdateReleasePreference inherits installed channel", async ()
   }
 });
 
+test("readInstalledUpdateReleasePreference reads cross-user channel with privilege", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-release-xuser-"),
+  );
+  try {
+    const preference = shared.readInstalledUpdateReleasePreference(installDir, {
+      targetUser: "rin",
+      currentUser: "operator",
+      readJson() {
+        throw new Error("current_user_reader_must_not_be_used");
+      },
+      readPrivilegedJson(filePath: string, fallback: any) {
+        assert.equal(filePath, path.join(installDir, "installer.json"));
+        assert.deepEqual(fallback, {});
+        return {
+          currentRelease: {
+            release: {
+              channel: "git",
+              branch: "main",
+              version: "deadbeef",
+            },
+          },
+        };
+      },
+    });
+
+    assert.deepEqual(preference, {
+      channel: "git",
+      branch: "main",
+    });
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
 test("readInstalledUpdateReleasePreference requires an installed channel", async () => {
   const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-release-"));
   try {

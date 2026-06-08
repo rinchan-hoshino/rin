@@ -18,7 +18,7 @@ import {
   runFinalizeInstallPlanInChild,
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
-import { readJsonFile } from "./fs-utils.js";
+import { readInstallerJson, readJsonFile } from "./fs-utils.js";
 import {
   buildFinalRequirements,
   buildInstallPlanText,
@@ -121,14 +121,22 @@ function note(message?: string, title?: string) {
   );
 }
 
-function readInstalledUpdateLanguage(options: {
-  currentUser: string;
-  targetUser: string;
-  installDir: string;
-  ownerHome?: string;
-}) {
+export function readInstalledUpdateLanguage(
+  options: {
+    currentUser: string;
+    targetUser: string;
+    installDir: string;
+    ownerHome?: string;
+  },
+  deps: {
+    readInstallerJson?: typeof readInstallerJson;
+  } = {},
+) {
+  const readSettings = deps.readInstallerJson || readInstallerJson;
+  const elevated = options.targetUser !== options.currentUser;
   return normalizeLanguageTag(
-    readJsonFile<any>(installSettingsPath(options.installDir), {})?.language,
+    readSettings<any>(installSettingsPath(options.installDir), {}, elevated)
+      ?.language,
     "",
   );
 }

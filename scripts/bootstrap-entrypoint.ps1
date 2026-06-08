@@ -44,9 +44,37 @@ Legacy flags such as --branch/--version remain supported.
 "@ | Write-Host
 }
 
+function Read-LauncherInstallDir([string]$Path) {
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return "" }
+  try {
+    $record = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $value = [string]$record.defaultInstallDir
+    if (-not $value) { $value = [string]$record.installDir }
+    return $value.Trim()
+  } catch {
+    return ""
+  }
+}
+
+function Resolve-UpdateInstallDir {
+  if ($env:RIN_DIR) { return $env:RIN_DIR }
+  if ($HOME) {
+    $candidates = @(
+      (Join-Path $HOME ".config/rin/install.json"),
+      (Join-Path $HOME "Library/Application Support/rin/install.json")
+    )
+    foreach ($candidate in $candidates) {
+      $installDir = Read-LauncherInstallDir $candidate
+      if ($installDir) { return $installDir }
+    }
+    return (Join-Path $HOME ".rin")
+  }
+  return ""
+}
+
 function Inherit-UpdateChannel {
   if ($script:mode -ne "update" -or $script:explicitChannel) { return }
-  $installDir = if ($env:RIN_DIR) { $env:RIN_DIR } elseif ($HOME) { Join-Path $HOME ".rin" } else { "" }
+  $installDir = Resolve-UpdateInstallDir
   $manifestPath = if ($installDir) { Join-Path $installDir "installer.json" } else { "" }
   if (-not $manifestPath -or -not (Test-Path -LiteralPath $manifestPath)) {
     throw "rin update requires an existing installer.json release record; pass --stable/--beta/--nightly/--git to override"

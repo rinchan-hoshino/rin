@@ -1,12 +1,13 @@
 import os from "node:os";
 import path from "node:path";
-import { buildUserShell, targetUserRuntimeEnv } from "../rin-lib/system.js";
 import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
+import { buildUserShell, targetUserRuntimeEnv } from "../rin-lib/system.js";
 import {
   createTargetExecutionContext,
   ensureDaemonAvailable,
   installConfigPath,
   ParsedArgs,
+  resolveRuntimeAgentDirForTarget,
   runCommand,
   safeString,
 } from "./shared.js";
@@ -21,19 +22,16 @@ export function formatMaintenanceModeNotice(error: unknown) {
   ].join("\n");
 }
 
-function resolveTuiRuntimeAgentDir(installDir?: string) {
-  return (
-    String(process.env[RIN_DIR_ENV] || "").trim() ||
-    String(installDir || "").trim()
-  );
-}
-
 export function buildTuiRuntimeEnv(
   targetUser: string,
   currentUser: string,
   installDir?: string,
 ) {
-  const runtimeAgentDir = resolveTuiRuntimeAgentDir(installDir);
+  const runtimeAgentDir = resolveRuntimeAgentDirForTarget(
+    targetUser,
+    currentUser,
+    installDir || "",
+  );
   return targetUserRuntimeEnv(targetUser, {
     ...(runtimeAgentDir
       ? {

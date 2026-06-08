@@ -146,7 +146,10 @@ const fields = [
 ];
 fs.appendFileSync(logPath, fields.join(":") + "\\n", "utf8");
 
-if (args[0] === "-" && String(args[1] || "").endsWith("installer.json")) {
+if (args[0] === "-" && String(args[1] || "").endsWith("install.json")) {
+  const record = JSON.parse(fs.readFileSync(args[1], "utf8"));
+  process.stdout.write(String(record.defaultInstallDir || record.installDir || ""));
+} else if (args[0] === "-" && String(args[1] || "").endsWith("installer.json")) {
   const release = JSON.parse(fs.readFileSync(args[1], "utf8")).currentRelease.release;
   process.stdout.write(String(release.channel || "") + "\\n" + String(release.branch || "") + "\\n");
 } else if (args[0] === "-") {
@@ -354,6 +357,69 @@ test("stable install and update wrappers resolve release metadata then npm-insta
     assert.match(log, /npm:.*:install --omit=dev --no-fund --no-audit\n/);
 
     assert.deepEqual(await fs.readdir(workRoot), []);
+  });
+});
+
+test("update wrapper inherits release channel from launcher metadata install dir", async () => {
+  await withTempDir(async (tempDir) => {
+    const archivePath = await createSourceArchive(tempDir);
+    const manifestPath = await createReleaseManifest(tempDir);
+    const fakeBin = path.join(tempDir, "bin");
+    const logPath = path.join(tempDir, "invocations.log");
+    const workRoot = path.join(tempDir, "work");
+    const currentHome = path.join(tempDir, "operator-home");
+    const installDir = path.join(tempDir, "target-install");
+    await createFakeBin(fakeBin, logPath);
+    await fs.mkdir(workRoot, { recursive: true });
+    await fs.mkdir(path.join(currentHome, ".config", "rin"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(currentHome, ".config", "rin", "install.json"),
+      JSON.stringify({
+        defaultTargetUser: "rin",
+        defaultInstallDir: installDir,
+      }),
+      "utf8",
+    );
+    await fs.mkdir(installDir, { recursive: true });
+    await fs.writeFile(
+      path.join(installDir, "installer.json"),
+      JSON.stringify({
+        currentRelease: {
+          release: { channel: "git", branch: "main" },
+        },
+      }),
+      "utf8",
+    );
+
+    const env = {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      HOME: currentHome,
+      RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+      TMPDIR: workRoot,
+      RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
+      RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
+      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+        rootDir,
+        "scripts",
+        "bootstrap-entrypoint.sh",
+      ),
+      RIN_BOOTSTRAP_TEST_LOG: logPath,
+    };
+    delete env.RIN_DIR;
+
+    await runBootstrapWrapper("update.sh", [], env);
+
+    const log = await fs.readFile(logPath, "utf8");
+    assert.match(log, /node:.*\.config\/rin\/install\.json/);
+    assert.match(log, /node:.*target-install\/installer\.json/);
+    assert.match(
+      log,
+      /curl:-fsSL https:\/\/example\.invalid\/releases\/main\.tar\.gz -o /,
+    );
+    assert.match(log, /npm:.*:ci --no-fund --no-audit/);
   });
 });
 

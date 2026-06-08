@@ -23,6 +23,9 @@ const installCommon = await import(
 const launch = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "launch.js")).href
 );
+const control = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "control.js")).href
+);
 const installPaths = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "paths.js"))
     .href
@@ -124,6 +127,68 @@ test("ensureDaemonAvailable does not spawn unmanaged daemon without a managed se
     /rin_daemon_unavailable: managed daemon service did not become available for demo/,
   );
   assert.deepEqual(execCalls, []);
+});
+
+test("target execution context ignores current RIN_DIR for cross-user commands", () => {
+  const previousRinDir = process.env.RIN_DIR;
+  const currentUser = os.userInfo().username;
+  const installDir = "/srv/rin-target";
+
+  try {
+    process.env.RIN_DIR = "/tmp/current-user-rin";
+    const sameUserContext = shared.createTargetExecutionContext({
+      targetUser: currentUser,
+      installDir,
+    } as any);
+    assert.equal(sameUserContext.agentDir, "/tmp/current-user-rin");
+    assert.equal(sameUserContext.runtimeEnv.RIN_DIR, "/tmp/current-user-rin");
+
+    const crossUserContext = shared.createTargetExecutionContext({
+      targetUser: `${currentUser}-daemon`,
+      installDir,
+    } as any);
+    assert.equal(crossUserContext.agentDir, installDir);
+    assert.equal(crossUserContext.runtimeEnv.RIN_DIR, installDir);
+
+    const crossUserTuiEnv = launch.buildTuiRuntimeEnv(
+      `${currentUser}-daemon`,
+      currentUser,
+      installDir,
+    );
+    assert.equal(crossUserTuiEnv.RIN_DIR, installDir);
+  } finally {
+    if (previousRinDir === undefined) delete process.env.RIN_DIR;
+    else process.env.RIN_DIR = previousRinDir;
+  }
+});
+
+test("managed runtime service manifest reads cross-user installer metadata with privilege", () => {
+  const installDir = "/home/rin/.rin";
+  const service = control.readManagedRuntimeService({
+    installDir,
+    targetUser: "rin",
+    currentUser: "operator",
+    readJson() {
+      throw new Error("current_user_reader_must_not_be_used");
+    },
+    readPrivilegedJson(filePath: string, fallback: any) {
+      assert.equal(filePath, path.join(installDir, "installer.json"));
+      assert.deepEqual(fallback, {});
+      return {
+        service: {
+          kind: "systemd",
+          label: "rin-daemon-rin.service",
+          path: "/home/rin/.config/systemd/user/rin-daemon-rin.service",
+        },
+      };
+    },
+  } as any);
+
+  assert.deepEqual(service, {
+    kind: "systemd",
+    label: "rin-daemon-rin.service",
+    path: "/home/rin/.config/systemd/user/rin-daemon-rin.service",
+  });
 });
 
 test("shared reuses installer common repo helpers", async () => {

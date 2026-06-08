@@ -7,6 +7,7 @@ import {
 import { systemdUserUnitPathForHome } from "../rin-install/paths.js";
 import {
   createTargetExecutionContext,
+  targetPathExists,
   type ParsedArgs,
   type TargetExecutionContext,
 } from "./shared.js";
@@ -69,12 +70,17 @@ export function existingManagedSystemdUnitsForDoctor(
 
 type DoctorSystemdContext = Pick<
   TargetExecutionContext,
-  "capture" | "managedServiceUnits" | "systemctl" | "targetHome"
+  | "capture"
+  | "isTargetUser"
+  | "managedServiceUnits"
+  | "systemctl"
+  | "targetHome"
 >;
 
 export function collectSystemdDoctorLines(
   context: DoctorSystemdContext,
-  unitExists: (filePath: string) => boolean = fs.existsSync,
+  unitExists: (filePath: string) => boolean = (filePath) =>
+    targetPathExists(context, filePath, fs.existsSync),
 ) {
   const lines: string[] = [];
   if (!context.systemctl) return lines;

@@ -33,6 +33,10 @@ const run = await import(
 const main = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "main.js")).href
 );
+const installerMain = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "main.js"))
+    .href
+);
 
 test("version subcommand prints package version without launching Rin", () => {
   const packageJson = JSON.parse(
@@ -115,6 +119,27 @@ test("rin update can read target language through the privileged cross-user path
       return { language: "zh_CN" };
     },
   });
+
+  assert.equal(language, "zh_CN");
+});
+
+test("rin-install update reads target language through elevated installer JSON", () => {
+  const installDir = "/home/demo/.rin";
+  const language = installerMain.readInstalledUpdateLanguage(
+    {
+      currentUser: "operator",
+      targetUser: "demo",
+      installDir,
+    },
+    {
+      readInstallerJson(filePath: string, fallback: any, elevated: boolean) {
+        assert.equal(filePath, path.join(installDir, "settings.json"));
+        assert.deepEqual(fallback, {});
+        assert.equal(elevated, true);
+        return { language: "zh_CN" };
+      },
+    },
+  );
 
   assert.equal(language, "zh_CN");
 });
