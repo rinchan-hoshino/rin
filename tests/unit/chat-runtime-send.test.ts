@@ -944,7 +944,7 @@ test("lark adapter sends markdown nodes as native markdown rich text", async () 
   });
 });
 
-test("lark adapter terminates markdown lists before following plain lines", async () => {
+test("lark adapter terminates markdown lists with post paragraphs", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -967,16 +967,23 @@ test("lark adapter terminates markdown lists before following plain lines", asyn
 
     const result = await app.bots[0].sendMessage("oc_1", [
       h.markdown(
-        "- first\nplain\n- second\nplain again\n```\n- not a list\nplain code\n```",
+        "- first\nplain\n- second\n[docs](https://example.com)\n```\n- not a list\nplain code\n```",
       ),
     ]);
 
     assert.deepEqual(result, ["m1"]);
     const content = JSON.parse(calls[0].data.content);
-    assert.equal(
-      content.zh_cn.content[0][0].text,
-      "- first\n\nplain\n- second\n\nplain again\n```\n- not a list\nplain code\n```",
-    );
+    assert.deepEqual(content.zh_cn.content, [
+      [{ tag: "md", text: "- first" }],
+      [{ tag: "md", text: "plain" }],
+      [{ tag: "md", text: "- second" }],
+      [
+        {
+          tag: "md",
+          text: "[docs](https://example.com)\n```\n- not a list\nplain code\n```",
+        },
+      ],
+    ]);
   });
 });
 
