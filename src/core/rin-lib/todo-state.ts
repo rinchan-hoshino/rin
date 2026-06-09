@@ -13,7 +13,7 @@ export type RinTodoSnapshot = {
   signature: string;
 };
 
-function normalizeTodoItem(value: unknown): RinTodoItem | undefined {
+export function normalizeRinTodoItem(value: unknown): RinTodoItem | undefined {
   const item = value && typeof value === "object" ? (value as any) : null;
   if (!item) return undefined;
   const id = Number(item.id);
@@ -24,6 +24,30 @@ function normalizeTodoItem(value: unknown): RinTodoItem | undefined {
     text,
     done: Boolean(item.done),
   };
+}
+
+export function normalizeRinTodoItems(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .map(normalizeRinTodoItem)
+    .filter((todo): todo is RinTodoItem => Boolean(todo));
+}
+
+export function formatRinTodoItemText(
+  todo: Pick<RinTodoItem, "text" | "done">,
+) {
+  const text = safeString(todo.text).trim();
+  return todo.done && text ? `~~${text}~~` : text;
+}
+
+export function formatRinTodoChecklistContent(
+  todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
+): string {
+  if (todos.length === 0) return "○ No todos";
+
+  return todos
+    .map((todo) => `${todo.done ? "✓" : "○"} ${formatRinTodoItemText(todo)}`)
+    .join("\n");
 }
 
 function todoSnapshot(todos: RinTodoItem[] = [], nextId?: number) {
@@ -57,9 +81,7 @@ function todoSnapshotFromMessage(
     value.details && typeof value.details === "object"
       ? value.details
       : undefined;
-  const todos = Array.isArray((details as any)?.todos)
-    ? (details as any).todos.map(normalizeTodoItem).filter(Boolean)
-    : undefined;
+  const todos = normalizeRinTodoItems((details as any)?.todos);
   if (!todos) return undefined;
   const rawNextId = Number((details as any)?.nextId);
   return todoSnapshot(

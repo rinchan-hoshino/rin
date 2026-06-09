@@ -8,6 +8,10 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import {
+  formatRinTodoChecklistContent,
+  formatRinTodoItemText,
+} from "./todo-state.js";
 import type {
   RinCapabilityDefinition,
   RinCapabilityContext,
@@ -113,11 +117,7 @@ function readTodoDetails(value: unknown): TodoDetails | undefined {
 }
 
 function formatTodoChecklistContent(todoList: Todo[]): string {
-  if (todoList.length === 0) return "○ No todos";
-
-  return todoList
-    .map((todo) => `${todo.done ? "✓" : "○"} ${todo.text}`)
-    .join("\n");
+  return formatRinTodoChecklistContent(todoList);
 }
 
 function formatTodoChecklistRender(
@@ -132,9 +132,10 @@ function formatTodoChecklistRender(
   const display = expanded ? todoList : todoList.slice(0, 5);
   const lines = display.map((todo) => {
     const check = todo.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
+    const itemText = formatRinTodoItemText(todo);
     const text = todo.done
-      ? theme.fg("dim", todo.text)
-      : theme.fg("text", todo.text);
+      ? theme.fg("dim", itemText)
+      : theme.fg("text", itemText);
     return `${check} ${text}`;
   });
 
@@ -205,9 +206,10 @@ class TodoListComponent {
 
       for (const todo of this.todos) {
         const check = todo.done ? th.fg("success", "✓") : th.fg("dim", "○");
+        const itemText = formatRinTodoItemText(todo);
         const text = todo.done
-          ? th.fg("dim", todo.text)
-          : th.fg("text", todo.text);
+          ? th.fg("dim", itemText)
+          : th.fg("text", itemText);
         lines.push(truncateToWidth(`  ${check} ${text}`, width));
       }
     }

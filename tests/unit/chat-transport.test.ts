@@ -219,6 +219,47 @@ test("chat transport forwards text delivery kind to adapters", async () => {
   });
 });
 
+test("chat transport treats strikethrough-only text deliveries as markdown", async () => {
+  await withTempDir(async (dir) => {
+    const sends = [];
+    await transport.sendOutboxPayload(
+      {
+        bots: [
+          {
+            platform: "telegram",
+            selfId: "1",
+            async sendMessage(chatId, content) {
+              sends.push({ chatId, content });
+              return ["m-strike"];
+            },
+          },
+        ],
+      },
+      dir,
+      {
+        type: "text_delivery",
+        chatKey: "telegram/1:2",
+        text: "✓ ~~done~~",
+      },
+      Object.assign((type, attrs) => ({ type, attrs }), {
+        text(content) {
+          return { type: "text", attrs: { content } };
+        },
+        markdown(content) {
+          return { type: "markdown", attrs: { content } };
+        },
+        quote(id) {
+          return { type: "quote", attrs: { id } };
+        },
+      }),
+    );
+
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0].content[0].type, "markdown");
+    assert.equal(sends[0].content[0].attrs.content, "✓ ~~done~~");
+  });
+});
+
 test("chat transport defaults text delivery kind to final", async () => {
   await withTempDir(async (dir) => {
     const sends = [];

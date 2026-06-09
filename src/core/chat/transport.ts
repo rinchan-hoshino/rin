@@ -304,7 +304,7 @@ function markdownNode(h: any, text: string) {
 }
 
 function looksLikeMarkdown(text: string) {
-  return /(^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s)|```|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|!?\[[^\]]+\]\([^)]+\)|\[(?:quote:\s*[^\]]+|(?:image|file|video|audio|sticker):\s*[^\]]*)\]/i.test(
+  return /(^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s)|```|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|!?\[[^\]]+\]\([^)]+\)|\[(?:quote:\s*[^\]]+|(?:image|file|video|audio|sticker):\s*[^\]]*)\]/i.test(
     safeString(text),
   );
 }

@@ -227,6 +227,156 @@ test("frontend backend event translator does not complete turns from interim tex
   assert.deepEqual(translator.translate({ type: "agent_end" }), []);
 });
 
+test("frontend backend event translator emits todo notice for single todo execution", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolCallId: "todo-1",
+      toolName: "todo",
+      result: {
+        content: [{ type: "text", text: "legacy text is ignored" }],
+        details: {
+          action: "write",
+          todos: [
+            { id: 1, text: "Keep working", done: false },
+            { id: 2, text: "Ship renderer", done: true },
+          ],
+          nextId: 3,
+        },
+      },
+      isError: false,
+    }),
+    [
+      { type: "turn_accepted" },
+      {
+        type: "passive_notice",
+        text: "○ Keep working\n✓ ~~Ship renderer~~",
+        level: "info",
+        deferDuringTurn: false,
+      },
+    ],
+  );
+});
+
+test("frontend backend event translator waits for the active tool batch before todo notice", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "todo-1", name: "todo" },
+          { type: "toolCall", id: "read-1", name: "read" },
+        ],
+      },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolCallId: "todo-1",
+      toolName: "todo",
+      result: {
+        details: {
+          action: "write",
+          todos: [
+            { id: 1, text: "Keep working", done: false },
+            { id: 2, text: "Ship renderer", done: true },
+          ],
+          nextId: 3,
+        },
+      },
+    }),
+    [{ type: "turn_accepted" }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolCallId: "read-1",
+      toolName: "read",
+      result: { content: [{ type: "text", text: "done" }] },
+    }),
+    [
+      { type: "turn_accepted" },
+      {
+        type: "passive_notice",
+        text: "○ Keep working\n✓ ~~Ship renderer~~",
+        level: "info",
+        deferDuringTurn: false,
+      },
+    ],
+  );
+});
+
+test("frontend backend event translator emits nested multi-tool todo notice when wrapper ends", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "multi-1",
+            name: "multi_tool_use.parallel",
+            arguments: {
+              tool_uses: [
+                { recipient_name: "functions.todo", parameters: {} },
+                { recipient_name: "functions.read", parameters: {} },
+              ],
+            },
+          },
+        ],
+      },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolCallId: "multi-1",
+      toolName: "multi_tool_use.parallel",
+      result: {
+        results: [
+          {
+            recipient_name: "functions.read",
+            result: { content: [{ type: "text", text: "done" }] },
+          },
+          {
+            recipient_name: "functions.todo",
+            result: {
+              details: {
+                action: "write",
+                todos: [
+                  { id: 1, text: "Keep working", done: false },
+                  { id: 2, text: "Ship renderer", done: true },
+                ],
+                nextId: 3,
+              },
+            },
+          },
+        ],
+      },
+    }),
+    [
+      { type: "turn_accepted" },
+      {
+        type: "passive_notice",
+        text: "○ Keep working\n✓ ~~Ship renderer~~",
+        level: "info",
+        deferDuringTurn: false,
+      },
+    ],
+  );
+});
+
 test("frontend backend event translator treats overflow compaction as ordinary backend progress", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
