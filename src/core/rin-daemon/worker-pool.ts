@@ -6,6 +6,11 @@ import path from "node:path";
 
 import { sleep } from "../platform/process.js";
 import type { RpcSocketLike } from "../platform/rpc-socket.js";
+import {
+  clearPendingTerminalTurnEvent,
+  rememberPendingTerminalTurnEvent,
+  takePendingTerminalTurnEvent,
+} from "./pending-turn-events.js";
 import { setRunningWorkerSession } from "./running-workers.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
@@ -77,6 +82,13 @@ function createSwitchSessionCommand(sessionFile: string) {
     type: "switch_session",
     sessionPath: sessionFile,
   };
+}
+
+function isTerminalRpcTurnEvent(payload: any) {
+  return (
+    payload?.type === "rpc_turn_event" &&
+    (payload.event === "complete" || payload.event === "error")
+  );
 }
 
 const RESUMABLE_COMMAND_TYPES = new Set([
@@ -726,9 +738,18 @@ export class WorkerPool {
           return;
         }
 
+        let forwarded = 0;
         for (const connection of worker.connections) {
           if (this.shouldForwardWorkerPayload(connection, worker, payload)) {
             writeLine(connection.socket, payload);
+            forwarded += 1;
+          }
+        }
+        if (isTerminalRpcTurnEvent(payload)) {
+          if (forwarded === 0) {
+            rememberPendingTerminalTurnEvent(this.options.agentDir, payload);
+          } else {
+            clearPendingTerminalTurnEvent(this.options.agentDir, payload);
           }
         }
       });
@@ -820,7 +841,14 @@ export class WorkerPool {
     worker.connections.add(connection);
     worker.lastUsedAt = Date.now();
     worker.idleSince = null;
-    this.rememberSessionSelection(connection, this.getWorkerSelector(worker));
+    const selector = this.getWorkerSelector(worker);
+    this.rememberSessionSelection(connection, selector);
+    const pendingTerminalEvent = takePendingTerminalTurnEvent(
+      this.options.agentDir,
+      selector,
+    );
+    if (pendingTerminalEvent)
+      writeLine(connection.socket, pendingTerminalEvent);
   }
 
   private maybeReleaseWorker(worker: WorkerHandle) {

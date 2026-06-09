@@ -19,8 +19,10 @@ import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity
 import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
   captureRinTurnCompletionBaseline,
+  resolveRinLatestSubmittedTurnCompletion,
   resolveRinTurnCompletionAfterPromptSettled,
   resolveRinTurnFailureMessage,
+  type RinTurnCompletionResolution,
 } from "../rin-frontend-sdk/turn-completion.js";
 import {
   emitPiSessionEvent,
@@ -358,21 +360,22 @@ async function forceFlushSessionFile(session: any) {
 async function resumeInterruptedTurn(
   session: any,
   options: { persistInterruptionMessage?: boolean } = {},
-) {
+): Promise<RinTurnCompletionResolution | null> {
   const lastMessage = Array.isArray(session?.agent?.state?.messages)
     ? session.agent.state.messages[session.agent.state.messages.length - 1]
     : null;
-  if (!lastMessage) return false;
-  if (
-    lastMessage.role === "assistant" &&
-    !appendInterruptedToolResults(session, {
-      persistToSession: options.persistInterruptionMessage,
-    })
-  ) {
-    return false;
+  if (!lastMessage) return null;
+  if (lastMessage.role === "assistant") {
+    if (
+      !appendInterruptedToolResults(session, {
+        persistToSession: options.persistInterruptionMessage,
+      })
+    ) {
+      return resolveRinLatestSubmittedTurnCompletion(session);
+    }
   }
   await session.agent.continue();
-  return true;
+  return null;
 }
 
 function isWorkerLocalSessionReplacementCommand(commandLine: string) {
@@ -723,7 +726,7 @@ export async function runCustomRpcMode(
   };
   const startTurnTask = (
     requestTag: string,
-    task: () => Promise<void>,
+    task: () => Promise<RinTurnCompletionResolution | void>,
     options: { forceTurnEvents?: boolean } = {},
   ) => {
     const turnSession = getSession();
@@ -754,8 +757,9 @@ export async function runCustomRpcMode(
             }, TURN_HEARTBEAT_INTERVAL_MS)
           : null;
       try {
-        await task();
+        const taskCompletion = await task();
         const { messages, completion } =
+          taskCompletion ||
           resolveRinTurnCompletionAfterPromptSettled(turnSession, {
             baseline,
           });
@@ -797,7 +801,7 @@ export async function runCustomRpcMode(
   };
   const startInterruptTurnTask = (
     requestTag: string,
-    task: () => Promise<void>,
+    task: () => Promise<RinTurnCompletionResolution | void>,
   ) => {
     interruptQueue = interruptQueue
       .then(
@@ -968,7 +972,7 @@ export async function runCustomRpcMode(
       }
       case "resume_interrupted_turn":
         startInterruptTurnTask(String(command.requestTag || ""), async () => {
-          await resumeInterruptedTurn(session);
+          return await resumeInterruptedTurn(session);
         });
         return done(id, "resume_interrupted_turn");
       case "steer":

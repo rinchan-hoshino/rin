@@ -358,6 +358,115 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("daemon-restart recovery replays an undelivered canonical terminal turn event on session attach", async () => {
+  const dir = await makeTempDir("rin-worker-pool-pending-turn-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const pendingEventsPath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "pending-turn-events.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    String.raw`const sessionFile = ${JSON.stringify(sessionFile)};
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (command.type === 'switch_session') {
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: 'response',
+        command: command.type,
+        success: true,
+        data: { sessionFile, sessionId: 'pending-turn-session' },
+      }) + '\n');
+      continue;
+    }
+    if (command.type === 'resume_interrupted_turn') {
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: 'response',
+        command: command.type,
+        success: true,
+        data: {},
+      }) + '\n');
+      setTimeout(() => {
+        process.stdout.write(JSON.stringify({
+          type: 'rpc_turn_event',
+          event: 'complete',
+          sessionFile,
+          sessionId: 'pending-turn-session',
+          finalText: 'replayed durable final',
+          result: { messages: [{ type: 'text', text: 'replayed durable final' }] },
+        }) + '\n');
+      }, 10);
+      continue;
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 10_000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+  });
+
+  for (let i = 0; i < 50; i += 1) {
+    try {
+      const pending = JSON.parse(await fs.readFile(pendingEventsPath, "utf8"));
+      if (pending.eventsBySessionFile?.[sessionFile]) break;
+    } catch {}
+    await sleep(10);
+  }
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const selected = await pool.selectSession(connection, { sessionFile });
+
+  assert.ok(selected);
+  const replayed = writes
+    .map((value) => JSON.parse(value))
+    .find(
+      (payload) =>
+        payload.type === "rpc_turn_event" && payload.event === "complete",
+    );
+  assert.equal(replayed?.finalText, "replayed durable final");
+  assert.equal(replayed?.sessionFile, sessionFile);
+
+  const pendingAfter = JSON.parse(await fs.readFile(pendingEventsPath, "utf8"));
+  assert.equal(pendingAfter.eventsBySessionFile?.[sessionFile], undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("resumable worker commands persist a running record until they finish", async () => {
   const dir = await makeTempDir("rin-worker-pool-running-");
   const workerPath = path.join(dir, "worker-source");

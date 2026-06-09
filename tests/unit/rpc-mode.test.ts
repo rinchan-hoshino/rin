@@ -4087,6 +4087,126 @@ test(
 );
 
 test(
+  "rpc mode resume_interrupted_turn re-emits complete for an already persisted assistant final",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const messages = [
+      { role: "user", content: "restart prompt" },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "durable final after restart" }],
+      },
+    ];
+    let continued = false;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        sessionId: "session-1",
+        sessionFile: "/tmp/session-1.jsonl",
+        isStreaming: false,
+        isCompacting: false,
+        messages,
+        agent: {
+          state: { messages },
+          continue: async () => {
+            continued = true;
+          },
+        },
+        subscribe: () => () => {},
+        appendMessage: () => {},
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "durable final after restart",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+        bindExtensions: async () => {},
+        sessionManager: testSessionManager(() => messages),
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "2", type: "resume_interrupted_turn", source: "daemon-restart" })}\n`,
+        ),
+      );
+      await wait(10);
+
+      const events = lines
+        .join("")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const complete = events.find(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      assert.equal(continued, false);
+      assert.equal(complete?.requestTag, undefined);
+      assert.equal(complete?.finalText, "durable final after restart");
+      assert.equal(complete?.sessionFile, "/tmp/session-1.jsonl");
+      assert.equal(
+        events.some(
+          (event) => event.type === "rpc_turn_event" && event.event === "error",
+        ),
+        false,
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode resume_interrupted_turn emits liveness events without requestTag",
   { concurrency: false },
   async () => {

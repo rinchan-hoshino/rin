@@ -138,6 +138,23 @@ export function resolveRinTurnCompletionAfterPromptSettled(
   };
 }
 
+export function resolveRinLatestSubmittedTurnCompletion(
+  session: any,
+): RinTurnCompletionResolution {
+  const branchMessages = readCurrentBranchMessages(session);
+  const lastUserIndex = [...branchMessages]
+    .reverse()
+    .findIndex((message) => safeString(message?.role).trim() === "user");
+  const submittedIndex =
+    lastUserIndex >= 0 ? branchMessages.length - 1 - lastUserIndex : -1;
+  const messages =
+    submittedIndex >= 0 ? branchMessages.slice(submittedIndex + 1) : [];
+  return {
+    messages,
+    completion: resolveTurnCompletion({ messages }),
+  };
+}
+
 export function resolveRinTurnFailureMessage(session: any, messages: any[]) {
   const stateError = safeString(session?.agent?.state?.errorMessage).trim();
   if (stateError) return stateError;

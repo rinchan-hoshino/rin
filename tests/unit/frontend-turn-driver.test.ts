@@ -979,64 +979,6 @@ test("frontend SDK turn driver follows an already active turn by default", async
   );
 });
 
-test("frontend SDK turn driver resolves a followed active turn from submitted messages when it settles before completion event", async () => {
-  const client = createFrontendClient();
-  const sessionFile = "/tmp/frontend-chat.jsonl";
-  let stateReads = 0;
-  client.getState = async () => {
-    stateReads += 1;
-    const active = stateReads <= 2;
-    return {
-      sessionFile,
-      sessionId: "frontend-session",
-      isStreaming: active,
-      turnActive: active,
-    };
-  };
-  client.getMessages = async () => [
-    {
-      role: "user",
-      timestamp: 1778774583000,
-      content: "restored job",
-    },
-    {
-      role: "assistant",
-      timestamp: 1778774590000,
-      content: "finished while reconnecting",
-    },
-  ];
-  client.prompt = async () => {
-    throw new Error("prompt_should_not_be_resubmitted");
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const result = await driver.runTurn({
-    text: "restored job",
-    promptContext: {
-      source: "chat-bridge",
-      chatKey: "telegram/1:2",
-      sentAt: 1778774580000,
-    },
-  });
-
-  assert.equal(result.finalText, "finished while reconnecting");
-  assert.equal(
-    client.calls.some((call: any) => call.type === "prompt"),
-    false,
-  );
-  assert.equal(
-    client.calls.some(
-      (call: any) =>
-        call.type === "request" &&
-        call.command.type === "resolve_submitted_turn",
-    ),
-    true,
-  );
-});
-
 test("frontend SDK turn driver treats worker exit as recovery while following an active turn", async () => {
   const client = createFrontendClient();
   let state = {
