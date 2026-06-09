@@ -64,9 +64,11 @@ Hi [@Alice](at:12345), please check this.
 [quote:987654321]
 Replying to the exact platform message.
 
-Here is the preview: [image: room-plan.png](/tmp/rin/room-plan.png)
+[image: room-plan.png](/tmp/rin/room-plan.png)
+Here is the preview.
 
-Full log: [file: debug-log.txt](/tmp/rin/debug-log.txt)
+[file: debug-log.txt](/tmp/rin/debug-log.txt)
+Full log.
 ```
 
 Markdown contract:
@@ -134,6 +136,20 @@ Structured part contract:
 - `file.name`, video/audio/sticker `name`, and `mimeType` improve adapter behavior and fallback records.
 - `text` is plain text. `markdown` may contain normal Markdown plus rich-object syntax.
 
+## Media ordering and captions
+
+Media parts are delivery boundaries. Adapters send text runs and media parts as separate platform messages in rich-part order instead of moving text across media or trying to force a shared bubble.
+
+Caption fields are used only when the platform requires them for a media-only send. Do not rely on a caption to bind explanatory text to an image; put the visible context in adjacent text and let the adapter preserve order.
+
+Example:
+
+```md
+This text is sent first.
+[image: preview.png](/tmp/rin/preview.png)
+This text is sent after the image.
+```
+
 ## Platform behavior and fallback
 
 Adapters choose the best native representation they support:
@@ -163,7 +179,8 @@ When a generated or local artifact should reach the recipient:
 Example final text:
 
 ```md
-Here is the preview: [image: preview.png](/tmp/rin/preview.png)
+[image: preview.png](/tmp/rin/preview.png)
+Here is the preview.
 ```
 
 ## Validation checks

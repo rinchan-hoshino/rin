@@ -127,7 +127,46 @@ test("telegram adapter renders structured at as a native mention link", async ()
   });
 });
 
-test("telegram adapter keeps media first and spills oversized captions into follow-up text messages", async () => {
+test("telegram adapter splits text and image rich parts in order", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+
+    const leading = "\u4e0b\u56fe\u662f\u8bf4\u660e\u5bf9\u8c61\uff1a";
+    const trailing = "\u540e\u9762\u8fd9\u53e5\u4e0d\u662f\u56fe\u7247 caption";
+    const result = await app.bots[0].sendMessage("456", [
+      h.quote("77"),
+      h.markdown(
+        `${leading}[image: demo](https://example.com/demo.png)\n${trailing}`,
+      ),
+    ]);
+
+    assert.deepEqual(result, ["1", "2", "3"]);
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].method, "sendMessage");
+    assert.equal(calls[0].payload.reply_to_message_id, "77");
+    assert.equal(calls[0].payload.text, leading);
+    assert.equal(calls[1].method, "sendPhoto");
+    assert.equal(calls[1].payload.photo, "https://example.com/demo.png");
+    assert.equal(calls[1].payload.caption, undefined);
+    assert.equal(calls[1].payload.reply_to_message_id, undefined);
+    assert.equal(calls[2].method, "sendMessage");
+    assert.equal(calls[2].payload.text, trailing);
+    assert.equal(calls[2].payload.reply_to_message_id, undefined);
+  });
+});
+
+test("telegram adapter sends media before following text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -152,10 +191,10 @@ test("telegram adapter keeps media first and spills oversized captions into foll
     assert.equal(calls.length, 2);
     assert.equal(calls[0].method, "sendPhoto");
     assert.equal(calls[0].payload.reply_to_message_id, "77");
-    assert.equal(calls[0].payload.caption.length, 1024);
+    assert.equal(calls[0].payload.caption, undefined);
     assert.equal(calls[1].method, "sendMessage");
     assert.equal(calls[1].payload.reply_to_message_id, undefined);
-    assert.equal(calls[1].payload.text, "b".repeat(6));
+    assert.equal(calls[1].payload.text, "b".repeat(1030));
   });
 });
 
@@ -418,7 +457,7 @@ test("onebot media action failures include the fixed Docker mount hint", () => {
   );
 });
 
-test("discord adapter splits oversized text sends and keeps attachments on the first chunk", async () => {
+test("discord adapter splits text and media into ordered messages", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "discord",
@@ -442,12 +481,48 @@ test("discord adapter splits oversized text sends and keeps attachments on the f
       h("video", { src: "https://example.com/demo.mp4" }),
     ]);
 
-    assert.deepEqual(result, ["1", "2"]);
-    assert.equal(calls.length, 2);
+    assert.deepEqual(result, ["1", "2", "3", "4"]);
+    assert.equal(calls.length, 4);
     assert.equal(calls[0].content.length, 2000);
-    assert.equal(calls[0].files.length, 2);
+    assert.equal(calls[0].files, undefined);
     assert.equal(calls[0].reply.messageReference, "88");
     assert.equal(calls[1].content, "c".repeat(5));
+    assert.equal(calls[1].files, undefined);
+    assert.equal(calls[1].reply, undefined);
+    assert.deepEqual(calls[2].files, ["https://example.com/demo.png"]);
+    assert.deepEqual(calls[3].files, ["https://example.com/demo.mp4"]);
+  });
+});
+
+test("discord adapter keeps media before following text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.fetchChannel = async () => ({
+      send: async (payload: any) => {
+        calls.push(payload);
+        return { id: String(calls.length) };
+      },
+    });
+
+    const result = await app.bots[0].sendMessage("456", [
+      h.quote("88"),
+      h.image("https://example.com/demo.png"),
+      h.text("caption after image"),
+    ]);
+
+    assert.deepEqual(result, ["1", "2"]);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].content, undefined);
+    assert.deepEqual(calls[0].files, ["https://example.com/demo.png"]);
+    assert.equal(calls[0].reply.messageReference, "88");
+    assert.equal(calls[1].content, "caption after image");
     assert.equal(calls[1].files, undefined);
     assert.equal(calls[1].reply, undefined);
   });
@@ -902,6 +977,90 @@ test("lark adapter terminates markdown lists before following plain lines", asyn
       content.zh_cn.content[0][0].text,
       "- first\n\nplain\n- second\n\nplain again\n```\n- not a list\nplain code\n```",
     );
+  });
+});
+
+test("slack adapter keeps media before following text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { token: "xapp", botToken: "xoxb" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.web = {
+      chat: {
+        postMessage: async (payload: any) => {
+          calls.push(payload);
+          return { ts: String(calls.length) };
+        },
+      },
+      files: {
+        uploadV2: async () => {
+          throw new Error("unexpected_upload");
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("C123", [
+      h.quote("99"),
+      h.image("https://example.com/demo.png"),
+      h.text("caption after image"),
+    ]);
+
+    assert.deepEqual(result, ["1", "2"]);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].text, "https://example.com/demo.png");
+    assert.equal(calls[0].thread_ts, "99");
+    assert.equal(calls[1].text, "caption after image");
+    assert.equal(calls[1].thread_ts, "99");
+  });
+});
+
+test("slack adapter splits leading text before local file uploads", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { token: "xapp", botToken: "xoxb" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const imagePath = path.join(agentDir, "demo.png");
+    await fs.writeFile(imagePath, Buffer.from("png"));
+    const posts: any[] = [];
+    const uploads: any[] = [];
+    adapter.web = {
+      chat: {
+        postMessage: async (payload: any) => {
+          posts.push(payload);
+          return { ts: String(posts.length) };
+        },
+      },
+      files: {
+        uploadV2: async (payload: any) => {
+          uploads.push(payload);
+          return { files: [{ id: "F1" }] };
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("C123", [
+      h.quote("99"),
+      h.text("leading text"),
+      h.image(imagePath),
+    ]);
+
+    assert.deepEqual(result, ["1", "F1"]);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].text, "leading text");
+    assert.equal(posts[0].thread_ts, "99");
+    assert.equal(uploads.length, 1);
+    assert.equal(uploads[0].initial_comment, undefined);
+    assert.equal(uploads[0].filename, "demo.png");
+    assert.equal(uploads[0].thread_ts, "99");
   });
 });
 

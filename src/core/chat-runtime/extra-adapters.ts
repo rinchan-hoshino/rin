@@ -28,6 +28,10 @@ import {
 const DISCORD_MAX_TEXT_LENGTH = 2000;
 const SLACK_MAX_TEXT_LENGTH = 40000;
 
+function isOutboundMediaNodeType(type: string) {
+  return ["image", "file", "video", "audio", "sticker"].includes(type);
+}
+
 const SLACK_REACTION_NAMES: Record<string, string> = {
   "🤔": "thinking_face",
   "🔥": "fire",
@@ -355,12 +359,8 @@ export class DiscordAdapter {
     emitBotStatus(this.app, this.bot, 0);
   }
 
-  private async sendMessage(chatId: string, content: any) {
-    const channel = await this.fetchChannel(chatId);
-    if (!channel?.send)
-      throw new Error(`discord_channel_not_sendable:${chatId}`);
-    const { work, replyToMessageId } = prepareOutboundNodes(content);
-    const text = renderPlainTextFromNodes(work, {
+  private renderOutboundText(nodes: any[]) {
+    return renderPlainTextFromNodes(nodes, {
       includeMedia: false,
       markdown: "preserve",
       renderAt(attrs) {
@@ -368,48 +368,97 @@ export class DiscordAdapter {
         return id ? `<@${id}>` : safeString(attrs.name).trim();
       },
     });
-    const files: any[] = [];
-    for (const node of work) {
-      const type = safeString(node?.type).toLowerCase();
-      if (!["image", "file", "video", "audio", "sticker"].includes(type))
-        continue;
-      const payload = await readBinaryFromNode(node);
-      if (!payload) continue;
-      if (payload.url) {
-        files.push(payload.url);
-        continue;
-      }
-      files.push({
-        attachment: payload.data,
-        name: payload.name,
-      });
-    }
+  }
+
+  private async readOutboundFile(node: any) {
+    const payload = await readBinaryFromNode(node);
+    if (!payload) return null;
+    if (payload.url) return payload.url;
+    return {
+      attachment: payload.data,
+      name: payload.name,
+    };
+  }
+
+  private async sendTextChunk(
+    channel: any,
+    input: { text: string; replyToMessageId?: string },
+  ) {
     const delivered: string[] = [];
-    const textChunks = splitPlainText(text, DISCORD_MAX_TEXT_LENGTH);
-    if (!textChunks.length && !files.length) {
-      throw new Error("discord_send_message_empty");
-    }
-    const chunkQueue = textChunks.length ? textChunks : [""];
-    let remainingFiles: any[] | undefined = files.length ? files : undefined;
-    let firstReply = replyToMessageId;
-    for (const textChunk of chunkQueue) {
-      if (!textChunk && !remainingFiles?.length) continue;
+    for (const textChunk of splitPlainText(
+      input.text,
+      DISCORD_MAX_TEXT_LENGTH,
+    )) {
       const sent = await channel.send(
         compactObject({
-          content: textChunk || undefined,
-          files: remainingFiles?.length ? remainingFiles : undefined,
-          reply: firstReply
-            ? {
-                messageReference: firstReply,
-                failIfNotExists: false,
-              }
-            : undefined,
+          content: textChunk,
+          reply:
+            input.replyToMessageId && !delivered.length
+              ? {
+                  messageReference: input.replyToMessageId,
+                  failIfNotExists: false,
+                }
+              : undefined,
         }),
       );
       const messageId = safeString(sent?.id).trim();
       if (messageId) delivered.push(messageId);
-      remainingFiles = undefined;
-      firstReply = undefined;
+    }
+    return delivered;
+  }
+
+  private async sendMediaChunk(
+    channel: any,
+    input: { node: any; replyToMessageId?: string },
+  ) {
+    const file = await this.readOutboundFile(input.node);
+    if (!file) return [] as string[];
+    const sent = await channel.send(
+      compactObject({
+        files: [file],
+        reply: input.replyToMessageId
+          ? {
+              messageReference: input.replyToMessageId,
+              failIfNotExists: false,
+            }
+          : undefined,
+      }),
+    );
+    return [safeString(sent?.id).trim()].filter(Boolean);
+  }
+
+  private async sendMessage(chatId: string, content: any) {
+    const channel = await this.fetchChannel(chatId);
+    if (!channel?.send)
+      throw new Error(`discord_channel_not_sendable:${chatId}`);
+    const { work, replyToMessageId } = prepareOutboundNodes(content);
+    const delivered: string[] = [];
+    let cursor = 0;
+    let firstReply = replyToMessageId;
+    while (cursor < work.length) {
+      const type = safeString(work[cursor]?.type).toLowerCase();
+      let chunkIds: string[] = [];
+      if (isOutboundMediaNodeType(type)) {
+        chunkIds = await this.sendMediaChunk(channel, {
+          node: work[cursor],
+          replyToMessageId: firstReply,
+        });
+        cursor += 1;
+      } else {
+        const textNodes: any[] = [];
+        while (cursor < work.length) {
+          const textType = safeString(work[cursor]?.type).toLowerCase();
+          if (isOutboundMediaNodeType(textType)) break;
+          textNodes.push(work[cursor]);
+          cursor += 1;
+        }
+        chunkIds = await this.sendTextChunk(channel, {
+          text: this.renderOutboundText(textNodes),
+          replyToMessageId: firstReply,
+        });
+      }
+      delivered.push(...chunkIds);
+      if (chunkIds.length) firstReply = undefined;
     }
     if (!delivered.length) throw new Error("discord_send_message_empty_result");
     return delivered;
@@ -679,9 +728,8 @@ export class SlackAdapter {
     return true;
   }
 
-  private async sendMessage(chatId: string, content: any) {
-    const { work, replyToMessageId } = prepareOutboundNodes(content);
-    const text = renderPlainTextFromNodes(work, {
+  private renderOutboundText(nodes: any[]) {
+    return renderPlainTextFromNodes(nodes, {
       includeMedia: false,
       markdown: "preserve",
       renderAt(attrs) {
@@ -689,6 +737,13 @@ export class SlackAdapter {
         return id ? `<@${id}>` : safeString(attrs.name).trim();
       },
     });
+  }
+
+  private async postText(
+    chatId: string,
+    text: string,
+    replyToMessageId?: string,
+  ) {
     const delivered: string[] = [];
     for (const textChunk of splitPlainText(text, SLACK_MAX_TEXT_LENGTH)) {
       const sent = await this.web.chat.postMessage(
@@ -701,37 +756,74 @@ export class SlackAdapter {
       const ts = safeString(sent?.ts).trim();
       if (ts) delivered.push(ts);
     }
-    for (const node of work) {
-      const type = safeString(node?.type).toLowerCase();
-      if (!["image", "file", "video", "audio", "sticker"].includes(type))
-        continue;
-      const payload = await readBinaryFromNode(node);
-      if (!payload) continue;
-      if (payload.url) {
-        const sent = await this.web.chat.postMessage(
-          compactObject({
-            channel: chatId,
-            text: payload.url,
-            thread_ts: replyToMessageId || undefined,
-          }),
+    return delivered;
+  }
+
+  private async uploadFile(
+    chatId: string,
+    payload: { data: Buffer; name: string },
+    replyToMessageId?: string,
+  ) {
+    const uploaded = await this.web.files.uploadV2(
+      compactObject({
+        channel_id: chatId,
+        file: payload.data,
+        filename: payload.name,
+        thread_ts: replyToMessageId || undefined,
+      }),
+    );
+    return safeString(
+      uploaded?.files?.[0]?.id || uploaded?.file?.id || "",
+    ).trim();
+  }
+
+  private async sendMedia(
+    chatId: string,
+    node: any,
+    replyToMessageId?: string,
+  ) {
+    const payload = await readBinaryFromNode(node);
+    if (!payload) return [] as string[];
+    if (payload.url) {
+      return await this.postText(chatId, payload.url, replyToMessageId);
+    }
+    const fileId = await this.uploadFile(
+      chatId,
+      { data: payload.data, name: payload.name },
+      replyToMessageId,
+    );
+    return fileId ? [fileId] : [];
+  }
+
+  private async sendMessage(chatId: string, content: any) {
+    const { work, replyToMessageId } = prepareOutboundNodes(content);
+    const delivered: string[] = [];
+    let cursor = 0;
+    while (cursor < work.length) {
+      const type = safeString(work[cursor]?.type).toLowerCase();
+      let messageIds: string[] = [];
+      if (isOutboundMediaNodeType(type)) {
+        messageIds = await this.sendMedia(
+          chatId,
+          work[cursor],
+          replyToMessageId,
         );
-        const ts = safeString(sent?.ts).trim();
-        if (ts) delivered.push(ts);
-        continue;
+        cursor += 1;
+      } else {
+        const textNodes: any[] = [];
+        while (cursor < work.length) {
+          const textType = safeString(work[cursor]?.type).toLowerCase();
+          if (isOutboundMediaNodeType(textType)) break;
+          textNodes.push(work[cursor]);
+          cursor += 1;
+        }
+        messageIds = await this.postText(
+          chatId,
+          this.renderOutboundText(textNodes),
+          replyToMessageId,
+        );
       }
-      const uploaded = await this.web.files.uploadV2(
-        compactObject({
-          channel_id: chatId,
-          file: payload.data,
-          filename: payload.name,
-          initial_comment: undefined,
-          thread_ts: replyToMessageId || undefined,
-        }),
-      );
-      const fileId = safeString(
-        uploaded?.files?.[0]?.id || uploaded?.file?.id || "",
-      ).trim();
-      if (fileId) delivered.push(fileId);
+      delivered.push(...messageIds);
     }
     if (!delivered.length) throw new Error("slack_send_message_empty");
     return delivered;

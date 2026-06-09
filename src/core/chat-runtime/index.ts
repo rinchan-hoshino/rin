@@ -839,42 +839,18 @@ class TelegramAdapter {
       const node = work[cursor];
       const type = safeString(node?.type).toLowerCase();
       if (isTelegramMediaNodeType(type)) {
-        const captionNodes: any[] = [];
-        let nextCursor = cursor + 1;
-        while (nextCursor < work.length && isTextLikeNode(work[nextCursor])) {
-          captionNodes.push(work[nextCursor]);
-          nextCursor += 1;
-        }
-        const renderedCaption = renderTelegramHtmlFromNodes(captionNodes);
-        const captionChunks = splitPlainText(
-          renderedCaption,
-          TELEGRAM_MAX_CAPTION_LENGTH,
-        );
         const media = telegramMediaMethod(type);
-        const caption = type === "sticker" ? "" : captionChunks[0] || "";
         const messageId = await this.sendBinaryMessage(
           media.method as any,
           media.field as any,
           chatId,
           node,
-          caption,
+          "",
           firstReply,
-          caption ? "HTML" : undefined,
         );
         if (messageId) delivered.push(messageId);
         firstReply = undefined;
-        const spillCaptionChunks =
-          type === "sticker" ? captionChunks : captionChunks.slice(1);
-        for (const extraCaptionChunk of spillCaptionChunks) {
-          const extraMessageId = await this.sendText(
-            chatId,
-            extraCaptionChunk,
-            firstReply,
-            "HTML",
-          );
-          if (extraMessageId) delivered.push(extraMessageId);
-        }
-        cursor = nextCursor;
+        cursor += 1;
         continue;
       }
       const textNodes: any[] = [];
