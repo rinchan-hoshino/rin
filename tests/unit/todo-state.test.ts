@@ -56,7 +56,7 @@ test("todo state formats checklist content as markdown task items", () => {
       { text: "Open item", done: false },
       { text: "Done item", done: true },
     ]),
-    "- [ ] Open item\n- [x] ~~Done item~~",
+    "- [ ] Open item\n- [x] Done item",
   );
 });
 

@@ -378,7 +378,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
     .render(80);
   assert.equal(todoResultLines.length, 2);
   assert.match(todoResultLines[0], /○ Wire core todo/);
-  assert.match(todoResultLines[1], /✓ ~~Ship renderer~~/);
+  assert.match(todoResultLines[1], /✓ Ship renderer/);
 
   const todoExecution = await todoTool.execute("todo-call", {
     todos: [
@@ -386,7 +386,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
       { text: "Ship renderer", done: true },
     ],
   });
-  assert.match(todoExecution.content[0].text, /- \[x\] ~~Ship renderer~~/);
+  assert.match(todoExecution.content[0].text, /- \[x\] Ship renderer/);
 
   const todoResult = todoResultLines.join("\n");
   assert.doesNotMatch(todoResult, /<toolSuccessBg>/);

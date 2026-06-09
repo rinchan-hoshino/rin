@@ -239,7 +239,7 @@ test("chat transport treats task-list todo deliveries as markdown", async () => 
       {
         type: "text_delivery",
         chatKey: "telegram/1:2",
-        text: "- [x] ~~done~~",
+        text: "- [x] done",
       },
       Object.assign((type, attrs) => ({ type, attrs }), {
         text(content) {
@@ -256,7 +256,7 @@ test("chat transport treats task-list todo deliveries as markdown", async () => 
 
     assert.equal(sends.length, 1);
     assert.equal(sends[0].content[0].type, "markdown");
-    assert.equal(sends[0].content[0].attrs.content, "- [x] ~~done~~");
+    assert.equal(sends[0].content[0].attrs.content, "- [x] done");
   });
 });
 

@@ -187,7 +187,7 @@ test("core todo loads from configured runtime without extension paths", async ()
       assert.equal(written.content[0].text, "- [ ] Wire core todo");
       assert.equal(
         rewritten.content[0].text,
-        "- [x] ~~Wire core todo~~\n- [ ] Ship whole-list writer",
+        "- [x] Wire core todo\n- [ ] Ship whole-list writer",
       );
       assert.deepEqual(rewritten.details.todos, [
         { id: 1, text: "Wire core todo", done: true },

@@ -924,7 +924,7 @@ test("chat controller delivers non-deferred passive notices during active turns"
     type: "backend_event",
     payload: {
       type: "passive_notice",
-      text: "- [x] ~~finished~~",
+      text: "- [x] finished",
       level: "info",
       deferDuringTurn: false,
     },
@@ -934,7 +934,7 @@ test("chat controller delivers non-deferred passive notices during active turns"
   assert.equal(controller.currentTurn?.incomingMessageId, "m-owner");
   assert.deepEqual(controller.pendingPassiveNotices, []);
   assert.deepEqual(deliveries, [
-    { text: "- [x] ~~finished~~", kind: "passive_notice" },
+    { text: "- [x] finished", kind: "passive_notice" },
   ]);
 });
 

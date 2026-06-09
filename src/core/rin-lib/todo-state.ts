@@ -33,11 +33,8 @@ export function normalizeRinTodoItems(value: unknown) {
     .filter((todo): todo is RinTodoItem => Boolean(todo));
 }
 
-export function formatRinTodoItemText(
-  todo: Pick<RinTodoItem, "text" | "done">,
-) {
-  const text = safeString(todo.text).trim();
-  return todo.done && text ? `~~${text}~~` : text;
+export function formatRinTodoItemText(todo: Pick<RinTodoItem, "text">) {
+  return safeString(todo.text).trim();
 }
 
 export function formatRinTodoChecklistContent(
