@@ -16,7 +16,7 @@ import webSearchModule from "../rin-web-search/index.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
-  formatRuntimeErrorForUser,
+  formatRuntimeErrorForTui,
   rawErrorMessage,
 } from "../rin-lib/user-facing-errors.js";
 import {
@@ -1477,7 +1477,7 @@ export class RpcInteractiveSession {
         this.activeTurn = null;
         this.syncStreamingState();
       }
-      throw new Error(formatRuntimeErrorForUser(error), { cause: error });
+      throw new Error(formatRuntimeErrorForTui(error), { cause: error });
     }
   }
 
@@ -1735,12 +1735,12 @@ export class RpcInteractiveSession {
         await this.waitForDaemonAvailable();
         response = await send();
       } else {
-        throw new Error(formatRuntimeErrorForUser(error), { cause: error });
+        throw new Error(formatRuntimeErrorForTui(error), { cause: error });
       }
     }
     if (!response || response.success !== true) {
       throw new Error(
-        formatRuntimeErrorForUser(response?.error || "rin_request_failed"),
+        formatRuntimeErrorForTui(response?.error || "rin_request_failed"),
       );
     }
     return response.data;

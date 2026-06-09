@@ -1,4 +1,4 @@
-import { formatRuntimeErrorForUser } from "../rin-lib/user-facing-errors.js";
+import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
 import { safeString } from "./chat-helpers.js";
 
 const TRANSIENT_CHAT_RUNTIME_ERROR_RE =
@@ -11,5 +11,5 @@ export function isTransientChatRuntimeError(error: unknown) {
 }
 
 export function formatChatRuntimeErrorForUser(error: unknown) {
-  return formatRuntimeErrorForUser(error);
+  return formatRuntimeErrorForChat(error);
 }

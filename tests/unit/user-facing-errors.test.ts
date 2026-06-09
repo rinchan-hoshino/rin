@@ -4,6 +4,8 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  formatRuntimeErrorForChat,
+  formatRuntimeErrorForTui,
   formatRuntimeErrorForUser,
   hasUserFacingRuntimeErrorMapping,
 } from "../../src/core/rin-lib/user-facing-errors.js";
@@ -13,6 +15,35 @@ test("runtime error formatter keeps human messages", () => {
   assert.equal(
     formatRuntimeErrorForUser("prompt is too long"),
     "prompt is too long",
+  );
+});
+
+test("tui error formatter keeps terse Pi-style errors", () => {
+  assert.equal(formatRuntimeErrorForTui("fetch failed"), "fetch failed");
+  assert.equal(
+    formatRuntimeErrorForTui("rin_request_failed"),
+    "request failed",
+  );
+  assert.equal(formatRuntimeErrorForTui("rin_app_tui_failed"), "tui failed");
+  assert.equal(
+    formatRuntimeErrorForTui("frontend_model_not_found:openai/missing"),
+    "frontend model not found: openai/missing",
+  );
+  assert.equal(formatRuntimeErrorForTui(""), "unknown error");
+});
+
+test("chat error formatter prefixes terse Rin errors", () => {
+  assert.equal(
+    formatRuntimeErrorForChat("rin_request_failed"),
+    "rin error: request failed",
+  );
+  assert.equal(
+    formatRuntimeErrorForChat("prompt is too long"),
+    "rin error: prompt is too long",
+  );
+  assert.equal(
+    formatRuntimeErrorForChat("rin error: request failed"),
+    "rin error: request failed",
   );
 });
 
@@ -136,17 +167,26 @@ function collectRinOwnedErrorMarkers() {
   return markers;
 }
 
-test("app entrypoints format caught errors before printing", () => {
+test("tui entrypoints keep Pi-style caught errors before printing", () => {
+  const repoRoot = path.resolve(import.meta.dirname, "../..");
+  const entrypoints = ["src/app/rin-tui/main.ts", "src/core/rin-tui/main.ts"];
+  for (const relative of entrypoints) {
+    const text = fs.readFileSync(path.join(repoRoot, relative), "utf8");
+    assert.match(text, /formatRuntimeErrorForTui\(error \|\|/);
+    assert.doesNotMatch(text, /formatRuntimeErrorForUser\(error \|\|/);
+    assert.doesNotMatch(text, /console\.error\(String\(error\?\.message/);
+  }
+});
+
+test("non-tui app entrypoints format caught errors before printing", () => {
   const repoRoot = path.resolve(import.meta.dirname, "../..");
   const entrypoints = [
     "src/app/rin/main.ts",
-    "src/app/rin-tui/main.ts",
     "src/app/rin-install/main.ts",
     "src/app/rin-gui/main.ts",
     "src/app/rin-desktop-host/main.ts",
     "src/app/rin-daemon/daemon.ts",
     "src/app/rin-daemon/worker.ts",
-    "src/core/rin-tui/main.ts",
   ];
   for (const relative of entrypoints) {
     const text = fs.readFileSync(path.join(repoRoot, relative), "utf8");

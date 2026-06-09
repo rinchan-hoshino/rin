@@ -1635,7 +1635,7 @@ test("chat controller delivers visible non-transient command errors", async () =
   };
 
   await assert.rejects(controller.runCommand("/reload"), /boom/);
-  assert.deepEqual(deliveries, ["boom"]);
+  assert.deepEqual(deliveries, ["rin error: boom"]);
 });
 
 test("chat controller keeps transient daemon command errors out of chat replies", async () => {
@@ -2903,7 +2903,7 @@ test("chat controller delivers prompt turn errors through conversation binding",
           type: "rpc_turn_event",
           event: "error",
           requestTag: options.requestTag,
-          error: "fetch failed",
+          error: "provider unavailable",
           sessionFile,
           sessionId: "session-failed-turn",
         },
@@ -2919,11 +2919,11 @@ test("chat controller delivers prompt turn errors through conversation binding",
       incomingMessageId: "m-failed-turn",
       replyToMessageId: "m-failed-turn",
     }),
-    /fetch failed/,
+    /provider unavailable/,
   );
 
   const assistantError = getChatMessage(controller.agentDir, chatKey, "m1");
-  assert.equal(assistantError?.text, "fetch failed");
+  assert.equal(assistantError?.text, "rin error: provider unavailable");
   assert.equal(assistantError?.replyToMessageId, "m-failed-turn");
   assert.equal(assistantError?.sessionFile, "failed-turn-chat.jsonl");
   assert.equal(controller.state.sessionFile, "failed-turn-chat.jsonl");

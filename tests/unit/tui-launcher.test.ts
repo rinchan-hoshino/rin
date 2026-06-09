@@ -275,16 +275,13 @@ test("tui launcher maps quiet startup to Pi version-check skip env", () => {
   assert.equal(existingEnv.RIN_SKIP_VERSION_CHECK, "custom");
 });
 
-test("tui launcher formats daemon startup socket failures with doctor/reopen guidance", () => {
-  const message = launcher.formatTuiStartupError(
-    new Error("connect ECONNREFUSED /run/user/1001/rin-daemon/daemon.sock"),
+test("tui launcher keeps daemon startup socket failures in Pi-style form", () => {
+  assert.equal(
+    launcher.formatTuiStartupError(
+      new Error("connect ECONNREFUSED /run/user/1001/rin-daemon/daemon.sock"),
+    ),
+    "connect ECONNREFUSED /run/user/1001/rin-daemon/daemon.sock",
   );
-  assert.match(
-    message,
-    /RPC TUI could not connect to the daemon \(connect ECONNREFUSED \/run\/user\/1001\/rin-daemon\/daemon\.sock\)\./,
-  );
-  assert.match(message, /Try `rin doctor`/);
-  assert.match(message, /temporary maintenance mode/);
 });
 
 test("tui launcher classifies transient rpc startup failures as maintenance fallbacks", () => {
@@ -318,10 +315,10 @@ test("tui launcher leaves unrelated startup errors unchanged", () => {
   assert.equal(launcher.formatTuiStartupError(new Error("boom")), "boom");
 });
 
-test("tui launcher maps internal startup error markers without generic recovery advice", () => {
+test("tui launcher formats internal startup markers as terse Pi-style text", () => {
   assert.equal(
     launcher.formatTuiStartupError(new Error("rin_request_failed")),
-    "Rin request failed.",
+    "request failed",
   );
 });
 

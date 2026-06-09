@@ -15,7 +15,7 @@ import {
 } from "../tui-runtime-env.js";
 import { requestDaemonCommand } from "../rin-daemon/client.js";
 import {
-  formatRuntimeErrorForUser,
+  formatRuntimeErrorForTui,
   rawErrorMessage,
 } from "../rin-lib/user-facing-errors.js";
 
@@ -65,11 +65,8 @@ function errorMessage(error: unknown) {
 
 export function formatTuiStartupError(error: unknown) {
   const message = errorMessage(error);
-  if (!message) return formatRuntimeErrorForUser("rin_tui_failed");
-  if (!RPC_TUI_STARTUP_CONNECT_ERROR_RE.test(message)) {
-    return formatRuntimeErrorForUser(message);
-  }
-  return `RPC TUI could not connect to the daemon (${message}). Try \`rin doctor\` to inspect the daemon, or reopen Rin; the launcher will enter temporary maintenance mode if the daemon stays unavailable.`;
+  if (!message) return formatRuntimeErrorForTui("rin_tui_failed");
+  return formatRuntimeErrorForTui(message);
 }
 
 export function isRecoverableRpcStartupError(error: unknown) {

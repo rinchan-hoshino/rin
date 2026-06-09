@@ -3,6 +3,9 @@ const INTERNAL_RUNTIME_ERROR_RE =
 
 const UNKNOWN_INTERNAL_ERROR_MESSAGE =
   "Rin hit an internal runtime problem before it could finish.";
+const CHAT_RUNTIME_ERROR_PREFIX = "rin error:";
+const LEADING_RUNTIME_MARKER_RE =
+  /^([a-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+)(?:(:)\s*|\s+)?(.*)$/;
 
 function describeRuntimeOperation(detail: string) {
   switch (detail) {
@@ -452,6 +455,31 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
 
 export function rawErrorMessage(error: unknown) {
   return String((error as any)?.message || error || "").trim();
+}
+
+function markerToTerseRuntimeText(marker: string) {
+  return marker.replace(/_/g, " ").replace(/^rin\s+(?:app\s+)?/, "");
+}
+
+function formatRuntimeMarkerInPiStyle(message: string) {
+  const marker = LEADING_RUNTIME_MARKER_RE.exec(message);
+  if (!marker) return message;
+  const prefix = markerToTerseRuntimeText(marker[1]);
+  const detail = String(marker[3] || "").trim();
+  if (!detail) return prefix;
+  return `${prefix}${marker[2] ? ":" : ""} ${detail}`;
+}
+
+export function formatRuntimeErrorForTui(error: unknown) {
+  const message = rawErrorMessage(error);
+  if (!message) return "unknown error";
+  return formatRuntimeMarkerInPiStyle(message);
+}
+
+export function formatRuntimeErrorForChat(error: unknown) {
+  const message = formatRuntimeErrorForTui(error);
+  if (/^rin error:\s*/i.test(message)) return message;
+  return `${CHAT_RUNTIME_ERROR_PREFIX} ${message}`;
 }
 
 export function hasUserFacingRuntimeErrorMapping(marker: string) {

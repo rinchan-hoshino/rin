@@ -26,17 +26,17 @@ test("chat runtime treats worker exits without detail as transient", () => {
   assert.equal(isTransientChatRuntimeError("rin_worker_exit"), true);
 });
 
-test("chat runtime maps internal marker errors to user-facing messages", () => {
+test("chat runtime prefixes terse Rin errors", () => {
   assert.equal(
     formatChatRuntimeErrorForUser("new_session_session_file_unsupported"),
-    "Could not start a new chat session because the command was bound to a replied message's old session.",
+    "rin error: new session session file unsupported",
   );
   assert.equal(
     formatChatRuntimeErrorForUser("frontend_model_not_found:openai/missing"),
-    "Model not found: openai/missing. Choose an available model in /model or settings.",
+    "rin error: frontend model not found: openai/missing",
   );
   assert.equal(
     formatChatRuntimeErrorForUser("prompt is too long"),
-    "prompt is too long",
+    "rin error: prompt is too long",
   );
 });
