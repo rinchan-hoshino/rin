@@ -211,7 +211,13 @@ test("chat controller passes sender metadata through the frontend prompt context
       .filter((line) => line.startsWith("["));
     const seen = JSON.parse(rows.at(-1) || "[]");
     assert.equal(seen.length, 1);
-    assert.equal(seen[0].text, "my name is?");
+    assert.ok(seen[0].text.startsWith("time: "));
+    assert.ok(seen[0].text.includes("runtime metadata: rin prompt context v1"));
+    assert.ok(seen[0].text.includes("sender user id: guest-1"));
+    assert.ok(seen[0].text.includes("sender nickname: AccountNick"));
+    assert.ok(seen[0].text.includes("sender group nickname: GroupCard"));
+    assert.ok(seen[0].text.includes("sender trust: trusted user"));
+    assert.ok(seen[0].text.endsWith("---\nmy name is?"));
     assert.deepEqual(seen[0].promptContext, {
       source: "chat-bridge",
       chatKey: "telegram/1:2",

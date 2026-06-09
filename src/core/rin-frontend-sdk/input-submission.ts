@@ -4,6 +4,7 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "./frontend-identity.js";
+import { injectPromptContextHeader } from "./prompt-context.js";
 import type {
   RinFrontendClient,
   RinPromptContext,
@@ -76,5 +77,8 @@ export async function submitNativeFrontendPromptTurn(
   if (sessionFile) promptOptions.sessionFile = sessionFile;
   const sessionId = safeString(input.sessionId || "").trim();
   if (sessionId) promptOptions.sessionId = sessionId;
-  await client.prompt(input.text, promptOptions);
+  await client.prompt(
+    injectPromptContextHeader(input.promptContext, input.text),
+    promptOptions,
+  );
 }

@@ -271,6 +271,38 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   });
 });
 
+test("frontend SDK turn driver persists sender prompt context in submitted prompt text", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  await driver.runTurn({
+    text: "who am I?",
+    managedSessionLeaf: "telegram/1:2",
+    promptContext: {
+      source: "chat-bridge",
+      sentAt: 1710000000000,
+      chatKey: "telegram/1:2",
+      chatType: "group",
+      userId: "guest-1",
+      nickname: "Guest",
+      identity: "OTHER",
+    },
+  });
+
+  const promptCall = client.calls.find((call: any) => call.type === "prompt");
+  assert.ok(promptCall.text.startsWith("time: "));
+  assert.ok(
+    promptCall.text.includes("runtime metadata: rin prompt context v1"),
+  );
+  assert.ok(promptCall.text.includes("sender user id: guest-1"));
+  assert.ok(promptCall.text.includes("sender nickname: Guest"));
+  assert.ok(promptCall.text.includes("sender trust: other chat user"));
+  assert.ok(promptCall.text.endsWith("---\nwho am I?"));
+});
+
 test("frontend SDK turn driver applies startup session names before prompt submission", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({

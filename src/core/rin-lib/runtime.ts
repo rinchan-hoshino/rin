@@ -33,7 +33,10 @@ import {
 import { compileSelfImproveSync } from "../self-improve/store.js";
 import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
-import { formatPromptContextSystemPromptBlock } from "../rin-frontend-sdk/prompt-context.js";
+import {
+  formatPromptContextSystemPromptBlock,
+  injectPromptContextHeader,
+} from "../rin-frontend-sdk/prompt-context.js";
 import type { RinToolStartupOptions } from "./tool-options.js";
 import {
   buildProviderBoundContextEvent,
@@ -706,6 +709,22 @@ function persistSessionBaseSystemPrompt(session: any, systemPrompt: string) {
   });
 }
 
+function persistSessionSystemPromptBlock(session: any, block: string) {
+  const normalized = String(block || "").trim();
+  if (!normalized) return;
+  if (typeof session?.sessionManager?.appendCustomEntry !== "function") return;
+  if (readPersistedSessionSystemPromptBlocks(session).includes(normalized)) {
+    return;
+  }
+  session.sessionManager.appendCustomEntry(
+    SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE,
+    {
+      version: 1,
+      blocks: [normalized],
+    },
+  );
+}
+
 export function applySessionBaseSystemPrompt(
   session: any,
   systemPrompt: string,
@@ -764,7 +783,22 @@ export function appendPromptContextSystemPrompt(
   const block = formatPromptContextSystemPromptBlock(promptContext as any);
   if (!block.trim()) return String(systemPrompt || "");
   const base = String(systemPrompt || "").trimEnd();
+  if (base.includes(block.trim())) return base;
   return base ? `${base}\n\n${block}` : block;
+}
+
+export function persistPromptContextSystemPrompt(
+  session: any,
+  systemPrompt: string,
+  promptContext: unknown,
+) {
+  const block = formatPromptContextSystemPromptBlock(promptContext as any);
+  if (!block.trim()) return String(systemPrompt || "");
+  const next = appendPromptContextSystemPrompt(systemPrompt, promptContext);
+  if (next !== String(systemPrompt || "")) {
+    persistSessionSystemPromptBlock(session, block);
+  }
+  return next;
 }
 
 function applyRinPromptBuilder(session: any) {
@@ -801,43 +835,24 @@ function applyRinPromptBuilder(session: any) {
   if (originalPrompt) {
     session.prompt = async (text: string, options?: any) => {
       const basePrompt = ensureSessionBaseSystemPrompt(session);
-      const turnPrompt = appendPromptContextSystemPrompt(
+      const nextPrompt = persistPromptContextSystemPrompt(
+        session,
         basePrompt,
         options?.promptContext,
       );
-      const previousActiveTurnPrompt = session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
-      const activeTurnPrompt: {
-        basePrompt: string;
-        turnPrompt: string;
-        refreshedBasePrompt?: string;
-      } = { basePrompt, turnPrompt };
       const frontendIdentity = normalizeFrontendIdentity(
         options?.frontendIdentity,
       );
       if (session.sessionManager && frontendIdentity) {
         session.sessionManager.__rinFrontend = frontendIdentity;
       }
-      if (turnPrompt !== basePrompt) {
-        session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = activeTurnPrompt;
-        applySessionBaseSystemPrompt(session, turnPrompt);
+      if (nextPrompt !== basePrompt) {
+        applySessionBaseSystemPrompt(session, nextPrompt);
       }
-      try {
-        return await originalPrompt(text, options);
-      } finally {
-        if (turnPrompt !== basePrompt) {
-          if (previousActiveTurnPrompt === undefined) {
-            delete session[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
-          } else {
-            session[ACTIVE_TURN_SYSTEM_PROMPT_KEY] = previousActiveTurnPrompt;
-          }
-        }
-        if (turnPrompt !== basePrompt) {
-          applySessionBaseSystemPrompt(
-            session,
-            String(activeTurnPrompt.refreshedBasePrompt || basePrompt),
-          );
-        }
-      }
+      return await originalPrompt(
+        injectPromptContextHeader(options?.promptContext, text),
+        options,
+      );
     };
   }
 
@@ -846,21 +861,13 @@ function applyRinPromptBuilder(session: any) {
   if (originalReload) {
     session.reload = async (...args: any[]) => {
       clearSessionBaseSystemPrompt(session, { ignorePersistedPrompt: true });
-      const result = await originalReload(...args);
-      if (session[ACTIVE_TURN_SYSTEM_PROMPT_KEY]) {
-        applySessionBaseSystemPrompt(
-          session,
-          readCurrentSessionSystemPrompt(session),
-        );
-      }
-      return result;
+      return await originalReload(...args);
     };
   }
 
   clearSessionBaseSystemPrompt(session);
 }
 
-const ACTIVE_TURN_SYSTEM_PROMPT_KEY = Symbol.for("rin.activeTurnSystemPrompt");
 const AUTO_RELOAD_AFTER_COMPACTION_KEY = Symbol.for(
   "rin.autoReloadAfterCompaction",
 );
@@ -1271,40 +1278,6 @@ export function applyRinCompactionReasonTracking(session: any) {
     originalRunAutoCompaction,
     originalCompact,
   };
-}
-
-function mergeActiveTurnSystemPrompt(session: any, basePrompt: string) {
-  const active = session?.[ACTIVE_TURN_SYSTEM_PROMPT_KEY];
-  if (!active || typeof active !== "object") return basePrompt;
-
-  const originalBase = String(active.basePrompt || "");
-  const originalTurn = String(active.turnPrompt || "");
-  if (!originalTurn || originalTurn === originalBase) return basePrompt;
-
-  active.refreshedBasePrompt = basePrompt;
-
-  let suffix = "";
-  if (originalBase && originalTurn.startsWith(originalBase)) {
-    suffix = originalTurn.slice(originalBase.length).trim();
-  } else if (!originalBase) {
-    suffix = originalTurn.trim();
-  }
-  if (!suffix || basePrompt.includes(suffix)) return basePrompt;
-  return `${String(basePrompt || "").trimEnd()}\n\n${suffix}`.trimEnd();
-}
-
-function readCurrentSessionSystemPrompt(session: any) {
-  try {
-    return mergeActiveTurnSystemPrompt(
-      session,
-      ensureSessionBaseSystemPrompt(session),
-    );
-  } catch {
-    return mergeActiveTurnSystemPrompt(
-      session,
-      String(readPiSessionBaseSystemPrompt(session)),
-    );
-  }
 }
 
 export function applyAutoReloadAfterCompaction(session: any) {
