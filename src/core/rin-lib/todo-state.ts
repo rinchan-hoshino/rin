@@ -43,10 +43,12 @@ export function formatRinTodoItemText(
 export function formatRinTodoChecklistContent(
   todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
 ): string {
-  if (todos.length === 0) return "○ No todos";
+  if (todos.length === 0) return "No todos";
 
   return todos
-    .map((todo) => `${todo.done ? "✓" : "○"} ${formatRinTodoItemText(todo)}`)
+    .map(
+      (todo) => `- [${todo.done ? "x" : " "}] ${formatRinTodoItemText(todo)}`,
+    )
     .join("\n");
 }
 

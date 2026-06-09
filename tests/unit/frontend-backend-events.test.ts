@@ -252,7 +252,7 @@ test("frontend backend event translator emits todo notice for single todo execut
       { type: "turn_accepted" },
       {
         type: "passive_notice",
-        text: "○ Keep working\n✓ ~~Ship renderer~~",
+        text: "- [ ] Keep working\n- [x] ~~Ship renderer~~",
         level: "info",
         deferDuringTurn: false,
       },
@@ -305,7 +305,7 @@ test("frontend backend event translator waits for the active tool batch before t
       { type: "turn_accepted" },
       {
         type: "passive_notice",
-        text: "○ Keep working\n✓ ~~Ship renderer~~",
+        text: "- [ ] Keep working\n- [x] ~~Ship renderer~~",
         level: "info",
         deferDuringTurn: false,
       },
@@ -369,7 +369,7 @@ test("frontend backend event translator emits nested multi-tool todo notice when
       { type: "turn_accepted" },
       {
         type: "passive_notice",
-        text: "○ Keep working\n✓ ~~Ship renderer~~",
+        text: "- [ ] Keep working\n- [x] ~~Ship renderer~~",
         level: "info",
         deferDuringTurn: false,
       },

@@ -1649,6 +1649,10 @@ export class ChatController {
           await this.sendPassiveNoticeNow(event.text);
           return;
         }
+        if (event.deferDuringTurn === false) {
+          await this.sendPassiveNoticeNow(event.text);
+          return;
+        }
         await this.deliverPassiveNotice(event.text);
         return;
       case "compaction_start_notice":

@@ -69,6 +69,7 @@ export type RinFrontendPassiveNoticeEvent = {
   type: "passive_notice";
   text: string;
   level?: "info" | "warning" | "error";
+  deferDuringTurn?: boolean;
   noticeKind?: "compaction_end";
 };
 
@@ -1389,6 +1390,9 @@ export class RinFrontendTurnDriver {
             type: "passive_notice",
             text: event.text,
             level: event.level,
+            ...(typeof event.deferDuringTurn === "boolean"
+              ? { deferDuringTurn: event.deferDuringTurn }
+              : {}),
             ...(event.noticeKind ? { noticeKind: event.noticeKind } : {}),
           },
           { deferDuringTurn: event.deferDuringTurn },

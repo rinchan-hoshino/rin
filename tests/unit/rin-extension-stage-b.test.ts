@@ -184,16 +184,16 @@ test("core todo loads from configured runtime without extension paths", async ()
         { cwd: agentDir },
       );
 
-      assert.equal(written.content[0].text, "○ Wire core todo");
+      assert.equal(written.content[0].text, "- [ ] Wire core todo");
       assert.equal(
         rewritten.content[0].text,
-        "✓ ~~Wire core todo~~\n○ Ship whole-list writer",
+        "- [x] ~~Wire core todo~~\n- [ ] Ship whole-list writer",
       );
       assert.deepEqual(rewritten.details.todos, [
         { id: 1, text: "Wire core todo", done: true },
         { id: 2, text: "Ship whole-list writer", done: false },
       ]);
-      assert.equal(cleared.content[0].text, "○ No todos");
+      assert.equal(cleared.content[0].text, "No todos");
       assert.deepEqual(cleared.details.todos, []);
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});

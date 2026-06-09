@@ -900,6 +900,44 @@ test("chat controller keeps compaction notice independent from the underlying ch
   ]);
 });
 
+test("chat controller delivers non-deferred passive notices during active turns", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .filter(Boolean)
+      .join(" ");
+    deliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-out-${deliveries.length}`];
+  };
+  controller.driver.frontendPhase = "working";
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-owner",
+    replyToMessageId: "m-owner",
+    workingNoticeSent: false,
+  };
+
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "- [x] ~~finished~~",
+      level: "info",
+      deferDuringTurn: false,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-owner");
+  assert.deepEqual(controller.pendingPassiveNotices, []);
+  assert.deepEqual(deliveries, [
+    { text: "- [x] ~~finished~~", kind: "passive_notice" },
+  ]);
+});
+
 test("chat controller does not create processing turns for slash commands", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];

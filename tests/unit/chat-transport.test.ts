@@ -219,7 +219,7 @@ test("chat transport forwards text delivery kind to adapters", async () => {
   });
 });
 
-test("chat transport treats strikethrough-only text deliveries as markdown", async () => {
+test("chat transport treats task-list todo deliveries as markdown", async () => {
   await withTempDir(async (dir) => {
     const sends = [];
     await transport.sendOutboxPayload(
@@ -239,7 +239,7 @@ test("chat transport treats strikethrough-only text deliveries as markdown", asy
       {
         type: "text_delivery",
         chatKey: "telegram/1:2",
-        text: "✓ ~~done~~",
+        text: "- [x] ~~done~~",
       },
       Object.assign((type, attrs) => ({ type, attrs }), {
         text(content) {
@@ -256,7 +256,7 @@ test("chat transport treats strikethrough-only text deliveries as markdown", asy
 
     assert.equal(sends.length, 1);
     assert.equal(sends[0].content[0].type, "markdown");
-    assert.equal(sends[0].content[0].attrs.content, "✓ ~~done~~");
+    assert.equal(sends[0].content[0].attrs.content, "- [x] ~~done~~");
   });
 });
 
