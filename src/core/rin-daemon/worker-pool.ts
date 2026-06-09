@@ -843,12 +843,24 @@ export class WorkerPool {
     worker.idleSince = null;
     const selector = this.getWorkerSelector(worker);
     this.rememberSessionSelection(connection, selector);
+  }
+
+  replayPendingTerminalTurnEvent(
+    connection: ConnectionState,
+    selector: SessionSelector = {},
+  ) {
+    if (connection.socket.destroyed) return false;
+    const effectiveSelector = hasSessionSelector(selector)
+      ? selector
+      : this.getConnectionSelector(connection);
+    if (!hasSessionSelector(effectiveSelector)) return false;
     const pendingTerminalEvent = takePendingTerminalTurnEvent(
       this.options.agentDir,
-      selector,
+      effectiveSelector,
     );
-    if (pendingTerminalEvent)
-      writeLine(connection.socket, pendingTerminalEvent);
+    if (!pendingTerminalEvent) return false;
+    writeLine(connection.socket, pendingTerminalEvent);
+    return true;
   }
 
   private maybeReleaseWorker(worker: WorkerHandle) {

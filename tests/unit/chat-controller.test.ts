@@ -1736,6 +1736,71 @@ test("chat controller polls typing and rotating reactions while a turn is active
   ]);
 });
 
+test("chat controller clears typing and working reactions after canonical completion", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  const reactions = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        workingIndicators: [testPollingIndicator(actions, reactions)],
+        async sendMessage() {
+          return ["m-final"];
+        },
+        async createReaction(chatId, messageId, emoji) {
+          reactions.push(["create", chatId, messageId, emoji]);
+        },
+        async deleteReaction(chatId, messageId, emoji, userId) {
+          reactions.push(["delete", chatId, messageId, emoji, userId]);
+        },
+        internal: {
+          async sendChatAction(payload) {
+            actions.push(payload);
+          },
+        },
+      },
+    ],
+  };
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/complete-clears-working.jsonl",
+      getSessionId: () => "session-complete-clears-working",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/complete-clears-working.jsonl",
+      sessionId: "session-complete-clears-working",
+    }),
+    prompt: async (_text, options = {}) => {
+      await controller.handleSessionEvent({ type: "agent_start" });
+      await controller.pollTyping();
+      emitRpcTurnComplete(controller, options, "done");
+    },
+    switchSession: async () => {},
+  };
+
+  const result = await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-complete",
+    replyToMessageId: "m-complete",
+  });
+
+  assert.equal(result.finalText, "done");
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [
+    ["create", "2", "m-complete", "🤔"],
+    ["delete", "2", "m-complete", "🤔", "1"],
+  ]);
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.awaitingTurnSettle, false);
+  assert.equal(await controller.pollTyping(), false);
+});
+
 test("chat controller uses adapter reaction capability for lark working indicators", async () => {
   const controller = await createController("lark:chat-1");
   const reactions = [];
@@ -2965,6 +3030,9 @@ test("chat controller rejects rpc completion without finalText instead of reusin
     /rpc_turn_final_output_missing/,
   );
   assert.deepEqual(deliveries, []);
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.awaitingTurnSettle, false);
+  assert.equal(await controller.pollTyping(), false);
 });
 
 test("chat controller rejects rpc completion without finalText instead of scanning session messages", async () => {
@@ -3018,6 +3086,9 @@ test("chat controller rejects rpc completion without finalText instead of scanni
     /rpc_turn_final_output_missing/,
   );
   assert.deepEqual(deliveries, []);
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.awaitingTurnSettle, false);
+  assert.equal(await controller.pollTyping(), false);
 });
 
 test("chat controller switches to a linked reply session before sending the prompt", async () => {

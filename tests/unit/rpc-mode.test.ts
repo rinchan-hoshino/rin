@@ -2508,7 +2508,7 @@ test(
           `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
         ),
       );
-      await wait(20);
+      await wait(60);
 
       const events = lines
         .join("")
@@ -2535,6 +2535,127 @@ test(
       );
       assert.equal(error?.requestTag, "tag-1");
       assert.equal(error?.error, "rpc_turn_final_output_missing");
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
+  "rpc mode rechecks the backend session before emitting final-missing after prompt settles",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        prompt: async () => {
+          setTimeout(() => {
+            session.messages = [
+              {
+                role: "assistant",
+                timestamp: Date.now(),
+                content: [{ type: "text", text: "late durable final" }],
+              },
+            ];
+          }, 5);
+        },
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => session.messages || []),
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
+        ),
+      );
+      await wait(80);
+
+      const events = lines
+        .join("")
+        .trim()
+        .split(/\n+/)
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const complete = events.find(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      assert.equal(complete?.requestTag, "tag-1");
+      assert.equal(complete?.finalText, "late durable final");
+      assert.equal(
+        events.some(
+          (event) => event.type === "rpc_turn_event" && event.event === "error",
+        ),
+        false,
+      );
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2631,7 +2752,7 @@ test(
           `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
         ),
       );
-      await wait(20);
+      await wait(60);
 
       const events = lines
         .join("")
@@ -4278,7 +4399,7 @@ test(
           `${JSON.stringify({ id: "2", type: "resume_interrupted_turn", source: "daemon-restart" })}\n`,
         ),
       );
-      await wait(10);
+      await wait(60);
 
       const events = lines
         .join("")
@@ -4636,7 +4757,7 @@ test(
       );
       await wait(10);
       releasePrompt();
-      await wait(20);
+      await wait(60);
 
       const responses = lines
         .join("")

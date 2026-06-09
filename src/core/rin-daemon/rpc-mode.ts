@@ -41,6 +41,7 @@ import {
 } from "./worker-helpers.js";
 
 const TURN_HEARTBEAT_INTERVAL_MS = 2_000;
+const TURN_COMPLETION_RECHECK_DELAYS_MS = [0, 10];
 const THINKING_LEVEL_ORDER = [
   "off",
   "minimal",
@@ -84,6 +85,33 @@ function stableJson(value: any) {
   } catch {
     return undefined;
   }
+}
+
+function waitForTurnCompletionRecheck(delayMs: number) {
+  return new Promise((resolve) => {
+    if (delayMs <= 0) setImmediate(resolve);
+    else setTimeout(resolve, delayMs);
+  });
+}
+
+async function resolveRinTurnCompletionAfterPromptSettledWithRechecks(
+  session: any,
+  options: { baseline: ReturnType<typeof captureRinTurnCompletionBaseline> },
+) {
+  let resolution = resolveRinTurnCompletionAfterPromptSettled(session, options);
+  if (resolution.completion.finalText) return resolution;
+  if (resolveRinTurnFailureMessage(session, resolution.messages)) {
+    return resolution;
+  }
+  for (const delayMs of TURN_COMPLETION_RECHECK_DELAYS_MS) {
+    await waitForTurnCompletionRecheck(delayMs);
+    resolution = resolveRinTurnCompletionAfterPromptSettled(session, options);
+    if (resolution.completion.finalText) return resolution;
+    if (resolveRinTurnFailureMessage(session, resolution.messages)) {
+      return resolution;
+    }
+  }
+  return resolution;
 }
 
 async function promptWithQueueableTurnReceiver(
@@ -760,9 +788,12 @@ export async function runCustomRpcMode(
         const taskCompletion = await task();
         const { messages, completion } =
           taskCompletion ||
-          resolveRinTurnCompletionAfterPromptSettled(turnSession, {
-            baseline,
-          });
+          (await resolveRinTurnCompletionAfterPromptSettledWithRechecks(
+            turnSession,
+            {
+              baseline,
+            },
+          ));
         if (!completion.finalText) {
           const failureMessage = resolveRinTurnFailureMessage(
             turnSession,

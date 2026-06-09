@@ -87,8 +87,8 @@ function collectRinTurnCompletionMessagesFromBranchEntries(
     const baselineIndex = branchEntries.findIndex(
       (entry) => safeString(entry?.id).trim() === baseline.branchLeafId,
     );
-    candidateEntries =
-      baselineIndex >= 0 ? branchEntries.slice(baselineIndex + 1) : [];
+    if (baselineIndex < 0) return null;
+    candidateEntries = branchEntries.slice(baselineIndex + 1);
   }
 
   return candidateEntries

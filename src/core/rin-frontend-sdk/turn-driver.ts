@@ -475,6 +475,10 @@ export class RinFrontendTurnDriver {
       while (this.liveTurn && Date.now() < deadline) {
         try {
           await this.connect({ restoreSessionFile: context?.sessionFile });
+          await this.replayPendingTerminalTurnEvent(context?.sessionFile).catch(
+            () => false,
+          );
+          if (!this.liveTurn) break;
           const state = await this.refreshFrontendState(
             context?.sessionFile,
           ).catch(() => ({}));
@@ -831,6 +835,18 @@ export class RinFrontendTurnDriver {
     };
   }
 
+  private async replayPendingTerminalTurnEvent(sessionFile?: string) {
+    if (!this.client || !this.liveTurn) return false;
+    const wanted = safeString(sessionFile || this.currentSessionFile()).trim();
+    const response: any = await this.client
+      .request({
+        type: "replay_pending_terminal_turn_event",
+        ...(wanted ? { sessionFile: wanted } : {}),
+      })
+      .catch(() => null);
+    return Boolean(response?.replayed);
+  }
+
   private async resolveSubmittedTurnForSession(
     sessionFile: string | undefined,
     input: { text: string; sentAt?: number },
@@ -891,6 +907,9 @@ export class RinFrontendTurnDriver {
       sessionFile: targetSessionFile || undefined,
     };
     this.setFrontendPhase("working");
+    await this.replayPendingTerminalTurnEvent(targetSessionFile).catch(
+      () => false,
+    );
     let deadline = Date.now() + 120_000;
     while (this.liveTurn === liveTurn && Date.now() < deadline) {
       const recovered = await this.resolveSubmittedTurnForSession(
@@ -939,6 +958,9 @@ export class RinFrontendTurnDriver {
       sessionFile: targetSessionFile || undefined,
     };
     this.setFrontendPhase("working");
+    await this.replayPendingTerminalTurnEvent(targetSessionFile).catch(
+      () => false,
+    );
     while (this.liveTurn === liveTurn) {
       let state: any = {};
       try {

@@ -358,7 +358,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("daemon-restart recovery replays an undelivered canonical terminal turn event on session attach", async () => {
+test("daemon-restart recovery replays an undelivered canonical terminal turn event only after the frontend asks", async () => {
   const dir = await makeTempDir("rin-worker-pool-pending-turn-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -451,6 +451,24 @@ setInterval(() => {}, 1000);
   const selected = await pool.selectSession(connection, { sessionFile });
 
   assert.ok(selected);
+  assert.equal(
+    writes
+      .map((value) => JSON.parse(value))
+      .some(
+        (payload) =>
+          payload.type === "rpc_turn_event" && payload.event === "complete",
+      ),
+    false,
+  );
+  assert.ok(
+    JSON.parse(await fs.readFile(pendingEventsPath, "utf8"))
+      .eventsBySessionFile?.[sessionFile],
+  );
+
+  assert.equal(
+    pool.replayPendingTerminalTurnEvent(connection, { sessionFile }),
+    true,
+  );
   const replayed = writes
     .map((value) => JSON.parse(value))
     .find(

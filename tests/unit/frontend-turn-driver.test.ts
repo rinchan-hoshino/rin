@@ -1340,6 +1340,56 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
   );
 });
 
+test("frontend SDK turn driver asks the daemon to replay pending terminal events after joining a submitted turn", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  let replayCalls = 0;
+  let liveTurnCreatedBeforeReplay = false;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command.type === "get_state") {
+      return {
+        sessionFile: "/tmp/frontend-chat.jsonl",
+        sessionId: "frontend-session",
+        isStreaming: true,
+        turnActive: true,
+      };
+    }
+    if (command.type === "resolve_submitted_turn") return { submitted: true };
+    if (command.type === "replay_pending_terminal_turn_event") {
+      replayCalls += 1;
+      liveTurnCreatedBeforeReplay = Boolean((driver as any).liveTurn);
+      await emitDriverEvent(driver as any, {
+        type: "rpc_turn_event",
+        event: "complete",
+        finalText: "replayed pending final",
+        result: {
+          messages: [{ type: "text", text: "replayed pending final" }],
+        },
+        sessionId: "frontend-session",
+        sessionFile: "/tmp/frontend-chat.jsonl",
+      });
+      return { replayed: true };
+    }
+    return {};
+  };
+  client.prompt = async () => {
+    throw new Error("prompt should not be resubmitted");
+  };
+
+  const result = await driver.runTurn({
+    text: "hello",
+    promptContext: { sentAt: Date.now() },
+  });
+
+  assert.equal(result.finalText, "replayed pending final");
+  assert.equal(replayCalls, 1);
+  assert.equal(liveTurnCreatedBeforeReplay, true);
+});
+
 test("frontend SDK turn driver follows active turn across transient reconnect before rpc final", async () => {
   const client = createFrontendClient();
   let getStateCount = 0;

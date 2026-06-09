@@ -9,6 +9,7 @@ export type RinRpcCommandType =
   | "cycle_model"
   | "get_messages"
   | "resolve_submitted_turn"
+  | "replay_pending_terminal_turn_event"
   | "get_session_snapshot"
   | "get_commands"
   | "get_all_models"

@@ -517,6 +517,14 @@ export async function startDaemon(
       );
       return true;
     }
+    if (type === "replay_pending_terminal_turn_event") {
+      const replayed = workerPool.replayPendingTerminalTurnEvent(
+        connection,
+        getSessionSelector(command),
+      );
+      writeLine(connection.socket, response(id, type, true, { replayed }));
+      return true;
+    }
     if (type === "rename_session") {
       try {
         const { SessionManager } = await getSessionManagerModule();
