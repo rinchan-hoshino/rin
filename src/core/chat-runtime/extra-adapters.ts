@@ -154,54 +154,24 @@ function escapeLarkTagAttr(text: string) {
   return escapeLarkTagText(text).replace(/"/g, "&quot;");
 }
 
-function isLarkMarkdownFenceLine(line: string) {
-  return /^\s*```/.test(line);
-}
-
-function isLarkMarkdownListItem(line: string, inFence: boolean) {
-  return !inFence && /^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)/.test(line);
-}
-
-function splitLarkMarkdownPostParagraphs(text: string) {
+function normalizeLarkMarkdownListBlocks(text: string) {
   const lines = safeString(text).replace(/\r\n?/g, "\n").split("\n");
-  const paragraphs: string[] = [];
-  let current: string[] = [];
+  const out: string[] = [];
   let inFence = false;
-  let previousKind: "blank" | "list" | "text" = "blank";
-
-  const flush = () => {
-    const paragraph = current.join("\n").trim();
-    if (paragraph) paragraphs.push(paragraph);
-    current = [];
-  };
-
+  let previousWasList = false;
   for (const line of lines) {
+    if (/^\s*```/.test(line)) inFence = !inFence;
     const blank = !line.trim();
-    const listItem = isLarkMarkdownListItem(line, inFence);
-    const kind = blank ? "blank" : listItem ? "list" : "text";
-    const crossesListBoundary =
-      !inFence &&
-      !blank &&
-      current.length > 0 &&
-      previousKind !== "blank" &&
-      previousKind !== kind &&
-      (previousKind === "list" || kind === "list");
-    if (crossesListBoundary) flush();
-    current.push(line);
-    if (isLarkMarkdownFenceLine(line)) inFence = !inFence;
-    previousKind = kind;
+    const listItem = !inFence && /^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)/.test(line);
+    if (!inFence && previousWasList && !blank && !listItem) {
+      const last = out[out.length - 1];
+      if (last !== undefined && last.trim()) out.push("");
+    }
+    out.push(line);
+    previousWasList = !inFence && listItem;
+    if (blank) previousWasList = false;
   }
-
-  flush();
-  return paragraphs.length
-    ? paragraphs
-    : [safeString(text).trim()].filter(Boolean);
-}
-
-function buildLarkMarkdownPostContent(text: string) {
-  return splitLarkMarkdownPostParagraphs(text).map((paragraph) => [
-    { tag: "md", text: paragraph },
-  ]);
+  return out.join("\n");
 }
 
 const QQ_REACTION_EMOJI_IDS: Record<string, string> = {
@@ -1778,21 +1748,25 @@ export class LarkAdapter {
 
   private async sendMessage(chatId: string, content: any) {
     const { work, replyToMessageId } = prepareOutboundNodes(content);
-    const text = renderMarkdownFromNodes(work, {
-      renderAt(attrs) {
-        const id = safeString(attrs.id).trim();
-        const name = safeString(attrs.name).trim();
-        return id
-          ? `<at user_id="${escapeLarkTagAttr(id)}">${escapeLarkTagText(name)}</at>`
-          : name;
-      },
-    });
-    const postContent = buildLarkMarkdownPostContent(text);
-    if (!postContent.length) throw new Error("lark_send_message_empty");
+    const text = normalizeLarkMarkdownListBlocks(
+      renderMarkdownFromNodes(work, {
+        preserveLineIndentation: true,
+        renderAt(attrs) {
+          const id = safeString(attrs.id).trim();
+          const name = safeString(attrs.name).trim();
+          return id
+            ? `<at user_id="${escapeLarkTagAttr(id)}">${escapeLarkTagText(name)}</at>`
+            : name;
+        },
+      }),
+    );
+    if (!text) throw new Error("lark_send_message_empty");
     const data = {
       msg_type: "post",
       content: JSON.stringify({
-        zh_cn: { content: postContent },
+        zh_cn: {
+          content: [[{ tag: "md", text }]],
+        },
       }),
     };
     const result = replyToMessageId

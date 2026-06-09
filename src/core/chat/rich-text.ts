@@ -6,6 +6,7 @@ export type RenderChatNodesOptions = {
   renderAt?: (attrs: Record<string, any>) => string;
   markdown?: "preserve" | "strip";
   includeMedia?: boolean;
+  preserveLineIndentation?: boolean;
 };
 
 export function chatMarkdownPolicyForPlatform(
@@ -93,14 +94,23 @@ export function stripMarkdownFormatting(text: string) {
   return normalizeRenderedText(next);
 }
 
-function normalizeRenderedText(text: string) {
-  return safeString(text)
+function normalizeRenderedText(
+  text: string,
+  options: { preserveLineIndentation?: boolean } = {},
+) {
+  const next = safeString(text)
     .replace(/\r\n?/g, "\n")
-    .replace(/[\t ]+\n/g, "\n")
-    .replace(/\n[\t ]+/g, "\n")
-    .replace(/[^\S\n]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/[\t ]+\n/g, "\n");
+  const normalized = options.preserveLineIndentation
+    ? next
+        .split("\n")
+        .map((line) => {
+          const indentation = /^[\t ]*/.exec(line)?.[0] || "";
+          return `${indentation}${line.slice(indentation.length).replace(/[^\S\n]+/g, " ")}`;
+        })
+        .join("\n")
+    : next.replace(/\n[\t ]+/g, "\n").replace(/[^\S\n]+/g, " ");
+  return normalized.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function renderNodeMarkdown(
@@ -175,7 +185,9 @@ export function renderChatNodesMarkdown(
   nodes: any[],
   options: RenderChatNodesOptions = {},
 ) {
-  return normalizeRenderedText(renderNodeMarkdown(nodes, options));
+  return normalizeRenderedText(renderNodeMarkdown(nodes, options), {
+    preserveLineIndentation: options.preserveLineIndentation,
+  });
 }
 
 export function renderChatNodesPlain(
