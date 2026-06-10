@@ -41,7 +41,6 @@ import {
 } from "./worker-helpers.js";
 
 const TURN_HEARTBEAT_INTERVAL_MS = 2_000;
-const TURN_COMPLETION_RECHECK_DELAYS_MS = [0, 10];
 const THINKING_LEVEL_ORDER = [
   "off",
   "minimal",
@@ -85,33 +84,6 @@ function stableJson(value: any) {
   } catch {
     return undefined;
   }
-}
-
-function waitForTurnCompletionRecheck(delayMs: number) {
-  return new Promise((resolve) => {
-    if (delayMs <= 0) setImmediate(resolve);
-    else setTimeout(resolve, delayMs);
-  });
-}
-
-async function resolveRinTurnCompletionAfterPromptSettledWithRechecks(
-  session: any,
-  options: { baseline: ReturnType<typeof captureRinTurnCompletionBaseline> },
-) {
-  let resolution = resolveRinTurnCompletionAfterPromptSettled(session, options);
-  if (resolution.completion.finalText) return resolution;
-  if (resolveRinTurnFailureMessage(session, resolution.messages)) {
-    return resolution;
-  }
-  for (const delayMs of TURN_COMPLETION_RECHECK_DELAYS_MS) {
-    await waitForTurnCompletionRecheck(delayMs);
-    resolution = resolveRinTurnCompletionAfterPromptSettled(session, options);
-    if (resolution.completion.finalText) return resolution;
-    if (resolveRinTurnFailureMessage(session, resolution.messages)) {
-      return resolution;
-    }
-  }
-  return resolution;
 }
 
 async function promptWithQueueableTurnReceiver(
@@ -383,6 +355,34 @@ async function resetSessionModelOptionsFromSettings(session: any) {
 
 async function forceFlushSessionFile(session: any) {
   await Promise.resolve(rewritePiSessionManagerFile(session?.sessionManager));
+}
+
+function turnResolutionHasTerminalResult(
+  session: any,
+  resolution: RinTurnCompletionResolution | null | undefined,
+) {
+  if (!resolution) return false;
+  if (resolution.completion.finalText) return true;
+  return Boolean(resolveRinTurnFailureMessage(session, resolution.messages));
+}
+
+async function runSessionTurnProducer(
+  session: any,
+  baseline: ReturnType<typeof captureRinTurnCompletionBaseline>,
+  action: () => Promise<RinTurnCompletionResolution | null | undefined>,
+): Promise<RinTurnCompletionResolution | null> {
+  const directResolution = await action();
+  if (turnResolutionHasTerminalResult(session, directResolution)) {
+    return directResolution || null;
+  }
+  await forceFlushSessionFile(session);
+  const durableResolution = resolveRinTurnCompletionAfterPromptSettled(
+    session,
+    { baseline },
+  );
+  return turnResolutionHasTerminalResult(session, durableResolution)
+    ? durableResolution
+    : null;
 }
 
 async function resumeInterruptedTurn(
@@ -754,7 +754,9 @@ export async function runCustomRpcMode(
   };
   const startTurnTask = (
     requestTag: string,
-    task: () => Promise<RinTurnCompletionResolution | void>,
+    task: (
+      baseline: ReturnType<typeof captureRinTurnCompletionBaseline>,
+    ) => Promise<RinTurnCompletionResolution | null>,
     options: { forceTurnEvents?: boolean } = {},
   ) => {
     const turnSession = getSession();
@@ -770,7 +772,7 @@ export async function runCustomRpcMode(
         },
         forceTurnEvents,
       );
-      const heartbeatTimer =
+      let heartbeatTimer: NodeJS.Timeout | null =
         requestTag || forceTurnEvents
           ? setInterval(() => {
               emitTurnEvent(
@@ -785,21 +787,26 @@ export async function runCustomRpcMode(
             }, TURN_HEARTBEAT_INTERVAL_MS)
           : null;
       try {
-        const taskCompletion = await task();
-        const { messages, completion } =
-          taskCompletion ||
-          (await resolveRinTurnCompletionAfterPromptSettledWithRechecks(
-            turnSession,
-            {
-              baseline,
-            },
-          ));
+        const taskCompletion = await task(baseline);
+        if (!taskCompletion) {
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+          }
+          await new Promise<never>(() => {});
+        }
+        const { messages, completion } = taskCompletion;
         if (!completion.finalText) {
           const failureMessage = resolveRinTurnFailureMessage(
             turnSession,
             messages,
           );
-          throw new Error(failureMessage || "rpc_turn_final_output_missing");
+          if (failureMessage) throw new Error(failureMessage);
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+          }
+          await new Promise<never>(() => {});
         }
         emitTurnEvent(
           "complete",
@@ -832,7 +839,9 @@ export async function runCustomRpcMode(
   };
   const startInterruptTurnTask = (
     requestTag: string,
-    task: () => Promise<RinTurnCompletionResolution | void>,
+    task: (
+      baseline: ReturnType<typeof captureRinTurnCompletionBaseline>,
+    ) => Promise<RinTurnCompletionResolution | null>,
   ) => {
     interruptQueue = interruptQueue
       .then(
@@ -996,15 +1005,23 @@ export async function runCustomRpcMode(
           }
           return done(id, "prompt");
         }
-        startTurnTask(String(command.requestTag || ""), async () => {
-          await session.prompt(command.message, promptOptions);
+        startTurnTask(String(command.requestTag || ""), async (baseline) => {
+          return await runSessionTurnProducer(session, baseline, async () => {
+            await session.prompt(command.message, promptOptions);
+            return null;
+          });
         });
         return done(id, "prompt");
       }
       case "resume_interrupted_turn":
-        startInterruptTurnTask(String(command.requestTag || ""), async () => {
-          return await resumeInterruptedTurn(session);
-        });
+        startInterruptTurnTask(
+          String(command.requestTag || ""),
+          async (baseline) => {
+            return await runSessionTurnProducer(session, baseline, async () => {
+              return await resumeInterruptedTurn(session);
+            });
+          },
+        );
         return done(id, "resume_interrupted_turn");
       case "steer":
         return run(id, type, () =>
@@ -1232,8 +1249,11 @@ export async function runCustomRpcMode(
           return { sent: true };
         });
       case "send_user_message":
-        startTurnTask(String(command.requestTag || ""), async () => {
-          await session.sendUserMessage(command.content, command.options);
+        startTurnTask(String(command.requestTag || ""), async (baseline) => {
+          return await runSessionTurnProducer(session, baseline, async () => {
+            await session.sendUserMessage(command.content, command.options);
+            return null;
+          });
         });
         return done(id, type, { sent: true });
       case "get_commands":

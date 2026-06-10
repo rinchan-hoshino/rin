@@ -20,7 +20,61 @@ const { resolveRinTurnCompletionAfterPromptSettled } = await import(
   ).href
 );
 
-test("Rin turn completion falls back when the captured branch leaf is no longer in the branch", () => {
+test("Rin turn completion resolves durable entries after the turn baseline when the live branch is stale", () => {
+  const baseAssistant = {
+    role: "assistant",
+    content: "previous final must not be reused",
+    timestamp: 1000,
+  };
+  const toolResult = {
+    role: "toolResult",
+    content: "validated work",
+    timestamp: 2000,
+  };
+  const durableFinal = {
+    role: "assistant",
+    content: "durable final from session entries",
+    timestamp: 3000,
+  };
+  const session = {
+    sessionManager: {
+      getBranch: () => [
+        { id: "base-entry", type: "message", message: baseAssistant },
+      ],
+      getEntries: () => [
+        { id: "base-entry", type: "message", message: baseAssistant },
+        {
+          id: "tool-result",
+          parentId: "base-entry",
+          type: "message",
+          message: toolResult,
+        },
+        {
+          id: "durable-final",
+          parentId: "tool-result",
+          type: "message",
+          message: durableFinal,
+        },
+      ],
+      buildSessionContext: () => ({
+        messages: [baseAssistant],
+      }),
+    },
+  };
+
+  const { completion } = resolveRinTurnCompletionAfterPromptSettled(session, {
+    baseline: {
+      turnStartedAtMs: 2000,
+      branchMessageCount: 1,
+      hasBranchLeafId: true,
+      branchLeafId: "base-entry",
+    },
+  });
+
+  assert.equal(completion.finalText, "durable final from session entries");
+});
+
+test("Rin turn completion does not resolve final text from live branch or context fallbacks", () => {
   const oldUser = {
     role: "user",
     content: "old prompt",
@@ -36,19 +90,20 @@ test("Rin turn completion falls back when the captured branch leaf is no longer 
     content: "new prompt",
     timestamp: 3000,
   };
-  const newFinal = {
+  const liveBranchFinal = {
     role: "assistant",
-    content: "new durable final",
+    content: "live branch final must not be canonical",
     timestamp: 4000,
   };
   const session = {
     sessionManager: {
       getBranch: () => [
         { id: "new-user", type: "message", message: newUser },
-        { id: "new-final", type: "message", message: newFinal },
+        { id: "new-final", type: "message", message: liveBranchFinal },
       ],
+      getEntries: () => [],
       buildSessionContext: () => ({
-        messages: [oldUser, oldFinal, newUser, newFinal],
+        messages: [oldUser, oldFinal, newUser, liveBranchFinal],
       }),
     },
   };
@@ -62,5 +117,5 @@ test("Rin turn completion falls back when the captured branch leaf is no longer 
     },
   });
 
-  assert.equal(completion.finalText, "new durable final");
+  assert.equal(completion.finalText, "");
 });

@@ -77,6 +77,14 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin finished the turn without a final reply.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("rin_turn_result_invariant_failed"),
+    "Rin's remote turn ended without a durable terminal result.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_turn_result_recovery_timeout"),
+    "Rin could not recover the remote turn result before the timeout.",
+  );
+  assert.equal(
     /retry|restart|doctor|check the session output/i.test(
       formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
     ),

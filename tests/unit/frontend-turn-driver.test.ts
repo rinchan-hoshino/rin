@@ -1443,7 +1443,7 @@ test("frontend SDK turn driver does not complete from agent_end before rpc final
   assert.equal(result.finalText, "rpc final");
 });
 
-test("frontend SDK turn driver rejects rpc completion without finalText", async () => {
+test("frontend SDK turn driver rejects empty rpc completion as a terminal-result invariant failure", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.getMessages = async () => [
@@ -1457,11 +1457,11 @@ test("frontend SDK turn driver rejects rpc completion without finalText", async 
 
   await assert.rejects(
     () => driver.runTurn({ text: "hello" }),
-    /rpc_turn_final_output_missing/,
+    /rin_turn_result_invariant_failed/,
   );
 });
 
-test("frontend SDK turn driver rejects missing-final rpc errors without session-message fallback", async () => {
+test("frontend SDK turn driver rejects terminal-result invariant rpc errors without session-message fallback", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.getMessages = async () => [
@@ -1474,7 +1474,7 @@ test("frontend SDK turn driver rejects missing-final rpc errors without session-
       type: "rpc_turn_event",
       event: "error",
       requestTag: options.requestTag,
-      error: "rpc_turn_final_output_missing",
+      error: "rin_turn_result_invariant_failed",
       sessionId: "session-driver",
       sessionFile: "/tmp/chat-driver.jsonl",
     });
@@ -1482,7 +1482,7 @@ test("frontend SDK turn driver rejects missing-final rpc errors without session-
 
   await assert.rejects(
     () => driver.runTurn({ text: "hello" }),
-    /rpc_turn_final_output_missing/,
+    /rin_turn_result_invariant_failed/,
   );
 });
 
@@ -1819,7 +1819,7 @@ test("frontend SDK turn driver does not reuse an older final when the current tu
 
   await assert.rejects(
     () => driver.runTurn({ text: "new prompt" }),
-    /rpc_turn_final_output_missing/,
+    /rin_turn_result_invariant_failed/,
   );
 });
 

@@ -384,6 +384,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rpc_turn_failed: () => "Rin failed while running the remote turn.",
   rpc_turn_final_output_missing: () =>
     "Rin finished the turn without a final reply.",
+  rin_turn_result_invariant_failed: () =>
+    "Rin's remote turn ended without a durable terminal result.",
+  rin_turn_result_recovery_timeout: () =>
+    "Rin could not recover the remote turn result before the timeout.",
 
   run_managed_session_value_required: () =>
     "Run command needs a managed session name. Provide a leaf such as subagent.",

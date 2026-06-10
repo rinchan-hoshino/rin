@@ -1570,6 +1570,7 @@ test(
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines = [];
+    const durableEntries: any[] = [];
     const sessionSubscribers = new Set();
 
     process.stdin.on = function (event, handler) {
@@ -1596,12 +1597,24 @@ test(
         prompt: async () => {
           const assistantMessage = {
             role: "assistant",
+            timestamp: Date.now(),
             content: [{ type: "text", text: "final from rpc mode" }],
           };
-          session.messages = [
-            { role: "user", content: [{ type: "text", text: "hello" }] },
-            assistantMessage,
-          ];
+          durableEntries.push({
+            id: "user-entry",
+            type: "message",
+            message: {
+              role: "user",
+              timestamp: Date.now(),
+              content: [{ type: "text", text: "hello" }],
+            },
+          });
+          durableEntries.push({
+            id: "assistant-entry",
+            parentId: "user-entry",
+            type: "message",
+            message: assistantMessage,
+          });
           for (const handler of sessionSubscribers) {
             handler({ type: "message_end", message: assistantMessage });
           }
@@ -1611,7 +1624,10 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          ...testSessionManager(() => []),
+          getEntries: () => durableEntries,
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -1694,6 +1710,7 @@ test(
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines: string[] = [];
+    const durableEntries: any[] = [];
     const sessionSubscribers = new Set<(event: any) => void>();
     let resolvePostAgentQueue: (() => void) | undefined;
 
@@ -1732,12 +1749,24 @@ test(
         prompt: async () => {
           const assistantMessage = {
             role: "assistant",
+            timestamp: Date.now(),
             content: [{ type: "text", text: "final before compaction" }],
           };
-          session.messages = [
-            { role: "user", content: [{ type: "text", text: "hello" }] },
-            assistantMessage,
-          ];
+          durableEntries.push({
+            id: "user-entry",
+            type: "message",
+            message: {
+              role: "user",
+              timestamp: Date.now(),
+              content: [{ type: "text", text: "hello" }],
+            },
+          });
+          durableEntries.push({
+            id: "assistant-entry",
+            parentId: "user-entry",
+            type: "message",
+            message: assistantMessage,
+          });
           for (const handler of sessionSubscribers) {
             handler({ type: "message_end", message: assistantMessage });
           }
@@ -1749,7 +1778,10 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          ...testSessionManager(() => []),
+          getEntries: () => durableEntries,
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -1986,6 +2018,7 @@ test(
     const lines = [];
     const sessionSubscribers = new Set();
     const stateMessages = [];
+    const durableEntries: any[] = [];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -2022,6 +2055,11 @@ test(
             errorMessage: "WebSocket closed 1009",
           };
           stateMessages.push(errorMessage);
+          durableEntries.push({
+            id: "websocket-error-entry",
+            type: "message",
+            message: errorMessage,
+          });
           emit({ type: "message_end", message: errorMessage });
           setTimeout(() => {
             const finalMessage = {
@@ -2040,7 +2078,10 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          ...testSessionManager(() => stateMessages),
+          getEntries: () => durableEntries,
+        },
         messages: stateMessages,
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2128,6 +2169,7 @@ test(
     const lines = [];
     const sessionSubscribers = new Set();
     const stateMessages = [];
+    const durableEntries: any[] = [];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -2169,6 +2211,11 @@ test(
             errorMessage: "context_length_exceeded",
           };
           stateMessages.push(errorMessage);
+          durableEntries.push({
+            id: "overflow-error-entry",
+            type: "message",
+            message: errorMessage,
+          });
           emit({ type: "message_end", message: errorMessage });
           emit({ type: "agent_end" });
           emit({ type: "compaction_start", reason: "overflow" });
@@ -2186,6 +2233,12 @@ test(
             errorMessage: "",
           };
           stateMessages.push(finalMessage);
+          durableEntries.push({
+            id: "overflow-final-entry",
+            parentId: "overflow-error-entry",
+            type: "message",
+            message: finalMessage,
+          });
           emit({ type: "agent_start" });
           emit({ type: "message_end", message: finalMessage });
           emit({ type: "agent_end" });
@@ -2195,7 +2248,10 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          ...testSessionManager(() => stateMessages),
+          getEntries: () => durableEntries,
+        },
         messages: stateMessages,
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2509,6 +2565,10 @@ test(
         ),
       );
       await wait(60);
+      onData(
+        Buffer.from(`${JSON.stringify({ id: "2", type: "get_state" })}\n`),
+      );
+      await wait(20);
 
       const events = lines
         .join("")
@@ -2530,11 +2590,16 @@ test(
         ),
         false,
       );
-      const error = events.find(
-        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      assert.equal(
+        events.some(
+          (event) => event.type === "rpc_turn_event" && event.event === "error",
+        ),
+        false,
       );
-      assert.equal(error?.requestTag, "tag-1");
-      assert.equal(error?.error, "rpc_turn_final_output_missing");
+      const stateResponse = events.find(
+        (event) => event.type === "response" && event.id === "2",
+      );
+      assert.equal(stateResponse?.data?.turnActive, true);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2543,13 +2608,21 @@ test(
 );
 
 test(
-  "rpc mode rechecks the backend session before emitting final-missing after prompt settles",
+  "rpc mode resolves completed turns from durable session entries without a recheck window",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines = [];
+    const baseMessage = {
+      role: "assistant",
+      timestamp: Date.now() - 10_000,
+      content: [{ type: "text", text: "previous final" }],
+    };
+    const durableEntries: any[] = [
+      { id: "base-entry", type: "message", message: baseMessage },
+    ];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -2570,22 +2643,33 @@ test(
         bindExtensions: async () => {},
         subscribe: () => () => {},
         prompt: async () => {
-          setTimeout(() => {
-            session.messages = [
-              {
-                role: "assistant",
-                timestamp: Date.now(),
-                content: [{ type: "text", text: "late durable final" }],
-              },
-            ];
-          }, 5);
+          durableEntries.push({
+            id: "final-entry",
+            parentId: "base-entry",
+            type: "message",
+            message: {
+              role: "assistant",
+              timestamp: Date.now(),
+              content: [{ type: "text", text: "durable final" }],
+            },
+          });
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          buildSessionContext: () => ({ messages: [baseMessage] }),
+          getBranch: () => [
+            { id: "base-entry", type: "message", message: baseMessage },
+          ],
+          getEntries: () => durableEntries,
+          getLeafId: () => "base-entry",
+          getTree: () => [],
+          getCwd: () => process.cwd(),
+          getSessionDir: () => process.cwd(),
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -2649,7 +2733,7 @@ test(
           event.type === "rpc_turn_event" && event.event === "complete",
       );
       assert.equal(complete?.requestTag, "tag-1");
-      assert.equal(complete?.finalText, "late durable final");
+      assert.equal(complete?.finalText, "durable final");
       assert.equal(
         events.some(
           (event) => event.type === "rpc_turn_event" && event.event === "error",
@@ -2753,6 +2837,10 @@ test(
         ),
       );
       await wait(60);
+      onData(
+        Buffer.from(`${JSON.stringify({ id: "2", type: "get_state" })}\n`),
+      );
+      await wait(20);
 
       const events = lines
         .join("")
@@ -2772,11 +2860,16 @@ test(
           event.type === "rpc_turn_event" && event.event === "complete",
       );
       assert.equal(completion, undefined);
-      const error = events.find(
-        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      assert.equal(
+        events.some(
+          (event) => event.type === "rpc_turn_event" && event.event === "error",
+        ),
+        false,
       );
-      assert.equal(error?.requestTag, "tag-1");
-      assert.equal(error?.error, "rpc_turn_final_output_missing");
+      const stateResponse = events.find(
+        (event) => event.type === "response" && event.id === "2",
+      );
+      assert.equal(stateResponse?.data?.turnActive, true);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2785,14 +2878,14 @@ test(
 );
 
 test(
-  "rpc mode resolves final text from canonical branch entries after the turn baseline leaf",
+  "rpc mode resolves final text from durable entries after the turn baseline leaf",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines = [];
-    const branchEntries: any[] = [
+    const durableEntries: any[] = [
       {
         type: "message",
         id: "base-entry",
@@ -2830,7 +2923,7 @@ test(
             content: [{ type: "text", text: "branch entry final" }],
           };
           session.agent.state.messages = [assistantMessage];
-          branchEntries.push({
+          durableEntries.push({
             type: "message",
             id: "final-entry",
             parentId: "base-entry",
@@ -2844,9 +2937,9 @@ test(
         modelRegistry: { getAvailable: async () => [] },
         sessionManager: {
           buildSessionContext: () => ({ messages: [] }),
-          getBranch: () => branchEntries,
+          getBranch: () => [durableEntries[0]],
           getLeafId: () => "base-entry",
-          getEntries: () => branchEntries,
+          getEntries: () => durableEntries,
           getTree: () => [],
           getCwd: () => process.cwd(),
           getSessionDir: () => process.cwd(),
@@ -2939,6 +3032,7 @@ test(
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines = [];
+    const durableEntries: any[] = [];
     const stateMessages = [
       {
         role: "assistant",
@@ -2970,17 +3064,25 @@ test(
         prompt: async () => {
           const assistantMessage = {
             role: "assistant",
+            timestamp: Date.now(),
             content: [{ type: "text", text: "final from stored session" }],
           };
           stateMessages.push(assistantMessage);
-          session.messages = stateMessages;
+          durableEntries.push({
+            id: "stored-final-entry",
+            type: "message",
+            message: assistantMessage,
+          });
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          ...testSessionManager(() => stateMessages),
+          getEntries: () => durableEntries,
+        },
         messages: stateMessages,
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -4328,7 +4430,7 @@ test(
 );
 
 test(
-  "rpc mode resume_interrupted_turn emits liveness events without requestTag",
+  "rpc mode resume_interrupted_turn keeps liveness active without requestTag until a terminal result exists",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4400,6 +4502,10 @@ test(
         ),
       );
       await wait(60);
+      onData(
+        Buffer.from(`${JSON.stringify({ id: "3", type: "get_state" })}\n`),
+      );
+      await wait(20);
 
       const events = lines
         .join("")
@@ -4421,10 +4527,13 @@ test(
           event.type === "rpc_turn_event" &&
           (event.event === "complete" || event.event === "error"),
       );
+      const stateResponse = events.find(
+        (event) => event.type === "response" && event.id === "3",
+      );
       assert.ok(start);
       assert.equal(start.requestTag, undefined);
-      assert.ok(finished);
-      assert.equal(finished.requestTag, undefined);
+      assert.equal(finished, undefined);
+      assert.equal(stateResponse?.data?.turnActive, true);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -4671,6 +4780,7 @@ test(
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines = [];
+    const durableEntries: any[] = [];
     let releasePrompt;
 
     process.stdin.on = function (event, handler) {
@@ -4696,19 +4806,26 @@ test(
         subscribe: () => () => {},
         prompt: async () => {
           await promptGate;
+          durableEntries.push({
+            id: "final-entry",
+            type: "message",
+            message: {
+              role: "assistant",
+              timestamp: Date.now(),
+              content: [{ type: "text", text: "done" }],
+            },
+          });
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
-        messages: [
-          {
-            role: "assistant",
-            content: [{ type: "text", text: "done" }],
-          },
-        ],
+        sessionManager: {
+          ...testSessionManager(() => []),
+          getEntries: () => durableEntries,
+        },
+        messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
         getLastAssistantText: () => "done",

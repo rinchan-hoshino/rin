@@ -65,6 +65,9 @@ export type RinFrontendTurnResult = {
   sessionFile?: string;
 };
 
+const TURN_RESULT_INVARIANT_ERROR = "rin_turn_result_invariant_failed";
+const TURN_RESULT_RECOVERY_TIMEOUT_ERROR = "rin_turn_result_recovery_timeout";
+
 export type RinFrontendPassiveNoticeEvent = {
   type: "passive_notice";
   text: string;
@@ -819,7 +822,7 @@ export class RinFrontendTurnDriver {
     completion: RinFrontendTurnResult,
   ): RinFrontendTurnResult {
     const finalText = safeString(completion?.finalText).trim();
-    if (!finalText) throw new Error("rpc_turn_final_output_missing");
+    if (!finalText) throw new Error(TURN_RESULT_INVARIANT_ERROR);
     this.latestAssistantText = finalText;
     this.liveTurnRecoveryContext = null;
     return {
@@ -940,7 +943,7 @@ export class RinFrontendTurnDriver {
         return this.normalizeTurnCompletion(raced.completion);
     }
     if (this.liveTurn === liveTurn) {
-      const error = new Error("rpc_turn_final_output_missing");
+      const error = new Error(TURN_RESULT_RECOVERY_TIMEOUT_ERROR);
       this.failLiveTurn(error);
       throw error;
     }
@@ -979,7 +982,17 @@ export class RinFrontendTurnDriver {
           if (this.liveTurn === liveTurn) continue;
           break;
         }
-        const error = new Error("rpc_turn_final_output_missing");
+        await this.replayPendingTerminalTurnEvent(targetSessionFile).catch(
+          () => false,
+        );
+        const replayed = await Promise.race([
+          liveTurn.promise.then((completion) => ({ completion })),
+          sleep(1000).then(() => ({})),
+        ]);
+        if ("completion" in replayed) {
+          return this.normalizeTurnCompletion(replayed.completion);
+        }
+        const error = new Error(TURN_RESULT_INVARIANT_ERROR);
         this.failLiveTurn(error);
         throw error;
       }
@@ -1296,7 +1309,7 @@ export class RinFrontendTurnDriver {
       const finalText = safeString((completion as any)?.finalText).trim();
       if (!finalText) {
         this.liveTurnRecoveryContext = null;
-        throw new Error("rpc_turn_final_output_missing");
+        throw new Error(TURN_RESULT_INVARIANT_ERROR);
       }
       this.latestAssistantText = finalText;
       this.liveTurnRecoveryContext = null;
@@ -1461,7 +1474,7 @@ export class RinFrontendTurnDriver {
         this.updateFrontendStateFrom(event);
         const finalText = safeString(event.finalText).trim();
         if (!finalText) {
-          this.failLiveTurn(new Error("rpc_turn_final_output_missing"));
+          this.failLiveTurn(new Error(TURN_RESULT_INVARIANT_ERROR));
           return;
         }
         this.latestAssistantText = finalText;

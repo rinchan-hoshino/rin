@@ -1,4 +1,3 @@
-import { asArray } from "../json-utils.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 
@@ -29,6 +28,36 @@ function entryMessage(entry: any) {
 
 function readCurrentBranchEntries(session: any) {
   return callArray(session?.sessionManager?.getBranch?.());
+}
+
+function readDurableEntries(session: any) {
+  return callArray(session?.sessionManager?.getEntries?.());
+}
+
+function entryId(entry: any) {
+  return safeString(entry?.id).trim();
+}
+
+function entryParentId(entry: any) {
+  return safeString(entry?.parentId).trim();
+}
+
+function entryDescendsFrom(
+  entry: any,
+  ancestorId: string,
+  entriesById: Map<string, any>,
+) {
+  const seen = new Set<string>();
+  let current = entry;
+  while (current && typeof current === "object") {
+    const parentId = entryParentId(current);
+    if (!parentId) return false;
+    if (parentId === ancestorId) return true;
+    if (seen.has(parentId)) return false;
+    seen.add(parentId);
+    current = entriesById.get(parentId);
+  }
+  return false;
 }
 
 function readCurrentBranchMessages(session: any) {
@@ -74,21 +103,26 @@ export function captureRinTurnCompletionBaseline(
   };
 }
 
-function collectRinTurnCompletionMessagesFromBranchEntries(
-  session: any,
+function collectMessagesFromEntriesAfterBaseline(
+  entries: any[],
   baseline: RinTurnCompletionBaseline,
 ) {
-  if (!baseline.hasBranchLeafId) return null;
-  const branchEntries = readCurrentBranchEntries(session);
-  if (!branchEntries.length) return null;
-
-  let candidateEntries = branchEntries;
+  let candidateEntries = entries;
   if (baseline.branchLeafId) {
-    const baselineIndex = branchEntries.findIndex(
-      (entry) => safeString(entry?.id).trim() === baseline.branchLeafId,
+    const baselineIndex = entries.findIndex(
+      (entry) => entryId(entry) === baseline.branchLeafId,
     );
     if (baselineIndex < 0) return null;
-    candidateEntries = branchEntries.slice(baselineIndex + 1);
+    const entriesById = new Map<string, any>();
+    for (const entry of entries) {
+      const id = entryId(entry);
+      if (id) entriesById.set(id, entry);
+    }
+    candidateEntries = entries
+      .slice(baselineIndex + 1)
+      .filter((entry) =>
+        entryDescendsFrom(entry, baseline.branchLeafId || "", entriesById),
+      );
   }
 
   return candidateEntries
@@ -99,29 +133,27 @@ function collectRinTurnCompletionMessagesFromBranchEntries(
     );
 }
 
+function collectRinTurnCompletionMessagesFromDurableEntries(
+  session: any,
+  baseline: RinTurnCompletionBaseline,
+) {
+  if (!baseline.hasBranchLeafId) return null;
+  const durableEntries = readDurableEntries(session);
+  if (!durableEntries.length) return null;
+  return collectMessagesFromEntriesAfterBaseline(durableEntries, baseline);
+}
+
 export function collectRinTurnCompletionMessages(
   session: any,
   options: {
     baseline: RinTurnCompletionBaseline;
   },
 ) {
-  const branchEntryMessages = collectRinTurnCompletionMessagesFromBranchEntries(
-    session,
-    options.baseline,
-  );
-  if (branchEntryMessages) return branchEntryMessages;
-
-  const branchMessages = readCurrentBranchMessages(session);
-  const baselineCount = Math.max(
-    0,
-    Number(options.baseline.branchMessageCount),
-  );
-  const branchAdvanced = branchMessages.length >= baselineCount;
-  const candidates = branchAdvanced
-    ? branchMessages.slice(baselineCount)
-    : branchMessages;
-  return asArray<any>(candidates).filter((message) =>
-    isCurrentTurnMessage(message, options.baseline.turnStartedAtMs),
+  return (
+    collectRinTurnCompletionMessagesFromDurableEntries(
+      session,
+      options.baseline,
+    ) || []
   );
 }
 

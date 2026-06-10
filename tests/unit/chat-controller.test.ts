@@ -3027,7 +3027,7 @@ test("chat controller rejects rpc completion without finalText instead of reusin
       incomingMessageId: "m-turn-observed-final",
       replyToMessageId: "m-turn-observed-final",
     }),
-    /rpc_turn_final_output_missing/,
+    /rin_turn_result_invariant_failed/,
   );
   assert.deepEqual(deliveries, []);
   assert.equal(controller.currentTurn, null);
@@ -3083,7 +3083,7 @@ test("chat controller rejects rpc completion without finalText instead of scanni
       incomingMessageId: "m-turn-missing-final",
       replyToMessageId: "m-turn-missing-final",
     }),
-    /rpc_turn_final_output_missing/,
+    /rin_turn_result_invariant_failed/,
   );
   assert.deepEqual(deliveries, []);
   assert.equal(controller.currentTurn, null);
