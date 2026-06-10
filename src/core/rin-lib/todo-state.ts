@@ -43,7 +43,9 @@ export function formatRinTodoChecklistContent(
   if (todos.length === 0) return "No todos";
 
   return todos
-    .map((todo) => `${todo.done ? "✓" : "○"} ${formatRinTodoItemText(todo)}`)
+    .map(
+      (todo) => `- [${todo.done ? "x" : " "}] ${formatRinTodoItemText(todo)}`,
+    )
     .join("\n");
 }
 

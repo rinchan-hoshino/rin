@@ -50,13 +50,13 @@ test("todo state reads the latest branch-aware todo result", () => {
   ]);
 });
 
-test("todo state formats checklist content as chat-safe status lines", () => {
+test("todo state formats checklist content as markdown task items", () => {
   assert.equal(
     todoState.formatRinTodoChecklistContent([
       { text: "Open item", done: false },
       { text: "Done item", done: true },
     ]),
-    "○ Open item\n✓ Done item",
+    "- [ ] Open item\n- [x] Done item",
   );
 });
 
