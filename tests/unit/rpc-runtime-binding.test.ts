@@ -386,7 +386,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
       { text: "Ship renderer", done: true },
     ],
   });
-  assert.match(todoExecution.content[0].text, /- \[x\] Ship renderer/);
+  assert.match(todoExecution.content[0].text, /✓ Ship renderer/);
 
   const todoResult = todoResultLines.join("\n");
   assert.doesNotMatch(todoResult, /<toolSuccessBg>/);

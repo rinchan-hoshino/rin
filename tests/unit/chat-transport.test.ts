@@ -219,7 +219,7 @@ test("chat transport forwards text delivery kind to adapters", async () => {
   });
 });
 
-test("chat transport treats task-list todo deliveries as markdown", async () => {
+test("chat transport treats explicit markdown task-list deliveries as markdown", async () => {
   await withTempDir(async (dir) => {
     const sends = [];
     await transport.sendOutboxPayload(
