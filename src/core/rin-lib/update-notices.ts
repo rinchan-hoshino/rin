@@ -222,16 +222,10 @@ function currentUpdateContext(options: RinUpdateCheckOptions = {}) {
 }
 
 export function rinUpdateCommandForChannel(
-  channel: ReleaseChannel,
-  currentRelease?: InstalledReleaseInfo,
+  _channel: ReleaseChannel,
+  _currentRelease?: InstalledReleaseInfo,
 ) {
-  if (channel === "beta") return "rin update --beta";
-  if (channel === "nightly") return "rin update --nightly";
-  if (channel === "git") {
-    const branch = trim(currentRelease?.branch);
-    return branch ? `rin update --git ${branch}` : "rin update --git";
-  }
-  return "rin update";
+  return "rin update --yes";
 }
 
 function isGitHash(value: unknown) {

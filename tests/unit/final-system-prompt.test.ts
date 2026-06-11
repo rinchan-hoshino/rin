@@ -150,6 +150,11 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.equal(baseSystemPrompt.includes("Chat bridge guidance:"), false);
   assert.ok(baseSystemPrompt.includes("chat bridge -> docs/chat-bridge.md"));
+  assert.ok(
+    baseSystemPrompt.includes(
+      "runtime layout -> docs/runtime-layout.md; capabilities and update -> docs/capabilities.md",
+    ),
+  );
   assert.equal(
     baseSystemPrompt.includes("Memory and self-improvement guidance:"),
     false,

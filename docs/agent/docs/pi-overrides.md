@@ -28,7 +28,7 @@ When Rin docs and Pi docs describe the same Rin surface differently, apply the R
 
 ### Runtime paths
 
-Use Rin stable paths under `~/.rin/...`. Runtime layout, launcher ownership, install manifests, app releases, and update/rollback paths are defined in `docs/runtime-layout.md`.
+Use Rin stable paths under `~/.rin/...`. Runtime layout, launcher ownership, install manifests, app releases, and rollback paths are defined in `docs/runtime-layout.md`; update policy belongs to `docs/capabilities.md`.
 
 ### Memory and self-improve
 

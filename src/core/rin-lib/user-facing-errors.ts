@@ -371,7 +371,7 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_tui_disposed: () => "Rin TUI session has already closed. Reopen Rin.",
   rin_tui_failed: () => "Rin TUI failed before it could start.",
   rin_update_installed_release_channel_missing: () =>
-    "Rin update could not find the installed release channel. Pass --stable, --beta, --nightly, or --git explicitly.",
+    "Rin update could not find the installed release channel. Repair the installed release metadata before updating.",
   rin_tui_not_connected: () =>
     "Rin is not connected to an interactive session yet. Start or reconnect the Rin interface.",
   rin_wait_for_idle_timeout: () =>
