@@ -19,6 +19,7 @@ import {
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import { nowIso } from "../time-utils.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
+import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
   readChatCommandResponses,
   resolveChatCommandResponses,
@@ -1322,19 +1323,20 @@ export class ChatController {
   }
 
   async runTurn(
-    input: RinToolStartupOptions & {
-      text: string;
-      attachments: SavedAttachment[];
-      replyToMessageId?: string;
-      incomingMessageId?: string;
-      sessionFile?: string;
-      sessionName?: string;
-      promptMeta?: PromptContextMeta;
-      model?: string;
-      thinkingLevel?: string;
-      managedSessionLeaf?: string;
-      deliverFinal?: boolean;
-    },
+    input: RinToolStartupOptions &
+      Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
+        text: string;
+        attachments: SavedAttachment[];
+        replyToMessageId?: string;
+        incomingMessageId?: string;
+        sessionFile?: string;
+        sessionName?: string;
+        promptMeta?: PromptContextMeta;
+        model?: string;
+        thinkingLevel?: string;
+        managedSessionLeaf?: string;
+        deliverFinal?: boolean;
+      },
     mode: "prompt" | "steer" = "prompt",
   ) {
     this.rememberPromptChatType(input.promptMeta);
@@ -1370,6 +1372,7 @@ export class ChatController {
         tools: input.tools,
         excludeTools: input.excludeTools,
         noTools: input.noTools,
+        piStartupOptions: input.piStartupOptions,
         resetModelOptionsFromSettings: true,
         promptContext: input.promptMeta,
         source: "chat-bridge",
@@ -1471,6 +1474,7 @@ export class ChatController {
           tools: input.tools,
           excludeTools: input.excludeTools,
           noTools: input.noTools,
+          piStartupOptions: input.piStartupOptions,
           resetModelOptionsFromSettings: true,
           promptContext: input.promptMeta,
           source: "chat-bridge",

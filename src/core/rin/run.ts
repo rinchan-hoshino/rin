@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { parseArgs as parsePiArgs } from "@earendil-works/pi-coding-agent";
 import { requestDaemonCommand } from "../rin-daemon/client.js";
 import { MANAGED_CLI_SESSION_LEAF } from "../session/managed-paths.js";
 import {
@@ -10,28 +11,27 @@ import {
   type ParsedArgs,
   safeString,
 } from "./shared.js";
-import {
-  parseRinToolNameList,
-  type RinToolStartupOptions,
-} from "../rin-lib/tool-options.js";
+import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
+import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const VALID_MODES = new Set(["text", "json"]);
 
-export type RunCliOptions = RinToolStartupOptions & {
-  messages: string[];
-  prompt: string;
-  sessionFile?: string;
-  managedSessionLeaf?: string;
-  sessionName?: string;
-  provider?: string;
-  model?: string;
-  thinkingLevel?: string;
-  chatKey?: string;
-  outputMode: "text" | "json";
-  timeoutMs: number;
-  help?: boolean;
-};
+export type RunCliOptions = RinToolStartupOptions &
+  Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
+    messages: string[];
+    prompt: string;
+    sessionFile?: string;
+    managedSessionLeaf?: string;
+    sessionName?: string;
+    provider?: string;
+    model?: string;
+    thinkingLevel?: string;
+    chatKey?: string;
+    outputMode: "text" | "json";
+    timeoutMs: number;
+    help?: boolean;
+  };
 
 function printRunHelp() {
   console.log(`rin - AI coding assistant with read, bash, edit, write tools
@@ -138,6 +138,67 @@ async function readFileArg(pathText: string) {
   return await fs.readFile(filePath, "utf8");
 }
 
+function normalizePiArgvCompatibility(args: string[]) {
+  const splitEquals = new Set([
+    "--mode",
+    "--provider",
+    "--model",
+    "--thinking",
+    "--session",
+    "--name",
+    "--tools",
+    "--exclude-tools",
+  ]);
+  return args.flatMap((arg) => {
+    const text = safeString(arg).trim();
+    const eqIndex = text.indexOf("=");
+    if (eqIndex <= 0) return [arg];
+    const name = text.slice(0, eqIndex);
+    if (!splitEquals.has(name)) return [arg];
+    return [name, text.slice(eqIndex + 1)];
+  });
+}
+
+function stripRinOnlyArgsForPi(args: string[]) {
+  const result: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = safeString(args[index]).trim();
+    if (arg === "--bind-chat-session") {
+      throw new Error("unknown_run_option:--bind-chat-session");
+    }
+    if (
+      arg === "--chat-key" ||
+      arg === "--chatKey" ||
+      arg === "--timeout" ||
+      arg === "--managed-session" ||
+      arg === "--managed-session-leaf"
+    ) {
+      index += 1;
+      continue;
+    }
+    if (
+      arg.startsWith("--chat-key=") ||
+      arg.startsWith("--chatKey=") ||
+      arg.startsWith("--timeout=") ||
+      arg.startsWith("--managed-session=") ||
+      arg.startsWith("--managed-session-leaf=")
+    ) {
+      continue;
+    }
+    result.push(args[index]);
+  }
+  return result;
+}
+
+function serializePiStartupArgs(parsed: any) {
+  const { diagnostics: _diagnostics, unknownFlags, ...rest } = parsed;
+  return {
+    ...rest,
+    unknownFlags:
+      unknownFlags instanceof Map ? Object.fromEntries(unknownFlags) : {},
+  };
+}
+
 export function shouldRunNonInteractive(
   rawArgv: string[],
   stdinIsTTY = process.stdin.isTTY,
@@ -160,107 +221,22 @@ export async function parseRunArgs(
   stdinContentOverride?: string,
 ): Promise<RunCliOptions> {
   const args = stripRinWrapperArgs(rawArgv);
-  const messages: string[] = [];
-  const fileArgs: string[] = [];
-  let sessionFile = "";
+  const piArgs = normalizePiArgvCompatibility(stripRinOnlyArgsForPi(args));
+  const piParsed = parsePiArgs(piArgs);
+  const errorDiagnostic = piParsed.diagnostics.find(
+    (diagnostic) => diagnostic.type === "error",
+  );
+  if (errorDiagnostic) throw new Error(errorDiagnostic.message);
+
   let managedSessionLeaf = "";
-  let sessionName = "";
-  let provider = "";
-  let model = "";
-  let thinkingLevel = "";
-  let tools: string[] | undefined;
-  let excludeTools: string[] | undefined;
-  let noTools: "all" | "builtin" | undefined;
   let chatKey = "";
   let timeoutValue = "";
-  let outputMode: "text" | "json" = "text";
-  let help = false;
-  let passthroughMessages = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = safeString(args[index]).trim();
     if (!arg) continue;
-    if (passthroughMessages) {
-      messages.push(arg);
-      continue;
-    }
-    if (arg === "--") {
-      passthroughMessages = true;
-      continue;
-    }
-    if (arg === "--help" || arg === "-h") {
-      help = true;
-      continue;
-    }
-    if (arg === "--print" || arg === "-p") continue;
     if (arg === "--bind-chat-session") {
       throw new Error("unknown_run_option:--bind-chat-session");
-    }
-    if (arg === "--mode") {
-      const value = readValue(args, index);
-      if (value === undefined) throw new Error("run_mode_value_required");
-      if (!VALID_MODES.has(value)) throw new Error(`invalid_mode:${value}`);
-      outputMode = value as "text" | "json";
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("--mode=")) {
-      const value = arg.slice("--mode=".length);
-      if (!VALID_MODES.has(value)) throw new Error(`invalid_mode:${value}`);
-      outputMode = value as "text" | "json";
-      continue;
-    }
-    if (arg === "--provider") {
-      index = appendInlineValue(
-        args,
-        index,
-        (value) => (provider = value),
-        "run_provider_value_required",
-      );
-      continue;
-    }
-    if (arg.startsWith("--provider=")) {
-      provider = arg.slice("--provider=".length);
-      continue;
-    }
-    if (arg === "--model") {
-      index = appendInlineValue(
-        args,
-        index,
-        (value) => (model = value),
-        "run_model_value_required",
-      );
-      continue;
-    }
-    if (arg.startsWith("--model=")) {
-      model = arg.slice("--model=".length);
-      continue;
-    }
-    if (arg === "--thinking") {
-      index = appendInlineValue(
-        args,
-        index,
-        (value) => (thinkingLevel = value),
-        "run_thinking_value_required",
-      );
-      continue;
-    }
-    if (arg.startsWith("--thinking=")) {
-      thinkingLevel = arg.slice("--thinking=".length);
-      continue;
-    }
-    if (arg === "--session") {
-      index = appendInlineValue(
-        args,
-        index,
-        (value) => (sessionFile = value),
-        "run_session_value_required",
-      );
-      continue;
-    }
-    if (arg.startsWith("--session=")) {
-      sessionFile = arg.slice("--session=".length);
-      continue;
     }
     if (arg === "--managed-session" || arg === "--managed-session-leaf") {
       index = appendInlineValue(
@@ -277,58 +253,6 @@ export async function parseRunArgs(
     }
     if (arg.startsWith("--managed-session-leaf=")) {
       managedSessionLeaf = arg.slice("--managed-session-leaf=".length);
-      continue;
-    }
-    if (arg === "--tools" || arg === "-t") {
-      index = appendInlineValue(
-        args,
-        index,
-        (value) => (tools = parseRinToolNameList(value)),
-        "run_tools_value_required",
-      );
-      continue;
-    }
-    if (arg.startsWith("--tools=")) {
-      tools = parseRinToolNameList(arg.slice("--tools=".length));
-      continue;
-    }
-    if (arg === "--exclude-tools" || arg === "-xt") {
-      index = appendInlineValue(
-        args,
-        index,
-        (value) => (excludeTools = parseRinToolNameList(value)),
-        "run_exclude_tools_value_required",
-      );
-      continue;
-    }
-    if (arg.startsWith("--exclude-tools=")) {
-      excludeTools = parseRinToolNameList(arg.slice("--exclude-tools=".length));
-      continue;
-    }
-    if (arg === "--no-tools" || arg === "-nt") {
-      noTools = "all";
-      continue;
-    }
-    if (arg === "--no-builtin-tools" || arg === "-nbt") {
-      noTools = "builtin";
-      continue;
-    }
-    if (arg === "--no-session") {
-      sessionFile = "";
-      managedSessionLeaf = "";
-      continue;
-    }
-    if (arg === "--name") {
-      index = appendInlineValue(
-        args,
-        index,
-        (value) => (sessionName = value),
-        "run_name_value_required",
-      );
-      continue;
-    }
-    if (arg.startsWith("--name=")) {
-      sessionName = arg.slice("--name=".length);
       continue;
     }
     if (arg === "--chat-key" || arg === "--chatKey") {
@@ -359,20 +283,11 @@ export async function parseRunArgs(
     }
     if (arg.startsWith("--timeout=")) {
       timeoutValue = arg.slice("--timeout=".length);
-      continue;
     }
-    if (arg.startsWith("@")) {
-      fileArgs.push(arg.slice(1));
-      continue;
-    }
-    if (arg.startsWith("--")) {
-      const value = readValue(args, index);
-      if (value !== undefined && !value.startsWith("@")) index += 1;
-      continue;
-    }
-    if (arg.startsWith("-")) throw new Error(`unknown_run_option:${arg}`);
-    messages.push(arg);
   }
+
+  const mode = piParsed.mode ?? "text";
+  if (!VALID_MODES.has(mode)) throw new Error(`invalid_mode:${mode}`);
 
   const parts: string[] = [];
   const stdinContent =
@@ -380,39 +295,53 @@ export async function parseRunArgs(
       ? stdinContentOverride
       : await readStdinIfAvailable();
   if (stdinContent) parts.push(stdinContent);
-  for (const fileArg of fileArgs) {
+  for (const fileArg of piParsed.fileArgs) {
     const text = await readFileArg(fileArg);
     if (text) parts.push(text);
   }
-  if (messages.length) parts.push(messages[0]);
+  if (piParsed.messages.length) parts.push(piParsed.messages[0]);
   const prompt = parts.join("");
-  const additionalMessages = messages.length > 1 ? messages.slice(1) : [];
-  const providerModel = resolveProviderModel(provider, model);
-  if (model && !providerModel) throw new Error(`invalid_model:${model}`);
-  const normalizedSessionFile = safeString(sessionFile).trim();
+  const additionalMessages =
+    piParsed.messages.length > 1 ? piParsed.messages.slice(1) : [];
+  const providerModel = resolveProviderModel(piParsed.provider, piParsed.model);
+  if (piParsed.model && !providerModel) {
+    throw new Error(`invalid_model:${piParsed.model}`);
+  }
+  const normalizedSessionFile = safeString(
+    piParsed.noSession ? "" : piParsed.session,
+  ).trim();
   const normalizedManagedSessionLeaf = safeString(managedSessionLeaf).trim();
   if (normalizedSessionFile && normalizedManagedSessionLeaf) {
     throw new Error("run_session_conflict");
   }
+
+  const noTools = piParsed.noTools
+    ? "all"
+    : piParsed.noBuiltinTools
+      ? "builtin"
+      : undefined;
 
   return {
     messages: additionalMessages,
     prompt,
     sessionFile: normalizedSessionFile || undefined,
     managedSessionLeaf: normalizedManagedSessionLeaf || undefined,
-    sessionName: safeString(sessionName).trim() || undefined,
-    provider: safeString(provider).trim() || undefined,
+    sessionName: safeString(piParsed.name).trim() || undefined,
+    provider: safeString(piParsed.provider).trim() || undefined,
     model: providerModel
       ? `${providerModel.provider}/${providerModel.modelId}`
       : undefined,
-    thinkingLevel: safeString(thinkingLevel).trim() || undefined,
-    ...(tools !== undefined ? { tools } : {}),
-    ...(excludeTools !== undefined ? { excludeTools } : {}),
+    thinkingLevel: piParsed.thinking,
+    ...(piParsed.tools !== undefined ? { tools: piParsed.tools } : {}),
+    ...(piParsed.excludeTools !== undefined
+      ? { excludeTools: piParsed.excludeTools }
+      : {}),
     ...(noTools !== undefined ? { noTools } : {}),
     chatKey: safeString(chatKey).trim() || undefined,
-    outputMode,
+    piStartupOptions: serializePiStartupArgs(piParsed),
+    outputMode: mode as "text" | "json",
     timeoutMs: parseTimeoutMs(timeoutValue),
-    help,
+    help: Boolean(piParsed.help),
   };
 }
 
@@ -474,6 +403,9 @@ async function runDetachedTurn(
           ? { excludeTools: options.excludeTools }
           : {}),
         ...(options.noTools !== undefined ? { noTools: options.noTools } : {}),
+        ...(options.piStartupOptions !== undefined
+          ? { piStartupOptions: options.piStartupOptions }
+          : {}),
         model: options.model,
         thinkingLevel: options.thinkingLevel,
         controllerKey: `cli-${Date.now()}-${randomUUID().slice(0, 8)}`,

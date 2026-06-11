@@ -12,6 +12,7 @@ import { runCustomRpcMode } from "./rpc-mode.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 
 type WorkerResourceOptions = RinToolStartupOptions & {
+  piStartupOptions?: Record<string, unknown>;
   additionalExtensionPaths?: string[];
   noExtensions?: boolean;
   extensionFlagValues?: Array<[string, boolean | string]>;
@@ -93,6 +94,7 @@ export async function startWorker(options: WorkerResourceOptions = {}) {
     additionalThemePaths: mergedOptions.additionalThemePaths,
     noThemes: mergedOptions.noThemes,
     noContextFiles: mergedOptions.noContextFiles,
+    piStartupOptions: mergedOptions.piStartupOptions,
     systemPrompt: mergedOptions.systemPrompt,
     appendSystemPrompt: mergedOptions.appendSystemPrompt,
   });

@@ -175,6 +175,9 @@ function serializeRpcResourceOptions(options: TuiResourceOptions) {
     additionalThemePaths: [...(options.additionalThemePaths || [])],
     noThemes: options.noThemes,
     noContextFiles: options.noContextFiles,
+    ...(options.piStartupOptions !== undefined
+      ? { piStartupOptions: options.piStartupOptions }
+      : {}),
     systemPrompt: options.systemPrompt,
     appendSystemPrompt: [...(options.appendSystemPrompt || [])],
   };

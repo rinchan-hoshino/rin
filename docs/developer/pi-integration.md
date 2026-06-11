@@ -24,13 +24,42 @@ still be upgraded intentionally.
 | Rin capability bridge into Pi extension lifecycle                            | `src/core/pi/internal-extension-bridge.ts` | Rin first-party capabilities need selected Pi lifecycle events without pretending every capability is a standalone Pi package                                        | `Pi session private members stay behind Rin's session host` |
 | TUI patch implementation                                                     | `src/core/pi/tui-patches/index.ts`         | Rin currently has a local TUI shell layered on Pi interactive mode; all prototype patching stays inside the integration area                                         | focused TUI override tests                                  |
 
+## Pi update rule
+
+Rin does not try to be a zero-loss wrapper around Pi's app layer. Instead, Pi
+updates follow two rules:
+
+1. If a Pi behavior can be carried as a public parser result, service option,
+   resource-loader option, session option, or JSON startup option bag, add or
+   reuse that passthrough path so future updates of the same class need no new
+   feature-specific code.
+2. If a Pi behavior cannot be carried that way, adapt it only at the finite
+   Rin-owned entrypoint that wraps the matching Pi surface. Do not scatter
+   feature-specific patches through product modules.
+
+Finite entrypoints for non-passthrough follow-up:
+
+- CLI and non-interactive print mode: `src/core/rin/run.ts` and
+  `src/core/rin/main.ts`.
+- TUI startup and interactive-only behavior: `src/core/rin-tui/`.
+- Shared session/runtime creation for chat, daemon, scheduled tasks, SDK calls,
+  and TUI-created sessions: `src/core/rin-lib/runtime.ts` and
+  `src/core/session/factory.ts`.
+- Pi service/resource creation: `src/core/rin-lib/agent-runtime.ts`.
+- Cross-process option transport: `src/core/rin-daemon/worker.ts`,
+  `src/core/chat/`, and `src/core/rin-frontend-sdk/turn-driver.ts`.
+- Private Pi symbols: `src/core/pi/` only.
+
 ## Upgrade workflow
 
 1. Upgrade Pi packages and upstream mirror metadata together.
-2. Run `npm run build` and the focused Pi integration tests:
+2. Read the Pi delta and classify each behavior change as either passthrough,
+   finite-entrypoint follow-up, intentional Rin difference, or missing upstream
+   hook.
+3. Run `npm run build` and the focused Pi integration tests:
    - `tests/unit/pi-dependencies.test.ts`
    - `tests/unit/tui-overrides.test.ts`
    - `tests/unit/rin-runtime.test.ts`
    - `tests/unit/rpc-mode.test.ts`
-3. If a private seam breaks, fix the helper in `src/core/pi/` first. Do not
+4. If a private seam breaks, fix the helper in `src/core/pi/` first. Do not
    scatter fallback accesses through product code.

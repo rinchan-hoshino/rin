@@ -21,6 +21,7 @@ import {
   serializeRinToolStartupOptions,
   type RinToolStartupOptions,
 } from "../rin-lib/tool-options.js";
+import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
 import {
   normalizeFrontendIdentity,
@@ -87,7 +88,8 @@ export type RinFrontendTurnClient = RinFrontendClient & {
   ensureSessionReady?: (
     restoreSessionFile?: string,
     managedSessionLeaf?: string,
-    toolOptions?: RinToolStartupOptions,
+    toolOptions?: RinToolStartupOptions &
+      Pick<RinPiPassthroughOptions, "piStartupOptions">,
   ) => Promise<Record<string, unknown>>;
   terminateSession?: () => Promise<unknown>;
   consumeQueuedOfflineOperation?: (requestTag?: string) => boolean;
@@ -543,7 +545,8 @@ export class RinFrontendTurnDriver {
   private async ensureSessionReady(
     restoreSessionFile = "",
     managedSessionLeaf = "",
-    toolOptions?: RinToolStartupOptions,
+    toolOptions?: RinToolStartupOptions &
+      Pick<RinPiPassthroughOptions, "piStartupOptions">,
   ) {
     if (!this.client) throw new Error("frontend_session_not_connected");
     if (this.client.ensureSessionReady) {
@@ -561,12 +564,18 @@ export class RinFrontendTurnDriver {
     await this.refreshFrontendState(wanted).catch(() => {});
     if (managedLeaf && !wanted) {
       const serializedToolOptions = serializeRinToolStartupOptions(toolOptions);
+      const resourceOptions = {
+        ...(hasRinToolStartupOptions(serializedToolOptions)
+          ? serializedToolOptions
+          : {}),
+        ...(toolOptions?.piStartupOptions !== undefined
+          ? { piStartupOptions: toolOptions.piStartupOptions }
+          : {}),
+      };
       const value = await this.client.newSession({
         managedSessionLeaf: managedLeaf,
         frontendIdentity: this.frontendIdentity,
-        ...(hasRinToolStartupOptions(serializedToolOptions)
-          ? { resourceOptions: serializedToolOptions }
-          : {}),
+        ...(Object.keys(resourceOptions).length > 0 ? { resourceOptions } : {}),
       });
       if (value?.cancelled) throw new Error("rin_new_session_cancelled");
       this.updateFrontendStateFrom(value);
@@ -1021,6 +1030,7 @@ export class RinFrontendTurnDriver {
       requestTag?: string;
       streamingBehavior?: "steer" | "followUp";
       assumeSessionReady?: boolean;
+      piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
     } & RinToolStartupOptions,
   ): Promise<RinFrontendTurnResult> {
     const promptSource = safeString(input.source).trim() || this.promptSource;
@@ -1111,6 +1121,7 @@ export class RinFrontendTurnDriver {
       promptContext?: RinPromptContext;
       source?: string;
       streamingBehavior?: "steer" | "follow";
+      piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
     } & RinToolStartupOptions,
   ): Promise<RinFrontendTurnResult> {
     const turnInterruptionSeq = this.turnInterruptionSeq;

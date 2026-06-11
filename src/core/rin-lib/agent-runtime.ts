@@ -82,7 +82,7 @@ function createRinAgentSessionServicesFactory(
       agentDir,
       settingsManager,
     });
-    await resourceLoader.reload();
+    await resourceLoader.reload(options.resourceLoaderReloadOptions);
     const diagnostics: any[] = [];
     const extensionsResult = resourceLoader.getExtensions();
     for (const { name, config, extensionPath } of extensionsResult.runtime

@@ -107,6 +107,41 @@ test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface"
   }
 });
 
+test("Rin agent services pass Pi resource loader reload options", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-reload-options-"),
+  );
+  try {
+    await fs.mkdir(path.join(agentDir, ".pi"), { recursive: true });
+    await writeJson(path.join(agentDir, ".pi", "settings.json"), {
+      steeringMode: "all",
+    });
+
+    const PiAgentRuntime = await loaderModule.loadRinAgentRuntime();
+    const settingsManager = PiAgentRuntime.SettingsManager.create(
+      agentDir,
+      agentDir,
+      { projectTrusted: false },
+    );
+    let resolverCalled = false;
+    await PiAgentRuntime.createAgentSessionServices({
+      cwd: agentDir,
+      agentDir,
+      settingsManager,
+      resourceLoaderReloadOptions: {
+        resolveProjectTrust: async () => {
+          resolverCalled = true;
+          return false;
+        },
+      },
+    });
+
+    assert.equal(resolverCalled, true);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("configured Rin sessions use the Rin extension loader through agent services", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-ext-session-"));
   const extensionDir = path.join(agentDir, "extension");

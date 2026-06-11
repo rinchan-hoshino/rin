@@ -38,6 +38,7 @@ import {
   injectPromptContextHeader,
 } from "../rin-frontend-sdk/prompt-context.js";
 import type { RinToolStartupOptions } from "./tool-options.js";
+import type { RinPiPassthroughOptions } from "./pi-passthrough.js";
 import {
   buildProviderBoundContextEvent,
   estimateProviderBoundContextTokens,
@@ -1589,27 +1590,28 @@ function applyStartupSessionName(sessionManager: any, sessionName?: unknown) {
 }
 
 export async function createConfiguredAgentSession(
-  options: RinToolStartupOptions & {
-    cwd?: string;
-    agentDir?: string;
-    additionalExtensionPaths?: string[];
-    noExtensions?: boolean;
-    extensionFlagValues?: Map<string, boolean | string>;
-    additionalSkillPaths?: string[];
-    noSkills?: boolean;
-    additionalPromptTemplatePaths?: string[];
-    noPromptTemplates?: boolean;
-    additionalThemePaths?: string[];
-    noThemes?: boolean;
-    noContextFiles?: boolean;
-    systemPrompt?: string;
-    appendSystemPrompt?: string[];
-    disabledRinCapabilities?: string[];
-    sessionManager?: any;
-    sessionName?: string;
-    modelRef?: string;
-    thinkingLevel?: any;
-  } = {},
+  options: RinToolStartupOptions &
+    RinPiPassthroughOptions & {
+      cwd?: string;
+      agentDir?: string;
+      additionalExtensionPaths?: string[];
+      noExtensions?: boolean;
+      extensionFlagValues?: Map<string, boolean | string>;
+      additionalSkillPaths?: string[];
+      noSkills?: boolean;
+      additionalPromptTemplatePaths?: string[];
+      noPromptTemplates?: boolean;
+      additionalThemePaths?: string[];
+      noThemes?: boolean;
+      noContextFiles?: boolean;
+      systemPrompt?: string;
+      appendSystemPrompt?: string[];
+      disabledRinCapabilities?: string[];
+      sessionManager?: any;
+      sessionName?: string;
+      modelRef?: string;
+      thinkingLevel?: any;
+    } = {},
 ) {
   const agentRuntimeModule = await loadRinAgentRuntime();
   const {
@@ -1662,11 +1664,16 @@ export async function createConfiguredAgentSession(
     const settingsManager = SettingsManager.create(runtimeCwd, runtimeAgentDir);
     applyBundledRinExtensionAliases(settingsManager);
 
+    const piServiceOptions = options.piAgentSessionServicesOptions ?? {};
+    const piResourceLoaderOptions =
+      (piServiceOptions.resourceLoaderOptions as Record<string, unknown>) ?? {};
     const services = await createAgentSessionServices({
+      ...piServiceOptions,
       cwd: runtimeCwd,
       agentDir: runtimeAgentDir,
       settingsManager,
       resourceLoaderOptions: {
+        ...piResourceLoaderOptions,
         additionalExtensionPaths: options.additionalExtensionPaths ?? [],
         noExtensions: options.noExtensions,
         additionalSkillPaths,
@@ -1801,6 +1808,7 @@ export async function createConfiguredAgentSession(
     });
 
     const result = await createAgentSessionFromServices({
+      ...(options.piAgentSessionOptions ?? {}),
       services,
       sessionManager,
       sessionStartEvent,

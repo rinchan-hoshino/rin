@@ -319,6 +319,7 @@ async function startStdTui(
     additionalThemePaths: resourceOptions.additionalThemePaths,
     noThemes: resourceOptions.noThemes,
     noContextFiles: resourceOptions.noContextFiles,
+    piStartupOptions: resourceOptions.piStartupOptions,
     systemPrompt: resourceOptions.systemPrompt,
     appendSystemPrompt: resourceOptions.appendSystemPrompt,
   });

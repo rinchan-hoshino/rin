@@ -96,6 +96,7 @@ import {
   type RinFrontendIdentity,
 } from "../rin-frontend-sdk/frontend-identity.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
+import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
   enqueueChatOutboxPayload,
   type ChatOutboxPayload,
@@ -248,22 +249,23 @@ function parseInboundCommand(
   return { name, argsText };
 }
 
-export type ChatBridgeTurnPayload = RinToolStartupOptions & {
-  chatKey?: string;
-  controllerKey?: string;
-  affectChatBinding?: boolean;
-  disposeAfterTurn?: boolean;
-  shutdownAfterTurn?: boolean;
-  deliverFinal?: boolean;
-  text: string;
-  sessionFile?: string;
-  sessionName?: string;
-  managedSessionLeaf?: string;
-  model?: string;
-  thinkingLevel?: string;
-  promptMeta?: PromptContextMeta;
-  frontend?: RinFrontendIdentity;
-};
+export type ChatBridgeTurnPayload = RinToolStartupOptions &
+  Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
+    chatKey?: string;
+    controllerKey?: string;
+    affectChatBinding?: boolean;
+    disposeAfterTurn?: boolean;
+    shutdownAfterTurn?: boolean;
+    deliverFinal?: boolean;
+    text: string;
+    sessionFile?: string;
+    sessionName?: string;
+    managedSessionLeaf?: string;
+    model?: string;
+    thinkingLevel?: string;
+    promptMeta?: PromptContextMeta;
+    frontend?: RinFrontendIdentity;
+  };
 
 export type ChatBridgeEvalPayload = {
   createdAt: string;
@@ -948,6 +950,7 @@ export async function startChatBridge(
         noTools: payload?.noTools,
         model: payload?.model,
         thinkingLevel: payload?.thinkingLevel,
+        piStartupOptions: payload?.piStartupOptions,
         promptMeta: payload?.promptMeta,
         deliverFinal: payload?.deliverFinal,
       });

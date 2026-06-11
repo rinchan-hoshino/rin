@@ -333,7 +333,7 @@ test("frontend SDK turn driver applies startup session names before prompt submi
   assert.equal((driver as any).frontendState.sessionName, "daily audit");
 });
 
-test("frontend SDK turn driver applies Pi tool startup options before prompt submission", async () => {
+test("frontend SDK turn driver applies Pi startup options before prompt submission", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -346,6 +346,7 @@ test("frontend SDK turn driver applies Pi tool startup options before prompt sub
     tools: ["read", "grep"],
     excludeTools: ["grep"],
     noTools: "builtin",
+    piStartupOptions: { projectTrustOverride: true },
   });
 
   assert.equal(result.finalText, "frontend final");
@@ -356,6 +357,7 @@ test("frontend SDK turn driver applies Pi tool startup options before prompt sub
     tools: ["read", "grep"],
     excludeTools: ["grep"],
     noTools: "builtin",
+    piStartupOptions: { projectTrustOverride: true },
   });
   const setToolsIndex = client.calls.findIndex(
     (call: any) =>

@@ -270,7 +270,8 @@ test("run parser supports Pi-style print, model, chatKey, json, timeout, and nam
     "",
   );
 
-  assert.deepEqual(parsed, {
+  const { piStartupOptions, ...parsedWithoutPiStartup } = parsed;
+  assert.deepEqual(parsedWithoutPiStartup, {
     messages: [],
     prompt: "hello",
     sessionFile: undefined,
@@ -287,6 +288,9 @@ test("run parser supports Pi-style print, model, chatKey, json, timeout, and nam
     timeoutMs: 12500,
     help: false,
   });
+  assert.equal(piStartupOptions?.model, "@openai/gpt-5.5");
+  assert.equal(piStartupOptions?.thinking, "low");
+  assert.deepEqual(piStartupOptions?.excludeTools, ["grep"]);
 
   await assert.rejects(
     () => run.parseRunArgs(["-p", "hello", "--bind-chat-session"], ""),
@@ -308,6 +312,7 @@ test("run parser supports managed session leaves for delegated non-interactive s
   assert.equal(parsed.sessionFile, undefined);
   assert.equal(parsed.managedSessionLeaf, "subagent");
   assert.equal(parsed.sessionName, "Scout auth");
+  assert.equal(parsed.piStartupOptions?.name, "Scout auth");
 
   await assert.rejects(
     () =>

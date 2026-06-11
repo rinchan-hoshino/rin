@@ -304,8 +304,8 @@ export function createRinDefaultResourceLoader(PiAgentRuntime: any) {
       });
     }
 
-    async reload() {
-      await super.reload();
+    async reload(options?: any) {
+      await super.reload(options);
       const cliSources = await this.rinPackageManager.resolveExtensionSources(
         this.rinExtensionPaths,
         {

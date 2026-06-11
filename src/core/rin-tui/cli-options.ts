@@ -1,24 +1,28 @@
 import path from "node:path";
 
+import { parseArgs as parsePiArgs } from "@earendil-works/pi-coding-agent";
+
 import {
   parseRinToolNameList,
   type RinToolStartupOptions,
 } from "../rin-lib/tool-options.js";
+import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 
-export type TuiResourceOptions = RinToolStartupOptions & {
-  additionalExtensionPaths: string[];
-  noExtensions?: boolean;
-  extensionFlagValues?: Map<string, boolean | string>;
-  additionalSkillPaths: string[];
-  noSkills?: boolean;
-  additionalPromptTemplatePaths: string[];
-  noPromptTemplates?: boolean;
-  additionalThemePaths: string[];
-  noThemes?: boolean;
-  noContextFiles?: boolean;
-  systemPrompt?: string;
-  appendSystemPrompt?: string[];
-};
+export type TuiResourceOptions = RinToolStartupOptions &
+  Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
+    additionalExtensionPaths: string[];
+    noExtensions?: boolean;
+    extensionFlagValues?: Map<string, boolean | string>;
+    additionalSkillPaths: string[];
+    noSkills?: boolean;
+    additionalPromptTemplatePaths: string[];
+    noPromptTemplates?: boolean;
+    additionalThemePaths: string[];
+    noThemes?: boolean;
+    noContextFiles?: boolean;
+    systemPrompt?: string;
+    appendSystemPrompt?: string[];
+  };
 
 export type TuiParsedCliOptions = {
   initialMessage?: string;
@@ -92,6 +96,40 @@ function readValue(args: string[], index: number) {
   return next;
 }
 
+function normalizePiArgvCompatibility(args: string[]) {
+  const splitEquals = new Set([
+    "--mode",
+    "--provider",
+    "--model",
+    "--thinking",
+    "--session",
+    "--name",
+    "--tools",
+    "--exclude-tools",
+  ]);
+  return args.flatMap((arg) => {
+    const text = String(arg || "").trim();
+    const eqIndex = text.indexOf("=");
+    if (eqIndex <= 0) return [arg];
+    const name = text.slice(0, eqIndex);
+    if (!splitEquals.has(name)) return [arg];
+    return [name, text.slice(eqIndex + 1)];
+  });
+}
+
+function serializePiStartupArgs(args: string[]) {
+  const {
+    diagnostics: _diagnostics,
+    unknownFlags,
+    ...rest
+  } = parsePiArgs(normalizePiArgvCompatibility(args));
+  return {
+    ...rest,
+    unknownFlags:
+      unknownFlags instanceof Map ? Object.fromEntries(unknownFlags) : {},
+  };
+}
+
 function pushResolvedPath(target: string[], cwd: string, value: string) {
   const resolved = resolvePathValue(cwd, value);
   if (resolved) target.push(resolved);
@@ -104,6 +142,7 @@ export function parseTuiCliOptions(
   const messages: string[] = [];
   const extensionFlagValues = new Map<string, boolean | string>();
   const resources: TuiResourceOptions = {
+    piStartupOptions: serializePiStartupArgs(argv),
     additionalExtensionPaths: [],
     additionalSkillPaths: [],
     additionalPromptTemplatePaths: [],
