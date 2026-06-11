@@ -14,7 +14,10 @@ import {
 } from "../session/factory.js";
 import { getManagedSessionDir } from "../session/managed-paths.js";
 import { requireSessionFile } from "../session/ref.js";
-import { resolveRuntimeProfile } from "../rin-lib/runtime.js";
+import {
+  getRuntimeSessionDir,
+  resolveRuntimeProfile,
+} from "../rin-lib/runtime.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
@@ -433,6 +436,65 @@ function canReuseCurrentSessionForNewSessionCommand(
   return typeof messageCount === "number" ? messageCount === 0 : false;
 }
 
+function canCreateReplacementSession(runtime: any) {
+  return (
+    typeof runtime.emitBeforeSwitch === "function" &&
+    typeof runtime.teardownCurrent === "function" &&
+    typeof runtime.apply === "function" &&
+    typeof runtime.createRuntime === "function"
+  );
+}
+
+async function createPersistedNewSession(
+  runtime: any,
+  SessionManager: any,
+  options: { parentSession?: unknown } = {},
+) {
+  if (!canCreateReplacementSession(runtime)) {
+    return await runtime.newSession(
+      options.parentSession
+        ? { parentSession: options.parentSession }
+        : undefined,
+    );
+  }
+
+  const beforeResult = await runtime.emitBeforeSwitch("new");
+  if (beforeResult?.cancelled) return beforeResult;
+
+  const currentSession = runtime.session;
+  const cwd =
+    safeString(
+      runtime.cwd || currentSession?.sessionManager?.getCwd?.(),
+    ).trim() || process.cwd();
+  const profile = resolveRuntimeProfile({
+    cwd,
+    agentDir: safeString(runtime.services?.agentDir).trim() || undefined,
+  });
+  const sessionManager = SessionManager.create(
+    cwd,
+    getRuntimeSessionDir(cwd, profile.agentDir),
+  );
+  if (options.parentSession) {
+    sessionManager.newSession({ parentSession: options.parentSession });
+  }
+  const previousSessionFile = currentSession?.sessionFile;
+  await runtime.teardownCurrent("new", sessionManager.getSessionFile());
+  runtime.apply(
+    await runtime.createRuntime({
+      cwd,
+      agentDir: profile.agentDir,
+      sessionManager,
+      sessionStartEvent: {
+        type: "session_start",
+        reason: "new",
+        previousSessionFile,
+      },
+    }),
+  );
+  await runtime.finishSessionReplacement?.();
+  return { cancelled: false };
+}
+
 async function createManagedNewSession(
   runtime: any,
   SessionManager: any,
@@ -447,12 +509,7 @@ async function createManagedNewSession(
     );
   }
 
-  if (
-    typeof runtime.emitBeforeSwitch !== "function" ||
-    typeof runtime.teardownCurrent !== "function" ||
-    typeof runtime.apply !== "function" ||
-    typeof runtime.createRuntime !== "function"
-  ) {
+  if (!canCreateReplacementSession(runtime)) {
     throw new Error("managed_new_session_unsupported");
   }
 
@@ -1329,11 +1386,9 @@ export async function runCustomRpcMode(
                   managedSessionLeaf,
                   parentSession: command.parentSession,
                 })
-              : await runtime.newSession(
-                  command.parentSession
-                    ? { parentSession: command.parentSession }
-                    : undefined,
-                );
+              : await createPersistedNewSession(runtime, SessionManager, {
+                  parentSession: command.parentSession,
+                });
             await bindCurrentSession();
             const rebound = getSession();
             return {
