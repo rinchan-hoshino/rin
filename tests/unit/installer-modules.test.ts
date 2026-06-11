@@ -771,7 +771,7 @@ test("persistInstallerOutputs stores configured language in settings", async () 
         modelId: "gpt",
         thinkingLevel: "medium",
         language: "zh_CN",
-        builtInExtensions: ["rin:web-search"],
+        builtInExtensions: ["rin:browse"],
         chatConfig: {},
         authData: {},
         elevated: false,
@@ -809,7 +809,7 @@ test("persistInstallerOutputs stores configured language in settings", async () 
     assert.equal(settingsWrite.value.defaultModel, "gpt");
     assert.equal(settingsWrite.value.defaultThinkingLevel, "medium");
     assert.equal(settingsWrite.value.language, "zh_CN");
-    assert.deepEqual(settingsWrite.value.extensions, ["rin:web-search"]);
+    assert.deepEqual(settingsWrite.value.extensions, ["rin:browse"]);
 
     const manifestWrites = writes.filter(
       (entry) =>

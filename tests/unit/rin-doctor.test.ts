@@ -7,7 +7,7 @@ import {
   existingManagedSystemdUnitsForDoctor,
   renderChatBridgeDoctorLines,
   renderDaemonWorkerDoctorLines,
-  renderWebSearchDoctorLines,
+  renderBrowseDoctorLines,
 } from "../../src/core/rin/doctor.js";
 
 test("rin doctor skips missing managed systemd unit candidates", () => {
@@ -83,11 +83,11 @@ test("rin doctor skips missing managed systemd unit candidates", () => {
 });
 
 test("rin doctor renderers report default daemon capability status", () => {
-  assert.deepEqual(renderWebSearchDoctorLines(undefined), [
-    "webSearchRuntimeReady=no",
-    "webSearchMode=unknown",
-    "webSearchProviderCount=0",
-    "webSearchInstanceCount=0",
+  assert.deepEqual(renderBrowseDoctorLines(undefined), [
+    "browseRuntimeReady=no",
+    "browseMode=unknown",
+    "browseProviderCount=0",
+    "browseInstanceCount=0",
   ]);
 
   assert.deepEqual(renderChatBridgeDoctorLines(undefined), [
@@ -103,7 +103,7 @@ test("rin doctor renderers report default daemon capability status", () => {
 
 test("rin doctor renderers format daemon status details consistently", () => {
   assert.deepEqual(
-    renderWebSearchDoctorLines({
+    renderBrowseDoctorLines({
       runtime: {
         ready: true,
         mode: "searxng-sidecar",
@@ -121,14 +121,14 @@ test("rin doctor renderers format daemon status details consistently", () => {
       ],
     }),
     [
-      "webSearchRuntimeReady=yes",
-      "webSearchMode=searxng-sidecar",
-      "webSearchProviderCount=3",
-      "webSearchInstanceCount=1",
-      "webSearchProvider=google",
-      "webSearchProvider=bing",
-      "webSearchProvider=duckduckgo",
-      "webSearchInstance=primary pid=123 alive=yes port=8080 baseUrl=http://127.0.0.1:8080",
+      "browseRuntimeReady=yes",
+      "browseMode=searxng-sidecar",
+      "browseProviderCount=3",
+      "browseInstanceCount=1",
+      "browseProvider=google",
+      "browseProvider=bing",
+      "browseProvider=duckduckgo",
+      "browseInstance=primary pid=123 alive=yes port=8080 baseUrl=http://127.0.0.1:8080",
     ],
   );
 

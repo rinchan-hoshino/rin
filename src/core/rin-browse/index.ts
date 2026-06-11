@@ -45,13 +45,13 @@ function extractInvalidSearchParameter(response: any) {
 function formatSearchFailureForUser(response: any): string {
   const invalidParameter = extractInvalidSearchParameter(response);
   if (invalidParameter) {
-    return `Web search failed: invalid search parameter ${invalidParameter.parameter}=${invalidParameter.value}. Change or omit that parameter and retry.`;
+    return `Browse failed: invalid search parameter ${invalidParameter.parameter}=${invalidParameter.value}. Change or omit that parameter and retry.`;
   }
-  return formatRuntimeErrorForUser(response?.error || "web_search_failed");
+  return formatRuntimeErrorForUser(response?.error || "browse_failed");
 }
 
 function formatSearchFailureForAgent(response: any): string {
-  const lines = ["Web search failed"];
+  const lines = ["Browse failed"];
   const userText = formatSearchFailureForUser(response);
   if (userText) lines.push(userText);
   const rawError = String(response?.error || "").trim();
@@ -76,7 +76,7 @@ function formatResults(response: any): string {
     return formatSearchFailureForUser(response);
   }
   const rows = Array.isArray(response.results) ? response.results : [];
-  if (!rows.length) return "No web results found.";
+  if (!rows.length) return "No browse results found.";
   return rows
     .slice(0, 3)
     .map((item: any) => {
@@ -91,9 +91,9 @@ function formatResults(response: any): string {
 function formatAgentResults(response: any): string {
   if (!response?.ok) return formatSearchFailureForAgent(response);
   const rows = Array.isArray(response.results) ? response.results : [];
-  if (!rows.length) return "web_search 0";
+  if (!rows.length) return "browse 0";
   return [
-    `web_search ${rows.length}`,
+    `browse ${rows.length}`,
     ...rows.map((item: any, index: number) => {
       const title = String(item?.title || "").trim() || "(untitled)";
       const url = String(item?.url || "").trim();
@@ -110,7 +110,7 @@ function formatAgentResults(response: any): string {
   ].join("\n\n");
 }
 
-function formatWebSearchResult(
+function formatBrowseResult(
   result: {
     content: Array<{
       type: string;
@@ -147,17 +147,17 @@ async function loadSearchWeb() {
   return mod.searchWeb as (params: any, options?: any) => Promise<any>;
 }
 
-function formatWebSearchCall(args: any, theme: any) {
+function formatBrowseCall(args: any, theme: any) {
   const query = String(args?.q || "").trim();
   const url = parseFetchUrl(query);
-  return formatToolCallLine("web_search", url || query, theme);
+  return formatToolCallLine("browse", url || query, theme);
 }
 
 function formatFetchAgentResult(
   response: Awaited<ReturnType<typeof fetchReadableUrl>>,
 ) {
   const lines = [
-    response.ok ? "Web fetch ok" : "Web fetch failed",
+    response.ok ? "Browse fetch ok" : "Browse fetch failed",
     `url=${response.finalUrl || response.url}`,
     response.status
       ? `status=${response.status} ${response.statusText}`.trim()
@@ -192,25 +192,25 @@ function formatFetchUserResult(
   return lines.join("\n");
 }
 
-export default function webSearchModule(): RinCapabilityDefinition {
+export default function browseModule(): RinCapabilityDefinition {
   return {
-    name: "web-search",
+    name: "browse",
     tools: [
       {
-        name: "web_search",
-        label: "Web Search",
+        name: "browse",
+        label: "Browse",
         description:
-          "Search the web, or fetch readable content from an HTTP(S) URL.",
+          "Browse the web, or fetch readable content from an HTTP(S) URL.",
         promptSnippet:
-          "Search the web or fetch readable content from a specific HTTP(S) page.",
+          "Browse the web or fetch readable content from a specific HTTP(S) page.",
         promptGuidelines: [
-          "Use web_search when current, external, source-dependent, or version-sensitive web information matters.",
-          "Use web_search URL mode when a specific HTTP(S) page is the evidence source.",
+          "Use browse when current, external, source-dependent, or version-sensitive web information matters.",
+          "Use browse URL mode when a specific HTTP(S) page is the evidence source.",
         ],
         parameters: Type.Object({
           q: Type.String({
             description:
-              "Web search query or HTTP(S) URL. For search, use distinctive keywords; use quotes for exact phrases, site:example.com for domain scope, -term to exclude, and OR for alternatives. Split unrelated topics into separate calls.",
+              "Browse query or HTTP(S) URL. For search, use distinctive keywords; use quotes for exact phrases, site:example.com for domain scope, -term to exclude, and OR for alternatives. Split unrelated topics into separate calls.",
           }),
           format: Type.Optional(
             Type.Union([Type.Literal("markdown"), Type.Literal("text")], {
@@ -288,7 +288,7 @@ export default function webSearchModule(): RinCapabilityDefinition {
           }).catch((error: any) => ({
             ok: false,
             results: [],
-            error: String(error?.message || error || "web_search_failed"),
+            error: String(error?.message || error || "browse_failed"),
           }));
 
           const agentText = formatAgentResults(response);
@@ -313,14 +313,14 @@ export default function webSearchModule(): RinCapabilityDefinition {
           };
 
           if (response?.ok !== true) {
-            details.error = String(response?.error || "web_search_failed");
+            details.error = String(response?.error || "browse_failed");
             if (Array.isArray(response?.attempts)) {
               details.attempts = response.attempts;
             }
           }
 
           if (!rows.length && response?.ok) {
-            details.emptyMessage = "No web results found.";
+            details.emptyMessage = "No browse results found.";
           }
 
           if (truncated.truncation) {
@@ -334,7 +334,7 @@ export default function webSearchModule(): RinCapabilityDefinition {
           };
         },
         renderCall(args, theme) {
-          return new Text(formatWebSearchCall(args, theme), 0, 0);
+          return new Text(formatBrowseCall(args, theme), 0, 0);
         },
         renderResult(result, options, theme, context) {
           const text =
@@ -354,12 +354,7 @@ export default function webSearchModule(): RinCapabilityDefinition {
             },
           );
           text.setText(
-            formatWebSearchResult(
-              userResult,
-              options,
-              theme,
-              context.showImages,
-            ),
+            formatBrowseResult(userResult, options, theme, context.showImages),
           );
           return text;
         },

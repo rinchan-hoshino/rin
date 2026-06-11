@@ -4,7 +4,7 @@ Rin's builtin session-history memory module.
 
 Public tool:
 
-- `search_memory` — query past sessions, or leave `query` empty to browse recent sessions directly
+- `recall` — query past sessions, or leave `query` empty to browse recent sessions directly
 
 Extension API:
 

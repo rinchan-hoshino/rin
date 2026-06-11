@@ -717,7 +717,7 @@ export class RinBackgroundExtensionManager {
     };
   }
 
-  async searchMemoryProviders(params: Record<string, any> = {}) {
+  async recallProviders(params: Record<string, any> = {}) {
     const query = safeString(params.query || "").trim();
     const limit = normalizeExternalMemoryLimit(params.limit, 8);
     const mode = query ? "search" : "recent";

@@ -27,8 +27,8 @@ test("data layout helpers group runtime state by owner", () => {
     path.join(root, "data", "scheduler", "turns"),
   );
   assert.equal(
-    sidecarDataPath(root, "web-search"),
-    path.join(root, "data", "sidecars", "web-search"),
+    sidecarDataPath(root, "browse"),
+    path.join(root, "data", "sidecars", "browse"),
   );
   assert.equal(
     extensionDataPath(root, "runtime"),

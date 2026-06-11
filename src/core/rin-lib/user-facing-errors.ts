@@ -237,11 +237,11 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Background extension is missing a Rin extension entry point. Export a Rin extension factory or background service.",
 
   python_not_found: () =>
-    "Web search needs Python to start the local SearXNG sidecar. Install Python 3.10 or newer.",
+    "Browse needs Python to start the local SearXNG sidecar. Install Python 3.10 or newer.",
   python_version_unsupported: () =>
-    "Web search could not prepare a Python 3.10 or newer runtime for the local SearXNG sidecar. Check the network.",
+    "Browse could not prepare a Python 3.10 or newer runtime for the local SearXNG sidecar. Check the network.",
   uv_install_failed: () =>
-    "Web search could not install Rin's private Python helper. Check the network.",
+    "Browse could not install Rin's private Python helper. Check the network.",
   qq_app_id_required: () =>
     "QQ adapter needs an app id before it can start. Add the app id.",
   qq_reaction_requires_channel_chat: () =>
@@ -399,7 +399,7 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   run_session_conflict: () =>
     "Choose either --session or --managed-session, not both.",
 
-  search_memory_aborted: () => "Memory search was aborted.",
+  recall_aborted: () => "Recall was aborted.",
   searxng_start_failed: () =>
     "The local SearXNG search sidecar exited before it became ready.",
   searxng_start_timeout: () =>
@@ -441,16 +441,15 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       ". Remove it or check the command help.",
     ),
   web_fetch_invalid_url: () => "Enter a valid HTTP or HTTPS URL.",
-  web_search_failed: () =>
-    "Web search failed. Check the network or search backend.",
-  web_search_query_required: () => "Enter a search query or URL.",
-  web_search_runtime_fetch_tools_not_found: () =>
-    "Web search needs git, or curl/wget plus tar, to install the local SearXNG sidecar. Install the missing tool.",
-  web_search_runtime_source_invalid: () =>
+  browse_failed: () => "Browse failed. Check the network or search backend.",
+  browse_query_required: () => "Enter a search query or URL.",
+  browse_runtime_fetch_tools_not_found: () =>
+    "Browse needs git, or curl/wget plus tar, to install the local SearXNG sidecar. Install the missing tool.",
+  browse_runtime_source_invalid: () =>
     "The local SearXNG search runtime is incomplete.",
-  web_search_runtime_not_installed: () =>
+  browse_runtime_not_installed: () =>
     "The local SearXNG search runtime is not installed.",
-  web_search_sidecar_unavailable: () =>
+  browse_sidecar_unavailable: () =>
     "The local SearXNG search sidecar is not available yet.",
 
   fetch_failed: () => "The network request failed.",

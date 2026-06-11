@@ -122,7 +122,7 @@ test("memory transcripts archive entries under memory/transcripts", async () => 
   });
 });
 
-test("memory search returns session-level archived transcript matches and creates persistent index", async () => {
+test("recall returns session-level archived transcript matches and creates persistent index", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
       {
@@ -154,7 +154,7 @@ test("memory search returns session-level archived transcript matches and create
   });
 });
 
-test("memory search does not match session file paths", async () => {
+test("recall does not match session file paths", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
       {
@@ -190,7 +190,7 @@ test("memory search does not match session file paths", async () => {
   });
 });
 
-test("memory search index stays in sync when an archived session file grows", async () => {
+test("recall index stays in sync when an archived session file grows", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
       {
@@ -233,7 +233,7 @@ test("memory search index stays in sync when an archived session file grows", as
   });
 });
 
-test("memory search indexes numeric millisecond timestamps for recent ordering", async () => {
+test("recall indexes numeric millisecond timestamps for recent ordering", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
       {
@@ -448,7 +448,7 @@ test("presentSessionResult shares ranked preview and message ordering while keep
   assert.equal(result.timestamp, "2026-04-05T12:22:25.000Z");
 });
 
-test("memory search merges multiple message hits from the same session", async () => {
+test("recall merges multiple message hits from the same session", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
       {
@@ -503,7 +503,7 @@ test("memory search merges multiple message hits from the same session", async (
   });
 });
 
-test("memory search avoids full entries-table exact scans before FTS lookup", async () => {
+test("recall avoids full entries-table exact scans before FTS lookup", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
       {
@@ -547,7 +547,7 @@ test("memory search avoids full entries-table exact scans before FTS lookup", as
   });
 });
 
-test("memory search handles structured identifiers beyond exact raw substrings", async () => {
+test("recall handles structured identifiers beyond exact raw substrings", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
       {
@@ -577,7 +577,7 @@ test("memory search handles structured identifiers beyond exact raw substrings",
   });
 });
 
-test("memory search requires explicit repair for transcript files written outside incremental indexing", async () => {
+test("recall requires explicit repair for transcript files written outside incremental indexing", async () => {
   await withTempRoot(async (root) => {
     const entry = {
       id: "manual-1",
@@ -612,7 +612,7 @@ test("memory search requires explicit repair for transcript files written outsid
   });
 });
 
-test("memory search repair refreshes rewritten transcript archives without stale rows", async () => {
+test("recall repair refreshes rewritten transcript archives without stale rows", async () => {
   await withTempRoot(async (root) => {
     const firstEntry = {
       id: "manual-rewrite-1",
@@ -753,7 +753,7 @@ test("memory transcripts reject legacy synthetic session summaries", async () =>
   });
 });
 
-test("search_memory uses the first user message as the session display fallback", async () => {
+test("recall uses the first user message as the session display fallback", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = await writeSessionFile(root, "fallback-session.jsonl", [
       {
@@ -809,7 +809,7 @@ test("search_memory uses the first user message as the session display fallback"
   });
 });
 
-test("search_memory derives the display name without a full readFileSync slurp", async () => {
+test("recall derives the display name without a full readFileSync slurp", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = await writeSessionFile(
       root,
@@ -882,10 +882,10 @@ test("search_memory derives the display name without a full readFileSync slurp",
   });
 });
 
-test("executeSearchMemory emits an initial status update before finishing", async () => {
+test("executeRecall emits an initial status update before finishing", async () => {
   await withTempRoot(async (root) => {
     const updates = [];
-    const result = await memoryExtensionModule.executeSearchMemory(
+    const result = await memoryExtensionModule.executeRecall(
       { query: "no hits yet", limit: 8 },
       { agentDir: root, model: { provider: "test", id: "demo" } },
       "medium",
@@ -896,11 +896,11 @@ test("executeSearchMemory emits an initial status update before finishing", asyn
     assert.deepEqual(updates, [
       'Searching archived sessions for "no hits yet"...',
     ]);
-    assert.match(result.details.userText, /No memory results found\./);
+    assert.match(result.details.userText, /No recall results found\./);
   });
 });
 
-test("search_memory includes external provider results without local transcript paths", async () => {
+test("recall includes external provider results without local transcript paths", async () => {
   await withTempRoot(async (root) => {
     const requests = [];
     await withJsonlDaemonSocket(
@@ -932,7 +932,7 @@ test("search_memory includes external provider results without local transcript 
         return {};
       },
       async () => {
-        const result = await memoryExtensionModule.executeSearchMemory(
+        const result = await memoryExtensionModule.executeRecall(
           { query: "remote only marker", limit: 8 },
           { agentDir: root, model: { provider: "test", id: "demo" } },
           "medium",
@@ -991,7 +991,7 @@ test("memory message hook publishes transcript archive writes to external memory
   });
 });
 
-test("search_memory user formatting omits duplicate header and shows raw messages", () => {
+test("recall user formatting omits duplicate header and shows raw messages", () => {
   const rendered = memoryExtensionModule.formatSearchResult({
     query: "minecraft server",
     results: [
@@ -1013,7 +1013,7 @@ test("search_memory user formatting omits duplicate header and shows raw message
     ],
   });
 
-  assert.doesNotMatch(rendered, /^search_memory minecraft server/m);
+  assert.doesNotMatch(rendered, /^recall minecraft server/m);
   assert.match(
     rendered,
     /\/home\/rin\/\.rin\/memory\/transcripts\/2026\/04\/demo\.jsonl/,
@@ -1026,7 +1026,7 @@ test("search_memory user formatting omits duplicate header and shows raw message
   assert.doesNotMatch(rendered, /raw preview should never leak/);
 });
 
-test("search_memory agent formatting uses archive path and line-numbered raw messages", () => {
+test("recall agent formatting uses archive path and line-numbered raw messages", () => {
   const rendered = memoryExtensionModule.formatAgentSearchResult({
     query: "chat outbound",
     results: [
@@ -1049,7 +1049,7 @@ test("search_memory agent formatting uses archive path and line-numbered raw mes
     ],
   });
 
-  assert.match(rendered, /^search_memory chat outbound \(1\)/m);
+  assert.match(rendered, /^recall chat outbound \(1\)/m);
   assert.match(
     rendered,
     /1\. \/home\/rin\/\.rin\/memory\/transcripts\/2026\/04\/64ccd205-ea35-4716-b2d4-9eff931eb59c\.jsonl/,
@@ -1058,19 +1058,19 @@ test("search_memory agent formatting uses archive path and line-numbered raw mes
   assert.doesNotMatch(rendered, /^1\. 2026-04-14T06:05:42\.876Z/m);
 });
 
-test("search_memory call formatting keeps query in the TUI tool title", () => {
+test("recall call formatting keeps tool name and query in the TUI tool title", () => {
   const theme = {
     fg: (_name, value) => value,
     bold: (value) => value,
   };
-  const rendered = memoryExtensionModule.formatSearchMemoryCall(
-    { query: "search_memory hang" },
+  const rendered = memoryExtensionModule.formatRecallCall(
+    { query: "recall hang" },
     theme,
   );
-  assert.equal(rendered, "🧠 search_memory hang");
+  assert.equal(rendered, "recall recall hang");
 });
 
-test("search_memory rendered result appends timing info", () => {
+test("recall rendered result appends timing info", () => {
   const theme = {
     fg: (_name, value) => value,
     bold: (value) => value,
@@ -1078,7 +1078,7 @@ test("search_memory rendered result appends timing info", () => {
   const rendered = memoryExtensionModule.formatRenderedMemoryResult(
     {
       details: {
-        userText: 'Searching archived sessions for "search_memory hang"...',
+        userText: 'Searching archived sessions for "recall hang"...',
       },
     },
     { expanded: false, isPartial: false },
@@ -1088,9 +1088,6 @@ test("search_memory rendered result appends timing info", () => {
     3500,
   );
 
-  assert.match(
-    rendered,
-    /Searching archived sessions for "search_memory hang"/,
-  );
+  assert.match(rendered, /Searching archived sessions for "recall hang"/);
   assert.match(rendered, /Took 2\.5s/);
 });

@@ -290,7 +290,7 @@ function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
     builtIn: true,
     createdAt,
     updatedAt: createdAt,
-    name: "Repair memory search index",
+    name: "Repair recall index",
     enabled: true,
     trigger: {
       expression: "17 4 * * *",

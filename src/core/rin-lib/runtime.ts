@@ -1486,7 +1486,7 @@ function createSerialExecutionQueue() {
 
 export function applyRinBackendToolExecutionLocks(
   session: any,
-  toolNames = ["web_search"],
+  toolNames = ["browse"],
 ) {
   if (!session || typeof session !== "object") return;
   const targetNames = new Set(

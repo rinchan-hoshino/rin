@@ -1,25 +1,25 @@
 const SEARCH_TIMEOUT_MS = 8_000;
 const USER_AGENT =
-  "Mozilla/5.0 (compatible; RinWebSearch/1.0; +https://github.com/rinchan-hoshino/rin)";
+  "Mozilla/5.0 (compatible; RinBrowse/1.0; +https://github.com/rinchan-hoshino/rin)";
 const SUPPORTED_FRESHNESS = ["day", "week", "month", "year"] as const;
 
-export const SEARXNG_WEB_SEARCH_PROVIDERS = [
+export const SEARXNG_BROWSE_PROVIDERS = [
   "google",
   "bing",
   "duckduckgo",
 ] as const;
 
-export type WebSearchFreshness = (typeof SUPPORTED_FRESHNESS)[number];
+export type BrowseFreshness = (typeof SUPPORTED_FRESHNESS)[number];
 
-export type WebSearchRequest = {
+export type BrowseRequest = {
   q: string;
   limit?: number;
   domains?: string[];
-  freshness?: WebSearchFreshness;
+  freshness?: BrowseFreshness;
   language?: string;
 };
 
-export type WebSearchResult = {
+export type BrowseResult = {
   position: number;
   title: string;
   url: string;
@@ -29,19 +29,19 @@ export type WebSearchResult = {
   publishedDate: string;
 };
 
-export type WebSearchAttempt = {
+export type BrowseAttempt = {
   engine: string;
   ok: boolean;
   results?: number;
   error?: string;
 };
 
-export type WebSearchResponse = {
+export type BrowseResponse = {
   ok: boolean;
   query: string;
-  results: WebSearchResult[];
+  results: BrowseResult[];
   engine?: string;
-  attempts?: WebSearchAttempt[];
+  attempts?: BrowseAttempt[];
   error?: string;
 };
 
@@ -50,12 +50,12 @@ type SearchSiteConstraint = {
   pathPrefix: string;
 };
 
-type NormalizedWebSearchRequest = {
+type NormalizedBrowseRequest = {
   q: string;
   limit: number;
   domains: string[];
   siteConstraints: SearchSiteConstraint[];
-  freshness?: WebSearchFreshness;
+  freshness?: BrowseFreshness;
   language: string;
 };
 
@@ -66,7 +66,7 @@ type FetchTextOptions = {
   timeoutMs?: number;
 };
 
-type SearxngEngine = (typeof SEARXNG_WEB_SEARCH_PROVIDERS)[number];
+type SearxngEngine = (typeof SEARXNG_BROWSE_PROVIDERS)[number];
 
 type SearxngResultRow = {
   title?: unknown;
@@ -119,7 +119,7 @@ function formatFetchFailure(url: string, error: unknown): string {
   return `fetch_failed url=${formatFetchUrl(url)} error=${formatErrorSummary(error)}${causeText}`;
 }
 
-function isSupportedFreshness(value: string): value is WebSearchFreshness {
+function isSupportedFreshness(value: string): value is BrowseFreshness {
   return (SUPPORTED_FRESHNESS as readonly string[]).includes(value);
 }
 
@@ -203,8 +203,8 @@ function extractSiteConstraints(
 }
 
 export function normalizeSearchRequest(
-  raw: WebSearchRequest | null | undefined,
-): NormalizedWebSearchRequest {
+  raw: BrowseRequest | null | undefined,
+): NormalizedBrowseRequest {
   const q = safeText(raw?.q);
   const limit = Math.max(1, Math.min(8, Number(raw?.limit || 5) || 5));
   const language = normalizeLanguageHint(raw?.language);
@@ -304,7 +304,7 @@ function buildResultRow(
   snippet: string,
   engine: string,
   position: number,
-): WebSearchResult | null {
+): BrowseResult | null {
   const normalizedUrl = safeText(url);
   if (!normalizedUrl) return null;
   return {
@@ -338,7 +338,7 @@ function pathMatches(pathname: string, pathPrefix: string): boolean {
 }
 
 function siteConstraintMatches(
-  row: WebSearchResult,
+  row: BrowseResult,
   constraint: SearchSiteConstraint,
 ): boolean {
   if (!domainMatches(row.domain, constraint.domain)) return false;
@@ -351,9 +351,9 @@ function siteConstraintMatches(
 }
 
 function filterSearchResults(
-  rows: WebSearchResult[],
-  request: NormalizedWebSearchRequest,
-): WebSearchResult[] {
+  rows: BrowseResult[],
+  request: NormalizedBrowseRequest,
+): BrowseResult[] {
   if (!request.siteConstraints.length) return rows;
   return rows.filter((row) =>
     request.siteConstraints.some((constraint) =>
@@ -362,12 +362,9 @@ function filterSearchResults(
   );
 }
 
-function dedupeResults(
-  rows: WebSearchResult[],
-  limit: number,
-): WebSearchResult[] {
+function dedupeResults(rows: BrowseResult[], limit: number): BrowseResult[] {
   const seen = new Set<string>();
-  const results: WebSearchResult[] = [];
+  const results: BrowseResult[] = [];
   for (const row of rows) {
     const url = safeText(row?.url);
     if (!url || seen.has(url)) continue;
@@ -380,7 +377,7 @@ function dedupeResults(
 
 function buildSearxngUrl(
   baseUrl: string,
-  request: NormalizedWebSearchRequest,
+  request: NormalizedBrowseRequest,
   engine: SearxngEngine,
 ): string {
   const url = new URL("/search", `${baseUrl}/`);
@@ -401,7 +398,7 @@ function parseSearxngResults(
   data: SearxngResponse | null | undefined,
   engine: SearxngEngine,
   limit: number,
-): WebSearchResult[] {
+): BrowseResult[] {
   const rows = Array.isArray(data?.results) ? data.results : [];
   const results = rows
     .map((item, index) => {
@@ -418,15 +415,15 @@ function parseSearxngResults(
         publishedDate: safeText(item?.publishedDate || item?.published_date),
       };
     })
-    .filter((item): item is WebSearchResult => Boolean(item));
+    .filter((item): item is BrowseResult => Boolean(item));
   return dedupeResults(results, limit);
 }
 
 async function searchSearxngEngine(
   baseUrl: string,
-  request: NormalizedWebSearchRequest,
+  request: NormalizedBrowseRequest,
   engine: SearxngEngine,
-): Promise<WebSearchResult[]> {
+): Promise<BrowseResult[]> {
   const url = buildSearxngUrl(baseUrl, request, engine);
   const data = await fetchJson<SearxngResponse>(url, {
     headers: { "User-Agent": USER_AGENT },
@@ -439,17 +436,17 @@ async function searchSearxngEngine(
 
 export async function searchWeb(
   baseUrl: string,
-  input: WebSearchRequest,
-): Promise<WebSearchResponse> {
+  input: BrowseRequest,
+): Promise<BrowseResponse> {
   const request = normalizeSearchRequest(input);
-  if (!request.q) throw new Error("web_search_query_required");
-  if (!safeText(baseUrl)) throw new Error("web_search_sidecar_unavailable");
+  if (!request.q) throw new Error("browse_query_required");
+  if (!safeText(baseUrl)) throw new Error("browse_sidecar_unavailable");
 
-  const attempts: WebSearchAttempt[] = [];
+  const attempts: BrowseAttempt[] = [];
   let lastError = "";
   let hadOkAttempt = false;
 
-  for (const engine of SEARXNG_WEB_SEARCH_PROVIDERS) {
+  for (const engine of SEARXNG_BROWSE_PROVIDERS) {
     try {
       const results = await searchSearxngEngine(baseUrl, request, engine);
       attempts.push({ engine, ok: true, results: results.length });
@@ -465,7 +462,7 @@ export async function searchWeb(
       }
     } catch (error: unknown) {
       lastError = safeText(
-        error instanceof Error ? error.message : error || "web_search_failed",
+        error instanceof Error ? error.message : error || "browse_failed",
       );
       attempts.push({ engine, ok: false, error: lastError });
     }
@@ -484,9 +481,9 @@ export async function searchWeb(
   return {
     ok: false,
     query: request.q,
-    engine: SEARXNG_WEB_SEARCH_PROVIDERS[0],
+    engine: SEARXNG_BROWSE_PROVIDERS[0],
     attempts,
     results: [],
-    error: lastError || "web_search_failed",
+    error: lastError || "browse_failed",
   };
 }

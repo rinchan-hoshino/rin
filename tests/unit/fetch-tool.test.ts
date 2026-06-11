@@ -8,15 +8,14 @@ const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "../..",
 );
-const webSearchIndex = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-web-search", "index.js"),
-  ).href
+const browseIndex = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-browse", "index.js"))
+    .href
 );
 
-function getWebSearchTool() {
-  const tools = webSearchIndex.default().tools || [];
-  const tool = tools.find((entry) => entry.name === "web_search");
+function getBrowseTool() {
+  const tools = browseIndex.default().tools || [];
+  const tool = tools.find((entry) => entry.name === "browse");
   assert.ok(tool);
   return tool;
 }
@@ -36,7 +35,7 @@ async function withServer(handler, fn) {
   }
 }
 
-test("web_search fetches URLs with Chrome-like headers and Readability markdown", async () => {
+test("browse fetches URLs with Chrome-like headers and Readability markdown", async () => {
   await withServer(
     (request, response) => {
       assert.match(request.headers["user-agent"] || "", /Chrome/);
@@ -51,7 +50,7 @@ test("web_search fetches URLs with Chrome-like headers and Readability markdown"
       );
     },
     async (baseUrl) => {
-      const tool = getWebSearchTool();
+      const tool = getBrowseTool();
       const result = await tool.execute(
         "tool-fetch",
         { q: `${baseUrl}/redirect` },
@@ -63,7 +62,7 @@ test("web_search fetches URLs with Chrome-like headers and Readability markdown"
 
       assert.equal(result.details?.mode, "fetch");
       assert.equal(result.details?.fetch?.finalUrl, `${baseUrl}/page`);
-      assert.match(agentText, /Web fetch ok/);
+      assert.match(agentText, /Browse fetch ok/);
       assert.match(agentText, /status=200 OK/);
       assert.match(userText, new RegExp(`Fetched: ${baseUrl}/page`));
       assert.match(userText, /Status: 200 OK/);

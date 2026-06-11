@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { safeString } from "./text-utils.js";
 
-export type BuiltInRinExtensionId = "rin:web-search";
+export type BuiltInRinExtensionId = "rin:browse";
 
 export type BuiltInRinExtensionDefinition = {
   id: BuiltInRinExtensionId;
@@ -17,18 +17,17 @@ export type BuiltInRinExtensionDefinition = {
 
 export const BUILT_IN_RIN_EXTENSIONS: BuiltInRinExtensionDefinition[] = [
   {
-    id: "rin:web-search",
-    label: "Web search",
+    id: "rin:browse",
+    label: "Browse",
     description:
-      "Adds the web_search tool and prepares Rin-managed SearXNG when enabled.",
-    directory: "rin-web-search",
+      "Adds the browse tool and prepares Rin-managed SearXNG when enabled.",
+    directory: "rin-browse",
     defaultEnabled: true,
     installOnEnable: true,
     async onEnable(context) {
       const agentDir = String(context.agentDir || "").trim();
       if (!agentDir) return;
-      const { prepareSearxngRuntime } =
-        await import("./rin-web-search/service.js");
+      const { prepareSearxngRuntime } = await import("./rin-browse/service.js");
       await prepareSearxngRuntime(agentDir).catch(() => undefined);
     },
   },

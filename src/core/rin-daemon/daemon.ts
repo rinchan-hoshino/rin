@@ -33,7 +33,7 @@ import {
   listBoundSessions,
   renameBoundSession,
 } from "../session/factory.js";
-import { getWebSearchStatus } from "../rin-web-search/service.js";
+import { getBrowseStatus } from "../rin-browse/service.js";
 import { CronScheduler } from "./cron.js";
 import {
   getCatalogOAuthState,
@@ -267,7 +267,7 @@ export async function startDaemon(
     }),
     memory_search_external: async (command) => ({
       data: {
-        results: await backgroundExtensionManager.searchMemoryProviders(
+        results: await backgroundExtensionManager.recallProviders(
           command.payload || {},
         ),
       },
@@ -567,7 +567,7 @@ export async function startDaemon(
             ? activity
             : {
                 ...activity,
-                webSearch: getWebSearchStatus(runtime.agentDir),
+                browse: getBrowseStatus(runtime.agentDir),
                 ...(extraStatus && typeof extraStatus === "object"
                   ? extraStatus
                   : {}),

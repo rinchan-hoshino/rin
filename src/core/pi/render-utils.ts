@@ -114,26 +114,11 @@ export const NO_OUTPUT_TEXT = "(no output)";
 
 const TOOL_CALL_PREFIXES: Record<string, string> = {
   bash: "$",
-  read: "read",
-  write: "write",
-  edit: "edit",
-  web_search: "🌐",
-  search_memory: "🧠",
-  save_prompts: "📌",
-  generate_codex_image: "image",
 };
 
 export function getToolCallDisplayPrefix(toolName: unknown) {
   const normalized = String(toolName || "").trim();
-  if (!normalized) return "tool";
-  const known = TOOL_CALL_PREFIXES[normalized];
-  if (known) return known;
-  const initials = normalized
-    .split(/[_\s-]+/)
-    .map((part) => part.trim()[0])
-    .filter(Boolean)
-    .join("");
-  return initials || normalized;
+  return TOOL_CALL_PREFIXES[normalized] || normalized || "tool";
 }
 
 export function formatToolCallLine(
@@ -281,7 +266,7 @@ export function styleToolOutputLine(line: string, theme: any) {
     return theme.fg("muted", line);
   }
   if (
-    /^(Error:|Web search failed:?|Web fetch failed:?|Fetch failed:?|The network request failed\.|Google blocked this search path|Message not found:)/.test(
+    /^(Error:|Browse failed:?|Browse fetch failed:?|Fetch failed:?|The network request failed\.|Google blocked this search path|Message not found:)/.test(
       trimmed,
     )
   ) {

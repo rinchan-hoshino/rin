@@ -44,11 +44,11 @@ type MemoryRenderState = {
   interval: NodeJS.Timeout | undefined;
 };
 
-const searchMemoryParams = Type.Object({
+const recallParams = Type.Object({
   query: Type.Optional(
     Type.String({
       description:
-        "Session-memory search query. Omit it to browse recent sessions; use distinctive keywords, OR, or quoted exact wording when useful.",
+        "Recall query. Omit it to browse recent sessions; use distinctive keywords, OR, or quoted exact wording when useful.",
     }),
   ),
   limit: Type.Optional(
@@ -56,7 +56,7 @@ const searchMemoryParams = Type.Object({
       minimum: 1,
       maximum: 8,
       description:
-        "Maximum number of session-level memory results to return. Defaults to 8.",
+        "Maximum number of session-level recall results to return. Defaults to 8.",
     }),
   ),
 });
@@ -141,13 +141,13 @@ function formatMessageLine(message: any): string {
 
 function searchResultHeader(response: any): string {
   const query = String(response?.query || "").trim();
-  if (!query) return "search_memory recent";
-  return `search_memory ${query}`;
+  if (!query) return "recall recent";
+  return `recall ${query}`;
 }
 
 export function formatSearchResult(response: any): string {
   const rows = Array.isArray(response?.results) ? response.results : [];
-  if (!rows.length) return "No memory results found.";
+  if (!rows.length) return "No recall results found.";
   return rows
     .map((item: any) => {
       return [
@@ -182,7 +182,7 @@ export function formatAgentSearchResult(response: any): string {
   ].join("\n\n");
 }
 
-function buildSearchMemorySearchStatusText(
+function buildRecallSearchStatusText(
   mode: "search" | "recent",
   query: string,
 ): string {
@@ -190,7 +190,7 @@ function buildSearchMemorySearchStatusText(
   return `Searching archived sessions for ${JSON.stringify(query)}...`;
 }
 
-function emitSearchMemoryUpdate(
+function emitRecallUpdate(
   onUpdate:
     | ((value: {
         content: Array<{ type: "text"; text: string }>;
@@ -234,7 +234,7 @@ function formatMemoryResult(
 
 function throwIfAborted(signal?: AbortSignal) {
   if (!signal?.aborted) return;
-  throw new Error("search_memory_aborted");
+  throw new Error("recall_aborted");
 }
 
 function resultTimestampMs(item: any): number {
@@ -276,7 +276,7 @@ function mergeMemoryResults(
   };
 }
 
-export async function executeSearchMemory(
+export async function executeRecall(
   params: any,
   ctx: any,
   _currentThinkingLevel: ThinkingLevel,
@@ -295,13 +295,9 @@ export async function executeSearchMemory(
     };
     const rootOverride = String(ctx?.agentDir || "").trim();
 
-    emitSearchMemoryUpdate(
-      onUpdate,
-      buildSearchMemorySearchStatusText(mode, query),
-      {
-        phase: mode,
-      },
-    );
+    emitRecallUpdate(onUpdate, buildRecallSearchStatusText(mode, query), {
+      phase: mode,
+    });
 
     throwIfAborted(signal);
     const localResults = query
@@ -338,7 +334,7 @@ export async function executeSearchMemory(
     };
 
     if (!visibleRows.length) {
-      details.emptyMessage = "No memory results found.";
+      details.emptyMessage = "No recall results found.";
     }
 
     if (truncated.truncation) {
@@ -357,7 +353,7 @@ export async function executeSearchMemory(
         ok: false,
         error: message,
         agentText: message,
-        userText: `Memory search failed: ${message}`,
+        userText: `Recall failed: ${message}`,
       },
       isError: true,
     };
@@ -424,9 +420,9 @@ function renderMemoryResult(
   return text;
 }
 
-export function formatSearchMemoryCall(args: any, theme: any) {
+export function formatRecallCall(args: any, theme: any) {
   const query = String(args?.query || "").trim();
-  return formatToolCallLine("search_memory", query || "recent", theme, {
+  return formatToolCallLine("recall", query || "recent", theme, {
     detailStyle: query ? "accent" : "muted",
   });
 }
@@ -437,18 +433,18 @@ export default function memoryModule(
   return {
     tools: [
       {
-        name: "search_memory",
-        label: "Search Memory",
+        name: "recall",
+        label: "Recall",
         description:
           "Search archived session history by query, or browse recent sessions when query is omitted.",
         promptSnippet:
           "Search archived session history for past-conversation evidence.",
         promptGuidelines: [
-          "Use search_memory when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
+          "Use recall when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
         ],
-        parameters: searchMemoryParams,
+        parameters: recallParams,
         execute: async (_toolCallId, params, signal, onUpdate, ctx) =>
-          (await executeSearchMemory(
+          (await executeRecall(
             params,
             ctx,
             options.getThinkingLevel() as ThinkingLevel,
@@ -463,7 +459,7 @@ export default function memoryModule(
           }
           const text =
             (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-          text.setText(formatSearchMemoryCall(args, theme));
+          text.setText(formatRecallCall(args, theme));
           return text;
         },
         renderResult: renderMemoryResult,

@@ -68,7 +68,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("Available tools:"));
   assert.match(baseSystemPrompt, /\nCurrent date: \d{4}-\d{2}-\d{2}$/);
   assert.equal(baseSystemPrompt.includes("Current working directory:"), false);
-  assert.ok(baseSystemPrompt.includes("- search_memory:"));
+  assert.ok(baseSystemPrompt.includes("- recall:"));
   assert.ok(
     baseSystemPrompt.includes(
       "Search archived session history for past-conversation evidence.",
@@ -76,7 +76,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Use search_memory when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters",
+      "Use recall when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters",
     ),
   );
   assert.equal(

@@ -1,9 +1,6 @@
 import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import { sleep } from "../platform/process.js";
-import {
-  getWebSearchStatus,
-  stopSearxngSidecar,
-} from "../rin-web-search/service.js";
+import { getBrowseStatus, stopSearxngSidecar } from "../rin-browse/service.js";
 import {
   createTargetExecutionContext,
   ensureDaemonAvailable,
@@ -95,8 +92,8 @@ async function waitForDaemonUnavailable(
   return !(await context.canConnectSocket());
 }
 
-async function stopManagedWebSearchSidecars(agentDir: string) {
-  const status = getWebSearchStatus(agentDir);
+async function stopManagedBrowseSidecars(agentDir: string) {
+  const status = getBrowseStatus(agentDir);
   const instances = Array.isArray(status.instances) ? status.instances : [];
   for (const instance of instances) {
     const instanceId = String(instance?.instanceId || "").trim();
@@ -115,7 +112,7 @@ export async function runStart(parsed: ParsedArgs) {
 export async function runStop(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
   const unit = tryManagedServiceAction(context, "stop");
-  await stopManagedWebSearchSidecars(context.agentDir);
+  await stopManagedBrowseSidecars(context.agentDir);
   if (!(await waitForDaemonUnavailable(context))) {
     throw new Error(
       `rin_stop_incomplete: daemon socket is still reachable for ${context.targetUser}`,

@@ -526,7 +526,7 @@ const INSTALLER_DISPLAY_COPY = {
       "- context compaction / summarization when the session grows large",
       "- non-interactive `rin -p` / `rin --mode json` turns when the assistant or a script delegates work",
       "- scheduled task / chat-bridge-triggered agent runs that create their own turns",
-      "- web-search result text added into the model context when search is used",
+      "- browse result text added into the model context when search is used",
     ],
     buildInstallSafetyBoundaryText() {
       return this.installSafetyBoundaryLines.join("\n");
@@ -935,7 +935,7 @@ const INSTALLER_DISPLAY_COPY = {
       "- 会话上下文过大时的压缩 / 总结",
       "- assistant 或脚本委派工作时触发的非交互 `rin -p` / `rin --mode json` 回合",
       "- scheduled task / 聊天接入触发的 agent 运行",
-      "- 使用 web search 时加入模型上下文的搜索结果文本",
+      "- 使用 browse 时加入模型上下文的搜索结果文本",
     ],
     buildInstallSafetyBoundaryText() {
       return this.installSafetyBoundaryLines.join("\n");

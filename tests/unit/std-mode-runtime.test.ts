@@ -45,15 +45,15 @@ function deferred() {
   return { promise, resolve };
 }
 
-test("Rin backend serializes web_search execution without tool-side metadata", async () => {
+test("Rin backend serializes browse execution without tool-side metadata", async () => {
   const firstCanFinish = deferred();
   const firstStarted = deferred();
   const events: string[] = [];
   const baseTool = {
-    name: "web_search",
-    label: "Web Search",
+    name: "browse",
+    label: "Browse",
     description:
-      "Search the web, or fetch readable content from an HTTP(S) URL.",
+      "Browse the web, or fetch readable content from an HTTP(S) URL.",
     execute: async (toolCallId: string) => {
       events.push(`start:${toolCallId}`);
       if (toolCallId === "first") {
@@ -67,9 +67,7 @@ test("Rin backend serializes web_search execution without tool-side metadata", a
   const session: any = {
     agent: { state: { tools: [baseTool] } },
     setActiveToolsByName(toolNames: string[]) {
-      this.agent.state.tools = toolNames.includes("web_search")
-        ? [baseTool]
-        : [];
+      this.agent.state.tools = toolNames.includes("browse") ? [baseTool] : [];
     },
     _refreshToolRegistry() {
       this.agent.state.tools = [baseTool];
@@ -96,7 +94,7 @@ test("Rin backend serializes web_search execution without tool-side metadata", a
     "end:second",
   ]);
 
-  session.setActiveToolsByName(["web_search"]);
+  session.setActiveToolsByName(["browse"]);
   assert.notEqual(session.agent.state.tools[0], baseTool);
   assert.equal(session.agent.state.tools[0].executionMode, undefined);
 });
@@ -170,7 +168,7 @@ test("std configured session keeps daemon-independent Rin tools usable without d
     agentDir,
     "data",
     "sidecars",
-    "web-search",
+    "browse",
     "instances",
     `process-${process.pid}`,
     "state.json",
@@ -178,7 +176,7 @@ test("std configured session keeps daemon-independent Rin tools usable without d
   await fs.mkdir(agentDir, { recursive: true });
   await fs.writeFile(
     path.join(agentDir, "settings.json"),
-    `${JSON.stringify({ extensions: ["rin:web-search"] })}\n`,
+    `${JSON.stringify({ extensions: ["rin:browse"] })}\n`,
     "utf8",
   );
   await fs.mkdir(path.dirname(sidecarStatePath), { recursive: true });
@@ -204,18 +202,18 @@ test("std configured session keeps daemon-independent Rin tools usable without d
 
   try {
     const session = runtime.session;
-    for (const name of ["search_memory", "web_search"]) {
+    for (const name of ["recall", "browse"]) {
       assert.ok(session.getToolDefinition(name), `${name} should be available`);
     }
     assert.ok(
       runtime.runtime?.session?.resourceLoader
         ?.getExtensions?.()
         ?.extensions?.some((extension: any) =>
-          extension.tools?.has?.("web_search"),
+          extension.tools?.has?.("browse"),
         ),
-      "web_search should be provided by the built-in extension loader",
+      "browse should be provided by the built-in extension loader",
     );
-    const memoryTool = session.getToolDefinition("search_memory");
+    const memoryTool = session.getToolDefinition("recall");
     assert.equal(
       memoryTool.description,
       "Search archived session history by query, or browse recent sessions when query is omitted.",
@@ -225,11 +223,11 @@ test("std configured session keeps daemon-independent Rin tools usable without d
       "Search archived session history for past-conversation evidence.",
     );
     assert.deepEqual(memoryTool.promptGuidelines, [
-      "Use search_memory when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
+      "Use recall when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
     ]);
     assert.match(
       memoryTool.parameters.properties.query.description,
-      /Session-memory search query/,
+      /Recall query/,
     );
 
     const memoryResult = await memoryTool.execute(
@@ -241,25 +239,25 @@ test("std configured session keeps daemon-independent Rin tools usable without d
         agentDir,
       },
     );
-    assert.match(memoryResult.content[0].text, /search_memory recent/);
-    assert.equal(memoryResult.details.emptyMessage, "No memory results found.");
+    assert.match(memoryResult.content[0].text, /recall recent/);
+    assert.equal(memoryResult.details.emptyMessage, "No recall results found.");
 
-    const webTool = session.getToolDefinition("web_search");
+    const webTool = session.getToolDefinition("browse");
     assert.equal(
       webTool.description,
-      "Search the web, or fetch readable content from an HTTP(S) URL.",
+      "Browse the web, or fetch readable content from an HTTP(S) URL.",
     );
     assert.equal(
       webTool.promptSnippet,
-      "Search the web or fetch readable content from a specific HTTP(S) page.",
+      "Browse the web or fetch readable content from a specific HTTP(S) page.",
     );
     assert.deepEqual(webTool.promptGuidelines, [
-      "Use web_search when current, external, source-dependent, or version-sensitive web information matters.",
-      "Use web_search URL mode when a specific HTTP(S) page is the evidence source.",
+      "Use browse when current, external, source-dependent, or version-sensitive web information matters.",
+      "Use browse URL mode when a specific HTTP(S) page is the evidence source.",
     ]);
     assert.match(
       webTool.parameters.properties.q.description,
-      /Web search query or HTTP\(S\) URL/,
+      /Browse query or HTTP\(S\) URL/,
     );
 
     const fetchResult = await webTool.execute(
@@ -280,7 +278,7 @@ test("std configured session keeps daemon-independent Rin tools usable without d
       { agentDir },
     );
     assert.equal(searchResult.isError, false);
-    assert.match(searchResult.content[0].text, /web_search 0/);
+    assert.match(searchResult.content[0].text, /browse 0/);
   } finally {
     await runtime.runtime?.dispose?.().catch?.(() => {});
     await closeServer(server).catch(() => {});

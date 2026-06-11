@@ -37,7 +37,7 @@ const RIN_COMMANDS = [
   ["self", "Show recent self-improve distillation runs and details"],
   ["versions", "List installed Rin runtime versions"],
   ["rollback", "Rollback the installed Rin runtime to the previous version"],
-  ["memory-index", "Repair the memory search index from archived transcripts"],
+  ["memory-index", "Repair the recall index from archived transcripts"],
   ["target", "List, select, and inspect configured Rin deployment targets"],
   ["version", "Show Rin version"],
 ] as const satisfies ReadonlyArray<readonly [ParsedArgs["command"], string]>;

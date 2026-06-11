@@ -38,7 +38,7 @@ function createFrontendClient() {
   let listener: any = null;
   let connected = false;
   let sessionFile = "/tmp/frontend-chat.jsonl";
-  let activeTools = ["read", "bash", "edit", "write", "web_search"];
+  let activeTools = ["read", "bash", "edit", "write", "browse"];
   return {
     calls,
     async connect() {

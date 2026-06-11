@@ -110,7 +110,7 @@ test("self-improve system prompt prefers full docs over preview docs", () => {
 
 test("self-improve format renders stable result variants", () => {
   const response = {
-    query: " memory ",
+    query: " profile ",
     results: [
       {
         id: "agent-profile",
@@ -132,7 +132,7 @@ test("self-improve format renders stable result variants", () => {
     self_improve_prompt_prompt_docs: [{ path: "/tmp/agent.md" }],
   };
   const emptyResponse = {
-    query: " memory ",
+    query: " profile ",
     results: [],
   };
 
@@ -141,7 +141,7 @@ test("self-improve format renders stable result variants", () => {
   assert.match(listText, /tags=core,prompt/);
 
   const searchText = format.formatSelfImproveResult("search", response);
-  assert.match(searchText, /Self-improve matches for: memory/);
+  assert.match(searchText, /Self-improve matches for: profile/);
   assert.match(searchText, /score=0.88/);
 
   const saveText = format.formatSelfImproveResult(
@@ -174,14 +174,14 @@ test("self-improve format renders stable result variants", () => {
     "search",
     response,
   );
-  assert.match(agentSearchText, /^self_improve search memory \(1\)$/m);
+  assert.match(agentSearchText, /^self_improve search profile \(1\)$/m);
   assert.match(agentSearchText, /score=0.88/);
 
   const agentCompileText = format.formatSelfImproveAgentResult(
     "compile",
     response,
   );
-  assert.match(agentCompileText, /^self_improve compile memory$/m);
+  assert.match(agentCompileText, /^self_improve compile profile$/m);
   assert.match(agentCompileText, /self_improve_prompts: 1/);
 
   assert.equal(
@@ -195,7 +195,7 @@ test("self-improve format renders stable result variants", () => {
   );
   assert.equal(
     format.formatSelfImproveResult("search", emptyResponse),
-    "No self-improve matches for: memory",
+    "No self-improve matches for: profile",
   );
   assert.equal(
     format.formatSelfImproveAgentResult("list", emptyResponse),
@@ -203,7 +203,7 @@ test("self-improve format renders stable result variants", () => {
   );
   assert.equal(
     format.formatSelfImproveAgentResult("search", emptyResponse),
-    "self_improve search memory (0)",
+    "self_improve search profile (0)",
   );
 
   assert.equal(

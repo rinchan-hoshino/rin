@@ -7,7 +7,7 @@ import { Type } from "typebox";
 
 import { fetchReadableUrl, parseFetchUrl } from "./url-fetch.ts";
 import {
-  getWebSearchStatus,
+  getBrowseStatus,
   prepareSearxngRuntime,
   searchWeb,
   startSearxngSidecar,
@@ -22,10 +22,7 @@ function trimSnippet(value: string, max = 220): string {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-function runtimeErrorText(
-  error: unknown,
-  fallback = "web_search_failed",
-): string {
+function runtimeErrorText(error: unknown, fallback = "browse_failed"): string {
   const text = String(error || "").trim();
   if (!text) return fallback;
   return text.replace(/_/g, " ");
@@ -54,13 +51,13 @@ function extractInvalidSearchParameter(response: any) {
 function formatSearchFailureForUser(response: any): string {
   const invalidParameter = extractInvalidSearchParameter(response);
   if (invalidParameter) {
-    return `Web search failed: invalid search parameter ${invalidParameter.parameter}=${invalidParameter.value}. Change or omit that parameter and retry.`;
+    return `Browse failed: invalid search parameter ${invalidParameter.parameter}=${invalidParameter.value}. Change or omit that parameter and retry.`;
   }
-  return runtimeErrorText(response?.error || "web_search_failed");
+  return runtimeErrorText(response?.error || "browse_failed");
 }
 
 function formatSearchFailureForAgent(response: any): string {
-  const lines = ["Web search failed"];
+  const lines = ["Browse failed"];
   const userText = formatSearchFailureForUser(response);
   if (userText) lines.push(userText);
   const rawError = String(response?.error || "").trim();
@@ -83,7 +80,7 @@ function formatSearchFailureForAgent(response: any): string {
 function formatResults(response: any): string {
   if (!response?.ok) return formatSearchFailureForUser(response);
   const rows = Array.isArray(response.results) ? response.results : [];
-  if (!rows.length) return "No web results found.";
+  if (!rows.length) return "No browse results found.";
   return rows
     .slice(0, 3)
     .map((item: any) => {
@@ -98,9 +95,9 @@ function formatResults(response: any): string {
 function formatAgentResults(response: any): string {
   if (!response?.ok) return formatSearchFailureForAgent(response);
   const rows = Array.isArray(response.results) ? response.results : [];
-  if (!rows.length) return "web_search 0";
+  if (!rows.length) return "browse 0";
   return [
-    `web_search ${rows.length}`,
+    `browse ${rows.length}`,
     ...rows.map((item: any, index: number) => {
       const title = String(item?.title || "").trim() || "(untitled)";
       const url = String(item?.url || "").trim();
@@ -139,7 +136,7 @@ function formatFetchAgentResult(
   response: Awaited<ReturnType<typeof fetchReadableUrl>>,
 ) {
   const lines = [
-    response.ok ? "Web fetch ok" : "Web fetch failed",
+    response.ok ? "Browse fetch ok" : "Browse fetch failed",
     `url=${response.finalUrl || response.url}`,
     response.status
       ? `status=${response.status} ${response.statusText}`.trim()
@@ -184,7 +181,7 @@ export const builtInExtensionLifecycle = {
         status: "unknown",
         detail: "Rin agent directory is not available.",
       };
-    const status = getWebSearchStatus(agentDir);
+    const status = getBrowseStatus(agentDir);
     const running = status.instances.filter((instance: any) => instance.alive);
     return {
       status: running.length
@@ -209,7 +206,7 @@ export const builtInExtensionLifecycle = {
     const agentDir = String(
       context.agentDir || process.env.RIN_DIR || "",
     ).trim();
-    if (!agentDir) throw new Error("web_search_agent_dir_required");
+    if (!agentDir) throw new Error("browse_agent_dir_required");
     return await prepareSearxngRuntime(agentDir, { logger: context.logger });
   },
   async start(
@@ -221,7 +218,7 @@ export const builtInExtensionLifecycle = {
     const agentDir = String(
       context.agentDir || process.env.RIN_DIR || "",
     ).trim();
-    if (!agentDir) throw new Error("web_search_agent_dir_required");
+    if (!agentDir) throw new Error("browse_agent_dir_required");
     await prepareSearxngRuntime(agentDir, { logger: context.logger });
     return await startSearxngSidecar(agentDir, { logger: context.logger });
   },
@@ -234,8 +231,8 @@ export const builtInExtensionLifecycle = {
     const agentDir = String(
       context.agentDir || process.env.RIN_DIR || "",
     ).trim();
-    if (!agentDir) throw new Error("web_search_agent_dir_required");
-    const status = getWebSearchStatus(agentDir);
+    if (!agentDir) throw new Error("browse_agent_dir_required");
+    const status = getBrowseStatus(agentDir);
     const stopped = [];
     for (const instance of status.instances) {
       if (!instance.alive) continue;
@@ -250,22 +247,22 @@ export const builtInExtensionLifecycle = {
   },
 };
 
-export default function webSearchExtension(pi: ExtensionAPI) {
+export default function browseExtension(pi: ExtensionAPI) {
   pi.registerTool({
-    name: "web_search",
-    label: "Web Search",
+    name: "browse",
+    label: "Browse",
     description:
-      "Search the web, or fetch readable content from an HTTP(S) URL.",
+      "Browse the web, or fetch readable content from an HTTP(S) URL.",
     promptSnippet:
-      "Search the web or fetch readable content from a specific HTTP(S) page.",
+      "Browse the web or fetch readable content from a specific HTTP(S) page.",
     promptGuidelines: [
-      "Use web_search when current, external, source-dependent, or version-sensitive web information matters.",
-      "Use web_search URL mode when a specific HTTP(S) page is the evidence source.",
+      "Use browse when current, external, source-dependent, or version-sensitive web information matters.",
+      "Use browse URL mode when a specific HTTP(S) page is the evidence source.",
     ],
     parameters: Type.Object({
       q: Type.String({
         description:
-          "Web search query or HTTP(S) URL. For search, use distinctive keywords; use quotes for exact phrases, site:example.com for domain scope, -term to exclude, and OR for alternatives. Split unrelated topics into separate calls.",
+          "Browse query or HTTP(S) URL. For search, use distinctive keywords; use quotes for exact phrases, site:example.com for domain scope, -term to exclude, and OR for alternatives. Split unrelated topics into separate calls.",
       }),
       format: Type.Optional(
         Type.Union([Type.Literal("markdown"), Type.Literal("text")], {
@@ -334,7 +331,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
       }).catch((error: any) => ({
         ok: false,
         results: [],
-        error: String(error?.message || error || "web_search_failed"),
+        error: String(error?.message || error || "browse_failed"),
       }));
 
       const agentText = formatAgentResults(response);
@@ -349,11 +346,13 @@ export default function webSearchExtension(pi: ExtensionAPI) {
           hiddenCount: rows.length > 3 ? rows.length - 3 : 0,
           totalResults: rows.length,
           emptyMessage:
-            !rows.length && response?.ok ? "No web results found." : undefined,
+            !rows.length && response?.ok
+              ? "No browse results found."
+              : undefined,
           error:
             response?.ok === true
               ? undefined
-              : String(response?.error || "web_search_failed"),
+              : String(response?.error || "browse_failed"),
           attempts: Array.isArray(response?.attempts)
             ? response.attempts
             : undefined,

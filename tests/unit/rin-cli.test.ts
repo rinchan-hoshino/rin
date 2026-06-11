@@ -178,7 +178,7 @@ test("rin lifecycle control uses the recorded managed service boundary", () => {
     /installer\.json does not record a managed runtime service/,
   );
   assert.match(source, /tryManagedSystemdAction\(\[service\.label\]/);
-  assert.match(source, /stopManagedWebSearchSidecars\(context\.agentDir\)/);
+  assert.match(source, /stopManagedBrowseSidecars\(context\.agentDir\)/);
   assert.match(source, /waitForDaemonUnavailable\(context\)/);
   assert.match(source, /rin_stop_incomplete/);
   assert.doesNotMatch(source, /pkill/);

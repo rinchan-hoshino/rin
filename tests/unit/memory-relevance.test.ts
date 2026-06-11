@@ -46,7 +46,7 @@ function buildEvent(overrides = {}) {
     session_file: "/tmp/session-1.jsonl",
     chat_key: "",
     source: "test",
-    tool_name: "web_search",
+    tool_name: "browse",
     is_error: false,
     summary: "search results arrived",
     text: "SearXNG search adapter updated",

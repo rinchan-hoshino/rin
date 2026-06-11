@@ -101,25 +101,25 @@ test("render utils style structured tool output lines", () => {
   );
 });
 
-test("render utils format compact tool call headers", () => {
+test("render utils format tool call headers with single-word titles", () => {
   const theme = {
     fg: (kind, text) => `<${kind}>${text}</${kind}>`,
     bold: (text) => `**${text}**`,
   };
 
   assert.equal(
-    renderUtils.formatToolCallLine(
-      "web_search",
-      "site:example.com docs",
-      theme,
-    ),
-    "<toolTitle>**🌐**</toolTitle> <accent>site:example.com docs</accent>",
+    renderUtils.formatToolCallLine("browse", "site:example.com docs", theme),
+    "<toolTitle>**browse**</toolTitle> <accent>site:example.com docs</accent>",
   );
   assert.equal(
-    renderUtils.formatToolCallLine("search_memory", "recent", theme, {
+    renderUtils.formatToolCallLine("recall", "recent", theme, {
       detailStyle: "muted",
     }),
-    "<toolTitle>**🧠**</toolTitle> <muted>recent</muted>",
+    "<toolTitle>**recall**</toolTitle> <muted>recent</muted>",
+  );
+  assert.equal(
+    renderUtils.formatToolCallLine("bash", "npm test", theme),
+    "<toolTitle>**$**</toolTitle> <accent>npm test</accent>",
   );
 });
 
@@ -200,7 +200,7 @@ test("render utils render expanded tool warnings", () => {
 
   const rendered = renderUtils.renderTextToolResult(
     {
-      content: [{ type: "text", text: "web_search 2\npath=/tmp/demo.txt" }],
+      content: [{ type: "text", text: "browse 2\npath=/tmp/demo.txt" }],
       details: {
         truncation: {
           truncated: true,
@@ -218,7 +218,7 @@ test("render utils render expanded tool warnings", () => {
 
   assert.match(
     rendered,
-    /<toolTitle>\*\*web_search\*\*<\/toolTitle> <success>2<\/success>/,
+    /<toolTitle>\*\*browse\*\*<\/toolTitle> <success>2<\/success>/,
   );
   assert.match(
     rendered,

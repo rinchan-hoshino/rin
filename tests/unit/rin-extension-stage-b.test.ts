@@ -264,7 +264,7 @@ test("core todo remains enabled when optional extensions are disabled", async ()
   const originalCwd = process.cwd();
   for (const scenario of [
     { settings: {}, options: { noExtensions: true } },
-    { settings: { extensions: ["!rin:web-search"] }, options: {} },
+    { settings: { extensions: ["!rin:browse"] }, options: {} },
   ]) {
     const agentDir = await fs.mkdtemp(
       path.join(os.tmpdir(), "rin-builtin-todo-on-"),
@@ -288,11 +288,11 @@ test("core todo remains enabled when optional extensions are disabled", async ()
   }
 });
 
-test("stage B built-in extension controls update web search settings alias", async () => {
+test("stage B built-in extension controls update browse settings alias", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
   try {
     await writeJson(path.join(agentDir, "settings.json"), {
-      extensions: ["rin:web-search"],
+      extensions: ["rin:browse"],
     });
     const settingsManager = SettingsManager.create(agentDir, agentDir);
 
@@ -300,12 +300,12 @@ test("stage B built-in extension controls update web search settings alias", asy
       builtInExtensionControls
         .listBuiltInRinExtensionStates(settingsManager)
         .map((entry: any) => [entry.id, entry.enabled]),
-      [["rin:web-search", true]],
+      [["rin:browse", true]],
     );
 
     await builtInExtensionControls.disableBuiltInRinExtension(
       settingsManager,
-      "rin:web-search",
+      "rin:browse",
     );
     await settingsManager.flush();
 
@@ -346,18 +346,16 @@ test("stage B built-in extension entrypoints stay self-contained", async () => {
   }
 });
 
-test("stage B web search loads as an external built-in extension", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-web-search-ext-"),
-  );
+test("stage B browse loads as an external built-in extension", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-ext-"));
   try {
     await writeJson(path.join(agentDir, "settings.json"), {
-      extensions: ["rin:web-search"],
+      extensions: ["rin:browse"],
     });
     const loader = await createExtensionLoader(agentDir);
     const toolNames = extensionToolNames(loader);
 
-    assert.equal(toolNames.includes("web_search"), true);
+    assert.equal(toolNames.includes("browse"), true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -672,11 +670,11 @@ export default function extension(rin) {
     });
     await manager.start();
 
-    const searchResults = await manager.searchMemoryProviders({
+    const searchResults = await manager.recallProviders({
       query: "remote originals",
       limit: 3,
     });
-    const recentResults = await manager.searchMemoryProviders({ limit: 2 });
+    const recentResults = await manager.recallProviders({ limit: 2 });
     const writeResult = await manager.writeMemoryProviders({
       id: "entry-1",
       timestamp: "2026-05-11T06:00:00.000Z",

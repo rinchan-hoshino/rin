@@ -12,7 +12,7 @@ import {
 } from "../rin-lib/profile.js";
 import { createRinCapabilityDefinitions } from "../rin-lib/runtime.js";
 import { serializeRinToolStartupOptions } from "../rin-lib/tool-options.js";
-import webSearchModule from "../rin-web-search/index.js";
+import browseModule from "../rin-browse/index.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
@@ -1035,7 +1035,7 @@ export class RpcInteractiveSession {
           this.emitEvent(event);
         },
       }),
-      webSearchModule(),
+      browseModule(),
     ];
     const tools = new Map<string, any>();
     for (const definition of definitions) {

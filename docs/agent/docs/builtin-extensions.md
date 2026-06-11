@@ -9,7 +9,7 @@ The live tool list remains authoritative for the current turn.
 | Source                                   | Provides                                                                                                                                                                | Configuration surface                                                                                         | Agent route                                                    |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, scheduled-task SDK workflows, chat setup, token usage | built into Rin                                                                                                | use live tools, CLI, SDK, or topic docs                        |
-| Bundled optional foreground Pi extension | `rin:web-search` alias registering `web_search`                                                                                                                         | `settings.json -> extensions`                                                                                 | use `web_search` when present                                  |
+| Bundled optional foreground Pi extension | `rin:browse` alias registering `browse`                                                                                                                                 | `settings.json -> extensions`                                                                                 | use `browse` when present                                      |
 | Browser/desktop operation                | browser or computer tools supplied by the live runtime, plus documented practice patterns                                                                               | live tool list or external Pi extension config                                                                | read `practices/browser-use.md` or `practices/computer-use.md` |
 | Background extension runtime             | trusted long-running services, chat adapters, and external memory providers                                                                                             | `settings.json -> rinExtensions.backgroundServices` or trusted extension entries with background capabilities | inspect runtime state and relevant extension config            |
 
@@ -17,7 +17,7 @@ The live tool list remains authoritative for the current turn.
 
 These capabilities are native Rin behavior rather than optional Pi extensions:
 
-- `memory`: `search_memory`, transcript archiving, and searchable session-history index.
+- `memory`: `recall`, transcript archiving, and searchable session-history index.
 - `self-improve`: compact distilled guidance in prompt baselines, agent-managed skills, periodic review, and hidden nightly consolidation.
 - system prompt assembly: Rin default stance, tool guidance, configured baselines, and available skill metadata.
 - message metadata: `sent at` and chat-specific prompt context when applicable.
@@ -44,30 +44,30 @@ Rin core always provides todo support. It registers:
 
 Todo state is reconstructed from session tool-result details, so forks and session branches can recover the matching checklist. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
 
-## Bundled optional foreground extension: `rin:web-search`
+## Bundled optional foreground extension: `rin:browse`
 
 Rin ships one bundled optional foreground Pi extension alias:
 
 ```json
 {
-  "extensions": ["rin:web-search"]
+  "extensions": ["rin:browse"]
 }
 ```
 
-`rin:web-search` expands to the bundled `extensions/rin-web-search` Pi package and registers `web_search`.
+`rin:browse` expands to the bundled `extensions/rin-browse` Pi package and registers `browse`.
 
-`web_search` modes:
+`browse` modes:
 
 - search query: uses Rin-managed SearXNG;
 - HTTP(S) URL: fetches readable content from the specific page.
 
-Fresh installs enable `rin:web-search` by default unless the installer selection disables it. Existing installs keep their current `settings.json -> extensions` value.
+Fresh installs enable `rin:browse` by default unless the installer selection disables it. Existing installs keep their current `settings.json -> extensions` value.
 
 Use Pi resource filters with the alias when a broader extension list needs filtering:
 
 ```json
 {
-  "extensions": ["rin:web-search", "!rin:web-search"]
+  "extensions": ["rin:browse", "!rin:browse"]
 }
 ```
 

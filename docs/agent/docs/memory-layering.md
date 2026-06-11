@@ -27,7 +27,7 @@ Use the least resident self-improve surface that changes future behavior. Use me
 
 Memory preserves source material and makes it findable.
 
-Use `search_memory` when the task depends on:
+Use `recall` when the task depends on:
 
 - past conversations;
 - unfinished work;
@@ -84,7 +84,7 @@ Short-term continuity records contain distilled active state, such as current go
 
 When adding or consolidating information, choose the destination in this order:
 
-1. **Memory only:** original wording, evidence, chronology, or provenance is enough; use transcript archives and `search_memory`.
+1. **Memory only:** original wording, evidence, chronology, or provenance is enough; use transcript archives and `recall`.
 2. **Memory index pointer:** future lookup needs a compact dated handle to original evidence.
 3. **Prompt baseline:** distilled guidance must influence most future turns and fits one compact line.
 4. **Current matching skill:** distilled workflow or domain guidance belongs in the active skill. For correction-based reusable behavior, the matching executable surface carries the rule unless it is already present.
@@ -113,7 +113,7 @@ At task time:
 
 1. Follow prompt baselines for standing posture and constraints.
 2. Use the matching skill when its description fits the task.
-3. Use `search_memory` when original context, evidence, wording, chronology, or cross-session continuity matters.
+3. Use `recall` when original context, evidence, wording, chronology, or cross-session continuity matters.
 4. Inspect concrete memory or self-improve files only after the retrieval layer points to them.
 
 This keeps distilled guidance compact while preserving original evidence through targeted memory retrieval.

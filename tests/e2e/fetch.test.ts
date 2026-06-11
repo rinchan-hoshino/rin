@@ -9,15 +9,14 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const webSearchIndex = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-web-search", "index.js"),
-  ).href
+const browseIndex = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-browse", "index.js"))
+    .href
 );
 
-function getWebSearchTool() {
-  const tools = webSearchIndex.default().tools || [];
-  const tool = tools.find((entry) => entry.name === "web_search");
+function getBrowseTool() {
+  const tools = browseIndex.default().tools || [];
+  const tool = tools.find((entry) => entry.name === "browse");
   assert.ok(tool);
   return tool;
 }
@@ -37,14 +36,14 @@ async function withServer(handler, fn) {
   }
 }
 
-test("web_search URL mode pretty prints JSON responses", async () => {
+test("browse URL mode pretty prints JSON responses", async () => {
   await withServer(
     (_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ ok: true, nested: { value: 1 } }));
     },
     async (baseUrl) => {
-      const result = await getWebSearchTool().execute(
+      const result = await getBrowseTool().execute(
         "tool-fetch-json",
         { q: `${baseUrl}/data` },
         undefined,
@@ -56,7 +55,7 @@ test("web_search URL mode pretty prints JSON responses", async () => {
   );
 });
 
-test("web_search URL mode extracts HTML as markdown by default and text on request", async () => {
+test("browse URL mode extracts HTML as markdown by default and text on request", async () => {
   await withServer(
     (_request, response) => {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -65,7 +64,7 @@ test("web_search URL mode extracts HTML as markdown by default and text on reque
       );
     },
     async (baseUrl) => {
-      const tool = getWebSearchTool();
+      const tool = getBrowseTool();
       const markdown = await tool.execute(
         "tool-fetch-html-markdown",
         { q: `${baseUrl}/article` },
@@ -88,14 +87,14 @@ test("web_search URL mode extracts HTML as markdown by default and text on reque
   );
 });
 
-test("web_search URL mode reports non-text content as a fetch error", async () => {
+test("browse URL mode reports non-text content as a fetch error", async () => {
   await withServer(
     (_request, response) => {
       response.writeHead(200, { "content-type": "image/png" });
       response.end(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     },
     async (baseUrl) => {
-      const result = await getWebSearchTool().execute(
+      const result = await getBrowseTool().execute(
         "tool-fetch-binary",
         { q: `${baseUrl}/image.png` },
         undefined,

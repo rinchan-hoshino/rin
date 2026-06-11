@@ -73,7 +73,7 @@ On Windows, the interactive installer opens the GUI installer by default. After 
 
 ## Safety and cost
 
-Rin can keep context, write memory, run scheduled work, search the web, and call models repeatedly. This may consume more model tokens, API quota, or subscription capacity than a one-off chat.
+Rin can keep context, write memory, run scheduled work, browse the web, and call models repeatedly. This may consume more model tokens, API quota, or subscription capacity than a one-off chat.
 
 Use supervision for important actions. Do not let Rin perform irreversible or sensitive work unless you understand the risk and can review or roll back the result.
 

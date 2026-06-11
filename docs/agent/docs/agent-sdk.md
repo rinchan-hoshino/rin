@@ -178,9 +178,9 @@ const status = await rin.daemon.status();
 const activity = await rin.daemon.activity();
 
 const { extensions } = await rin.builtInExtensions.list();
-await rin.builtInExtensions.enable("rin:web-search");
-await rin.builtInExtensions.disable("rin:web-search");
-await rin.builtInExtensions.setEnabled("rin:web-search", true);
+await rin.builtInExtensions.enable("rin:browse");
+await rin.builtInExtensions.disable("rin:browse");
+await rin.builtInExtensions.setEnabled("rin:browse", true);
 ```
 
 Use daemon helpers for structured inspection inside scripts. Use `rin status` or `rin status --json` for operator-facing status reports.

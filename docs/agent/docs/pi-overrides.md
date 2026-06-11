@@ -41,7 +41,7 @@ Read `docs/memory-layering.md`, `docs/self-improve-distillation.md`, and `docs/c
 
 ### Capabilities
 
-Use the live tool list for the current turn and Rin capability docs for installed behavior. Rin agent-facing surfaces include archived memory search, core todo, scheduled tasks, chat bridge configuration, and bundled web search with URL fetching.
+Use the live tool list for the current turn and Rin capability docs for installed behavior. Rin agent-facing surfaces include archived recall, core todo, scheduled tasks, chat bridge configuration, and bundled browse with URL fetching.
 
 Read `docs/builtin-extensions.md` and `docs/capabilities.md` for the current Rin layer.
 

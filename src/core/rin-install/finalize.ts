@@ -34,10 +34,10 @@ import {
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { preparePiManagedToolsForInstall } from "./pi-tools.js";
 import {
-  getWebSearchStatus,
+  getBrowseStatus,
   prepareSearxngRuntime,
   stopSearxngSidecar,
-} from "../rin-web-search/service.js";
+} from "../rin-browse/service.js";
 import {
   describeOwnership,
   findSystemUser,
@@ -46,8 +46,8 @@ import {
   targetHomeForUser,
 } from "./users.js";
 
-async function stopInstalledWebSearchSidecars(installDir: string) {
-  const status = getWebSearchStatus(installDir);
+async function stopInstalledBrowseSidecars(installDir: string) {
+  const status = getBrowseStatus(installDir);
   const instances = Array.isArray(status.instances) ? status.instances : [];
   for (const instance of instances) {
     const instanceId = String(instance?.instanceId || "").trim();
@@ -60,7 +60,7 @@ async function applyInstalledRuntime(
   options: FinalizeInstallOptions & {
     persistInstallerState?: boolean;
     daemonFailureCode: string;
-    prepareWebSearchRuntime?: boolean;
+    prepareBrowseRuntime?: boolean;
     stopRuntimeBeforePublish?: boolean;
   },
 ) {
@@ -94,7 +94,7 @@ async function applyInstalledRuntime(
   const serviceDeps = { findSystemUser, targetHomeForUser };
 
   if (options.stopRuntimeBeforePublish) {
-    await stopInstalledWebSearchSidecars(installDir);
+    await stopInstalledBrowseSidecars(installDir);
   }
 
   const previousReleaseName = currentInstalledReleaseName(
@@ -137,8 +137,8 @@ async function applyInstalledRuntime(
     installDir,
   });
   if (
-    options.prepareWebSearchRuntime !== false &&
-    builtInExtensions?.includes("rin:web-search")
+    options.prepareBrowseRuntime !== false &&
+    builtInExtensions?.includes("rin:browse")
   ) {
     await prepareSearxngRuntime(installDir).catch(() => undefined);
   }
@@ -353,7 +353,7 @@ export async function finalizeCoreUpdate(options: {
     ...options,
     persistInstallerState: false,
     stopRuntimeBeforePublish: true,
-    prepareWebSearchRuntime: false,
+    prepareBrowseRuntime: false,
     daemonFailureCode: "rin_core_update_daemon_not_ready",
   });
   return { ...result, mode: "core-only" as const };

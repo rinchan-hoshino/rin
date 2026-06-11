@@ -304,7 +304,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
   };
   const renderContext = { state: {}, lastComponent: undefined };
 
-  for (const name of ["web_search", "search_memory", "todo"]) {
+  for (const name of ["browse", "recall", "todo"]) {
     const tool = session.getToolDefinition(name);
     assert.ok(tool, `${name} should be available in the RPC frontend`);
     assert.equal(typeof tool.renderCall, "function");
@@ -312,7 +312,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
   }
 
   const rendered = session
-    .getToolDefinition("web_search")
+    .getToolDefinition("browse")
     .renderCall(
       { q: "RAG retrieval augmented generation", limit: 5 },
       theme,
@@ -323,7 +323,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
   assert.match(rendered, /RAG retrieval augmented generation/);
 
   const longToolResultLines = session
-    .getToolDefinition("search_memory")
+    .getToolDefinition("recall")
     .renderResult(
       {
         content: [

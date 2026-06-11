@@ -421,18 +421,18 @@ test("core update restarts runtime only after manifest persistence", () => {
   );
 
   assert.match(source, /if \(options\.stopRuntimeBeforePublish\)/);
-  assert.match(source, /stopInstalledWebSearchSidecars\(installDir\)/);
-  assert.match(source, /options\.prepareWebSearchRuntime !== false/);
-  assert.match(source, /builtInExtensions\?\.includes\("rin:web-search"\)/);
+  assert.match(source, /stopInstalledBrowseSidecars\(installDir\)/);
+  assert.match(source, /options\.prepareBrowseRuntime !== false/);
+  assert.match(source, /builtInExtensions\?\.includes\("rin:browse"\)/);
   assert.match(
     source,
     /const shouldRestartBeforePersist = !options\.stopRuntimeBeforePublish/,
   );
   assert.match(source, /if \(!shouldRestartBeforePersist\)/);
   assert.match(updateBlock, /stopRuntimeBeforePublish: true/);
-  assert.match(updateBlock, /prepareWebSearchRuntime: false/);
+  assert.match(updateBlock, /prepareBrowseRuntime: false/);
   assert.doesNotMatch(installBlock, /stopRuntimeBeforePublish: true/);
-  assert.doesNotMatch(installBlock, /prepareWebSearchRuntime: false/);
+  assert.doesNotMatch(installBlock, /prepareBrowseRuntime: false/);
 });
 
 test("installer i18n source keeps localized copy in one display table", () => {
@@ -498,7 +498,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.doesNotMatch(updaterSource, /process\.env/);
 });
 
-test("promptBuiltInExtensionSetup defaults web search on for fresh installs", async () => {
+test("promptBuiltInExtensionSetup defaults browse on for fresh installs", async () => {
   let promptOptions;
   const selected = await interactive.promptBuiltInExtensionSetup({
     ensureNotCancelled: (value) => value,
@@ -511,8 +511,8 @@ test("promptBuiltInExtensionSetup defaults web search on for fresh installs", as
     },
   });
 
-  assert.deepEqual(selected, ["rin:web-search"]);
-  assert.deepEqual(promptOptions.initialValues, ["rin:web-search"]);
+  assert.deepEqual(selected, ["rin:browse"]);
+  assert.deepEqual(promptOptions.initialValues, ["rin:browse"]);
   assert.ok(promptOptions.options.length >= 1);
 });
 

@@ -29,7 +29,7 @@ function printMemoryIndexHelp() {
       "rin memory-index repair",
       "",
       "Commands:",
-      "  repair    rebuild the memory search index from archived transcripts",
+      "  repair    rebuild the recall index from archived transcripts",
       "",
       "Examples:",
       "  rin memory-index repair",

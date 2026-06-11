@@ -1,6 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  listInstanceIds as listSidecarInstanceIds,
+  readInstanceState as readSidecarInstanceState,
+  writeInstanceState as writeSidecarInstanceState,
+} from "../sidecar/common.js";
+import { readJsonFile, writeJsonAtomic } from "../platform/fs.js";
+import { sharedRuntimeDataPath, sidecarDataPath } from "../data-layout.js";
+
 export type RuntimeBootstrapState = {
   ready?: boolean;
   sourceDir?: string;
@@ -11,7 +19,7 @@ export type RuntimeBootstrapState = {
   installedAt?: string;
 };
 
-export type WebSearchInstanceState = {
+export type BrowseInstanceState = {
   pid?: number;
   port?: number;
   baseUrl?: string;
@@ -26,62 +34,9 @@ const RUNTIME_SEGMENT = "runtime";
 const INSTANCES_SEGMENT = "instances";
 const WINDOWS_VENV_BIN_DIR = "Scripts";
 const POSIX_VENV_BIN_DIR = "bin";
-const LOCK_FILE_MODE = 0o600;
-const INSTANCE_STATE_FILE = "state.json";
-
-function ensureDir(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true });
-}
-
-function ensurePrivateDir(dir: string): void {
-  ensureDir(dir);
-  try {
-    fs.chmodSync(dir, 0o700);
-  } catch {}
-}
-
-function readJsonFile<T>(filePath: string, fallback: T): T {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJsonAtomic(
-  filePath: string,
-  value: unknown,
-  mode = LOCK_FILE_MODE,
-  privateDir = false,
-): void {
-  const dir = path.dirname(filePath);
-  if (privateDir) ensurePrivateDir(dir);
-  else ensureDir(dir);
-  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode });
-  fs.renameSync(tmp, filePath);
-  try {
-    fs.chmodSync(filePath, mode);
-  } catch {}
-}
-
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function sidecarDataPath(stateRoot: string, ...segments: string[]): string {
-  return path.join(path.resolve(stateRoot), "data", "sidecars", ...segments);
-}
-
-function sharedRuntimeDataPath(
-  stateRoot: string,
-  ...segments: string[]
-): string {
-  return path.join(path.resolve(stateRoot), "data", "runtime", ...segments);
-}
 
 function dataPathForState(stateRoot: string, ...segments: string[]): string {
-  return sidecarDataPath(stateRoot, "web-search", ...segments);
+  return sidecarDataPath(stateRoot, "browse", ...segments);
 }
 
 function runtimePathForState(stateRoot: string, ...segments: string[]): string {
@@ -218,46 +173,24 @@ export function writeRuntimeBootstrapState(
 export function readInstanceState(
   stateRoot: string,
   instanceId: string,
-): WebSearchInstanceState | null {
-  const value = readJsonFile<unknown>(
+): BrowseInstanceState | null {
+  return readSidecarInstanceState<BrowseInstanceState | null>(
     instanceStateFileForState(stateRoot, instanceId),
-    null,
   );
-  return isJsonRecord(value) ? (value as WebSearchInstanceState) : null;
 }
 
 export function listInstanceIds(stateRoot: string): string[] {
-  try {
-    return fs
-      .readdirSync(instancesRootForState(stateRoot), { withFileTypes: true })
-      .filter(
-        (entry) =>
-          entry.isDirectory() &&
-          fs.existsSync(
-            path.join(
-              instancesRootForState(stateRoot),
-              entry.name,
-              INSTANCE_STATE_FILE,
-            ),
-          ),
-      )
-      .map((entry) => entry.name)
-      .sort();
-  } catch {
-    return [] as string[];
-  }
+  return listSidecarInstanceIds(instancesRootForState(stateRoot));
 }
 
 export function writeInstanceState(
   stateRoot: string,
   instanceId: string,
-  value: WebSearchInstanceState,
+  value: BrowseInstanceState,
 ): void {
-  writeJsonAtomic(
+  writeSidecarInstanceState(
     instanceStateFileForState(stateRoot, instanceId),
     value,
-    LOCK_FILE_MODE,
-    true,
   );
 }
 

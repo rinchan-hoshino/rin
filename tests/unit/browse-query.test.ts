@@ -12,24 +12,20 @@ const rootDir = path.resolve(
   "..",
 );
 const query = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-web-search", "query.js"),
-  ).href
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-browse", "query.js"))
+    .href
 );
 const paths = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-web-search", "paths.js"),
-  ).href
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-browse", "paths.js"))
+    .href
 );
 const service = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-web-search", "service.js"),
-  ).href
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-browse", "service.js"))
+    .href
 );
-const webSearchIndex = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-web-search", "index.js"),
-  ).href
+const browseIndex = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-browse", "index.js"))
+    .href
 );
 
 function listen(server: http.Server) {
@@ -50,7 +46,7 @@ async function writeLiveSidecarState(agentDir: string, baseUrl: string) {
     agentDir,
     "data",
     "sidecars",
-    "web-search",
+    "browse",
     "instances",
     instanceId,
     "state.json",
@@ -76,7 +72,7 @@ async function withMockManagedSidecar(
   handler: http.RequestListener,
   fn: (agentDir: string, baseUrl: string) => Promise<void>,
 ) {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-web-search-"));
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-"));
   const server = http.createServer(handler);
   await listen(server);
   const address = server.address();
@@ -96,7 +92,7 @@ function jsonResponse(response: http.ServerResponse, value: unknown) {
   response.end(JSON.stringify(value));
 }
 
-test("web search query helpers normalize request", () => {
+test("browse query helpers normalize request", () => {
   const req = query.normalizeSearchRequest({
     q: "  hello ",
     limit: 99,
@@ -108,7 +104,7 @@ test("web search query helpers normalize request", () => {
   assert.equal(query.buildSearchQuery(req), "hello site:a.com site:b.com");
 });
 
-test("web search query helpers normalize domain filters", () => {
+test("browse query helpers normalize domain filters", () => {
   const req = query.normalizeSearchRequest({
     q: "docs",
     domains: [
@@ -124,7 +120,7 @@ test("web search query helpers normalize domain filters", () => {
   );
 });
 
-test("web search query helpers discard invalid freshness", () => {
+test("browse query helpers discard invalid freshness", () => {
   const req = query.normalizeSearchRequest({
     q: " demo ",
     freshness: "decade",
@@ -135,7 +131,7 @@ test("web search query helpers discard invalid freshness", () => {
   assert.equal(req.freshness, undefined);
 });
 
-test("web search query helpers normalize locale-style language hints", () => {
+test("browse query helpers normalize locale-style language hints", () => {
   assert.equal(
     query.normalizeSearchRequest({ q: "demo", language: "en_US" }).language,
     "en-US",
@@ -147,7 +143,7 @@ test("web search query helpers normalize locale-style language hints", () => {
   );
 });
 
-test("web search maps freshness to SearXNG sidecar query parameters", async () => {
+test("browse maps freshness to SearXNG sidecar query parameters", async () => {
   const originalFetch = globalThis.fetch;
   const calls: string[] = [];
   globalThis.fetch = (async (url: any) => {
@@ -190,7 +186,7 @@ test("web search maps freshness to SearXNG sidecar query parameters", async () =
   }
 });
 
-test("web search falls back across SearXNG engines", async () => {
+test("browse falls back across SearXNG engines", async () => {
   const originalFetch = globalThis.fetch;
   const engines: string[] = [];
   globalThis.fetch = (async (url: any) => {
@@ -231,17 +227,17 @@ test("web search falls back across SearXNG engines", async () => {
   }
 });
 
-test("web search paths derive data root location", () => {
+test("browse paths derive data root location", () => {
   const root = "/tmp/demo";
   assert.ok(
     paths
       .dataRootForState(root)
-      .endsWith(path.join("data", "sidecars", "web-search")),
+      .endsWith(path.join("data", "sidecars", "browse")),
   );
 });
 
-test("web search service reports SearXNG sidecar runtime status by default", () => {
-  const status = service.getWebSearchStatus("/tmp/rin-agent");
+test("browse service reports SearXNG sidecar runtime status by default", () => {
+  const status = service.getBrowseStatus("/tmp/rin-agent");
   assert.equal(status.runtime.ready, false);
   assert.equal(status.runtime.mode, "searxng-sidecar");
   assert.equal(status.runtime.providerCount, 3);
@@ -249,17 +245,15 @@ test("web search service reports SearXNG sidecar runtime status by default", () 
   assert.deepEqual(status.instances, []);
 });
 
-test("web search status does not install or start SearXNG", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-web-search-"));
+test("browse status does not install or start SearXNG", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-"));
   try {
-    const status = service.getWebSearchStatus(agentDir);
+    const status = service.getBrowseStatus(agentDir);
     assert.equal(status.runtime.ready, false);
     assert.deepEqual(status.instances, []);
     await assert.rejects(
       () =>
-        fs.stat(
-          path.join(agentDir, "data", "sidecars", "web-search", "runtime"),
-        ),
+        fs.stat(path.join(agentDir, "data", "sidecars", "browse", "runtime")),
       /ENOENT/,
     );
   } finally {
@@ -267,8 +261,8 @@ test("web search status does not install or start SearXNG", async () => {
   }
 });
 
-test("web search runtime rejects an invalid managed Python before source install", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-web-search-"));
+test("browse runtime rejects an invalid managed Python before source install", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-"));
   const uvPath = paths.runtimeUvBinForState(agentDir);
   await fs.mkdir(path.dirname(uvPath), { recursive: true });
   await fs.writeFile(
@@ -296,7 +290,7 @@ test("web search runtime rejects an invalid managed Python before source install
             agentDir,
             "data",
             "sidecars",
-            "web-search",
+            "browse",
             "runtime",
             "searxng",
           ),
@@ -308,8 +302,8 @@ test("web search runtime rejects an invalid managed Python before source install
   }
 });
 
-test("web search runtime installs Rin-managed Python with private uv before source install", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-web-search-"));
+test("browse runtime installs Rin-managed Python with private uv before source install", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-"));
   const uvPath = paths.runtimeUvBinForState(agentDir);
   await fs.mkdir(path.dirname(uvPath), { recursive: true });
   await fs.writeFile(
@@ -330,7 +324,7 @@ test("web search runtime installs Rin-managed Python with private uv before sour
   try {
     await assert.rejects(
       () => service.prepareSearxngRuntime(agentDir),
-      /web_search_runtime_fetch_tools_not_found/,
+      /browse_runtime_fetch_tools_not_found/,
     );
     await fs.stat(
       path.join(
@@ -349,7 +343,7 @@ test("web search runtime installs Rin-managed Python with private uv before sour
   }
 });
 
-test("web search service reuses Rin-managed sidecar state", async () => {
+test("browse service reuses Rin-managed sidecar state", async () => {
   await withMockManagedSidecar(
     (request, response) => {
       assert.ok(request.url?.startsWith("/search"));
@@ -381,26 +375,26 @@ test("web search service reuses Rin-managed sidecar state", async () => {
   );
 });
 
-test("web search tool prompt contract describes search and URL modes", () => {
-  const registeredTool = webSearchIndex
+test("browse tool prompt contract describes search and URL modes", () => {
+  const registeredTool = browseIndex
     .default()
-    .tools.find((tool: any) => tool.name === "web_search");
+    .tools.find((tool: any) => tool.name === "browse");
 
   assert.equal(
     registeredTool.description,
-    "Search the web, or fetch readable content from an HTTP(S) URL.",
+    "Browse the web, or fetch readable content from an HTTP(S) URL.",
   );
   assert.equal(
     registeredTool.promptSnippet,
-    "Search the web or fetch readable content from a specific HTTP(S) page.",
+    "Browse the web or fetch readable content from a specific HTTP(S) page.",
   );
   assert.deepEqual(registeredTool.promptGuidelines, [
-    "Use web_search when current, external, source-dependent, or version-sensitive web information matters.",
-    "Use web_search URL mode when a specific HTTP(S) page is the evidence source.",
+    "Use browse when current, external, source-dependent, or version-sensitive web information matters.",
+    "Use browse URL mode when a specific HTTP(S) page is the evidence source.",
   ]);
   assert.match(
     registeredTool.parameters.properties.q.description,
-    /Web search query or HTTP\(S\) URL/,
+    /Browse query or HTTP\(S\) URL/,
   );
   assert.match(
     registeredTool.parameters.properties.limit.description,
@@ -408,10 +402,10 @@ test("web search tool prompt contract describes search and URL modes", () => {
   );
 });
 
-test("web search tool output exposes provider attempts to the agent on sidecar failure", async () => {
-  const registeredTool = webSearchIndex
+test("browse tool output exposes provider attempts to the agent on sidecar failure", async () => {
+  const registeredTool = browseIndex
     .default()
-    .tools.find((tool: any) => tool.name === "web_search");
+    .tools.find((tool: any) => tool.name === "browse");
 
   await withMockManagedSidecar(
     (_request, response) => {
@@ -430,7 +424,7 @@ test("web search tool output exposes provider attempts to the agent on sidecar f
         { agentDir },
       );
       assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /Web search failed/);
+      assert.match(result.content[0].text, /Browse failed/);
       assert.match(result.content[0].text, /network request failed/i);
       assert.match(result.content[0].text, /attempts:/);
       assert.match(result.content[0].text, /fetch_failed/);
@@ -442,10 +436,10 @@ test("web search tool output exposes provider attempts to the agent on sidecar f
   );
 });
 
-test("web search tool exposes SearXNG parameter errors for agent retry", async () => {
-  const registeredTool = webSearchIndex
+test("browse tool exposes SearXNG parameter errors for agent retry", async () => {
+  const registeredTool = browseIndex
     .default()
-    .tools.find((tool: any) => tool.name === "web_search");
+    .tools.find((tool: any) => tool.name === "browse");
 
   await withMockManagedSidecar(
     (_request, response) => {
@@ -481,7 +475,7 @@ test("web search tool exposes SearXNG parameter errors for agent retry", async (
   );
 });
 
-test("web search maps zh_CN language hints to SearXNG-compatible zh-CN", async () => {
+test("browse maps zh_CN language hints to SearXNG-compatible zh-CN", async () => {
   await withMockManagedSidecar(
     (request, response) => {
       const target = new URL(request.url || "/", "http://127.0.0.1");
@@ -508,10 +502,10 @@ test("web search maps zh_CN language hints to SearXNG-compatible zh-CN", async (
   );
 });
 
-test("web search URL call label omits fetch prefix", () => {
-  const registeredTool = webSearchIndex
+test("browse URL call label omits fetch prefix", () => {
+  const registeredTool = browseIndex
     .default()
-    .tools.find((tool: any) => tool.name === "web_search");
+    .tools.find((tool: any) => tool.name === "browse");
   const rendered = registeredTool
     .renderCall(
       { q: "https://example.com/page" },
@@ -526,9 +520,9 @@ test("web search URL call label omits fetch prefix", () => {
   assert.doesNotMatch(rendered, /fetch https:/);
 });
 
-test("web search tool definition does not request tool-side sequential execution", () => {
-  const registeredTool = webSearchIndex
+test("browse tool definition does not request tool-side sequential execution", () => {
+  const registeredTool = browseIndex
     .default()
-    .tools.find((tool: any) => tool.name === "web_search");
+    .tools.find((tool: any) => tool.name === "browse");
   assert.equal(registeredTool.executionMode, undefined);
 });

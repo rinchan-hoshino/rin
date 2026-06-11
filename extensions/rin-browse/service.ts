@@ -5,8 +5,31 @@ import net from "node:net";
 import os from "node:os";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
-import { ensurePrivateDir } from "../platform/fs.js";
-import { isPidAlive, safeString, sleep } from "../platform/process.js";
+function ensurePrivateDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    fs.chmodSync(dir, 0o700);
+  } catch {}
+}
+
+function safeString(value: unknown): string {
+  return value == null ? "" : String(value);
+}
+
+function isPidAlive(pid: unknown): boolean {
+  const n = Number(pid || 0);
+  if (!Number.isInteger(n) || n <= 1) return false;
+  try {
+    process.kill(n, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 import {
   dataRootForState,
   instanceSettingsFileForState,
@@ -27,14 +50,14 @@ import {
   writeInstanceState,
   writeRuntimeBootstrapState,
   type RuntimeBootstrapState,
-  type WebSearchInstanceState,
+  type BrowseInstanceState,
 } from "./paths.js";
 import {
-  SEARXNG_WEB_SEARCH_PROVIDERS,
+  SEARXNG_BROWSE_PROVIDERS,
   searchWeb as performSearxngSearch,
   safeText,
-  type WebSearchRequest,
-  type WebSearchResponse,
+  type BrowseRequest,
+  type BrowseResponse,
 } from "./query.js";
 
 const START_TIMEOUT_MS = 90_000;
@@ -123,7 +146,7 @@ function defaultInstanceId() {
 function normalizeInstanceState(
   stateRoot: string,
   instanceId: string,
-  state: WebSearchInstanceState | null | undefined,
+  state: BrowseInstanceState | null | undefined,
 ): NormalizedInstanceState {
   const pid = toNumber(state?.pid);
   const ownerPid = toNumber(state?.ownerPid);
@@ -291,9 +314,8 @@ function installPrivateUv(
   if (process.platform === "win32") {
     const powershell =
       findExecutableOnPath("pwsh") || findExecutableOnPath("powershell");
-    if (!powershell)
-      throw new Error("web_search_runtime_fetch_tools_not_found");
-    logInfo(logger, "web-search: installing private uv helper");
+    if (!powershell) throw new Error("browse_runtime_fetch_tools_not_found");
+    logInfo(logger, "browse: installing private uv helper");
     runCommandSync(
       powershell,
       [
@@ -310,9 +332,9 @@ function installPrivateUv(
     const curl = findExecutableOnPath("curl");
     const wget = findExecutableOnPath("wget");
     if (!shell || (!curl && !wget)) {
-      throw new Error("web_search_runtime_fetch_tools_not_found");
+      throw new Error("browse_runtime_fetch_tools_not_found");
     }
-    logInfo(logger, "web-search: installing private uv helper");
+    logInfo(logger, "browse: installing private uv helper");
     const command = curl
       ? "curl -LsSf https://astral.sh/uv/install.sh | sh"
       : "wget -qO- https://astral.sh/uv/install.sh | sh";
@@ -355,7 +377,7 @@ function ensureManagedSearxngPython(
   const env = uvCommandEnv(stateRoot, tmpDir);
   logInfo(
     logger,
-    `web-search: installing private Python ${MANAGED_PYTHON_VERSION}`,
+    `browse: installing private Python ${MANAGED_PYTHON_VERSION}`,
   );
   runCommandSync(uvBin, ["python", "install", MANAGED_PYTHON_VERSION], {
     cwd: runtimeRootForState(stateRoot),
@@ -472,7 +494,7 @@ function installSearxngSourceFromArchive(
   const curl = findExecutableOnPath("curl");
   const wget = findExecutableOnPath("wget");
   if (!tar || (!curl && !wget)) {
-    throw new Error("web_search_runtime_fetch_tools_not_found");
+    throw new Error("browse_runtime_fetch_tools_not_found");
   }
 
   const archivePath = path.join(runtimeDir, "searxng-source.tar.gz");
@@ -516,7 +538,7 @@ function ensureSearxngSourceInstalled(
   const git = findExecutableOnPath("git");
   try {
     if (git) {
-      logInfo(logger, "web-search: cloning searxng source");
+      logInfo(logger, "browse: cloning searxng source");
       runCommandSync(
         git,
         [
@@ -529,7 +551,7 @@ function ensureSearxngSourceInstalled(
         { cwd: runtimeDir, env: runtimeCommandEnv(tmpDir) },
       );
     } else {
-      logInfo(logger, "web-search: downloading searxng source archive");
+      logInfo(logger, "browse: downloading searxng source archive");
       installSearxngSourceFromArchive(runtimeDir, sourceDir, tmpDir);
     }
   } catch (error) {
@@ -539,7 +561,7 @@ function ensureSearxngSourceInstalled(
 
   if (!hasSearxngSourceTree(sourceDir)) {
     removePathIfExists(sourceDir);
-    throw new Error("web_search_runtime_source_invalid");
+    throw new Error("browse_runtime_source_invalid");
   }
 }
 
@@ -566,7 +588,7 @@ function writeSearxngSettingsForInstance(
   ensurePrivateDir(path.dirname(settingsPath));
   const secret = crypto
     .createHash("sha256")
-    .update(`${baseUrl}|${stateRoot}|${instanceId}|rin-web-search`)
+    .update(`${baseUrl}|${stateRoot}|${instanceId}|rin-browse`)
     .digest("hex")
     .slice(0, 32);
   const yaml = [
@@ -629,14 +651,14 @@ function ensureSearxngRuntimeInstalled(
   ensureSearxngSourceInstalled(runtimeDir, sourceDir, tmpDir, logger);
 
   if (!fs.existsSync(pythonBin)) {
-    logInfo(logger, "web-search: creating searxng virtualenv");
+    logInfo(logger, "browse: creating searxng virtualenv");
     runCommandSync(managedPythonBin, ["-m", "venv", venvDir], {
       cwd: runtimeDir,
       env: runtimeCommandEnv(tmpDir),
     });
   }
 
-  logInfo(logger, "web-search: installing searxng runtime dependencies");
+  logInfo(logger, "browse: installing searxng runtime dependencies");
   runCommandSync(
     pipBin,
     ["install", "--upgrade", "pip", "wheel", "setuptools"],
@@ -679,7 +701,7 @@ function readInstalledSearxngRuntime(stateRoot: string): SearxngRuntimeInstall {
   ) {
     return { sourceDir, pythonBin, pipBin, reused: true };
   }
-  throw new Error("web_search_runtime_not_installed");
+  throw new Error("browse_runtime_not_installed");
 }
 
 function createInstanceId(prefix = "ws"): string {
@@ -725,7 +747,7 @@ async function startSearxngSidecar(
 
     logInfo(
       logger,
-      `web-search: starting searxng instance=${instanceId} baseUrl=${baseUrl}`,
+      `browse: starting searxng instance=${instanceId} baseUrl=${baseUrl}`,
     );
     child = spawn(runtime.pythonBin, ["-m", "searx.webapp"], {
       cwd: runtime.sourceDir,
@@ -747,7 +769,7 @@ async function startSearxngSidecar(
     } catch {}
 
     const pid = toNumber(child.pid);
-    const nextState: WebSearchInstanceState = {
+    const nextState: BrowseInstanceState = {
       pid,
       port,
       baseUrl,
@@ -792,7 +814,7 @@ async function stopSearxngSidecar(
 ) {
   const logger = options.logger;
   const instanceId = trimString(options.instanceId);
-  if (!instanceId) return { ok: false, error: "web_search_instance_required" };
+  if (!instanceId) return { ok: false, error: "browse_instance_required" };
 
   const current = readNormalizedInstanceState(stateRoot, instanceId);
   if (current.alive) {
@@ -801,7 +823,7 @@ async function stopSearxngSidecar(
     } catch {}
   }
   removeStoredInstance(stateRoot, instanceId);
-  logInfo(logger, `web-search: stopped searxng instance=${instanceId}`);
+  logInfo(logger, `browse: stopped searxng instance=${instanceId}`);
   return { ok: true, pid: current.pid };
 }
 
@@ -843,7 +865,7 @@ async function cleanupOrphanSearxngSidecars(
     });
     logInfo(
       logger,
-      `web-search: cleaned stale instance=${instanceId} pid=${state.pid} ownerPid=${state.ownerPid} reason=${reason}`,
+      `browse: cleaned stale instance=${instanceId} pid=${state.pid} ownerPid=${state.ownerPid} reason=${reason}`,
     );
   }
   return { ok: true, cleaned };
@@ -871,19 +893,19 @@ async function resolveSearxngSearchBaseUrl(options: SearchWebOptions) {
     searchSidecarStartInFlight = null;
   });
   const started = await searchSidecarStartInFlight;
-  if (!started?.baseUrl) throw new Error("web_search_sidecar_unavailable");
+  if (!started?.baseUrl) throw new Error("browse_sidecar_unavailable");
   return started.baseUrl;
 }
 
 async function searchWeb(
-  request: WebSearchRequest,
+  request: BrowseRequest,
   options: SearchWebOptions = {},
-): Promise<WebSearchResponse> {
+): Promise<BrowseResponse> {
   const baseUrl = await resolveSearxngSearchBaseUrl(options);
   return await performSearxngSearch(baseUrl, request);
 }
 
-function getWebSearchStatus(stateRoot: string) {
+function getBrowseStatus(stateRoot: string) {
   const runtime = readRuntimeBootstrapState(stateRoot) || {};
   const instances = listInstanceIds(stateRoot).map((instanceId) => {
     const state = readNormalizedInstanceState(stateRoot, instanceId);
@@ -904,8 +926,8 @@ function getWebSearchStatus(stateRoot: string) {
     runtime: {
       ready: Boolean(runtime?.ready || instances.some((item) => item.alive)),
       mode: "searxng-sidecar",
-      providerCount: SEARXNG_WEB_SEARCH_PROVIDERS.length,
-      providers: [...SEARXNG_WEB_SEARCH_PROVIDERS],
+      providerCount: SEARXNG_BROWSE_PROVIDERS.length,
+      providers: [...SEARXNG_BROWSE_PROVIDERS],
       installedAt: trimString(runtime?.installedAt),
       pythonBin: trimString(runtime?.pythonBin),
       sourceDir: trimString(runtime?.sourceDir),
@@ -918,9 +940,9 @@ export {
   cleanupOrphanSearxngSidecars,
   prepareSearxngRuntime,
   startSearxngSidecar,
-  getWebSearchStatus,
+  getBrowseStatus,
   stopSearxngSidecar,
   searchWeb,
-  type WebSearchRequest,
-  type WebSearchResponse,
+  type BrowseRequest,
+  type BrowseResponse,
 };

@@ -98,9 +98,9 @@ export const LEGACY_DATA_LAYOUT_MOVES: Array<{
   },
   { id: "token-usage", from: "token-usage", to: path.join("core", "usage") },
   {
-    id: "web-search",
-    from: "web-search",
-    to: path.join("sidecars", "web-search"),
+    id: "browse",
+    from: "browse",
+    to: path.join("sidecars", "browse"),
   },
   {
     id: "extension-runtime",

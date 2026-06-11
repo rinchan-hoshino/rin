@@ -107,7 +107,7 @@ test("runtime error formatter hides unmapped internal markers from user-facing t
   assert.equal(text.includes("some_new_internal_marker"), false);
   assert.equal(text.includes("debug_code"), false);
 
-  const embedded = formatRuntimeErrorForUser("Web search failed: fetch_failed");
+  const embedded = formatRuntimeErrorForUser("Browse failed: fetch_failed");
   assert.match(embedded, /network request failed/i);
   assert.equal(embedded.includes("fetch_failed"), false);
 

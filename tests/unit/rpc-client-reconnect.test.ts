@@ -608,7 +608,7 @@ test("rpc interactive session keeps the daemon connection while a worker exits m
   session.startupPending = false;
   session.activeTurn = {
     mode: "prompt",
-    message: "search memory",
+    message: "recall",
     requestTag: "tag-1",
   };
   session.setRemoteTurnRunning(true);
