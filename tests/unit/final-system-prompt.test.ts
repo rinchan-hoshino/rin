@@ -136,6 +136,11 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "rich chat output -> docs/rich-text-output-format.md",
     ),
   );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Core Rin capabilities: use real scheduled/background tasks for reminders, delayed follow-ups, recurring work, polling/watch work, and work that must continue after the current turn; use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
+    ),
+  );
   assert.equal(baseSystemPrompt.includes("condition.kind"), false);
   assert.equal(
     baseSystemPrompt.includes(
