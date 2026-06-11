@@ -408,20 +408,19 @@ export function canAccessAgentInput({
   trust,
   mentionLike = false,
   commandLike = false,
+  allowWithoutMention = false,
 }: {
   chatType: "private" | "group";
   trust: string;
   mentionLike?: boolean;
   commandLike?: boolean;
+  allowWithoutMention?: boolean;
 }) {
   const nextTrust = normalizeTrust(trust);
   if (commandLike) return false;
-  if (chatType === "private") {
-    return nextTrust === "OWNER" || nextTrust === "TRUSTED";
-  }
-  return (
-    Boolean(mentionLike) && (nextTrust === "OWNER" || nextTrust === "TRUSTED")
-  );
+  const trusted = nextTrust === "OWNER" || nextTrust === "TRUSTED";
+  if (chatType === "private") return trusted;
+  return trusted && (Boolean(mentionLike) || Boolean(allowWithoutMention));
 }
 
 const TRUSTED_COMMANDS = new Set(["new", "abort", "status"]);

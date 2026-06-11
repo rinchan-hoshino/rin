@@ -81,7 +81,7 @@ test("chat decision allows trusted private messages", async () => {
   assert.equal(result.trust, "TRUSTED");
 });
 
-test("chat decision treats two-member owner groups as private-like", async () => {
+test("chat decision lets two-member owner groups skip mention without changing chat type", async () => {
   const result = await decision.shouldProcessText(
     {
       platform: "telegram",
@@ -107,11 +107,11 @@ test("chat decision treats two-member owner groups as private-like", async () =>
 
   assert.equal(result.allow, true);
   assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
-  assert.equal(result.chatType, "private");
+  assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
 });
 
-test("chat decision treats Feishu owner-only groups as private-like", async () => {
+test("chat decision lets Feishu owner-only groups skip mention without changing chat type", async () => {
   const calls: string[] = [];
   const result = await decision.shouldProcessText(
     {
@@ -137,7 +137,7 @@ test("chat decision treats Feishu owner-only groups as private-like", async () =
   assert.deepEqual(calls, ["oc_owner_only"]);
   assert.equal(result.allow, true);
   assert.equal(result.chatKey, "lark:oc_owner_only");
-  assert.equal(result.chatType, "private");
+  assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
 });
 

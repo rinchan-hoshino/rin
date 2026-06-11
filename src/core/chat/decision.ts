@@ -209,10 +209,10 @@ export async function shouldProcessText(
     };
 
   const context = normalizeDecisionSessionContext(session, identity);
-  const privateLike =
-    directLike(session) ||
+  const chatType = directLike(session) ? "private" : "group";
+  const privateLikeGroup =
+    chatType === "group" &&
     (await isPrivateLikeGroupSession(session, context.trust));
-  const chatType = privateLike ? "private" : "group";
   const ownerPresent =
     chatType === "private" ||
     (await isOwnerPresentInGroupSession(session, identity, context));
@@ -223,6 +223,7 @@ export async function shouldProcessText(
       trust: context.trust,
       mentionLike: mentionLike(session),
       commandLike: false,
+      allowWithoutMention: privateLikeGroup,
     });
 
   return {
