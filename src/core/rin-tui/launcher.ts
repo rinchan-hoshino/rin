@@ -46,6 +46,56 @@ type TuiStartupTerminal = {
   write?(value: string): unknown;
 };
 
+type TuiStartupStatusAnimation = {
+  stop(): void;
+};
+
+const STARTING_STATUS_FRAMES = [
+  "⠋",
+  "⠙",
+  "⠹",
+  "⠸",
+  "⠼",
+  "⠴",
+  "⠦",
+  "⠧",
+  "⠇",
+  "⠏",
+];
+const STARTING_STATUS_INTERVAL_MS = 80;
+
+export function startTuiStartupStatusAnimation(
+  stdout: TuiStartupTerminal = process.stdout,
+  options: { intervalMs?: number } = {},
+): TuiStartupStatusAnimation {
+  if (!stdout.isTTY || typeof stdout.write !== "function") {
+    return { stop() {} };
+  }
+
+  let frameIndex = 0;
+  let stopped = false;
+  const intervalMs = Math.max(
+    1,
+    options.intervalMs ?? STARTING_STATUS_INTERVAL_MS,
+  );
+  const render = () => {
+    const frame =
+      STARTING_STATUS_FRAMES[frameIndex] ?? STARTING_STATUS_FRAMES[0];
+    frameIndex = (frameIndex + 1) % STARTING_STATUS_FRAMES.length;
+    stdout.write?.(`\r\x1b[K${frame} Starting...`);
+  };
+  render();
+  const timer = setInterval(render, intervalMs);
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      stdout.write?.("\r\x1b[K");
+    },
+  };
+}
+
 export function clearVisibleTerminalForTuiStartup(
   stdout: TuiStartupTerminal = process.stdout,
 ) {
@@ -308,11 +358,16 @@ async function startRpcTui(
   let runtimeHost: { dispose(): Promise<void> } | undefined;
   let interactiveMode: InteractiveMode | undefined;
   try {
-    await prepareRpcSessionWorkerForInteractiveStartup(
-      rpcSession,
-      interactiveOptions,
-      profile,
-    );
+    const startupStatus = startTuiStartupStatusAnimation();
+    try {
+      await prepareRpcSessionWorkerForInteractiveStartup(
+        rpcSession,
+        interactiveOptions,
+        profile,
+      );
+    } finally {
+      startupStatus.stop();
+    }
     runtimeHost = createFrontendSdkRuntimeWrapper(
       createRpcRuntimeHost(rpcSession),
     );

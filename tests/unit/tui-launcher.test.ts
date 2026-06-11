@@ -226,6 +226,36 @@ test("tui launcher clears the visible viewport before taking over the terminal",
   assert.deepEqual(writes, ["\x1b[2J\x1b[H"]);
 });
 
+test("rpc startup shows a Starting animation before the full TUI takes over", () => {
+  const writes: string[] = [];
+  const status = launcher.startTuiStartupStatusAnimation(
+    {
+      isTTY: true,
+      write(value: string) {
+        writes.push(value);
+        return true;
+      },
+    },
+    { intervalMs: 1000 },
+  );
+
+  status.stop();
+
+  assert.match(writes[0], /Starting\.\.\./);
+  assert.equal(writes.at(-1), "\r\x1b[K");
+
+  const nonTtyWrites: string[] = [];
+  launcher
+    .startTuiStartupStatusAnimation({
+      isTTY: false,
+      write(value: string) {
+        nonTtyWrites.push(value);
+      },
+    })
+    .stop();
+  assert.deepEqual(nonTtyWrites, []);
+});
+
 test("tui cli options stay lightweight without onboarding imports", async () => {
   const source = await fs.readFile(
     path.join(rootDir, "src", "core", "rin-tui", "cli-options.ts"),
