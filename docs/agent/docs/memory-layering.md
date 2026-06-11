@@ -7,17 +7,19 @@ Terminology:
 - **Memory** is original material plus retrieval: archived transcripts, exact wording, evidence, chronology, provenance, and indexes that help find those originals.
 - **Self-improve** is distilled guidance: compact prompt baselines, reusable skills, and short-term continuity records that change future agent behavior.
 
+If an owner correction or repeated failure implies a future behavior change, memory can preserve the evidence, but self-improve carries the executable rule in the prompt or skill surface that future work will use.
+
 Keep these concepts separate even when implementation paths overlap. For example, memory-index files may live under `self_improve/skills` for skill-based discovery, but their job is to point back to memory evidence, not to replace the original evidence.
 
 ## Surface model
 
-| Concept      | Surface               | Storage                                                        | Use when                                                                                                   |
-| ------------ | --------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Memory       | Transcript archives   | archived session memory                                        | Original conversation text, evidence, wording, chronology, or provenance matters                           |
-| Memory       | Memory index pointers | `self_improve/skills/memory-index/...`                         | A compact dated handle helps retrieve original evidence later                                              |
-| Self-improve | Prompt baselines      | `self_improve/prompts/*.md`                                    | A compact distilled rule must influence most turns                                                         |
-| Self-improve | Reusable skills       | `self_improve/skills/<skill>/`                                 | A reusable workflow, procedure, playbook, example, or distilled domain fact should load for matching tasks |
-| Self-improve | Short-term continuity | `self_improve/skills/short-term-memory/SKILL.md` or task files | Active distilled handoff state guides current work                                                         |
+| Concept      | Surface               | Storage                                                        | Use when                                                                                                |
+| ------------ | --------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Memory       | Transcript archives   | archived session memory                                        | Original conversation text, evidence, wording, chronology, or provenance matters                        |
+| Memory       | Memory index pointers | `self_improve/skills/memory-index/...`                         | A compact dated handle helps retrieve original evidence later                                           |
+| Self-improve | Prompt baselines      | `self_improve/prompts/*.md`                                    | A compact distilled rule must influence most turns                                                      |
+| Self-improve | Reusable skills       | `self_improve/skills/<skill>/`                                 | A reusable workflow, procedure, playbook, example, or distilled domain fact should guide matching tasks |
+| Self-improve | Short-term continuity | `self_improve/skills/short-term-memory/SKILL.md` or task files | Active distilled handoff state guides current work                                                      |
 
 Use the least resident self-improve surface that changes future behavior. Use memory retrieval when original evidence matters.
 
@@ -36,6 +38,8 @@ Use `search_memory` when the task depends on:
 Keep raw event evidence in transcript archives. Add a memory-index pointer only when future lookup needs a stable topic/date/keyword handle.
 
 Use one evolving memory-index transaction for repeated same-topic evidence. Update the monthly index line with date ranges and keywords instead of creating many near-duplicate transaction files.
+
+When a correction proves an operational rule, pair any memory-index pointer with the matching prompt baseline, workflow skill, scheduled-task prompt, or product manual that future work will use, or record why that surface already contains the exact behavior.
 
 ## Self-improve surfaces
 
@@ -83,7 +87,7 @@ When adding or consolidating information, choose the destination in this order:
 1. **Memory only:** original wording, evidence, chronology, or provenance is enough; use transcript archives and `search_memory`.
 2. **Memory index pointer:** future lookup needs a compact dated handle to original evidence.
 3. **Prompt baseline:** distilled guidance must influence most future turns and fits one compact line.
-4. **Current matching skill:** distilled workflow or domain guidance belongs in the active skill.
+4. **Current matching skill:** distilled workflow or domain guidance belongs in the active skill. For correction-based reusable behavior, the matching executable surface carries the rule unless it is already present.
 5. **Umbrella skill:** a broader existing skill cleanly owns the class of distilled guidance.
 6. **Skill reference:** reusable evidence, examples, commands, or traces are useful but too bulky for `SKILL.md`.
 7. **New skill:** the distilled trigger is recurring, reusable, and not owned by an existing skill.
@@ -108,7 +112,7 @@ Use `docs/self-improve-distillation.md` for the full self-improve distillation w
 At task time:
 
 1. Follow prompt baselines for standing posture and constraints.
-2. Load the matching skill when its description fits the task.
+2. Use the matching skill when its description fits the task.
 3. Use `search_memory` when original context, evidence, wording, chronology, or cross-session continuity matters.
 4. Inspect concrete memory or self-improve files only after the retrieval layer points to them.
 

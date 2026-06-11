@@ -1,6 +1,6 @@
 ---
 name: rin-prompt-engineering
-description: "Use for LLM prompts and agent/task instructions: system/developer prompts, skills, agent workflows, tool-use rules, structured output, RAG/citation prompts, model migration, prompt evaluation, and prompt-caused behavior issues."
+description: "Use whenever writing, editing, reviewing, or debugging LLM prompts, including agent prompts, system/developer prompts, skills, scheduled-agent tasks, and any instruction given to an LLM."
 ---
 
 # Rin prompt engineering
