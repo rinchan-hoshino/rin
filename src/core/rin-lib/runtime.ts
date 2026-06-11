@@ -487,8 +487,9 @@ function buildRinDocsBlock(agentDir: string) {
     `- Pi base docs: ${path.join(piRoot, "README.md")} and ${path.join(piRoot, "docs")}`,
     "- For Rin runtime, daemon, memory, scheduled task, chat, frontend, layout, update, or capability behavior, read Rin docs first; Rin overrides Pi.",
     "- Start runtime work with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md; then read only the narrow topic doc needed for the task.",
-    "- Topic routes: session awareness -> docs/session-awareness.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/agent-sdk.md + docs/scheduled-tasks.md; rich chat output -> docs/rich-text-output-format.md; chat bridge -> docs/chat-bridge.md; runtime layout -> docs/runtime-layout.md; capabilities and update -> docs/capabilities.md.",
-    "- Core Rin capabilities: use real scheduled/background tasks for reminders, delayed follow-ups, recurring work, polling/watch work, and work that must continue after the current turn; use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
+    "- Topic routes: session awareness -> docs/session-awareness.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/agent-sdk.md + docs/scheduled-tasks.md; rich chat output -> docs/rich-text-output-format.md; chat bridge -> docs/chat-bridge.md; runtime layout -> docs/runtime-layout.md; capabilities/update/rollback -> docs/capabilities.md.",
+    "- Core scheduled tasks: use real scheduled/background tasks for reminders, delayed follow-ups, recurring work, polling/watch work, and work that must continue after the current turn.",
+    "- Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
     "- Use Pi docs only for topics not covered by Rin docs, after applying Rin overrides.",
   ].join("\n");
 }

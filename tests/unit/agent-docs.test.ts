@@ -75,11 +75,12 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(piOverrides, /Report the effective authority/);
   assert.match(runtimeLayout, /## Locator contract/);
   assert.match(runtimeLayout, /## Installed runtime entrypoint/);
-  assert.match(runtimeLayout, /## Rollback contract/);
+  assert.match(runtimeLayout, /## Maintenance target contract/);
   assert.match(
     capabilities,
     /`rin update --yes`: the only agent-facing installed-runtime update command/,
   );
+  assert.match(capabilities, /`rin rollback`: switch to the `previousRelease`/);
   assert.match(runtimeLayout, /## Source checkout boundary/);
   assert.match(runtimeLayout, /## Report contract/);
   assert.match(runtimeLayout, /<targetHome>\/\.rin\/installer\.json/);

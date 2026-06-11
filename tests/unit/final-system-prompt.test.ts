@@ -138,7 +138,12 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Core Rin capabilities: use real scheduled/background tasks for reminders, delayed follow-ups, recurring work, polling/watch work, and work that must continue after the current turn; use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
+      "Core scheduled tasks: use real scheduled/background tasks for reminders, delayed follow-ups, recurring work, polling/watch work, and work that must continue after the current turn.",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
     ),
   );
   assert.equal(baseSystemPrompt.includes("condition.kind"), false);
@@ -152,7 +157,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("chat bridge -> docs/chat-bridge.md"));
   assert.ok(
     baseSystemPrompt.includes(
-      "runtime layout -> docs/runtime-layout.md; capabilities and update -> docs/capabilities.md",
+      "runtime layout -> docs/runtime-layout.md; capabilities/update/rollback -> docs/capabilities.md",
     ),
   );
   assert.equal(

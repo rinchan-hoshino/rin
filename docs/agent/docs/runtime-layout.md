@@ -44,7 +44,7 @@ A runtime-layout inspection is complete when:
 - `app/current/` identifies the active installed runtime entrypoint;
 - source checkout paths and installed runtime paths are treated as separate surfaces;
 - docs paths are resolved through the installed `docs/rin/` and `docs/pi/` roots;
-- rollback, SDK import, or installed-runtime edits name the verified target.
+- SDK import or installed-runtime edits name the verified target.
 
 ## Agent directory contract
 
@@ -141,18 +141,18 @@ Use `app/current/` for:
 
 Use a specific `app/releases/<id>/` path for auditing a recorded release.
 
-## Rollback contract
+## Maintenance target contract
 
-Use `rin rollback` to switch to the `previousRelease` recorded in the install manifest. Update policy belongs to `docs/capabilities.md`.
+Use this document to identify the installed runtime target for launcher maintenance. Update and rollback operation policy belongs to `docs/capabilities.md`.
 
-Before rollback, verify target ownership through:
+Verify target ownership through:
 
 - `<targetHome>/.rin/installer.json`;
 - `<installDir>/installer.json`;
 - Linux service files under `~/.config/systemd/user/rin-daemon*.service`;
 - macOS launch agents under `~/Library/LaunchAgents/com.rin.daemon.*.plist`.
 
-After rollback, verify:
+After installed-runtime maintenance, verify:
 
 - `app/current/` target;
 - `currentRelease` and `previousRelease` in `<installDir>/installer.json`;
