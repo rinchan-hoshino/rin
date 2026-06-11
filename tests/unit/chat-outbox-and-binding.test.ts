@@ -101,6 +101,48 @@ test("chat outbox retries queued payloads after send failure", async () => {
   });
 });
 
+test("chat outbox fails partial delivery errors without retrying", async () => {
+  await withTempDir(async (dir) => {
+    outbox.enqueueChatOutboxPayload(dir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/777:1",
+      text: "partial send",
+    });
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "777",
+          async sendMessage() {
+            throw Object.assign(
+              new Error("chat_delivery_partial:network down"),
+              {
+                deliveredMessageIds: ["m-before-failure"],
+                partialDelivery: true,
+              },
+            );
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+    const logger = { warn() {} };
+
+    const results = await boot.drainChatOutbox(app, dir, h, logger);
+    assert.equal(results[0].status, "failed");
+    const failed = outbox.listChatOutboxItems(dir)[0].item;
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.failureKind, "permanent");
+    assert.equal(failed.nextAttemptAt, undefined);
+    assert.deepEqual(failed.deliveryResult, ["m-before-failure"]);
+  });
+});
+
 test("chat outbox stops retrying after repeated transient failures", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {

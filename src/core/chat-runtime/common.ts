@@ -364,14 +364,19 @@ export async function readBinaryFromNode(node: any) {
   if (!src) return null;
   if (src.startsWith("file://")) {
     const filePath = fileURLToPath(src);
-    const data = await fs.promises.readFile(filePath);
-    return {
-      data,
-      name:
-        ensureExtension(path.basename(filePath), mimeType) ||
-        ensureExtension(name, mimeType),
-      mimeType,
-    };
+    try {
+      const data = await fs.promises.readFile(filePath);
+      return {
+        data,
+        name:
+          ensureExtension(path.basename(filePath), mimeType) ||
+          ensureExtension(name, mimeType),
+        mimeType,
+      };
+    } catch (error: any) {
+      if (error?.code === "ENOENT") throw mediaSourceMissingError(filePath);
+      throw error;
+    }
   }
   if (/^https?:\/\//i.test(src)) {
     return {
@@ -380,14 +385,20 @@ export async function readBinaryFromNode(node: any) {
       mimeType,
     };
   }
-  const data = await fs.promises.readFile(path.resolve(src));
-  return {
-    data,
-    name:
-      ensureExtension(path.basename(src), mimeType) ||
-      ensureExtension(name, mimeType),
-    mimeType,
-  };
+  const filePath = path.resolve(src);
+  try {
+    const data = await fs.promises.readFile(filePath);
+    return {
+      data,
+      name:
+        ensureExtension(path.basename(src), mimeType) ||
+        ensureExtension(name, mimeType),
+      mimeType,
+    };
+  } catch (error: any) {
+    if (error?.code === "ENOENT") throw mediaSourceMissingError(filePath);
+    throw error;
+  }
 }
 
 export function extractQuoteMessageId(nodes: any[]) {

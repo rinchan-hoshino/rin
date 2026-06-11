@@ -137,6 +137,23 @@ test("chat runtime common helpers expand markdown rich object syntax", () => {
   assert.equal(markdown.nodes[4].attrs.name, "spec.pdf");
 });
 
+test("chat runtime common helpers do not expand rich syntax inside markdown code", () => {
+  const markdown = chatRuntimeCommon.prepareOutboundNodes([
+    chatRuntimeCommon.normalizeNode("markdown", {
+      content:
+        "Examples: `[@name](at:<platform-user-id>)` and `[image: name](local-path-or-url)`\n```md\n[file: name](local-path-or-url)\n```\nActual [quote:m1] [image: cat](https://example.com/cat.png)",
+    }),
+  ]);
+
+  assert.deepEqual(
+    markdown.nodes.map((node) => node.type),
+    ["markdown", "quote", "image"],
+  );
+  assert.equal(markdown.replyToMessageId, "m1");
+  assert.match(markdown.nodes[0].attrs.content, /local-path-or-url/);
+  assert.equal(markdown.nodes[2].attrs.src, "https://example.com/cat.png");
+});
+
 test("chat runtime common helpers preserve binary payload naming for buffers and file urls", async () => {
   const bufferPayload = await chatRuntimeCommon.readBinaryFromNode(
     chatRuntimeCommon.normalizeNode("file", {
@@ -164,6 +181,15 @@ test("chat runtime common helpers preserve binary payload naming for buffers and
     assert.equal(filePayload?.name, "note.txt");
     assert.equal(filePayload?.mimeType, "text/plain");
     assert.equal(filePayload?.data.toString("utf8"), "hello file\n");
+    await assert.rejects(
+      () =>
+        chatRuntimeCommon.readBinaryFromNode(
+          chatRuntimeCommon.normalizeNode("image", {
+            src: path.join(tempDir, "missing.png"),
+          }),
+        ),
+      /chat_media_file_missing:/,
+    );
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

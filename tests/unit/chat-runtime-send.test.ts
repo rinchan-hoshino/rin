@@ -166,6 +166,34 @@ test("telegram adapter splits text and image rich parts in order", async () => {
   });
 });
 
+test("telegram adapter validates media before sending preceding text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+
+    const missingPath = path.join(agentDir, "missing.png");
+    await assert.rejects(
+      () =>
+        app.bots[0].sendMessage("456", [
+          h.markdown(`leading text [image: missing](${missingPath})`),
+        ]),
+      /chat_media_file_missing:/,
+    );
+
+    assert.equal(calls.length, 0);
+  });
+});
+
 test("telegram adapter sends media before following text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {

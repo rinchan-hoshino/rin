@@ -1,3 +1,5 @@
+import { Lexer } from "marked";
+
 import { safeString } from "../text-utils.js";
 
 export type ChatMarkdownPolicy = "render" | "preserve" | "strip";
@@ -233,16 +235,99 @@ function mediaNode(type: string, src: string, name = "") {
   );
 }
 
+type MarkdownSourceRange = { start: number; end: number };
+
+function appendMarkdownRange(
+  ranges: MarkdownSourceRange[],
+  start: number,
+  end: number,
+) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+  ranges.push({ start, end });
+}
+
+function markdownRangeOverlaps(
+  ranges: MarkdownSourceRange[],
+  start: number,
+  end: number,
+) {
+  return ranges.some((range) => start < range.end && end > range.start);
+}
+
+function locateTokenRaw(source: string, raw: string, cursor: number) {
+  if (!raw) return -1;
+  const afterCursor = source.indexOf(raw, Math.max(0, cursor));
+  return afterCursor >= 0 ? afterCursor : source.indexOf(raw);
+}
+
+function collectInlineMarkdownProtectedRanges(
+  ranges: MarkdownSourceRange[],
+  blockStart: number,
+  blockRaw: string,
+  tokens: any[],
+) {
+  let cursor = 0;
+  for (const token of Array.isArray(tokens) ? tokens : []) {
+    const raw = safeString(token?.raw);
+    if (!raw) continue;
+    let localStart = blockRaw.indexOf(raw, cursor);
+    if (localStart < 0) localStart = blockRaw.indexOf(raw);
+    if (localStart < 0) continue;
+    const start = blockStart + localStart;
+    const end = start + raw.length;
+    const type = safeString(token?.type).trim().toLowerCase();
+    if (type === "codespan") {
+      appendMarkdownRange(ranges, start, end);
+    }
+    if (Array.isArray(token?.tokens) && token.tokens.length) {
+      collectInlineMarkdownProtectedRanges(ranges, start, raw, token.tokens);
+    }
+    cursor = localStart + raw.length;
+  }
+}
+
+function collectMarkdownProtectedRanges(source: string) {
+  const ranges: MarkdownSourceRange[] = [];
+  let cursor = 0;
+  let tokens: any[] = [];
+  try {
+    tokens = Lexer.lex(source) as any[];
+  } catch {
+    return ranges;
+  }
+
+  for (const token of tokens) {
+    const raw = safeString(token?.raw);
+    if (!raw) continue;
+    const start = locateTokenRaw(source, raw, cursor);
+    if (start < 0) continue;
+    const end = start + raw.length;
+    const type = safeString(token?.type).trim().toLowerCase();
+    if (type === "code") {
+      appendMarkdownRange(ranges, start, end);
+    } else if (Array.isArray(token?.tokens) && token.tokens.length) {
+      collectInlineMarkdownProtectedRanges(ranges, start, raw, token.tokens);
+    }
+    cursor = end;
+  }
+
+  return ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
 function parseMarkdownRichTextNodes(text: string) {
   const source = safeString(text);
+  const protectedRanges = collectMarkdownProtectedRanges(source);
   const nodes: any[] = [];
   const tokenPattern =
     /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\((at|mention|quote):([^)]+)\)|\[(image|file|video|audio|sticker):\s*([^\]]*)\]\(([^)]+)\)|\[quote:\s*([^\]]+)\]/gi;
   let cursor = 0;
   for (const match of source.matchAll(tokenPattern)) {
     const index = typeof match.index === "number" ? match.index : cursor;
+    const matchText = safeString(match[0]);
+    const end = index + matchText.length;
+    if (markdownRangeOverlaps(protectedRanges, index, end)) continue;
     pushTextNode(nodes, "markdown", source.slice(cursor, index));
-    cursor = index + safeString(match[0]).length;
+    cursor = end;
 
     if (match[1] !== undefined) {
       nodes.push(mediaNode("image", match[2] || "", match[1] || ""));

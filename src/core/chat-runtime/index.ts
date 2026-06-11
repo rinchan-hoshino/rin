@@ -241,6 +241,17 @@ function createNodeBuilder() {
   return h;
 }
 
+function partialChatDeliveryError(error: unknown, delivered: string[]) {
+  const message = safeString((error as any)?.message || error) || "send_failed";
+  const next = new Error(`chat_delivery_partial:${message}`) as Error & {
+    deliveredMessageIds?: string[];
+    partialDelivery?: boolean;
+  };
+  next.deliveredMessageIds = [...delivered];
+  next.partialDelivery = true;
+  return next;
+}
+
 export class ChatRuntimeApp extends EventEmitter {
   bots: any[] = [];
   private readonly adapters = new Set<any>();
@@ -830,55 +841,75 @@ class TelegramAdapter {
     return safeString(result?.message_id).trim();
   }
 
+  private async assertMediaSourcesReadable(nodes: any[]) {
+    for (const node of nodes) {
+      const type = safeString(node?.type).toLowerCase();
+      if (!isTelegramMediaNodeType(type)) continue;
+      const media = telegramMediaMethod(type);
+      const payload = await readBinaryFromNode(node);
+      if (!payload)
+        throw new Error(`telegram_media_source_missing:${media.field}`);
+    }
+  }
+
   async sendMessage(chatId: string, content: any) {
     const { work, replyToMessageId } = prepareOutboundNodes(content);
+    await this.assertMediaSourcesReadable(work);
     const delivered: string[] = [];
-    let cursor = 0;
-    let firstReply = replyToMessageId;
-    while (cursor < work.length) {
-      const node = work[cursor];
-      const type = safeString(node?.type).toLowerCase();
-      if (isTelegramMediaNodeType(type)) {
-        const media = telegramMediaMethod(type);
-        const messageId = await this.sendBinaryMessage(
-          media.method as any,
-          media.field as any,
-          chatId,
-          node,
-          "",
-          firstReply,
-        );
-        if (messageId) delivered.push(messageId);
-        firstReply = undefined;
-        cursor += 1;
-        continue;
+    try {
+      let cursor = 0;
+      let firstReply = replyToMessageId;
+      while (cursor < work.length) {
+        const node = work[cursor];
+        const type = safeString(node?.type).toLowerCase();
+        if (isTelegramMediaNodeType(type)) {
+          const media = telegramMediaMethod(type);
+          const messageId = await this.sendBinaryMessage(
+            media.method as any,
+            media.field as any,
+            chatId,
+            node,
+            "",
+            firstReply,
+          );
+          if (messageId) delivered.push(messageId);
+          firstReply = undefined;
+          cursor += 1;
+          continue;
+        }
+        const textNodes: any[] = [];
+        let nextCursor = cursor;
+        while (nextCursor < work.length) {
+          const candidate = work[nextCursor];
+          const candidateType = safeString(candidate?.type).toLowerCase();
+          if (isTelegramMediaNodeType(candidateType)) break;
+          textNodes.push(candidate);
+          nextCursor += 1;
+        }
+        const text = renderTelegramHtmlFromNodes(textNodes);
+        for (const textChunk of splitPlainText(
+          text,
+          TELEGRAM_MAX_TEXT_LENGTH,
+        )) {
+          const messageId = await this.sendText(
+            chatId,
+            textChunk,
+            firstReply,
+            "HTML",
+          );
+          if (messageId) delivered.push(messageId);
+          firstReply = undefined;
+        }
+        cursor = nextCursor;
       }
-      const textNodes: any[] = [];
-      let nextCursor = cursor;
-      while (nextCursor < work.length) {
-        const candidate = work[nextCursor];
-        const candidateType = safeString(candidate?.type).toLowerCase();
-        if (isTelegramMediaNodeType(candidateType)) break;
-        textNodes.push(candidate);
-        nextCursor += 1;
+      if (!delivered.length) {
+        throw new Error("telegram_send_message_empty");
       }
-      const text = renderTelegramHtmlFromNodes(textNodes);
-      for (const textChunk of splitPlainText(text, TELEGRAM_MAX_TEXT_LENGTH)) {
-        const messageId = await this.sendText(
-          chatId,
-          textChunk,
-          firstReply,
-          "HTML",
-        );
-        if (messageId) delivered.push(messageId);
-        firstReply = undefined;
-      }
-      cursor = nextCursor;
+      return delivered;
+    } catch (error) {
+      if (delivered.length) throw partialChatDeliveryError(error, delivered);
+      throw error;
     }
-    if (!delivered.length) {
-      throw new Error("telegram_send_message_empty");
-    }
-    return delivered;
   }
 
   async tickWorkingIndicator(context: any) {

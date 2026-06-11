@@ -128,9 +128,26 @@ function chatOutboxErrorMessage(error: unknown) {
   return safeString((error as any)?.message || error) || "send_failed";
 }
 
+function partialDeliveryMessageIds(error: unknown) {
+  return Array.isArray((error as any)?.deliveredMessageIds)
+    ? (error as any).deliveredMessageIds
+        .map((item: unknown) => safeString(item).trim())
+        .filter(Boolean)
+    : [];
+}
+
+function isPartialChatDeliveryError(error: unknown) {
+  return (
+    (error as any)?.partialDelivery === true ||
+    partialDeliveryMessageIds(error).length > 0 ||
+    /^chat_delivery_partial\b/.test(chatOutboxErrorMessage(error))
+  );
+}
+
 function isPermanentChatOutboxError(error: unknown) {
   const message = chatOutboxErrorMessage(error);
   return (
+    isPartialChatDeliveryError(error) ||
     /^(invalid_chatKey|no_bot_for_platform|chat_outbox_empty_message|chat_outbox_invalid_part|unsupported_chat_part|chat_part_file_missing|chat_media_file_missing)\b/.test(
       message,
     ) ||
@@ -231,6 +248,7 @@ async function drainChatOutboxItem(
     };
   } catch (error: any) {
     const message = chatOutboxErrorMessage(error);
+    const partialDelivered = partialDeliveryMessageIds(error);
     const permanent = isPermanentChatOutboxError(error);
     const exhausted = sending.attempts >= CHAT_OUTBOX_MAX_ATTEMPTS;
     if (permanent || exhausted) {
@@ -242,6 +260,9 @@ async function drainChatOutboxItem(
         lastError: message,
         nextAttemptAt: undefined,
         failureKind: permanent ? "permanent" : "attempts_exhausted",
+        deliveryResult: partialDelivered.length
+          ? partialDelivered
+          : sending.deliveryResult,
       };
       writeChatOutboxItem(agentDir, failed);
       warnChatOutboxFailure(logger, failed, error, "failed");
