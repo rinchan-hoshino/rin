@@ -54,6 +54,7 @@ import {
   formatChatRuntimeErrorForUser,
   isTransientChatRuntimeError,
 } from "./runtime-errors.js";
+import { resolveChatQuietModeEnabled } from "./settings.js";
 
 const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
 const WORKING_REACTION_INTERVAL_MS = 30_000;
@@ -433,6 +434,13 @@ export class ChatController {
     const parsed = parseChatKey(this.chatKey);
     if (!parsed) return false;
     return Boolean(findBot(this.app, parsed.platform, parsed.botId));
+  }
+
+  private isQuietModeEnabled() {
+    return resolveChatQuietModeEnabled(
+      readJsonFile(path.join(this.agentDir, "settings.json"), {}),
+      this.chatKey,
+    );
   }
 
   private getWorkingIndicators() {
@@ -1627,6 +1635,13 @@ export class ChatController {
 
   private async handleFrontendEvent(event: any) {
     if (!event || typeof event !== "object") return;
+    if (
+      this.isQuietModeEnabled() &&
+      (event.type === "assistant_interim" ||
+        (event.type === "passive_notice" && event.noticeKind === "todo"))
+    ) {
+      return;
+    }
     switch (event.type) {
       case "frontend_status":
         if (event.phase === "working") {

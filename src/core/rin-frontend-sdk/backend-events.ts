@@ -181,6 +181,7 @@ function todoPassiveNotice(text: string) {
     text,
     level: "info",
     deferDuringTurn: false,
+    noticeKind: "todo",
   } satisfies RinFrontendBackendEvent;
 }
 

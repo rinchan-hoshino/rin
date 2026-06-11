@@ -275,23 +275,26 @@ test("cron dedicated agent task creates and then preserves its bound session", a
         chatKey: item.chatKey,
         controllerKey: item.controllerKey,
         affectChatBinding: item.affectChatBinding,
+        deliverFinal: item.deliverFinal,
         disposeAfterTurn: item.disposeAfterTurn,
         text: item.text,
         sessionFile: item.sessionFile,
       })),
       [
         {
-          chatKey: undefined,
+          chatKey: "telegram/demo:1",
           controllerKey: "cron_dedicated",
-          affectChatBinding: false,
+          affectChatBinding: true,
+          deliverFinal: true,
           disposeAfterTurn: false,
           text: "hello",
           sessionFile: dedicatedSessionFile,
         },
         {
-          chatKey: undefined,
+          chatKey: "telegram/demo:1",
           controllerKey: "cron_dedicated",
-          affectChatBinding: false,
+          affectChatBinding: true,
+          deliverFinal: true,
           disposeAfterTurn: false,
           text: "hello again",
           sessionFile: dedicatedSessionFile,
@@ -357,14 +360,16 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
         chatKey: calls[0].chatKey,
         controllerKey: calls[0].controllerKey,
         affectChatBinding: calls[0].affectChatBinding,
+        deliverFinal: calls[0].deliverFinal,
         disposeAfterTurn: calls[0].disposeAfterTurn,
         text: calls[0].text,
         sessionFile: calls[0].sessionFile,
       },
       {
-        chatKey: undefined,
+        chatKey: "telegram/demo:1",
         controllerKey: "cron_seeded",
-        affectChatBinding: false,
+        affectChatBinding: true,
+        deliverFinal: true,
         disposeAfterTurn: false,
         text: "hello again",
         sessionFile: path.join(
@@ -564,6 +569,9 @@ test("cron chat-bound no-session agent task preserves session file for quote res
       await fs.readFile(transientSessionFile, "utf8"),
       "temporary session",
     );
+    assert.equal(calls[0].chatKey, "telegram/demo:1");
+    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal(calls[0].deliverFinal, true);
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_chat_bound");
     assert.equal(calls[0].shutdownAfterTurn, true);
@@ -885,7 +893,7 @@ test("cron dedicated agent task uses separate initial and continuation prompts",
   }
 });
 
-test("cron chat-bound agent task delivery records session binding", async () => {
+test("cron chat-bound agent task uses chat turn delivery", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const sessionFile = path.join(
     agentDir,
@@ -894,6 +902,7 @@ test("cron chat-bound agent task delivery records session binding", async () => 
     "task",
     "cron_delivery.jsonl",
   );
+  const calls = [];
   const sent = [];
   const task = {
     id: "cron_delivery",
@@ -907,15 +916,20 @@ test("cron chat-bound agent task delivery records session binding", async () => 
     await execMod.executeCronTask(task, {
       agentDir,
       chat: {
-        runTurn: async () => ({ finalText: "done", sessionFile }),
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return { finalText: "done", sessionFile };
+        },
         send: async (payload) => {
           sent.push(payload);
         },
       },
     });
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].sessionFile, sessionFile);
-    assert.equal(sent[0].sessionBinding, "conversation");
+    assert.equal(sent.length, 0);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].chatKey, "telegram/demo:1");
+    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal(calls[0].deliverFinal, true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -923,6 +937,7 @@ test("cron chat-bound agent task delivery records session binding", async () => 
 
 test("cron chat-bound task can bind frontend without final delivery", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const calls = [];
   const sent = [];
   const task = {
     id: "cron_silent_delivery",
@@ -937,7 +952,10 @@ test("cron chat-bound task can bind frontend without final delivery", async () =
     await execMod.executeCronTask(task, {
       agentDir,
       chat: {
-        runTurn: async () => ({ finalText: "hidden final" }),
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return { finalText: "hidden final" };
+        },
         send: async (payload) => {
           sent.push(payload);
         },
@@ -945,6 +963,9 @@ test("cron chat-bound task can bind frontend without final delivery", async () =
     });
     assert.equal(task.lastResultText, "hidden final");
     assert.equal(sent.length, 0);
+    assert.equal(calls[0].chatKey, "telegram/demo:1");
+    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal(calls[0].deliverFinal, false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

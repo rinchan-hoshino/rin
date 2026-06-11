@@ -938,6 +938,54 @@ test("chat controller delivers non-deferred passive notices during active turns"
   ]);
 });
 
+test("chat controller quiet mode suppresses interim and todo notices", async () => {
+  const controller = await createController("telegram/1:2");
+  await fs.writeFile(
+    path.join(controller.agentDir, "settings.json"),
+    JSON.stringify({
+      chat: { byChatKey: { "telegram/1:2": { quietMode: true } } },
+    }),
+    "utf8",
+  );
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .filter(Boolean)
+      .join(" ");
+    deliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-out-${deliveries.length}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: { type: "assistant_interim", text: "checking" },
+  });
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "- [ ] hidden todo",
+      noticeKind: "todo",
+      deferDuringTurn: false,
+    },
+  });
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "Compacted from 10,000 tokens",
+      noticeKind: "compaction_end",
+      deferDuringTurn: false,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(deliveries, [
+    { text: "Compacted from 10,000 tokens", kind: "passive_notice" },
+  ]);
+});
+
 test("chat controller does not create processing turns for slash commands", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];

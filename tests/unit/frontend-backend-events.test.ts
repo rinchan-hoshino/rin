@@ -255,6 +255,7 @@ test("frontend backend event translator emits todo notice for single todo execut
         text: "[ ] Keep working\n[x] Ship renderer",
         level: "info",
         deferDuringTurn: false,
+        noticeKind: "todo",
       },
     ],
   );
@@ -308,6 +309,7 @@ test("frontend backend event translator waits for the active tool batch before t
         text: "[ ] Keep working\n[x] Ship renderer",
         level: "info",
         deferDuringTurn: false,
+        noticeKind: "todo",
       },
     ],
   );
@@ -372,6 +374,7 @@ test("frontend backend event translator emits nested multi-tool todo notice when
         text: "[ ] Keep working\n[x] Ship renderer",
         level: "info",
         deferDuringTurn: false,
+        noticeKind: "todo",
       },
     ],
   );

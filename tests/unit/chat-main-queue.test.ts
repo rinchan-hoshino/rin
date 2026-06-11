@@ -115,10 +115,8 @@ test("chat main records record-only chat messages without starting an agent turn
       path.join(agentDir, "settings.json"),
       JSON.stringify({
         chat: {
-          turnPolicy: {
-            byChatKey: {
-              "telegram/1:2": "record_only",
-            },
+          byChatKey: {
+            "telegram/1:2": { turnPolicy: "record_only" },
           },
         },
       }) + "\n",

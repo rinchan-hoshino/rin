@@ -329,7 +329,13 @@ export async function executeCronAgentTask(
   const prompt = basePrompt;
   const result = await options.chat.runTurn({
     controllerKey,
-    affectChatBinding: false,
+    ...(chatKey
+      ? {
+          chatKey,
+          affectChatBinding: true,
+          deliverFinal: task.deliverFinal !== false,
+        }
+      : { affectChatBinding: false }),
     disposeAfterTurn: sessionMode === "none",
     shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(task, sessionMode),
     text: prompt,
@@ -440,8 +446,11 @@ export async function executeCronTask(
         sessionFile?: string;
       }
     | undefined;
+  const showExternalWorking = task.target.kind === "shell_command";
   try {
-    await setCronTaskFrontendWorking(task, options, true);
+    if (showExternalWorking) {
+      await setCronTaskFrontendWorking(task, options, true);
+    }
     if (task.target.kind === "shell_command") {
       const text = await executeCronShellTask(task, {
         agentDir: options.agentDir,
@@ -482,19 +491,6 @@ export async function executeCronTask(
         outputPreview: result.text,
         sessionFile: result.sessionFile,
       };
-      const frontend = resolveCronTaskFrontend(task);
-      const chatKey = shouldDeliverCronTaskFinal(task, frontend)
-        ? frontend?.key
-        : undefined;
-      if (chatKey && result.text) {
-        await sendChatText(options, {
-          chatKey,
-          taskId: task.id,
-          runId,
-          text: result.text,
-          sessionFile: result.sessionFile,
-        }).catch(() => {});
-      }
     }
   } catch (error: any) {
     task.lastError = String(
@@ -505,7 +501,9 @@ export async function executeCronTask(
       error: task.lastError,
     };
   } finally {
-    await setCronTaskFrontendWorking(task, options, false);
+    if (showExternalWorking) {
+      await setCronTaskFrontendWorking(task, options, false);
+    }
     task.lastFinishedAt = nowIso();
     task.updatedAt = nowIso();
     if (maintenanceHistoryRecord) {

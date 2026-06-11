@@ -176,15 +176,17 @@ EvalBridge contract:
 
 ## Incoming turn policy
 
-Allowed inbound chat messages normally start an agent turn after Rin stores the message. Configure record-only chats under `settings.json -> chat.turnPolicy.byChatKey` when a scheduled task, SDK call, or optional extension will inspect stored messages and decide how to respond.
+Allowed inbound chat messages normally start an agent turn after Rin stores the message. Configure record-only chats under `settings.json -> chat.byChatKey[chatKey].turnPolicy` when a scheduled task, SDK call, or optional extension will inspect stored messages and decide how to respond.
 
 ```json
 {
   "chat": {
     "turnPolicy": {
-      "default": "start_on_message",
-      "byChatKey": {
-        "telegram/123456:7890": "record_only"
+      "default": "start_on_message"
+    },
+    "byChatKey": {
+      "telegram/123456:7890": {
+        "turnPolicy": "record_only"
       }
     }
   }
@@ -197,6 +199,24 @@ Modes:
 - `record_only`: inbound messages are stored while normal agent turns stay idle; chat commands still use the command path.
 
 Core chat storage records messages. Automation for record-only chats comes from the scheduled task or background producer that inspects the store.
+
+## Quiet chat display mode
+
+Configure quiet display for specific chats under `settings.json -> chat.byChatKey[chatKey].quietMode` when the chat should still receive final replies and working indicators, but should not receive assistant interim messages or todo checklist notices.
+
+```json
+{
+  "chat": {
+    "byChatKey": {
+      "telegram/123456:7890": {
+        "quietMode": true
+      }
+    }
+  }
+}
+```
+
+Per-chat quiet entries may also be objects such as `{ "enabled": true }`. Quiet mode does not suppress final replies, errors, working indicators, or compaction notices.
 
 ## Command acknowledgement text
 

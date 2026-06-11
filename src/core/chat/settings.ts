@@ -8,30 +8,59 @@ function normalizeChatTurnPolicyMode(value: unknown): ChatTurnPolicyMode {
   return value === "record_only" ? "record_only" : DEFAULT_CHAT_TURN_POLICY;
 }
 
+function normalizeChatQuietModeEnabled(value: unknown) {
+  if (isJsonRecord(value)) {
+    if (value.enabled !== undefined) return Boolean(value.enabled);
+    if (value.quiet !== undefined) return Boolean(value.quiet);
+    if (value.mode !== undefined) return value.mode === "quiet";
+  }
+  return value === true || value === "quiet";
+}
+
 export function getStoredChatConfigRoot(settings: any): Record<string, any> {
   return isJsonRecord(settings?.chat) ? settings.chat : {};
+}
+
+function resolvePerChatConfig(settings: any, chatKey: string) {
+  const byChatKey = getStoredChatConfigRoot(settings).byChatKey;
+  if (!isJsonRecord(byChatKey)) return undefined;
+  const normalizedChatKey = String(chatKey || "").trim();
+  if (
+    !normalizedChatKey ||
+    !Object.prototype.hasOwnProperty.call(byChatKey, normalizedChatKey)
+  ) {
+    return undefined;
+  }
+  const entry = byChatKey[normalizedChatKey];
+  return isJsonRecord(entry) ? entry : undefined;
 }
 
 export function resolveChatTurnPolicyMode(
   settings: any,
   chatKey: string,
 ): ChatTurnPolicyMode {
-  const turnPolicy = getStoredChatConfigRoot(settings).turnPolicy;
-  if (!isJsonRecord(turnPolicy)) return DEFAULT_CHAT_TURN_POLICY;
-  const byChatKey = isJsonRecord(turnPolicy.byChatKey)
-    ? turnPolicy.byChatKey
-    : {};
-  const normalizedChatKey = String(chatKey || "").trim();
-  if (
-    normalizedChatKey &&
-    Object.prototype.hasOwnProperty.call(byChatKey, normalizedChatKey)
-  ) {
-    const entry = byChatKey[normalizedChatKey];
+  const perChat = resolvePerChatConfig(settings, chatKey);
+  if (perChat?.turnPolicy !== undefined) {
+    const value = perChat.turnPolicy;
     return normalizeChatTurnPolicyMode(
-      isJsonRecord(entry) ? entry.mode : entry,
+      isJsonRecord(value) ? value.mode : value,
     );
   }
-  return normalizeChatTurnPolicyMode(turnPolicy.default);
+  const turnPolicy = getStoredChatConfigRoot(settings).turnPolicy;
+  return isJsonRecord(turnPolicy)
+    ? normalizeChatTurnPolicyMode(turnPolicy.default)
+    : DEFAULT_CHAT_TURN_POLICY;
+}
+
+export function resolveChatQuietModeEnabled(settings: any, chatKey: string) {
+  const perChat = resolvePerChatConfig(settings, chatKey);
+  if (perChat?.quietMode !== undefined) {
+    return normalizeChatQuietModeEnabled(perChat.quietMode);
+  }
+  const quietMode = getStoredChatConfigRoot(settings).quietMode;
+  return isJsonRecord(quietMode)
+    ? normalizeChatQuietModeEnabled(quietMode.default)
+    : false;
 }
 
 export function dropLegacyChatSettings(settings: any) {

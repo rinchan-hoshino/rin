@@ -167,7 +167,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(chatBridge, /Treat platform metadata as authoritative/);
   assert.match(chatBridge, /rin\.chat\.evalBridge/);
   assert.match(chatBridge, /helpers\.useChat\(chatKey\)/);
-  assert.match(chatBridge, /chat\.turnPolicy\.byChatKey/);
+  assert.match(chatBridge, /chat\.byChatKey/);
   assert.match(chatBridge, /record_only/);
   assert.match(chatBridge, /docs\/rich-text-output-format\.md/);
   assert.match(chatBridge, /data\/chat\/message-store/);
