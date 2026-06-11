@@ -260,7 +260,14 @@ function locateTokenRaw(source: string, raw: string, cursor: number) {
   return afterCursor >= 0 ? afterCursor : source.indexOf(raw);
 }
 
-function collectInlineMarkdownProtectedRanges(
+function childMarkdownTokens(token: any) {
+  const children: any[] = [];
+  if (Array.isArray(token?.tokens)) children.push(...token.tokens);
+  if (Array.isArray(token?.items)) children.push(...token.items);
+  return children;
+}
+
+function collectNestedMarkdownProtectedRanges(
   ranges: MarkdownSourceRange[],
   blockStart: number,
   blockRaw: string,
@@ -269,18 +276,39 @@ function collectInlineMarkdownProtectedRanges(
   let cursor = 0;
   for (const token of Array.isArray(tokens) ? tokens : []) {
     const raw = safeString(token?.raw);
-    if (!raw) continue;
+    const children = childMarkdownTokens(token);
+    if (!raw) {
+      if (children.length) {
+        collectNestedMarkdownProtectedRanges(
+          ranges,
+          blockStart,
+          blockRaw,
+          children,
+        );
+      }
+      continue;
+    }
     let localStart = blockRaw.indexOf(raw, cursor);
     if (localStart < 0) localStart = blockRaw.indexOf(raw);
-    if (localStart < 0) continue;
+    if (localStart < 0) {
+      if (children.length) {
+        collectNestedMarkdownProtectedRanges(
+          ranges,
+          blockStart,
+          blockRaw,
+          children,
+        );
+      }
+      continue;
+    }
     const start = blockStart + localStart;
     const end = start + raw.length;
     const type = safeString(token?.type).trim().toLowerCase();
-    if (type === "codespan") {
+    if (type === "code" || type === "codespan") {
       appendMarkdownRange(ranges, start, end);
     }
-    if (Array.isArray(token?.tokens) && token.tokens.length) {
-      collectInlineMarkdownProtectedRanges(ranges, start, raw, token.tokens);
+    if (children.length) {
+      collectNestedMarkdownProtectedRanges(ranges, start, raw, children);
     }
     cursor = localStart + raw.length;
   }
@@ -305,8 +333,10 @@ function collectMarkdownProtectedRanges(source: string) {
     const type = safeString(token?.type).trim().toLowerCase();
     if (type === "code") {
       appendMarkdownRange(ranges, start, end);
-    } else if (Array.isArray(token?.tokens) && token.tokens.length) {
-      collectInlineMarkdownProtectedRanges(ranges, start, raw, token.tokens);
+    }
+    const children = childMarkdownTokens(token);
+    if (children.length) {
+      collectNestedMarkdownProtectedRanges(ranges, start, raw, children);
     }
     cursor = end;
   }

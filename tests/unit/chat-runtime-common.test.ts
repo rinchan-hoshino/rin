@@ -141,7 +141,7 @@ test("chat runtime common helpers do not expand rich syntax inside markdown code
   const markdown = chatRuntimeCommon.prepareOutboundNodes([
     chatRuntimeCommon.normalizeNode("markdown", {
       content:
-        "Examples: `[@name](at:<platform-user-id>)` and `[image: name](local-path-or-url)`\n```md\n[file: name](local-path-or-url)\n```\nActual [quote:m1] [image: cat](https://example.com/cat.png)",
+        "Examples: `[@name](at:<platform-user-id>)` and `[image: name](local-path-or-url)`\n- `[file: name](local-path-or-url)`\n```md\n[video: name](local-path-or-url)\n```\nActual [quote:m1] [image: cat](https://example.com/cat.png)",
     }),
   ]);
 
