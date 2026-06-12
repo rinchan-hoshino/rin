@@ -3,9 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import { runFrontendEntrypoint } from "../../src/core/rin-frontend-sdk/entrypoint.js";
 import {
   formatRuntimeErrorForChat,
-  formatRuntimeErrorForTui,
+  formatRuntimeErrorForFrontendDisplay,
   formatRuntimeErrorForUser,
   hasUserFacingRuntimeErrorMapping,
 } from "../../src/core/rin-lib/user-facing-errors.js";
@@ -18,18 +19,26 @@ test("runtime error formatter keeps human messages", () => {
   );
 });
 
-test("tui error formatter keeps terse Pi-style errors", () => {
-  assert.equal(formatRuntimeErrorForTui("fetch failed"), "fetch failed");
+test("frontend display error formatter keeps terse marker-derived errors", () => {
   assert.equal(
-    formatRuntimeErrorForTui("rin_request_failed"),
+    formatRuntimeErrorForFrontendDisplay("fetch failed"),
+    "fetch failed",
+  );
+  assert.equal(
+    formatRuntimeErrorForFrontendDisplay("rin_request_failed"),
     "request failed",
   );
-  assert.equal(formatRuntimeErrorForTui("rin_app_tui_failed"), "tui failed");
   assert.equal(
-    formatRuntimeErrorForTui("frontend_model_not_found:openai/missing"),
+    formatRuntimeErrorForFrontendDisplay("rin_app_tui_failed"),
+    "tui failed",
+  );
+  assert.equal(
+    formatRuntimeErrorForFrontendDisplay(
+      "frontend_model_not_found:openai/missing",
+    ),
     "frontend model not found: openai/missing",
   );
-  assert.equal(formatRuntimeErrorForTui(""), "unknown error");
+  assert.equal(formatRuntimeErrorForFrontendDisplay(""), "unknown error");
 });
 
 test("chat error formatter prefixes terse Rin errors", () => {
@@ -175,15 +184,50 @@ function collectRinOwnedErrorMarkers() {
   return markers;
 }
 
-test("tui entrypoints keep Pi-style caught errors before printing", () => {
+test("tui entrypoints delegate caught-error display to the shared frontend boundary", () => {
   const repoRoot = path.resolve(import.meta.dirname, "../..");
   const entrypoints = ["src/app/rin-tui/main.ts", "src/core/rin-tui/main.ts"];
   for (const relative of entrypoints) {
     const text = fs.readFileSync(path.join(repoRoot, relative), "utf8");
-    assert.match(text, /formatRuntimeErrorForTui\(error \|\|/);
-    assert.doesNotMatch(text, /formatRuntimeErrorForUser\(error \|\|/);
-    assert.doesNotMatch(text, /console\.error\(String\(error\?\.message/);
+    assert.match(text, /runFrontendEntrypoint\(startTui\)/);
+    assert.match(text, /rin-frontend-sdk\/entrypoint\.js/);
+    assert.doesNotMatch(text, /formatRuntimeErrorFor/);
+    assert.doesNotMatch(text, /console\.error\(/);
   }
+
+  assert.equal(
+    fs.existsSync(path.join(repoRoot, "src/core/rin-tui/entrypoint.ts")),
+    false,
+  );
+
+  const displayBoundary = fs.readFileSync(
+    path.join(repoRoot, "src/core/rin-frontend-sdk/entrypoint.ts"),
+    "utf8",
+  );
+  assert.match(
+    displayBoundary,
+    /stderr\.error\(formatRuntimeErrorForFrontendDisplay\(error\)\)/,
+  );
+  assert.doesNotMatch(displayBoundary, /fallback/i);
+  assert.doesNotMatch(displayBoundary, /formatRuntimeErrorForTui/);
+});
+
+test("shared frontend entrypoint formats caught errors exactly at display", async () => {
+  const printed: string[] = [];
+  const exits: number[] = [];
+
+  await runFrontendEntrypoint(
+    () => {
+      throw new Error("rin_request_failed");
+    },
+    {
+      stderr: { error: (message: string) => printed.push(message) },
+      exit: (code: number) => exits.push(code),
+    },
+  );
+
+  assert.deepEqual(printed, ["request failed"]);
+  assert.deepEqual(exits, [1]);
 });
 
 test("non-tui app entrypoints format caught errors before printing", () => {

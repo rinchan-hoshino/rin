@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-import { startTui } from "./launcher.js";
-import { formatRuntimeErrorForTui } from "../rin-lib/user-facing-errors.js";
+import { runFrontendEntrypoint } from "../rin-frontend-sdk/entrypoint.js";
 
-startTui().catch((error: any) => {
-  console.error(formatRuntimeErrorForTui(error || "rin_tui_failed"));
-  process.exit(1);
-});
+import { startTui } from "./launcher.js";
+
+runFrontendEntrypoint(startTui);

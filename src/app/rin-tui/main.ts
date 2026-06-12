@@ -4,10 +4,7 @@
  *
  * Thin assembly wrapper over the shared core TUI launcher.
  */
+import { runFrontendEntrypoint } from "../../core/rin-frontend-sdk/entrypoint.js";
 import { startTui } from "../../core/rin-tui/launcher.js";
-import { formatRuntimeErrorForTui } from "../../core/rin-lib/user-facing-errors.js";
 
-startTui().catch((error: any) => {
-  console.error(formatRuntimeErrorForTui(error || "rin_app_tui_failed"));
-  process.exit(1);
-});
+runFrontendEntrypoint(startTui);

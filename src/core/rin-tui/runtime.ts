@@ -15,10 +15,7 @@ import { serializeRinToolStartupOptions } from "../rin-lib/tool-options.js";
 import browseModule from "../rin-browse/index.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
-import {
-  formatRuntimeErrorForTui,
-  rawErrorMessage,
-} from "../rin-lib/user-facing-errors.js";
+import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
 import {
   applyFrontendBuiltinCommandText,
   parseFrontendCompactCommand,
@@ -200,6 +197,15 @@ const REFRESH_SESSION = { session: true } as const;
 const REFRESH_MESSAGES_AND_SESSION = { messages: true, session: true } as const;
 const REFRESH_ALL = { messages: true, models: true, session: true } as const;
 
+function isPromptSubmissionTimeout(message: string) {
+  return /\b(?:rin_?timeout:prompt|timeout:\s*prompt)\b/.test(message);
+}
+
+function asRawRuntimeError(error: unknown, fallback = "unknown error") {
+  if (error instanceof Error) return error;
+  return new Error(rawErrorMessage(error) || fallback);
+}
+
 async function completeRpcRecovery(target: any) {
   const canApplyLightweightState =
     typeof target.call === "function" &&
@@ -214,7 +220,16 @@ async function completeRpcRecovery(target: any) {
     target.emitSessionResynced();
   }
   target.emitFrontendStatus(true);
+  const timedOutPrompts = [...(target.timedOutPromptOps || [])];
+  target.timedOutPromptOps = [];
   const queued = [...target.queuedOfflineOps];
+  if (
+    timedOutPrompts.length &&
+    !target.remoteTurnRunning &&
+    !target.isCompacting
+  ) {
+    queued.unshift(...timedOutPrompts);
+  }
   target.queuedOfflineOps = [];
   if (typeof target.emitQueueUpdate === "function") {
     target.emitQueueUpdate();
@@ -342,6 +357,7 @@ export class RpcInteractiveSession {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectPromise: Promise<void> | null = null;
   private queuedOfflineOps: PendingRpcOperation[] = [];
+  private timedOutPromptOps: PendingRpcOperation[] = [];
   private activeTurn: PendingRpcOperation | null = null;
   private rpcConnected = false;
   private remoteTurnRunning = false;
@@ -1476,11 +1492,16 @@ export class RpcInteractiveSession {
         this.queueOfflineOperation(operation);
         return;
       }
+      if (operation.mode === "prompt" && isPromptSubmissionTimeout(message)) {
+        this.timedOutPromptOps.push(operation);
+        this.handleSessionUnavailable();
+        return;
+      }
       if (tracksTurn) {
         this.activeTurn = null;
         this.syncStreamingState();
       }
-      throw new Error(formatRuntimeErrorForTui(error), { cause: error });
+      throw asRawRuntimeError(error);
     }
   }
 
@@ -1738,13 +1759,11 @@ export class RpcInteractiveSession {
         await this.waitForDaemonAvailable();
         response = await send();
       } else {
-        throw new Error(formatRuntimeErrorForTui(error), { cause: error });
+        throw asRawRuntimeError(error);
       }
     }
     if (!response || response.success !== true) {
-      throw new Error(
-        formatRuntimeErrorForTui(response?.error || "rin_request_failed"),
-      );
+      throw asRawRuntimeError(response?.error || "rin_request_failed");
     }
     return response.data;
   }

@@ -307,13 +307,14 @@ test("tui launcher maps quiet startup to Pi version-check skip env", () => {
   assert.equal(existingEnv.RIN_SKIP_VERSION_CHECK, "custom");
 });
 
-test("tui launcher keeps daemon startup socket failures in Pi-style form", () => {
-  assert.equal(
-    launcher.formatTuiStartupError(
-      new Error("connect ECONNREFUSED /run/user/1001/rin-daemon/daemon.sock"),
-    ),
-    "connect ECONNREFUSED /run/user/1001/rin-daemon/daemon.sock",
+test("tui launcher preserves startup errors until the entrypoint display boundary", async () => {
+  const source = await fs.readFile(
+    path.join(rootDir, "src", "core", "rin-tui", "launcher.ts"),
+    "utf8",
   );
+
+  assert.doesNotMatch(source, /formatTuiStartupError/);
+  assert.doesNotMatch(source, /new Error\(formatRuntimeError/);
 });
 
 test("tui launcher classifies transient rpc startup failures as maintenance fallbacks", () => {
@@ -332,6 +333,8 @@ test("tui launcher classifies transient rpc startup failures as maintenance fall
   const notice = launcher.formatTuiMaintenanceFallbackNotice(
     new Error("rin_timeout:rpc_session_ready"),
   );
+  assert.match(notice, /timeout: rpc_session_ready/);
+  assert.doesNotMatch(notice, /rin_timeout/);
   assert.match(notice, /Entering temporary maintenance mode/);
   assert.match(notice, /rin doctor/);
 });
@@ -340,17 +343,6 @@ test("tui launcher startup timeout rejects with a bounded startup error", async 
   await assert.rejects(
     launcher.withTuiStartupTimeout(new Promise(() => {}), 10, "demo"),
     /rin_timeout:demo/,
-  );
-});
-
-test("tui launcher leaves unrelated startup errors unchanged", () => {
-  assert.equal(launcher.formatTuiStartupError(new Error("boom")), "boom");
-});
-
-test("tui launcher formats internal startup markers as terse Pi-style text", () => {
-  assert.equal(
-    launcher.formatTuiStartupError(new Error("rin_request_failed")),
-    "request failed",
   );
 });
 

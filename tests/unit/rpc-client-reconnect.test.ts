@@ -714,6 +714,160 @@ test("rpc interactive session attaches a request tag to prompt turns by default"
   assert.match(String(calls[0]?.requestTag || ""), /^rin-tui-/);
 });
 
+test("rpc interactive session recovers prompt submission timeout without surfacing an editor exception", async () => {
+  const calls = [];
+  let promptCalls = 0;
+  const client = {
+    isConnected: () => true,
+    send: async (payload) => {
+      calls.push(payload);
+      if (payload.type === "prompt") {
+        promptCalls += 1;
+        if (promptCalls === 1) throw new Error("rin_timeout:prompt");
+        return { success: true, data: {} };
+      }
+      if (payload.type === "get_state") {
+        return {
+          success: true,
+          data: {
+            sessionId: "s1",
+            sessionFile: "/tmp/s1.jsonl",
+            thinkingLevel: "medium",
+            steeringMode: "all",
+            followUpMode: "one-at-a-time",
+            autoCompactionEnabled: false,
+            turnActive: false,
+            isStreaming: false,
+            isCompacting: false,
+            pendingMessageCount: 0,
+          },
+        };
+      }
+      return { success: true, data: {} };
+    },
+  };
+  const session = new RpcInteractiveSession(client);
+  session.ensureRemoteSession = async () => {};
+  session.refreshState = async () => {};
+  session.ensureReconnectLoop = () => Promise.resolve();
+  session.rpcConnected = true;
+  session.startupPending = false;
+
+  await session.prompt("hello", { expandPromptTemplates: false });
+
+  assert.equal(promptCalls, 1);
+  assert.equal(session.recoveryPending, true);
+  assert.deepEqual(session.getFrontendStatusEvent(), {
+    type: "rpc_frontend_status",
+    phase: "connecting",
+    label: "Connecting",
+    connected: true,
+  });
+
+  session.handleSessionRecovered();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(promptCalls, 2);
+  assert.deepEqual(
+    calls
+      .filter((payload) => payload.type === "prompt")
+      .map((payload) => payload.message),
+    ["hello", "hello"],
+  );
+  assert.equal(session.recoveryPending, false);
+});
+
+test("rpc interactive session recovers steer prompt timeout without surfacing an editor exception", async () => {
+  const calls = [];
+  let promptCalls = 0;
+  const client = {
+    isConnected: () => true,
+    send: async (payload) => {
+      calls.push(payload);
+      if (payload.type === "prompt") {
+        promptCalls += 1;
+        throw new Error("rin_timeout:prompt");
+      }
+      if (payload.type === "get_state") {
+        return {
+          success: true,
+          data: {
+            sessionId: "s1",
+            sessionFile: "/tmp/s1.jsonl",
+            thinkingLevel: "medium",
+            steeringMode: "all",
+            followUpMode: "one-at-a-time",
+            autoCompactionEnabled: false,
+            turnActive: true,
+            isStreaming: true,
+            isCompacting: false,
+            pendingMessageCount: 0,
+          },
+        };
+      }
+      return { success: true, data: {} };
+    },
+  };
+  const session = new RpcInteractiveSession(client);
+  session.ensureRemoteSession = async () => {};
+  session.refreshState = async () => {};
+  session.ensureReconnectLoop = () => Promise.resolve();
+  session.rpcConnected = true;
+  session.startupPending = false;
+  session.remoteTurnRunning = true;
+  session.syncStreamingState();
+
+  await session.prompt("steer", {
+    expandPromptTemplates: false,
+    streamingBehavior: "steer",
+  });
+
+  assert.equal(promptCalls, 1);
+  assert.equal(session.recoveryPending, true);
+  assert.deepEqual(session.getFrontendStatusEvent(), {
+    type: "rpc_frontend_status",
+    phase: "connecting",
+    label: "Connecting",
+    connected: true,
+  });
+
+  session.handleSessionRecovered();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(promptCalls, 1);
+  assert.deepEqual(
+    calls.filter((payload) => payload.type === "prompt"),
+    [
+      {
+        type: "prompt",
+        message: "steer",
+        images: undefined,
+        streamingBehavior: "steer",
+        source: undefined,
+        requestTag: calls[0]?.requestTag,
+      },
+    ],
+  );
+  assert.equal(session.recoveryPending, false);
+  assert.equal(session.remoteTurnRunning, true);
+});
+
+test("rpc interactive session preserves raw runtime error markers inside session logic", async () => {
+  const session = new RpcInteractiveSession({
+    isConnected: () => true,
+    send: async () => {
+      throw new Error("rin_request_failed");
+    },
+  });
+  session.ensureRemoteSession = async () => {};
+  session.rpcConnected = true;
+
+  await assert.rejects(
+    session.prompt("hello", { expandPromptTemplates: false }),
+    /rin_request_failed/,
+  );
+});
+
 test("rpc interactive session can shut down or terminate an attached worker without local session selectors", async () => {
   const calls = [];
   const client = {

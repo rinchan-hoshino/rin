@@ -61,6 +61,12 @@ export {
 } from "./command-dispatcher.js";
 
 export {
+  runFrontendEntrypoint,
+  type RinFrontendEntrypointHost,
+  type RinFrontendEntrypointStart,
+} from "./entrypoint.js";
+
+export {
   TUI_FRONTEND_IDENTITY,
   chatFrontendIdentity,
   normalizeFrontendIdentity,

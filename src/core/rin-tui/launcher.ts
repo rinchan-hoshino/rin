@@ -15,7 +15,7 @@ import {
 } from "../tui-runtime-env.js";
 import { requestDaemonCommand } from "../rin-daemon/client.js";
 import {
-  formatRuntimeErrorForTui,
+  formatRuntimeErrorForFrontendDisplay,
   rawErrorMessage,
 } from "../rin-lib/user-facing-errors.js";
 
@@ -113,10 +113,10 @@ function errorMessage(error: unknown) {
   return rawErrorMessage(error);
 }
 
-export function formatTuiStartupError(error: unknown) {
+function asStartupError(error: unknown) {
+  if (error instanceof Error) return error;
   const message = errorMessage(error);
-  if (!message) return formatRuntimeErrorForTui("rin_tui_failed");
-  return formatRuntimeErrorForTui(message);
+  return new Error(message || "rin_tui_failed");
 }
 
 export function isRecoverableRpcStartupError(error: unknown) {
@@ -136,7 +136,7 @@ export function formatTuiMaintenanceModeNotice() {
 }
 
 export function formatTuiMaintenanceFallbackNotice(error: unknown) {
-  const message = errorMessage(error);
+  const message = formatRuntimeErrorForFrontendDisplay(error);
   const detail = message ? ` (${message})` : "";
   return `RPC TUI startup is unavailable${detail}. Entering temporary maintenance mode; run \`rin doctor\` if this keeps happening.`;
 }
@@ -385,7 +385,7 @@ async function startRpcTui(
     } else {
       await rpcSession.disconnect().catch(() => {});
     }
-    throw new Error(formatTuiStartupError(error), { cause: error });
+    throw asStartupError(error);
   }
   profile.mark("interactive-mode-and-rpc-ready");
 

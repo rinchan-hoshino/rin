@@ -464,7 +464,7 @@ function markerToTerseRuntimeText(marker: string) {
   return marker.replace(/_/g, " ").replace(/^rin\s+(?:app\s+)?/, "");
 }
 
-function formatRuntimeMarkerInPiStyle(message: string) {
+function formatRuntimeMarkerForFrontendDisplay(message: string) {
   const marker = LEADING_RUNTIME_MARKER_RE.exec(message);
   if (!marker) return message;
   const prefix = markerToTerseRuntimeText(marker[1]);
@@ -473,14 +473,14 @@ function formatRuntimeMarkerInPiStyle(message: string) {
   return `${prefix}${marker[2] ? ":" : ""} ${detail}`;
 }
 
-export function formatRuntimeErrorForTui(error: unknown) {
+export function formatRuntimeErrorForFrontendDisplay(error: unknown) {
   const message = rawErrorMessage(error);
   if (!message) return "unknown error";
-  return formatRuntimeMarkerInPiStyle(message);
+  return formatRuntimeMarkerForFrontendDisplay(message);
 }
 
 export function formatRuntimeErrorForChat(error: unknown) {
-  const message = formatRuntimeErrorForTui(error);
+  const message = formatRuntimeErrorForFrontendDisplay(error);
   if (/^rin error:\s*/i.test(message)) return message;
   return `${CHAT_RUNTIME_ERROR_PREFIX} ${message}`;
 }
