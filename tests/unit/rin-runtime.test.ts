@@ -79,7 +79,7 @@ test("compaction reason tracking annotates native before-compact hooks", async (
   assert.equal(session.__rinCurrentCompactionReason, undefined);
 });
 
-test("configured Rin sessions install the 85 percent compaction patch", async () => {
+test("configured Rin sessions disable completion-time threshold compaction only", async () => {
   const agentDir = await fs.mkdtemp("/tmp/rin-percent-session-");
   await fs.writeFile(
     path.join(agentDir, "settings.json"),
@@ -118,7 +118,7 @@ test("configured Rin sessions install the 85 percent compaction patch", async ()
       return "compacted";
     };
 
-    const result = await session._checkCompaction({
+    const assistantMessage = {
       role: "assistant",
       stopReason: "toolUse",
       timestamp: Date.now(),
@@ -131,7 +131,12 @@ test("configured Rin sessions install the 85 percent compaction patch", async ()
         cacheWrite: 0,
         totalTokens: 240_000,
       },
-    });
+    };
+
+    assert.equal(await session._checkCompaction(assistantMessage), false);
+    assert.deepEqual(calls, []);
+
+    const result = await session._checkCompaction(assistantMessage, false);
 
     assert.equal(result, "compacted");
     assert.deepEqual(calls, [["threshold", false]]);
@@ -176,7 +181,7 @@ test("Rin percent compaction defaults to 85 percent", async () => {
   });
 
   assert.equal(
-    await session._checkCompaction({ timestamp: Date.now() }),
+    await session._checkCompaction({ timestamp: Date.now() }, false),
     false,
   );
   assert.equal(nativeChecks, 0);
@@ -184,7 +189,7 @@ test("Rin percent compaction defaults to 85 percent", async () => {
 
   contextTokens = 850;
   assert.equal(
-    await session._checkCompaction({ timestamp: Date.now() }),
+    await session._checkCompaction({ timestamp: Date.now() }, false),
     "threshold:false",
   );
   assert.equal(nativeChecks, 0);
@@ -222,12 +227,12 @@ test("Rin percent compaction respects the earlier Pi reserve-token threshold", a
   });
 
   assert.equal(
-    await session._checkCompaction({ timestamp: Date.now() }),
+    await session._checkCompaction({ timestamp: Date.now() }, false),
     false,
   );
   contextTokens = 800;
   assert.equal(
-    await session._checkCompaction({ timestamp: Date.now() }),
+    await session._checkCompaction({ timestamp: Date.now() }, false),
     "compacted",
   );
   assert.deepEqual(calls, ["threshold:false"]);
@@ -285,13 +290,16 @@ test("Rin percent compaction estimates error contexts from pruned provider conte
   });
 
   assert.equal(
-    await session._checkCompaction({
-      stopReason: "error",
-      provider: "test",
-      model: "model",
-      timestamp: Date.now(),
-      content: "temporary upstream error",
-    }),
+    await session._checkCompaction(
+      {
+        stopReason: "error",
+        provider: "test",
+        model: "model",
+        timestamp: Date.now(),
+        content: "temporary upstream error",
+      },
+      false,
+    ),
     false,
   );
   assert.equal(nativeChecks, 0);

@@ -1214,6 +1214,11 @@ export function applyRinCompactionPercentThreshold(
         );
       }
 
+      // Pi calls _checkCompaction with the default skipAbortedCheck=true after
+      // an assistant message completes. Disable that completion-time threshold
+      // compaction path while preserving pre-prompt checks and overflow recovery.
+      if (skipAbortedCheck) return false;
+
       const contextTokens =
         assistantMessage?.stopReason === "error"
           ? estimateCurrentProviderContextTokens(
