@@ -82,6 +82,7 @@ export type RinFrontendBackendEvent =
       isStreaming?: boolean;
     }
   | { type: "turn_accepted"; requestTag?: string }
+  | { type: "user_message_start"; text: string }
   | {
       type: "passive_notice";
       text: string;

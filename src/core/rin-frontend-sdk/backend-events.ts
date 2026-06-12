@@ -313,6 +313,19 @@ export function createRinFrontendBackendEventTranslator(
         case "agent_start":
           resetAssistantSegments();
           return [{ type: "turn_accepted" }];
+        case "message_start":
+          if (payload?.message?.role !== "user") return [];
+          return [
+            {
+              type: "user_message_start",
+              text: safeString(
+                extractMessageText(payload.message?.content, {
+                  includeThinking: false,
+                  trim: true,
+                }),
+              ).trim(),
+            },
+          ];
         case "agent_end":
           return [];
         case "message_update":

@@ -1483,7 +1483,7 @@ test("chat controller uses configured command responses for /compact and /reload
   }
 });
 
-test("chat controller retargets the working reaction to the latest steered message", async () => {
+test("chat controller keeps working reaction on current message while steer is queued", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -1570,11 +1570,38 @@ test("chat controller retargets the working reaction to the latest steered messa
   );
 
   assert.equal(steerResult.steered, true);
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
+  assert.equal(controller.currentTurn?.replyToMessageId, "m-first");
+  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
+  assert.deepEqual(actions, []);
+  assert.deepEqual(reactions, []);
+
+  await controller.pollTyping();
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [["create", "2", "m-first", "🤔"]]);
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "message_start",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "steer now" }],
+      },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(controller.currentTurn?.incomingMessageId, "m-steer");
   assert.equal(controller.currentTurn?.replyToMessageId, "m-steer");
-  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-  assert.deepEqual(reactions, [["create", "2", "m-steer", "🤔"]]);
+  assert.deepEqual(actions, [
+    { chat_id: "2", action: "typing" },
+    { chat_id: "2", action: "typing" },
+  ]);
+  assert.deepEqual(reactions, [
+    ["create", "2", "m-first", "🤔"],
+    ["delete", "2", "m-first", "🤔", "1"],
+    ["create", "2", "m-steer", "🤔"],
+  ]);
 
   releaseFirstPrompt();
   assert.equal((await firstTurn).finalText, "done");
@@ -3305,10 +3332,24 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   );
 
   assert.equal(steerResult.steered, true);
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
   assert.deepEqual(promptCalls, [
     { text: "first", streamingBehavior: undefined },
     { text: "steer now", streamingBehavior: "steer" },
   ]);
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "message_start",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "steer now" }],
+      },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-steer-now");
 
   releaseFirstPrompt();
   const firstResult = await firstTurn;

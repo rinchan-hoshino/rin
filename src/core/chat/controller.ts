@@ -59,9 +59,14 @@ import { resolveChatQuietModeEnabled } from "./settings.js";
 const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
 const WORKING_REACTION_INTERVAL_MS = 30_000;
 
-type ChatTurnMeta = {
+type ChatTurnTarget = {
   incomingMessageId?: string;
   replyToMessageId?: string;
+  text?: string;
+  submittedText?: string;
+};
+
+type ChatTurnMeta = ChatTurnTarget & {
   workingNoticeSent?: boolean;
   startedAt: number;
 };
@@ -172,10 +177,8 @@ export class ChatController {
   compactionReactionTick = 0;
   lastCompactionReactionAt = 0;
   compactionIndicatorTick = 0;
-  activeCommandTurnInput: {
-    incomingMessageId?: string;
-    replyToMessageId?: string;
-  } | null = null;
+  activeCommandTurnInput: ChatTurnTarget | null = null;
+  pendingSteeredDeliveryTargets: ChatTurnTarget[] = [];
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatTextDelivery | null = null;
   pendingPassiveNotices: string[] = [];
@@ -266,6 +269,7 @@ export class ChatController {
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
+    this.pendingSteeredDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
@@ -299,6 +303,7 @@ export class ChatController {
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
+    this.pendingSteeredDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.saveState();
   }
@@ -398,6 +403,38 @@ export class ChatController {
 
   private clearActiveCommandTurnInput() {
     this.activeCommandTurnInput = null;
+  }
+
+  private rememberPendingSteeredDeliveryTarget(input: ChatTurnTarget) {
+    const incomingMessageId = safeString(input.incomingMessageId || "").trim();
+    const replyToMessageId =
+      safeString(input.replyToMessageId || "").trim() || incomingMessageId;
+    if (!incomingMessageId && !replyToMessageId) return;
+    this.pendingSteeredDeliveryTargets.push({
+      incomingMessageId: incomingMessageId || undefined,
+      replyToMessageId: replyToMessageId || undefined,
+      text: safeString(input.text || "").trim() || undefined,
+      submittedText: safeString(input.submittedText || "").trim() || undefined,
+    });
+  }
+
+  private async activatePendingSteeredDeliveryTarget(startedText?: string) {
+    const text = safeString(startedText || "").trim();
+    if (!text || !this.pendingSteeredDeliveryTargets.length) return false;
+    const index = this.pendingSteeredDeliveryTargets.findIndex((target) => {
+      const raw = safeString(target.text || "").trim();
+      const submitted = safeString(target.submittedText || "").trim();
+      return Boolean(
+        (submitted && submitted === text) || (raw && raw === text),
+      );
+    });
+    if (index < 0) return false;
+    const [target] = this.pendingSteeredDeliveryTargets.splice(index, 1);
+    await this.beginVisibleProcessingTurn({
+      incomingMessageId: target?.incomingMessageId,
+      replyToMessageId: target?.replyToMessageId,
+    });
+    return true;
   }
 
   private ensureVisibleCommandTurn() {
@@ -616,20 +653,6 @@ export class ChatController {
       Promise.all([marker, poll]),
       new Promise((resolve) => setImmediate(resolve)),
     ]);
-  }
-
-  private async retargetVisibleProcessingTurn(input: {
-    incomingMessageId?: string;
-    replyToMessageId?: string;
-  }) {
-    const incomingMessageId = safeString(input.incomingMessageId || "").trim();
-    const replyToMessageId =
-      safeString(input.replyToMessageId || "").trim() || incomingMessageId;
-    if (!incomingMessageId && !replyToMessageId) return;
-    await this.beginVisibleProcessingTurn({
-      incomingMessageId: incomingMessageId || undefined,
-      replyToMessageId: replyToMessageId || undefined,
-    });
   }
 
   private currentDeliveryTarget(input: {
@@ -1239,6 +1262,7 @@ export class ChatController {
         this.turnAbortRequested = false;
         await this.clearWorkingReaction().catch(() => {});
         this.clearCurrentTurn();
+        this.pendingSteeredDeliveryTargets = [];
         this.stagedDelivery = null;
         this.saveState();
       }
@@ -1320,6 +1344,7 @@ export class ChatController {
       if (interruptingActiveTurn) this.turnAbortRequested = false;
       await this.clearWorkingReaction().catch(() => {});
       this.clearCurrentTurn();
+      if (interruptingActiveTurn) this.pendingSteeredDeliveryTargets = [];
       this.clearActiveCommandTurnInput();
       this.stagedDelivery = null;
       this.saveState();
@@ -1370,8 +1395,9 @@ export class ChatController {
         attachments: input.attachments,
         startedAt: Date.now(),
       });
+      const submittedText = formatPromptForChatContext(text, input.promptMeta);
       const result = await this.driver.runTurn({
-        text: formatPromptForChatContext(text, input.promptMeta),
+        text: submittedText,
         images,
         sessionFile: wantedSessionFile,
         restoreSessionFile,
@@ -1397,9 +1423,11 @@ export class ChatController {
       this.saveState();
       if (result.steered) {
         if (deliverFinal) {
-          await this.retargetVisibleProcessingTurn({
+          this.rememberPendingSteeredDeliveryTarget({
             incomingMessageId: input.incomingMessageId,
             replyToMessageId: input.replyToMessageId,
+            text,
+            submittedText,
           });
         }
         this.backendAcceptedIncomingMessageId = safeString(
@@ -1472,8 +1500,12 @@ export class ChatController {
         if (this.turnAbortGeneration !== turnAbortGeneration) {
           throw new Error("chat_turn_aborted");
         }
+        const submittedText = formatPromptForChatContext(
+          text,
+          input.promptMeta,
+        );
         const result = await this.driver.runTurn({
-          text: formatPromptForChatContext(text, input.promptMeta),
+          text: submittedText,
           images,
           sessionFile: wantedSessionFile,
           restoreSessionFile,
@@ -1498,9 +1530,11 @@ export class ChatController {
         this.saveState();
         if (result.steered) {
           if (deliverFinal) {
-            await this.retargetVisibleProcessingTurn({
+            this.rememberPendingSteeredDeliveryTarget({
               incomingMessageId: input.incomingMessageId,
               replyToMessageId: input.replyToMessageId,
+              text,
+              submittedText,
             });
           }
           this.backendAcceptedIncomingMessageId = safeString(
@@ -1552,6 +1586,7 @@ export class ChatController {
           if (ownsCurrentTurn) {
             this.awaitingTurnSettle = false;
             this.turnAbortRequested = false;
+            this.pendingSteeredDeliveryTargets = [];
             this.stagedDelivery = null;
           }
           this.saveState();
@@ -1602,6 +1637,7 @@ export class ChatController {
         if (ownsCurrentTurn) {
           this.awaitingTurnSettle = false;
           this.turnAbortRequested = false;
+          this.pendingSteeredDeliveryTargets = [];
           this.stagedDelivery = null;
         }
         this.saveState();
@@ -1661,6 +1697,9 @@ export class ChatController {
       case "turn_accepted":
         this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
+        return;
+      case "user_message_start":
+        await this.activatePendingSteeredDeliveryTarget(event.text);
         return;
       case "passive_notice":
         if (event.noticeKind === "compaction_end") {

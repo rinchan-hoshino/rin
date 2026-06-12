@@ -80,6 +80,7 @@ export type RinFrontendPassiveNoticeEvent = {
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "turn_accepted" }
+  | { type: "user_message_start"; text: string }
   | RinFrontendPassiveNoticeEvent
   | { type: "compaction_start_notice"; text: string }
   | { type: "assistant_interim"; text: string };
@@ -1429,6 +1430,9 @@ export class RinFrontendTurnDriver {
         this.frontendState.turnActive = true;
         this.setFrontendPhase("working");
         this.emit({ type: "turn_accepted" });
+        return;
+      case "user_message_start":
+        this.emit({ type: "user_message_start", text: event.text });
         return;
       case "passive_notice":
         this.emitPassiveNoticeAtPullCheckpoint(
