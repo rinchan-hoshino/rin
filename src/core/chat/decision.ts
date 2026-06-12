@@ -206,6 +206,7 @@ export async function shouldProcessText(
       chatKey: "",
       chatType: "group" as const,
       trust: "OTHER",
+      requiresMentionToStartTurn: false,
     };
 
   const context = normalizeDecisionSessionContext(session, identity);
@@ -232,5 +233,6 @@ export async function shouldProcessText(
     chatKey: context.chatKey,
     chatType,
     trust: context.trust,
+    requiresMentionToStartTurn: chatType === "group" && !privateLikeGroup,
   };
 }

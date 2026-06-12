@@ -44,7 +44,6 @@ import {
   pickChatName,
   pickMessageId,
   pickReplyToMessageId,
-  pickSenderGroupNickname,
   pickSenderNickname,
   pickUnsessionedOwnQuoteText,
   pickUserId,
@@ -490,7 +489,6 @@ export async function startChatBridge(
       chatType: getChatType(session),
       userId: pickUserId(session),
       nickname: pickSenderNickname(session),
-      groupNickname: pickSenderGroupNickname(session) || undefined,
       identity: trust,
       runtimeMetadata:
         session?.runtimeMetadata && typeof session.runtimeMetadata === "object"
@@ -614,7 +612,6 @@ export async function startChatBridge(
       chatType: decision.chatType,
       userId: pickUserId(session),
       nickname: pickSenderNickname(session),
-      groupNickname: pickSenderGroupNickname(session) || undefined,
       identity: trustOf(
         identity,
         safeString(session?.platform || "").trim(),
@@ -624,6 +621,8 @@ export async function startChatBridge(
         session?.runtimeMetadata && typeof session.runtimeMetadata === "object"
           ? session.runtimeMetadata
           : undefined,
+      requiresMentionToStartTurn:
+        decision.requiresMentionToStartTurn || undefined,
       replyToMessageId: promptReplyToMessageId || undefined,
       attachedFiles: attachments
         .filter((item) => item?.kind === "file")

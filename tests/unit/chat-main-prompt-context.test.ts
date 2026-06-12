@@ -124,8 +124,9 @@ test("chat main carries sender metadata to the controller with the prompt body",
     assert.equal(seen[0].promptMeta.chatKey, "telegram/1:2");
     assert.equal(seen[0].promptMeta.userId, "guest-1");
     assert.equal(seen[0].promptMeta.nickname, "AccountNick");
-    assert.equal(seen[0].promptMeta.groupNickname, "GroupCard");
+    assert.equal(seen[0].promptMeta.groupNickname, undefined);
     assert.equal(seen[0].promptMeta.identity, "TRUSTED");
+    assert.equal(seen[0].promptMeta.requiresMentionToStartTurn, true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -215,7 +216,7 @@ test("chat controller passes sender metadata through the frontend prompt context
     assert.ok(seen[0].text.includes("runtime metadata: rin prompt context v1"));
     assert.ok(seen[0].text.includes("sender user id: guest-1"));
     assert.ok(seen[0].text.includes("sender nickname: AccountNick"));
-    assert.ok(seen[0].text.includes("sender group nickname: GroupCard"));
+    assert.equal(seen[0].text.includes("sender group nickname:"), false);
     assert.ok(seen[0].text.includes("sender trust: trusted user"));
     assert.ok(seen[0].text.endsWith("---\nmy name is?"));
     assert.deepEqual(seen[0].promptContext, {
