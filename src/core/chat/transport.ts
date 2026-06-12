@@ -3,6 +3,12 @@ import path from "node:path";
 import { pathToFileURL as toFileUrl } from "node:url";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
+import {
+  base64_to_image as base64ToPhotonImage,
+  resize as resizePhotonImage,
+  SamplingFilter,
+  type PhotonImage,
+} from "@silvia-odwyer/photon-node";
 
 import type {
   ChatMessagePart,
@@ -37,6 +43,17 @@ import {
 const DEFAULT_WORKING_REACTION_FRAMES = ["🤔", "🔥"] as const;
 const ONEBOT_WORKING_REACTION_FRAMES = ["🤔", "🔥"] as const;
 const CHAT_PRESENTATION_TIMEOUT_MS = 2500;
+const MODEL_IMAGE_MAX_BYTES = 1_250_000;
+const MODEL_IMAGE_MAX_EDGE = 1600;
+const MODEL_IMAGE_MIN_EDGE = 512;
+const MODEL_IMAGE_JPEG_QUALITIES = [82, 72, 62, 52, 42] as const;
+
+type ModelImageCompressionOptions = {
+  maxBytes?: number;
+  maxEdge?: number;
+  minEdge?: number;
+  force?: boolean;
+};
 
 async function withPresentationTimeout<T>(
   run: () => Promise<T>,
@@ -695,12 +712,120 @@ export function buildPromptText(text: string, _attachments: SavedAttachment[]) {
   return text;
 }
 
+function normalizePositiveInteger(value: unknown, fallback: number) {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) return fallback;
+  return Math.floor(next);
+}
+
+function dimensionsForMaxEdge(width: number, height: number, maxEdge: number) {
+  const longEdge = Math.max(width, height);
+  if (!longEdge || longEdge <= maxEdge) return { width, height };
+  const scale = maxEdge / longEdge;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+function jpegBytesFor(image: PhotonImage, quality: number) {
+  return Buffer.from(image.get_bytes_jpeg(quality));
+}
+
+function maybeKeepBestCandidate(
+  best: Buffer | null,
+  candidate: Buffer,
+  originalSize: number,
+) {
+  if (candidate.length >= originalSize) return best;
+  if (!best || candidate.length < best.length) return candidate;
+  return best;
+}
+
+export function compressImageForModelPayload(
+  data: Buffer,
+  options: ModelImageCompressionOptions = {},
+) {
+  const maxBytes = normalizePositiveInteger(
+    options.maxBytes,
+    MODEL_IMAGE_MAX_BYTES,
+  );
+  if (!options.force && data.length <= maxBytes) {
+    return { data, mimeType: "" };
+  }
+
+  const maxEdge = normalizePositiveInteger(
+    options.maxEdge,
+    MODEL_IMAGE_MAX_EDGE,
+  );
+  const minEdge = Math.min(
+    maxEdge,
+    normalizePositiveInteger(options.minEdge, MODEL_IMAGE_MIN_EDGE),
+  );
+  let source: PhotonImage | null = null;
+  let best: Buffer | null = null;
+
+  try {
+    source = base64ToPhotonImage(data.toString("base64"));
+    const sourceWidth = source.get_width();
+    const sourceHeight = source.get_height();
+    const sourceLongEdge = Math.max(sourceWidth, sourceHeight);
+    let targetLongEdge = Math.min(sourceLongEdge, maxEdge);
+
+    while (targetLongEdge >= minEdge) {
+      const target = dimensionsForMaxEdge(
+        sourceWidth,
+        sourceHeight,
+        targetLongEdge,
+      );
+      const resized =
+        target.width === sourceWidth && target.height === sourceHeight
+          ? source
+          : resizePhotonImage(
+              source,
+              target.width,
+              target.height,
+              SamplingFilter.Lanczos3,
+            );
+
+      try {
+        for (const quality of MODEL_IMAGE_JPEG_QUALITIES) {
+          const candidate = jpegBytesFor(resized, quality);
+          best = maybeKeepBestCandidate(best, candidate, data.length);
+          if (candidate.length <= maxBytes) {
+            return { data: candidate, mimeType: "image/jpeg" };
+          }
+        }
+      } finally {
+        if (resized !== source) resized.free();
+      }
+
+      const nextLongEdge = Math.floor(targetLongEdge * 0.75);
+      if (nextLongEdge >= targetLongEdge) break;
+      targetLongEdge = nextLongEdge;
+    }
+  } catch {
+    return { data, mimeType: "" };
+  } finally {
+    source?.free();
+  }
+
+  if (best) return { data: best, mimeType: "image/jpeg" };
+  return { data, mimeType: "" };
+}
+
 export async function attachmentToImageContent(
   filePath: string,
   mimeType = "image/png",
+  options: ModelImageCompressionOptions = {},
 ): Promise<ImageContent> {
   const data = await fs.promises.readFile(filePath);
-  return { type: "image", data: data.toString("base64"), mimeType };
+  const compressed = compressImageForModelPayload(data, options);
+  return {
+    type: "image",
+    data: compressed.data.toString("base64"),
+    mimeType: compressed.mimeType || mimeType,
+  };
 }
 
 export async function restorePromptParts(processing: ChatPromptRestoreInput) {

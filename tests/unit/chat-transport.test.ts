@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { PhotonImage } from "@silvia-odwyer/photon-node";
+
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "..",
@@ -27,6 +29,24 @@ async function withTempDir(fn) {
   }
 }
 
+function buildNoisyPng(width, height) {
+  const raw = new Uint8Array(width * height * 4);
+  let seed = 0x12345678;
+  for (let index = 0; index < raw.length; index += 4) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    raw[index] = seed & 0xff;
+    raw[index + 1] = (seed >>> 8) & 0xff;
+    raw[index + 2] = (seed >>> 16) & 0xff;
+    raw[index + 3] = 255;
+  }
+  const image = new PhotonImage(raw, width, height);
+  try {
+    return Buffer.from(image.get_bytes());
+  } finally {
+    image.free();
+  }
+}
+
 test("chat transport buildPromptText keeps the original text intact", () => {
   const result = transport.buildPromptText("hello", [
     { kind: "file", path: "/tmp/a.txt", name: "a.txt" },
@@ -40,6 +60,35 @@ test("chat transport keeps image-only prompts native", () => {
     { kind: "image", path: "/tmp/b.png", name: "b.png" },
   ]);
   assert.equal(result, "");
+});
+
+test("chat transport compresses only the model image payload and keeps the source file intact", async () => {
+  await withTempDir(async (dir) => {
+    const imagePath = path.join(dir, "large.png");
+    const original = buildNoisyPng(512, 512);
+    await fs.writeFile(imagePath, original);
+
+    const restored = await transport.attachmentToImageContent(
+      imagePath,
+      "image/png",
+      { maxBytes: 50_000, maxEdge: 256, minEdge: 64, force: true },
+    );
+    const modelBytes = Buffer.from(restored.data, "base64");
+
+    assert.equal(restored.mimeType, "image/jpeg");
+    assert.ok(modelBytes.length <= 50_000);
+    assert.ok(modelBytes.length < original.length);
+    assert.deepEqual(await fs.readFile(imagePath), original);
+  });
+});
+
+test("chat transport keeps small model image payloads unchanged", () => {
+  const original = Buffer.from("not an image, but already small");
+  const compressed = transport.compressImageForModelPayload(original, {
+    maxBytes: 1024,
+  });
+  assert.equal(compressed.data, original);
+  assert.equal(compressed.mimeType, "");
 });
 
 test("chat transport restorePromptParts rebuilds image payloads from disk", async () => {

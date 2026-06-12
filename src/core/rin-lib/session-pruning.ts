@@ -6,6 +6,8 @@ import {
 export const RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS = 4;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "[old tool result omitted to save context.]";
+export const RIN_SESSION_PRUNING_OMITTED_IMAGE =
+  "[image omitted to save context.]";
 
 type SessionPruningOptions = {
   protectRecentTurns?: number;
@@ -30,6 +32,55 @@ function isAssistantMessage(message: any) {
 function isToolResultMessage(message: any) {
   const role = String(message?.role || "").trim();
   return role === "toolResult" || role === "tool_result";
+}
+
+function normalizePartType(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function isImagePartType(type: string) {
+  return type === "image" || type === "img";
+}
+
+function omittedImageContent() {
+  return { type: "text", text: RIN_SESSION_PRUNING_OMITTED_IMAGE };
+}
+
+function pruneImageContent(content: any): {
+  content: any;
+  changed: boolean;
+} {
+  if (!content || typeof content !== "object") {
+    return { content, changed: false };
+  }
+
+  if (Array.isArray(content)) {
+    let changed = false;
+    const next = content.map((item) => {
+      const pruned = pruneImageContent(item);
+      if (pruned.changed) changed = true;
+      return pruned.content;
+    });
+    return { content: changed ? next : content, changed };
+  }
+
+  const type = normalizePartType(content.type);
+  if (isImagePartType(type)) {
+    return { content: omittedImageContent(), changed: true };
+  }
+
+  if (!Array.isArray(content.children) || !content.children.length) {
+    return { content, changed: false };
+  }
+
+  const prunedChildren = pruneImageContent(content.children);
+  if (!prunedChildren.changed) return { content, changed: false };
+  return {
+    content: { ...content, children: prunedChildren.content },
+    changed: true,
+  };
 }
 
 function findProtectedContextStart(
@@ -138,13 +189,27 @@ function createProviderBoundPrunePlan(
   const replacements = new Map<any, any>();
   let changed = visible.changed;
   const pruned = visible.messages.map((message, index) => {
-    if (index >= protectedStart || !isToolResultMessage(message)) {
-      return message;
+    if (index < protectedStart && isToolResultMessage(message)) {
+      if (isAlreadyOmitted(message?.content)) return message;
+      const replacement = {
+        ...message,
+        content: omittedContentFor(message?.content),
+      };
+      replacements.set(message, replacement);
+      changed = true;
+      return replacement;
     }
-    if (isAlreadyOmitted(message?.content)) return message;
+
+    const shouldPruneImages =
+      isAssistantMessage(message) ||
+      (index < protectedStart && isUserMessage(message));
+    if (!shouldPruneImages) return message;
+
+    const prunedContent = pruneImageContent(message?.content);
+    if (!prunedContent.changed) return message;
     const replacement = {
       ...message,
-      content: omittedContentFor(message?.content),
+      content: prunedContent.content,
     };
     replacements.set(message, replacement);
     changed = true;

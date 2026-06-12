@@ -14,6 +14,108 @@ const providerContext = await import(
   ).href
 );
 
+test("provider-bound context policy prunes images by role and protected turn window", () => {
+  const oldUserImage = {
+    type: "image",
+    data: "old-user-base64",
+    mimeType: "image/png",
+  };
+  const recentUserImage = {
+    type: "image",
+    data: "recent-user-base64",
+    mimeType: "image/png",
+  };
+  const assistantImage = {
+    type: "image",
+    data: "assistant-base64",
+    mimeType: "image/png",
+  };
+  const messages = [
+    {
+      role: "user",
+      content: [{ type: "text", text: "turn 1" }, oldUserImage],
+    },
+    { role: "assistant", content: [{ type: "text", text: "done 1" }] },
+    {
+      role: "user",
+      content: [{ type: "text", text: "turn 2" }, recentUserImage],
+    },
+    { role: "assistant", content: [{ type: "text", text: "done 2" }] },
+    { role: "user", content: [{ type: "text", text: "turn 3" }] },
+    { role: "assistant", content: [{ type: "text", text: "done 3" }] },
+    { role: "user", content: [{ type: "text", text: "turn 4" }] },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "done 4" }, assistantImage],
+    },
+    { role: "user", content: [{ type: "text", text: "turn 5" }] },
+  ];
+
+  const providerMessages =
+    providerContext.buildProviderBoundContextMessages(messages);
+
+  assert.notEqual(providerMessages, messages);
+  assert.deepEqual(providerMessages[0].content, [
+    { type: "text", text: "turn 1" },
+    { type: "text", text: "[image omitted to save context.]" },
+  ]);
+  assert.equal(providerMessages[2].content[1], recentUserImage);
+  assert.deepEqual(providerMessages[7].content, [
+    { type: "text", text: "done 4" },
+    { type: "text", text: "[image omitted to save context.]" },
+  ]);
+  assert.equal(messages[0].content[1], oldUserImage);
+  assert.equal(messages[7].content[1], assistantImage);
+});
+
+test("provider-bound context policy prunes nested assistant images", () => {
+  const messages = [
+    { role: "user", content: "start" },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "paragraph",
+          children: [
+            { type: "text", text: "see " },
+            { type: "image", attrs: { src: "file:///tmp/large.png" } },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const providerMessages =
+    providerContext.buildProviderBoundContextMessages(messages);
+
+  assert.deepEqual(providerMessages[1].content, [
+    {
+      type: "paragraph",
+      children: [
+        { type: "text", text: "see " },
+        { type: "text", text: "[image omitted to save context.]" },
+      ],
+    },
+  ]);
+});
+
+test("provider-bound context policy keeps non-image rich media nodes", () => {
+  const filePart = { type: "file", attrs: { src: "file:///tmp/large.zip" } };
+  const messages = [
+    { role: "user", content: "start" },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "see " }, filePart],
+    },
+  ];
+
+  const providerMessages =
+    providerContext.buildProviderBoundContextMessages(messages);
+
+  assert.equal(providerMessages, messages);
+  assert.equal(providerMessages[1].content[1], filePart);
+});
+
 test("provider-bound context policy omits old tool results", () => {
   const messages = [
     { role: "user", content: "turn 1" },
