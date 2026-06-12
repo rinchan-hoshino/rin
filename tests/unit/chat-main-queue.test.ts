@@ -205,7 +205,7 @@ test("chat main records record-only chat messages without starting an agent turn
   }
 });
 
-test("chat main treats /resume as a normal prompt after the command is removed", async () => {
+test("chat main reports unmatched private slash commands without starting an agent turn", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -224,6 +224,7 @@ test("chat main treats /resume as a normal prompt after the command is removed",
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.ts")).href);
       installChatControllerSessionClient(controllerMod.ChatController);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
       const seen = [];
@@ -240,12 +241,7 @@ test("chat main treats /resume as a normal prompt after the command is removed",
         return { handled: true, text: "should not run" };
       };
       controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
-        seen.push({
-          mode,
-          text: input?.text || null,
-          replyToMessageId: input?.replyToMessageId || null,
-          sessionFile: input?.sessionFile || null,
-        });
+        seen.push({ mode, text: input?.text || null });
         return { retry: false };
       };
 
@@ -273,20 +269,116 @@ test("chat main treats /resume as a normal prompt after the command is removed",
       });
 
       const deadline = Date.now() + 5000;
-      while (Date.now() < deadline && seen.length < 1) {
+      let rows = [];
+      while (Date.now() < deadline) {
+        rows = storeMod
+          .listChatMessages(agentDir)
+          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        if (rows.length >= 1) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       if (
         runCommandCalls !== 0 ||
-        sentCount !== 0 ||
-        seen.length !== 1 ||
-        seen[0]?.mode !== undefined ||
-        seen[0]?.text !== "/resume" ||
-        seen[0]?.replyToMessageId !== "m-resume" ||
-        seen[0]?.sessionFile !== null
+        seen.length !== 0 ||
+        sentCount !== 1 ||
+        rows.length !== 1 ||
+        rows[0]?.text !== "Unknown command. Send /help to see available commands."
       ) {
-        throw new Error(JSON.stringify({ sentCount, runCommandCalls, seen }));
+        throw new Error(JSON.stringify({ sentCount, runCommandCalls, seen, rows }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat main silently consumes unmatched group slash commands", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.ts")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const seen = [];
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      let runCommandCalls = 0;
+      controllerMod.ChatController.prototype.runCommand = async function () {
+        runCommandCalls += 1;
+        return { handled: true, text: "should not run" };
+      };
+      controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
+        seen.push({ mode, text: input?.text || null });
+        return { retry: false };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        username: "rin_bot",
+        name: "rin_bot",
+        async sendMessage() {
+          throw new Error("unmatched group command should not send a reply");
+        },
+      });
+      const node = h.createChatRuntimeH();
+      app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "-10042",
+        guildId: "-10042",
+        userId: "owner-1",
+        messageId: "m-group-unknown",
+        isDirect: false,
+        content: "/unknown @rin_bot",
+        stripped: { appel: true, content: "/unknown" },
+        elements: [node.text("/unknown "), node.at("1", { name: "rin_bot" })],
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const rows = storeMod
+        .listChatMessages(agentDir)
+        .filter((item) => item.chatKey === "telegram/1:-10042" && item.role === "assistant");
+
+      if (runCommandCalls !== 0 || seen.length !== 0 || rows.length !== 0) {
+        throw new Error(JSON.stringify({ runCommandCalls, seen, rows }));
       }
       process.exit(0);
     `;
@@ -435,7 +527,7 @@ test("chat main forwards command sender identity without reply session binding",
   }
 });
 
-test("chat main ignores removed /auth commands instead of mutating chat identity", async () => {
+test("chat main reports removed /auth private commands without mutating chat identity", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -484,7 +576,7 @@ test("chat main ignores removed /auth commands instead of mutating chat identity
       if (supportMod.trustOf(identity, "telegram", "u1") !== "OTHER") {
         throw new Error(JSON.stringify(identity));
       }
-      if (sentCount !== 0) {
+      if (sentCount !== 1) {
         throw new Error(JSON.stringify({ sentCount }));
       }
       process.exit(0);

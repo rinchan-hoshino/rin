@@ -220,32 +220,62 @@ function getCommandTargets(session: any) {
   );
 }
 
+type ParsedInboundCommand = { name: string; argsText: string };
+
+type InboundCommandRequest = {
+  commandLike: boolean;
+  name: string;
+  argsText: string;
+  command: ParsedInboundCommand | null;
+};
+
+function parseInboundCommandRequest(
+  session: any,
+  text: string,
+  commandRows: Array<{ name: string }>,
+): InboundCommandRequest {
+  const empty = {
+    commandLike: false,
+    name: "",
+    argsText: "",
+    command: null,
+  };
+  const input = safeString(text).trim();
+  if (!input.startsWith("/")) return empty;
+  const spaceIndex = input.indexOf(" ");
+  const head = (spaceIndex >= 0 ? input.slice(0, spaceIndex) : input)
+    .slice(1)
+    .trim();
+  if (!head) return empty;
+  const argsText = spaceIndex >= 0 ? input.slice(spaceIndex + 1).trim() : "";
+  const [rawName, rawTarget = ""] = head.split("@", 2);
+  const name = safeString(rawName).trim().toLowerCase();
+  if (!name) return empty;
+  const commandLike = true;
+  const target = safeString(rawTarget).trim().replace(/^@+/, "").toLowerCase();
+  if (target) {
+    const targets = getCommandTargets(session);
+    if (targets.size && !targets.has(target)) {
+      return { commandLike, name, argsText, command: null };
+    }
+  }
+  const active = commandRows.some(
+    (item) => safeString(item?.name).trim() === name,
+  );
+  return {
+    commandLike,
+    name,
+    argsText,
+    command: active ? { name, argsText } : null,
+  };
+}
+
 function parseInboundCommand(
   session: any,
   text: string,
   commandRows: Array<{ name: string }>,
 ) {
-  const input = safeString(text).trim();
-  if (!input.startsWith("/")) return null;
-  const spaceIndex = input.indexOf(" ");
-  const head = (spaceIndex >= 0 ? input.slice(0, spaceIndex) : input)
-    .slice(1)
-    .trim();
-  if (!head) return null;
-  const argsText = spaceIndex >= 0 ? input.slice(spaceIndex + 1).trim() : "";
-  const [rawName, rawTarget = ""] = head.split("@", 2);
-  const name = safeString(rawName).trim().toLowerCase();
-  if (!name) return null;
-  const active = commandRows.some(
-    (item) => safeString(item?.name).trim() === name,
-  );
-  if (!active) return null;
-  const target = safeString(rawTarget).trim().replace(/^@+/, "").toLowerCase();
-  if (target) {
-    const targets = getCommandTargets(session);
-    if (targets.size && !targets.has(target)) return null;
-  }
-  return { name, argsText };
+  return parseInboundCommandRequest(session, text, commandRows).command;
 }
 
 export type ChatBridgeTurnPayload = RinToolStartupOptions &
@@ -463,6 +493,29 @@ export async function startChatBridge(
     );
   const isInboundMessageProcessed = (chatKey: string, messageId: string) =>
     hasInboundChatMessageReplyBoundary(runtime.agentDir, chatKey, messageId);
+  const handleUnmatchedCommandSession = async (session: any) => {
+    if (getChatType(session) !== "private") return { retry: false };
+    const platform = safeString(session?.platform || "").trim();
+    const chatKey = composeChatKey(
+      platform,
+      getChatId(session),
+      safeString(session?.selfId || session?.bot?.selfId || "").trim(),
+    );
+    const messageId = pickMessageId(session);
+    if (!chatKey) return { retry: false };
+    await enqueueAndDrainOutbox(
+      {
+        type: "text_delivery",
+        createdAt: nowIso(),
+        chatKey,
+        text: "Unknown command. Send /help to see available commands.",
+        replyToMessageId: messageId || undefined,
+      },
+      "error",
+    ).catch(() => {});
+    return { retry: false };
+  };
+
   const handleCommandSession = async (
     session: any,
     command: { name: string; argsText: string },
@@ -773,16 +826,28 @@ export async function startChatBridge(
       ? envelope.elements
       : [];
     const identity = getIdentity();
-    const command = parseInboundCommand(
+    const commandRequest = parseInboundCommandRequest(
       queuedSession,
       elementsToText(queuedElements),
       commandRows,
     );
-    if (command) {
+    if (commandRequest.command) {
       return {
         run: () =>
           runClaimedInboxJob(job, () =>
-            handleCommandSession(queuedSession, command, identity),
+            handleCommandSession(
+              queuedSession,
+              commandRequest.command!,
+              identity,
+            ),
+          ),
+      };
+    }
+    if (commandRequest.commandLike) {
+      return {
+        run: () =>
+          runClaimedInboxJob(job, () =>
+            handleUnmatchedCommandSession(queuedSession),
           ),
       };
     }
