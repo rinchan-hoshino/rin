@@ -50,6 +50,72 @@ test("chat outbox enqueues payload on disk", async () => {
   });
 });
 
+test("chat outbox accepts SDK-style text and parts payloads", async () => {
+  await withTempDir(async (dir) => {
+    outbox.enqueueChatOutboxPayload(dir, {
+      chatKey: "telegram/777:1",
+      text: "plain sdk text",
+    });
+    outbox.enqueueChatOutboxPayload(dir, {
+      chatKey: "telegram/777:1",
+      parts: [
+        { type: "text", text: "sdk parts text" },
+        { type: "image", path: "/tmp/example.png", mimeType: "image/png" },
+      ],
+    });
+
+    const queued = outbox.listChatOutboxItems(dir).map(({ item }) => item);
+    assert.equal(queued[0].payload.type, "text_delivery");
+    assert.equal(queued[0].payload.text, "plain sdk text");
+    assert.equal(queued[1].payload.type, "parts_delivery");
+    assert.equal(queued[1].payload.parts.length, 2);
+
+    const sent = [];
+    function h(type, attrs) {
+      return { type, attrs };
+    }
+    h.text = (content) => ({ type: "text", attrs: { content } });
+    h.markdown = (content) => ({ type: "markdown", attrs: { content } });
+    h.quote = (id) => ({ type: "quote", attrs: { id } });
+    h.file = (src, mimeType, attrs) => ({
+      type: "file",
+      attrs: { src, mimeType, ...attrs },
+    });
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "777",
+          async sendMessage(chatId, content) {
+            sent.push({ chatId, content });
+            return [`m-${sent.length}`];
+          },
+        },
+      ],
+    };
+
+    const results = await boot.drainChatOutbox(app, dir, h, { warn() {} });
+    assert.deepEqual(
+      results.map((result) => result.status),
+      ["delivered", "delivered"],
+    );
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0].content[0].attrs.content, "plain sdk text");
+    assert.equal(sent[1].content[0].attrs.content, "sdk parts text");
+    assert.equal(sent[1].content[1].type, "image");
+  });
+});
+
+test("chat outbox rejects SDK-style empty payloads before enqueue", async () => {
+  await withTempDir(async (dir) => {
+    assert.throws(
+      () => outbox.enqueueChatOutboxPayload(dir, { chatKey: "telegram/777:1" }),
+      /chat_outbox_invalid_payload/,
+    );
+    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+  });
+});
+
 test("chat outbox retries queued payloads after send failure", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {

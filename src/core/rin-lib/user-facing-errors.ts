@@ -74,10 +74,14 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat message store write failed because the chat key is missing. Check the adapter event.",
   chat_message_store_messageId_required: () =>
     "Chat message store write failed because the message id is missing. Check the adapter event.",
+  chat_outbox_delivery_missing: () =>
+    "Chat send failed before the outbox item reached the adapter. Check the outgoing payload.",
   chat_outbox_empty_message: () =>
     "Chat send failed because the outgoing message is empty. Add text or an attachment.",
   chat_outbox_invalid_json: () =>
     "Chat outbox contains invalid JSON. Recreate the outbox item.",
+  chat_outbox_invalid_payload: () =>
+    "Chat send failed because the outgoing payload is invalid. Add text or message parts.",
   chat_outbox_invalid_part: () =>
     "Chat send failed because one message part is invalid. Fix the rich message part.",
   chat_restored_session_mismatch: () =>

@@ -74,6 +74,24 @@ export type ChatOutboxPayload =
       parts: ChatMessagePart[];
     };
 
+export type ChatOutboxPayloadInput =
+  | ChatOutboxPayload
+  | {
+      type?: "text_delivery" | "parts_delivery";
+      createdAt?: string;
+      chatKey: string;
+      taskId?: string;
+      runId?: string;
+      requestId?: string;
+      deliveryKind?: ChatDeliveryKind;
+      text?: string;
+      replyToMessageId?: string;
+      sessionId?: string;
+      sessionFile?: string;
+      sessionBinding?: "conversation";
+      parts?: ChatMessagePart[];
+    };
+
 export type ChatOutboxDeliveryKind =
   | "final"
   | "interim"
@@ -163,6 +181,49 @@ function normalizeDeliveryKind(value: unknown): ChatOutboxDeliveryKind {
     return text;
   }
   return "generic";
+}
+
+export function normalizeChatOutboxPayload(
+  raw: unknown,
+): ChatOutboxPayload | null {
+  if (!raw || typeof raw !== "object") return null;
+  const payload = raw as Record<string, unknown>;
+  const chatKey = safeString(payload.chatKey).trim();
+  if (!chatKey) return null;
+  const explicitType = safeString(payload.type).trim();
+  const type =
+    explicitType === "text_delivery" || explicitType === "parts_delivery"
+      ? explicitType
+      : Array.isArray(payload.parts)
+        ? "parts_delivery"
+        : safeString(payload.text).trim()
+          ? "text_delivery"
+          : "";
+  if (type === "text_delivery") {
+    const text = safeString(payload.text).trim();
+    if (!text) return null;
+    return {
+      ...payload,
+      type,
+      chatKey,
+      text,
+      createdAt: safeString(payload.createdAt).trim() || nowIso(),
+    } as ChatOutboxPayload;
+  }
+  if (type === "parts_delivery") {
+    const parts = Array.isArray(payload.parts)
+      ? payload.parts.filter(Boolean)
+      : [];
+    if (!parts.length) return null;
+    return {
+      ...payload,
+      type,
+      chatKey,
+      parts,
+      createdAt: safeString(payload.createdAt).trim() || nowIso(),
+    } as ChatOutboxPayload;
+  }
+  return null;
 }
 
 function normalizeOutboxItem(
@@ -255,20 +316,25 @@ export function listChatOutboxItems(agentDir: string) {
 
 export function enqueueChatOutboxPayload(
   agentDir: string,
-  payload: ChatOutboxPayload,
+  payload: ChatOutboxPayloadInput,
   options: EnqueueChatOutboxOptions = {},
 ) {
   const createdAt = safeString(payload.createdAt).trim() || nowIso();
+  const normalizedPayload = normalizeChatOutboxPayload({
+    ...payload,
+    createdAt,
+  });
+  if (!normalizedPayload) throw new Error("chat_outbox_invalid_payload");
   const sequence =
     Date.now() * 1000 + (sequenceCounter = (sequenceCounter + 1) % 1_000_000);
   const item: ChatOutboxItem = {
     id: sanitizeIdPart(options.id) || createOutboxId(),
     status: "queued",
-    createdAt,
-    updatedAt: createdAt,
+    createdAt: normalizedPayload.createdAt,
+    updatedAt: normalizedPayload.createdAt,
     sequence,
     deliveryKind: normalizeDeliveryKind(options.deliveryKind),
-    payload: { ...payload, createdAt } as ChatOutboxPayload,
+    payload: normalizedPayload,
     attempts: 0,
     postDelivery: options.postDelivery,
   };

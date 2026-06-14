@@ -98,7 +98,7 @@ import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
   enqueueChatOutboxPayload,
-  type ChatOutboxPayload,
+  type ChatOutboxPayloadInput,
 } from "../rin-lib/chat-outbox.js";
 import { sendReaction, sendTyping } from "./transport.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
@@ -326,7 +326,7 @@ export type ChatBridgeHandle = {
   };
   stop: () => Promise<void>;
   getStatus: () => ChatBridgeStatus;
-  send: (payload: ChatOutboxPayload) => Promise<{ delivered: true }>;
+  send: (payload: ChatOutboxPayloadInput) => Promise<{ delivered: true }>;
   typing: (payload: { chatKey?: string }) => Promise<{ sent: boolean }>;
   react: (payload: {
     chatKey?: string;
@@ -369,7 +369,7 @@ export async function startChatBridge(
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
   const enqueueAndDrainOutbox = async (
-    payload: ChatOutboxPayload,
+    payload: ChatOutboxPayloadInput,
     deliveryKind: "command_ack" | "error" | "generic" = "generic",
   ) => {
     const id = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -378,7 +378,10 @@ export async function startChatBridge(
     const own = Array.isArray(results)
       ? results.find((item: any) => item?.id === id)
       : null;
-    if (own && own.status !== "delivered") {
+    if (!own) {
+      throw new Error("chat_outbox_delivery_missing");
+    }
+    if (own.status !== "delivered") {
       throw new Error(
         safeString((own as any).error).trim() || "chat_outbox_delivery_pending",
       );
@@ -960,7 +963,7 @@ export async function startChatBridge(
   });
 
   const startedAt = nowIso();
-  const send = async (payload: ChatOutboxPayload) => {
+  const send = async (payload: ChatOutboxPayloadInput) => {
     await enqueueAndDrainOutbox(payload, "generic");
     return { delivered: true as const };
   };
