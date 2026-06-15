@@ -1257,10 +1257,22 @@ export async function runCustomRpcMode(
       case "get_messages":
         return done(id, type, { messages: session.messages });
       case "resolve_submitted_turn": {
-        const resolved = resolveSubmittedTurnFromMessages(session.messages, {
-          text: safeString(command.text).trim(),
-          sentAt: Number(command.sentAt || 0),
-        });
+        const resolved = resolveSubmittedTurnFromMessages(
+          session.messages,
+          {
+            text: safeString(command.text).trim(),
+            sentAt: Number(command.sentAt || 0),
+          },
+          {
+            turnActive: Boolean(
+              isTurnActive() ||
+              session.isStreaming ||
+              session.isCompacting ||
+              session.isRetrying ||
+              session.retryAttempt > 0,
+            ),
+          },
+        );
         if (resolved && !("submitted" in resolved)) {
           return done(id, type, {
             ...resolved,

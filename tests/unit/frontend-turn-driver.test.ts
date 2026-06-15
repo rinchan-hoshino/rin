@@ -799,6 +799,32 @@ test("submitted turn resolution preserves provider failure instead of final-miss
   assert.deepEqual(resolved, { error: "WebSocket error" });
 });
 
+test("submitted turn resolution does not surface provider failure while the submitted turn is active", () => {
+  const resolved = (resolveSubmittedTurnFromMessages as any)(
+    [
+      {
+        role: "user",
+        timestamp: 1778774583000,
+        content: "restored job",
+      },
+      {
+        role: "assistant",
+        timestamp: 1778774590000,
+        stopReason: "error",
+        errorMessage: "Codex SSE response headers timed out after 20000ms",
+        content: [
+          { type: "thinking", thinking: "working" },
+          { type: "toolCall", name: "write", arguments: {} },
+        ],
+      },
+    ],
+    { text: "restored job", sentAt: 1778774580000 },
+    { turnActive: true },
+  );
+
+  assert.deepEqual(resolved, { submitted: true });
+});
+
 test("frontend SDK turn driver surfaces restored submitted provider errors", async () => {
   const originalNow = Date.now;
   let now = 1778774600000;

@@ -71,6 +71,7 @@ function findSubmittedTurnFailure(messages: unknown[]) {
 export function resolveSubmittedTurnFromMessages(
   messages: unknown[],
   input: { text: string; sentAt?: number },
+  options: { turnActive?: boolean } = {},
 ): RinSubmittedTurnResolution {
   const sentAt = Number(input.sentAt || 0);
   if (!Number.isFinite(sentAt) || sentAt <= 0) return null;
@@ -92,6 +93,7 @@ export function resolveSubmittedTurnFromMessages(
   const completion = resolveTurnCompletion({ messages: turnMessages });
   const finalText = safeString(completion.finalText).trim();
   if (!finalText) {
+    if (options.turnActive) return { submitted: true };
     const error = findSubmittedTurnFailure(turnMessages);
     if (error) return { error };
     return { submitted: true };
