@@ -20,6 +20,10 @@ const { getChatMessage, saveChatMessage } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
     .href
 );
+const { lookupReplySession } = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js"))
+    .href
+);
 
 async function createController(chatKey = "telegram/1:2", deps = {}) {
   const tempDir = await fs.mkdtemp(
@@ -788,6 +792,17 @@ test("chat controller starts command reactions from frontend working status", as
 
 test("chat controller sends compaction start notice and reacts on that notice", async () => {
   const controller = await createController("telegram/1:2");
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "compaction-notice-chat.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "", "utf8");
+  controller.driver.frontendState = {
+    sessionFile,
+    sessionId: "session-compaction-notice",
+  };
   const actions = [];
   const reactions = [];
   const deliveries = [];
@@ -839,6 +854,20 @@ test("chat controller sends compaction start notice and reacts on that notice", 
     { text: "Compacting...", kind: "passive_notice" },
     { text: "Compacted from 108,642 tokens", kind: "passive_notice" },
   ]);
+  assert.equal(
+    getChatMessage(controller.agentDir, "telegram/1:2", "m-out-1")?.sessionFile,
+    "compaction-notice-chat.jsonl",
+  );
+  assert.equal(
+    lookupReplySession(controller.agentDir, "telegram/1:2", "m-out-1")
+      ?.sessionFile,
+    sessionFile,
+  );
+  assert.equal(
+    lookupReplySession(controller.agentDir, "telegram/1:2", "m-out-2")
+      ?.sessionFile,
+    sessionFile,
+  );
 });
 
 test("chat controller keeps compaction notice independent from the underlying chat turn", async () => {
@@ -936,6 +965,56 @@ test("chat controller delivers non-deferred passive notices during active turns"
   assert.deepEqual(deliveries, [
     { text: "- [x] finished", kind: "passive_notice" },
   ]);
+});
+
+test("chat controller binds passive notices to the current session for quote resume", async () => {
+  const controller = await createController("telegram/1:2");
+  const chatKey = "telegram/1:2";
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "passive-notice-chat.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "", "utf8");
+  controller.driver.frontendState = {
+    sessionFile,
+    sessionId: "session-passive-notice",
+    isStreaming: true,
+    turnActive: true,
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-owner",
+    replyToMessageId: "m-owner",
+    workingNoticeSent: false,
+  };
+  controller.app.bots[0].sendMessage = async () => ["m-passive-notice"];
+
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "- [x] tool finished",
+      level: "info",
+      deferDuringTurn: false,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const stored = getChatMessage(
+    controller.agentDir,
+    chatKey,
+    "m-passive-notice",
+  );
+  assert.equal(stored?.text, "- [x] tool finished");
+  assert.equal(stored?.sessionFile, "passive-notice-chat.jsonl");
+  const linked = lookupReplySession(
+    controller.agentDir,
+    chatKey,
+    "m-passive-notice",
+  );
+  assert.equal(linked?.sessionFile, sessionFile);
 });
 
 test("chat controller quiet mode suppresses interim and todo notices", async () => {

@@ -903,6 +903,15 @@ export class ChatController {
     });
   }
 
+  private currentConversationSessionPayload() {
+    if (!this.affectChatBinding) return {};
+    const sessionFile = this.currentSessionFile();
+    return {
+      ...(sessionFile ? { sessionFile } : {}),
+      sessionBinding: "conversation" as const,
+    };
+  }
+
   private buildAssistantDelivery(input: {
     text?: string;
     replyToMessageId?: string;
@@ -1057,12 +1066,7 @@ export class ChatController {
           deliveryKind: "interim",
           text: `${INTERIM_PREFIX}${trimmed}`,
           replyToMessageId: replyToMessageId || undefined,
-          ...(this.affectChatBinding
-            ? {
-                sessionFile: this.currentSessionFile(),
-                sessionBinding: "conversation" as const,
-              }
-            : {}),
+          ...this.currentConversationSessionPayload(),
         },
         { deliveryKind: "interim" },
       );
@@ -1092,6 +1096,7 @@ export class ChatController {
           createdAt: nowIso(),
           chatKey: this.chatKey,
           text: trimmed,
+          ...this.currentConversationSessionPayload(),
         },
         { deliveryKind: "passive_notice" },
       );
@@ -1134,6 +1139,7 @@ export class ChatController {
           createdAt: nowIso(),
           chatKey: this.chatKey,
           text: trimmed,
+          ...this.currentConversationSessionPayload(),
         },
         { deliveryKind: "passive_notice" },
       );
