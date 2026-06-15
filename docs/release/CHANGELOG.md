@@ -1,5 +1,29 @@
 # Rin Changelog
 
+## 0.5.0
+
+- Chat and daemon recovery is more resilient: active submitted turns stay attached during recovery, passive notices target the right chat session, replaced resume workers shut down cleanly, and outbox delivery stalls are isolated from other chat traffic.
+- Provider and compact-command failures now surface more accurately, including retry-exhaustion details without extra compact acknowledgements.
+- The todo tool can now read the current checklist when called without replacement data, matching the documented checklist workflow.
+- Installer and update flows are clearer and safer around update progress, cleanup, and CLI handoff behavior.
+- Self-improve review and distillation paths now require eligible producers and prefer target-state guidance, reducing stale or unsupported review output.
+- Release executors now verify changelog coverage against included commits before publishing stable or prerelease metadata.
+
+<!-- rin-changelog-coverage
+cd8c892 fix(release): require changelog commit coverage
+e336177 fix: suppress compact chat acknowledgement
+fb0f678 fix(chat): keep submitted turns alive during active recovery
+ccc4718 fix(chat): bind passive notices to chat sessions
+0fdd7ee fix(chat): show retry exhaustion in provider errors
+3738ddb feat(todo): read checklist when todos is omitted
+1e44a32 fix(daemon): shut down replaced resume sessions
+198f1a6 fix(chat): preserve retry exhaustion on thrown provider errors
+b587d6e fix(chat): isolate outbox delivery stalls
+a961138 Refine Rin update installer flow
+ea1dccf docs(self-improve): prefer target-state distillation
+ff4bde6 fix(self-improve): require eligible producers for reviews
+-->
+
 ## 0.4.0
 
 - Chat and daemon sessions reuse workers more safely across reconnects, session switches, and restored turns, so frontends are less likely to attach to stale or duplicate session state.
