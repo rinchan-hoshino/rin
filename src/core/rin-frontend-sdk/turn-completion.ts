@@ -187,7 +187,14 @@ export function resolveRinLatestSubmittedTurnCompletion(
   };
 }
 
-export function resolveRinTurnFailureMessage(session: any, messages: any[]) {
+export function resolveRinTurnFailureMessage(
+  session: any,
+  messages: any[],
+  options: { retryFailureMessage?: string } = {},
+) {
+  const retryFailureMessage = safeString(options.retryFailureMessage).trim();
+  if (retryFailureMessage) return retryFailureMessage;
+
   const stateError = safeString(session?.agent?.state?.errorMessage).trim();
   if (stateError) return stateError;
 

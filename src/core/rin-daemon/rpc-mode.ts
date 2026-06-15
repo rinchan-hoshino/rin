@@ -363,19 +363,28 @@ async function forceFlushSessionFile(session: any) {
 function turnResolutionHasTerminalResult(
   session: any,
   resolution: RinTurnCompletionResolution | null | undefined,
+  options: { retryFailureMessage?: string } = {},
 ) {
   if (!resolution) return false;
   if (resolution.completion.finalText) return true;
-  return Boolean(resolveRinTurnFailureMessage(session, resolution.messages));
+  return Boolean(
+    resolveRinTurnFailureMessage(session, resolution.messages, options),
+  );
 }
 
 async function runSessionTurnProducer(
   session: any,
   baseline: ReturnType<typeof captureRinTurnCompletionBaseline>,
   action: () => Promise<RinTurnCompletionResolution | null | undefined>,
+  options: { retryFailureMessage?: () => string } = {},
 ): Promise<RinTurnCompletionResolution | null> {
+  const failureOptions = () => ({
+    retryFailureMessage: safeString(options.retryFailureMessage?.()).trim(),
+  });
   const directResolution = await action();
-  if (turnResolutionHasTerminalResult(session, directResolution)) {
+  if (
+    turnResolutionHasTerminalResult(session, directResolution, failureOptions())
+  ) {
     return directResolution || null;
   }
   await forceFlushSessionFile(session);
@@ -383,7 +392,11 @@ async function runSessionTurnProducer(
     session,
     { baseline },
   );
-  return turnResolutionHasTerminalResult(session, durableResolution)
+  return turnResolutionHasTerminalResult(
+    session,
+    durableResolution,
+    failureOptions(),
+  )
     ? durableResolution
     : null;
 }
@@ -782,6 +795,7 @@ export async function runCustomRpcMode(
     return done(id, type, map ? map(value) : value);
   };
   let activeTurnPromise: Promise<void> | null = null;
+  let latestAutoRetryFailureMessage = "";
   const isTurnActive = () => Boolean(activeTurnPromise);
   let interruptQueue = Promise.resolve();
   let initialFreshSessionReusable =
@@ -816,6 +830,7 @@ export async function runCustomRpcMode(
     ) => Promise<RinTurnCompletionResolution | null>,
     options: { forceTurnEvents?: boolean } = {},
   ) => {
+    latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
     const baseline = captureRinTurnCompletionBaseline(turnSession);
     const promise = (async () => {
@@ -857,6 +872,7 @@ export async function runCustomRpcMode(
           const failureMessage = resolveRinTurnFailureMessage(
             turnSession,
             messages,
+            { retryFailureMessage: latestAutoRetryFailureMessage },
           );
           if (failureMessage) throw new Error(failureMessage);
           if (heartbeatTimer) {
@@ -1014,7 +1030,23 @@ export async function runCustomRpcMode(
     });
 
     unsubscribeSessionEvents?.();
-    unsubscribeSessionEvents = session.subscribe((event: unknown) => {
+    unsubscribeSessionEvents = session.subscribe((event: any) => {
+      if (event?.type === "auto_retry_start") {
+        latestAutoRetryFailureMessage = "";
+      }
+      if (event?.type === "auto_retry_end") {
+        if (event.success === false) {
+          const finalError = safeString(event.finalError).trim();
+          const attempt = Number(event.attempt || 0);
+          latestAutoRetryFailureMessage = finalError
+            ? /^Retry failed after\b/i.test(finalError)
+              ? finalError
+              : `Retry failed after ${attempt || 1} attempts: ${finalError}`
+            : "";
+        } else {
+          latestAutoRetryFailureMessage = "";
+        }
+      }
       output(withCompactionEventMetadata(session, event));
     });
   };
@@ -1063,10 +1095,15 @@ export async function runCustomRpcMode(
           return done(id, "prompt");
         }
         startTurnTask(String(command.requestTag || ""), async (baseline) => {
-          return await runSessionTurnProducer(session, baseline, async () => {
-            await session.prompt(command.message, promptOptions);
-            return null;
-          });
+          return await runSessionTurnProducer(
+            session,
+            baseline,
+            async () => {
+              await session.prompt(command.message, promptOptions);
+              return null;
+            },
+            { retryFailureMessage: () => latestAutoRetryFailureMessage },
+          );
         });
         return done(id, "prompt");
       }
@@ -1074,9 +1111,14 @@ export async function runCustomRpcMode(
         startInterruptTurnTask(
           String(command.requestTag || ""),
           async (baseline) => {
-            return await runSessionTurnProducer(session, baseline, async () => {
-              return await resumeInterruptedTurn(session);
-            });
+            return await runSessionTurnProducer(
+              session,
+              baseline,
+              async () => {
+                return await resumeInterruptedTurn(session);
+              },
+              { retryFailureMessage: () => latestAutoRetryFailureMessage },
+            );
           },
         );
         return done(id, "resume_interrupted_turn");
@@ -1319,10 +1361,15 @@ export async function runCustomRpcMode(
         });
       case "send_user_message":
         startTurnTask(String(command.requestTag || ""), async (baseline) => {
-          return await runSessionTurnProducer(session, baseline, async () => {
-            await session.sendUserMessage(command.content, command.options);
-            return null;
-          });
+          return await runSessionTurnProducer(
+            session,
+            baseline,
+            async () => {
+              await session.sendUserMessage(command.content, command.options);
+              return null;
+            },
+            { retryFailureMessage: () => latestAutoRetryFailureMessage },
+          );
         });
         return done(id, type, { sent: true });
       case "get_commands":
