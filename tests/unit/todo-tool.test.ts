@@ -16,7 +16,7 @@ test("todo tool replaces the whole checklist in one write", async () => {
   const tool = todoModule.default().tools[0];
 
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["todos"]);
-  assert.deepEqual(tool.parameters.required, ["todos"]);
+  assert.deepEqual(tool.parameters.required ?? [], []);
 
   const first = await tool.execute(
     "todo-write-1",
@@ -47,4 +47,51 @@ test("todo tool replaces the whole checklist in one write", async () => {
   ]);
   assert.equal(second.details.nextId, 2);
   assert.doesNotMatch(second.content[0].text, /First item|Done item/);
+});
+
+test("todo tool reads current checklist when todos is omitted", async () => {
+  const tool = todoModule.default().tools[0];
+
+  await tool.execute(
+    "todo-write-before-read",
+    { todos: [{ text: "Keep this item" }, { text: "Done item", done: true }] },
+    undefined,
+    undefined,
+    {},
+  );
+
+  const read = await tool.execute("todo-read", {}, undefined, undefined, {});
+
+  assert.equal(read.details.action, "list");
+  assert.deepEqual(read.details.todos, [
+    { id: 1, text: "Keep this item", done: false },
+    { id: 2, text: "Done item", done: true },
+  ]);
+  assert.equal(read.details.nextId, 3);
+  assert.equal(read.content[0].text, "[ ] Keep this item\n[x] Done item");
+});
+
+test("todo tool clears only when todos is an empty array", async () => {
+  const tool = todoModule.default().tools[0];
+
+  await tool.execute(
+    "todo-write-before-clear",
+    { todos: [{ text: "Clear this item" }] },
+    undefined,
+    undefined,
+    {},
+  );
+
+  const cleared = await tool.execute(
+    "todo-clear",
+    { todos: [] },
+    undefined,
+    undefined,
+    {},
+  );
+
+  assert.equal(cleared.details.action, "clear");
+  assert.deepEqual(cleared.details.todos, []);
+  assert.equal(cleared.details.nextId, 1);
+  assert.equal(cleared.content[0].text, "No todos");
 });

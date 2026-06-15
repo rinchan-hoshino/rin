@@ -44,10 +44,12 @@ const TodoItemParams: any = Type.Object({
 });
 
 const TodoParams: any = Type.Object({
-  todos: Type.Array(TodoItemParams, {
-    description:
-      "Complete ordered checklist for the current branch. This replaces all previous todos; include every item that should remain.",
-  }),
+  todos: Type.Optional(
+    Type.Array(TodoItemParams, {
+      description:
+        "Complete ordered checklist for the current branch. Omit this property to read the current checklist; pass an empty array to clear it; otherwise include every item that should remain.",
+    }),
+  ),
 });
 
 function normalizeTodoId(value: unknown): number | undefined {
@@ -98,6 +100,11 @@ function normalizeTodoWriteItems(value: unknown): Todo[] | undefined {
     });
   }
   return nextTodos;
+}
+
+function isTodoReadParams(params: unknown): boolean {
+  const value = params && typeof params === "object" ? (params as any) : null;
+  return !value || !Object.hasOwn(value, "todos") || value.todos == null;
 }
 
 function readTodoDetails(value: unknown): TodoDetails | undefined {
@@ -275,29 +282,40 @@ export default function todoCapability(): RinCapabilityDefinition {
   const todoToolDefinition: any = {
     name: "todo",
     label: "Checklist",
-    description:
-      "Replace the current branch execution checklist with a complete ordered list.",
+    description: "Read or replace the current branch execution checklist.",
     promptSnippet:
-      "Rewrite the current branch checklist in one call by passing the complete desired todos array.",
+      "Read the current branch checklist by omitting todos, or rewrite it by passing the complete desired todos array.",
     promptGuidelines: [
       "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
-      "Always pass the complete desired checklist; omitted items are removed. Use an empty todos array to clear the checklist.",
+      "Omit todos to read the current checklist. Pass the complete desired checklist to replace it; omitted items are removed. Pass an empty todos array only to clear the checklist.",
     ],
     parameters: TodoParams,
 
     async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      if (isTodoReadParams(params)) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: formatTodoChecklistContent(todos),
+            },
+          ],
+          details: snapshot("list"),
+        };
+      }
+
       const nextTodos = normalizeTodoWriteItems(params.todos);
       if (!nextTodos) {
         return {
           content: [
             {
               type: "text" as const,
-              text: "Error: todos must be a complete array of non-empty todo items",
+              text: "Error: todos must be omitted or a complete array of non-empty todo items",
             },
           ],
           details: snapshot(
             "write",
-            "todos must be a complete array of non-empty todo items",
+            "todos must be omitted or a complete array of non-empty todo items",
           ),
         };
       }
@@ -311,12 +329,15 @@ export default function todoCapability(): RinCapabilityDefinition {
             text: formatTodoChecklistContent(todos),
           },
         ],
-        details: snapshot("write"),
+        details: snapshot(todos.length === 0 ? "clear" : "write"),
       };
     },
 
     renderCall(args: any, theme, context) {
       if (context?.isPartial === false) return renderTodoText("");
+      if (isTodoReadParams(args)) {
+        return renderTodoText(formatTodoChecklistRender(todos, false, theme));
+      }
       const nextTodos = normalizeTodoWriteItems(args?.todos);
       return renderTodoText(
         nextTodos ? formatTodoChecklistRender(nextTodos, false, theme) : "",

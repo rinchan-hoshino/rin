@@ -149,12 +149,13 @@ test("core todo loads from configured runtime without extension paths", async ()
       assert.ok(todoTool);
       assert.equal(
         todoTool.description,
-        "Replace the current branch execution checklist with a complete ordered list.",
+        "Read or replace the current branch execution checklist.",
       );
+      assert.match(todoTool.promptSnippet, /omitting todos/);
       assert.match(todoTool.promptSnippet, /complete desired todos array/);
       assert.deepEqual(todoTool.promptGuidelines, [
         "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
-        "Always pass the complete desired checklist; omitted items are removed. Use an empty todos array to clear the checklist.",
+        "Omit todos to read the current checklist. Pass the complete desired checklist to replace it; omitted items are removed. Pass an empty todos array only to clear the checklist.",
       ]);
 
       const written = await todoTool.execute(
@@ -176,8 +177,15 @@ test("core todo loads from configured runtime without extension paths", async ()
         undefined,
         { cwd: agentDir },
       );
-      const cleared = await todoTool.execute(
+      const read = await todoTool.execute(
         "tool-call-3",
+        {},
+        undefined,
+        undefined,
+        { cwd: agentDir },
+      );
+      const cleared = await todoTool.execute(
+        "tool-call-4",
         { todos: [] },
         undefined,
         undefined,
@@ -193,6 +201,9 @@ test("core todo loads from configured runtime without extension paths", async ()
         { id: 1, text: "Wire core todo", done: true },
         { id: 2, text: "Ship whole-list writer", done: false },
       ]);
+      assert.equal(read.details.action, "list");
+      assert.deepEqual(read.details.todos, rewritten.details.todos);
+      assert.equal(cleared.details.action, "clear");
       assert.equal(cleared.content[0].text, "No todos");
       assert.deepEqual(cleared.details.todos, []);
     } finally {
