@@ -25,6 +25,7 @@ type WorkerResourceOptions = RinToolStartupOptions & {
   noContextFiles?: boolean;
   systemPrompt?: string;
   appendSystemPrompt?: string[];
+  disabledRinCapabilities?: string[];
 };
 
 function readValueArg(argv: string[], name: string) {
@@ -97,6 +98,7 @@ export async function startWorker(options: WorkerResourceOptions = {}) {
     piStartupOptions: mergedOptions.piStartupOptions,
     systemPrompt: mergedOptions.systemPrompt,
     appendSystemPrompt: mergedOptions.appendSystemPrompt,
+    disabledRinCapabilities: mergedOptions.disabledRinCapabilities,
   });
   await runCustomRpcMode(runtime, {
     SessionManager: sessionManagerModule.SessionManager,

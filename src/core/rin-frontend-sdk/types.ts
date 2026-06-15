@@ -241,7 +241,9 @@ export interface RinFrontendClient {
   ensureSessionReady?(
     restoreSessionFile?: string,
     managedSessionLeaf?: string,
-    toolOptions?: RinToolStartupOptions,
+    toolOptions?: RinToolStartupOptions & {
+      disabledRinCapabilities?: string[];
+    },
   ): Promise<RinSessionState>;
   listModels(): Promise<RinFrontendModelItem[]>;
   setModel(

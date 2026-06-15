@@ -295,6 +295,7 @@ export type ChatBridgeTurnPayload = RinToolStartupOptions &
     thinkingLevel?: string;
     promptMeta?: PromptContextMeta;
     frontend?: RinFrontendIdentity;
+    disabledRinCapabilities?: string[];
   };
 
 export type ChatBridgeEvalPayload = {
@@ -491,6 +492,7 @@ export async function startChatBridge(
         sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
         commandResponses: chatCommandResponses,
         frontendIdentity: detachedOptions?.frontendIdentity,
+        useChatFrontendIdentity: Boolean(detachedOptions?.chatKey),
       });
       detachedControllers.set(controllerKey, controller);
       return controller;
@@ -549,6 +551,7 @@ export async function startChatBridge(
     if (!chatKey) return { retry: false };
     const promptMeta = {
       source: "chat-bridge",
+      selfImproveEligible: true,
       sentAt: Number.isFinite(Number(session?.timestamp))
         ? Number(session.timestamp)
         : Date.now(),
@@ -672,6 +675,7 @@ export async function startChatBridge(
       : turnText;
     const promptMeta = {
       source: "chat-bridge",
+      selfImproveEligible: true,
       sentAt: Number.isFinite(Number(session?.timestamp))
         ? Number(session.timestamp)
         : Date.now(),
@@ -1029,6 +1033,7 @@ export async function startChatBridge(
         tools: payload?.tools,
         excludeTools: payload?.excludeTools,
         noTools: payload?.noTools,
+        disabledRinCapabilities: payload?.disabledRinCapabilities,
         model: payload?.model,
         thinkingLevel: payload?.thinkingLevel,
         piStartupOptions: payload?.piStartupOptions,

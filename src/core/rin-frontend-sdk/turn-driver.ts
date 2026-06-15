@@ -551,7 +551,9 @@ export class RinFrontendTurnDriver {
     restoreSessionFile = "",
     managedSessionLeaf = "",
     toolOptions?: RinToolStartupOptions &
-      Pick<RinPiPassthroughOptions, "piStartupOptions">,
+      Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
+        disabledRinCapabilities?: string[];
+      },
   ) {
     if (!this.client) throw new Error("frontend_session_not_connected");
     if (this.client.ensureSessionReady) {
@@ -575,6 +577,9 @@ export class RinFrontendTurnDriver {
           : {}),
         ...(toolOptions?.piStartupOptions !== undefined
           ? { piStartupOptions: toolOptions.piStartupOptions }
+          : {}),
+        ...(toolOptions?.disabledRinCapabilities !== undefined
+          ? { disabledRinCapabilities: toolOptions.disabledRinCapabilities }
           : {}),
       };
       const value = await this.client.newSession({
@@ -1036,6 +1041,7 @@ export class RinFrontendTurnDriver {
       streamingBehavior?: "steer" | "followUp";
       assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
+      disabledRinCapabilities?: string[];
     } & RinToolStartupOptions,
   ): Promise<RinFrontendTurnResult> {
     const promptSource = safeString(input.source).trim() || this.promptSource;
@@ -1127,6 +1133,7 @@ export class RinFrontendTurnDriver {
       source?: string;
       streamingBehavior?: "steer" | "follow";
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
+      disabledRinCapabilities?: string[];
     } & RinToolStartupOptions,
   ): Promise<RinFrontendTurnResult> {
     const turnInterruptionSeq = this.turnInterruptionSeq;

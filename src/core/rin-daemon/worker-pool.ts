@@ -207,9 +207,18 @@ export class WorkerPool {
     });
   }
 
-  private terminateWorkerGracefullyIfUnattached(worker: WorkerHandle) {
+  private async terminateWorkerGracefullyIfUnattached(worker: WorkerHandle) {
     if (worker.connections.size > 0) return;
-    this.terminateWorkerGracefully(worker);
+    await this.terminateWorkerGracefullyAndFlush(worker);
+  }
+
+  private async terminateWorkerGracefullyAndFlush(worker: WorkerHandle) {
+    if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
+    worker.gracefulShutdownRequested = true;
+    const written = await this.writeWorkerStdinAndWait(worker, {
+      type: "shutdown_session",
+    });
+    if (!written) this.destroyWorker(worker);
   }
 
   destroyWorker(
@@ -315,7 +324,7 @@ export class WorkerPool {
     ) {
       const previousWorker = this.detachWorker(connection, { release: false });
       if (previousWorker)
-        this.terminateWorkerGracefullyIfUnattached(previousWorker);
+        await this.terminateWorkerGracefullyIfUnattached(previousWorker);
     }
     this.rememberSessionSelection(connection, wanted);
     return await this.ensureSelectedWorker(connection);
@@ -1187,6 +1196,40 @@ export class WorkerPool {
       onError(error instanceof Error ? error : new Error(String(error)));
       return false;
     }
+  }
+
+  private async writeWorkerStdinAndWait(
+    worker: WorkerHandle,
+    command: unknown,
+  ) {
+    if (!this.isWorkerStdinWritable(worker)) {
+      this.handleWorkerStdinFailure(
+        worker,
+        new Error("rin_worker_stdin_unavailable"),
+      );
+      return false;
+    }
+    return await new Promise<boolean>((resolve) => {
+      try {
+        worker.child.stdin.write(
+          `${JSON.stringify(command)}\n`,
+          (error?: Error | null) => {
+            if (error) {
+              this.handleWorkerStdinFailure(worker, error);
+              resolve(false);
+            } else {
+              resolve(true);
+            }
+          },
+        );
+      } catch (error: any) {
+        this.handleWorkerStdinFailure(
+          worker,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        resolve(false);
+      }
+    });
   }
 
   private handleWorkerStdinFailure(worker: WorkerHandle, error: Error) {

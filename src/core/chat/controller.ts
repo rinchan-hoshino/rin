@@ -202,6 +202,7 @@ export class ChatController {
       sleepAfterIdleMs?: number;
       commandResponses?: Partial<ChatCommandResponses>;
       frontendIdentity?: RinFrontendIdentity;
+      useChatFrontendIdentity?: boolean;
     },
   ) {
     this.app = app;
@@ -219,17 +220,21 @@ export class ChatController {
       ? resolveChatCommandResponses(deps.commandResponses)
       : undefined;
     if (!this.state.chatKey) this.state.chatKey = chatKey;
+    const frontendIdentity =
+      deps.frontendIdentity ||
+      (deps.useChatFrontendIdentity === false
+        ? undefined
+        : chatFrontendIdentity(chatKey));
     this.driver = new RinFrontendTurnDriver({
       clientFactory:
         deps.frontendClientFactory ||
         (() =>
           new RinDaemonFrontendClient({
-            frontendIdentity:
-              deps.frontendIdentity || chatFrontendIdentity(chatKey),
+            frontendIdentity,
           })),
       promptSource: "chat-bridge",
       commandResponses: this.getCommandResponses(),
-      frontendIdentity: deps.frontendIdentity || chatFrontendIdentity(chatKey),
+      frontendIdentity,
     });
     this.driver.subscribe((event) => {
       void this.handleFrontendEvent(event).catch(() => {});
@@ -1387,6 +1392,7 @@ export class ChatController {
         thinkingLevel?: string;
         managedSessionLeaf?: string;
         deliverFinal?: boolean;
+        disabledRinCapabilities?: string[];
       },
     mode: "prompt" | "steer" = "prompt",
   ) {
@@ -1424,6 +1430,7 @@ export class ChatController {
         tools: input.tools,
         excludeTools: input.excludeTools,
         noTools: input.noTools,
+        disabledRinCapabilities: input.disabledRinCapabilities,
         piStartupOptions: input.piStartupOptions,
         resetModelOptionsFromSettings: true,
         promptContext: input.promptMeta,
@@ -1532,6 +1539,7 @@ export class ChatController {
           tools: input.tools,
           excludeTools: input.excludeTools,
           noTools: input.noTools,
+          disabledRinCapabilities: input.disabledRinCapabilities,
           piStartupOptions: input.piStartupOptions,
           resetModelOptionsFromSettings: true,
           promptContext: input.promptMeta,

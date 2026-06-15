@@ -846,8 +846,16 @@ function applyRinPromptBuilder(session: any) {
       const frontendIdentity = normalizeFrontendIdentity(
         options?.frontendIdentity,
       );
-      if (session.sessionManager && frontendIdentity) {
-        session.sessionManager.__rinFrontend = frontendIdentity;
+      if (session.sessionManager) {
+        session.sessionManager.__rinLastPromptSource = String(
+          options?.source || "",
+        ).trim();
+        session.sessionManager.__rinLastPromptContext = options?.promptContext;
+        if (frontendIdentity) {
+          session.sessionManager.__rinFrontend = frontendIdentity;
+        } else {
+          delete session.sessionManager.__rinFrontend;
+        }
       }
       if (nextPrompt !== basePrompt) {
         applySessionBaseSystemPrompt(session, nextPrompt);

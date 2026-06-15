@@ -116,6 +116,72 @@ function resolveFinalMessageCount(
   return state.finalMessages + 1;
 }
 
+const SELF_IMPROVE_FRONTEND_KINDS = new Set([
+  "chat",
+  "gui",
+  "scheduled-task",
+  "tui",
+]);
+
+function normalizedText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function resolveSelfImproveFrontend(event: unknown, ctx: any) {
+  const source =
+    (event as any)?.frontend ??
+    ctx?.frontend ??
+    ctx?.sessionManager?.__rinFrontend;
+  const kind = normalizedText(source?.kind).toLowerCase();
+  const key = normalizedText(source?.key ?? source?.id);
+  return kind ? { kind, key } : undefined;
+}
+
+function resolvePromptContext(event: unknown, ctx: any) {
+  return (
+    (event as any)?.promptContext ??
+    ctx?.promptContext ??
+    ctx?.sessionManager?.__rinLastPromptContext
+  );
+}
+
+function resolvePromptSource(event: unknown, ctx: any) {
+  return normalizedText(
+    (event as any)?.source ??
+      ctx?.source ??
+      ctx?.sessionManager?.__rinLastPromptSource,
+  );
+}
+
+function isScheduledTaskPromptContext(promptContext: unknown) {
+  const context = promptContext as any;
+  return (
+    normalizedText(context?.taskContextKind) === "scheduled-task" ||
+    normalizedText(context?.source) === "scheduled-task"
+  );
+}
+
+function isScheduledTaskProducer(event: unknown, ctx: any) {
+  return (
+    isScheduledTaskPromptContext(resolvePromptContext(event, ctx)) ||
+    resolvePromptSource(event, ctx) === "scheduled-task"
+  );
+}
+
+function hasSelfImproveEligibility(promptContext: unknown) {
+  return Boolean((promptContext as any)?.selfImproveEligible === true);
+}
+
+function isUserFrontendSelfImproveTrigger(event: unknown, ctx: any) {
+  const frontend = resolveSelfImproveFrontend(event, ctx);
+  if (frontend?.kind === "chat" && !frontend.key) return false;
+  if (frontend?.kind === "gui" || frontend?.kind === "tui") return true;
+  const promptContext = resolvePromptContext(event, ctx);
+  if (!hasSelfImproveEligibility(promptContext)) return false;
+  if (frontend && SELF_IMPROVE_FRONTEND_KINDS.has(frontend.kind)) return true;
+  return isScheduledTaskProducer(event, ctx);
+}
+
 type SelfImproveMaintenanceJobNowRunner =
   typeof runSelfImproveMaintenanceJobNow;
 
@@ -190,6 +256,10 @@ export default function selfImproveModule(
       message_end: [
         async (event, ctx) => {
           const meta = sessionMeta(ctx);
+          if (!isUserFrontendSelfImproveTrigger(event, ctx)) {
+            if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
+            return;
+          }
           const state = getSessionReviewState(meta.sessionId);
           if (!state || !meta.sessionFile || !meta.sessionPersisted) return;
           if (!isAssistantFinalMessage(event?.message)) return;
@@ -225,6 +295,10 @@ export default function selfImproveModule(
         async (event, ctx) => {
           if (String(event?.reason || "").trim() === "reload") return;
           const meta = sessionMeta(ctx);
+          if (!isUserFrontendSelfImproveTrigger(event, ctx)) {
+            if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
+            return;
+          }
           if (!meta.sessionPersisted) {
             if (meta.sessionId) reviewStateBySession.delete(meta.sessionId);
             return;

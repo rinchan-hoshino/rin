@@ -206,6 +206,7 @@ function buildCronTaskPromptContext(task: CronTaskRecord) {
     taskId: task.id,
     taskName: taskName || undefined,
     taskContextKind: "scheduled-task",
+    selfImproveEligible: true,
   };
 }
 
@@ -252,11 +253,8 @@ function isSelfImproveDistillationTask(task: CronTaskRecord) {
   return prompt.includes("self-improve-distillation.md");
 }
 
-function shouldShutdownTaskSessionAfterRun(
-  task: CronTaskRecord,
-  sessionMode: string,
-) {
-  return sessionMode === "none" && !isSelfImproveDistillationTask(task);
+function shouldShutdownTaskSessionAfterRun(sessionMode: string) {
+  return sessionMode === "none";
 }
 
 async function appendCronMaintenanceHistoryRecord(
@@ -337,7 +335,7 @@ export async function executeCronAgentTask(
         }
       : { affectChatBinding: false }),
     disposeAfterTurn: sessionMode === "none",
-    shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(task, sessionMode),
+    shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(sessionMode),
     text: prompt,
     sessionFile: sessionFile || dedicatedSessionFile,
     ...(sessionMode === "none"
@@ -345,24 +343,22 @@ export async function executeCronAgentTask(
       : {}),
     ...(task.model ? { model: task.model } : {}),
     ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
-    ...(frontend
-      ? {
-          frontend: {
-            kind: frontend.kind || "scheduled-task",
-            key: frontend.key,
-          },
-          promptMeta: buildCronTaskPromptContext(task),
-        }
+    ...(task.disabledRinCapabilities
+      ? { disabledRinCapabilities: task.disabledRinCapabilities }
       : {}),
+    frontend: frontend
+      ? {
+          kind: frontend.kind || "scheduled-task",
+          key: frontend.key,
+        }
+      : { kind: "scheduled-task", key: task.id },
+    promptMeta: buildCronTaskPromptContext(task),
   });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
   if (!finalText) throw new Error("cron_final_assistant_text_missing");
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
   const keepChatBoundSession = Boolean(chatKey && nextSessionFile);
-  const keepSelfImproveSession = Boolean(
-    isSelfImproveDistillationTask(task) && nextSessionFile,
-  );
   if (sessionMode === "dedicated") {
     if (dedicatedSessionFile) {
       task.dedicatedSessionFile = dedicatedSessionFile;
@@ -377,7 +373,7 @@ export async function executeCronAgentTask(
     sessionId: String(result?.sessionId || "").trim() || undefined,
     sessionFile:
       sessionMode === "none"
-        ? keepChatBoundSession || keepSelfImproveSession
+        ? keepChatBoundSession
           ? nextSessionFile
           : undefined
         : dedicatedSessionFile,
@@ -415,8 +411,13 @@ export async function executeCronSessionInstructionTask(
     deliverFinal: task.deliverFinal !== false,
     text: instruction,
     sessionFile,
+    frontend: { kind: "chat", key: chatKey },
+    promptMeta: buildCronTaskPromptContext(task),
     ...(task.model ? { model: task.model } : {}),
     ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
+    ...(task.disabledRinCapabilities
+      ? { disabledRinCapabilities: task.disabledRinCapabilities }
+      : {}),
   });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);

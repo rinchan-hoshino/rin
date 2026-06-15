@@ -1353,6 +1353,7 @@ test("frontend SDK turn driver waits for real final after interim and compaction
 test("frontend SDK turn driver starts managed leaf sessions even after connect reports a default session", async () => {
   const driver = createDriver();
   const calls: string[] = [];
+  const newSessionOptions: any[] = [];
   const client = (driver as any).testClient;
   let sessionFile = "/tmp/root-session.jsonl";
   client.getState = async () => ({
@@ -1361,6 +1362,7 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
     isStreaming: false,
   });
   client.newSession = async (options: any = {}) => {
+    newSessionOptions.push(options);
     calls.push(
       `newSession:${options.managedSessionLeaf}:${JSON.stringify(options.frontendIdentity)}`,
     );
@@ -1379,10 +1381,41 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
 
   assert.equal(result.finalText, "done");
   assert.deepEqual(calls, ['newSession:task:{"kind":"chat-bridge"}', "prompt"]);
+  assert.equal(newSessionOptions[0].resourceOptions, undefined);
   assert.equal(
     result.sessionFile,
     "/tmp/rin/sessions/managed/task/created.jsonl",
   );
+});
+
+test("frontend SDK turn driver forwards disabled Rin capabilities to managed sessions", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  let sessionFile = "/tmp/root-session.jsonl";
+  let newSessionOptions: any = undefined;
+  client.getState = async () => ({
+    sessionFile,
+    sessionId: "session-driver",
+    isStreaming: false,
+  });
+  client.newSession = async (options: any = {}) => {
+    newSessionOptions = options;
+    sessionFile = "/tmp/rin/sessions/managed/task/created.jsonl";
+    return { cancelled: false, sessionFile, sessionId: "session-driver" };
+  };
+  client.prompt = async (_text: string, options: any = {}) => {
+    await emitRpcTurnComplete(driver, options.requestTag, "done", sessionFile);
+  };
+
+  await driver.runTurn({
+    text: "hello",
+    managedSessionLeaf: "task",
+    disabledRinCapabilities: ["self_improve"],
+  });
+
+  assert.deepEqual(newSessionOptions.resourceOptions, {
+    disabledRinCapabilities: ["self_improve"],
+  });
 });
 
 test("frontend SDK turn driver asks the daemon to replay pending terminal events after joining a submitted turn", async () => {

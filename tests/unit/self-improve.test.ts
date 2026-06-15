@@ -84,6 +84,10 @@ function assistantToolMessage(text = "I will check") {
   };
 }
 
+function userFrontend() {
+  return { kind: "chat", key: "telegram/1:2" };
+}
+
 async function writeSessionWithAssistantFinals(sessionFile, count) {
   const entries = [];
   let parentId = null;
@@ -342,6 +346,8 @@ test("automatic self-improve handlers run periodic reviews synchronously", async
     await fs.writeFile(managedSessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
         getSessionId: () => "managed-task-session-test",
         getSessionFile: () => managedSessionFile,
@@ -387,6 +393,8 @@ test("automatic self-improve review interval is configurable", async () => {
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
         getSessionId: () => "configurable-review-session-test",
         getSessionFile: () => sessionFile,
@@ -429,6 +437,8 @@ test("automatic self-improve review counts agent final messages, not user turns"
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
         getSessionId: () => "final-message-count-session-test",
         getSessionFile: () => sessionFile,
@@ -475,6 +485,8 @@ test("automatic self-improve review reuses chat final-message detection for tool
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
         getSessionId: () => "tool-message-ignored-review-session-test",
         getSessionFile: () => sessionFile,
@@ -534,6 +546,8 @@ test("automatic self-improve review records its watermark before awaiting distil
     await writeSessionWithAssistantFinals(sessionFile, 5);
     const ctx = (leafId) => ({
       agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
         getSessionId: () => "watermark-before-await-session-test",
         getSessionFile: () => sessionFile,
@@ -565,6 +579,8 @@ test("automatic self-improve review resumes from persisted session count after r
 
     const createContext = (sessionId, leafId) => ({
       agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
         getSessionId: () => sessionId,
         getSessionFile: () => sessionFile,
@@ -636,6 +652,8 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
         getSessionId: () => "nested-ignored-review-session-test",
         getSessionFile: () => sessionFile,
@@ -655,6 +673,173 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].snapshotKey, "review:5");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+  });
+});
+
+test("automatic self-improve requires explicit eligible producer", async () => {
+  await withTempRoot(async (root) => {
+    const calls = [];
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+      async runSelfImproveMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const shutdown = definition.hooks.session_shutdown[0];
+    const sessionFile = path.join(root, "sessions", "background-child.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      sessionManager: {
+        getSessionId: () => "background-child-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-background-child",
+        isPersisted: () => true,
+      },
+    };
+
+    for (let i = 0; i < 5; i += 1) {
+      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
+    }
+    await shutdown({}, ctx);
+
+    assert.equal(calls.length, 0);
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+  });
+});
+
+test("automatic self-improve allows scheduled-task turns delivered through chat", async () => {
+  await withTempRoot(async (root) => {
+    const calls = [];
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+      async runSelfImproveMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const shutdown = definition.hooks.session_shutdown[0];
+    const sessionFile = path.join(root, "sessions", "scheduled-chat.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "scheduled-task", selfImproveEligible: true },
+      sessionManager: {
+        __rinLastPromptContext: {
+          taskContextKind: "scheduled-task",
+          selfImproveEligible: true,
+        },
+        getSessionId: () => "scheduled-chat-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-scheduled-chat",
+        isPersisted: () => true,
+      },
+    };
+
+    for (let i = 0; i < 5; i += 1) {
+      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
+    }
+    await shutdown({}, ctx);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].trigger, "self_improve:periodic_review");
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
+  });
+});
+
+test("automatic self-improve allows scheduled-task source with explicit eligibility", async () => {
+  await withTempRoot(async (root) => {
+    const calls = [];
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+      async runSelfImproveMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const sessionFile = path.join(root, "sessions", "scheduled-source.jsonl");
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "scheduled-task", selfImproveEligible: true },
+      sessionManager: {
+        __rinLastPromptSource: "scheduled-task",
+        getSessionId: () => "scheduled-source-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-scheduled-source",
+        isPersisted: () => true,
+      },
+    };
+
+    for (let i = 0; i < 5; i += 1) {
+      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
+    }
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].trigger, "self_improve:periodic_review");
+    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+  });
+});
+
+test("automatic self-improve ignores scheduled-task source without explicit eligibility", async () => {
+  await withTempRoot(async (root) => {
+    const calls = [];
+    const definition = selfImproveIndex.default({
+      sendMessage() {},
+      getThinkingLevel() {
+        return "medium";
+      },
+      async runSelfImproveMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
+      },
+    });
+    const messageEnd = definition.hooks.message_end[0];
+    const sessionFile = path.join(
+      root,
+      "sessions",
+      "scheduled-source-no-eligibility.jsonl",
+    );
+    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+    await fs.writeFile(sessionFile, "", "utf8");
+    const ctx = {
+      agentDir: root,
+      frontend: userFrontend(),
+      sessionManager: {
+        __rinLastPromptSource: "scheduled-task",
+        getSessionId: () => "scheduled-source-no-eligibility-session-test",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => "leaf-scheduled-source-no-eligibility",
+        isPersisted: () => true,
+      },
+    };
+
+    for (let i = 0; i < 5; i += 1) {
+      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
+    }
+
+    assert.equal(calls.length, 0);
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
   });
 });
@@ -817,6 +1002,8 @@ test("real session shutdown queues self-improve review distillation without a co
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       emitEvent(event) {
         notices.push(event);
       },

@@ -15,6 +15,7 @@ export type PromptContextMeta = {
   taskId?: string;
   taskName?: string;
   taskContextKind?: "scheduled-task";
+  selfImproveEligible?: boolean;
   frontend?: { kind?: string; key?: string } | null;
   runtimeMetadata?: Record<string, unknown>;
   attachedFiles?: Array<{ name?: string; path?: string }>;

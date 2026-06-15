@@ -35,6 +35,32 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function readCommandLog(logPath: string) {
+  return (await fs.readFile(logPath, "utf8"))
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+}
+
+async function waitForCommandLogPrefix(
+  logPath: string,
+  expected: string[],
+  timeoutMs = 1000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let last: string[] = [];
+  while (Date.now() <= deadline) {
+    try {
+      last = await readCommandLog(logPath);
+      if (expected.every((item, index) => last[index] === item)) return last;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    await sleep(10);
+  }
+  return last;
+}
+
 async function waitForChildExit(child: any, timeoutMs = 1000) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((resolve) => {
@@ -992,7 +1018,12 @@ setInterval(() => {}, 1000);
   assert.equal(connection.attachedWorker, selected);
   assert.equal(connection.sessionFile, "/tmp/selected.jsonl");
   assert.deepEqual(
-    (await fs.readFile(logPath, "utf8")).trim().split("\n").filter(Boolean),
+    (
+      await waitForCommandLogPrefix(logPath, [
+        "shutdown_session",
+        "switch_session",
+      ])
+    ).slice(0, 2),
     ["shutdown_session", "switch_session"],
   );
 

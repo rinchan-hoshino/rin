@@ -430,7 +430,20 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
       "temporary session",
     );
     assert.equal(task.dedicatedSessionFile, undefined);
-    assert.deepEqual(calls, [
+    assert.equal(calls.length, 1);
+    assert.deepEqual(
+      {
+        controllerKey: calls[0].controllerKey,
+        affectChatBinding: calls[0].affectChatBinding,
+        disposeAfterTurn: calls[0].disposeAfterTurn,
+        shutdownAfterTurn: calls[0].shutdownAfterTurn,
+        text: calls[0].text,
+        sessionFile: calls[0].sessionFile,
+        managedSessionLeaf: calls[0].managedSessionLeaf,
+        model: calls[0].model,
+        thinkingLevel: calls[0].thinkingLevel,
+        frontend: calls[0].frontend,
+      },
       {
         controllerKey: "cron_none",
         affectChatBinding: false,
@@ -441,8 +454,12 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
         managedSessionLeaf: "task",
         model: "openai-codex/gpt-5.5",
         thinkingLevel: "low",
+        frontend: { kind: "scheduled-task", key: "cron_none" },
       },
-    ]);
+    );
+    assert.equal(calls[0].promptMeta?.source, "scheduled-task");
+    assert.equal(calls[0].promptMeta?.taskId, "cron_none");
+    assert.equal(calls[0].promptMeta?.taskContextKind, "scheduled-task");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -506,6 +523,23 @@ test("cron scheduler persists generic frontend bindings", () => {
     kind: "tui",
     key: "terminal/main",
   });
+});
+
+test("cron scheduler persists disabled Rin capabilities", () => {
+  const scheduler = new cronMod.CronScheduler({
+    agentDir: "/tmp/rin-agent",
+    cwd: process.cwd(),
+  });
+  const task = scheduler.upsertTask({
+    trigger: { runAt: "2026-04-10T00:00:00.000Z" },
+    session: { mode: "none" },
+    disabledRinCapabilities: [" self_improve ", "self_improve", "token_usage"],
+    target: { kind: "agent_prompt", prompt: "hello" },
+  });
+  assert.deepEqual(task.disabledRinCapabilities, [
+    "self_improve",
+    "token_usage",
+  ]);
 });
 
 test("cron scheduler rejects explicit frontend bindings for session instructions", () => {
@@ -650,6 +684,7 @@ test("cron current-session instruction derives chat binding from session file me
         sessionFile: calls[0].sessionFile,
         model: calls[0].model,
         thinkingLevel: calls[0].thinkingLevel,
+        frontend: calls[0].frontend,
       },
       {
         chatKey: "telegram/demo:1",
@@ -660,9 +695,13 @@ test("cron current-session instruction derives chat binding from session file me
         sessionFile,
         model: "openai-codex/gpt-5.5",
         thinkingLevel: "low",
+        frontend: { kind: "chat", key: "telegram/demo:1" },
       },
     );
-    assert.equal(calls[0].promptMeta, undefined);
+    assert.equal(calls[0].promptMeta?.source, "scheduled-task");
+    assert.equal(calls[0].promptMeta?.selfImproveEligible, true);
+    assert.equal(calls[0].promptMeta?.taskId, "cron_current_session");
+    assert.equal(calls[0].promptMeta?.taskContextKind, "scheduled-task");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -1007,8 +1046,9 @@ test("cron chat-bound shell task toggles frontend working while running", async 
   }
 });
 
-test("built-in self-improve cron task writes distillation history", async () => {
+test("built-in self-improve cron task disables nested self-improve and writes distillation history", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const disabledRinCapabilities = ["self_improve"];
   const task = {
     id: "builtin_self_improve_sleep_consolidation_daily",
     session: { mode: "none" },
@@ -1018,23 +1058,28 @@ test("built-in self-improve cron task writes distillation history", async () => 
       prompt:
         "Follow the manual at /tmp/rin/docs/rin/docs/self-improve-distillation.md to optimize self-improve guidance.",
     },
+    disabledRinCapabilities,
     runCount: 4,
     lastStartedAt: "2026-05-08T09:33:09.353Z",
   };
+  const calls = [];
   try {
     await execMod.executeCronTask(task, {
       agentDir,
       chat: {
-        runTurn: async () => ({
-          finalText: "distillation done",
-          sessionFile: path.join(
-            agentDir,
-            "sessions",
-            "managed",
-            "task",
-            "night.jsonl",
-          ),
-        }),
+        runTurn: async (payload) => {
+          calls.push(payload);
+          return {
+            finalText: "distillation done",
+            sessionFile: path.join(
+              agentDir,
+              "sessions",
+              "managed",
+              "task",
+              "night.jsonl",
+            ),
+          };
+        },
       },
     });
     const historyPath = path.join(
@@ -1055,7 +1100,14 @@ test("built-in self-improve cron task writes distillation history", async () => 
       "cron:builtin_self_improve_sleep_consolidation_daily",
     );
     assert.equal(rows[0].outputPreview, "distillation done");
-    assert.equal(rows[0].sessionFile.endsWith("night.jsonl"), true);
+    assert.equal(rows[0].sessionFile, undefined);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].disabledRinCapabilities, disabledRinCapabilities);
+    assert.equal(calls[0].shutdownAfterTurn, true);
+    assert.deepEqual(calls[0].frontend, {
+      kind: "scheduled-task",
+      key: "builtin_self_improve_sleep_consolidation_daily",
+    });
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -1249,6 +1301,7 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.equal(sleep.builtIn, true);
     assert.equal(sleep.trigger.expression, "43 3 * * *");
     assert.equal(sleep.session.mode, "none");
+    assert.deepEqual(sleep.disabledRinCapabilities, ["self_improve"]);
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,

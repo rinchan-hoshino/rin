@@ -89,6 +89,7 @@ export type CronTaskRecord = {
   deliverFinal?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
+  disabledRinCapabilities?: string[];
   trigger: CronTaskTrigger;
   termination?: CronTaskTermination;
   condition?: CronTaskCondition;
@@ -115,6 +116,7 @@ export type CronTaskInput = {
   deliverFinal?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
+  disabledRinCapabilities?: string[] | null;
   trigger?: CronTaskTrigger;
   termination?: CronTaskTermination | null;
   condition?: CronTaskCondition | null;
@@ -140,6 +142,19 @@ function normalizeThinkingLevel(
 
 function normalizeModelOverride(value: unknown) {
   return safeString(value).trim() || undefined;
+}
+
+function normalizeDisabledRinCapabilities(
+  value: unknown,
+  existing: CronTaskRecord | undefined,
+) {
+  if (value === null) return undefined;
+  if (value === undefined) return existing?.disabledRinCapabilities;
+  const values = Array.isArray(value) ? value : [value];
+  const normalized = [
+    ...new Set(values.map((item) => safeString(item).trim()).filter(Boolean)),
+  ];
+  return normalized.length ? normalized : undefined;
 }
 
 function failCronTaskValidation(errorCode: string): never {
@@ -333,6 +348,7 @@ function createBuiltInSelfImproveSleepConsolidationTask(
     },
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt },
+    disabledRinCapabilities: ["self_improve"],
     deliverFinal: true,
     runCount: 0,
     running: false,
@@ -485,6 +501,10 @@ export class CronScheduler {
         ? input.thinkingLevel
         : existing?.thinkingLevel,
     );
+    const disabledRinCapabilities = normalizeDisabledRinCapabilities(
+      input.disabledRinCapabilities,
+      existing,
+    );
     const normalizedTarget = normalizeTaskTarget(
       input.target ?? existing?.target,
     );
@@ -530,6 +550,7 @@ export class CronScheduler {
           : (existing?.deliverFinal ?? true),
       model,
       thinkingLevel,
+      disabledRinCapabilities,
       trigger: normalizedTrigger,
       termination,
       condition,

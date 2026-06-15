@@ -64,6 +64,14 @@ async function createController(chatKey = "telegram/1:2", deps = {}) {
   return controller;
 }
 
+test("detached non-chat controllers do not synthesize a chat frontend identity", async () => {
+  const controller = await createController("cron:cli-123", {
+    useChatFrontendIdentity: false,
+  });
+
+  assert.equal((controller.driver as any).frontendIdentity.kind, "chat-bridge");
+});
+
 function testPollingIndicator(actions = [], reactions = [], selfId = "1") {
   let emoji = "";
   return {
