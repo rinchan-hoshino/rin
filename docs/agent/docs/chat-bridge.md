@@ -220,7 +220,7 @@ Per-chat quiet entries may also be objects such as `{ "enabled": true }`. Quiet 
 
 ## Command acknowledgement text
 
-Routine chat command acknowledgements such as `/new`, `/abort`, `/compact`, and `/reload` come from i18n/configuration so commands stay predictable and avoid temporary agent turns.
+Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` come from i18n/configuration so commands stay predictable and avoid temporary agent turns. `/compact` uses the compaction notice templates below instead of a separate generic completion line.
 
 If `~/.rin/i18n.json` is absent, Rin uses built-in English replies. To customize command replies, create or edit that generic i18n catalog:
 
@@ -229,8 +229,9 @@ If `~/.rin/i18n.json` is absent, Rin uses built-in English replies. To customize
   "chat.commandResponses.abort": "Aborted current operation.",
   "chat.commandResponses.new": "Started a new session.",
   "chat.commandResponses.newCancelled": "Session switch cancelled.",
-  "chat.commandResponses.compact": "Compacted session.",
-  "chat.commandResponses.reload": "Reloaded extensions, prompts, skills, and themes."
+  "chat.commandResponses.reload": "Reloaded extensions, prompts, skills, and themes.",
+  "chat.compaction.start": "Compacting...",
+  "chat.compaction.summaryLine": "Compacted from {tokens} tokens"
 }
 ```
 

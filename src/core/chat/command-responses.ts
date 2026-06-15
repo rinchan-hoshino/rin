@@ -30,7 +30,6 @@ const CHAT_COMMAND_RESPONSE_I18N_IDS = {
   abort: "chat.commandResponses.abort",
   new: "chat.commandResponses.new",
   newCancelled: "chat.commandResponses.newCancelled",
-  compact: "chat.commandResponses.compact",
   reload: "chat.commandResponses.reload",
   compactionStart: "chat.compaction.start",
   compactionSummaryLine: "chat.compaction.summaryLine",

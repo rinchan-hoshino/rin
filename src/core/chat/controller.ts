@@ -1314,6 +1314,11 @@ export class ChatController {
       this.saveState();
       data = this.localizeBuiltinCommandResult(commandName, data);
 
+      if (commandName === "compact") {
+        const text = safeString(data?.text || "").trim();
+        return text ? { ...data, text } : data;
+      }
+
       const text = safeString(data?.text || "").trim();
       if (!text) throw new Error("chat_command_text_missing");
       data = { ...data, text };

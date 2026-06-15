@@ -783,7 +783,7 @@ test("chat controller starts command reactions from frontend working status", as
     ["create", "2", "m-compact", "🤔"],
     ["delete", "2", "m-compact", "🤔", "1"],
   ]);
-  assert.deepEqual(deliveries, ["Compacted session."]);
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller sends compaction start notice and reacts on that notice", async () => {
@@ -1422,10 +1422,14 @@ test("chat controller keeps /status immediate during an active chat turn", async
   assert.equal((await firstTurn).finalText, "first done");
 });
 
-test("chat controller uses configured command responses for /compact and /reload", async () => {
-  for (const [command, resultText] of [
-    ["/compact", "Compacted session."],
-    ["/reload", "Reloaded extensions, prompts, skills, and themes."],
+test("chat controller suppresses /compact acknowledgement but keeps configured /reload response", async () => {
+  for (const [command, resultText, expectedDeliveries] of [
+    ["/compact", "Compacted session.", []],
+    [
+      "/reload",
+      "Reloaded extensions, prompts, skills, and themes.",
+      ["Reloaded extensions, prompts, skills, and themes."],
+    ],
   ]) {
     const controller = await createController();
     const calls = [];
@@ -1479,7 +1483,7 @@ test("chat controller uses configured command responses for /compact and /reload
         : ["ensureSessionReady", `runCommand:${command}`],
     );
     assert.deepEqual(prompts, []);
-    assert.deepEqual(deliveries, [resultText]);
+    assert.deepEqual(deliveries, expectedDeliveries);
   }
 });
 

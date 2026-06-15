@@ -94,6 +94,9 @@ test("chat i18n exposes only chat-sent compaction templates", async () => {
     rinI18n.rinI18nPath(agentDir),
     JSON.stringify({
       chat: {
+        commandResponses: {
+          compact: "Legacy compact completion copy.",
+        },
         compaction: {
           busy: "Already compacting.",
           start: "Shrinking now...",
@@ -105,6 +108,7 @@ test("chat i18n exposes only chat-sent compaction templates", async () => {
   );
 
   const responses = commandResponses.readChatCommandResponses(agentDir);
+  assert.equal(responses.compact, "Compacted session.");
   assert.equal(responses.compactionBusy, "Compaction already in progress.");
   assert.equal(responses.compactionStart, "Shrinking now...");
   assert.equal(
