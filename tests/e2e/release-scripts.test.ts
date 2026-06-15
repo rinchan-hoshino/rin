@@ -20,6 +20,29 @@ function readWorkflow(workflow) {
   );
 }
 
+function runReleaseScript(script, args, options = {}) {
+  return execFileSync(
+    process.execPath,
+    [path.join(rootDir, "scripts", "release", script), ...args],
+    {
+      cwd: options.cwd || rootDir,
+      stdio: "pipe",
+      encoding: "utf8",
+      env: options.env || process.env,
+    },
+  );
+}
+
+function assertReleaseScriptFails(script, args, pattern, options = {}) {
+  try {
+    runReleaseScript(script, args, options);
+    assert.fail(`${script} unexpectedly succeeded`);
+  } catch (error) {
+    const output = `${error.stdout || ""}${error.stderr || ""}${error.message || ""}`;
+    assert.match(output, pattern);
+  }
+}
+
 test("update-release-manifest script writes stable npm tarball metadata", () => {
   const tempDir = makeTempDir(".tmp-release-script-");
   try {
@@ -328,29 +351,112 @@ test("verify-changelog script requires a target Rin changelog heading", () => {
       ["# Rin Changelog", "", "## 1.2.3", "", "- Ready", ""].join("\n"),
       "utf8",
     );
-    execFileSync(
-      process.execPath,
-      [
-        path.join(rootDir, "scripts", "release", "verify-changelog.ts"),
-        "--changelog",
-        changelogPath,
-        "--version",
-        "1.2.3",
-      ],
-      { cwd: rootDir, stdio: "pipe" },
+    runReleaseScript("verify-changelog.ts", [
+      "--changelog",
+      changelogPath,
+      "--version",
+      "1.2.3",
+    ]);
+    assertReleaseScriptFails(
+      "verify-changelog.ts",
+      ["--changelog", changelogPath, "--version", "1.2.4"],
+      /Missing Rin changelog entry for 1\.2\.4/,
     );
-    assert.throws(() =>
-      execFileSync(
-        process.execPath,
-        [
-          path.join(rootDir, "scripts", "release", "verify-changelog.ts"),
-          "--changelog",
-          changelogPath,
-          "--version",
-          "1.2.4",
-        ],
-        { cwd: rootDir, stdio: "pipe" },
-      ),
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+function runGit(repoDir, args) {
+  return execFileSync("git", args, {
+    cwd: repoDir,
+    stdio: "pipe",
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Rin Release Test",
+      GIT_AUTHOR_EMAIL: "rin@example.invalid",
+      GIT_COMMITTER_NAME: "Rin Release Test",
+      GIT_COMMITTER_EMAIL: "rin@example.invalid",
+    },
+  }).trim();
+}
+
+function commitAll(repoDir, message) {
+  runGit(repoDir, ["add", "."]);
+  runGit(repoDir, ["commit", "-m", message]);
+  return runGit(repoDir, ["rev-parse", "HEAD"]);
+}
+
+test("verify-changelog script requires concrete release note bullets", () => {
+  const tempDir = makeTempDir(".tmp-release-changelog-");
+  try {
+    const changelogPath = path.join(tempDir, "CHANGELOG.md");
+    fs.writeFileSync(
+      changelogPath,
+      ["# Rin Changelog", "", "## 1.2.3", "", "", "## 1.2.2", ""].join("\n"),
+      "utf8",
+    );
+    assertReleaseScriptFails(
+      "verify-changelog.ts",
+      ["--changelog", changelogPath, "--version", "1.2.3"],
+      /Missing Rin changelog content for 1\.2\.3/,
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("verify-changelog script checks release-note commit coverage", () => {
+  const tempDir = makeTempDir(".tmp-release-coverage-");
+  try {
+    runGit(tempDir, ["init"]);
+    fs.mkdirSync(path.join(tempDir, "docs", "release"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempDir, "docs", "release", "CHANGELOG.md"),
+      ["# Rin Changelog", "", "## 1.2.3", "", "- Ready", ""].join("\n"),
+      "utf8",
+    );
+    const baseRef = commitAll(tempDir, "chore: base");
+
+    fs.mkdirSync(path.join(tempDir, "src", "core", "chat"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(tempDir, "src", "core", "chat", "delivery.ts"),
+      "export const ready = true;\n",
+      "utf8",
+    );
+    const featureRef = commitAll(tempDir, "fix(chat): improve delivery");
+    const featureShort = featureRef.slice(0, 7);
+
+    assertReleaseScriptFails(
+      "verify-changelog.ts",
+      ["--version", "1.2.3", "--from-ref", baseRef, "--to-ref", featureRef],
+      /Missing Rin changelog coverage for 1\.2\.3:[\s\S]*fix\(chat\): improve delivery/,
+      { cwd: tempDir },
+    );
+
+    fs.writeFileSync(
+      path.join(tempDir, "docs", "release", "CHANGELOG.md"),
+      [
+        "# Rin Changelog",
+        "",
+        "## 1.2.3",
+        "",
+        "- Chat delivery is more reliable.",
+        "",
+        "<!-- rin-changelog-coverage",
+        `- ${featureShort} fix(chat): improve delivery`,
+        "-->",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    runReleaseScript(
+      "verify-changelog.ts",
+      ["--version", "1.2.3", "--from-ref", baseRef, "--to-ref", featureRef],
+      { cwd: tempDir },
     );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -405,11 +511,17 @@ test("release workflows are manual executors without GitHub schedules", () => {
   }
 });
 
-test("release workflows require changelog entries before expensive publish gates", () => {
+test("release workflows require changelog content coverage before expensive publish gates", () => {
   const beta = readWorkflow("publish-beta.yml");
+  assert.match(beta, /scripts\/release\/verify-changelog\.ts/);
   assert.match(
     beta,
-    /npx --yes tsx scripts\/release\/verify-changelog\.ts --version '\$\{\{ steps\.plan\.outputs\.promotion_version \}\}'/,
+    /--version '\$\{\{ steps\.plan\.outputs\.promotion_version \}\}'/,
+  );
+  assert.match(beta, /--from-ref "\$from_ref"/);
+  assert.match(
+    beta,
+    /--to-ref '\$\{\{ steps\.plan\.outputs\.release_ref \}\}'/,
   );
   assert.ok(
     beta.indexOf("Verify Rin changelog entry") <
@@ -417,20 +529,20 @@ test("release workflows require changelog entries before expensive publish gates
   );
 
   const stable = readWorkflow("publish-stable.yml");
-  assert.match(
-    stable,
-    /npx --yes tsx scripts\/release\/verify-changelog\.ts --version '\$\{\{ steps\.plan\.outputs\.version \}\}'/,
-  );
+  assert.match(stable, /scripts\/release\/verify-changelog\.ts/);
+  assert.match(stable, /--version '\$\{\{ steps\.plan\.outputs\.version \}\}'/);
+  assert.match(stable, /--from-ref "\$from_ref"/);
+  assert.match(stable, /--to-ref '\$\{\{ steps\.plan\.outputs\.beta_ref \}\}'/);
   assert.ok(
     stable.indexOf("Verify Rin changelog entry") <
       stable.indexOf("npm ci --no-fund --no-audit"),
   );
 
   const hotfix = readWorkflow("publish-hotfix.yml");
-  assert.match(
-    hotfix,
-    /npx --yes tsx scripts\/release\/verify-changelog\.ts --version '\$\{\{ inputs\.version \}\}'/,
-  );
+  assert.match(hotfix, /scripts\/release\/verify-changelog\.ts/);
+  assert.match(hotfix, /--version '\$\{\{ inputs\.version \}\}'/);
+  assert.match(hotfix, /--from-ref "\$from_ref"/);
+  assert.match(hotfix, /--to-ref '\$\{\{ inputs\.ref \}\}'/);
   assert.ok(
     hotfix.indexOf("Verify Rin changelog entry") <
       hotfix.indexOf("npm ci --no-fund --no-audit"),

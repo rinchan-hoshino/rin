@@ -46,7 +46,13 @@ jobs:
           git worktree add --detach "$candidate_dir" '${{ steps.plan.outputs.beta_ref }}'
       - name: Verify Rin changelog entry
         working-directory: ${{ runner.temp }}/stable-candidate
-        run: npx --yes tsx scripts/release/verify-changelog.ts --version '${{ steps.plan.outputs.version }}'
+        run: |
+          set -eu
+          from_ref=$(node -e 'const manifest = require("./release-manifest.json"); process.stdout.write(String(manifest.stable?.ref || ""));')
+          npx --yes tsx scripts/release/verify-changelog.ts \
+            --version '${{ steps.plan.outputs.version }}' \
+            --from-ref "$from_ref" \
+            --to-ref '${{ steps.plan.outputs.beta_ref }}'
       - name: Install candidate dependencies
         working-directory: ${{ runner.temp }}/stable-candidate
         run: npm ci --no-fund --no-audit

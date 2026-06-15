@@ -40,7 +40,13 @@ jobs:
           git worktree add --detach "$candidate_dir" '${{ inputs.ref }}'
       - name: Verify Rin changelog entry
         working-directory: ${{ runner.temp }}/hotfix-candidate
-        run: npx --yes tsx scripts/release/verify-changelog.ts --version '${{ inputs.version }}'
+        run: |
+          set -eu
+          from_ref=$(node -e 'const manifest = require("./release-manifest.json"); process.stdout.write(String(manifest.stable?.ref || ""));')
+          npx --yes tsx scripts/release/verify-changelog.ts \
+            --version '${{ inputs.version }}' \
+            --from-ref "$from_ref" \
+            --to-ref '${{ inputs.ref }}'
       - name: Install candidate dependencies
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm ci --no-fund --no-audit

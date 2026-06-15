@@ -34,7 +34,13 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "promotion_version=$promotion_version" >> "$GITHUB_OUTPUT"
       - name: Verify Rin changelog entry
-        run: npx --yes tsx scripts/release/verify-changelog.ts --version '${{ steps.plan.outputs.promotion_version }}'
+        run: |
+          set -eu
+          from_ref=$(node -e 'const manifest = require("./release-manifest.json"); process.stdout.write(String(manifest.stable?.ref || ""));')
+          npx --yes tsx scripts/release/verify-changelog.ts \
+            --version '${{ steps.plan.outputs.promotion_version }}' \
+            --from-ref "$from_ref" \
+            --to-ref '${{ steps.plan.outputs.release_ref }}'
       - run: npm ci --no-fund --no-audit
       - run: npm run build
       - run: npm run test:release

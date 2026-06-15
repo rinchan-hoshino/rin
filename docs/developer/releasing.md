@@ -7,7 +7,7 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 - keep `main` as the development source of truth
 - configure the repository secret `NPM_TOKEN` so `publish-stable.yml` and `publish-hotfix.yml` can publish `@hoshinorin/rin`
 - confirm the focused release validation set passes on `main`
-- update `docs/release/CHANGELOG.md` before beta, stable, or hotfix publishing; release workflows require a `## <stable-version>` heading for the target user-facing version
+- update `docs/release/CHANGELOG.md` before beta, stable, or hotfix publishing; release workflows require a `## <stable-version>` heading, at least one user-facing bullet, and a commit coverage block for the candidate range
 - keep stable/hotfix versioning aligned with the current policy: each regular stable release advances `minor + 1` and resets `patch` to `0`, while each hotfix advances the current stable line by `patch + 1`
 
 ## Channel contract
@@ -51,7 +51,7 @@ It:
 1. resolves the beta source ref, defaulting to `main` HEAD
 2. computes the next regular stable target from the current stable version by advancing `minor + 1` and resetting `patch` to `0`
 3. creates the weekly beta version for that promotion target
-4. verifies `docs/release/CHANGELOG.md` contains the target promotion heading
+4. verifies `docs/release/CHANGELOG.md` contains the target promotion heading, release-note bullets, and commit coverage from the current stable ref to the beta source ref
 5. validates the focused release test set
 6. updates `release-manifest.json -> beta`
 7. commits the manifest update back to `main`
@@ -66,7 +66,7 @@ It:
 2. computes the stable promotion version by stripping the beta suffix
 3. if a rerun or earlier release already used that version, bumps to the next available patch version on that stable line
 4. checks out the beta candidate ref in a detached worktree
-5. verifies the candidate `docs/release/CHANGELOG.md` contains the stable version heading
+5. verifies the candidate `docs/release/CHANGELOG.md` contains the stable version heading, release-note bullets, and commit coverage from the previous stable ref to the beta candidate ref
 6. validates that candidate with the focused release test set
 7. sets the package version only inside the candidate worktree
 8. publishes `@hoshinorin/rin` to npm using dist-tag `latest`
@@ -83,7 +83,7 @@ Use it for urgent stable fixes outside the weekly train; the patch version shoul
 It:
 
 1. checks out the requested ref in a detached worktree
-2. verifies the candidate `docs/release/CHANGELOG.md` contains the hotfix version heading
+2. verifies the candidate `docs/release/CHANGELOG.md` contains the hotfix version heading, release-note bullets, and commit coverage from the current stable ref to the hotfix ref
 3. validates the candidate with the focused release test set
 4. sets the requested patch version in the candidate worktree
 5. publishes that patch to npm as `latest`
@@ -114,10 +114,26 @@ npm run release:bootstrap -- --output /path/to/bootstrap-worktree
 
 ## Local manifest maintenance
 
-Before publishing a beta, stable, or hotfix build, add the user-facing notes under `docs/release/CHANGELOG.md` and verify the target stable version:
+Before publishing a beta, stable, or hotfix build, add the user-facing notes under `docs/release/CHANGELOG.md`. The target section must include visible bullets plus a source-only coverage block listing every non-release-metadata commit in the candidate range:
+
+```markdown
+## <x.y.z>
+
+- User-facing release note.
+
+<!-- rin-changelog-coverage
+- <short-sha> <commit subject>
+- <short-sha> <commit subject>
+-->
+```
+
+Verify the target stable version against the same range the workflow will publish:
 
 ```bash
-npx tsx scripts/release/verify-changelog.ts --version <x.y.z>
+npx tsx scripts/release/verify-changelog.ts \
+  --version <x.y.z> \
+  --from-ref <previous-stable-ref> \
+  --to-ref <candidate-ref>
 ```
 
 Stable:
