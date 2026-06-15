@@ -187,6 +187,140 @@ test("chat boot claims outbox files before sending so concurrent drains do not d
   });
 });
 
+test("chat boot drains a target chat without waiting for a slow different chat", async () => {
+  await withTempDir(async (agentDir) => {
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/1:slow",
+      text: "slow image batch",
+    });
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/1:fast",
+      text: "fast reply",
+    });
+    const fastId = outbox
+      .listChatOutboxItems(agentDir)
+      .find(({ item }) => item.payload.chatKey === "telegram/1:fast")?.item.id;
+    assert.ok(fastId);
+
+    const sends = [];
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "1",
+          async sendMessage(chatId, content) {
+            sends.push({ chatId, content });
+            if (chatId === "slow") {
+              await new Promise(() => {});
+            }
+            return [`m-${chatId}`];
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+      quote(id) {
+        return { type: "quote", attrs: { id } };
+      },
+    };
+
+    const result = await Promise.race([
+      boot.drainChatOutbox(
+        app,
+        agentDir,
+        h,
+        { warn() {} },
+        {
+          chatKey: "telegram/1:fast",
+          itemId: fastId,
+        },
+      ),
+      new Promise((resolve) => setTimeout(() => resolve("timed-out"), 100)),
+    ]);
+
+    assert.notEqual(result, "timed-out");
+    assert.equal(
+      outbox.listChatOutboxItems(agentDir)[1].item.status,
+      "delivered",
+    );
+    assert.deepEqual(
+      sends.map((send) => send.chatId),
+      ["fast"],
+    );
+  });
+});
+
+test("chat boot releases a timed out outbox send without retrying before its lease", async () => {
+  await withTempDir(async (agentDir) => {
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/1:2",
+      text: "stuck send",
+    });
+    const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
+    let sends = 0;
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "1",
+          async sendMessage() {
+            sends += 1;
+            await new Promise(() => {});
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+
+    const results = await boot.drainChatOutbox(
+      app,
+      agentDir,
+      h,
+      { warn() {} },
+      {
+        chatKey: "telegram/1:2",
+        itemId,
+        sendTimeoutMs: 20,
+        retryLeaseMs: 5000,
+      },
+    );
+
+    assert.equal(results[0].status, "queued");
+    const stored = outbox.listChatOutboxItems(agentDir)[0].item;
+    assert.equal(stored.status, "sending");
+    assert.equal(stored.failureKind, "retryable");
+    assert.match(stored.lastError, /chat_outbox_delivery_timeout/);
+    assert.ok(stored.nextAttemptAt);
+
+    const second = await boot.drainChatOutbox(
+      app,
+      agentDir,
+      h,
+      { warn() {} },
+      {
+        chatKey: "telegram/1:2",
+        itemId,
+        sendTimeoutMs: 20,
+      },
+    );
+    assert.deepEqual(second, []);
+    assert.equal(sends, 1);
+  });
+});
+
 test("chat boot keeps retryable outbox delivery failures queued", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {

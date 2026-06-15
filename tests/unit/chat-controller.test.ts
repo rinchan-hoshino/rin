@@ -3138,6 +3138,78 @@ test("chat controller leaves inbound unprocessed when final reply delivery fails
   assert.equal(stored?.processedAt, undefined);
 });
 
+test("chat controller releases the turn when final reply delivery times out", async () => {
+  const previousTimeout = process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+  const previousLease = process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS;
+  process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS = "20";
+  process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS = "1000";
+  try {
+    const controller = await createController("telegram/1:2");
+    const chatKey = "telegram/1:2";
+    saveChatMessage(controller.agentDir, {
+      chatKey,
+      platform: "telegram",
+      botId: "1",
+      chatId: "2",
+      chatType: "private",
+      messageId: "m-timeout-send",
+      role: "user",
+      receivedAt: new Date().toISOString(),
+      text: "hello",
+    });
+    controller.app.bots[0].sendMessage = async () => {
+      await new Promise(() => {});
+    };
+    controller.session = {
+      isStreaming: false,
+      messages: [],
+      sessionManager: {
+        getSessionFile: () => "/tmp/send-timeout-chat.jsonl",
+        getSessionId: () => "session-send-timeout",
+        getSessionName: () => chatKey,
+      },
+      ensureSessionReady: async () => ({
+        sessionFile: "/tmp/send-timeout-chat.jsonl",
+        sessionId: "session-send-timeout",
+      }),
+      prompt: async (_text, options = {}) => {
+        await controller.handleSessionEvent({ type: "agent_start" });
+        emitRpcTurnComplete(controller, options, "final pending delivery");
+      },
+      switchSession: async () => {},
+    };
+
+    const result = await controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-timeout-send",
+      replyToMessageId: "m-timeout-send",
+    });
+
+    assert.equal(result.finalText, "final pending delivery");
+    assert.equal(controller.currentTurn, null);
+    assert.equal(controller.awaitingTurnSettle, false);
+    const stored = getChatMessage(
+      controller.agentDir,
+      chatKey,
+      "m-timeout-send",
+    );
+    assert.ok(stored?.acceptedAt);
+    assert.ok(stored?.processedAt);
+  } finally {
+    if (previousTimeout === undefined) {
+      delete process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+    } else {
+      process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS = previousTimeout;
+    }
+    if (previousLease === undefined) {
+      delete process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS;
+    } else {
+      process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS = previousLease;
+    }
+  }
+});
+
 test("chat controller rejects rpc completion without finalText instead of reusing observed assistant text", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];

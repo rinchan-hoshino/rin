@@ -987,14 +987,21 @@ export class ChatController {
       this.agentDir,
       this.h,
       this.logger,
+      {
+        chatKey: safeString(normalizedPayload?.chatKey).trim(),
+        itemId: id,
+      },
     );
     const own = Array.isArray(results)
       ? results.find((item: any) => item?.id === id)
       : null;
     if (own && own.status !== "delivered") {
-      throw new Error(
-        safeString((own as any).error).trim() || "chat_outbox_delivery_pending",
-      );
+      const errorMessage =
+        safeString((own as any).error).trim() || "chat_outbox_delivery_pending";
+      if (/^chat_outbox_delivery_timeout:/.test(errorMessage)) {
+        return (own as any)?.deliveryResult || [];
+      }
+      throw new Error(errorMessage);
     }
     return (own as any)?.deliveryResult || [];
   }

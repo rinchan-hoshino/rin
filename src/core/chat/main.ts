@@ -121,6 +121,7 @@ function createLogger(name: string) {
 const logger = createLogger("rin-chat");
 const TYPING_POLL_INTERVAL_MS = 4000;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
+const CHAT_OUTBOX_POLL_INTERVAL_MS = 5000;
 const CHAT_INBOX_PROCESSING_STALE_MS = 10 * 60 * 1000;
 const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
@@ -374,7 +375,10 @@ export async function startChatBridge(
   ) => {
     const id = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
     enqueueChatOutboxPayload(runtime.agentDir, payload, { id, deliveryKind });
-    const results = await drainChatOutbox(app, runtime.agentDir, h, logger);
+    const results = await drainChatOutbox(app, runtime.agentDir, h, logger, {
+      chatKey: safeString(payload.chatKey).trim(),
+      itemId: id,
+    });
     const own = Array.isArray(results)
       ? results.find((item: any) => item?.id === id)
       : null;
@@ -421,6 +425,16 @@ export async function startChatBridge(
   const controllers = new Map<string, ChatController>();
   const detachedControllers = new Map<string, ChatController>();
   let inboxPollTimer: NodeJS.Timeout | null = null;
+  let outboxPollTimer: NodeJS.Timeout | null = null;
+  const requestDrainChatOutbox = () => {
+    void drainChatOutbox(app, runtime.agentDir, h, logger).catch(
+      (error: any) => {
+        logger.warn(
+          `chat outbox drain failed err=${safeString(error?.message || error)}`,
+        );
+      },
+    );
+  };
   const typingPollTimer = setInterval(() => {
     for (const controller of controllers.values()) {
       void controller.pollTyping().catch(() => {});
@@ -1176,6 +1190,11 @@ export async function startChatBridge(
   }
 
   requestDrainChatInbox();
+  requestDrainChatOutbox();
+  outboxPollTimer = setInterval(
+    () => requestDrainChatOutbox(),
+    CHAT_OUTBOX_POLL_INTERVAL_MS,
+  );
 
   let stoppingPromise: Promise<void> | null = null;
   const stop = async () => {
@@ -1183,6 +1202,7 @@ export async function startChatBridge(
     stoppingPromise = (async () => {
       clearInterval(typingPollTimer);
       if (inboxPollTimer) clearInterval(inboxPollTimer);
+      if (outboxPollTimer) clearInterval(outboxPollTimer);
       for (const controller of controllers.values()) controller.dispose();
       for (const controller of detachedControllers.values())
         controller.dispose();

@@ -220,6 +220,7 @@ export function createChatBridgeRuntime(options: {
         safeString(replyToMessageId).trim(),
       );
       if (!parts.length) throw new Error("chat_bridge_send_empty");
+      const id = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
       enqueueChatOutboxPayload(
         options.agentDir,
         {
@@ -231,13 +232,14 @@ export function createChatBridgeRuntime(options: {
           sessionFile,
           parts,
         },
-        { deliveryKind: "generic" },
+        { id, deliveryKind: "generic" },
       );
       const results = await drainChatOutbox(
         options.app,
         options.agentDir,
         options.h,
         { warn() {} },
+        { chatKey, itemId: id },
       );
       return Array.isArray(results)
         ? results.flatMap((item: any) => item?.deliveryResult || [])

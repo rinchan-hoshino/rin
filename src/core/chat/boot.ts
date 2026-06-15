@@ -1,6 +1,8 @@
 import {
   type ChatOutboxItem,
+  chatOutboxItemPath,
   listChatOutboxItems,
+  readChatOutboxItem,
   writeChatOutboxItem,
 } from "../rin-lib/chat-outbox.js";
 import { createRinI18n } from "../i18n.js";
@@ -14,7 +16,7 @@ export type ChatCommandRow = {
   description?: string;
 };
 
-let chatOutboxDrainQueue: Promise<void> = Promise.resolve();
+const chatOutboxDrainQueues = new Map<string, Promise<void>>();
 
 export function getChatCommandRows(
   languageTag = DEFAULT_LANGUAGE_TAG,
@@ -123,6 +125,15 @@ export async function syncTelegramCommands(
 
 const CHAT_OUTBOX_MAX_ATTEMPTS = 4;
 const CHAT_OUTBOX_RETRY_DELAYS_MS = [1000, 3000, 10_000] as const;
+const DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS = 120_000;
+const DEFAULT_CHAT_OUTBOX_RETRY_LEASE_MS = 5 * 60_000;
+
+export type ChatOutboxDrainOptions = {
+  chatKey?: string;
+  itemId?: string;
+  sendTimeoutMs?: number;
+  retryLeaseMs?: number;
+};
 
 function chatOutboxErrorMessage(error: unknown) {
   return safeString((error as any)?.message || error) || "send_failed";
@@ -168,11 +179,80 @@ function nextRetryAt(attempts: number) {
   return new Date(Date.now() + delayMs).toISOString();
 }
 
-function isRetryDue(item: ChatOutboxItem) {
+function isRetryDue(item: ChatOutboxItem, nowMs = Date.now()) {
   const nextAttemptAt = safeString(item.nextAttemptAt).trim();
   if (!nextAttemptAt) return true;
   const dueAt = Date.parse(nextAttemptAt);
-  return !Number.isFinite(dueAt) || dueAt <= Date.now();
+  return !Number.isFinite(dueAt) || dueAt <= nowMs;
+}
+
+function normalizePositiveMilliseconds(value: unknown, fallback: number) {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) return fallback;
+  return Math.max(1, Math.floor(next));
+}
+
+function sendTimeoutMs(options: ChatOutboxDrainOptions = {}) {
+  return normalizePositiveMilliseconds(
+    options.sendTimeoutMs ?? process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+    DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+  );
+}
+
+function retryLeaseMs(options: ChatOutboxDrainOptions = {}) {
+  return normalizePositiveMilliseconds(
+    options.retryLeaseMs ?? process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS,
+    DEFAULT_CHAT_OUTBOX_RETRY_LEASE_MS,
+  );
+}
+
+function isOutboxItemDrainable(item: ChatOutboxItem, nowMs = Date.now()) {
+  if (item.status === "delivered" || item.status === "failed") return false;
+  if (item.status === "sending" && !isRetryDue(item, nowMs)) return false;
+  return isRetryDue(item, nowMs);
+}
+
+function readCurrentOutboxItem(agentDir: string, itemId: string) {
+  return readChatOutboxItem(agentDir, chatOutboxItemPath(agentDir, itemId));
+}
+
+function isSameSendingAttempt(
+  current: ChatOutboxItem | null,
+  sending: ChatOutboxItem,
+) {
+  return (
+    current?.id === sending.id &&
+    current.status === "sending" &&
+    current.attempts === sending.attempts
+  );
+}
+
+function createChatOutboxTimeoutError(timeoutMs: number) {
+  return new Error(`chat_outbox_delivery_timeout:${timeoutMs}`);
+}
+
+function isChatOutboxTimeoutError(error: unknown) {
+  return /^chat_outbox_delivery_timeout:/.test(chatOutboxErrorMessage(error));
+}
+
+async function withChatOutboxSendTimeout<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+) {
+  let timeout: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      task,
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(createChatOutboxTimeoutError(timeoutMs)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function warnChatOutboxFailure(
@@ -203,43 +283,152 @@ function applyPostDelivery(agentDir: string, item: ChatOutboxItem) {
   });
 }
 
+function deliveredChatOutboxItem(
+  item: ChatOutboxItem,
+  deliveryResult: string[],
+): ChatOutboxItem {
+  return {
+    ...item,
+    status: "delivered",
+    updatedAt: new Date().toISOString(),
+    deliveredAt: new Date().toISOString(),
+    deliveryResult,
+    lastError: undefined,
+    nextAttemptAt: undefined,
+    failureKind: undefined,
+  };
+}
+
+function failedChatOutboxItem(
+  sending: ChatOutboxItem,
+  error: unknown,
+): ChatOutboxItem | null {
+  const message = chatOutboxErrorMessage(error);
+  const partialDelivered = partialDeliveryMessageIds(error);
+  const permanent = isPermanentChatOutboxError(error);
+  const exhausted = sending.attempts >= CHAT_OUTBOX_MAX_ATTEMPTS;
+  if (!permanent && !exhausted) return null;
+  return {
+    ...sending,
+    status: "failed",
+    updatedAt: new Date().toISOString(),
+    failedAt: new Date().toISOString(),
+    lastError: message,
+    nextAttemptAt: undefined,
+    failureKind: permanent ? "permanent" : "attempts_exhausted",
+    deliveryResult: partialDelivered.length
+      ? partialDelivered
+      : sending.deliveryResult,
+  };
+}
+
+function queuedChatOutboxItem(
+  sending: ChatOutboxItem,
+  error: unknown,
+  options: { keepSending?: boolean; retryAfterMs?: number } = {},
+): ChatOutboxItem {
+  const nextAttemptAt = Number.isFinite(options.retryAfterMs)
+    ? new Date(
+        Date.now() + Math.max(1, Number(options.retryAfterMs)),
+      ).toISOString()
+    : nextRetryAt(sending.attempts);
+  return {
+    ...sending,
+    status: options.keepSending ? "sending" : "queued",
+    updatedAt: new Date().toISOString(),
+    lastError: chatOutboxErrorMessage(error),
+    nextAttemptAt,
+    failureKind: "retryable",
+  };
+}
+
+function settleChatOutboxFailure(
+  agentDir: string,
+  logger: any,
+  sending: ChatOutboxItem,
+  error: unknown,
+) {
+  const failed = failedChatOutboxItem(sending, error);
+  if (failed) {
+    writeChatOutboxItem(agentDir, failed);
+    warnChatOutboxFailure(logger, failed, error, "failed");
+    return {
+      status: "failed" as const,
+      error: chatOutboxErrorMessage(error),
+    };
+  }
+  const queued = queuedChatOutboxItem(sending, error);
+  writeChatOutboxItem(agentDir, queued);
+  warnChatOutboxFailure(logger, queued, error, "queued");
+  return {
+    status: "queued" as const,
+    error: chatOutboxErrorMessage(error),
+  };
+}
+
+function settleLateChatOutboxSuccess(
+  agentDir: string,
+  sending: ChatOutboxItem,
+  deliveryResult: string[],
+) {
+  const current = readCurrentOutboxItem(agentDir, sending.id);
+  if (!isSameSendingAttempt(current, sending)) return;
+  const delivered = deliveredChatOutboxItem(current, deliveryResult);
+  writeChatOutboxItem(agentDir, delivered);
+  applyPostDelivery(agentDir, delivered);
+}
+
+function settleLateChatOutboxFailure(
+  agentDir: string,
+  logger: any,
+  sending: ChatOutboxItem,
+  error: unknown,
+) {
+  const current = readCurrentOutboxItem(agentDir, sending.id);
+  if (!isSameSendingAttempt(current, sending)) return;
+  const failed = failedChatOutboxItem(current, error);
+  if (failed) {
+    writeChatOutboxItem(agentDir, failed);
+    warnChatOutboxFailure(logger, failed, error, "failed");
+    return;
+  }
+  const queued = queuedChatOutboxItem(current, error);
+  writeChatOutboxItem(agentDir, queued);
+  warnChatOutboxFailure(logger, queued, error, "queued");
+}
+
 async function drainChatOutboxItem(
   app: any,
   agentDir: string,
   h: any,
   logger: any,
   item: ChatOutboxItem,
+  options: ChatOutboxDrainOptions = {},
 ) {
   if (item.status === "delivered" || item.status === "failed") {
     return { status: item.status };
   }
-  if (!isRetryDue(item)) {
-    return { status: "deferred" as const };
+  if (!isOutboxItemDrainable(item)) {
+    return null;
   }
+  const timeoutMs = sendTimeoutMs(options);
   const sending: ChatOutboxItem = {
     ...item,
     status: "sending",
     attempts: item.attempts + 1,
     updatedAt: new Date().toISOString(),
+    nextAttemptAt: new Date(
+      Date.now() + timeoutMs + retryLeaseMs(options),
+    ).toISOString(),
   };
   writeChatOutboxItem(agentDir, sending);
+  const deliveryTask = sendOutboxPayload(app, agentDir, sending.payload, h);
   try {
-    const deliveryResult = await sendOutboxPayload(
-      app,
-      agentDir,
-      sending.payload,
-      h,
+    const deliveryResult = await withChatOutboxSendTimeout(
+      deliveryTask,
+      timeoutMs,
     );
-    const delivered: ChatOutboxItem = {
-      ...sending,
-      status: "delivered",
-      updatedAt: new Date().toISOString(),
-      deliveredAt: new Date().toISOString(),
-      deliveryResult,
-      lastError: undefined,
-      nextAttemptAt: undefined,
-      failureKind: undefined,
-    };
+    const delivered = deliveredChatOutboxItem(sending, deliveryResult);
     writeChatOutboxItem(agentDir, delivered);
     applyPostDelivery(agentDir, delivered);
     return {
@@ -247,61 +436,94 @@ async function drainChatOutboxItem(
       deliveryResult,
     };
   } catch (error: any) {
-    const message = chatOutboxErrorMessage(error);
-    const partialDelivered = partialDeliveryMessageIds(error);
-    const permanent = isPermanentChatOutboxError(error);
-    const exhausted = sending.attempts >= CHAT_OUTBOX_MAX_ATTEMPTS;
-    if (permanent || exhausted) {
-      const failed: ChatOutboxItem = {
-        ...sending,
-        status: "failed",
-        updatedAt: new Date().toISOString(),
-        failedAt: new Date().toISOString(),
-        lastError: message,
-        nextAttemptAt: undefined,
-        failureKind: permanent ? "permanent" : "attempts_exhausted",
-        deliveryResult: partialDelivered.length
-          ? partialDelivered
-          : sending.deliveryResult,
-      };
-      writeChatOutboxItem(agentDir, failed);
-      warnChatOutboxFailure(logger, failed, error, "failed");
+    if (isChatOutboxTimeoutError(error)) {
+      const queued = queuedChatOutboxItem(sending, error, {
+        keepSending: true,
+        retryAfterMs: retryLeaseMs(options),
+      });
+      writeChatOutboxItem(agentDir, queued);
+      warnChatOutboxFailure(logger, queued, error, "queued");
+      void deliveryTask.then(
+        (deliveryResult) =>
+          settleLateChatOutboxSuccess(agentDir, sending, deliveryResult),
+        (lateError) =>
+          settleLateChatOutboxFailure(agentDir, logger, sending, lateError),
+      );
       return {
-        status: "failed" as const,
-        error: message,
+        status: "queued" as const,
+        error: chatOutboxErrorMessage(error),
       };
     }
-    const queued: ChatOutboxItem = {
-      ...sending,
-      status: "queued",
-      updatedAt: new Date().toISOString(),
-      lastError: message,
-      nextAttemptAt: nextRetryAt(sending.attempts),
-      failureKind: "retryable",
-    };
-    writeChatOutboxItem(agentDir, queued);
-    warnChatOutboxFailure(logger, queued, error, "queued");
-    return {
-      status: "queued" as const,
-      error: message,
-    };
+    return settleChatOutboxFailure(agentDir, logger, sending, error);
   }
 }
 
-async function drainChatOutboxNow(
+function filterDrainableChatOutboxItems(
+  agentDir: string,
+  options: ChatOutboxDrainOptions = {},
+) {
+  const chatKey = safeString(options.chatKey).trim();
+  const itemId = safeString(options.itemId).trim();
+  return listChatOutboxItems(agentDir)
+    .map(({ item }) => item)
+    .filter(
+      (item) =>
+        (!chatKey || item.payload.chatKey === chatKey) &&
+        (!itemId || item.id === itemId || !chatKey),
+    )
+    .filter((item) => isOutboxItemDrainable(item));
+}
+
+async function drainChatOutboxNowForChat(
   app: any,
   agentDir: string,
   h: any,
   logger: any,
+  chatKey: string,
+  options: ChatOutboxDrainOptions = {},
 ) {
   const results: Array<{ id: string; status?: string }> = [];
-  for (const { item } of listChatOutboxItems(agentDir)) {
-    if (item.status === "delivered" || item.status === "failed") continue;
-    if (!isRetryDue(item)) continue;
-    const result = await drainChatOutboxItem(app, agentDir, h, logger, item);
-    results.push({ id: item.id, ...(result || {}) });
+  for (const item of filterDrainableChatOutboxItems(agentDir, {
+    ...options,
+    chatKey,
+  })) {
+    const result = await drainChatOutboxItem(
+      app,
+      agentDir,
+      h,
+      logger,
+      item,
+      options,
+    );
+    if (result) results.push({ id: item.id, ...(result || {}) });
   }
   return results;
+}
+
+async function runWithChatOutboxDrainQueue<T>(
+  chatKey: string,
+  run: () => Promise<T>,
+) {
+  const key = safeString(chatKey).trim() || "unknown";
+  const previous = chatOutboxDrainQueues.get(key) || Promise.resolve();
+  let release!: () => void;
+  const slot = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const current = previous.then(
+    () => slot,
+    () => slot,
+  );
+  chatOutboxDrainQueues.set(key, current);
+  await previous.catch(() => {});
+  try {
+    return await run();
+  } finally {
+    release();
+    if (chatOutboxDrainQueues.get(key) === current) {
+      chatOutboxDrainQueues.delete(key);
+    }
+  }
 }
 
 export async function drainChatOutbox(
@@ -309,20 +531,34 @@ export async function drainChatOutbox(
   agentDir: string,
   h: any,
   logger: any,
+  options: ChatOutboxDrainOptions = {},
 ) {
-  const previous = chatOutboxDrainQueue;
-  let release!: () => void;
-  const slot = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  chatOutboxDrainQueue = previous.then(
-    () => slot,
-    () => slot,
-  );
-  await previous.catch(() => {});
-  try {
-    return await drainChatOutboxNow(app, agentDir, h, logger);
-  } finally {
-    release();
+  const targetChatKey = safeString(options.chatKey).trim();
+  if (targetChatKey) {
+    return await runWithChatOutboxDrainQueue(targetChatKey, () =>
+      drainChatOutboxNowForChat(
+        app,
+        agentDir,
+        h,
+        logger,
+        targetChatKey,
+        options,
+      ),
+    );
   }
+  const chatKeys = Array.from(
+    new Set(
+      filterDrainableChatOutboxItems(agentDir).map(
+        (item) => item.payload.chatKey,
+      ),
+    ),
+  );
+  const grouped = await Promise.all(
+    chatKeys.map((chatKey) =>
+      runWithChatOutboxDrainQueue(chatKey, () =>
+        drainChatOutboxNowForChat(app, agentDir, h, logger, chatKey, options),
+      ),
+    ),
+  );
+  return grouped.flat();
 }
