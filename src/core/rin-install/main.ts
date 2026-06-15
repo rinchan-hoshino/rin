@@ -41,7 +41,10 @@ import {
   detectLocalLanguageTag,
   normalizeLanguageTag,
 } from "../language.js";
-import { releaseInfoFromFile } from "../rin-lib/release.js";
+import {
+  releaseInfoFromFile,
+  type ReleaseChannel,
+} from "../rin-lib/release.js";
 import { runGuiInstaller, shouldStartGuiInstaller } from "./gui.js";
 import {
   describeOwnership,
@@ -81,9 +84,52 @@ function readValueArg(argv: string[], name: string) {
   return "";
 }
 
+function readOptionalFlagValue(argv: string[], name: string) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = String(argv[index] || "").trim();
+    if (value === name) {
+      const next = String(argv[index + 1] || "").trim();
+      return !next || next.startsWith("-") ? "" : next;
+    }
+    if (value.startsWith(`${name}=`))
+      return value.slice(name.length + 1).trim();
+  }
+  return "";
+}
+
+function parseInstallerUpdateReleaseArgs(argv: string[]) {
+  const hasFlag = (name: string) =>
+    argv.some((arg) => String(arg || "").trim() === name);
+  const selected = [
+    hasFlag("--stable") ? "stable" : "",
+    hasFlag("--beta") ? "beta" : "",
+    hasFlag("--nightly") ? "nightly" : "",
+    hasFlag("--git") ? "git" : "",
+  ].filter(Boolean) as ReleaseChannel[];
+  if (selected.length > 1) throw new Error("rin_release_channel_conflict");
+  let branch = readValueArg(argv, "--branch");
+  let version = readValueArg(argv, "--version");
+  const gitSelector = readOptionalFlagValue(argv, "--git");
+  if (!branch && !version && gitSelector) {
+    if (
+      /^[0-9a-f]{7,40}$/i.test(gitSelector) ||
+      gitSelector.startsWith("refs/")
+    )
+      version = gitSelector;
+    else branch = gitSelector;
+  }
+  return {
+    channel: selected[0] || "stable",
+    branch,
+    version,
+    explicitReleaseChannel: selected.length > 0,
+  };
+}
+
 function parseInstallerCliArgs(argv: string[]) {
   const hasFlag = (name: string) =>
     argv.some((arg) => String(arg || "").trim() === name);
+  const updateReleaseRequest = parseInstallerUpdateReleaseArgs(argv);
   return {
     applyPlanFile: readValueArg(argv, "--apply-plan-file"),
     applyResultFile: readValueArg(argv, "--apply-result-file"),
@@ -92,8 +138,10 @@ function parseInstallerCliArgs(argv: string[]) {
     updateTargetUser: readValueArg(argv, "--target-user"),
     updateInstallDir: readValueArg(argv, "--install-dir"),
     updateAssumeYes: hasFlag("--yes"),
+    updatePreconfirmed: hasFlag("--preconfirmed"),
     language: normalizeLanguageTag(readValueArg(argv, "--language"), ""),
     releaseFile: readValueArg(argv, "--release-file"),
+    updateReleaseRequest,
   };
 }
 
@@ -200,6 +248,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
       repoRootFromHere,
       ensureNotCancelled,
       release: releaseInfoFromFile(cli.releaseFile),
+      releaseRequest: cli.updateReleaseRequest,
       select,
       confirm: localizedConfirm,
       i18n,
@@ -207,6 +256,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
       requestedInstallDir: cli.updateInstallDir,
       requestedTargetUser: cli.updateTargetUser,
       assumeYes: cli.updateAssumeYes,
+      preconfirmed: cli.updatePreconfirmed,
     });
     return;
   }

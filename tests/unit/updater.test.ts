@@ -56,6 +56,14 @@ const requestedUpdateTarget = {
   requestedInstallDir: "/home/alice/.rin",
   requestedTargetUser: "alice",
 };
+const preparedRelease = {
+  channel: "stable",
+  archiveUrl: "https://example.test/rin.tgz",
+  version: "1.2.3",
+  branch: "stable",
+  ref: "abc1234",
+  sourceLabel: "stable 1.2.3",
+};
 
 test("startUpdater does not write language during core updates", async () => {
   await withUpdaterStdout(async () => {
@@ -67,6 +75,7 @@ test("startUpdater does not write language during core updates", async () => {
       ensureNotCancelled: (value: unknown) => value,
       i18n: installerI18n.createInstallerI18n("en_US"),
       readInstalledUpdateLanguage: () => "",
+      release: preparedRelease,
       ...requestedUpdateTarget,
       assumeYes: true,
       async runFinalizeInstallPlanInChild(options: any) {
@@ -86,16 +95,70 @@ test("startUpdater uses installed language for UI without rewriting settings", a
   await withUpdaterStdout(async () => {
     let capturedOptions: any;
     let confirmMessage = "";
+    const originalStdinIsTty = process.stdin.isTTY;
+    const originalStdoutIsTty = process.stdout.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    Object.defineProperty(process.stdout, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+
+    try {
+      await updater.startUpdater({
+        detectCurrentUser: () => "alice",
+        repoRootFromHere: () => "/src/rin",
+        ensureNotCancelled: (value: unknown) => value,
+        i18n: installerI18n.createInstallerI18n("en_US"),
+        readInstalledUpdateLanguage: () => "zh_CN",
+        release: preparedRelease,
+        ...requestedUpdateTarget,
+        async confirm(options: any) {
+          confirmMessage = String(options.message || "");
+          return true;
+        },
+        async runFinalizeInstallPlanInChild(options: any) {
+          capturedOptions = options;
+          return fakeUpdateResult();
+        },
+      });
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", {
+        configurable: true,
+        value: originalStdinIsTty,
+      });
+      Object.defineProperty(process.stdout, "isTTY", {
+        configurable: true,
+        value: originalStdoutIsTty,
+      });
+    }
+
+    assert.equal(Object.hasOwn(capturedOptions, "language"), false);
+    assert.equal(
+      confirmMessage,
+      installerI18n.createInstallerI18n("zh_CN").publishUpdateConfirmMessage,
+    );
+  });
+});
+
+test("startUpdater skips repeated plan and confirmation when preconfirmed", async () => {
+  await withUpdaterStdout(async (stdout) => {
+    let confirmCalled = false;
+    let capturedOptions: any;
 
     await updater.startUpdater({
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
       ensureNotCancelled: (value: unknown) => value,
       i18n: installerI18n.createInstallerI18n("en_US"),
-      readInstalledUpdateLanguage: () => "zh_CN",
+      readInstalledUpdateLanguage: () => "",
+      release: preparedRelease,
       ...requestedUpdateTarget,
-      async confirm(options: any) {
-        confirmMessage = String(options.message || "");
+      preconfirmed: true,
+      async confirm() {
+        confirmCalled = true;
         return true;
       },
       async runFinalizeInstallPlanInChild(options: any) {
@@ -104,11 +167,11 @@ test("startUpdater uses installed language for UI without rewriting settings", a
       },
     });
 
-    assert.equal(Object.hasOwn(capturedOptions, "language"), false);
-    assert.equal(
-      confirmMessage,
-      installerI18n.createInstallerI18n("zh_CN").publishUpdateConfirmMessage,
-    );
+    const output = stdout.join("");
+    assert.equal(confirmCalled, false);
+    assert.equal(capturedOptions.coreUpdate, true);
+    assert.doesNotMatch(output, /Update targets|Update plan/);
+    assert.match(output, /Written paths/);
   });
 });
 

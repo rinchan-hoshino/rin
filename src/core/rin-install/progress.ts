@@ -1,5 +1,12 @@
 import { spinner } from "@clack/prompts";
 
+export function restoreTerminalCursor() {
+  if (!process.stderr.isTTY) return;
+  try {
+    process.stderr.write("\x1B[?25h");
+  } catch {}
+}
+
 export async function runInstallerProgress<T>(
   message: string,
   action: () => T | Promise<T>,
@@ -16,5 +23,7 @@ export async function runInstallerProgress<T>(
   } catch (error) {
     progress.stop(options.failureMessage || message);
     throw error;
+  } finally {
+    restoreTerminalCursor();
   }
 }

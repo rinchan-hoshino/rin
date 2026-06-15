@@ -18,19 +18,13 @@ import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import {
   buildUserShell,
   readPasswdUser,
-  shellQuote,
   socketPathForUser,
   targetUserRuntimeEnv,
 } from "../rin-lib/system.js";
-import {
-  detectCurrentUser,
-  repoRootFromHere,
-  runCommand,
-} from "../rin-install/common.js";
+import { repoRootFromHere, runCommand } from "../rin-install/common.js";
 import { createInstallerI18n } from "../rin-install/i18n.js";
 import { readJsonFileWithPrivilege } from "../rin-install/fs-utils.js";
 import { loadInstallRecordFromCandidates } from "../rin-install/install-record.js";
-import { runInstallerProgress } from "../rin-install/progress.js";
 import {
   defaultInstallDirForHome,
   installRecordCandidatesForHome,
@@ -40,14 +34,13 @@ import {
   managedSystemdUnitCandidates,
 } from "../rin-install/paths.js";
 import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
-import {
-  type ReleaseChannel,
-  type ResolvedRelease,
-  buildGitHubRefArchiveUrl,
-  getReleaseRepoUrl,
-  loadReleaseManifestForNetwork,
-  resolveReleaseRequest,
-} from "../rin-lib/release.js";
+import { type ReleaseChannel } from "../rin-lib/release.js";
+export {
+  cleanupStaleUpdateWorkDirs,
+  requireTool,
+  runLoggedUpdateCommandSync,
+  updateWorkRoot,
+} from "../rin-install/update-workflow.js";
 
 export type ParsedArgs = {
   command:
@@ -359,21 +352,6 @@ export async function ensureDaemonAvailable(context: TargetExecutionContext) {
   );
 }
 
-export function requireTool(name: string, paths: string[] = []) {
-  for (const candidate of paths) {
-    if (candidate && fs.existsSync(candidate)) return candidate;
-  }
-  try {
-    return (
-      execFileSync("sh", ["-lc", `command -v ${shellQuote(name)}`], {
-        encoding: "utf8",
-      }).trim() || name
-    );
-  } catch {
-    throw new Error(`rin_missing_required_tool:${name}`);
-  }
-}
-
 const FORWARDED_CHILD_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
 function signalExitCode(signal: NodeJS.Signals) {
@@ -420,122 +398,6 @@ async function runInteractiveCommand(
       process.off(signal, handler);
     }
   }
-}
-
-function runCommandSync(command: string, args: string[], options: any = {}) {
-  execFileSync(command, args, { stdio: "inherit", ...options });
-}
-
-function runLoggedUpdateCommandSync(
-  command: string,
-  args: string[],
-  label: string,
-  logFile: string,
-  options: any = {},
-  buildFailureHeader: (label: string) => string = (value) =>
-    `${value} failed; recent log:`,
-) {
-  if (!process.stderr.isTTY) {
-    runCommandSync(command, args, options);
-    return;
-  }
-
-  const fd = fs.openSync(logFile, "a");
-  try {
-    fs.writeSync(fd, `\n$ ${[command, ...args].join(" ")}\n`);
-    execFileSync(command, args, {
-      ...options,
-      stdio: ["ignore", fd, fd],
-    });
-  } catch (error) {
-    try {
-      const log = fs.readFileSync(logFile, "utf8").trimEnd();
-      const recent = log.split("\n").slice(-80).join("\n");
-      if (recent)
-        process.stderr.write(`\n${buildFailureHeader(label)}\n${recent}\n`);
-    } catch {}
-    throw error;
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-function resolveGitCommitForRelease(
-  repoUrl: string,
-  release: ResolvedRelease,
-): ResolvedRelease {
-  if (release.channel !== "git") return release;
-  const selector = release.ref || release.version || release.branch || "HEAD";
-  if (/^[0-9a-f]{7,40}$/i.test(selector)) return release;
-  try {
-    const git = requireTool("git", ["/usr/bin/git", "/bin/git"]);
-    const raw = execFileSync(git, ["ls-remote", repoUrl, selector], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    const hash = raw.split(/\s+/)[0] || "";
-    if (/^[0-9a-f]{40}$/i.test(hash)) {
-      const shortHash = hash.slice(0, 12);
-      return {
-        ...release,
-        archiveUrl: buildGitHubRefArchiveUrl(repoUrl, hash),
-        version: shortHash,
-        ref: hash,
-        sourceLabel: `${release.sourceLabel} @ ${shortHash}`,
-      };
-    }
-  } catch {}
-  return release;
-}
-
-export function updateWorkRoot() {
-  const base =
-    safeString(process.env.XDG_CACHE_HOME).trim() ||
-    path.join(os.homedir(), ".cache");
-  const dir = path.join(base, "rin-update");
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-export function cleanupStaleUpdateWorkDirs(
-  workRoot: string,
-  options: {
-    keepPaths?: string[];
-    nowMs?: number;
-    staleAfterMs?: number;
-  } = {},
-) {
-  const rootPath = path.resolve(workRoot);
-  const keepPaths = new Set(
-    (options.keepPaths || []).map((item) => path.resolve(item)),
-  );
-  const nowMs = Number.isFinite(options.nowMs)
-    ? Number(options.nowMs)
-    : Date.now();
-  const staleAfterMs = Number.isFinite(options.staleAfterMs)
-    ? Math.max(0, Number(options.staleAfterMs))
-    : 12 * 60 * 60 * 1000;
-  const removed: string[] = [];
-  let entries: fs.Dirent[] = [];
-  try {
-    entries = fs.readdirSync(rootPath, { withFileTypes: true });
-  } catch {
-    return removed;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (!entry.name.startsWith("work-")) continue;
-    const fullPath = path.join(rootPath, entry.name);
-    if (keepPaths.has(path.resolve(fullPath))) continue;
-    try {
-      const stat = fs.statSync(fullPath);
-      const touchedAt = Number(stat.mtimeMs || 0);
-      if (nowMs - touchedAt < staleAfterMs) continue;
-      fs.rmSync(fullPath, { recursive: true, force: true });
-      removed.push(fullPath);
-    } catch {}
-  }
-  return removed;
 }
 
 export function resolveInstallDirForTarget(parsed: ParsedArgs) {
@@ -764,186 +626,30 @@ export function readInstalledUpdateReleasePreference(
   return { channel, branch: safeString(release?.branch).trim() };
 }
 
-function disablePackageRootPrepareScript(sourceRoot: string) {
-  const packageJsonPath = path.join(sourceRoot, "package.json");
-  const parsed = readJsonFile<any>(packageJsonPath, null);
-  if (!parsed?.scripts?.prepare) return;
-  delete parsed.scripts.prepare;
-  fs.writeFileSync(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`);
-}
-
-export async function runUpdate(parsed: ParsedArgs) {
-  const installDir = resolveInstallDirForTarget(parsed);
-  const i18n = createUpdateI18n(installDir, parsed.targetUser);
-  const manifest = await loadReleaseManifestForNetwork();
-  const inheritedRelease = parsed.explicitReleaseChannel
-    ? null
-    : readInstalledUpdateReleasePreference(installDir, {
-        targetUser: parsed.targetUser,
-      });
-  const requestedRelease = resolveReleaseRequest(manifest, {
-    channel: inheritedRelease?.channel || parsed.releaseChannel,
-    branch: parsed.releaseBranch || inheritedRelease?.branch || "",
-    version: parsed.releaseVersion,
-  });
-  const resolvedRelease = resolveGitCommitForRelease(
-    manifest.git?.repoUrl || getReleaseRepoUrl(manifest),
-    requestedRelease,
-  );
-  const npm = requireTool("npm", ["/usr/bin/npm", "/bin/npm"]);
-  const installerEnv = { ...process.env };
-  const baseInstallerArgs = [
+function buildRinInstallUpdateArgs(parsed: ParsedArgs, installDir: string) {
+  const args = [
     "--update",
     "--target-user",
     parsed.targetUser,
     "--install-dir",
     installDir,
-    "--language",
-    i18n.language,
-    ...(parsed.updateAssumeYes ? ["--yes"] : []),
   ];
+  if (parsed.updateAssumeYes) args.push("--yes");
+  if (parsed.explicitReleaseChannel) args.push(`--${parsed.releaseChannel}`);
+  if (parsed.releaseBranch) args.push("--branch", parsed.releaseBranch);
+  if (parsed.releaseVersion) args.push("--version", parsed.releaseVersion);
+  return args;
+}
 
-  const writeReleaseHandoffFile = (dir: string) => {
-    const releaseFile = path.join(dir, "release.json");
-    fs.writeFileSync(releaseFile, `${JSON.stringify(resolvedRelease)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    return releaseFile;
-  };
-
-  const curl =
-    process.platform === "win32"
-      ? ""
-      : fs.existsSync("/usr/bin/curl")
-        ? "/usr/bin/curl"
-        : "";
-  const wget =
-    process.platform === "win32"
-      ? ""
-      : fs.existsSync("/usr/bin/wget")
-        ? "/usr/bin/wget"
-        : "";
-  const tar = requireTool("tar", ["/usr/bin/tar", "/bin/tar"]);
-  const workRoot = updateWorkRoot();
-  cleanupStaleUpdateWorkDirs(workRoot);
-  const tempRoot = fs.mkdtempSync(path.join(workRoot, "work-"));
-  const tmpDir = path.join(tempRoot, "tmp");
-  const archivePath = path.join(tempRoot, "rin.tar.gz");
-  const sourceRoot = path.join(tempRoot, "src");
-  const logFile = path.join(tempRoot, "update.log");
-  const buildEnv = {
-    ...process.env,
-    TMPDIR: tmpDir,
-    TEMP: tmpDir,
-    TMP: tmpDir,
-  };
-
-  try {
-    fs.mkdirSync(sourceRoot, { recursive: true });
-    fs.mkdirSync(tmpDir, { recursive: true });
-    fs.writeFileSync(logFile, "", "utf8");
-    const installerArgs = [
-      ...baseInstallerArgs,
-      "--release-file",
-      writeReleaseHandoffFile(tempRoot),
-    ];
-
-    await runInstallerProgress(i18n.fetchingUpdateSourceMessage, () => {
-      if (curl) {
-        runLoggedUpdateCommandSync(
-          curl,
-          ["-fsSL", resolvedRelease.archiveUrl, "-o", archivePath],
-          i18n.fetchingUpdateSourceMessage,
-          logFile,
-          {},
-          i18n.buildUpdateCommandFailureHeader,
-        );
-      } else if (wget) {
-        runLoggedUpdateCommandSync(
-          wget,
-          ["-qO", archivePath, resolvedRelease.archiveUrl],
-          i18n.fetchingUpdateSourceMessage,
-          logFile,
-          {},
-          i18n.buildUpdateCommandFailureHeader,
-        );
-      } else {
-        throw new Error("rin_missing_required_tool:curl_or_wget");
-      }
-    });
-    await runInstallerProgress(i18n.preparingUpdateSourceMessage, () =>
-      runLoggedUpdateCommandSync(
-        tar,
-        ["-xzf", archivePath, "-C", sourceRoot, "--strip-components=1"],
-        i18n.preparingUpdateSourceMessage,
-        logFile,
-        {},
-        i18n.buildUpdateCommandFailureHeader,
-      ),
-    );
-
-    await runInstallerProgress(i18n.installingUpdateDependenciesMessage, () => {
-      if (resolvedRelease.channel === "stable") {
-        disablePackageRootPrepareScript(sourceRoot);
-        runLoggedUpdateCommandSync(
-          npm,
-          [
-            "install",
-            "--omit=dev",
-            "--no-fund",
-            "--no-audit",
-            "--loglevel=error",
-          ],
-          i18n.installingUpdateDependenciesMessage,
-          logFile,
-          { cwd: sourceRoot, env: buildEnv },
-          i18n.buildUpdateCommandFailureHeader,
-        );
-      } else if (fs.existsSync(path.join(sourceRoot, "package-lock.json"))) {
-        runLoggedUpdateCommandSync(
-          npm,
-          ["ci", "--no-fund", "--no-audit", "--loglevel=error"],
-          i18n.installingUpdateDependenciesMessage,
-          logFile,
-          { cwd: sourceRoot, env: buildEnv },
-          i18n.buildUpdateCommandFailureHeader,
-        );
-      } else {
-        runLoggedUpdateCommandSync(
-          npm,
-          ["install", "--no-fund", "--no-audit", "--loglevel=error"],
-          i18n.installingUpdateDependenciesMessage,
-          logFile,
-          { cwd: sourceRoot, env: buildEnv },
-          i18n.buildUpdateCommandFailureHeader,
-        );
-      }
-    });
-    if (resolvedRelease.channel !== "stable") {
-      await runInstallerProgress(i18n.buildingUpdateRuntimeMessage, () =>
-        runLoggedUpdateCommandSync(
-          npm,
-          ["run", "build", "--silent"],
-          i18n.buildingUpdateRuntimeMessage,
-          logFile,
-          { cwd: sourceRoot, env: buildEnv },
-          i18n.buildUpdateCommandFailureHeader,
-        ),
-      );
-    }
-
-    await runInteractiveCommand(
-      process.execPath,
-      [
-        path.join(sourceRoot, "dist", "app", "rin-install", "main.js"),
-        ...installerArgs,
-      ],
-      { env: installerEnv, cwd: sourceRoot },
-    );
-  } finally {
-    try {
-      fs.rmSync(tempRoot, { recursive: true, force: true });
-    } catch {}
-  }
+export async function runUpdate(parsed: ParsedArgs) {
+  const installDir = resolveInstallDirForTarget(parsed);
+  const repoRoot = repoRootFromHere();
+  await runInteractiveCommand(
+    process.execPath,
+    [
+      path.join(repoRoot, "dist", "app", "rin-install", "main.js"),
+      ...buildRinInstallUpdateArgs(parsed, installDir),
+    ],
+    { env: { ...process.env }, cwd: repoRoot },
+  );
 }

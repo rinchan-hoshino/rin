@@ -355,6 +355,11 @@ test("createInstallerI18n exposes localized post-install and update copy", () =>
   assert.equal(en.writtenPathLabel, "Written");
   assert.equal(en.serviceLabelLabel, "label");
   assert.equal(en.updaterIntroTitle, "Rin Updater");
+  assert.equal(en.updateAlreadyCurrentTitle, "Already up to date");
+  assert.equal(
+    en.fetchAndApplyUpdateConfirmMessage,
+    "Fetch and apply this update now?",
+  );
   assert.ok(
     en
       .buildUpdatePlanText({
@@ -367,6 +372,14 @@ test("createInstallerI18n exposes localized post-install and update copy", () =>
       })
       .includes("Updater policy:"),
   );
+  assert.ok(
+    en
+      .buildUpdateAlreadyCurrentText({
+        installDir: "/home/bob/.rin",
+        sourceLabel: "stable 1.2.3",
+      })
+      .includes("No download"),
+  );
   assert.equal(
     zh.targetInstallDirLabel,
     "\u76ee\u6807\u5b89\u88c5\u76ee\u5f55",
@@ -376,6 +389,11 @@ test("createInstallerI18n exposes localized post-install and update copy", () =>
   assert.equal(zh.confirmActiveLabel, "\u662f");
   assert.equal(zh.confirmInactiveLabel, "\u5426");
   assert.equal(zh.updaterIntroTitle, "Rin \u66f4\u65b0\u5668");
+  assert.equal(zh.updateAlreadyCurrentTitle, "\u5df2\u662f\u6700\u65b0");
+  assert.equal(
+    zh.fetchAndApplyUpdateConfirmMessage,
+    "\u73b0\u5728\u83b7\u53d6\u5e76\u5e94\u7528\u6b64\u66f4\u65b0\u5417\uff1f",
+  );
   assert.ok(
     zh
       .buildAfterUpdateText({
@@ -472,6 +490,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   );
   assert.doesNotMatch(updateModeBlock, /promptInstallerLanguage/);
   assert.match(updateModeBlock, /readInstalledUpdateLanguage/);
+  assert.match(mainSource, /--preconfirmed/);
   assert.match(mainSource, /installSettingsPath/);
   assert.doesNotMatch(mainSource, /installerManifestPaths/);
   assert.doesNotMatch(mainSource, /launcherMetadataCandidatesForHome/);
@@ -481,6 +500,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.match(updaterSource, /wrapInstallerNoteText/);
   assert.match(updaterSource, /requestedTargetUser/);
   assert.match(updaterSource, /assumeYes/);
+  assert.match(updaterSource, /preconfirmed/);
   assert.match(updaterSource, /selectUpdateTarget/);
   assert.match(updaterSource, /readInstalledUpdateLanguage/);
   assert.match(updaterSource, /createInstallerI18n\(displayLanguage\)/);
@@ -495,7 +515,7 @@ test("update mode skips language prompt and reuses installer note renderer", () 
     updaterSource,
     /const promptConfirm = deps\.confirm \|\| confirm/,
   );
-  assert.doesNotMatch(updaterSource, /process\.env/);
+  assert.match(updaterSource, /rin_update_confirmation_required/);
 });
 
 test("promptBuiltInExtensionSetup defaults browse on for fresh installs", async () => {

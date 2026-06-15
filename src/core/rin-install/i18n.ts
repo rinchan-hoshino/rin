@@ -213,6 +213,8 @@ type InstallerDisplayCopy = {
   noUpdateTargetsText: string;
   updaterNothingUpdated: string;
   updaterFinishedWithoutWritingChanges: string;
+  updateAlreadyCurrentTitle: string;
+  fetchAndApplyUpdateConfirmMessage: string;
   publishUpdateConfirmMessage: string;
   publishingUpdateMessage: string;
   fetchingUpdateSourceMessage: string;
@@ -236,6 +238,10 @@ type InstallerDisplayCopy = {
     installDir: string;
     source: string;
     ownerHome: string;
+    sourceLabel: string;
+  }) => string;
+  buildUpdateAlreadyCurrentText: (options: {
+    installDir: string;
     sourceLabel: string;
   }) => string;
   buildUpdatedTargetText: (options: {
@@ -567,8 +573,10 @@ const INSTALLER_DISPLAY_COPY = {
     updaterNothingUpdated: "Nothing updated.",
     updaterFinishedWithoutWritingChanges:
       "Updater finished without writing changes.",
+    updateAlreadyCurrentTitle: "Already up to date",
+    fetchAndApplyUpdateConfirmMessage: "Fetch and apply this update now?",
     publishUpdateConfirmMessage:
-      "Publish the latest built runtime to this installed target now?",
+      "Publish the prepared runtime to this installed target now?",
     publishingUpdateMessage:
       "Publishing runtime and refreshing the installed target...",
     fetchingUpdateSourceMessage: "Fetching update source",
@@ -604,6 +612,13 @@ const INSTALLER_DISPLAY_COPY = {
         "- refresh launchers and installer metadata for the current user",
         "- refresh managed daemon service files and restart the daemon when applicable",
         "- preserve existing provider/auth/settings unless changed elsewhere",
+      ].join("\n");
+    },
+    buildUpdateAlreadyCurrentText(options) {
+      return [
+        `${this.targetInstallDirLabel}: ${options.installDir}`,
+        `Current source: ${this.formatUpdateSourceLabel(options.sourceLabel)}`,
+        "No download or runtime changes are needed.",
       ].join("\n");
     },
     buildUpdatedTargetText(options) {
@@ -974,7 +989,9 @@ const INSTALLER_DISPLAY_COPY = {
     noUpdateTargetsText: "当前系统上未发现已安装的 Rin 守护进程目标。",
     updaterNothingUpdated: "未执行更新。",
     updaterFinishedWithoutWritingChanges: "更新器结束，未写入变更。",
-    publishUpdateConfirmMessage: "现在将最新构建的运行时发布到此目标吗？",
+    updateAlreadyCurrentTitle: "已是最新",
+    fetchAndApplyUpdateConfirmMessage: "现在获取并应用此更新吗？",
+    publishUpdateConfirmMessage: "现在将已准备好的运行时发布到此目标吗？",
     publishingUpdateMessage: "正在发布运行时并刷新已安装目标……",
     fetchingUpdateSourceMessage: "正在获取更新源",
     preparingUpdateSourceMessage: "正在准备更新源",
@@ -985,6 +1002,7 @@ const INSTALLER_DISPLAY_COPY = {
     formatUpdateDiscoverySource(source) {
       const labels: Record<string, string> = {
         launcher: "启动器",
+        default: "默认安装目标",
         manifest: "安装清单",
         systemd: "systemd 用户服务",
         launchd: "launchd 代理",
@@ -1048,6 +1066,13 @@ const INSTALLER_DISPLAY_COPY = {
         "- 为当前用户刷新启动器和安装器元数据",
         "- 如适用，刷新托管守护进程服务文件并重启守护进程",
         "- 保留现有提供商、认证和设置，除非其他流程显式修改",
+      ].join("\n");
+    },
+    buildUpdateAlreadyCurrentText(options) {
+      return [
+        `${this.targetInstallDirLabel}: ${options.installDir}`,
+        `当前来源: ${this.formatUpdateSourceLabel(options.sourceLabel)}`,
+        "无需下载或修改运行时。",
       ].join("\n");
     },
     buildUpdatedTargetText(options) {

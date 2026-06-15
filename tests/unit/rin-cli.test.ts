@@ -37,6 +37,11 @@ const installerMain = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "main.js"))
     .href
 );
+const updateWorkflow = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-install", "update-workflow.js"),
+  ).href
+);
 
 test("version subcommand prints package version without launching Rin", () => {
   const packageJson = JSON.parse(
@@ -144,26 +149,74 @@ test("rin-install update reads target language through elevated installer JSON",
   assert.equal(language, "zh_CN");
 });
 
-test("rin update delegates final update UI to rin-install update args", () => {
+test("rin update is a thin wrapper around rin-install update", () => {
   const source = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin", "shared.ts"),
     "utf8",
   );
+  const workflowSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "update-workflow.ts"),
+    "utf8",
+  );
+  const updaterSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "updater.ts"),
+    "utf8",
+  );
 
+  assert.match(source, /buildRinInstallUpdateArgs/);
+  assert.match(source, /dist", "app", "rin-install", "main\.js"/);
   assert.match(source, /"--update"/);
   assert.match(source, /"--target-user"/);
   assert.match(source, /"--install-dir"/);
-  assert.match(source, /"--language"/);
-  assert.match(source, /parsed\.updateAssumeYes \? \["--yes"\]/);
-  assert.match(source, /createUpdateI18n\(installDir, parsed\.targetUser\)/);
-  assert.match(source, /rin-install/);
-  assert.match(source, /runInteractiveCommand/);
-  assert.match(source, /FORWARDED_CHILD_SIGNALS/);
-  assert.match(source, /runInstallerProgress/);
-  assert.match(source, /runLoggedUpdateCommandSync/);
-  assert.match(source, /--loglevel=error/);
-  assert.doesNotMatch(source, /finalizeCoreUpdate/);
+  assert.match(source, /parsed\.updateAssumeYes/);
+  assert.match(source, /parsed\.explicitReleaseChannel/);
+  assert.match(source, /parsed\.releaseBranch/);
+  assert.match(source, /parsed\.releaseVersion/);
+  assert.doesNotMatch(source, /prepareUpdateRuntimeSource/);
+  assert.doesNotMatch(source, /confirmUpdateBeforeSourcePreparation/);
+  assert.doesNotMatch(source, /bootstrap-entrypoint/);
+  assert.match(updaterSource, /prepareUpdateRuntimeSource/);
+  assert.match(updaterSource, /rin_update_confirmation_required/);
+  assert.match(updaterSource, /isInstalledReleaseCurrent/);
+  assert.match(updaterSource, /--preconfirmed/);
+  assert.match(workflowSource, /runInstallerProgress/);
+  assert.match(workflowSource, /runLoggedUpdateCommandSync/);
+  assert.match(workflowSource, /spawn/);
+  assert.match(workflowSource, /FORWARDED_UPDATE_SIGNALS/);
+  assert.match(workflowSource, /restoreTerminalCursor/);
+  assert.match(workflowSource, /--loglevel=error/);
   assert.equal(source.includes("rin update:"), false);
+});
+
+test("rin-install update release comparison supports current-version fast path", () => {
+  assert.equal(
+    updateWorkflow.isInstalledReleaseCurrent(
+      { channel: "stable", version: "1.2.3", ref: "old" },
+      {
+        channel: "stable",
+        archiveUrl: "https://example.invalid/rin.tgz",
+        version: "1.2.3",
+        branch: "stable",
+        ref: "new",
+        sourceLabel: "stable 1.2.3",
+      },
+    ),
+    true,
+  );
+  assert.equal(
+    updateWorkflow.isInstalledReleaseCurrent(
+      { channel: "git", version: "main", ref: "abc123" },
+      {
+        channel: "git",
+        archiveUrl: "https://example.invalid/rin.tgz",
+        version: "def456",
+        branch: "main",
+        ref: "def456",
+        sourceLabel: "git branch main @ def456",
+      },
+    ),
+    false,
+  );
 });
 
 test("rin lifecycle control uses the recorded managed service boundary", () => {

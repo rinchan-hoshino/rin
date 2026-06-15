@@ -13,6 +13,11 @@ const rootDir = path.resolve(
 const shared = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "shared.js")).href
 );
+const updateWorkflow = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-install", "update-workflow.js"),
+  ).href
+);
 
 test("cleanupStaleUpdateWorkDirs prunes only stale work dirs", async () => {
   const workRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-root-"));
@@ -49,5 +54,53 @@ test("updateWorkRoot uses the platform cache root", async () => {
     if (previous == null) delete process.env.XDG_CACHE_HOME;
     else process.env.XDG_CACHE_HOME = previous;
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createUpdateRuntimeSourceWorkspace writes the release handoff", async () => {
+  const workRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-work-"));
+  const release = {
+    channel: "stable",
+    archiveUrl: "https://example.invalid/rin.tgz",
+    version: "1.2.3",
+    branch: "stable",
+    ref: "abc1234",
+    sourceLabel: "stable 1.2.3",
+  };
+
+  try {
+    const workspace = updateWorkflow.createUpdateRuntimeSourceWorkspace(
+      release,
+      workRoot,
+    );
+    assert.equal(path.dirname(workspace.tempRoot), workRoot);
+    assert.equal(
+      await fs.readFile(workspace.releaseFile, "utf8"),
+      `${JSON.stringify(release)}\n`,
+    );
+    await assert.doesNotReject(fs.access(workspace.sourceRoot));
+    await assert.doesNotReject(fs.access(workspace.tmpDir));
+    await assert.doesNotReject(fs.access(workspace.logFile));
+  } finally {
+    await fs.rm(workRoot, { recursive: true, force: true });
+  }
+});
+
+test("disablePackageRootPrepareScript removes only the package prepare hook", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-package-"));
+  const packageJson = path.join(dir, "package.json");
+  try {
+    await fs.writeFile(
+      packageJson,
+      `${JSON.stringify({ scripts: { prepare: "husky", build: "tsc" } })}\n`,
+      "utf8",
+    );
+
+    updateWorkflow.disablePackageRootPrepareScript(dir);
+
+    const parsed = JSON.parse(await fs.readFile(packageJson, "utf8"));
+    assert.deepEqual(parsed.scripts, { build: "tsc" });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });

@@ -1,7 +1,18 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { confirm, intro, outro, select } from "@clack/prompts";
 import chalk from "chalk";
 
-import { type InstalledReleaseInfo } from "../rin-lib/release.js";
+import {
+  getReleaseRepoUrl,
+  loadReleaseManifestForNetwork,
+  resolveReleaseRequest,
+  type InstalledReleaseInfo,
+  type ReleaseChannel,
+  type ReleaseRequest,
+  type ResolvedRelease,
+} from "../rin-lib/release.js";
 
 import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
@@ -11,8 +22,17 @@ import {
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
 import { renderInstallerNote, wrapInstallerNoteText } from "./interactive.js";
+import { readInstallerJson } from "./fs-utils.js";
+import { installerManifestPath } from "./paths.js";
 import { runInstallerProgress } from "./progress.js";
 import { targetHomeForUser } from "./users.js";
+import {
+  createUpdateRuntimeSourceWorkspace,
+  isInstalledReleaseCurrent,
+  prepareUpdateRuntimeSource,
+  resolveGitCommitForRelease,
+  runUpdateCommand,
+} from "./update-workflow.js";
 
 export function renderUpdaterNote(message?: string, title?: string) {
   return renderInstallerNote(
@@ -58,11 +78,88 @@ async function selectUpdateTarget(
   ]!;
 }
 
+function isReleaseChannel(value: string): value is ReleaseChannel {
+  return ["stable", "beta", "nightly", "git"].includes(value);
+}
+
+function defaultReadInstalledRelease(target: {
+  currentUser: string;
+  targetUser: string;
+  installDir: string;
+}) {
+  const elevated = target.targetUser !== target.currentUser;
+  return (
+    readInstallerJson<any>(
+      installerManifestPath(target.installDir),
+      {},
+      elevated,
+    )?.currentRelease?.release || null
+  );
+}
+
+function readInstalledReleasePreference(installedRelease: any): {
+  channel: ReleaseChannel;
+  branch: string;
+} | null {
+  const channel = String(installedRelease?.channel || "").trim();
+  if (!isReleaseChannel(channel)) return null;
+  if (channel !== "git") return { channel, branch: "" };
+  return { channel, branch: String(installedRelease?.branch || "").trim() };
+}
+
+async function resolveUpdateRelease(options: {
+  installedRelease: any;
+  releaseRequest?: ReleaseRequest & { explicitReleaseChannel?: boolean };
+}): Promise<ResolvedRelease> {
+  const manifest = await loadReleaseManifestForNetwork();
+  const inherited = options.releaseRequest?.explicitReleaseChannel
+    ? null
+    : readInstalledReleasePreference(options.installedRelease);
+  const requested = resolveReleaseRequest(manifest, {
+    channel: inherited?.channel || options.releaseRequest?.channel || "stable",
+    branch: options.releaseRequest?.branch || inherited?.branch || "",
+    version: options.releaseRequest?.version || "",
+  });
+  return resolveGitCommitForRelease(
+    manifest.git?.repoUrl || getReleaseRepoUrl(manifest),
+    requested,
+  );
+}
+
+async function runPreparedUpdater(options: {
+  sourceRoot: string;
+  releaseFile: string;
+  currentUser: string;
+  targetUser: string;
+  installDir: string;
+  language: string;
+}) {
+  await runUpdateCommand(
+    process.execPath,
+    [
+      path.join(options.sourceRoot, "dist", "app", "rin-install", "main.js"),
+      "--update",
+      "--target-user",
+      options.targetUser,
+      "--install-dir",
+      options.installDir,
+      "--language",
+      options.language,
+      "--yes",
+      "--preconfirmed",
+      "--release-file",
+      options.releaseFile,
+    ],
+    { cwd: options.sourceRoot, env: { ...process.env } },
+  );
+}
+
 export async function startUpdater(deps: {
   detectCurrentUser: () => string;
   repoRootFromHere: () => string;
   ensureNotCancelled: <T>(value: T | symbol) => T;
   release?: InstalledReleaseInfo;
+  releaseRequest?: ReleaseRequest & { explicitReleaseChannel?: boolean };
   select?: typeof select;
   confirm?: typeof confirm;
   i18n?: InstallerI18n;
@@ -72,10 +169,17 @@ export async function startUpdater(deps: {
     installDir: string;
     ownerHome: string;
   }) => string;
+  readInstalledRelease?: (target: {
+    currentUser: string;
+    targetUser: string;
+    installDir: string;
+    ownerHome: string;
+  }) => any;
   runFinalizeInstallPlanInChild?: typeof runFinalizeInstallPlanInChildImpl;
   requestedInstallDir?: string;
   requestedTargetUser?: string;
   assumeYes?: boolean;
+  preconfirmed?: boolean;
 }) {
   const currentUser = deps.detectCurrentUser();
   const promptSelect = deps.select || select;
@@ -122,39 +226,99 @@ export async function startUpdater(deps: {
     ? createInstallerI18n(displayLanguage)
     : initialI18n;
 
-  note(
-    i18n.buildUpdateTargetText({
-      currentUser,
-      targetUser,
-      installDir,
-      source: target.source,
-      ownerHome: target.ownerHome,
-    }),
-    i18n.updateTargetsTitle,
-  );
+  const installedRelease = (
+    deps.readInstalledRelease || defaultReadInstalledRelease
+  )({
+    currentUser,
+    targetUser,
+    installDir,
+    ownerHome: target.ownerHome,
+  });
+  const resolvedRelease =
+    deps.release ||
+    (await resolveUpdateRelease({
+      installedRelease,
+      releaseRequest: deps.releaseRequest,
+    }));
 
-  note(
-    i18n.buildUpdatePlanText({
-      currentUser,
-      targetUser,
-      installDir,
-      source: target.source,
-      ownerHome: target.ownerHome,
-      sourceLabel: deps.release?.sourceLabel || "stable latest",
-    }),
-    i18n.updatePlanTitle,
-  );
+  if (isInstalledReleaseCurrent(installedRelease, resolvedRelease)) {
+    note(
+      i18n.buildUpdateAlreadyCurrentText({
+        installDir,
+        sourceLabel: resolvedRelease.sourceLabel,
+      }),
+      i18n.updateAlreadyCurrentTitle,
+    );
+    outro(i18n.updaterNothingUpdated);
+    return;
+  }
 
-  const shouldProceed = deps.assumeYes
-    ? true
-    : deps.ensureNotCancelled(
-        await promptConfirm({
-          message: i18n.publishUpdateConfirmMessage,
-          initialValue: true,
-        }),
+  if (!deps.preconfirmed) {
+    note(
+      i18n.buildUpdateTargetText({
+        currentUser,
+        targetUser,
+        installDir,
+        source: target.source,
+        ownerHome: target.ownerHome,
+      }),
+      i18n.updateTargetsTitle,
+    );
+
+    note(
+      i18n.buildUpdatePlanText({
+        currentUser,
+        targetUser,
+        installDir,
+        source: target.source,
+        ownerHome: target.ownerHome,
+        sourceLabel: resolvedRelease.sourceLabel,
+      }),
+      i18n.updatePlanTitle,
+    );
+
+    if (!deps.assumeYes && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+      throw new Error(
+        "rin_update_confirmation_required: pass --yes in non-interactive mode",
       );
-  if (!shouldProceed) {
-    outro(i18n.updaterFinishedWithoutWritingChanges);
+    }
+    const shouldProceed = deps.assumeYes
+      ? true
+      : deps.ensureNotCancelled(
+          await promptConfirm({
+            message: deps.release
+              ? i18n.publishUpdateConfirmMessage
+              : i18n.fetchAndApplyUpdateConfirmMessage,
+            initialValue: true,
+          }),
+        );
+    if (!shouldProceed) {
+      outro(i18n.updaterFinishedWithoutWritingChanges);
+      return;
+    }
+  }
+
+  if (!deps.release) {
+    const workspace = createUpdateRuntimeSourceWorkspace(resolvedRelease);
+    try {
+      await prepareUpdateRuntimeSource({
+        release: resolvedRelease,
+        workspace,
+        i18n,
+      });
+      await runPreparedUpdater({
+        sourceRoot: workspace.sourceRoot,
+        releaseFile: workspace.releaseFile,
+        currentUser,
+        targetUser,
+        installDir,
+        language: i18n.language,
+      });
+    } finally {
+      try {
+        fs.rmSync(workspace.tempRoot, { recursive: true, force: true });
+      } catch {}
+    }
     return;
   }
 
@@ -169,7 +333,7 @@ export async function startUpdater(deps: {
           sourceRoot: deps.repoRootFromHere(),
           daemonReadyTimeoutMs: 30_000,
           coreUpdate: true,
-          ...(deps.release ? { release: deps.release } : {}),
+          release: resolvedRelease,
         } satisfies FinalizeInstallOptions,
         i18n.refreshingInstalledTargetMessage,
         { writeStatus() {} },
