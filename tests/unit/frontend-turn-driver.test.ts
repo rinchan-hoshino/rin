@@ -664,6 +664,23 @@ test("frontend SDK turn driver terminates the attached daemon session", async ()
   );
 });
 
+test("frontend SDK turn driver clears active state after terminating the attached daemon session", async () => {
+  const driver = createDriver();
+  await driver.connect();
+  (driver as any).frontendState = {
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+  };
+
+  assert.equal(driver.canSteerActiveTurn(), true);
+  await (driver as any).terminateSession();
+
+  assert.equal(driver.canSteerActiveTurn(), false);
+  assert.equal(driver.currentSessionFile(), "");
+});
+
 test("frontend SDK turn driver applies turn-scoped model without persisting defaults", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;

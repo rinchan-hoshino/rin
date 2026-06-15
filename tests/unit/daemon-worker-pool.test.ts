@@ -932,6 +932,148 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("selectSession shuts down the previous session before resuming another session", async () => {
+  const dir = await makeTempDir("rin-worker-pool-select-shutdown-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+const logPath = ${JSON.stringify(logPath)};
+function log(type) {
+  fs.appendFileSync(logPath, String(type) + '\n');
+}
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    log(command.type);
+    if (command.type === 'shutdown_session') process.exit(0);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { cancelled: false, sessionFile: command.sessionPath, sessionId: 'selected-session' },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  const current = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(current, {
+    sessionFile: "/tmp/current.jsonl",
+    sessionId: "current-session",
+  });
+  pool.attachWorker(connection, current);
+
+  const selected = await pool.selectSession(connection, {
+    sessionFile: "/tmp/selected.jsonl",
+  });
+
+  assert.notEqual(selected, current);
+  assert.equal(connection.attachedWorker, selected);
+  assert.equal(connection.sessionFile, "/tmp/selected.jsonl");
+  assert.deepEqual(
+    (await fs.readFile(logPath, "utf8")).trim().split("\n").filter(Boolean),
+    ["shutdown_session", "switch_session"],
+  );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("selectSession keeps a previous session alive while another connection is still attached", async () => {
+  const dir = await makeTempDir("rin-worker-pool-select-shared-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+const logPath = ${JSON.stringify(logPath)};
+function log(type) {
+  fs.appendFileSync(logPath, String(type) + '\n');
+}
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    log(command.type);
+    if (command.type === 'shutdown_session') process.exit(0);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { cancelled: false, sessionFile: command.sessionPath, sessionId: 'selected-session' },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const switchingConnection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const remainingConnection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  const current = pool.resolveWorkerForCommand(switchingConnection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(current, {
+    sessionFile: "/tmp/current.jsonl",
+    sessionId: "current-session",
+  });
+  pool.attachWorker(switchingConnection, current);
+  pool.attachWorker(remainingConnection, current);
+
+  const selected = await pool.selectSession(switchingConnection, {
+    sessionFile: "/tmp/selected.jsonl",
+  });
+
+  assert.notEqual(selected, current);
+  assert.equal(switchingConnection.attachedWorker, selected);
+  assert.equal(remainingConnection.attachedWorker, current);
+  assert.equal(current.gracefulShutdownRequested, false);
+  assert.deepEqual(
+    (await fs.readFile(logPath, "utf8")).trim().split("\n").filter(Boolean),
+    ["switch_session"],
+  );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("selectSession lazily restores the chosen session worker", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");

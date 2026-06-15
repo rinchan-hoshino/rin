@@ -223,9 +223,13 @@ export class RinFrontendTurnDriver {
     if (!this.client?.isConnected()) return;
     if (typeof this.client.terminateSession === "function") {
       await this.client.terminateSession();
-      return;
+    } else {
+      await this.client.request({ type: "terminate_session" });
     }
-    await this.client.request({ type: "terminate_session" });
+    this.failLiveTurn(new Error("frontend_session_terminated"));
+    this.resetAssistantSegmentTracking();
+    this.frontendPhase = "idle";
+    this.frontendState = {};
   }
 
   private sessionFileFromReady(

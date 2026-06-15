@@ -176,18 +176,19 @@ export class WorkerPool {
 
   detachWorker(
     connection: ConnectionState,
-    options: { clearSelection?: boolean } = {},
+    options: { clearSelection?: boolean; release?: boolean } = {},
   ) {
     const worker = connection.attachedWorker;
     if (worker) {
       worker.connections.delete(connection);
       connection.attachedWorker = undefined;
       worker.lastUsedAt = Date.now();
-      this.maybeReleaseWorker(worker);
+      if (options.release !== false) this.maybeReleaseWorker(worker);
     }
     if (options.clearSelection) {
       this.rememberSessionSelection(connection, {});
     }
+    return worker;
   }
 
   terminateWorkerGracefully(worker: WorkerHandle) {
@@ -204,6 +205,11 @@ export class WorkerPool {
     this.writeWorkerStdin(worker, { type: "sleep_session" }, () => {
       this.destroyWorker(worker, { signal: "SIGKILL" });
     });
+  }
+
+  private terminateWorkerGracefullyIfUnattached(worker: WorkerHandle) {
+    if (worker.connections.size > 0) return;
+    this.terminateWorkerGracefully(worker);
   }
 
   destroyWorker(
@@ -307,7 +313,9 @@ export class WorkerPool {
       connection.attachedWorker &&
       !this.workerMatchesSelector(connection.attachedWorker, wanted)
     ) {
-      this.detachWorker(connection);
+      const previousWorker = this.detachWorker(connection, { release: false });
+      if (previousWorker)
+        this.terminateWorkerGracefullyIfUnattached(previousWorker);
     }
     this.rememberSessionSelection(connection, wanted);
     return await this.ensureSelectedWorker(connection);
