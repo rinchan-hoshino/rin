@@ -893,14 +893,23 @@ export async function runCustomRpcMode(
           forceTurnEvents,
         );
       } catch (error: any) {
+        const retryFailureMessage = safeString(
+          latestAutoRetryFailureMessage,
+        ).trim();
+        const errorMessage =
+          retryFailureMessage ||
+          String(error?.message || error || "rpc_turn_failed");
         emitTurnEvent(
           "error",
           requestTag,
           {
-            error: String(error?.message || error || "rpc_turn_failed"),
+            sessionFile: turnSession.sessionFile,
+            sessionId: turnSession.sessionId,
+            error: errorMessage,
           },
           forceTurnEvents,
         );
+        if (retryFailureMessage) throw new Error(retryFailureMessage);
         throw error;
       } finally {
         if (heartbeatTimer) clearInterval(heartbeatTimer);

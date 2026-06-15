@@ -2142,6 +2142,136 @@ test(
 );
 
 test(
+  "rpc mode includes retry exhaustion when provider failure is thrown",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const sessionSubscribers = new Set();
+    const stateMessages = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const emit = (event) => {
+        for (const handler of sessionSubscribers) handler(event);
+      };
+      const providerError =
+        "Codex SSE response headers timed out after 20000ms";
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: {
+          state: { messages: stateMessages, errorMessage: "" },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        prompt: async () => {
+          emit({
+            type: "auto_retry_end",
+            success: false,
+            attempt: 3,
+            finalError: providerError,
+          });
+          throw new Error(providerError);
+        },
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => session.messages || []),
+        messages: stateMessages,
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const events = lines
+        .join("")
+        .trim()
+        .split(/\n+/)
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      );
+      assert.equal(error?.requestTag, "tag-1");
+      assert.equal(error?.sessionFile, "/tmp/test-session.jsonl");
+      assert.equal(error?.sessionId, "session-1");
+      assert.equal(
+        error?.error,
+        "Retry failed after 3 attempts: Codex SSE response headers timed out after 20000ms",
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode surfaces websocket errors instead of waiting for continuation",
   { concurrency: false },
   async () => {
