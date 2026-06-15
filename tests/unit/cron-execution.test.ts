@@ -1252,7 +1252,7 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")}. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records. Apply the manual's evidence, trigger, behavior delta, and owning surface gate; merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, or recall. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`,
+      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")}. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. Merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, recall, or remove guidance that would cause future mistakes. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /Trigger:/);
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
@@ -1268,7 +1268,9 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.match(sleep.target.prompt, /reusable skills/);
     assert.match(sleep.target.prompt, /memory-index pointers/);
     assert.match(sleep.target.prompt, /short-term continuity records/);
-    assert.match(sleep.target.prompt, /evidence, trigger, behavior delta/);
+    assert.match(sleep.target.prompt, /evidence, trigger, target behavior/);
+    assert.match(sleep.target.prompt, /delete or rewrite wrong guidance/);
+    assert.match(sleep.target.prompt, /reject patch-layer fixes/);
     assert.match(sleep.target.prompt, /proven behavior changes/);
     assert.match(sleep.target.prompt, /routed candidates/);
     assert.doesNotMatch(sleep.target.prompt, /no-change result as exceptional/);

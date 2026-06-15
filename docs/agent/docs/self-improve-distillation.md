@@ -1,13 +1,13 @@
 # Self-improve Distillation
 
-Use this document when a self-improve review must turn conversation evidence into durable future behavior.
+Use this document when a self-improve review must maintain durable future guidance from conversation evidence.
 
-A distillation pass is a compiler from evidence to future behavior. It writes behavior contracts for future runs: prompt baselines, skills, memory-index pointers, and short-term continuity.
+A distillation pass maintains the target state of future guidance. It may add, rewrite, narrow, move, or delete guidance. Do not treat every correction as a new rule.
 
 Memory and self-improve stay separate:
 
 - Memory preserves original evidence and supports retrieval.
-- Self-improve stores distilled guidance that changes future agent behavior.
+- Self-improve stores distilled target-state guidance that changes future agent behavior or removes guidance that would cause future mistakes.
 
 Use `docs/memory-layering.md` for destination choice. Use this document for the actual distillation pass over `<agentDir>/self_improve`.
 
@@ -21,10 +21,11 @@ Target surface:
 
 Goal:
 
-- distill only proven behavior changes into the smallest durable guidance that future matching work will use;
-- place correction-based or repeated-failure lessons in the executable prompt, skill, workflow, or product surface that future work will use, with provenance kept in memory surfaces;
+- maintain the smallest durable guidance that future matching work will use;
+- for correction-based or repeated-failure evidence, first identify whether existing guidance caused, preserved, or obscured the failure, then delete or rewrite that source guidance before considering any new guidance;
+- add new executable guidance only when the evidence proves a reusable future behavior that cleanup alone cannot encode;
 - preserve the trigger cues needed to recognize the same failure or work class again;
-- reduce guidance entropy only after the evidence, trigger, behavior delta, and owning surface are clear.
+- reduce guidance entropy only after the evidence, trigger, target behavior, and owning surface are clear.
 
 Inputs and authority:
 
@@ -45,31 +46,37 @@ Output contract:
 
 Distill only proven behavior changes.
 
-For each candidate lesson, identify:
+For each candidate lesson or cleanup, identify:
 
-- **Evidence:** the trusted conversation evidence, correction, repeated failure, authoritative doc, or verified runtime/repository behavior that proves the lesson.
-- **Trigger:** the future situation, wording, surface, or work class that should make the agent use the lesson.
-- **Behavior delta:** what the agent must do differently in future runs.
-- **Owning surface:** the narrowest self-improve surface that can carry the lesson and be used when needed.
+- **Evidence:** the trusted conversation evidence, correction, repeated failure, authoritative doc, or verified runtime/repository behavior that proves the need.
+- **Trigger:** the future situation, wording, surface, or work class that should make the agent use, avoid, or ignore the guidance.
+- **Target behavior:** what future runs should do differently after the library is clean.
+- **Owning surface:** the narrowest self-improve surface that can carry the target behavior or the cleanup.
 
 If any field is missing, do not write the candidate as self-improve guidance. Existing artifacts can prove cleanup needs, overlap, or stale state; they do not by themselves prove a new standing rule.
 
-## Executable projection gate
+## Guidance maintenance rule
 
-Memory-index entries preserve evidence. Reusable behavior changes live in executable surfaces. When a lesson comes from an owner correction, frustration, repeated reminder, or repeated assistant failure, a complete pass:
+Corrections are not automatically new guidance. A complete pass maintains the clean target state of the guidance library.
 
-- adds or revises the matching executable surface that future task work will use, such as the current skill, umbrella skill, prompt baseline, scheduled-task prompt, or product manual; or
-- records a concise unchanged decision explaining which executable surface already contains the exact trigger and behavior delta.
+For each correction, frustration, repeated reminder, or repeated assistant failure, first decide whether the evidence:
 
-Use memory-index for the dated provenance behind corrections and disputes; use the smallest executable surface for the future behavior contract.
+- proves a new reusable behavior;
+- narrows or rewrites existing guidance;
+- invalidates an existing abstraction or rule;
+- only corrects the current execution.
+
+When evidence invalidates an existing abstraction, remove or rewrite the source guidance. Do not preserve the wrong abstraction by adding exceptions, guard clauses, opposite rules, authorization clauses, or narrower prohibitions around it.
+
+Memory-index entries preserve dated provenance behind corrections and disputes. Provenance is not a reason to keep a bad rule. Use an executable surface for a behavior contract only when the cleaned target state still needs one.
 
 ## Success criteria
 
 A successful distillation pass makes future behavior easier to trigger and execute:
 
-- each changed guidance line can name its evidence, trigger, behavior delta, and owning surface;
-- the new or revised guidance changes future behavior, routing, decisions, execution, or recall;
-- correction-based or repeated-failure lessons land in an executable surface future work will use, with memory-index used for provenance;
+- each changed guidance line or deletion can name its evidence, trigger, target behavior, and owning surface;
+- the new, revised, or removed guidance changes future behavior, routing, decisions, execution, or recall;
+- correction-based or repeated-failure evidence first removes or rewrites wrong guidance; new executable guidance is added only when cleanup alone cannot produce the proven target behavior;
 - trigger cues are preserved, including exact wording when that wording is needed to recognize the future failure again;
 - each lesson has one canonical owner;
 - prompt baselines stay compact, resident-worthy, and limited to stable cross-turn invariants;
@@ -91,7 +98,7 @@ Inspect the surfaces that can own the lesson:
 - `short-term-memory/SKILL.md`;
 - `<agentDir>/self_improve/state/skill-usage.json` when present.
 
-Review high-salience conversation evidence before lower-salience artifact cleanup: owner corrections, frustration, repeated reminders, and repeated assistant failures. File only the reusable behavior delta in the smallest self-improve surface that will affect later behavior.
+Review high-salience conversation evidence before lower-salience artifact cleanup: owner corrections, frustration, repeated reminders, and repeated assistant failures. File only the target behavior or cleanup in the smallest self-improve surface that will affect later behavior.
 
 ## Behavior contract
 
@@ -101,18 +108,19 @@ Run one cohesive same-class pass:
 2. Read the matching skill and any umbrella skill that owns the same work class.
 3. Check `skill-usage.json` for stale, overlapping, or rarely used skills worth merging, aliasing, pruning, or reshaping.
 4. Review high-salience conversation evidence first: owner corrections, repeated reminders, frustration, and repeated assistant failures.
-5. Extract candidate lessons with evidence, trigger, behavior delta, and the narrowest owning surface.
-6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, or recall.
-7. For correction-based or repeated-failure candidates, apply the executable projection gate before calling the pass complete.
-8. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, only restate existing artifact wording, or place a behavior change only in provenance.
-9. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
-10. Choose the smallest correct destination using the priority list below.
-11. Merge overlapping guidance into one canonical owner.
-12. Rewrite the destination as compact target-state guidance only after the trigger and behavior delta are preserved.
-13. Update memory-index when evidence is repeated, correction-based, disputed, or used to justify resident prompt-baseline guidance.
-14. Prune stale short-term continuity records and move active state to the narrowest current owner.
-15. Validate skill frontmatter after editing skills.
-16. Report changed self-improve artifacts or one concise unchanged reason.
+5. Extract candidate lessons or cleanups with evidence, trigger, target behavior, and the narrowest owning surface.
+6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, recall, or remove guidance that would otherwise cause future mistakes.
+7. For correction-based or repeated-failure evidence, inspect existing guidance first. If existing guidance caused or preserved the behavior, remove or rewrite it before considering any new guidance.
+8. Reject patch-layer fixes: do not add exceptions, bans, authorization clauses, or special cases when deleting or rewriting the wrong abstraction solves the problem.
+9. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, only restate existing artifact wording, or place a behavior change only in provenance.
+10. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
+11. Choose the smallest correct destination using the priority list below.
+12. Merge overlapping guidance into one canonical owner.
+13. Rewrite the destination as compact target-state guidance only after the trigger and target behavior are preserved.
+14. Update memory-index when evidence is repeated, correction-based, disputed, or used to justify resident prompt-baseline guidance.
+15. Prune stale short-term continuity records and move active state to the narrowest current owner.
+16. Validate skill frontmatter after editing skills.
+17. Report changed self-improve artifacts or one concise unchanged reason.
 
 ## Destination contract
 
@@ -123,7 +131,7 @@ Choose the first destination that satisfies the lesson's future-use contract and
 3. **Umbrella skill:** a broader existing skill cleanly owns the work class.
 4. **Skill `references/`:** reusable evidence, examples, command traces, or longer notes help future skill use while keeping `SKILL.md` concise.
 5. **New reusable skill:** existing skills lack a clean home, and the lesson is a recurring class-level workflow, domain, or playbook.
-6. **Memory-index pointer:** future lookup needs a compact dated handle to original evidence, chronology, or transaction context. For reusable behavior changes, pair it with the executable surface that owns the behavior.
+6. **Memory-index pointer:** future lookup needs a compact dated handle to original evidence, chronology, or transaction context. For reusable behavior changes, pair it with the executable surface that owns the behavior; for invalidated guidance, keep provenance only when later retrieval of the dispute or deletion reason matters.
 7. **Short-term continuity:** active temporary state still guides current work.
 8. **Leave unchanged:** existing guidance already covers the lesson or the candidate adds clutter.
 
@@ -162,7 +170,7 @@ Create a new ordinary skill when the trigger is reusable, the scope is class-lev
 
 Memory-index transactions are retrieval pointers and compact evidence buckets. They support future lookup of original memory evidence while transcript archives remain the evidence source.
 
-Use one evolving memory-index transaction for repeated same-topic evidence. Update the monthly index line with date ranges and keywords. Update memory-index when evidence is repeated, correction-based, disputed, or used to justify resident prompt-baseline guidance.
+Use one evolving memory-index transaction for repeated same-topic evidence. Update the monthly index line with date ranges and keywords. Update memory-index when evidence is repeated, correction-based, disputed, used to justify resident prompt-baseline guidance, or needed to explain why guidance was removed.
 
 ### Short-term continuity
 
@@ -181,10 +189,11 @@ Use `disable-model-invocation: true` for skills that should remain explicit/manu
 Before reporting success, check the revised library against these prompt-engineering criteria:
 
 - **Evidence gate:** every changed guidance line traces to trusted evidence, an authoritative doc, or verified behavior.
-- **Behavior delta:** every changed guidance line changes a named future behavior, routing decision, execution step, or recall path.
+- **Target behavior:** every changed or removed guidance line changes a named future behavior, routing decision, execution step, or recall path.
 - **Trigger preservation:** compression keeps the wording or conditions needed to recognize the same failure again.
-- **Destination fit:** each lesson lives in the narrowest surface that future matching work will use.
-- **Executable projection:** repeated corrections and repeated assistant failures are reflected in a prompt, skill, workflow, or product surface that future work will use, with memory-index kept as provenance.
+- **Destination fit:** each lesson or cleanup lives in the narrowest surface that future matching work will use.
+- **Target-state cleanup:** repeated corrections and repeated assistant failures reduce wrong, stale, conflicting, or overgeneral guidance first. New guidance is allowed only when cleanup alone cannot encode the proven future behavior.
+- **No patch layering:** the revision must not preserve a bad rule by wrapping it in exceptions, prohibitions, authorization clauses, guard flags, or special cases.
 - **Instruction/data boundary:** original wording, chronology, and provenance stay retrievable through memory surfaces while self-improve stores distilled guidance.
 - **Output contract:** the final report names changed artifacts and the behavior contract each artifact now owns.
 - **Entropy:** duplicate, stale, conflicting, or misplaced guidance shrinks rather than spreads.

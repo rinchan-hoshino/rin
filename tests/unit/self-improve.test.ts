@@ -666,7 +666,7 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   );
   assert.equal(
     prompt,
-    "Use /tmp/rin-agent/docs/rin/docs/self-improve-distillation.md as the self-improve distillation contract. Review /tmp/rin-agent/self_improve with the conversation above as evidence for this scoped pass. Distill only proven behavior changes that pass the manual's evidence, trigger, behavior delta, and owning surface gate; then merge, move, prune, rewrite, delete, or add self-improve guidance when it improves future behavior, routing, decisions, execution, or recall. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.",
+    "Use /tmp/rin-agent/docs/rin/docs/self-improve-distillation.md as the self-improve distillation contract. Review /tmp/rin-agent/self_improve with the conversation above as evidence for this scoped pass. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. Merge, move, prune, rewrite, delete, or add self-improve guidance only when it improves future behavior, routing, decisions, execution, recall, or removes guidance that would cause future mistakes. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.",
   );
   assert.doesNotMatch(prompt, /Trigger:/);
   assert.doesNotMatch(prompt, /self_improve:periodic_review/);
@@ -676,11 +676,13 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   assert.match(prompt, /prompt baselines, reusable skills/);
   assert.match(prompt, /as the self-improve distillation contract/);
   assert.match(prompt, /evidence for this scoped pass/);
-  assert.match(prompt, /Distill only proven behavior changes/);
+  assert.match(prompt, /Maintain the clean target state/);
   assert.match(
     prompt,
-    /evidence, trigger, behavior delta, and owning surface gate/,
+    /evidence, trigger, target behavior, and owning surface checks/,
   );
+  assert.match(prompt, /delete or rewrite wrong guidance/);
+  assert.match(prompt, /reject patch-layer fixes/);
   assert.match(prompt, /Report changed artifacts/);
   assert.doesNotMatch(prompt, /self_improve_manage/);
   assert.doesNotMatch(prompt, /skill-read contract/);
@@ -695,8 +697,8 @@ test("self-improve distillation manual codifies review rules", async () => {
     manual,
     /Memory preserves original evidence and supports retrieval/,
   );
-  assert.match(manual, /Self-improve stores distilled guidance/);
-  assert.match(manual, /writes behavior contracts for future runs/);
+  assert.match(manual, /Self-improve stores distilled target-state guidance/);
+  assert.match(manual, /maintains the target state of future guidance/);
   assert.match(manual, /## Prompt brief/);
   assert.doesNotMatch(manual, /Cosmetic wording cleanup/);
   assert.match(manual, /## Core rule/);
@@ -707,7 +709,7 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /skill-usage\.json/);
   assert.match(manual, /\*\*Evidence:\*\*/);
   assert.match(manual, /\*\*Trigger:\*\*/);
-  assert.match(manual, /\*\*Behavior delta:\*\*/);
+  assert.match(manual, /\*\*Target behavior:\*\*/);
   assert.match(manual, /\*\*Owning surface:\*\*/);
   assert.doesNotMatch(
     manual,
@@ -716,8 +718,12 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.doesNotMatch(manual, /lower guidance entropy/);
   assert.match(
     manual,
-    /change future behavior, routing, decisions, execution, or recall/,
+    /change future behavior, routing, decisions, execution, recall, or remove guidance/,
   );
+  assert.match(manual, /## Guidance maintenance rule/);
+  assert.match(manual, /Corrections are not automatically new guidance/);
+  assert.match(manual, /Reject patch-layer fixes/);
+  assert.match(manual, /No patch layering/);
   assert.match(manual, /Current skill/);
   assert.match(manual, /Umbrella skill/);
   assert.match(manual, /Skill `references\/`/);

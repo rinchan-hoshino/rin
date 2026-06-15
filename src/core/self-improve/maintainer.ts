@@ -99,7 +99,7 @@ export function buildSelfImproveReviewPrompt(
   void trigger;
   const manualPath = selfImproveMaintenanceManualPath(agentDir);
   const libraryPath = path.join(agentDir, "self_improve");
-  return `Use ${manualPath} as the self-improve distillation contract. Review ${libraryPath} with the conversation above as evidence for this scoped pass. Distill only proven behavior changes that pass the manual's evidence, trigger, behavior delta, and owning surface gate; then merge, move, prune, rewrite, delete, or add self-improve guidance when it improves future behavior, routing, decisions, execution, or recall. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`;
+  return `Use ${manualPath} as the self-improve distillation contract. Review ${libraryPath} with the conversation above as evidence for this scoped pass. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. Merge, move, prune, rewrite, delete, or add self-improve guidance only when it improves future behavior, routing, decisions, execution, recall, or removes guidance that would cause future mistakes. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`;
 }
 
 async function createForkedSessionManager(options: {
