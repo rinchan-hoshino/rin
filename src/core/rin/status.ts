@@ -202,10 +202,12 @@ export function renderStatusReport(snapshot: unknown) {
   return lines.join("\n");
 }
 
+const STATUS_REQUEST_TIMEOUT_MS = 8_000;
+
 async function queryActivity(socketPath?: string) {
   return await requestDaemonCommand(
     { id: "status_1", type: "daemon_activity" },
-    { socketPath, timeoutMs: 1500 },
+    { socketPath, timeoutMs: STATUS_REQUEST_TIMEOUT_MS },
   );
 }
 
@@ -241,6 +243,14 @@ async function runStatusLoop(options: StatusCliOptions, socketPath?: string) {
   }
 }
 
+async function printStatusOnce(options: StatusCliOptions, socketPath?: string) {
+  try {
+    console.log(await renderOnce(options, socketPath));
+  } catch (error: any) {
+    console.log(formatStatusRequestFailure(options, error?.message || error));
+  }
+}
+
 export async function runStatusInternal(rawArgv: string[]) {
   const options = parseStatusArgs(rawArgv);
   if (options.help) {
@@ -252,7 +262,7 @@ export async function runStatusInternal(rawArgv: string[]) {
     return;
   }
   if (options.watch) return await runStatusLoop(options);
-  console.log(await renderOnce(options));
+  await printStatusOnce(options);
 }
 
 export async function runStatus(parsed: ParsedArgs, rawArgv: string[]) {
@@ -286,5 +296,5 @@ export async function runStatus(parsed: ParsedArgs, rawArgv: string[]) {
     return;
   }
   if (options.watch) return await runStatusLoop(options, context.socketPath);
-  console.log(await renderOnce(options, context.socketPath));
+  await printStatusOnce(options, context.socketPath);
 }
