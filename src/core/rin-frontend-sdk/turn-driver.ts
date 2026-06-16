@@ -857,6 +857,13 @@ export class RinFrontendTurnDriver {
     };
   }
 
+  private finishResolvedSubmittedTurn() {
+    this.frontendState.turnActive = false;
+    this.frontendState.isStreaming = false;
+    this.frontendState.sessionRecovering = false;
+    this.setFrontendPhase("idle");
+  }
+
   private async replayPendingTerminalTurnEvent(sessionFile?: string) {
     if (!this.client || !this.liveTurn) return false;
     const wanted = safeString(sessionFile || this.currentSessionFile()).trim();
@@ -890,6 +897,7 @@ export class RinFrontendTurnDriver {
     if (!resolved) return null;
     const errorMessage = safeString(resolved.error).trim();
     if (errorMessage) {
+      this.finishResolvedSubmittedTurn();
       const error = new Error(errorMessage) as Error & {
         sessionId?: string;
         sessionFile?: string;
@@ -902,7 +910,7 @@ export class RinFrontendTurnDriver {
     const finalText = safeString(resolved.finalText).trim();
     if (!finalText) return null;
     this.latestAssistantText = finalText;
-    this.setFrontendPhase("idle");
+    this.finishResolvedSubmittedTurn();
     return {
       finalText,
       result: resolved.result,

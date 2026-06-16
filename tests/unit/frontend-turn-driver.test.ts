@@ -791,6 +791,57 @@ test("frontend SDK turn driver resolves an already submitted restored turn witho
   );
 });
 
+test("frontend SDK turn driver clears active state when recovered submitted turn has final text", async () => {
+  const client = createFrontendClient();
+  let resolveCount = 0;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command.type === "get_state") {
+      const active = resolveCount > 1;
+      return {
+        sessionFile: "/tmp/frontend-chat.jsonl",
+        sessionId: "frontend-session",
+        isStreaming: active,
+        turnActive: active,
+      };
+    }
+    if (command.type === "resolve_submitted_turn") {
+      resolveCount += 1;
+      if (resolveCount < 3) return { submitted: true };
+      return {
+        finalText: "already finished while worker still active",
+        sessionId: "frontend-session",
+        sessionFile: "/tmp/frontend-chat.jsonl",
+      };
+    }
+    return {};
+  };
+  client.prompt = async () => {
+    throw new Error("prompt_should_not_be_resubmitted");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "restored job",
+    restoreSessionFile: "/tmp/frontend-chat.jsonl",
+    promptContext: {
+      source: "chat-bridge",
+      chatKey: "telegram/1:2",
+      sentAt: 1778774580000,
+    },
+  });
+
+  assert.equal(result.finalText, "already finished while worker still active");
+  assert.equal(driver.hasWorkerActiveTurn(), false);
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
+});
+
 test("submitted turn resolution preserves provider failure instead of final-missing", () => {
   const resolved = resolveSubmittedTurnFromMessages(
     [
