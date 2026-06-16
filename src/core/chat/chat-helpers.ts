@@ -45,6 +45,12 @@ export type ChatState = {
   chatKey: string;
   sessionFile?: string;
   chatType?: "private" | "group";
+  pendingSteeredDeliveryTargets?: Array<{
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+    text?: string;
+    submittedText?: string;
+  }>;
 };
 
 export const CHAT_WORKING_NOTICE_TEXT = "Working...";
@@ -288,6 +294,22 @@ export function isInboundChatMessageProcessed(
     safeString(
       findChatMessageByChatAndId(agentDir, nextChatKey, nextMessageId)
         ?.processedAt || "",
+    ).trim(),
+  );
+}
+
+export function isInboundChatMessageAccepted(
+  agentDir: string,
+  chatKey: string,
+  messageId: string,
+) {
+  const nextChatKey = safeString(chatKey).trim();
+  const nextMessageId = safeString(messageId).trim();
+  if (!nextChatKey || !nextMessageId) return false;
+  return Boolean(
+    safeString(
+      findChatMessageByChatAndId(agentDir, nextChatKey, nextMessageId)
+        ?.acceptedAt || "",
     ).trim(),
   );
 }

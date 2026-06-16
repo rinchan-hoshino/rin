@@ -41,6 +41,8 @@ function invalidModel(detail: string) {
 }
 
 const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
+  chat_accepted_inbound_turn_not_active: () =>
+    "Chat recovery could not find the active turn for the accepted message.",
   chat_bridge_at_id_required: () =>
     "Chat bridge send failed because a mention is missing its target id. Fix the mention part.",
   chat_bridge_chat_required: () =>
@@ -76,8 +78,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat message store write failed because the message id is missing. Check the adapter event.",
   chat_outbox_delivery_missing: () =>
     "Chat send failed before the outbox item reached the adapter. Check the outgoing payload.",
+  chat_outbox_delivery_pending: () =>
+    "Chat reply is still waiting in the outbox.",
   chat_outbox_empty_message: () =>
     "Chat send failed because the outgoing message is empty. Add text or an attachment.",
+  chat_outbox_idempotency_collision: () =>
+    "Chat outbox found a duplicate delivery key. Check the outgoing payload.",
   chat_outbox_invalid_json: () =>
     "Chat outbox contains invalid JSON. Recreate the outbox item.",
   chat_outbox_invalid_payload: () =>

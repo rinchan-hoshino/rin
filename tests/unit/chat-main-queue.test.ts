@@ -1214,6 +1214,7 @@ test("chat main lets same-chat follow-up enter the chatKey worker as steer", asy
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
     const script = `
+      import fs from "node:fs";
       import path from "node:path";
       import { pathToFileURL } from "node:url";
 
@@ -1315,8 +1316,127 @@ test("chat main lets same-chat follow-up enter the chatKey worker as steer", asy
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
 
-      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "steer") {
-        throw new Error(JSON.stringify({ promptModes }));
+      const processingDir = path.join(agentDir, "data", "chat", "inbox", "processing");
+      const processingItems = fs.existsSync(processingDir)
+        ? fs.readdirSync(processingDir)
+            .filter((name) => name.endsWith(".json"))
+            .map((name) => JSON.parse(fs.readFileSync(path.join(processingDir, name), "utf8")))
+        : [];
+      const hasSteeredProcessingItem = processingItems.some((item) => item.messageId === "m-two");
+      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "steer" || !hasSteeredProcessingItem) {
+        throw new Error(JSON.stringify({ promptModes, processingItems }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat main resumes a persisted steered target without submitting it twice", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import fs from "node:fs";
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const helpersMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      const chatKey = "telegram/1:2";
+      const statePath = supportMod.chatStatePath(path.join(agentDir, "data"), chatKey);
+      fs.mkdirSync(path.dirname(statePath), { recursive: true });
+      fs.writeFileSync(statePath, JSON.stringify({
+        chatKey,
+        sessionFile: "restored-chat.jsonl",
+        pendingSteeredDeliveryTargets: [{
+          incomingMessageId: "m-restored",
+          replyToMessageId: "m-restored",
+          text: "restored steer",
+        }],
+      }, null, 2) + "\\n");
+
+      let connectCalls = 0;
+      let runTurnCalls = 0;
+      controllerMod.ChatController.prototype.connect = async function () {
+        connectCalls += 1;
+        helpersMod.markProcessedChatMessage(agentDir, this.chatKey, "m-restored", {
+          sessionFile: "restored-chat.jsonl",
+          acceptedAt: new Date().toISOString(),
+          processedAt: new Date().toISOString(),
+        });
+      };
+      controllerMod.ChatController.prototype.runTurn = async function () {
+        runTurnCalls += 1;
+        throw new Error("runTurn should not be called for persisted steer recovery");
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-1"];
+        },
+        internal: {
+          async sendChatAction() {},
+        },
+      });
+
+      app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId: "m-restored",
+        isDirect: true,
+        content: "restored steer",
+        stripped: { content: "restored steer" },
+        elements: [h.createChatRuntimeH().text("restored steer")],
+      });
+
+      const deadline = Date.now() + 5000;
+      let stored = null;
+      while (Date.now() < deadline) {
+        stored = storeMod.getChatMessage(agentDir, chatKey, "m-restored");
+        if (stored?.processedAt) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (!stored?.processedAt || connectCalls < 1 || runTurnCalls !== 0) {
+        throw new Error(JSON.stringify({ connectCalls, runTurnCalls, stored }));
       }
       process.exit(0);
     `;

@@ -24,6 +24,31 @@ const { lookupReplySession } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js"))
     .href
 );
+const { listChatOutboxItems, writeChatOutboxItem } = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
+    .href
+);
+
+function attachTestChatApp(controller) {
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["m1"];
+        },
+        async createReaction() {},
+        async deleteReaction() {},
+        internal: {
+          async sendChatAction() {},
+        },
+      },
+    ],
+  };
+  controller.connect = async () => {};
+  return controller;
+}
 
 async function createController(chatKey = "telegram/1:2", deps = {}) {
   const tempDir = await fs.mkdtemp(
@@ -44,24 +69,21 @@ async function createController(chatKey = "telegram/1:2", deps = {}) {
     ...deps,
   });
   installChatControllerSessionClient(controller.constructor);
-  controller.app = {
-    bots: [
-      {
-        platform: "telegram",
-        selfId: "1",
-        async sendMessage() {
-          return ["m1"];
-        },
-        async createReaction() {},
-        async deleteReaction() {},
-        internal: {
-          async sendChatAction() {},
-        },
-      },
-    ],
-  };
-  controller.connect = async () => {};
-  return controller;
+  return attachTestChatApp(controller);
+}
+
+function createRecoveredController(previousController) {
+  const controller = new ChatController(
+    {},
+    previousController.dataDir,
+    previousController.chatKey,
+    {
+      logger: { info() {}, warn() {} },
+      h: previousController.h,
+    },
+  );
+  installChatControllerSessionClient(controller.constructor);
+  return attachTestChatApp(controller);
 }
 
 test("detached non-chat controllers do not synthesize a chat frontend identity", async () => {
@@ -1720,6 +1742,26 @@ test("chat controller keeps working reaction on current message while steer is q
   assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
   assert.equal(controller.currentTurn?.replyToMessageId, "m-first");
   assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
+  const steeredState = JSON.parse(
+    await fs.readFile(controller.statePath, "utf8"),
+  );
+  assert.equal(
+    steeredState.pendingSteeredDeliveryTargets?.[0]?.incomingMessageId,
+    "m-steer",
+  );
+  const restoredController = new ChatController(
+    {},
+    controller.dataDir,
+    controller.chatKey,
+    {
+      logger: { info() {}, warn() {} },
+      h: controller.h,
+    },
+  );
+  assert.equal(
+    restoredController.hasPendingSteeredDeliveryTarget("m-steer"),
+    true,
+  );
   assert.deepEqual(actions, []);
   assert.deepEqual(reactions, []);
 
@@ -1738,6 +1780,10 @@ test("chat controller keeps working reaction on current message while steer is q
     },
   });
   await new Promise((resolve) => setImmediate(resolve));
+  const activatedState = JSON.parse(
+    await fs.readFile(controller.statePath, "utf8"),
+  );
+  assert.equal(activatedState.pendingSteeredDeliveryTargets, undefined);
   assert.equal(controller.currentTurn?.incomingMessageId, "m-steer");
   assert.equal(controller.currentTurn?.replyToMessageId, "m-steer");
   assert.deepEqual(actions, [
@@ -3972,4 +4018,225 @@ test("chat controller does not persist transient processing state to chat state.
   });
   assert.equal(controller.currentTurn?.incomingMessageId, "m1");
   assert.equal(controller.stagedDelivery?.text, "hello");
+});
+
+test("chat controller does not resend an already delivered final after restart recovery", async () => {
+  const controller = await createController("telegram/1:2");
+  let sendCount = 0;
+  controller.app.bots[0].sendMessage = async () => {
+    sendCount += 1;
+    return [`sent-${sendCount}`];
+  };
+
+  saveChatMessage(controller.agentDir, {
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    messageId: "incoming-1",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "prompt",
+  });
+
+  const input = {
+    text: "final answer",
+    incomingMessageId: "incoming-1",
+    replyToMessageId: "incoming-1",
+    sessionFile: "managed/chat/session.jsonl",
+    clearProcessing: true,
+  };
+
+  await controller.deliverAssistantReply(input);
+  const recoveredController = createRecoveredController(controller);
+  recoveredController.app.bots[0].sendMessage = async () => {
+    sendCount += 1;
+    return [`sent-${sendCount}`];
+  };
+  await recoveredController.deliverAssistantReply(input);
+
+  const items = listChatOutboxItems(controller.agentDir).map(
+    ({ item }) => item,
+  );
+  const message = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "incoming-1",
+  );
+  assert.equal(sendCount, 1);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, "delivered");
+  assert.equal(items[0].deliveryResult[0], "sent-1");
+  assert.equal(Boolean(message.processedAt), true);
+});
+
+test("chat controller reuses a queued final outbox item on restart recovery", async () => {
+  const controller = await createController("telegram/1:2");
+  let sendCount = 0;
+  controller.app.bots[0].sendMessage = async () => {
+    sendCount += 1;
+    if (sendCount === 1) throw new Error("temporary_network_down");
+    return [`sent-${sendCount}`];
+  };
+  saveChatMessage(controller.agentDir, {
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    messageId: "incoming-retry",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "prompt",
+  });
+
+  const input = {
+    text: "final answer after retry",
+    incomingMessageId: "incoming-retry",
+    replyToMessageId: "incoming-retry",
+    sessionFile: "managed/chat/session.jsonl",
+    clearProcessing: true,
+  };
+
+  await assert.rejects(
+    () => controller.deliverAssistantReply(input),
+    /temporary_network_down/,
+  );
+  let items = listChatOutboxItems(controller.agentDir).map(({ item }) => item);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, "queued");
+  writeChatOutboxItem(controller.agentDir, {
+    ...items[0],
+    nextAttemptAt: new Date(Date.now() - 1000).toISOString(),
+  });
+
+  const recoveredController = createRecoveredController(controller);
+  recoveredController.app.bots[0].sendMessage = async () => {
+    sendCount += 1;
+    return [`sent-${sendCount}`];
+  };
+  await recoveredController.deliverAssistantReply(input);
+
+  items = listChatOutboxItems(controller.agentDir).map(({ item }) => item);
+  assert.equal(sendCount, 2);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, "delivered");
+  assert.equal(items[0].deliveryResult[0], "sent-2");
+});
+
+test("chat controller leaves an in-flight final outbox item pending on restart recovery", async () => {
+  const controller = await createController("telegram/1:2");
+  let sendCount = 0;
+  controller.app.bots[0].sendMessage = async () => {
+    sendCount += 1;
+    throw new Error("temporary_network_down");
+  };
+  saveChatMessage(controller.agentDir, {
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    messageId: "incoming-sending",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "prompt",
+  });
+
+  const input = {
+    text: "in-flight final answer",
+    incomingMessageId: "incoming-sending",
+    replyToMessageId: "incoming-sending",
+    sessionFile: "managed/chat/session.jsonl",
+    clearProcessing: true,
+  };
+
+  await assert.rejects(
+    () => controller.deliverAssistantReply(input),
+    /temporary_network_down/,
+  );
+  const [item] = listChatOutboxItems(controller.agentDir).map(
+    ({ item }) => item,
+  );
+  writeChatOutboxItem(controller.agentDir, {
+    ...item,
+    status: "sending",
+    nextAttemptAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  const recoveredController = createRecoveredController(controller);
+  recoveredController.app.bots[0].sendMessage = async () => {
+    sendCount += 1;
+    return [`sent-${sendCount}`];
+  };
+
+  await assert.rejects(
+    () => recoveredController.deliverAssistantReply(input),
+    /chat_outbox_delivery_pending/,
+  );
+
+  const items = listChatOutboxItems(controller.agentDir).map(
+    ({ item }) => item,
+  );
+  const message = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "incoming-sending",
+  );
+  assert.equal(sendCount, 1);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, "sending");
+  assert.equal(message.processedAt, undefined);
+});
+
+test("chat controller surfaces a failed final outbox item on restart recovery", async () => {
+  const controller = await createController("telegram/1:2");
+  let sendCount = 0;
+  controller.app.bots[0].sendMessage = async () => {
+    sendCount += 1;
+    throw new Error("forbidden: bot was kicked");
+  };
+  saveChatMessage(controller.agentDir, {
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    messageId: "incoming-failed",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "prompt",
+  });
+
+  const input = {
+    text: "failed final answer",
+    incomingMessageId: "incoming-failed",
+    replyToMessageId: "incoming-failed",
+    sessionFile: "managed/chat/session.jsonl",
+    clearProcessing: true,
+  };
+
+  await assert.rejects(
+    () => controller.deliverAssistantReply(input),
+    /forbidden: bot was kicked/,
+  );
+  const recoveredController = createRecoveredController(controller);
+  recoveredController.app.bots[0].sendMessage = async () => {
+    sendCount += 1;
+    return [`sent-${sendCount}`];
+  };
+
+  await assert.rejects(
+    () => recoveredController.deliverAssistantReply(input),
+    /forbidden: bot was kicked/,
+  );
+
+  const items = listChatOutboxItems(controller.agentDir).map(
+    ({ item }) => item,
+  );
+  const message = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "incoming-failed",
+  );
+  assert.equal(sendCount, 1);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, "failed");
+  assert.equal(message.processedAt, undefined);
 });

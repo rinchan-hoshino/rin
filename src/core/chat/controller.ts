@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import path from "node:path";
 
 import prettyMilliseconds from "pretty-ms";
@@ -46,7 +47,11 @@ import {
   markProcessedChatMessage,
   safeString,
 } from "./chat-helpers.js";
-import { enqueueChatOutboxPayload } from "../rin-lib/chat-outbox.js";
+import {
+  chatOutboxItemPath,
+  enqueueChatOutboxPayload,
+  readChatOutboxItem,
+} from "../rin-lib/chat-outbox.js";
 import { drainChatOutbox } from "./boot.js";
 import { listChatMessages } from "./message-store.js";
 import { restorePromptParts } from "./transport.js";
@@ -58,6 +63,10 @@ import { resolveChatQuietModeEnabled } from "./settings.js";
 
 const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
 const WORKING_REACTION_INTERVAL_MS = 30_000;
+
+function sha256Hex(value: string) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
 
 type ChatTurnTarget = {
   incomingMessageId?: string;
@@ -153,6 +162,32 @@ function sameSessionFile(agentDir: string, left: unknown, right: unknown) {
   );
 }
 
+function normalizeChatTurnTarget(input: unknown): ChatTurnTarget | null {
+  if (!input || typeof input !== "object") return null;
+  const record = input as Record<string, unknown>;
+  const incomingMessageId = safeString(record.incomingMessageId).trim();
+  const replyToMessageId =
+    safeString(record.replyToMessageId).trim() || incomingMessageId;
+  const text = safeString(record.text).trim();
+  const submittedText = safeString(record.submittedText).trim();
+  if (!incomingMessageId && !replyToMessageId && !text && !submittedText) {
+    return null;
+  }
+  return {
+    incomingMessageId: incomingMessageId || undefined,
+    replyToMessageId: replyToMessageId || undefined,
+    text: text || undefined,
+    submittedText: submittedText || undefined,
+  };
+}
+
+function normalizeChatTurnTargets(input: unknown): ChatTurnTarget[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => normalizeChatTurnTarget(item))
+    .filter((item): item is ChatTurnTarget => Boolean(item));
+}
+
 export class ChatController {
   app: any;
   chatKey: string;
@@ -213,6 +248,9 @@ export class ChatController {
     this.affectChatBinding = deps.affectChatBinding !== false;
     this.statePath = deps.statePath || chatStatePath(dataDir, chatKey);
     this.state = readJsonFile<ChatState>(this.statePath, { chatKey });
+    this.pendingSteeredDeliveryTargets = normalizeChatTurnTargets(
+      this.state.pendingSteeredDeliveryTargets,
+    );
     this.logger = deps.logger;
     this.h = deps.h;
     this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
@@ -294,6 +332,12 @@ export class ChatController {
     if (storedSessionFile) nextState.sessionFile = storedSessionFile;
     if (this.state.chatType === "private" || this.state.chatType === "group") {
       nextState.chatType = this.state.chatType;
+    }
+    const pendingSteeredDeliveryTargets = normalizeChatTurnTargets(
+      this.pendingSteeredDeliveryTargets,
+    );
+    if (pendingSteeredDeliveryTargets.length) {
+      nextState.pendingSteeredDeliveryTargets = pendingSteeredDeliveryTargets;
     }
     this.state = nextState;
     writeJsonFile(this.statePath, nextState);
@@ -424,6 +468,16 @@ export class ChatController {
       text: safeString(input.text || "").trim() || undefined,
       submittedText: safeString(input.submittedText || "").trim() || undefined,
     });
+    this.saveState();
+  }
+
+  hasPendingSteeredDeliveryTarget(messageId?: string) {
+    const nextMessageId = safeString(messageId || "").trim();
+    if (!nextMessageId) return false;
+    return this.pendingSteeredDeliveryTargets.some(
+      (target) =>
+        safeString(target.incomingMessageId || "").trim() === nextMessageId,
+    );
   }
 
   private async activatePendingSteeredDeliveryTarget(startedText?: string) {
@@ -438,6 +492,7 @@ export class ChatController {
     });
     if (index < 0) return false;
     const [target] = this.pendingSteeredDeliveryTargets.splice(index, 1);
+    this.saveState();
     await this.beginVisibleProcessingTurn({
       incomingMessageId: target?.incomingMessageId,
       replyToMessageId: target?.replyToMessageId,
@@ -975,6 +1030,8 @@ export class ChatController {
   private async enqueueAndDrainDelivery(
     payload: any,
     options: {
+      id?: string;
+      idempotencyKey?: string;
       deliveryKind?:
         | "final"
         | "interim"
@@ -985,7 +1042,12 @@ export class ChatController {
       postDelivery?: any;
     } = {},
   ) {
-    const id = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
+    const idempotencyKey = safeString(options.idempotencyKey).trim();
+    const id =
+      safeString(options.id).trim() ||
+      (idempotencyKey
+        ? `dedupe-${sha256Hex(idempotencyKey)}`
+        : `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`);
     const deliveryKind = safeString(options.deliveryKind).trim();
     const normalizedPayload =
       payload?.type === "text_delivery" &&
@@ -996,8 +1058,8 @@ export class ChatController {
         ? { ...payload, deliveryKind }
         : payload;
     enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
-      id,
       ...options,
+      id,
     });
     const results = await drainChatOutbox(
       this.app,
@@ -1020,12 +1082,26 @@ export class ChatController {
       }
       throw new Error(errorMessage);
     }
+    if (!own && idempotencyKey) {
+      const current = readChatOutboxItem(
+        this.agentDir,
+        chatOutboxItemPath(this.agentDir, id),
+      );
+      if (current?.status === "delivered") return current.deliveryResult || [];
+      if (current?.status === "failed") {
+        throw new Error(current.lastError || "chat_outbox_delivery_failed");
+      }
+      if (current?.status === "queued" || current?.status === "sending") {
+        throw new Error("chat_outbox_delivery_pending");
+      }
+    }
     return (own as any)?.deliveryResult || [];
   }
 
   private async commitPendingDelivery(
     clearProcessing = false,
     postDelivery?: any,
+    deliveryOptions: { id?: string; idempotencyKey?: string } = {},
   ) {
     const pending = this.stagedDelivery;
     if (!pending) return;
@@ -1042,7 +1118,7 @@ export class ChatController {
         ...pending,
         createdAt: nowIso(),
       },
-      { deliveryKind: "final", postDelivery },
+      { deliveryKind: "final", postDelivery, ...deliveryOptions },
     );
     this.stagedDelivery = null;
     if (clearProcessing) {
@@ -1061,16 +1137,34 @@ export class ChatController {
   }) {
     const bindSession = input.bindSession !== false && this.affectChatBinding;
     const text = this.stageAssistantDelivery({ ...input, bindSession });
-    await this.commitPendingDelivery(input.clearProcessing, {
-      markProcessed: {
-        chatKey: this.chatKey,
-        messageId: input.incomingMessageId,
-        sessionFile: bindSession
-          ? input.sessionFile || this.currentSessionFile()
-          : undefined,
-        bindSession,
+    const incomingMessageId = safeString(input.incomingMessageId).trim();
+    const replyToMessageId = safeString(
+      input.replyToMessageId || input.incomingMessageId,
+    ).trim();
+    const idempotencyKey = incomingMessageId
+      ? JSON.stringify([
+          "final",
+          this.chatKey,
+          incomingMessageId,
+          replyToMessageId,
+          sha256Hex(text),
+        ])
+      : "";
+    const id = idempotencyKey ? `final-${sha256Hex(idempotencyKey)}` : "";
+    await this.commitPendingDelivery(
+      input.clearProcessing,
+      {
+        markProcessed: {
+          chatKey: this.chatKey,
+          messageId: input.incomingMessageId,
+          sessionFile: bindSession
+            ? input.sessionFile || this.currentSessionFile()
+            : undefined,
+          bindSession,
+        },
       },
-    });
+      { id, idempotencyKey },
+    );
     this.markProcessedMessage(input.incomingMessageId, bindSession);
     return text;
   }

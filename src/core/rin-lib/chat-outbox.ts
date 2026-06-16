@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -117,6 +118,7 @@ export type ChatOutboxItemStatus =
 
 export type ChatOutboxItem = {
   id: string;
+  idempotencyKey?: string;
   status: ChatOutboxItemStatus;
   createdAt: string;
   updatedAt: string;
@@ -135,6 +137,7 @@ export type ChatOutboxItem = {
 
 export type EnqueueChatOutboxOptions = {
   id?: string;
+  idempotencyKey?: string;
   deliveryKind?: ChatOutboxDeliveryKind;
   postDelivery?: ChatOutboxPostDelivery;
 };
@@ -162,6 +165,10 @@ function sanitizeIdPart(value: unknown) {
 function createOutboxId() {
   const seq = (sequenceCounter = (sequenceCounter + 1) % 1_000_000);
   return `${Date.now()}-${process.pid}-${seq}-${Math.random().toString(36).slice(2)}`;
+}
+
+function stableOutboxIdForKey(key: string) {
+  return `dedupe-${crypto.createHash("sha256").update(key).digest("hex")}`;
 }
 
 export function chatOutboxItemPath(agentDir: string, id: string) {
@@ -244,6 +251,7 @@ function normalizeOutboxItem(
     nowIso();
   return {
     id,
+    idempotencyKey: safeString(raw?.idempotencyKey).trim() || undefined,
     status:
       raw?.status === "sending" ||
       raw?.status === "delivered" ||
@@ -325,10 +333,23 @@ export function enqueueChatOutboxPayload(
     createdAt,
   });
   if (!normalizedPayload) throw new Error("chat_outbox_invalid_payload");
+  const idempotencyKey = safeString(options.idempotencyKey).trim();
+  const id =
+    sanitizeIdPart(options.id) ||
+    (idempotencyKey ? stableOutboxIdForKey(idempotencyKey) : createOutboxId());
+  const filePath = chatOutboxItemPath(agentDir, id);
+  const existing = readChatOutboxItem(agentDir, filePath);
+  if (existing) {
+    if (idempotencyKey && existing.idempotencyKey !== idempotencyKey) {
+      throw new Error("chat_outbox_idempotency_collision");
+    }
+    return filePath;
+  }
   const sequence =
     Date.now() * 1000 + (sequenceCounter = (sequenceCounter + 1) % 1_000_000);
   const item: ChatOutboxItem = {
-    id: sanitizeIdPart(options.id) || createOutboxId(),
+    id,
+    idempotencyKey: idempotencyKey || undefined,
     status: "queued",
     createdAt: normalizedPayload.createdAt,
     updatedAt: normalizedPayload.createdAt,
@@ -339,5 +360,5 @@ export function enqueueChatOutboxPayload(
     postDelivery: options.postDelivery,
   };
   writeChatOutboxItem(agentDir, item);
-  return chatOutboxItemPath(agentDir, item.id);
+  return filePath;
 }
