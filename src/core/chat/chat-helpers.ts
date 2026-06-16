@@ -298,22 +298,6 @@ export function isInboundChatMessageProcessed(
   );
 }
 
-export function isInboundChatMessageAccepted(
-  agentDir: string,
-  chatKey: string,
-  messageId: string,
-) {
-  const nextChatKey = safeString(chatKey).trim();
-  const nextMessageId = safeString(messageId).trim();
-  if (!nextChatKey || !nextMessageId) return false;
-  return Boolean(
-    safeString(
-      findChatMessageByChatAndId(agentDir, nextChatKey, nextMessageId)
-        ?.acceptedAt || "",
-    ).trim(),
-  );
-}
-
 function commandNameFromStoredText(text: unknown) {
   const value = safeString(text).trim();
   if (!value.startsWith("/")) return "";

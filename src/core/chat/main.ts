@@ -51,7 +51,6 @@ import {
   prependQuoteTextToPromptBody,
   safeString,
   hasInboundChatMessageReplyBoundary,
-  isInboundChatMessageAccepted,
   isInboundChatMessageProcessed,
   isReplyToLatestAssistantMessage,
 } from "./chat-helpers.js";
@@ -913,15 +912,9 @@ export async function startChatBridge(
     }
 
     const controller = getController(decision.chatKey);
-    const alreadyAccepted =
-      isInboundChatMessageAccepted(
-        runtime.agentDir,
-        decision.chatKey,
-        envelope.messageId,
-      ) && !isInboundMessageProcessed(decision.chatKey, envelope.messageId);
-    const alreadySteered =
-      alreadyAccepted ||
-      controller.hasPendingSteeredDeliveryTarget(envelope.messageId);
+    const alreadySteered = controller.hasPendingSteeredDeliveryTarget(
+      envelope.messageId,
+    );
     let task: Promise<void> | null = null;
     return {
       run: () => {
