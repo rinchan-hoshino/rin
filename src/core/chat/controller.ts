@@ -1433,6 +1433,8 @@ export class ChatController {
         disabledRinCapabilities: input.disabledRinCapabilities,
         piStartupOptions: input.piStartupOptions,
         resetModelOptionsFromSettings: true,
+        model: input.model,
+        thinkingLevel: input.thinkingLevel,
         promptContext: input.promptMeta,
         source: "chat-bridge",
         streamingBehavior: "steer",
@@ -1542,6 +1544,8 @@ export class ChatController {
           disabledRinCapabilities: input.disabledRinCapabilities,
           piStartupOptions: input.piStartupOptions,
           resetModelOptionsFromSettings: true,
+          model: input.model,
+          thinkingLevel: input.thinkingLevel,
           promptContext: input.promptMeta,
           source: "chat-bridge",
         });

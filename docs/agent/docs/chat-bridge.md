@@ -218,6 +218,25 @@ Configure quiet display for specific chats under `settings.json -> chat.byChatKe
 
 Per-chat quiet entries may also be objects such as `{ "enabled": true }`. Quiet mode does not suppress final replies, errors, working indicators, or compaction notices.
 
+## Per-chat model options
+
+Configure a chat-specific model or thinking level under `settings.json -> chat.byChatKey[chatKey]` when a chat should use a different default from the global session settings.
+
+```json
+{
+  "chat": {
+    "byChatKey": {
+      "telegram/123456:7890": {
+        "model": "openai-codex/gpt-5.5",
+        "thinkingLevel": "low"
+      }
+    }
+  }
+}
+```
+
+`model` uses `provider/model` format. `thinkingLevel` uses the normal Rin thinking level strings such as `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Per-chat options are applied to prompt turns after the session reloads global model settings; explicit SDK `rin.chat.runTurn({ model, thinkingLevel })` values override the per-chat defaults for that turn. Chat slash commands still follow the command path.
+
 ## Command acknowledgement text
 
 Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` come from i18n/configuration so commands stay predictable and avoid temporary agent turns. `/compact` uses the compaction notice templates below instead of a separate generic completion line.

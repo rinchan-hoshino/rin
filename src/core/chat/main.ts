@@ -56,7 +56,10 @@ import {
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { readChatCommandResponses } from "./command-responses.js";
-import { resolveChatTurnPolicyMode } from "./settings.js";
+import {
+  resolveChatModelOptions,
+  resolveChatTurnPolicyMode,
+} from "./settings.js";
 import { appendChatLog } from "./chat-log.js";
 import {
   type ChatInboxItem,
@@ -741,6 +744,7 @@ export async function startChatBridge(
         replyToMessageId: messageId,
         incomingMessageId: messageId,
         sessionFile: linkedSessionFile || undefined,
+        ...resolveChatModelOptions(settings, decision.chatKey),
       });
       return { retry: false };
     } catch (error) {
@@ -1024,6 +1028,9 @@ export async function startChatBridge(
           frontendIdentity: normalizeFrontendIdentity(payload?.frontend),
         });
     try {
+      const chatModelOptions = chatKey
+        ? resolveChatModelOptions(settings, chatKey)
+        : {};
       return await controller.runTurn({
         text,
         attachments: [],
@@ -1034,8 +1041,11 @@ export async function startChatBridge(
         excludeTools: payload?.excludeTools,
         noTools: payload?.noTools,
         disabledRinCapabilities: payload?.disabledRinCapabilities,
-        model: payload?.model,
-        thinkingLevel: payload?.thinkingLevel,
+        ...chatModelOptions,
+        model: safeString(payload?.model).trim() || chatModelOptions.model,
+        thinkingLevel:
+          safeString(payload?.thinkingLevel).trim() ||
+          chatModelOptions.thinkingLevel,
         piStartupOptions: payload?.piStartupOptions,
         promptMeta: payload?.promptMeta,
         deliverFinal: payload?.deliverFinal,

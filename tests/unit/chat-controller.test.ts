@@ -516,8 +516,6 @@ test("chat controller resets chat prompt sessions through the session settings r
   const result = await controller.runTurn({
     text: "hello",
     attachments: [],
-    model: "openai-codex/old",
-    thinkingLevel: "low",
   });
 
   assert.deepEqual(calls, [
@@ -528,6 +526,64 @@ test("chat controller resets chat prompt sessions through the session settings r
   ]);
   assert.equal(result.finalText, "settings prompt final");
   assert.deepEqual(deliveries, ["settings prompt final"]);
+});
+
+test("chat controller applies turn model options after settings reload", async () => {
+  const controller = await createController();
+  const calls = [];
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+
+  let currentModel = "openai-codex/default";
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    thinkingLevel: "medium",
+    modelRegistry: {
+      getAvailable: async () => [{ provider: "openai-codex", id: "gpt-5.5" }],
+    },
+    setModel: async (model) => {
+      currentModel = `${model.provider}/${model.id}`;
+      calls.push(`setModel:${currentModel}`);
+    },
+    resetModelOptionsFromSettings: async () => {
+      currentModel = "openai-codex/default";
+      controller.session.thinkingLevel = "high";
+      calls.push("resetModelOptionsFromSettings");
+    },
+    sessionManager: {
+      getSessionFile: () => "",
+      getSessionId: () => "session-model-options",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => {
+      calls.push("ensureSessionReady");
+      return { sessionId: "session-model-options" };
+    },
+    prompt: async (_text, options = {}) => {
+      calls.push(`prompt:${currentModel}:${controller.session.thinkingLevel}`);
+      emitRpcTurnComplete(controller, options, "model options final");
+    },
+  };
+
+  const result = await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    model: "openai-codex/gpt-5.5",
+    thinkingLevel: "low",
+  });
+
+  assert.deepEqual(calls, [
+    "ensureSessionReady",
+    "resetModelOptionsFromSettings",
+    "setModel:openai-codex/gpt-5.5",
+    "prompt:openai-codex/gpt-5.5:low",
+  ]);
+  assert.equal(result.finalText, "model options final");
+  assert.deepEqual(deliveries, ["model options final"]);
 });
 
 test("chat controller does not bind a transient default session before managed prompt creation", async () => {

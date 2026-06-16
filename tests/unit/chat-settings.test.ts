@@ -119,6 +119,36 @@ test("chat quiet mode supports per-chat entries", () => {
   );
 });
 
+test("chat model options resolve from per-chat entries only", () => {
+  const settings = {
+    chat: {
+      byChatKey: {
+        "telegram/123:456": {
+          model: "openai-codex/gpt-5.5",
+          thinkingLevel: "low",
+        },
+        "telegram/123:789": {
+          model: "  ",
+          thinkingLevel: { level: "high" },
+        },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    chatSettings.resolveChatModelOptions(settings, "telegram/123:456"),
+    { model: "openai-codex/gpt-5.5", thinkingLevel: "low" },
+  );
+  assert.deepEqual(
+    chatSettings.resolveChatModelOptions(settings, "telegram/123:789"),
+    { model: undefined, thinkingLevel: undefined },
+  );
+  assert.deepEqual(
+    chatSettings.resolveChatModelOptions(settings, "telegram/123:999"),
+    {},
+  );
+});
+
 test("chat support ignores removed legacy adapter settings keys", () => {
   const config = support.buildChatConfigFromSettings({
     koishi: {

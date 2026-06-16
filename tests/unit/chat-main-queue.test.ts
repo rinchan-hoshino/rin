@@ -205,6 +205,185 @@ test("chat main records record-only chat messages without starting an agent turn
   }
 });
 
+test("chat main applies per-chat model options to inbound prompt turns", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(
+      path.join(agentDir, "settings.json"),
+      JSON.stringify({
+        chat: {
+          byChatKey: {
+            "telegram/1:2": {
+              model: "openai-codex/gpt-5.5",
+              thinkingLevel: "low",
+            },
+          },
+        },
+      }) + "\n",
+      "utf8",
+    );
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const seen = [];
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
+        seen.push({ mode, text: input?.text || null, model: input?.model, thinkingLevel: input?.thinkingLevel });
+        return { finalText: "ok" };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["sent-1"];
+        },
+      });
+
+      app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId: "m-model-options",
+        isDirect: true,
+        content: "use configured model",
+        stripped: { content: "use configured model" },
+        elements: [h.createChatRuntimeH().text("use configured model")],
+      });
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && seen.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      if (
+        seen.length !== 1 ||
+        seen[0].model !== "openai-codex/gpt-5.5" ||
+        seen[0].thinkingLevel !== "low"
+      ) {
+        throw new Error(JSON.stringify({ seen }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat runTurn lets explicit model options override per-chat defaults", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(
+      path.join(agentDir, "settings.json"),
+      JSON.stringify({
+        chat: {
+          byChatKey: {
+            "telegram/1:2": {
+              model: "openai-codex/default",
+              thinkingLevel: "low",
+            },
+          },
+        },
+      }) + "\n",
+      "utf8",
+    );
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const seen = [];
+
+      controllerMod.ChatController.prototype.runTurn = async function (input) {
+        seen.push({ text: input?.text || null, model: input?.model, thinkingLevel: input?.thinkingLevel });
+        return { finalText: "ok" };
+      };
+
+      const bridge = await mainMod.startChatBridge();
+      await bridge.runTurn({
+        chatKey: "telegram/1:2",
+        text: "explicit override",
+        model: "openai-codex/override",
+        thinkingLevel: "high",
+      });
+      await bridge.runTurn({
+        chatKey: "telegram/1:2",
+        text: "blank falls back",
+        model: "  ",
+        thinkingLevel: "",
+      });
+
+      if (
+        seen.length !== 2 ||
+        seen[0].model !== "openai-codex/override" ||
+        seen[0].thinkingLevel !== "high" ||
+        seen[1].model !== "openai-codex/default" ||
+        seen[1].thinkingLevel !== "low"
+      ) {
+        throw new Error(JSON.stringify({ seen }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main reports unmatched private slash commands without starting an agent turn", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

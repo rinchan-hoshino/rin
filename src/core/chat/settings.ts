@@ -52,6 +52,17 @@ export function resolveChatTurnPolicyMode(
     : DEFAULT_CHAT_TURN_POLICY;
 }
 
+export type ChatModelOptions = {
+  model?: string;
+  thinkingLevel?: string;
+};
+
+function normalizeNonBlankString(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  return text || undefined;
+}
+
 export function resolveChatQuietModeEnabled(settings: any, chatKey: string) {
   const perChat = resolvePerChatConfig(settings, chatKey);
   if (perChat?.quietMode !== undefined) {
@@ -61,6 +72,18 @@ export function resolveChatQuietModeEnabled(settings: any, chatKey: string) {
   return isJsonRecord(quietMode)
     ? normalizeChatQuietModeEnabled(quietMode.default)
     : false;
+}
+
+export function resolveChatModelOptions(
+  settings: any,
+  chatKey: string,
+): ChatModelOptions {
+  const perChat = resolvePerChatConfig(settings, chatKey);
+  if (!perChat) return {};
+  return {
+    model: normalizeNonBlankString(perChat.model),
+    thinkingLevel: normalizeNonBlankString(perChat.thinkingLevel),
+  };
 }
 
 export function dropLegacyChatSettings(settings: any) {
