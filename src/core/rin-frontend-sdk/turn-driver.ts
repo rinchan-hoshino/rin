@@ -379,13 +379,11 @@ export class RinFrontendTurnDriver {
     return Boolean(this.frontendState.sessionRecovering);
   }
 
-  private isRemoteWorking() {
+  private isVisibleChatWorkingTurn() {
     return Boolean(
+      this.liveTurn ||
       this.frontendState.isStreaming ||
-      this.frontendState.turnActive ||
-      this.frontendState.isCompacting ||
-      this.frontendState.sessionRecovering ||
-      this.frontendState.piWorkingVisible,
+      this.frontendState.turnActive,
     );
   }
 
@@ -446,8 +444,16 @@ export class RinFrontendTurnDriver {
     return this.isTurnActive();
   }
 
+  hasVisibleChatWorkingTurn() {
+    return this.isVisibleChatWorkingTurn();
+  }
+
+  hasExplicitWorkingVisible() {
+    return Boolean(this.frontendState.piWorkingVisible);
+  }
+
   hasWorkerActiveTurn() {
-    return this.isRemoteWorking();
+    return this.hasVisibleChatWorkingTurn();
   }
 
   hasClient() {

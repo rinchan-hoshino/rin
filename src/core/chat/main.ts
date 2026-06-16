@@ -1096,7 +1096,7 @@ export async function startChatBridge(
           affectChatBinding: false,
         });
     if (payload?.visible === false) {
-      await controller.clearWorkingReaction().catch(() => {});
+      await controller.endExternalWorking().catch(() => {});
       return { handled: true };
     }
     await controller.beginExternalWorking().catch(() => {});

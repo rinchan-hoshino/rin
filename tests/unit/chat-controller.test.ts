@@ -1900,6 +1900,29 @@ test("chat controller can expose external working indicators", async () => {
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
 });
 
+test("chat controller preserves active turn typing when external working ends", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  controller.app.bots[0].getWorkingIndicators = () => [
+    testPollingIndicator(actions),
+  ];
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-active-external",
+    workingNoticeSent: false,
+  };
+  controller.externalWorkingVisible = true;
+  controller.awaitingTurnSettle = true;
+  controller.driver.frontendState.turnActive = true;
+
+  await controller.endExternalWorking();
+
+  assert.equal(controller.currentTurn?.incomingMessageId, "m-active-external");
+  assert.equal(controller.externalWorkingVisible, false);
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+});
+
 test("chat controller polls typing and rotating reactions while a turn is active", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
@@ -2836,6 +2859,40 @@ test("chat controller does not keep typing from stale currentTurn metadata alone
   assert.equal(await controller.pollTyping(), false);
   assert.deepEqual(actions, []);
   assert.deepEqual(reactions, []);
+});
+
+test("chat controller does not keep ordinary typing from standalone remote-working states", async () => {
+  for (const state of [
+    { isCompacting: true },
+    { sessionRecovering: true },
+    { piWorkingVisible: true },
+  ]) {
+    const controller = await createController("telegram/1:2");
+    const actions = [];
+    controller.app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "1",
+          workingIndicators: [testPollingIndicator(actions, [])],
+          internal: {
+            async sendChatAction(payload) {
+              actions.push(payload);
+            },
+          },
+        },
+      ],
+    };
+    controller.currentTurn = {
+      startedAt: Date.now(),
+      incomingMessageId: "m-remote-state",
+      workingNoticeSent: false,
+    };
+    Object.assign(controller.driver.frontendState, state);
+
+    assert.equal(await controller.pollTyping(), false);
+    assert.deepEqual(actions, []);
+  }
 });
 
 test("chat controller clears the working reaction before dropping processing state", async () => {

@@ -183,6 +183,7 @@ export class ChatController {
   stagedDelivery: ChatTextDelivery | null = null;
   pendingPassiveNotices: string[] = [];
   awaitingTurnSettle = false;
+  externalWorkingVisible = false;
   turnAbortRequested = false;
   turnAbortGeneration = 0;
   sleepAfterIdleMs = 0;
@@ -278,6 +279,7 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
+    this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration = 0;
     this.driver.dispose();
@@ -299,6 +301,7 @@ export class ChatController {
 
   async clearProcessingState() {
     this.awaitingTurnSettle = false;
+    this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.stagedDelivery = null;
@@ -740,9 +743,18 @@ export class ChatController {
     return { handled: true, text, local: true };
   }
 
+  private shouldShowTypingIndicator() {
+    if (!this.currentTurn) return false;
+    if (this.externalWorkingVisible && this.awaitingTurnSettle) return true;
+    if (typeof this.driver.hasVisibleChatWorkingTurn === "function") {
+      return this.driver.hasVisibleChatWorkingTurn();
+    }
+    return this.driver.hasWorkerActiveTurn();
+  }
+
   async pollTyping() {
     if (!this.canDeliverReplies()) return false;
-    if (!this.driver.hasWorkerActiveTurn()) {
+    if (!this.shouldShowTypingIndicator()) {
       await this.clearWorkingReaction().catch(() => {});
       return false;
     }
@@ -1375,7 +1387,16 @@ export class ChatController {
   }
 
   async beginExternalWorking() {
+    this.externalWorkingVisible = true;
     await this.beginVisibleProcessingTurn({});
+  }
+
+  async endExternalWorking() {
+    this.externalWorkingVisible = false;
+    if (this.driver.hasVisibleChatWorkingTurn()) return;
+    this.awaitingTurnSettle = false;
+    await this.clearWorkingReaction().catch(() => {});
+    this.clearCurrentTurn();
   }
 
   async runTurn(
@@ -1711,9 +1732,15 @@ export class ChatController {
     switch (event.type) {
       case "frontend_status":
         if (event.phase === "working") {
+          if (this.driver.hasExplicitWorkingVisible()) {
+            this.externalWorkingVisible = true;
+          }
           const createdCommandTurn = this.ensureVisibleCommandTurn();
           this.markAcceptedMessage(this.currentIncomingMessageId());
           if (createdCommandTurn) await this.pollTyping().catch(() => false);
+        }
+        if (event.phase === "idle") {
+          this.externalWorkingVisible = false;
         }
         if (
           event.phase === "idle" &&

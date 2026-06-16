@@ -842,6 +842,28 @@ test("frontend SDK turn driver clears active state when recovered submitted turn
   );
 });
 
+test("frontend SDK visible chat working excludes standalone compaction and recovery state", async () => {
+  const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: false,
+    turnActive: false,
+    isCompacting: true,
+    sessionRecovering: true,
+    piWorkingVisible: true,
+  });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  await driver.connect();
+
+  assert.equal(driver.hasActiveTurn(), false);
+  assert.equal(driver.hasVisibleChatWorkingTurn(), false);
+});
+
 test("submitted turn resolution preserves provider failure instead of final-missing", () => {
   const resolved = resolveSubmittedTurnFromMessages(
     [
