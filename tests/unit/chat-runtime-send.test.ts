@@ -226,6 +226,100 @@ test("telegram adapter sends media before following text", async () => {
   });
 });
 
+test("telegram adapter retries local photos as documents when Telegram rejects dimensions", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{
+      method: string;
+      chatId: FormDataEntryValue | null;
+      replyToMessageId: FormDataEntryValue | null;
+      hasPhoto: boolean;
+      hasDocument: boolean;
+    }> = [];
+    adapter.callMultipart = async (
+      method: string,
+      build: (form: FormData) => void,
+    ) => {
+      const form = new FormData();
+      build(form);
+      calls.push({
+        method,
+        chatId: form.get("chat_id"),
+        replyToMessageId: form.get("reply_to_message_id"),
+        hasPhoto: form.has("photo"),
+        hasDocument: form.has("document"),
+      });
+      if (method === "sendPhoto") {
+        throw new Error("Bad Request: PHOTO_INVALID_DIMENSIONS");
+      }
+      return { message_id: String(calls.length) };
+    };
+
+    const result = await app.bots[0].sendMessage("456", [
+      h.quote("77"),
+      h("image", {
+        data: Buffer.from("original image bytes"),
+        name: "original.png",
+        mimeType: "image/png",
+      }),
+    ]);
+
+    assert.deepEqual(result, ["2"]);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].method, "sendPhoto");
+    assert.equal(calls[0].chatId, "456");
+    assert.equal(calls[0].replyToMessageId, "77");
+    assert.equal(calls[0].hasPhoto, true);
+    assert.equal(calls[0].hasDocument, false);
+    assert.equal(calls[1].method, "sendDocument");
+    assert.equal(calls[1].chatId, "456");
+    assert.equal(calls[1].replyToMessageId, "77");
+    assert.equal(calls[1].hasPhoto, false);
+    assert.equal(calls[1].hasDocument, true);
+  });
+});
+
+test("telegram adapter retries remote photos as documents when Telegram rejects dimensions", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      if (method === "sendPhoto") {
+        throw new Error("Bad Request: PHOTO_INVALID_DIMENSIONS");
+      }
+      return { message_id: String(calls.length) };
+    };
+
+    const result = await app.bots[0].sendMessage("456", [
+      h.quote("77"),
+      h.image("https://example.com/too-tall.png"),
+    ]);
+
+    assert.deepEqual(result, ["2"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["sendPhoto", "sendDocument"],
+    );
+    assert.equal(calls[0].payload.photo, "https://example.com/too-tall.png");
+    assert.equal(calls[0].payload.reply_to_message_id, "77");
+    assert.equal(calls[1].payload.document, "https://example.com/too-tall.png");
+    assert.equal(calls[1].payload.reply_to_message_id, "77");
+  });
+});
+
 test("telegram adapter sends sticker media without dropping following text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {

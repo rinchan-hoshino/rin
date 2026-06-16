@@ -210,6 +210,12 @@ export function renderOneBotForwardContent(value: unknown) {
 const TELEGRAM_MAX_TEXT_LENGTH = 4096;
 const TELEGRAM_MAX_CAPTION_LENGTH = 1024;
 
+function isTelegramPhotoDimensionError(error: unknown) {
+  return /\bPHOTO_INVALID_DIMENSIONS\b/i.test(
+    safeString((error as any)?.message || error),
+  );
+}
+
 function createNodeBuilder() {
   const h: any = (
     type: string,
@@ -811,34 +817,48 @@ class TelegramAdapter {
     if (!payload) {
       throw new Error(`telegram_media_source_missing:${field}`);
     }
-    if (payload.url) {
-      const result = await this.callApi(
-        method,
-        compactObject({
-          chat_id: chatId,
-          [field]: payload.url,
-          caption: caption || undefined,
-          parse_mode: safeString(parseMode).trim() || undefined,
-          reply_to_message_id: replyToMessageId,
-        }),
-      );
+    const sendPayload = async (
+      nextMethod: typeof method,
+      nextField: typeof field,
+    ) => {
+      if (payload.url) {
+        const result = await this.callApi(
+          nextMethod,
+          compactObject({
+            chat_id: chatId,
+            [nextField]: payload.url,
+            caption: caption || undefined,
+            parse_mode: safeString(parseMode).trim() || undefined,
+            reply_to_message_id: replyToMessageId,
+          }),
+        );
+        return safeString(result?.message_id).trim();
+      }
+      const result = await this.callMultipart(nextMethod, (form) => {
+        form.append("chat_id", safeString(chatId));
+        if (caption) form.append("caption", caption);
+        if (parseMode) form.append("parse_mode", safeString(parseMode));
+        if (replyToMessageId)
+          form.append("reply_to_message_id", safeString(replyToMessageId));
+        form.append(
+          nextField,
+          new Blob([payload.data], {
+            type: safeString(payload.mimeType).trim() || undefined,
+          }),
+          payload.name,
+        );
+      });
       return safeString(result?.message_id).trim();
+    };
+
+    try {
+      return await sendPayload(method, field);
+    } catch (error) {
+      if (method === "sendPhoto" && isTelegramPhotoDimensionError(error)) {
+        return sendPayload("sendDocument", "document");
+      }
+      throw error;
     }
-    const result = await this.callMultipart(method, (form) => {
-      form.append("chat_id", safeString(chatId));
-      if (caption) form.append("caption", caption);
-      if (parseMode) form.append("parse_mode", safeString(parseMode));
-      if (replyToMessageId)
-        form.append("reply_to_message_id", safeString(replyToMessageId));
-      form.append(
-        field,
-        new Blob([payload.data], {
-          type: safeString(payload.mimeType).trim() || undefined,
-        }),
-        payload.name,
-      );
-    });
-    return safeString(result?.message_id).trim();
   }
 
   private async assertMediaSourcesReadable(nodes: any[]) {
