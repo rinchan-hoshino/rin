@@ -51,6 +51,7 @@ export type ParsedArgs = {
     | "restart"
     | "doctor"
     | "status"
+    | "tasks"
     | "gui"
     | "usage"
     | "self"

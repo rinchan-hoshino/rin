@@ -23,6 +23,9 @@ const memoryIndex = await import(
 const status = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "status.js")).href
 );
+const tasks = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "tasks.js")).href
+);
 const selfImprove = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "self-improve.js"))
     .href
@@ -271,6 +274,7 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
     output,
     /\n\s+self\s+Show recent self-improve distillation runs and details/,
   );
+  assert.match(output, /\n\s+tasks\s+Operate scheduled task records/);
   assert.doesNotMatch(output, /\n\s+memory\s+Compatibility alias/);
   assert.doesNotMatch(output, /\n\s+self-improve\s+/);
   assert.doesNotMatch(output, /--bind-chat-session/);
@@ -652,6 +656,15 @@ test("usage and status parsers reject invalid syntax", () => {
     () => status.parseStatusArgs(["status", "--interval=soon"]),
     /invalid_status_interval:soon/,
   );
+  assert.deepEqual(tasks.parseTasksArgs(["tasks", "reload", "--json"]), {
+    action: "reload",
+    json: true,
+    help: false,
+  });
+  assert.throws(
+    () => tasks.parseTasksArgs(["tasks", "--bad"]),
+    /unknown_tasks_arg:--bad/,
+  );
 });
 
 test("resolveInternalRinDispatch detects internal markers and wrapped subcommand help", () => {
@@ -709,4 +722,14 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
   assert.ok(statusHelp);
   assert.equal(statusHelp.run, status.runStatusInternal);
   assert.deepEqual(statusHelp.args, ["--help"]);
+
+  const tasksHelp = main.resolveInternalRinDispatch([
+    "-u",
+    "rin",
+    "tasks",
+    "--help",
+  ]);
+  assert.ok(tasksHelp);
+  assert.equal(tasksHelp.run, tasks.runTasksInternal);
+  assert.deepEqual(tasksHelp.args, ["--help"]);
 });

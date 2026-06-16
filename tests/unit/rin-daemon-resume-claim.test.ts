@@ -325,6 +325,29 @@ process.stdin.on("data", (chunk) => {
     assert.equal(fetched.success, true);
     assert.equal(fetched.data?.task?.id, taskId);
 
+    const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+    const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    rows.find((row: any) => row.id === taskId).name = "Reloaded Task";
+    await fs.writeFile(tasksFile, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+    const stillCached = await rpc(socketPath, {
+      id: "3a",
+      type: "cron_get_task",
+      taskId,
+    });
+    assert.equal(stillCached.data?.task?.name, "Demo Task");
+    const reloaded = await rpc(socketPath, {
+      id: "3b",
+      type: "cron_reload_tasks",
+    });
+    assert.equal(reloaded.success, true);
+    assert.equal(reloaded.data?.cron?.taskCount, 1);
+    const fetchedAfterReload = await rpc(socketPath, {
+      id: "3c",
+      type: "cron_get_task",
+      taskId,
+    });
+    assert.equal(fetchedAfterReload.data?.task?.name, "Reloaded Task");
+
     const paused = await rpc(socketPath, {
       id: "4",
       type: "cron_pause_task",

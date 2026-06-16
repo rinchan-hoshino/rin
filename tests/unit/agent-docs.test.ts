@@ -126,6 +126,7 @@ test("agent docs expose scheduled task operation workflow", () => {
     "rin.tasks.list",
     "rin.tasks.get",
     "rin.tasks.upsert",
+    "rin.tasks.reload",
     "rin.tasks.delete",
     "rin.tasks.complete",
     "rin.tasks.pause",

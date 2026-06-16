@@ -283,6 +283,7 @@ export async function startDaemon(
     Record<RinRpcCommandType, DaemonCommandHandler>
   > = {
     cron_list_tasks: () => ({ data: { tasks: cronScheduler.listTasks() } }),
+    cron_reload_tasks: () => ({ data: { cron: cronScheduler.reloadTasks() } }),
     cron_get_task: (command) => {
       const task = cronScheduler.getTask(taskIdFromCommand(command));
       return task

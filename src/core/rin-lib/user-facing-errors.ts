@@ -128,6 +128,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task session instruction must be a one-time task. Change the schedule.",
   cron_target_required: () =>
     "Scheduled task needs a target before it can run. Choose a target.",
+  cron_tasks_file_invalid: () =>
+    "Scheduled task file contains invalid JSON or task data. Fix ~/.rin/data/scheduler/tasks.json before reloading tasks.",
   cron_trigger_required: () =>
     "Scheduled task needs a trigger before it can run. Add a schedule or one-time trigger.",
 

@@ -8,8 +8,9 @@ A scheduled task is an automation contract. Its prompt and record define the tri
 
 Target surface:
 
-- daemon-owned scheduler records;
+- daemon-owned scheduler records in `~/.rin/data/scheduler/tasks.json`;
 - Agent SDK `rin.tasks.*` helpers;
+- CLI `rin tasks reload` for explicit daemon hot reload from the persisted task file;
 - optional chat/frontend delivery through the chat bridge;
 - optional shell commands or agent turns.
 
@@ -37,6 +38,7 @@ Output contract:
 A scheduled-task operation is complete when:
 
 - the task record expresses the smallest correct contract for the request;
+- file-based edits have been explicitly loaded with `rin tasks reload` or `rin.tasks.reload()`, then verified by daemon state;
 - `target.prompt` or `target.command` has enough source-of-truth, scope, stop, validation, and report instructions to run later;
 - `nextRunAt`, `enabled`, and lifecycle fields match the requested state;
 - delivery settings match the intended recipient or intentionally suppress automatic delivery;
@@ -51,7 +53,7 @@ Create or operate a task for:
 - **recurrence:** daily briefs, hourly checks, weekly reviews, regular audits;
 - **polling/watch:** repeated checks until external state changes;
 - **background automation:** health checks, release/watchdog checks, backup reviews, quant reviews, account audits, cleanup passes;
-- **existing task control:** inspect, update, run now, wake, reschedule, pause, resume, complete, or delete.
+- **existing task control:** inspect, update, reload from disk, run now, wake, reschedule, pause, resume, complete, or delete.
 
 When a single missing field changes the contract, ask for that field. Typical missing fields are exact time, target chat, action authority, or the event that should stop a watch task.
 
@@ -59,15 +61,16 @@ When a single missing field changes the contract, ask for that field. Typical mi
 
 Choose the smallest task shape that preserves the user-visible contract:
 
-1. **Operation:** create, inspect, update, run now, wake, reschedule, pause, resume, complete, or delete.
+1. **Operation:** create, inspect, update, reload from disk, run now, wake, reschedule, pause, resume, complete, or delete.
 2. **Trigger:** one-time `runAt` or recurring cron `expression`.
 3. **Condition gate:** optional TypeScript `condition` for cheap “only run if needed” checks.
 4. **Target:** `agent_prompt` for reasoning or user-facing reports; `shell_command` for machine checks.
 5. **Task prompt:** use `rin-prompt-engineering` for `target.prompt` and `target.continuationPrompt`.
-6. **Session:** `none` for normal tasks; `dedicated` for a task-owned continuing thread; `session_instruction` for insertion into an existing chat session.
-7. **Delivery:** optional `frontend`, chat binding, and `deliverFinal`.
-8. **Termination:** optional `maxRuns` or `stopAt`.
-9. **Verification:** re-read the task and check liveness when active producers matter.
+6. **Storage/edit path:** SDK writes and CLI operations update daemon scheduler state and the same scheduler file. If `~/.rin/data/scheduler/tasks.json` is edited outside the daemon, run `rin tasks reload` or `rin.tasks.reload()` explicitly; the daemon does not watch the file automatically.
+7. **Session:** `none` for normal tasks; `dedicated` for a task-owned continuing thread; `session_instruction` for insertion into an existing chat session.
+8. **Delivery:** optional `frontend`, chat binding, and `deliverFinal`.
+9. **Termination:** optional `maxRuns` or `stopAt`.
+10. **Verification:** re-read the task and check liveness when active producers matter.
 
 ## Task prompt contract
 
@@ -151,7 +154,7 @@ type Task = {
 };
 ```
 
-`upsert()` merges with an existing task when `id` matches. Include the fields you intend to change. Use `frontend: null`, `termination: null`, or `condition: null` to remove those optional fields.
+`upsert()` merges with an existing task when `id` matches. Include the fields you intend to change. Use `frontend: null`, `termination: null`, or `condition: null` to remove those optional fields. The daemon loads the persisted task file at startup and when explicitly requested through `rin tasks reload` or `rin.tasks.reload()`: valid JSON edits, additions, and removals take effect without restarting the daemon only after that reload command. Invalid JSON leaves the running daemon schedule unchanged and makes the reload fail, so a partial manual edit does not silently replace the in-memory schedule.
 
 ## Trigger contract
 

@@ -6,7 +6,7 @@ import {
   ALL_THINKING_LEVELS,
   type AvailableThinkingLevel,
 } from "../model-thinking-levels.js";
-import { readJsonFile, writeJsonAtomic } from "../platform/fs.js";
+import { writeJsonAtomic } from "../platform/fs.js";
 import { safeString } from "../platform/process.js";
 import { shellQuote } from "../rin-lib/system.js";
 import {
@@ -389,6 +389,16 @@ function assertMutableTask(task: CronTaskRecord | undefined) {
   if (task.builtIn) throw new Error(`cron_builtin_task_protected:${task.id}`);
 }
 
+function readCronTaskRows(file: string) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Array.isArray(parsed) ? (parsed as CronTaskRecord[]) : undefined;
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return [];
+    return undefined;
+  }
+}
+
 export class CronScheduler {
   private tasks = new Map<string, CronTaskRecord>();
   private activeExecutions = new Map<string, { startedAt: number }>();
@@ -416,7 +426,10 @@ export class CronScheduler {
   ) {}
 
   start() {
-    this.load();
+    if (!this.load({ persist: true })) {
+      this.installBuiltInTasks();
+      this.save();
+    }
     this.timer = setInterval(() => {
       void this.tick().catch(() => {});
     }, 1000);
@@ -689,56 +702,78 @@ export class CronScheduler {
     return this.publicTask(task);
   }
 
-  private load() {
+  private load(
+    options: { persist?: boolean; terminateRemovedActiveTasks?: boolean } = {},
+  ) {
     const file = cronTasksPath(this.options.agentDir);
-    const rows = readJsonFile<CronTaskRecord[]>(file, []);
-    this.tasks.clear();
-    for (const row of rows) {
-      if (!row || typeof row !== "object" || !row.id) continue;
-      row.running = false;
-      row.lastError = row.lastError ? safeString(row.lastError) : undefined;
-      row.thinkingLevel = normalizeThinkingLevel(row.thinkingLevel);
-      row.model = normalizeModelOverride(row.model);
-      row.deliverFinal = row.deliverFinal !== false;
-      const legacyChatKey = safeString((row as any).chatKey).trim();
-      row.frontend = normalizeTaskFrontend(
-        row.frontend ||
-          (legacyChatKey ? { kind: "chat", key: legacyChatKey } : undefined),
-        undefined,
-      );
-      delete (row as any).chatKey;
-      const normalizedMode = normalizeScheduledTaskSessionMode(
-        (row.session as any)?.mode,
-      );
-      row.session =
-        normalizedMode === "session_instruction"
-          ? {
-              mode: normalizedMode,
-              sessionFile: requireNonEmptyString(
-                (row.session as any)?.sessionFile,
-                "cron_session_file_required",
-              ),
-            }
-          : { mode: normalizedMode || "none" };
-      row.trigger = normalizeTaskTrigger(row.trigger);
-      row.condition = normalizeTaskCondition(row.condition, undefined);
-      if (row.session.mode === "dedicated") {
-        row.dedicatedSessionPersistent = true;
-        row.dedicatedSessionFile = getManagedTaskSessionFile(
-          this.options.agentDir,
-          row.id,
+    const rows = readCronTaskRows(file);
+    if (!rows) return false;
+
+    const loadedTasks = new Map<string, CronTaskRecord>();
+    try {
+      for (const row of rows) {
+        if (!row || typeof row !== "object" || !row.id) continue;
+        row.running = false;
+        row.lastError = row.lastError ? safeString(row.lastError) : undefined;
+        row.thinkingLevel = normalizeThinkingLevel(row.thinkingLevel);
+        row.model = normalizeModelOverride(row.model);
+        row.deliverFinal = row.deliverFinal !== false;
+        const legacyChatKey = safeString((row as any).chatKey).trim();
+        row.frontend = normalizeTaskFrontend(
+          row.frontend ||
+            (legacyChatKey ? { kind: "chat", key: legacyChatKey } : undefined),
+          undefined,
         );
-      } else {
-        delete row.dedicatedSessionFile;
-        delete row.dedicatedSessionPersistent;
+        delete (row as any).chatKey;
+        const normalizedMode = normalizeScheduledTaskSessionMode(
+          (row.session as any)?.mode,
+        );
+        row.session =
+          normalizedMode === "session_instruction"
+            ? {
+                mode: normalizedMode,
+                sessionFile: requireNonEmptyString(
+                  (row.session as any)?.sessionFile,
+                  "cron_session_file_required",
+                ),
+              }
+            : { mode: normalizedMode || "none" };
+        row.trigger = normalizeTaskTrigger(row.trigger);
+        row.condition = normalizeTaskCondition(row.condition, undefined);
+        if (row.session.mode === "dedicated") {
+          row.dedicatedSessionPersistent = true;
+          row.dedicatedSessionFile = getManagedTaskSessionFile(
+            this.options.agentDir,
+            row.id,
+          );
+        } else {
+          delete row.dedicatedSessionFile;
+          delete row.dedicatedSessionPersistent;
+        }
+        row.nextRunAt = row.completedAt
+          ? undefined
+          : row.nextRunAt || computeNextRunAt(row, Date.now());
+        loadedTasks.set(String(row.id), row);
       }
-      row.nextRunAt = row.completedAt
-        ? undefined
-        : row.nextRunAt || computeNextRunAt(row, Date.now());
-      this.tasks.set(String(row.id), row);
+    } catch {
+      return false;
     }
+
+    const previousTasks = this.tasks;
+    this.tasks = loadedTasks;
     this.installBuiltInTasks();
-    this.save();
+    if (options.terminateRemovedActiveTasks) {
+      for (const [taskId, previousTask] of previousTasks) {
+        if (!this.activeExecutions.has(taskId)) continue;
+        const currentTask = this.tasks.get(taskId);
+        if (!currentTask || currentTask.completedAt || !currentTask.enabled) {
+          this.terminateTaskSession(previousTask);
+        }
+      }
+    }
+
+    if (options.persist !== false) this.save();
+    return true;
   }
 
   private snapshotTask(task: CronTaskRecord): CronTaskRecord {
@@ -792,6 +827,13 @@ export class CronScheduler {
     });
   }
 
+  reloadTasks() {
+    if (!this.load({ persist: true, terminateRemovedActiveTasks: true })) {
+      throw new Error("cron_tasks_file_invalid");
+    }
+    return this.getStatusSnapshot();
+  }
+
   private save() {
     writeJsonAtomic(
       cronTasksPath(this.options.agentDir),
@@ -804,6 +846,7 @@ export class CronScheduler {
     if (!current || current === task) return current;
 
     const currentNextRunAt = safeString(current.nextRunAt).trim();
+    const currentStopped = current.completedAt || !current.enabled;
     current.lastStartedAt = task.lastStartedAt;
     current.lastFinishedAt = task.lastFinishedAt;
     current.lastResultText = task.lastResultText;
@@ -821,7 +864,7 @@ export class CronScheduler {
       current.dedicatedSessionPersistent = task.dedicatedSessionPersistent;
     }
 
-    if (!currentNextRunAt) {
+    if (!currentStopped && !currentNextRunAt) {
       current.completedAt = task.completedAt;
       current.completionReason = task.completionReason;
       current.enabled = task.enabled;

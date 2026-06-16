@@ -95,6 +95,7 @@ test("agent SDK maps task helpers to daemon task commands", async () => {
       await rin.tasks.rescheduleOnce("cron_demo", "2099-01-02T00:00:00.000Z");
       await rin.tasks.get("cron_demo");
       await rin.tasks.list();
+      await rin.tasks.reload();
       await rin.tasks.upsert({ id: "cron_demo" });
       await rin.tasks.complete("cron_demo", "done");
       await rin.tasks.delete("cron_demo");
@@ -109,6 +110,7 @@ test("agent SDK maps task helpers to daemon task commands", async () => {
           "cron_reschedule_once_task",
           "cron_get_task",
           "cron_list_tasks",
+          "cron_reload_tasks",
           "cron_upsert_task",
           "cron_complete_task",
           "cron_delete_task",

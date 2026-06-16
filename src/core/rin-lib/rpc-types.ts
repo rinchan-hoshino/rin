@@ -62,6 +62,7 @@ export type RinRpcCommandType =
   | "memory_search_external"
   | "memory_write_external"
   | "cron_list_tasks"
+  | "cron_reload_tasks"
   | "cron_get_task"
   | "cron_upsert_task"
   | "cron_delete_task"

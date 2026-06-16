@@ -45,7 +45,7 @@ An SDK script is complete when:
 
 Use the SDK for:
 
-- scheduled-task create/read/update/run/pause/resume/delete operations;
+- scheduled-task create/read/update/reload/run/pause/resume/delete operations;
 - chat bridge sends, agent turns, typing, reactions, turn termination, and bridge-local evals;
 - daemon status/activity checks when a script needs structured daemon data;
 - installed built-in extension enable/disable/list operations.
@@ -102,6 +102,7 @@ await rin.tasks.upsert({
   target: { kind: "agent_prompt", prompt: "Run the check and report changes." },
 });
 
+await rin.tasks.reload();
 await rin.tasks.run("cron_example");
 await rin.tasks.wake("cron_example");
 await rin.tasks.rescheduleOnce("cron_example", "2026-05-08T15:00:00+08:00");
@@ -113,9 +114,11 @@ await rin.tasks.delete("cron_example");
 
 Helper contract:
 
+- Scheduled task records are persisted in `~/.rin/data/scheduler/tasks.json`; use `rin.tasks.reload()` or `rin tasks reload` to explicitly load valid direct file edits, additions, and removals into the running daemon without restart.
 - `rin.tasks.list()` returns agent-visible scheduled tasks.
 - `rin.tasks.get(taskId)` reads one agent-visible task.
 - `rin.tasks.upsert(task, defaults?)` creates or updates a task; pass `condition: null`, `termination: null`, or `frontend: null` to remove optional fields.
+- `rin.tasks.reload()` reloads the persisted task file into the running daemon; invalid JSON or task data leaves current daemon state unchanged and fails the reload.
 - `rin.tasks.run(taskId)` starts the existing task through scheduler semantics, including condition evaluation.
 - `rin.tasks.wake(taskId)` moves the next run to now; the scheduler still evaluates the task normally.
 - `rin.tasks.rescheduleOnce(taskId, runAt)` sets the next run time and updates one-time `trigger.runAt` while preserving recurring cron expressions.
@@ -125,7 +128,7 @@ Helper contract:
 - `rin.tasks.delete(taskId)` removes the task record.
 - `rin.tasks.control("pause" | "resume", taskId)` is the low-level pause/resume helper; the named helpers are the normal script surface.
 
-After any write, re-read with `rin.tasks.get()` or `rin.tasks.list()`. When timing, liveness, or active producers matter, also check `rin status --json`.
+After any SDK write, re-read with `rin.tasks.get()`, `rin.tasks.list()`, or `rin status --json`. After any direct-file edit, call `rin.tasks.reload()` or `rin tasks reload` first, then re-read daemon state. Invalid manual JSON edits make reload fail and leave current daemon state unchanged.
 
 ## Chat helpers
 

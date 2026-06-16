@@ -8,6 +8,7 @@ import { runGui } from "../rin-gui/main.js";
 import { runMemoryIndex, runMemoryIndexInternal } from "./memory-index.js";
 import { runNonInteractive, shouldRunNonInteractive } from "./run.js";
 import { runStatus, runStatusInternal } from "./status.js";
+import { runTasks, runTasksInternal } from "./tasks.js";
 import {
   hasSubcommandHelpFlag,
   ParsedArgs,
@@ -32,6 +33,7 @@ const RIN_COMMANDS = [
   ["restart", "Restart the target user daemon"],
   ["doctor", "Show daemon/socket diagnostics for the target user"],
   ["status", "Show live worker and scheduled task activity"],
+  ["tasks", "Operate scheduled task records"],
   ["gui", "Start the cross-platform Rin GUI shell"],
   ["usage", "Show token telemetry dashboard and grouped usage stats"],
   ["self", "Show recent self-improve distillation runs and details"],
@@ -62,6 +64,11 @@ const INTERNAL_COMMANDS = [
     marker: "__status_internal",
     command: "status",
     run: runStatusInternal,
+  },
+  {
+    marker: "__tasks_internal",
+    command: "tasks",
+    run: runTasksInternal,
   },
 ] as const;
 
@@ -182,6 +189,8 @@ export async function startRinCli() {
   if (parsed.command === "doctor") return await runDoctor(parsed);
   if (parsed.command === "status")
     return await runStatus(parsed, process.argv.slice(2));
+  if (parsed.command === "tasks")
+    return await runTasks(parsed, process.argv.slice(2));
   if (parsed.command === "gui")
     return await runGui(parsed, process.argv.slice(2));
   if (parsed.command === "usage")

@@ -140,6 +140,212 @@ test("cron scheduler preserves finish metadata when a running once task self-res
   }
 });
 
+test("cron scheduler reloads task file edits only when requested", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  const taskId = "cron_hot_reload_read";
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "old prompt" },
+    });
+
+    const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    const row = rows.find((item) => item.id === taskId);
+    row.trigger = { runAt: "2099-04-12T00:00:00.000Z" };
+    row.nextRunAt = "2099-04-12T00:00:00.000Z";
+    row.target.prompt = "new hot-reloaded prompt";
+    await fs.writeFile(tasksFile, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+
+    assert.equal(scheduler.getTask(taskId).target.prompt, "old prompt");
+
+    scheduler.reloadTasks();
+    const reloaded = scheduler.getTask(taskId);
+    assert.equal(reloaded.trigger.runAt, "2099-04-12T00:00:00.000Z");
+    assert.equal(reloaded.nextRunAt, "2099-04-12T00:00:00.000Z");
+    assert.equal(reloaded.target.prompt, "new hot-reloaded prompt");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler reloads task file deletions only when requested", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  const taskId = "cron_hot_reload_deleted";
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+
+    const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    await fs.writeFile(
+      tasksFile,
+      `${JSON.stringify(
+        rows.filter((item) => item.id !== taskId),
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    assert.equal(scheduler.getTask(taskId).id, taskId);
+    scheduler.reloadTasks();
+    assert.equal(scheduler.getTask(taskId), undefined);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler keeps the in-memory schedule when explicit reload finds an invalid file", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  const taskId = "cron_hot_reload_invalid";
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "still loaded" },
+    });
+
+    const validRows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    await fs.writeFile(tasksFile, "{", "utf8");
+
+    assert.throws(() => scheduler.reloadTasks(), /cron_tasks_file_invalid/);
+    const task = scheduler.getTask(taskId);
+    assert.equal(task.target.prompt, "still loaded");
+    assert.ok(scheduler.wakeTaskNow(taskId).nextRunAt);
+
+    const row = validRows.find((item) => item.id === taskId);
+    row.target.prompt = "recovered hot reload";
+    await fs.writeFile(
+      tasksFile,
+      `${JSON.stringify(validRows, null, 2)}\n`,
+      "utf8",
+    );
+
+    scheduler.reloadTasks();
+    const recovered = scheduler.getTask(taskId);
+    assert.equal(recovered.target.prompt, "recovered hot reload");
+    const woken = scheduler.wakeTaskNow(taskId);
+    assert.ok(Date.parse(woken.nextRunAt) <= Date.now() + 1000);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler ticks against explicitly reloaded due times", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_hot_reload_tick";
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  let ran = false;
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        ran = true;
+        return { finalText: "hot reload tick ran" };
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+
+    const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    const row = rows.find((item) => item.id === taskId);
+    row.trigger = { runAt: "2000-01-01T00:00:00.000Z" };
+    row.nextRunAt = "2000-01-01T00:00:00.000Z";
+    await fs.writeFile(tasksFile, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+
+    await scheduler.tick();
+    assert.equal(ran, false);
+
+    scheduler.reloadTasks();
+    await scheduler.tick();
+    for (let i = 0; i < 50 && scheduler.getTask(taskId)?.running; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    assert.equal(ran, true);
+    assert.equal(
+      scheduler.getTask(taskId).lastResultText,
+      "hot reload tick ran",
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler does not resurrect a running task disabled by file edit", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_hot_reload_disable_running";
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  let finishRun: (() => void) | undefined;
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () =>
+        await new Promise((resolve) => {
+          finishRun = () => resolve({ finalText: "finished after disable" });
+        }),
+      terminateTurn: async () => ({}),
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { expression: "*/1 * * * *", timezone: "local" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+
+    scheduler.runTaskNow(taskId);
+    assert.equal(scheduler.getTask(taskId).running, true);
+    for (let i = 0; i < 50 && !finishRun; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(typeof finishRun, "function");
+
+    const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    const row = rows.find((item) => item.id === taskId);
+    row.enabled = false;
+    delete row.nextRunAt;
+    await fs.writeFile(tasksFile, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+
+    assert.equal(scheduler.getTask(taskId).enabled, true);
+    scheduler.reloadTasks();
+    const disabled = scheduler.getTask(taskId);
+    assert.equal(disabled.enabled, false);
+    assert.equal(disabled.nextRunAt, undefined);
+
+    finishRun?.();
+    for (let i = 0; i < 50 && scheduler.getTask(taskId)?.running; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const finished = scheduler.getTask(taskId);
+    assert.equal(finished.enabled, false);
+    assert.equal(finished.nextRunAt, undefined);
+    assert.equal(finished.lastResultText, "finished after disable");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron scheduler rejects removed specific session mode", () => {
   const scheduler = new cronMod.CronScheduler({
     agentDir: "/tmp/rin-agent",

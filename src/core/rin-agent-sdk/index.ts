@@ -128,6 +128,11 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
           { type: "cron_list_tasks" },
           override,
         ),
+      reload: async (override?: RinAgentSdkOptions) =>
+        await request<{ cron: unknown }>(
+          { type: "cron_reload_tasks" },
+          override,
+        ),
       get: async (taskId: string, override?: RinAgentSdkOptions) =>
         await request<{ task?: unknown }>(
           { type: "cron_get_task", taskId: trimTaskId(taskId) },
