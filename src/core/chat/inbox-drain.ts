@@ -3,6 +3,7 @@ import {
   type ChatInboxItem,
   claimChatInboxFile,
   completeChatInboxFile,
+  failChatInboxFile,
   listPendingChatInboxFiles,
   readChatInboxItem,
   requeueChatInboxFile,
@@ -13,6 +14,7 @@ import { safeString } from "../text-utils.js";
 
 const CHAT_INBOX_RETRY_MIN_MS = 2000;
 const CHAT_INBOX_RETRY_MAX_MS = 60_000;
+const CHAT_INBOX_MAX_ATTEMPTS = 5;
 
 export type ClaimedChatInboxJob = {
   claimedPath: string;
@@ -42,9 +44,15 @@ export function requeueClaimedChatInboxJob(
   job: ClaimedChatInboxJob,
   error?: unknown,
 ) {
+  const nextAttemptCount = Number(job.envelope.attemptCount || 0) + 1;
+  const errorMessage = safeString(error || "chat_inbound_retry_needed");
+  if (nextAttemptCount >= CHAT_INBOX_MAX_ATTEMPTS) {
+    failChatInboxFile(agentDir, job.claimedPath, job.envelope, errorMessage);
+    return;
+  }
   requeueChatInboxFile(agentDir, job.claimedPath, job.envelope, {
-    delayMs: computeChatInboxRetryDelay(job.envelope.attemptCount + 1),
-    error: safeString(error || "chat_inbound_retry_needed"),
+    delayMs: computeChatInboxRetryDelay(nextAttemptCount),
+    error: errorMessage,
   });
 }
 
@@ -70,18 +78,46 @@ export function createChatInboxDrain(deps: {
   isInboundMessageProcessed: (chatKey: string, messageId: string) => boolean;
   enqueueClaimedInboxItem: (job: ClaimedChatInboxJob) => void;
   processingStaleMs?: number;
+  maxProcessingRestorePerDrain?: number;
+  maxClaimsPerDrain?: number;
+  maxActiveChatKeyWorkers?: number;
+  activeChatKeyWorkerCount?: () => number;
   logger?: { warn?: (...args: any[]) => void };
 }) {
   const drainChatInboxOnce = async () => {
     const restored = restoreProcessingChatInboxFiles(deps.agentDir, {
       staleMs: deps.processingStaleMs,
+      limit: deps.maxProcessingRestorePerDrain,
     });
     if (restored.length) {
       deps.logger?.warn?.(
         `chat inbox restored stale processing items count=${restored.length}`,
       );
     }
+    let claimedCount = 0;
+    const canClaimMore = () => {
+      const maxClaimsPerDrain = Math.max(
+        0,
+        Number(deps.maxClaimsPerDrain || 0),
+      );
+      if (maxClaimsPerDrain > 0 && claimedCount >= maxClaimsPerDrain) {
+        return false;
+      }
+      const maxActiveChatKeyWorkers = Math.max(
+        0,
+        Number(deps.maxActiveChatKeyWorkers || 0),
+      );
+      const activeChatKeyWorkerCount = deps.activeChatKeyWorkerCount?.() || 0;
+      if (
+        maxActiveChatKeyWorkers > 0 &&
+        activeChatKeyWorkerCount >= maxActiveChatKeyWorkers
+      ) {
+        return false;
+      }
+      return true;
+    };
     for (const filePath of listPendingChatInboxFiles(deps.agentDir)) {
+      if (!canClaimMore()) break;
       let claimedPath = "";
       try {
         claimedPath = claimChatInboxFile(deps.agentDir, filePath);
@@ -115,6 +151,7 @@ export function createChatInboxDrain(deps: {
         continue;
       }
       deps.enqueueClaimedInboxItem({ claimedPath, envelope });
+      claimedCount += 1;
     }
   };
 

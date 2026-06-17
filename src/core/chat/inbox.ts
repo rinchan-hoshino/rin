@@ -300,12 +300,14 @@ export function failChatInboxFile(
 
 export function restoreProcessingChatInboxFiles(
   agentDir: string,
-  options: { staleMs?: number; nowMs?: number } = {},
+  options: { staleMs?: number; nowMs?: number; limit?: number } = {},
 ) {
   const restored: Array<{ itemId: string; filePath: string }> = [];
   const staleMs = Number(options.staleMs || 0);
   const nowMs = Number(options.nowMs || Date.now());
+  const limit = Math.max(0, Number(options.limit || 0));
   for (const filePath of listProcessingChatInboxFiles(agentDir)) {
+    if (limit > 0 && restored.length >= limit) break;
     const item = readChatInboxItem(filePath);
     if (!item) {
       completeChatInboxFile(filePath);

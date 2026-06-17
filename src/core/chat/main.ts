@@ -127,6 +127,9 @@ const TYPING_POLL_INTERVAL_MS = 4000;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
 const CHAT_OUTBOX_POLL_INTERVAL_MS = 5000;
 const CHAT_INBOX_PROCESSING_STALE_MS = 10 * 60 * 1000;
+const CHAT_INBOX_MAX_CLAIMS_PER_DRAIN = 8;
+const CHAT_INBOX_MAX_PROCESSING_RESTORE_PER_DRAIN = 8;
+const CHAT_INBOX_MAX_ACTIVE_CHAT_KEY_WORKERS = 4;
 const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
 
@@ -964,6 +967,10 @@ export async function startChatBridge(
     enqueueClaimedInboxItem: (job) =>
       chatKeyWorkers.enqueue(job.envelope.chatKey, job),
     processingStaleMs: CHAT_INBOX_PROCESSING_STALE_MS,
+    maxProcessingRestorePerDrain: CHAT_INBOX_MAX_PROCESSING_RESTORE_PER_DRAIN,
+    maxClaimsPerDrain: CHAT_INBOX_MAX_CLAIMS_PER_DRAIN,
+    maxActiveChatKeyWorkers: CHAT_INBOX_MAX_ACTIVE_CHAT_KEY_WORKERS,
+    activeChatKeyWorkerCount: () => chatKeyWorkers.activeWorkerCount(),
     logger,
   });
 
@@ -1221,7 +1228,9 @@ export async function startChatBridge(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );
 
-  const restoredInboxItems = restoreProcessingChatInboxFiles(runtime.agentDir);
+  const restoredInboxItems = restoreProcessingChatInboxFiles(runtime.agentDir, {
+    limit: CHAT_INBOX_MAX_PROCESSING_RESTORE_PER_DRAIN,
+  });
   if (restoredInboxItems.length) {
     logger.warn(
       `chat inbox restored stranded processing items count=${restoredInboxItems.length}`,

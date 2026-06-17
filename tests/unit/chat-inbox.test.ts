@@ -13,6 +13,10 @@ const rootDir = path.resolve(
 const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
+const inboxDrain = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox-drain.js"))
+    .href
+);
 const { saveChatMessage } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
     .href
@@ -586,4 +590,122 @@ test("chat inbox moves failed envelopes into failed storage with updated metadat
   assert.equal(loaded.attemptCount, 2);
   assert.equal(loaded.lastError, "fatal_failure");
   assert.equal(loaded.nextAttemptAt, undefined);
+});
+
+test("chat inbox processing restore honors a per-drain limit", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  for (let index = 0; index < 3; index += 1) {
+    inbox.enqueueChatInboxItem(agentDir, {
+      chatKey: `telegram/1:${index}`,
+      messageId: `restore-limit-${index}`,
+      session: {
+        platform: "telegram",
+        selfId: "1",
+        channelId: String(index),
+        userId: "3",
+        messageId: `restore-limit-${index}`,
+        timestamp: Date.now(),
+        content: "hello",
+        stripped: { content: "hello" },
+      },
+      elements: [{ type: "text", attrs: { content: "hello" } }],
+    });
+  }
+
+  for (const filePath of inbox.listPendingChatInboxFiles(agentDir)) {
+    inbox.claimChatInboxFile(agentDir, filePath);
+  }
+
+  const restored = inbox.restoreProcessingChatInboxFiles(agentDir, {
+    limit: 2,
+  });
+
+  assert.equal(restored.length, 2);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 2);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
+});
+
+test("chat inbox drain caps claimed work while backlog remains pending", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  for (let index = 0; index < 5; index += 1) {
+    inbox.enqueueChatInboxItem(agentDir, {
+      chatKey: `telegram/1:${index}`,
+      messageId: `claim-limit-${index}`,
+      session: {
+        platform: "telegram",
+        selfId: "1",
+        channelId: String(index),
+        userId: "3",
+        messageId: `claim-limit-${index}`,
+        timestamp: Date.now(),
+        content: "hello",
+        stripped: { content: "hello" },
+      },
+      elements: [{ type: "text", attrs: { content: "hello" } }],
+    });
+  }
+
+  const claimedJobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({ claimsInboundMessage: () => false }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+    maxClaimsPerDrain: 10,
+    maxActiveChatKeyWorkers: 2,
+    activeChatKeyWorkerCount: () => claimedJobs.length,
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.equal(claimedJobs.length, 2);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 3);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 2);
+});
+
+test("chat inbox retry helper isolates envelopes after repeated failures", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const { item } = inbox.enqueueChatInboxItem(agentDir, {
+    chatKey: "telegram/1:retry",
+    messageId: "retry-limit",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "retry",
+      userId: "3",
+      messageId: "retry-limit",
+      timestamp: Date.now(),
+      content: "hello",
+      stripped: { content: "hello" },
+    },
+    elements: [{ type: "text", attrs: { content: "hello" } }],
+  });
+  const [filePath] = inbox.listPendingChatInboxFiles(agentDir);
+  const claimedPath = inbox.claimChatInboxFile(agentDir, filePath);
+  const envelope = {
+    ...inbox.readChatInboxItem(claimedPath),
+    attemptCount: 4,
+  };
+
+  inboxDrain.requeueClaimedChatInboxJob(
+    agentDir,
+    { claimedPath, envelope },
+    "still failing",
+  );
+
+  const failedPath = path.join(
+    agentDir,
+    "data",
+    "chat",
+    "inbox",
+    "failed",
+    `${item.itemId}.json`,
+  );
+  const failed = inbox.readChatInboxItem(failedPath);
+
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
+  assert.equal(failed.itemId, item.itemId);
+  assert.equal(failed.attemptCount, 5);
+  assert.equal(failed.lastError, "still failing");
 });
