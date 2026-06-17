@@ -60,6 +60,7 @@ function Resolve-UpdateInstallDir {
   if ($env:RIN_DIR) { return $env:RIN_DIR }
   if ($HOME) {
     $candidates = @(
+      (Join-Path $HOME "AppData/Roaming/rin/install.json"),
       (Join-Path $HOME ".config/rin/install.json"),
       (Join-Path $HOME "Library/Application Support/rin/install.json")
     )

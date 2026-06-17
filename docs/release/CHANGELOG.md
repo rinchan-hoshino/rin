@@ -2,14 +2,38 @@
 
 ## 0.5.0
 
-- Chat and daemon recovery is more resilient: active submitted turns stay attached during recovery, passive notices target the right chat session, replaced resume workers shut down cleanly, and outbox delivery stalls are isolated from other chat traffic.
+- Chat and daemon recovery is more resilient: active submitted turns stay attached during recovery, accepted inbox turns recover after restarts, passive notices target the right chat session, replaced resume workers shut down cleanly, and outbox delivery stalls are isolated from other chat traffic.
+- Chat bridge delivery is more reliable across queued submissions, duplicate recovered finals, recovered final idempotency, typing indicators, per-chat model options, and slow daemon activity status checks.
+- CLI and installer flows are clearer and safer: `rin` is now the unified interactive command, print mode can run without the daemon, update-mode source handling is more stable, and native Windows daemon/TUI install is supported.
 - Provider and compact-command failures now surface more accurately, including retry-exhaustion details without extra compact acknowledgements.
 - The todo tool can now read the current checklist when called without replacement data, matching the documented checklist workflow.
-- Installer and update flows are clearer and safer around update progress, cleanup, and CLI handoff behavior.
-- Self-improve review and distillation paths now require eligible producers and prefer target-state guidance, reducing stale or unsupported review output.
+- Scheduler and self-improve operations are easier to maintain with explicit scheduler reloads, more complete verified-success capture, 24-hour activity review during nightly distillation, and target-state distillation guidance.
+- Rin now tracks the Pi 0.79.5 dependency line for this release series.
 - Release executors now verify changelog coverage against included commits before publishing stable or prerelease metadata.
 
 <!-- rin-changelog-coverage
+5cf9db2 fix(cli): run print mode without daemon
+e583326 test(installer): stabilize update-mode source boundary
+9adc476 fix(chat): stop gating queued inbox submissions
+66a8f31 fix(self-improve): capture verified success paths
+0b2811f feat(cli): make rin the unified interactive command
+dde1b1f feat(windows): support native install daemon and tui
+f606721 fix(chat): avoid duplicate recovered finals
+7c8b88b fix(chat): prune completed outbox history
+d633762 fix(chat): refresh claimed inbox leases
+cdb97cf fix(chat): bound inbox backlog recovery
+4ad2f80 fix(chat): archive completed outbox items
+84836b4 chore(deps): sync Pi 0.79.5
+b818f62 Retry invalid Telegram photos as documents
+5da2e26 Handle slow daemon activity status responses
+f14f7e9 Fix chat accepted inbox restart recovery
+21f8022 Fix chat final delivery recovery idempotency
+ab461fd feat(tasks): add explicit scheduler reload
+71a7ecc fix(chat): narrow ordinary typing activity
+f79372e fix(chat): clear recovered submitted turn activity
+b209f9a feat(chat): add per-chat model options
+c2efdfa fix(self-improve): review 24h activity in nightly distillation
+d83cc5f chore(deps): sync Pi 0.79.4
 cd8c892 fix(release): require changelog commit coverage
 e336177 fix: suppress compact chat acknowledgement
 fb0f678 fix(chat): keep submitted turns alive during active recovery
