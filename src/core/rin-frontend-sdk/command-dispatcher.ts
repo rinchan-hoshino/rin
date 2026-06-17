@@ -68,7 +68,6 @@ export type RinNonInteractiveCommandInteractionPolicy = {
   skipSessionRecovery: boolean;
   acceptInboundBeforeExecution: boolean;
   activeTurnHandling: RinNonInteractiveCommandActiveTurnHandling;
-  bypassAdmissionWait: boolean;
 };
 
 export const RIN_NON_INTERACTIVE_COMMAND_NAMES = [
@@ -123,7 +122,6 @@ export function getRinNonInteractiveCommandInteractionPolicy(
       CLI_ACCEPT_BEFORE_EXECUTION_COMMANDS.has(nextName) &&
       (!isCommandLine || !isExactOnlyControl || exactAbort || exactNewSession),
     activeTurnHandling,
-    bypassAdmissionWait: activeTurnHandling !== "none",
   };
 }
 

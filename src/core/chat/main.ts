@@ -78,7 +78,6 @@ import {
 import {
   type PreparedChatKeyWorkerJob,
   createChatKeyWorkerPool,
-  waitUntil,
 } from "./chat-key-worker.js";
 import { isOwnerPresentForGroup, shouldProcessText } from "./decision.js";
 import {
@@ -833,39 +832,6 @@ export async function startChatBridge(
     }
   };
 
-  const waitForTurnAdmission = (
-    controller: ChatController,
-    messageId: string,
-    task: Promise<unknown>,
-  ) =>
-    waitUntil(
-      () => controller.hasBackendAcceptedInboundMessage(messageId),
-      task,
-    );
-
-  const canCommandBypassAdmissionWait = (job: ClaimedChatInboxJob) => {
-    const { envelope } = job;
-    const queuedSession = restoreChatInboxSession(
-      envelope,
-      findRuntimeBot(
-        safeString(envelope?.session?.platform || "").trim(),
-        safeString(envelope?.session?.selfId || "").trim(),
-      ),
-    );
-    const queuedElements = Array.isArray(envelope.elements)
-      ? envelope.elements
-      : [];
-    const command = parseInboundCommand(
-      queuedSession,
-      elementsToText(queuedElements),
-      commandRows,
-    );
-    if (!command) return false;
-    const commandLine = `/${command.name}${command.argsText ? ` ${command.argsText}` : ""}`;
-    return getRinNonInteractiveCommandInteractionPolicy(commandLine)
-      .bypassAdmissionWait;
-  };
-
   const prepareClaimedInboxJob = async (
     job: ClaimedChatInboxJob,
   ): Promise<PreparedChatKeyWorkerJob> => {
@@ -929,10 +895,9 @@ export async function startChatBridge(
     const alreadySteered = controller.hasPendingSteeredDeliveryTarget(
       envelope.messageId,
     );
-    let task: Promise<void> | null = null;
     return {
-      run: () => {
-        task = runClaimedInboxJob(job, async () => {
+      run: () =>
+        runClaimedInboxJob(job, async () => {
           if (alreadySteered) {
             await controller.connect();
             return { retry: false, waitForProcessed: true };
@@ -943,21 +908,12 @@ export async function startChatBridge(
             identity,
             decision,
           );
-        });
-        return task;
-      },
-      waitForAdmission: async () => {
-        if (alreadySteered) return;
-        if (task) {
-          await waitForTurnAdmission(controller, envelope.messageId, task);
-        }
-      },
+        }),
     };
   };
 
   const chatKeyWorkers = createChatKeyWorkerPool<ClaimedChatInboxJob>({
     prepare: (job) => prepareClaimedInboxJob(job),
-    canBypassAdmissionWait: (job) => canCommandBypassAdmissionWait(job),
     onPrepareError: (job, chatKey, error) => {
       logger.warn(
         `chat inbox prepare failed chatKey=${chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,

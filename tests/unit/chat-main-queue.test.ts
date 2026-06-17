@@ -1070,7 +1070,7 @@ test("chat main routes active-turn /new through the chatKey worker immediately",
   }
 });
 
-test("chat main lets /abort bypass a same-chat turn waiting for backend admission", async () => {
+test("chat main submits /abort without waiting for a same-chat prompt to finish", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1109,13 +1109,13 @@ test("chat main lets /abort bypass a same-chat turn waiting for backend admissio
           isStreaming: false,
           messages: [],
           sessionManager: {
-            getSessionFile: () => "/tmp/abort-admission-chat.jsonl",
-            getSessionId: () => "abort-admission-session",
+            getSessionFile: () => "/tmp/abort-same-queue-chat.jsonl",
+            getSessionId: () => "abort-same-queue-session",
             getSessionName: () => controller.chatKey,
           },
           ensureSessionReady: async () => ({
-            sessionFile: "/tmp/abort-admission-chat.jsonl",
-            sessionId: "abort-admission-session",
+            sessionFile: "/tmp/abort-same-queue-chat.jsonl",
+            sessionId: "abort-same-queue-session",
           }),
           agent: {
             abort: () => {
@@ -1204,7 +1204,7 @@ test("chat main lets /abort bypass a same-chat turn waiting for backend admissio
   }
 });
 
-test("chat main lets same-chat follow-up enter the chatKey worker as steer", async () => {
+test("chat main submits same-chat follow-up as steer before the current turn is accepted", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1254,27 +1254,7 @@ test("chat main lets same-chat follow-up enter the chatKey worker as steer", asy
             promptModes.push(options.streamingBehavior || "prompt");
             if (controller.session.isStreaming) return;
             controller.session.isStreaming = true;
-            await controller.handleClientEvent({
-              type: "ui",
-              payload: {
-                type: "rpc_turn_event",
-                event: "start",
-                requestTag: options.requestTag,
-              },
-            });
-            await controller.handleClientEvent({
-              type: "ui",
-              payload: {
-                type: "message_end",
-                message: {
-                  role: "assistant",
-                  content: [
-                    { type: "text", text: "checking" },
-                    { type: "toolCall", name: "read", id: "call-1" },
-                  ],
-                },
-              },
-            });
+            await new Promise(() => {});
           },
           switchSession: async () => {},
         };

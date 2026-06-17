@@ -23,23 +23,14 @@ async function waitUntil(predicate: () => boolean, message: string) {
   assert.fail(message);
 }
 
-test("chat key worker lets abort bypass admission but keeps later jobs behind abort cleanup", async () => {
+test("chat key worker releases queued jobs immediately after submission starts", async () => {
   const events: string[] = [];
-  let releaseAdmission!: () => void;
-  let releaseAbort!: () => void;
   let releaseActive!: () => void;
-  const admission = new Promise<void>((resolve) => {
-    releaseAdmission = resolve;
-  });
-  const abortGate = new Promise<void>((resolve) => {
-    releaseAbort = resolve;
-  });
   const activeGate = new Promise<void>((resolve) => {
     releaseActive = resolve;
   });
 
   const pool = createChatKeyWorkerPool<{ kind: string }>({
-    canBypassAdmissionWait: (payload) => payload.kind === "abort",
     prepare: async (payload) => {
       if (payload.kind === "active") {
         return {
@@ -47,19 +38,6 @@ test("chat key worker lets abort bypass admission but keeps later jobs behind ab
             events.push("active-start");
             await activeGate;
             events.push("active-end");
-          },
-          waitForAdmission: async () => {
-            await admission;
-          },
-        };
-      }
-      if (payload.kind === "abort") {
-        return {
-          run: async () => {
-            events.push("abort-start");
-            releaseAdmission();
-            await abortGate;
-            events.push("abort-end");
           },
         };
       }
@@ -77,25 +55,16 @@ test("chat key worker lets abort bypass admission but keeps later jobs behind ab
     "active did not start",
   );
 
-  pool.enqueue("telegram/1:2", { kind: "abort" });
-  await waitUntil(() => events.includes("abort-start"), "abort did not bypass");
+  pool.enqueue("telegram/1:2", { kind: "follow-up" });
+  await waitUntil(
+    () => events.includes("follow-up-start"),
+    "follow-up waited for the active job to finish",
+  );
+  assert.deepEqual(events, ["active-start", "follow-up-start"]);
 
-  pool.enqueue("telegram/1:2", { kind: "next" });
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.deepEqual(events, ["active-start", "abort-start"]);
-
-  releaseAbort();
-  await waitUntil(() => events.includes("next-start"), "next did not resume");
   releaseActive();
   await waitUntil(
     () => events.includes("active-end"),
     "active did not clean up",
   );
-  assert.deepEqual(events, [
-    "active-start",
-    "abort-start",
-    "abort-end",
-    "next-start",
-    "active-end",
-  ]);
 });
