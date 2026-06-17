@@ -744,6 +744,26 @@ export class ChatController {
     this.markProcessedMessage(original, bindSession);
   }
 
+  private async finishSupersededRecoveredTurn(
+    input: { incomingMessageId?: string },
+    result: any,
+  ) {
+    this.markProcessedMessage(input.incomingMessageId);
+    await this.clearWorkingReactionFor(input.incomingMessageId);
+    this.clearCurrentTurnFor(input.incomingMessageId);
+    this.awaitingTurnSettle = false;
+    return {
+      superseded: true,
+      steered: false,
+      sessionId:
+        safeString(result?.sessionId || this.currentSessionId()).trim() ||
+        undefined,
+      sessionFile:
+        safeString(result?.sessionFile || this.currentSessionFile()).trim() ||
+        undefined,
+    };
+  }
+
   private buildStatusText() {
     const lines = [`Status: ${this.frontendPhase}`, `Chat: ${this.chatKey}`];
     const policy = this.getWorkingIndicatorPolicy();
@@ -1559,6 +1579,9 @@ export class ChatController {
         this.driver.currentSessionFile(),
       );
       this.saveState();
+      if (result.superseded) {
+        return await this.finishSupersededRecoveredTurn(input, result);
+      }
       if (result.steered) {
         if (deliverFinal) {
           this.rememberPendingSteeredDeliveryTarget({
@@ -1669,6 +1692,9 @@ export class ChatController {
           this.driver.currentSessionFile(),
         );
         this.saveState();
+        if (result.superseded) {
+          return await this.finishSupersededRecoveredTurn(input, result);
+        }
         if (result.steered) {
           if (deliverFinal) {
             this.rememberPendingSteeredDeliveryTarget({

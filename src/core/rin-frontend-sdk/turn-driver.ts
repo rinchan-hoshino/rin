@@ -62,6 +62,7 @@ export type RinFrontendTurnResult = {
   finalText?: string;
   result?: any;
   steered?: boolean;
+  superseded?: boolean;
   sessionId?: string;
   sessionFile?: string;
 };
@@ -913,6 +914,19 @@ export class RinFrontendTurnDriver {
       throw error;
     }
     if (resolved.submitted) return { submitted: true };
+    if ("superseded" in resolved && resolved.superseded) {
+      this.finishResolvedSubmittedTurn();
+      return {
+        superseded: true,
+        sessionId:
+          safeString(resolved.sessionId || this.currentSessionId()).trim() ||
+          undefined,
+        sessionFile:
+          safeString(
+            resolved.sessionFile || this.currentSessionFile(),
+          ).trim() || undefined,
+      };
+    }
     const finalText = safeString(resolved.finalText).trim();
     if (!finalText) return null;
     this.latestAssistantText = finalText;

@@ -4,6 +4,7 @@ import { safeString } from "../text-utils.js";
 
 export type RinSubmittedTurnResolution =
   | { submitted: true }
+  | { superseded: true; sessionId?: string; sessionFile?: string }
   | {
       error: string;
       sessionId?: string;
@@ -90,8 +91,25 @@ export function resolveSubmittedTurnFromMessages(
   if (submittedIndex < 0) return null;
 
   const turnMessages = messages.slice(submittedIndex + 1);
-  const completion = resolveTurnCompletion({ messages: turnMessages });
-  const finalText = safeString(completion.finalText).trim();
+  let hasLaterUserBeforeCompletion = false;
+  let completion: ReturnType<typeof resolveTurnCompletion> | null = null;
+  for (let index = 0; index < turnMessages.length; index += 1) {
+    const message = turnMessages[index];
+    if (messageRole(message) === "user") {
+      hasLaterUserBeforeCompletion = true;
+      continue;
+    }
+    const candidate = resolveTurnCompletion({
+      messages: turnMessages.slice(0, index + 1),
+    });
+    const candidateFinalText = safeString(candidate.finalText).trim();
+    if (candidateFinalText) {
+      completion = candidate;
+      break;
+    }
+  }
+  if (hasLaterUserBeforeCompletion) return { superseded: true };
+  const finalText = safeString(completion?.finalText).trim();
   if (!finalText) {
     if (options.turnActive) return { submitted: true };
     const error = findSubmittedTurnFailure(turnMessages);
@@ -100,6 +118,6 @@ export function resolveSubmittedTurnFromMessages(
   }
   return {
     finalText,
-    result: completion.result,
+    result: completion?.result,
   };
 }

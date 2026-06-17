@@ -3697,6 +3697,47 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   ]);
 });
 
+test("chat controller marks superseded restored inbox turns processed without duplicate final delivery", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery?.text || "");
+    this.stagedDelivery = null;
+  };
+  controller.driver.runTurn = async () => ({
+    superseded: true,
+    sessionFile: "/tmp/restored-chat.jsonl",
+    sessionId: "session-restored",
+  });
+  saveChatMessage(controller.agentDir, {
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    chatType: "group",
+    messageId: "m-old",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "older restored input",
+  });
+
+  const result = await controller.runTurn({
+    text: "older restored input",
+    attachments: [],
+    incomingMessageId: "m-old",
+    replyToMessageId: "m-old",
+  });
+
+  assert.deepEqual(deliveries, []);
+  assert.equal(result.superseded, true);
+  const stored = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "m-old",
+  );
+  assert.equal(Boolean(stored?.processedAt), true);
+});
+
 test("chat controller queues follow-up after an assistant reply is committed", async () => {
   const controller = await createController("onebot/1:private:2");
   const promptCalls = [];

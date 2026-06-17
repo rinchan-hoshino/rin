@@ -864,6 +864,44 @@ test("frontend SDK visible chat working excludes standalone compaction and recov
   assert.equal(driver.hasVisibleChatWorkingTurn(), false);
 });
 
+test("submitted turn resolution treats earlier steered inputs as superseded by the latest pre-final user input", () => {
+  const messages = [
+    {
+      role: "user",
+      timestamp: 1778774581000,
+      content: "first restored input",
+    },
+    {
+      role: "user",
+      timestamp: 1778774582000,
+      content: "latest restored input",
+    },
+    {
+      role: "assistant",
+      timestamp: 1778774590000,
+      content: [{ type: "text", text: "one recovered final" }],
+    },
+  ];
+
+  assert.deepEqual(
+    resolveSubmittedTurnFromMessages(messages, {
+      text: "first restored input",
+      sentAt: 1778774580000,
+    }),
+    { superseded: true },
+  );
+  assert.deepEqual(
+    resolveSubmittedTurnFromMessages(messages, {
+      text: "latest restored input",
+      sentAt: 1778774580000,
+    }),
+    {
+      finalText: "one recovered final",
+      result: { messages: [{ type: "text", text: "one recovered final" }] },
+    },
+  );
+});
+
 test("submitted turn resolution preserves provider failure instead of final-missing", () => {
   const resolved = resolveSubmittedTurnFromMessages(
     [
