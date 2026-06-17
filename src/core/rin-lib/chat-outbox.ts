@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { chatDataPath } from "../data-layout.js";
-import { readJsonFile, writeJsonAtomic } from "../platform/fs.js";
+import {
+  removeFileIfExists,
+  readJsonFile,
+  writeJsonAtomic,
+} from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 
 export type ChatMessagePart =
@@ -152,6 +156,17 @@ export function chatOutboxItemsDir(agentDir: string) {
   return path.join(chatOutboxDir(agentDir), "items");
 }
 
+export function chatOutboxHistoryDir(agentDir: string) {
+  return path.join(chatOutboxDir(agentDir), "history");
+}
+
+export function chatOutboxHistoryItemsDir(
+  agentDir: string,
+  status: Extract<ChatOutboxItemStatus, "delivered" | "failed">,
+) {
+  return path.join(chatOutboxHistoryDir(agentDir), status);
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -173,6 +188,17 @@ function stableOutboxIdForKey(key: string) {
 
 export function chatOutboxItemPath(agentDir: string, id: string) {
   return path.join(chatOutboxItemsDir(agentDir), `${sanitizeIdPart(id)}.json`);
+}
+
+export function chatOutboxHistoryItemPath(
+  agentDir: string,
+  id: string,
+  status: Extract<ChatOutboxItemStatus, "delivered" | "failed">,
+) {
+  return path.join(
+    chatOutboxHistoryItemsDir(agentDir, status),
+    `${sanitizeIdPart(id)}.json`,
+  );
 }
 
 function normalizeDeliveryKind(value: unknown): ChatOutboxDeliveryKind {
@@ -288,8 +314,30 @@ function normalizeOutboxItem(
   };
 }
 
+export function readChatOutboxItemById(agentDir: string, id: string) {
+  const activePath = chatOutboxItemPath(agentDir, id);
+  const active = readChatOutboxItem(agentDir, activePath);
+  if (active) return { filePath: activePath, item: active };
+  for (const status of ["delivered", "failed"] as const) {
+    const filePath = chatOutboxHistoryItemPath(agentDir, id, status);
+    const item = readChatOutboxItem(agentDir, filePath);
+    if (item) return { filePath, item };
+  }
+  return null;
+}
+
 export function writeChatOutboxItem(agentDir: string, item: ChatOutboxItem) {
+  if (item.status === "delivered" || item.status === "failed") {
+    writeJsonAtomic(
+      chatOutboxHistoryItemPath(agentDir, item.id, item.status),
+      item,
+    );
+    removeFileIfExists(chatOutboxItemPath(agentDir, item.id));
+    return;
+  }
   writeJsonAtomic(chatOutboxItemPath(agentDir, item.id), item);
+  removeFileIfExists(chatOutboxHistoryItemPath(agentDir, item.id, "delivered"));
+  removeFileIfExists(chatOutboxHistoryItemPath(agentDir, item.id, "failed"));
 }
 
 export function readChatOutboxItem(agentDir: string, filePath: string) {
@@ -310,7 +358,12 @@ export function listChatOutboxItems(agentDir: string) {
     .map((name) => {
       const filePath = path.join(dir, name);
       const item = readChatOutboxItem(agentDir, filePath);
-      return item ? { filePath, item } : null;
+      if (!item) return null;
+      if (item.status === "delivered" || item.status === "failed") {
+        writeChatOutboxItem(agentDir, item);
+        return null;
+      }
+      return { filePath, item };
     })
     .filter(Boolean)
     .sort(
@@ -338,12 +391,12 @@ export function enqueueChatOutboxPayload(
     sanitizeIdPart(options.id) ||
     (idempotencyKey ? stableOutboxIdForKey(idempotencyKey) : createOutboxId());
   const filePath = chatOutboxItemPath(agentDir, id);
-  const existing = readChatOutboxItem(agentDir, filePath);
+  const existing = readChatOutboxItemById(agentDir, id);
   if (existing) {
-    if (idempotencyKey && existing.idempotencyKey !== idempotencyKey) {
+    if (idempotencyKey && existing.item.idempotencyKey !== idempotencyKey) {
       throw new Error("chat_outbox_idempotency_collision");
     }
-    return filePath;
+    return existing.filePath;
   }
   const sequence =
     Date.now() * 1000 + (sequenceCounter = (sequenceCounter + 1) % 1_000_000);

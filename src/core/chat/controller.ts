@@ -48,9 +48,8 @@ import {
   safeString,
 } from "./chat-helpers.js";
 import {
-  chatOutboxItemPath,
   enqueueChatOutboxPayload,
-  readChatOutboxItem,
+  readChatOutboxItemById,
 } from "../rin-lib/chat-outbox.js";
 import { drainChatOutbox } from "./boot.js";
 import { listChatMessages } from "./message-store.js";
@@ -1083,10 +1082,7 @@ export class ChatController {
       throw new Error(errorMessage);
     }
     if (!own && idempotencyKey) {
-      const current = readChatOutboxItem(
-        this.agentDir,
-        chatOutboxItemPath(this.agentDir, id),
-      );
+      const current = readChatOutboxItemById(this.agentDir, id)?.item;
       if (current?.status === "delivered") return current.deliveryResult || [];
       if (current?.status === "failed") {
         throw new Error(current.lastError || "chat_outbox_delivery_failed");

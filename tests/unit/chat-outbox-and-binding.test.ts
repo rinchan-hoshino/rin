@@ -116,6 +116,36 @@ test("chat outbox rejects SDK-style empty payloads before enqueue", async () => 
   });
 });
 
+test("chat outbox archives legacy completed items out of the active queue", async () => {
+  await withTempDir(async (dir) => {
+    outbox.enqueueChatOutboxPayload(dir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/777:1",
+      text: "already sent",
+    });
+    const queued = outbox.listChatOutboxItems(dir)[0].item;
+    await fs.writeFile(
+      outbox.chatOutboxItemPath(dir, queued.id),
+      `${JSON.stringify({
+        ...queued,
+        status: "delivered",
+        deliveredAt: new Date().toISOString(),
+      })}\n`,
+    );
+
+    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+    await assert.rejects(fs.stat(outbox.chatOutboxItemPath(dir, queued.id)));
+    assert.equal(
+      outbox.readChatOutboxItem(
+        dir,
+        outbox.chatOutboxHistoryItemPath(dir, queued.id, "delivered"),
+      ).status,
+      "delivered",
+    );
+  });
+});
+
 test("chat outbox retries queued payloads after send failure", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {
@@ -163,7 +193,12 @@ test("chat outbox retries queued payloads after send failure", async () => {
     results = await boot.drainChatOutbox(app, dir, h, logger);
     assert.equal(results[0].status, "delivered");
     assert.deepEqual(deliveries, ["retry me", "retry me"]);
-    assert.equal(outbox.listChatOutboxItems(dir)[0].item.status, "delivered");
+    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+    assert.ok(
+      await fs.stat(
+        outbox.chatOutboxHistoryItemPath(dir, stored.id, "delivered"),
+      ),
+    );
   });
 });
 
@@ -201,7 +236,11 @@ test("chat outbox fails partial delivery errors without retrying", async () => {
 
     const results = await boot.drainChatOutbox(app, dir, h, logger);
     assert.equal(results[0].status, "failed");
-    const failed = outbox.listChatOutboxItems(dir)[0].item;
+    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+    const failed = outbox.readChatOutboxItem(
+      dir,
+      outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
+    );
     assert.equal(failed.status, "failed");
     assert.equal(failed.failureKind, "permanent");
     assert.equal(failed.nextAttemptAt, undefined);
@@ -239,7 +278,11 @@ test("chat outbox stops retrying after repeated transient failures", async () =>
 
     const results = await boot.drainChatOutbox(app, dir, h, logger);
     assert.equal(results[0].status, "failed");
-    const failed = outbox.listChatOutboxItems(dir)[0].item;
+    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+    const failed = outbox.readChatOutboxItem(
+      dir,
+      outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
+    );
     assert.equal(failed.status, "failed");
     assert.equal(failed.failureKind, "attempts_exhausted");
   });
@@ -262,7 +305,11 @@ test("chat outbox fails permanent delivery errors without retrying", async () =>
 
     const results = await boot.drainChatOutbox({ bots: [] }, dir, h, logger);
     assert.equal(results[0].status, "failed");
-    const stored = outbox.listChatOutboxItems(dir)[0].item;
+    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+    const stored = outbox.readChatOutboxItem(
+      dir,
+      outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
+    );
     assert.equal(stored.status, "failed");
     assert.equal(stored.failureKind, "permanent");
     assert.equal(stored.nextAttemptAt, undefined);
@@ -297,7 +344,11 @@ test("chat outbox treats platform permission errors as permanent", async () => {
 
     const results = await boot.drainChatOutbox(app, dir, h, logger);
     assert.equal(results[0].status, "failed");
-    const stored = outbox.listChatOutboxItems(dir)[0].item;
+    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+    const stored = outbox.readChatOutboxItem(
+      dir,
+      outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
+    );
     assert.equal(stored.status, "failed");
     assert.equal(stored.failureKind, "permanent");
   });

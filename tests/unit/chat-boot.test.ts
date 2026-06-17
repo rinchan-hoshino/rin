@@ -246,9 +246,11 @@ test("chat boot drains a target chat without waiting for a slow different chat",
     ]);
 
     assert.notEqual(result, "timed-out");
-    assert.equal(
-      outbox.listChatOutboxItems(agentDir)[1].item.status,
-      "delivered",
+    assert.ok(
+      outbox.readChatOutboxItem(
+        agentDir,
+        outbox.chatOutboxHistoryItemPath(agentDir, fastId, "delivered"),
+      ),
     );
     assert.deepEqual(
       sends.map((send) => send.chatId),

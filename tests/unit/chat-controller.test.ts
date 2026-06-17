@@ -24,10 +24,22 @@ const { lookupReplySession } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js"))
     .href
 );
-const { listChatOutboxItems, writeChatOutboxItem } = await import(
+const {
+  chatOutboxHistoryItemsDir,
+  listChatOutboxItems,
+  readChatOutboxItem,
+  writeChatOutboxItem,
+} = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
     .href
 );
+
+async function readOnlyChatOutboxHistoryItem(agentDir, status) {
+  const dir = chatOutboxHistoryItemsDir(agentDir, status);
+  const names = await fs.readdir(dir);
+  assert.equal(names.length, 1);
+  return readChatOutboxItem(agentDir, path.join(dir, names[0]));
+}
 
 function attachTestChatApp(controller) {
   controller.app = {
@@ -4058,15 +4070,19 @@ test("chat controller does not resend an already delivered final after restart r
   const items = listChatOutboxItems(controller.agentDir).map(
     ({ item }) => item,
   );
+  const delivered = await readOnlyChatOutboxHistoryItem(
+    controller.agentDir,
+    "delivered",
+  );
   const message = getChatMessage(
     controller.agentDir,
     controller.chatKey,
     "incoming-1",
   );
   assert.equal(sendCount, 1);
-  assert.equal(items.length, 1);
-  assert.equal(items[0].status, "delivered");
-  assert.equal(items[0].deliveryResult[0], "sent-1");
+  assert.equal(items.length, 0);
+  assert.equal(delivered.status, "delivered");
+  assert.equal(delivered.deliveryResult[0], "sent-1");
   assert.equal(Boolean(message.processedAt), true);
 });
 
@@ -4117,10 +4133,14 @@ test("chat controller reuses a queued final outbox item on restart recovery", as
   await recoveredController.deliverAssistantReply(input);
 
   items = listChatOutboxItems(controller.agentDir).map(({ item }) => item);
+  const delivered = await readOnlyChatOutboxHistoryItem(
+    controller.agentDir,
+    "delivered",
+  );
   assert.equal(sendCount, 2);
-  assert.equal(items.length, 1);
-  assert.equal(items[0].status, "delivered");
-  assert.equal(items[0].deliveryResult[0], "sent-2");
+  assert.equal(items.length, 0);
+  assert.equal(delivered.status, "delivered");
+  assert.equal(delivered.deliveryResult[0], "sent-2");
 });
 
 test("chat controller leaves an in-flight final outbox item pending on restart recovery", async () => {
@@ -4230,13 +4250,17 @@ test("chat controller surfaces a failed final outbox item on restart recovery", 
   const items = listChatOutboxItems(controller.agentDir).map(
     ({ item }) => item,
   );
+  const failed = await readOnlyChatOutboxHistoryItem(
+    controller.agentDir,
+    "failed",
+  );
   const message = getChatMessage(
     controller.agentDir,
     controller.chatKey,
     "incoming-failed",
   );
   assert.equal(sendCount, 1);
-  assert.equal(items.length, 1);
-  assert.equal(items[0].status, "failed");
+  assert.equal(items.length, 0);
+  assert.equal(failed.status, "failed");
   assert.equal(message.processedAt, undefined);
 });
