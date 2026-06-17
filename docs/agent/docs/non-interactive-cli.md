@@ -53,10 +53,9 @@ Useful options:
 - `--session <file>`: continue an existing session file.
 - `--managed-session <leaf>`: keep a new session under `~/.rin/sessions/managed/<leaf>/`.
 - `--name <name>`: set the child session display name.
-- `--chat-key <chatKey>`: deliver the final answer to a verified chat target.
 - `--timeout <seconds>`: set the maximum wait time.
 
-Runs without `--session` or `--managed-session` are transient. Use a managed session when the child needs durable context across runs.
+Non-interactive runs are standalone: they do not connect to the Rin daemon, do not deliver chat messages, and do not interact with chat bridge state. Runs without `--session` or `--managed-session` are transient. Use a managed session when the child needs durable context across runs.
 
 ## Managed child sessions
 
@@ -99,13 +98,7 @@ Prefer structured output over a copied parent transcript. Pass secrets, credenti
 
 ## Chat delivery
 
-Use `--chat-key` when a child run should deliver its final answer to a verified chat target while also printing locally:
-
-```sh
-rin -p --chat-key telegram/123:-100456 "Write a short status update"
-```
-
-Chat delivery uses a detached one-shot chat controller. Delivered messages are not bound to the child session for later replies. Use this path for authorized outbound status messages. Keep confirmations and account actions in the parent lane.
+Non-interactive CLI does not support chat delivery. Do not use `rin -p` for outbound chat messages; use the chat bridge or another explicit chat-owned surface instead. Keep confirmations and account actions in the parent lane.
 
 ## Parent integration
 

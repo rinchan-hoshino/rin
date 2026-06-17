@@ -426,6 +426,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Session operation needs a session file. Choose a session.",
   session_fork_unsupported: () =>
     "This session cannot be forked through that path. Use a supported session type or start a new session.",
+  run_chat_key_not_supported_in_print_mode: () =>
+    "Print mode cannot deliver chat messages. Use a chat-owned delivery surface instead.",
 
   slack_app_token_required: () =>
     "Slack adapter needs an app token before it can start. Add the token.",

@@ -105,10 +105,6 @@ function createCli() {
       "-nbt, --no-builtin-tools",
       "Disable built-in tools in non-interactive mode",
     )
-    .option(
-      "--chat-key <chatKey>",
-      "Deliver non-interactive final answer to a chat",
-    )
     .help();
 
   for (const [name, description] of RIN_COMMANDS) {

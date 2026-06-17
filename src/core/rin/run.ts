@@ -1,18 +1,26 @@
-import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseArgs as parsePiArgs } from "@earendil-works/pi-coding-agent";
-import { requestDaemonCommand } from "../rin-daemon/client.js";
-import { MANAGED_CLI_SESSION_LEAF } from "../session/managed-paths.js";
+import { extractMessageText } from "../message-content.js";
+import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import {
-  createTargetExecutionContext,
-  ensureDaemonAvailable,
-  stripRinWrapperArgs,
-  type ParsedArgs,
-  safeString,
-} from "./shared.js";
+  getRuntimeSessionDir,
+  resolveRuntimeProfile,
+} from "../rin-lib/profile.js";
+import { createConfiguredAgentSession } from "../rin-lib/runtime.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
+import {
+  getManagedSessionDir,
+  MANAGED_CLI_SESSION_LEAF,
+} from "../session/managed-paths.js";
+import { readSessionMetadata } from "../session/metadata.js";
+import {
+  requireExistingSessionFile,
+  resolveStoredSessionFile,
+} from "../session/ref.js";
+import { resolveTurnCompletion } from "../session/turn-result.js";
+import { stripRinWrapperArgs, type ParsedArgs, safeString } from "./shared.js";
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const VALID_MODES = new Set(["text", "json"]);
@@ -52,7 +60,6 @@ Options:
   --exclude-tools, -xt <tools>   Comma-separated denylist of tool names
   --no-tools, -nt                Disable all tools by default
   --no-builtin-tools, -nbt       Disable built-in tools by default
-  --chat-key <chatKey>           Deliver the final answer to this chat as well
   --timeout <seconds>            Maximum wait time (default: 1800)
   --help, -h                     Show this help
 
@@ -63,7 +70,6 @@ Examples:
   rin --mode json --managed-session subagent -p "Scout the auth module"
   rin --name "release audit" -p "Audit this repository"
   rin --model openai/gpt-5.5 --thinking low -p "Draft release notes"
-  rin -p --chat-key telegram/123:-100456 "Send a short status update"
 `);
 }
 
@@ -216,6 +222,19 @@ export function shouldRunNonInteractive(
   return !stdinIsTTY;
 }
 
+function hasChatDeliveryArg(rawArgv: string[]) {
+  const args = stripRinWrapperArgs(rawArgv);
+  return args.some((value) => {
+    const arg = safeString(value).trim();
+    return (
+      arg === "--chat-key" ||
+      arg === "--chatKey" ||
+      arg.startsWith("--chat-key=") ||
+      arg.startsWith("--chatKey=")
+    );
+  });
+}
+
 export async function parseRunArgs(
   rawArgv: string[],
   stdinContentOverride?: string,
@@ -366,59 +385,138 @@ async function removeTransientSessionFile(
     .catch(() => {});
 }
 
-function formatRunResult(result: any, keepSession: boolean) {
-  return {
-    finalText: result?.finalText,
-    result: result?.result,
-    ...(keepSession
-      ? { sessionFile: result?.sessionFile, sessionId: result?.sessionId }
-      : {}),
-  };
+function createStandaloneRunSessionManager(
+  SessionManager: any,
+  options: {
+    cwd: string;
+    agentDir: string;
+    sessionFile?: string;
+    managedSessionLeaf?: string;
+  },
+) {
+  const sessionFile = options.sessionFile
+    ? resolveStoredSessionFile(options.agentDir, options.sessionFile) ||
+      options.sessionFile
+    : "";
+  if (sessionFile) {
+    return SessionManager.open(
+      requireExistingSessionFile(sessionFile),
+      getRuntimeSessionDir(options.cwd, options.agentDir),
+    );
+  }
+
+  const managedSessionLeaf =
+    safeString(options.managedSessionLeaf).trim() || MANAGED_CLI_SESSION_LEAF;
+  return SessionManager.create(
+    options.cwd,
+    getManagedSessionDir(options.agentDir, managedSessionLeaf),
+  );
 }
 
-async function runDetachedTurn(
-  agentDir: string,
-  socketPath: string,
+async function withRunTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  let timeout: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(
+      () => {
+        reject(new Error(`run_timeout:${Math.ceil(timeoutMs / 1000)}`));
+      },
+      Math.max(1, timeoutMs),
+    );
+    timeout.unref?.();
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function runStandaloneTurn(
+  parsed: ParsedArgs,
   options: RunCliOptions,
 ): Promise<Record<string, unknown>> {
+  if (options.chatKey) {
+    throw new Error("run_chat_key_not_supported_in_print_mode");
+  }
+
   const text = [options.prompt, ...options.messages].filter(Boolean).join("\n");
   const managedSessionLeaf = safeString(options.managedSessionLeaf).trim();
   const keepSession = Boolean(options.sessionFile || managedSessionLeaf);
-  const result = await requestDaemonCommand(
-    {
-      type: "chat_run_turn",
-      payload: {
-        chatKey: options.chatKey,
-        text,
-        sessionFile: options.sessionFile,
-        ...(!options.sessionFile
-          ? {
-              managedSessionLeaf:
-                managedSessionLeaf || MANAGED_CLI_SESSION_LEAF,
-            }
-          : {}),
-        ...(options.sessionName ? { sessionName: options.sessionName } : {}),
-        ...(options.tools !== undefined ? { tools: options.tools } : {}),
-        ...(options.excludeTools !== undefined
-          ? { excludeTools: options.excludeTools }
-          : {}),
-        ...(options.noTools !== undefined ? { noTools: options.noTools } : {}),
-        ...(options.piStartupOptions !== undefined
-          ? { piStartupOptions: options.piStartupOptions }
-          : {}),
-        model: options.model,
-        thinkingLevel: options.thinkingLevel,
-        controllerKey: `cli-${Date.now()}-${randomUUID().slice(0, 8)}`,
-        affectChatBinding: false,
-        disposeAfterTurn: true,
-      },
-    },
-    { socketPath, timeoutMs: options.timeoutMs },
-  );
-  if (!keepSession) {
-    await removeTransientSessionFile(agentDir, result?.sessionFile);
+  const profile = resolveRuntimeProfile({ agentDir: parsed.installDir });
+  const { SessionManager } = await loadRinSessionManagerModule();
+  const sessionManager = createStandaloneRunSessionManager(SessionManager, {
+    cwd: profile.cwd,
+    agentDir: profile.agentDir,
+    sessionFile: options.sessionFile,
+    managedSessionLeaf,
+  });
+  const { session, runtime } = await createConfiguredAgentSession({
+    cwd: profile.cwd,
+    agentDir: profile.agentDir,
+    sessionManager,
+    sessionName: options.sessionName,
+    tools: options.tools,
+    excludeTools: options.excludeTools,
+    noTools: options.noTools,
+    piStartupOptions: options.piStartupOptions,
+    modelRef: options.model,
+    thinkingLevel: options.thinkingLevel,
+  });
+
+  let latestAssistantText = "";
+  const rawUnsubscribe = session.subscribe?.((event: any) => {
+    if (event?.type !== "message_end") return;
+    if (event?.message?.role !== "assistant") return;
+    const value = extractMessageText(event.message.content, { trim: true });
+    if (value) latestAssistantText = value;
+  });
+  const unsubscribe =
+    typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
+
+  try {
+    const promptResult: any = await withRunTimeout(
+      (async () => {
+        const result = await session.prompt(text, { source: "cli" as any });
+        await session.agent?.waitForIdle?.();
+        return result;
+      })(),
+      options.timeoutMs,
+    );
+    const completion = resolveTurnCompletion({
+      result: promptResult?.result ?? promptResult,
+      messages: promptResult?.messages,
+      finalText: latestAssistantText || promptResult?.finalText,
+    });
+    if (!completion.finalText) throw new Error("final_assistant_text_missing");
+    const sessionMeta = readSessionMetadata(session);
+    const result = {
+      finalText: completion.finalText,
+      result: completion.result,
+      ...(keepSession
+        ? {
+            sessionFile: sessionMeta.sessionFile || undefined,
+            sessionId: sessionMeta.sessionId || undefined,
+          }
+        : {}),
+    };
+    if (!keepSession) {
+      await removeTransientSessionFile(
+        profile.agentDir,
+        sessionMeta.sessionFile,
+      );
+    }
+    return result;
+  } finally {
+    try {
+      unsubscribe?.();
+    } catch {}
+    try {
+      await session.abort?.();
+    } catch {}
+    try {
+      await runtime.dispose?.();
+    } catch {}
   }
-  return formatRunResult(result, keepSession);
 }
 
 function printResult(
@@ -434,6 +532,9 @@ function printResult(
 }
 
 export async function runNonInteractive(parsed: ParsedArgs, rawArgv: string[]) {
+  if (hasChatDeliveryArg(rawArgv)) {
+    throw new Error("run_chat_key_not_supported_in_print_mode");
+  }
   const options = await parseRunArgs(rawArgv);
   if (options.help) {
     printRunHelp();
@@ -442,12 +543,6 @@ export async function runNonInteractive(parsed: ParsedArgs, rawArgv: string[]) {
   if (!options.prompt && !options.messages.length)
     throw new Error("run_prompt_required");
 
-  const context = createTargetExecutionContext(parsed);
-  await ensureDaemonAvailable(context);
-  const result = await runDetachedTurn(
-    context.agentDir,
-    context.socketPath,
-    options,
-  );
+  const result = await runStandaloneTurn(parsed, options);
   printResult(result, options.outputMode);
 }

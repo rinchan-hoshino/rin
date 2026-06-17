@@ -264,7 +264,7 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
 
   assert.match(output, /--print/);
   assert.match(output, /--mode <mode>/);
-  assert.match(output, /--chat-key <chatKey>/);
+  assert.doesNotMatch(output, /--chat-key <chatKey>/);
   assert.match(output, /--managed-session <leaf>/);
   assert.match(output, /--name <name>/);
   assert.match(output, /--tools <tools>/);
@@ -296,7 +296,7 @@ test("print help shows the Pi-style non-interactive CLI contract", () => {
     /Usage:\n\s+rin \[options\] \[@files\.\.\.\] \[messages\.\.\.\]/,
   );
   assert.match(output, /--print, -p/);
-  assert.match(output, /--chat-key <chatKey>/);
+  assert.doesNotMatch(output, /--chat-key <chatKey>/);
   assert.match(output, /--managed-session <leaf>/);
   assert.match(output, /--name <name>/);
   assert.match(output, /--tools, -t <tools>/);
@@ -304,7 +304,7 @@ test("print help shows the Pi-style non-interactive CLI contract", () => {
   assert.doesNotMatch(output, /--bind-chat-session/);
 });
 
-test("run parser supports Pi-style print, model, chatKey, json, timeout, and name options", async () => {
+test("run parser recognizes legacy chatKey but print mode rejects chat delivery", async () => {
   const parsed = await run.parseRunArgs(
     [
       "-p",
@@ -351,6 +351,20 @@ test("run parser supports Pi-style print, model, chatKey, json, timeout, and nam
   assert.deepEqual(piStartupOptions?.excludeTools, ["grep"]);
 
   await assert.rejects(
+    () =>
+      run.runNonInteractive(
+        shared.resolveParsedArgs("", {}, [
+          "-p",
+          "hello",
+          "--chat-key",
+          "telegram/1:2",
+        ]),
+        ["-p", "hello", "--chat-key", "telegram/1:2"],
+      ),
+    /run_chat_key_not_supported_in_print_mode/,
+  );
+
+  await assert.rejects(
     () => run.parseRunArgs(["-p", "hello", "--bind-chat-session"], ""),
     /unknown_run_option:--bind-chat-session/,
   );
@@ -358,6 +372,14 @@ test("run parser supports Pi-style print, model, chatKey, json, timeout, and nam
   assert.equal(run.shouldRunNonInteractive(["-p"], true), true);
   assert.equal(run.shouldRunNonInteractive(["--mode", "json"], true), true);
   assert.equal(run.shouldRunNonInteractive([], false), true);
+
+  const runSource = fs.readFileSync(
+    path.join(rootDir, "dist", "core", "rin", "run.js"),
+    "utf8",
+  );
+  assert.doesNotMatch(runSource, /requestDaemonCommand/);
+  assert.doesNotMatch(runSource, /ensureDaemonAvailable/);
+  assert.doesNotMatch(runSource, /chat_run_turn/);
 });
 
 test("run parser supports managed session leaves for delegated non-interactive sessions", async () => {
