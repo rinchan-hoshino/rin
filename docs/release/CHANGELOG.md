@@ -12,6 +12,7 @@
 - Release executors now verify changelog coverage against included commits before publishing stable or prerelease metadata.
 
 <!-- rin-changelog-coverage
+278f865 docs(release): cover 0.5.0 nightly changes
 5cf9db2 fix(cli): run print mode without daemon
 e583326 test(installer): stabilize update-mode source boundary
 9adc476 fix(chat): stop gating queued inbox submissions
