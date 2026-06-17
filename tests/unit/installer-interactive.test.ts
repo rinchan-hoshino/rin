@@ -484,9 +484,15 @@ test("update mode skips language prompt and reuses installer note renderer", () 
     "utf8",
   );
 
+  const updateModeStart = mainSource.indexOf("if (cli.update)");
+  const installLanguagePromptStart = mainSource.indexOf(
+    "const selectedLanguage = await promptInstallerLanguage",
+  );
+  assert.ok(updateModeStart >= 0);
+  assert.ok(installLanguagePromptStart > updateModeStart);
   const updateModeBlock = mainSource.slice(
-    mainSource.indexOf("if (cli.update)"),
-    mainSource.indexOf("if (shouldStartGuiInstaller"),
+    updateModeStart,
+    installLanguagePromptStart,
   );
   assert.doesNotMatch(updateModeBlock, /promptInstallerLanguage/);
   assert.match(updateModeBlock, /readInstalledUpdateLanguage/);
