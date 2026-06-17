@@ -447,8 +447,9 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     note(i18n.ownershipNotWritableText, i18n.ownershipCheckTitle);
   }
 
-  const installServiceNow =
-    process.platform === "darwin" || process.platform === "linux";
+  const installServiceNow = ["darwin", "linux", "win32"].includes(
+    process.platform,
+  );
   const needsElevatedWrite = !ownership.writable;
   const needsElevatedService = installServiceNow && targetUser !== currentUser;
   const finalRequirements = buildFinalRequirements(

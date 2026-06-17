@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { windowsNamedPipePath } from "../rin-lib/common.js";
+
 const INSTALLED_APP_ENTRY_LAYOUT = {
   rin: {
     current: ["app", "rin", "main.js"],
@@ -15,6 +17,9 @@ const INSTALLED_APP_ENTRY_LAYOUT = {
   "rin-gui": {
     current: ["app", "rin-gui", "main.js"],
   },
+  "rin-tui": {
+    current: ["app", "rin-tui", "main.js"],
+  },
 } as const;
 
 const INSTALLER_MANIFEST_RELATIVE_PATH = ["installer.json"] as const;
@@ -28,13 +33,20 @@ function uniqueNonEmptyStrings(values: Array<string | undefined | null>) {
   );
 }
 
-const SUPPORTED_HOME_DISCOVERY_PLATFORMS = ["linux", "darwin"] as const;
+const POSIX_HOME_DISCOVERY_PLATFORMS = ["linux", "darwin"] as const;
+
+function homeDiscoveryPlatforms(platform: NodeJS.Platform = process.platform) {
+  return platform === "win32"
+    ? (["win32"] as const)
+    : POSIX_HOME_DISCOVERY_PLATFORMS;
+}
 
 function pathCandidatesForSupportedHomeDiscoveryPlatforms(
   buildPath: (platform: NodeJS.Platform) => string,
+  platform: NodeJS.Platform = process.platform,
 ) {
   return uniqueNonEmptyStrings(
-    SUPPORTED_HOME_DISCOVERY_PLATFORMS.map((platform) => buildPath(platform)),
+    homeDiscoveryPlatforms(platform).map((entry) => buildPath(entry)),
   );
 }
 
@@ -44,8 +56,13 @@ export function defaultHomeRoot(platform = process.platform) {
   return "/home";
 }
 
-export function installDiscoveryHomeRoots() {
-  return pathCandidatesForSupportedHomeDiscoveryPlatforms(defaultHomeRoot);
+export function installDiscoveryHomeRoots(
+  platform: NodeJS.Platform = process.platform,
+) {
+  return pathCandidatesForSupportedHomeDiscoveryPlatforms(
+    defaultHomeRoot,
+    platform,
+  );
 }
 
 export function defaultHomeForUser(user: string, platform = process.platform) {
@@ -228,11 +245,17 @@ export function localBinDirForHome(home: string) {
   return path.join(home, ".local", "bin");
 }
 
-export function launcherPathForHome(
-  home: string,
-  name: "rin" | "rin-install" | "rin-gui",
-) {
+export type LauncherAppName = "rin" | "rin-install" | "rin-tui" | "rin-gui";
+
+export function launcherPathForHome(home: string, name: LauncherAppName) {
   return path.join(localBinDirForHome(home), name);
+}
+
+export function windowsLauncherPathForHome(
+  home: string,
+  name: LauncherAppName,
+) {
+  return path.join(localBinDirForHome(home), `${name}.cmd`);
 }
 
 export function windowsDesktopDirForHome(home: string) {
@@ -440,6 +463,9 @@ export function daemonSocketPathForHome(
 ) {
   const platform = options.platform || process.platform;
   const uid = Number(options.uid ?? -1);
+  if (platform === "win32") {
+    return windowsNamedPipePath("daemon", home);
+  }
   if (platform === "darwin") {
     return path.join(
       userCacheDirForHome(home, platform),

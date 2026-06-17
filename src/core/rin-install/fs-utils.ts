@@ -27,6 +27,7 @@ import {
   launcherPathForHome,
   windowsGuiDesktopLauncherPathForHome,
   windowsGuiStartMenuLauncherPathForHome,
+  windowsLauncherPathForHome,
 } from "./paths.js";
 
 export { ensureDir, readJsonFile, writeJsonFile };
@@ -105,7 +106,10 @@ export function installedRuntimePathValue(home?: string) {
     .join(path.delimiter);
 }
 
-export function installedRuntimeNodeCommandArgs() {
+export function installedRuntimeNodeCommandArgs(
+  platform: NodeJS.Platform = process.platform,
+) {
+  if (platform === "win32") return ["node"];
   return [fs.existsSync("/usr/bin/env") ? "/usr/bin/env" : "env", "node"];
 }
 
@@ -150,6 +154,7 @@ export function launcherTargetsForInstallDir(installDir: string) {
   return {
     rin: installedAppEntryCandidates(installDir, "rin"),
     rinInstall: installedAppEntryCandidates(installDir, "rin-install"),
+    rinTui: installedAppEntryCandidates(installDir, "rin-tui"),
     rinGui: installedAppEntryCandidates(installDir, "rin-gui"),
   };
 }
@@ -176,19 +181,32 @@ function writeLauncherExecutableForUser(
   writeTextFileWithPrivilege(filePath, content, ownerUser, ownerGroup, 0o755);
 }
 
+function windowsCmdQuote(value: string) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
 export function windowsCmdLauncherScript(
   candidates: string[],
   args: string[] = [],
+  options: { detached?: boolean; missingMessage?: string } = {},
 ) {
-  const nodeCommand = installedRuntimeNodeCommandArgs().join(" ");
-  const forwardedArgs = args.map((arg) => ` ${arg}`).join("");
+  const nodeCommand = installedRuntimeNodeCommandArgs("win32")
+    .map(windowsCmdQuote)
+    .join(" ");
+  const fixedArgs = args.map((arg) => ` ${windowsCmdQuote(arg)}`).join("");
+  const forwardedArgs = " %*";
+  const missingMessage =
+    options.missingMessage || "rin: installed runtime entry not found";
   const checks = candidates
-    .map(
-      (candidate) =>
-        `if exist "${String(candidate).replace(/"/g, '""')}" start "" "${nodeCommand}" "${String(candidate).replace(/"/g, '""')}"${forwardedArgs}`,
-    )
+    .map((candidate) => {
+      const entry = windowsCmdQuote(candidate);
+      const command = options.detached
+        ? `start "" ${nodeCommand} ${entry}${fixedArgs}${forwardedArgs}\r\n  exit /b 0`
+        : `${nodeCommand} ${entry}${fixedArgs}${forwardedArgs}\r\n  exit /b %ERRORLEVEL%`;
+      return `if exist ${entry} (\r\n  ${command}\r\n)`;
+    })
     .join("\r\n");
-  return `@echo off\r\n${checks}\r\necho rin: installed GUI entry not found\r\nexit /b 1\r\n`;
+  return `@echo off\r\n${checks}\r\necho ${missingMessage}\r\nexit /b 1\r\n`;
 }
 
 export function writeLaunchersForUser(
@@ -200,30 +218,47 @@ export function writeLaunchersForUser(
   const home = homeForUser(userName);
   const platform = options.platform || process.platform;
   const targets = launcherTargetsForInstallDir(installDir);
-  const rinPath = launcherPathForHome(home, "rin");
-  const rinInstallPath = launcherPathForHome(home, "rin-install");
-  const rinGuiPath = launcherPathForHome(home, "rin-gui");
-  writeLauncherExecutableForUser(
-    userName,
-    rinPath,
-    launcherScript(targets.rin),
-    options,
-  );
-  writeLauncherExecutableForUser(
-    userName,
-    rinInstallPath,
-    launcherScript(targets.rinInstall),
-    options,
-  );
-  writeLauncherExecutableForUser(
-    userName,
-    rinGuiPath,
-    launcherScript(targets.rinGui),
-    options,
-  );
+  const rinPath =
+    platform === "win32"
+      ? windowsLauncherPathForHome(home, "rin")
+      : launcherPathForHome(home, "rin");
+  const rinInstallPath =
+    platform === "win32"
+      ? windowsLauncherPathForHome(home, "rin-install")
+      : launcherPathForHome(home, "rin-install");
+  const rinTuiPath =
+    platform === "win32"
+      ? windowsLauncherPathForHome(home, "rin-tui")
+      : launcherPathForHome(home, "rin-tui");
+  const rinGuiPath =
+    platform === "win32"
+      ? windowsLauncherPathForHome(home, "rin-gui")
+      : launcherPathForHome(home, "rin-gui");
+  const launcherSpecs =
+    platform === "win32"
+      ? [
+          [rinPath, windowsCmdLauncherScript(targets.rin)],
+          [rinInstallPath, windowsCmdLauncherScript(targets.rinInstall)],
+          [rinTuiPath, windowsCmdLauncherScript(targets.rinTui)],
+          [
+            rinGuiPath,
+            windowsCmdLauncherScript(targets.rinGui, [], { detached: true }),
+          ],
+        ]
+      : [
+          [rinPath, launcherScript(targets.rin)],
+          [rinInstallPath, launcherScript(targets.rinInstall)],
+          [rinTuiPath, launcherScript(targets.rinTui)],
+          [rinGuiPath, launcherScript(targets.rinGui)],
+        ];
+  for (const [filePath, script] of launcherSpecs) {
+    writeLauncherExecutableForUser(userName, filePath, script, options);
+  }
   const windowsGuiShortcutPaths: string[] = [];
   if (platform === "win32") {
-    const script = windowsCmdLauncherScript(targets.rinGui);
+    const script = windowsCmdLauncherScript(targets.rinGui, [], {
+      detached: true,
+    });
     for (const filePath of [
       windowsGuiStartMenuLauncherPathForHome(home),
       windowsGuiDesktopLauncherPathForHome(home),
@@ -232,7 +267,13 @@ export function writeLaunchersForUser(
       windowsGuiShortcutPaths.push(filePath);
     }
   }
-  return { rinPath, rinInstallPath, rinGuiPath, windowsGuiShortcutPaths };
+  return {
+    rinPath,
+    rinInstallPath,
+    rinTuiPath,
+    rinGuiPath,
+    windowsGuiShortcutPaths,
+  };
 }
 
 export function appConfigDirForUser(
@@ -402,12 +443,47 @@ function warnTreeCleanupFailed(treePath: string, error: unknown) {
 
 function removeTreeOrWarn(treePath: string, warnOnFailure = false) {
   try {
-    execFileSync("rm", ["-rf", treePath], { stdio: "inherit" });
+    if (process.platform === "win32") {
+      fs.rmSync(treePath, { recursive: true, force: true });
+    } else {
+      execFileSync("rm", ["-rf", treePath], { stdio: "inherit" });
+    }
     return true;
   } catch (error) {
     if (warnOnFailure) warnTreeCleanupFailed(treePath, error);
     return false;
   }
+}
+
+function copyTree(sourcePath: string, destPath: string) {
+  fs.cpSync(sourcePath, destPath, {
+    recursive: true,
+    force: true,
+    dereference: false,
+    verbatimSymlinks: true,
+  });
+}
+
+export function currentRuntimeLinkTypeForPlatform(
+  platform: NodeJS.Platform = process.platform,
+) {
+  return platform === "win32" ? "junction" : "dir";
+}
+
+function replaceCurrentRuntimeLink(currentLink: string, targetRoot: string) {
+  const currentTmpLink = `${currentLink}.tmp`;
+  try {
+    fs.rmSync(currentTmpLink, { recursive: true, force: true });
+  } catch {}
+  fs.symlinkSync(
+    targetRoot,
+    currentTmpLink,
+    currentRuntimeLinkTypeForPlatform(),
+  );
+  try {
+    fs.rmSync(currentLink, { recursive: true, force: true });
+  } catch {}
+  fs.renameSync(currentTmpLink, currentLink);
 }
 
 export function syncTree(sourcePath: string, destPath: string) {
@@ -421,7 +497,7 @@ export function syncTree(sourcePath: string, destPath: string) {
 
   ensureDir(destParent);
   removeTreeOrWarn(tempPath);
-  execFileSync("cp", ["-a", sourcePath, tempPath], { stdio: "inherit" });
+  copyTree(sourcePath, tempPath);
   if (backupPath) fs.renameSync(destPath, backupPath);
   try {
     fs.renameSync(tempPath, destPath);
@@ -665,6 +741,9 @@ export function publishInstalledRuntime(
   );
   const currentLink = currentRuntimeRoot(installDir);
   const currentTmpLink = `${currentLink}.tmp`;
+  if (elevated && process.platform === "win32") {
+    throw new Error("rin_elevated_install_unsupported_on_windows");
+  }
   if (elevated) {
     const target = deps.findSystemUser(targetUser) as any;
     const targetGroup = target?.name ? String(target?.gid ?? "") : "";
@@ -713,14 +792,7 @@ export function publishInstalledRuntime(
   try {
     fs.utimesSync(releaseRoot, new Date(), new Date());
   } catch {}
-  try {
-    fs.rmSync(currentTmpLink, { recursive: true, force: true });
-  } catch {}
-  fs.symlinkSync(releaseRoot, currentTmpLink);
-  try {
-    fs.rmSync(currentLink, { recursive: true, force: true });
-  } catch {}
-  fs.renameSync(currentTmpLink, currentLink);
+  replaceCurrentRuntimeLink(currentLink, releaseRoot);
   return { releaseRoot, currentLink };
 }
 
@@ -836,6 +908,9 @@ export function switchInstalledCurrentRelease(
   if (!listInstalledReleaseNames(installDir, elevated).includes(releaseName)) {
     throw new Error(`rin_release_not_found:${releaseName}`);
   }
+  if (elevated && process.platform === "win32") {
+    throw new Error("rin_elevated_install_unsupported_on_windows");
+  }
   if (elevated) {
     const target = deps.findSystemUser(targetUser) as any;
     const targetGroup = target?.name ? String(target?.gid ?? "") : "";
@@ -858,14 +933,7 @@ export function switchInstalledCurrentRelease(
     }
     return { releaseRoot: targetRoot, currentLink };
   }
-  try {
-    fs.rmSync(currentTmpLink, { recursive: true, force: true });
-  } catch {}
-  fs.symlinkSync(targetRoot, currentTmpLink);
-  try {
-    fs.rmSync(currentLink, { recursive: true, force: true });
-  } catch {}
-  fs.renameSync(currentTmpLink, currentLink);
+  replaceCurrentRuntimeLink(currentLink, targetRoot);
   return { releaseRoot: targetRoot, currentLink };
 }
 

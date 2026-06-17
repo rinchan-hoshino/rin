@@ -1,11 +1,32 @@
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 import { coreDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
 
 export { safeString };
 
+function stablePipeHash(value: string) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 16);
+}
+
+export function windowsNamedPipePath(scope: string, identity: string) {
+  const normalizedScope =
+    safeString(scope)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_.-]+/g, "-") || "default";
+  const normalizedIdentity = safeString(identity).trim() || os.homedir();
+  return `\\\\.\\pipe\\rin-${normalizedScope}-${stablePipeHash(normalizedIdentity)}`;
+}
+
+export function isWindowsNamedPipePath(value: string) {
+  return /^\\\\\.\\pipe\\/i.test(safeString(value).trim());
+}
+
 export function bridgeDaemonSocketPath(agentDir: string) {
+  if (process.platform === "win32")
+    return windowsNamedPipePath("bridge", agentDir);
   return coreDataPath(agentDir, "daemon", "bridge.sock");
 }
 
@@ -30,6 +51,9 @@ function defaultDaemonRuntimeDir(): string {
 }
 
 export function defaultDaemonSocketPath() {
+  if (process.platform === "win32") {
+    return windowsNamedPipePath("daemon", os.homedir());
+  }
   return path.join(defaultDaemonRuntimeDir(), "rin-daemon", "daemon.sock");
 }
 

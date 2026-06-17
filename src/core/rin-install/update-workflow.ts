@@ -27,6 +27,14 @@ export function requireTool(name: string, paths: string[] = []) {
     if (candidate && fs.existsSync(candidate)) return candidate;
   }
   try {
+    if (process.platform === "win32") {
+      return (
+        execFileSync("where", [name], { encoding: "utf8" })
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find(Boolean) || name
+      );
+    }
     return (
       execFileSync("sh", ["-lc", `command -v ${shellQuote(name)}`], {
         encoding: "utf8",
@@ -35,6 +43,15 @@ export function requireTool(name: string, paths: string[] = []) {
   } catch {
     throw new Error(`rin_missing_required_tool:${name}`);
   }
+}
+
+async function downloadFile(url: string, outFile: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`rin_download_failed:${response.status}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(outFile, buffer);
 }
 
 const FORWARDED_UPDATE_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -272,18 +289,8 @@ export async function prepareUpdateRuntimeSource(options: {
   env?: NodeJS.ProcessEnv;
 }) {
   const { release, workspace, i18n } = options;
-  const curl =
-    process.platform === "win32"
-      ? ""
-      : fs.existsSync("/usr/bin/curl")
-        ? "/usr/bin/curl"
-        : "";
-  const wget =
-    process.platform === "win32"
-      ? ""
-      : fs.existsSync("/usr/bin/wget")
-        ? "/usr/bin/wget"
-        : "";
+  const curl = fs.existsSync("/usr/bin/curl") ? "/usr/bin/curl" : "";
+  const wget = fs.existsSync("/usr/bin/wget") ? "/usr/bin/wget" : "";
   const npm = requireTool("npm", ["/usr/bin/npm", "/bin/npm"]);
   const tar = requireTool("tar", ["/usr/bin/tar", "/bin/tar"]);
   const buildEnv = {
@@ -313,7 +320,7 @@ export async function prepareUpdateRuntimeSource(options: {
         i18n.buildUpdateCommandFailureHeader,
       );
     } else {
-      throw new Error("rin_missing_required_tool:curl_or_wget");
+      await downloadFile(release.archiveUrl, workspace.archivePath);
     }
   });
   await runInstallerProgress(i18n.preparingUpdateSourceMessage, () =>

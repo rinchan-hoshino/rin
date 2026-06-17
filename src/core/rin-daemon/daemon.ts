@@ -15,6 +15,7 @@ import {
 import {
   bridgeDaemonSocketPath,
   defaultDaemonSocketPath,
+  isWindowsNamedPipePath,
   safeString,
 } from "../rin-lib/common.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
@@ -184,6 +185,7 @@ export async function startDaemon(
   }
 
   for (const candidate of [socketPath, bridgeSocketPath]) {
+    if (isWindowsNamedPipePath(candidate)) continue;
     try {
       fs.rmSync(candidate, { force: true });
     } catch {}
@@ -694,7 +696,10 @@ export async function startDaemon(
           server.once("error", reject);
           server.listen(listenPath, () => {
             server.removeListener("error", reject);
-            if (typeof chmod === "number") {
+            if (
+              typeof chmod === "number" &&
+              !isWindowsNamedPipePath(listenPath)
+            ) {
               try {
                 fs.chmodSync(listenPath, chmod);
               } catch {}
@@ -739,6 +744,7 @@ export async function startDaemon(
       ),
     );
     for (const candidate of [socketPath, bridgeSocketPath]) {
+      if (isWindowsNamedPipePath(candidate)) continue;
       try {
         fs.rmSync(candidate, { force: true });
       } catch {}

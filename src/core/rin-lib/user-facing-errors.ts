@@ -303,6 +303,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   rin_install_temp_dir_unavailable: () =>
     "Rin installer could not create a temporary directory. Check disk permissions.",
+  rin_elevated_install_unsupported_on_windows: () =>
+    "Rin cannot install for another Windows user from this installer session.",
   rin_installed_daemon_entry_missing: () =>
     "Rin install is missing the daemon entrypoint. Reinstall or update Rin.",
   rin_installer_apply_result_missing: () =>

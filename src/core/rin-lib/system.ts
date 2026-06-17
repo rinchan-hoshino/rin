@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { defaultDaemonSocketPath } from "./common.js";
+import { defaultDaemonSocketPath, windowsNamedPipePath } from "./common.js";
 
 const PRIVILEGE_COMMAND_CANDIDATES = [
   "/run/current-system/sw/bin/doas",
@@ -19,10 +19,13 @@ function normalizeUserName(value: unknown) {
 }
 
 function defaultHomeForUser(targetUser: string) {
-  return path.join(
-    process.platform === "darwin" ? "/Users" : "/home",
-    targetUser,
-  );
+  const root =
+    process.platform === "darwin"
+      ? "/Users"
+      : process.platform === "win32"
+        ? "C:\\Users"
+        : "/home";
+  return path.join(root, targetUser);
 }
 
 function isNonWindowsPlatform() {
@@ -72,7 +75,12 @@ function requireTargetUser(targetUser: string) {
 
 function readUnixUserId(targetUser: string) {
   const normalizedTargetUser = normalizeUserName(targetUser);
-  if (!normalizedTargetUser || process.platform === "darwin") return -1;
+  if (
+    !normalizedTargetUser ||
+    process.platform === "darwin" ||
+    process.platform === "win32"
+  )
+    return -1;
   try {
     return Number(
       execFileSync("id", ["-u", normalizedTargetUser], {
@@ -149,6 +157,12 @@ export function socketPathForUser(targetUser: string) {
   const currentUser = normalizeUserName(os.userInfo().username);
   if (!normalizedTargetUser || normalizedTargetUser === currentUser) {
     return defaultDaemonSocketPath();
+  }
+  if (process.platform === "win32") {
+    return windowsNamedPipePath(
+      "daemon",
+      homeForUser(normalizedTargetUser) || normalizedTargetUser,
+    );
   }
   if (process.platform === "darwin") {
     return path.join(

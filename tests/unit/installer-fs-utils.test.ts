@@ -25,6 +25,9 @@ test("installer fs utils compute launcher targets and script", () => {
   assert.ok(
     targets.rinGui[0].endsWith(path.join("dist", "app", "rin-gui", "main.js")),
   );
+  assert.ok(
+    targets.rinTui[0].endsWith(path.join("dist", "app", "rin-tui", "main.js")),
+  );
   const oldPath = process.env.PATH;
   let script;
   try {
@@ -41,10 +44,62 @@ test("installer fs utils compute launcher targets and script", () => {
   assert.equal(script.includes("/tmp/installer-only-bin"), false);
   assert.ok(script.includes("'/usr/bin/env' 'node' '/tmp/a.js' \"$@\""));
   assert.equal(script.includes(process.execPath), false);
-  const windowsScript = fsUtils.windowsCmdLauncherScript(targets.rinGui);
+  const windowsScript = fsUtils.windowsCmdLauncherScript(targets.rin, [], {
+    detached: false,
+    missingMessage: "rin: installed runtime entry not found",
+  });
   assert.match(windowsScript, /^@echo off\r?$/m);
-  assert.match(windowsScript, /rin-gui/);
-  assert.doesNotMatch(windowsScript, /--app/);
+  assert.match(windowsScript, /rin/);
+  assert.match(windowsScript, /%\*/);
+  assert.doesNotMatch(windowsScript, /start ""/);
+  assert.doesNotMatch(windowsScript, /env node/);
+  assert.equal(fsUtils.currentRuntimeLinkTypeForPlatform("win32"), "junction");
+  assert.equal(fsUtils.currentRuntimeLinkTypeForPlatform("linux"), "dir");
+  const windowsGuiScript = fsUtils.windowsCmdLauncherScript(
+    targets.rinGui,
+    [],
+    {
+      detached: true,
+    },
+  );
+  assert.match(windowsGuiScript, /start ""/);
+  assert.match(windowsGuiScript, /rin-gui/);
+  assert.doesNotMatch(windowsGuiScript, /--app/);
+});
+
+test("writeLaunchersForUser writes native Windows cmd launchers", async () => {
+  const home = await fs.mkdtemp(path.join(tempBaseDir, "rin-win-home-"));
+  const installDir = path.join(home, ".rin");
+
+  const launchers = fsUtils.writeLaunchersForUser(
+    "demo",
+    installDir,
+    () => home,
+    {
+      platform: "win32",
+    },
+  );
+
+  assert.equal(launchers.rinPath, path.join(home, ".local", "bin", "rin.cmd"));
+  assert.equal(
+    launchers.rinTuiPath,
+    path.join(home, ".local", "bin", "rin-tui.cmd"),
+  );
+  assert.equal(
+    launchers.rinInstallPath,
+    path.join(home, ".local", "bin", "rin-install.cmd"),
+  );
+  assert.equal(launchers.windowsGuiShortcutPaths.length, 2);
+  const rinScript = await fs.readFile(launchers.rinPath, "utf8");
+  const tuiScript = await fs.readFile(launchers.rinTuiPath, "utf8");
+  assert.match(rinScript, /dist[\\/]app[\\/]rin[\\/]main\.js/);
+  assert.match(tuiScript, /dist[\\/]app[\\/]rin-tui[\\/]main\.js/);
+  assert.match(rinScript, /%\*/);
+  assert.doesNotMatch(rinScript, /env node/);
+  assert.doesNotMatch(rinScript, /start ""/);
+  await fs.access(launchers.windowsGuiShortcutPaths[0]);
+
+  await fs.rm(home, { recursive: true, force: true });
 });
 
 test("commandAsUserInvocation prefers runuser for root", () => {

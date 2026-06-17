@@ -76,6 +76,18 @@ test("rin system falls back safely for unknown user runtime paths", () => {
   );
 });
 
+test("common helpers build stable Windows named pipe paths", () => {
+  const first = common.windowsNamedPipePath("daemon", "C:\\Users\\demo");
+  const second = common.windowsNamedPipePath("daemon", "C:\\Users\\demo");
+  const bridge = common.windowsNamedPipePath("bridge", "C:\\Users\\demo\\.rin");
+
+  assert.equal(first, second);
+  assert.match(first, /^\\\\\.\\pipe\\rin-daemon-[a-f0-9]{16}$/);
+  assert.match(bridge, /^\\\\\.\\pipe\\rin-bridge-[a-f0-9]{16}$/);
+  assert.equal(common.isWindowsNamedPipePath(first), true);
+  assert.equal(common.isWindowsNamedPipePath("/run/user/1001/rin.sock"), false);
+});
+
 test("defaultDaemonSocketPath keeps runtime dir precedence stable", async () => {
   await withEnv(
     {

@@ -127,6 +127,7 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
   assert.equal(pathsMod.defaultHomeRoot("darwin"), "/Users");
   assert.equal(pathsMod.defaultHomeRoot("win32"), "C:\\Users");
   assert.deepEqual(pathsMod.installDiscoveryHomeRoots(), ["/home", "/Users"]);
+  assert.deepEqual(pathsMod.installDiscoveryHomeRoots("win32"), ["C:\\Users"]);
   assert.equal(pathsMod.defaultHomeForUser("demo", "linux"), linuxHome);
   assert.equal(pathsMod.defaultHomeForUser("demo", "darwin"), macHome);
   assert.equal(
@@ -202,6 +203,14 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
     path.join(linuxHome, ".local", "bin", "rin-gui"),
   );
   assert.equal(
+    pathsMod.launcherPathForHome(linuxHome, "rin-tui"),
+    path.join(linuxHome, ".local", "bin", "rin-tui"),
+  );
+  assert.equal(
+    pathsMod.windowsLauncherPathForHome("C:\\Users\\demo", "rin-tui"),
+    path.join("C:\\Users\\demo", ".local", "bin", "rin-tui.cmd"),
+  );
+  assert.equal(
     pathsMod.launcherMetadataPathForHome(linuxHome, "linux"),
     path.join(linuxHome, ".config", "rin", "install.json"),
   );
@@ -212,6 +221,12 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
   assert.equal(
     pathsMod.launcherMetadataPathForHome("C:\\Users\\demo", "win32"),
     path.join("C:\\Users\\demo", "AppData", "Roaming", "rin", "install.json"),
+  );
+  assert.equal(
+    pathsMod
+      .daemonSocketPathForHome("C:\\Users\\demo", { platform: "win32" })
+      .startsWith("\\\\.\\pipe\\rin-daemon-"),
+    true,
   );
   assert.equal(
     pathsMod.windowsStartupLauncherPathForHome("C:\\Users\\demo"),
