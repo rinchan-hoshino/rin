@@ -101,6 +101,7 @@ import {
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
+  cleanupChatOutboxHistory,
   enqueueChatOutboxPayload,
   type ChatOutboxPayloadInput,
 } from "../rin-lib/chat-outbox.js";
@@ -126,6 +127,7 @@ const logger = createLogger("rin-chat");
 const TYPING_POLL_INTERVAL_MS = 4000;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
 const CHAT_OUTBOX_POLL_INTERVAL_MS = 5000;
+const CHAT_OUTBOX_HISTORY_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CHAT_INBOX_PROCESSING_STALE_MS = 10 * 60 * 1000;
 const CHAT_INBOX_MAX_CLAIMS_PER_DRAIN = 8;
 const CHAT_INBOX_MAX_PROCESSING_RESTORE_PER_DRAIN = 8;
@@ -434,6 +436,15 @@ export async function startChatBridge(
   const detachedControllers = new Map<string, ChatController>();
   let inboxPollTimer: NodeJS.Timeout | null = null;
   let outboxPollTimer: NodeJS.Timeout | null = null;
+  let outboxHistoryCleanupTimer: NodeJS.Timeout | null = null;
+  const runOutboxHistoryCleanup = () => {
+    const result = cleanupChatOutboxHistory(runtime.agentDir);
+    if (result.delivered || result.failed) {
+      logger.info(
+        `chat outbox history cleanup removed delivered=${result.delivered} failed=${result.failed}`,
+      );
+    }
+  };
   const requestDrainChatOutbox = () => {
     void drainChatOutbox(app, runtime.agentDir, h, logger).catch(
       (error: any) => {
@@ -1238,6 +1249,11 @@ export async function startChatBridge(
   }
 
   requestDrainChatInbox();
+  runOutboxHistoryCleanup();
+  outboxHistoryCleanupTimer = setInterval(
+    () => runOutboxHistoryCleanup(),
+    CHAT_OUTBOX_HISTORY_CLEANUP_INTERVAL_MS,
+  );
   requestDrainChatOutbox();
   outboxPollTimer = setInterval(
     () => requestDrainChatOutbox(),
@@ -1251,6 +1267,7 @@ export async function startChatBridge(
       clearInterval(typingPollTimer);
       if (inboxPollTimer) clearInterval(inboxPollTimer);
       if (outboxPollTimer) clearInterval(outboxPollTimer);
+      if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
       for (const controller of controllers.values()) controller.dispose();
       for (const controller of detachedControllers.values())
         controller.dispose();

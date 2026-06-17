@@ -146,6 +146,10 @@ export type EnqueueChatOutboxOptions = {
   postDelivery?: ChatOutboxPostDelivery;
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const CHAT_OUTBOX_DELIVERED_HISTORY_RETENTION_MS = 7 * DAY_MS;
+export const CHAT_OUTBOX_FAILED_HISTORY_RETENTION_MS = 14 * DAY_MS;
+
 let sequenceCounter = 0;
 
 export function chatOutboxDir(agentDir: string) {
@@ -343,6 +347,61 @@ export function writeChatOutboxItem(agentDir: string, item: ChatOutboxItem) {
 export function readChatOutboxItem(agentDir: string, filePath: string) {
   const raw = readJsonFile<any>(filePath, null);
   return normalizeOutboxItem(agentDir, raw);
+}
+
+export function cleanupChatOutboxHistory(
+  agentDir: string,
+  options: {
+    nowMs?: number;
+    deliveredRetentionMs?: number;
+    failedRetentionMs?: number;
+  } = {},
+) {
+  const nowMs = Number(options.nowMs || Date.now());
+  const retentionByStatus = {
+    delivered: Math.max(
+      0,
+      Number(
+        options.deliveredRetentionMs ??
+          CHAT_OUTBOX_DELIVERED_HISTORY_RETENTION_MS,
+      ),
+    ),
+    failed: Math.max(
+      0,
+      Number(
+        options.failedRetentionMs ?? CHAT_OUTBOX_FAILED_HISTORY_RETENTION_MS,
+      ),
+    ),
+  } as const;
+  const result = { delivered: 0, failed: 0 };
+  for (const status of ["delivered", "failed"] as const) {
+    const dir = chatOutboxHistoryItemsDir(agentDir, status);
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    const retentionMs = retentionByStatus[status];
+    const cutoffMs = nowMs - retentionMs;
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue;
+      const filePath = path.join(dir, name);
+      const item = readChatOutboxItem(agentDir, filePath);
+      if (!item || item.status !== status) continue;
+      const completedAt =
+        status === "delivered"
+          ? item.deliveredAt || item.updatedAt || item.createdAt
+          : item.failedAt || item.updatedAt || item.createdAt;
+      const completedAtMs = Date.parse(safeString(completedAt).trim());
+      if (!Number.isFinite(completedAtMs) || completedAtMs > cutoffMs) {
+        continue;
+      }
+      removeFileIfExists(filePath);
+      result[status] += 1;
+    }
+  }
+  return result;
 }
 
 export function listChatOutboxItems(agentDir: string) {

@@ -429,3 +429,84 @@ test("chat state discovery ignores legacy telegram state dirs", async () => {
     ]);
   });
 });
+
+test("chat outbox history cleanup applies 7 day delivered and 14 day failed retention", async () => {
+  await withTempDir(async (dir) => {
+    const nowMs = Date.parse("2026-06-17T00:00:00.000Z");
+    const daysAgo = (days) =>
+      new Date(nowMs - days * 24 * 60 * 60 * 1000).toISOString();
+    const makePayload = (text) => ({
+      type: "text_delivery",
+      createdAt: daysAgo(20),
+      chatKey: "telegram/777:1",
+      text,
+    });
+    const baseItem = (id, status, updatedAt) => ({
+      id,
+      status,
+      createdAt: updatedAt,
+      updatedAt,
+      sequence: Date.parse(updatedAt),
+      deliveryKind: "generic",
+      payload: makePayload(id),
+      attempts: 1,
+    });
+
+    outbox.writeChatOutboxItem(dir, {
+      ...baseItem("old-delivered", "delivered", daysAgo(8)),
+      deliveredAt: daysAgo(8),
+      deliveryResult: ["m-old-delivered"],
+    });
+    outbox.writeChatOutboxItem(dir, {
+      ...baseItem("fresh-delivered", "delivered", daysAgo(6)),
+      deliveredAt: daysAgo(6),
+      deliveryResult: ["m-fresh-delivered"],
+    });
+    outbox.writeChatOutboxItem(dir, {
+      ...baseItem("old-failed", "failed", daysAgo(15)),
+      failedAt: daysAgo(15),
+      failureKind: "permanent",
+      lastError: "old failure",
+    });
+    outbox.writeChatOutboxItem(dir, {
+      ...baseItem("fresh-failed", "failed", daysAgo(13)),
+      failedAt: daysAgo(13),
+      failureKind: "permanent",
+      lastError: "fresh failure",
+    });
+    outbox.writeChatOutboxItem(dir, {
+      ...baseItem("active-queued", "queued", daysAgo(20)),
+      attempts: 0,
+    });
+
+    const result = outbox.cleanupChatOutboxHistory(dir, { nowMs });
+
+    assert.deepEqual(result, { delivered: 1, failed: 1 });
+    await assert.rejects(
+      fs.stat(
+        outbox.chatOutboxHistoryItemPath(dir, "old-delivered", "delivered"),
+      ),
+    );
+    await assert.rejects(
+      fs.stat(outbox.chatOutboxHistoryItemPath(dir, "old-failed", "failed")),
+    );
+    assert.equal(
+      outbox.readChatOutboxItem(
+        dir,
+        outbox.chatOutboxHistoryItemPath(dir, "fresh-delivered", "delivered"),
+      ).status,
+      "delivered",
+    );
+    assert.equal(
+      outbox.readChatOutboxItem(
+        dir,
+        outbox.chatOutboxHistoryItemPath(dir, "fresh-failed", "failed"),
+      ).status,
+      "failed",
+    );
+    assert.deepEqual(
+      outbox.listChatOutboxItems(dir).map(({ item }) => item.id),
+      ["active-queued"],
+    );
+  });
+});
