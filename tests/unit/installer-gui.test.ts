@@ -11,10 +11,14 @@ const gui = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "gui.js"))
     .href
 );
+const installerMain = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "main.js"))
+    .href
+);
 
-test("installer GUI starts by default only for Windows interactive installs", () => {
-  assert.equal(gui.shouldStartGuiInstaller([], "win32"), true);
-  assert.equal(gui.shouldStartGuiInstaller(["--gui"], "linux"), true);
+test("installer GUI startup is disabled while the desktop UI is redesigned", async () => {
+  assert.equal(gui.shouldStartGuiInstaller([], "win32"), false);
+  assert.equal(gui.shouldStartGuiInstaller(["--gui"], "linux"), false);
   assert.equal(gui.shouldStartGuiInstaller(["--tui"], "win32"), false);
   assert.equal(gui.shouldStartGuiInstaller(["--no-gui"], "win32"), false);
   assert.equal(
@@ -25,6 +29,10 @@ test("installer GUI starts by default only for Windows interactive installs", ()
     false,
   );
   assert.equal(gui.shouldStartGuiInstaller(["--update"], "win32"), false);
+  await assert.rejects(
+    () => installerMain.startInstaller(["--gui"]),
+    /rin_installer_gui_disabled/,
+  );
 });
 
 test("installer GUI launcher resolves the bundled desktop host directly", () => {

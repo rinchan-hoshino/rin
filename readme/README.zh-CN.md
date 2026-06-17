@@ -25,7 +25,7 @@ Rin 是一个本地运行的通用 AI 助手，内置记忆、工具、定时任
 ## 安装
 
 > [!TIP]
-> 大多数用户应从下面的 stable 安装命令开始。预发布和 git 通道放在折叠区域中。
+> 大多数用户应从下面的 stable 安装命令开始。直接使用这些安装命令即可；安装器会装好 `rin` 命令。预发布和 git 通道放在折叠区域中。
 
 Rin 在所有平台上都需要 Node.js 22.19.0 或更新版本，以及 npm。
 
@@ -69,7 +69,13 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 
 </details>
 
-在 Windows 上，交互式安装器默认会打开图形安装器。安装后，`rin` 默认打开桌面 GUI；Rin 也会写入 GUI 启动器，以及面向当前用户的后台运行时开机启动入口。
+安装后，所有平台都使用同一个命令：
+
+```bash
+rin
+```
+
+Windows 安装器会写入 `rin` 命令启动器，并在可行时把 Rin 的用户启动器目录加入用户 `PATH`。如果当前终端没有立刻识别 `rin`，请重新打开一个终端。桌面 GUI 入口在重构期间暂时禁用。
 
 ## 安全与成本
 

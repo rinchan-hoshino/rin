@@ -45,7 +45,6 @@ import {
   releaseInfoFromFile,
   type ReleaseChannel,
 } from "../rin-lib/release.js";
-import { runGuiInstaller, shouldStartGuiInstaller } from "./gui.js";
 import {
   describeOwnership,
   listSystemUsers,
@@ -129,6 +128,7 @@ function parseInstallerUpdateReleaseArgs(argv: string[]) {
 function parseInstallerCliArgs(argv: string[]) {
   const hasFlag = (name: string) =>
     argv.some((arg) => String(arg || "").trim() === name);
+  const guiDisabled = hasFlag("--gui");
   const updateReleaseRequest = parseInstallerUpdateReleaseArgs(argv);
   return {
     applyPlanFile: readValueArg(argv, "--apply-plan-file"),
@@ -139,6 +139,7 @@ function parseInstallerCliArgs(argv: string[]) {
     updateInstallDir: readValueArg(argv, "--install-dir"),
     updateAssumeYes: hasFlag("--yes"),
     updatePreconfirmed: hasFlag("--preconfirmed"),
+    guiDisabled,
     language: normalizeLanguageTag(readValueArg(argv, "--language"), ""),
     releaseFile: readValueArg(argv, "--release-file"),
     updateReleaseRequest,
@@ -223,6 +224,10 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     }
   }
 
+  if (cli.guiDisabled) {
+    throw new Error("rin_installer_gui_disabled");
+  }
+
   if (cli.update) {
     const updateCurrentUser = detectCurrentUser();
     const updateTargetUser = cli.updateTargetUser || updateCurrentUser;
@@ -258,11 +263,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
       assumeYes: cli.updateAssumeYes,
       preconfirmed: cli.updatePreconfirmed,
     });
-    return;
-  }
-
-  if (shouldStartGuiInstaller(argv)) {
-    await runGuiInstaller(argv);
     return;
   }
 

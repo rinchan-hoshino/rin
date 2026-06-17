@@ -311,6 +311,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin installer did not return an install result.",
   rin_installer_gui_command_failed: () =>
     "Rin installer GUI command failed. Check the install settings.",
+  rin_installer_gui_disabled: () =>
+    "Rin installer GUI is temporarily disabled while the desktop interface is redesigned. Use the terminal installer.",
   rin_installer_gui_install_dir_required: () =>
     "Rin installer GUI needs an install directory. Choose a directory.",
   rin_installer_gui_model_required: () =>

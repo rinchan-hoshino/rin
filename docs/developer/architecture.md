@@ -19,8 +19,8 @@ Keep changes aligned with that shape. Prefer one clear runtime path over compati
 - `src/app/`: executable entrypoints and product assembly.
   - `rin`: CLI entrypoint and command routing.
   - `rin-daemon`: daemon process and worker process entrypoints.
-  - `rin-tui`: terminal frontend entrypoint.
-  - `rin-gui` and `rin-desktop-host`: GUI launcher and desktop host boundary.
+  - `rin-tui`: terminal frontend implementation used by the `rin` command.
+  - `rin-gui` and `rin-desktop-host`: dormant GUI implementation material while the desktop UI is redesigned; not installed as public commands.
   - `rin-install`: installer entrypoint.
 - `src/core/`: reusable implementation modules used by the app entrypoints.
   - `rin-lib`: shared runtime prompt, changelog, model, update, and system helpers.
@@ -39,7 +39,7 @@ Rin should keep these layers distinct:
 1. **Product entrypoints** parse commands, select frontend mode, and assemble the runtime.
 2. **Daemon and worker runtime** owns session attachment, resumable turn state, worker lifecycle, and background execution.
 3. **Capability domains** register concrete tools and prompt support through their owning modules.
-4. **Adapters and frontends** translate terminal, GUI, chat, or scheduled input into the same runtime semantics.
+4. **Adapters and frontends** translate terminal, chat, scheduled, and future GUI input into the same runtime semantics.
 
 Do not add a frontend-only session model, local mirror of daemon state, or hidden compatibility runner when the daemon/core boundary can express the behavior directly.
 

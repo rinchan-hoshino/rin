@@ -100,16 +100,10 @@ export function buildGuiInstallerHostLaunch(
 }
 
 export function shouldStartGuiInstaller(
-  argv: string[],
-  platform: NodeJS.Platform = process.platform,
+  _argv: string[],
+  _platform: NodeJS.Platform = process.platform,
 ) {
-  const args = argv.map((arg) => String(arg || "").trim()).filter(Boolean);
-  if (args.includes("--apply-plan-file") || args.includes("--update")) {
-    return false;
-  }
-  if (args.includes("--tui") || args.includes("--no-gui")) return false;
-  if (args.includes("--gui")) return true;
-  return platform === "win32";
+  return false;
 }
 
 export function parseGuiInstallerArgs(argv: string[]): GuiInstallerOptions {

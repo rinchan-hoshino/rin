@@ -199,16 +199,12 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
     path.join(linuxHome, ".local", "bin", "rin"),
   );
   assert.equal(
-    pathsMod.launcherPathForHome(linuxHome, "rin-gui"),
-    path.join(linuxHome, ".local", "bin", "rin-gui"),
+    pathsMod.launcherPathForHome(linuxHome, "rin-install"),
+    path.join(linuxHome, ".local", "bin", "rin-install"),
   );
   assert.equal(
-    pathsMod.launcherPathForHome(linuxHome, "rin-tui"),
-    path.join(linuxHome, ".local", "bin", "rin-tui"),
-  );
-  assert.equal(
-    pathsMod.windowsLauncherPathForHome("C:\\Users\\demo", "rin-tui"),
-    path.join("C:\\Users\\demo", ".local", "bin", "rin-tui.cmd"),
+    pathsMod.windowsLauncherPathForHome("C:\\Users\\demo", "rin"),
+    path.join("C:\\Users\\demo", ".local", "bin", "rin.cmd"),
   );
   assert.equal(
     pathsMod.launcherMetadataPathForHome(linuxHome, "linux"),

@@ -245,7 +245,7 @@ export function localBinDirForHome(home: string) {
   return path.join(home, ".local", "bin");
 }
 
-export type LauncherAppName = "rin" | "rin-install" | "rin-tui" | "rin-gui";
+export type LauncherAppName = "rin" | "rin-install";
 
 export function launcherPathForHome(home: string, name: LauncherAppName) {
   return path.join(localBinDirForHome(home), name);

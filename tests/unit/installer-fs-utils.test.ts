@@ -22,12 +22,8 @@ test("installer fs utils compute launcher targets and script", () => {
   assert.ok(
     targets.rin[0].endsWith(path.join("dist", "app", "rin", "main.js")),
   );
-  assert.ok(
-    targets.rinGui[0].endsWith(path.join("dist", "app", "rin-gui", "main.js")),
-  );
-  assert.ok(
-    targets.rinTui[0].endsWith(path.join("dist", "app", "rin-tui", "main.js")),
-  );
+  assert.equal(targets.rinGui, undefined);
+  assert.equal(targets.rinTui, undefined);
   const oldPath = process.env.PATH;
   let script;
   try {
@@ -55,19 +51,36 @@ test("installer fs utils compute launcher targets and script", () => {
   assert.doesNotMatch(windowsScript, /env node/);
   assert.equal(fsUtils.currentRuntimeLinkTypeForPlatform("win32"), "junction");
   assert.equal(fsUtils.currentRuntimeLinkTypeForPlatform("linux"), "dir");
-  const windowsGuiScript = fsUtils.windowsCmdLauncherScript(
-    targets.rinGui,
-    [],
-    {
-      detached: true,
-    },
-  );
-  assert.match(windowsGuiScript, /start ""/);
-  assert.match(windowsGuiScript, /rin-gui/);
-  assert.doesNotMatch(windowsGuiScript, /--app/);
 });
 
-test("writeLaunchersForUser writes native Windows cmd launchers", async () => {
+test("Windows PATH helpers add the launcher directory once", () => {
+  const launcherDir = "C:\\Users\\demo\\.local\\bin";
+  assert.equal(
+    fsUtils.buildPathValueWithDirectory("C:\\Windows", launcherDir, ";"),
+    `${launcherDir};C:\\Windows`,
+  );
+  assert.equal(
+    fsUtils.buildPathValueWithDirectory(
+      `C:\\Windows;${launcherDir.toUpperCase()}`,
+      launcherDir,
+      ";",
+    ),
+    `C:\\Windows;${launcherDir.toUpperCase()}`,
+  );
+
+  let written = "";
+  const result = fsUtils.ensureWindowsUserPathIncludes(launcherDir, {
+    platform: "win32",
+    readUserPath: () => "C:\\Windows",
+    writeUserPath: (nextPath: string) => {
+      written = nextPath;
+    },
+  });
+  assert.equal(result.updated, true);
+  assert.equal(written, `${launcherDir};C:\\Windows`);
+});
+
+test("writeLaunchersForUser writes native Windows rin command launchers", async () => {
   const home = await fs.mkdtemp(path.join(tempBaseDir, "rin-win-home-"));
   const installDir = path.join(home, ".rin");
 
@@ -82,22 +95,22 @@ test("writeLaunchersForUser writes native Windows cmd launchers", async () => {
 
   assert.equal(launchers.rinPath, path.join(home, ".local", "bin", "rin.cmd"));
   assert.equal(
-    launchers.rinTuiPath,
-    path.join(home, ".local", "bin", "rin-tui.cmd"),
-  );
-  assert.equal(
     launchers.rinInstallPath,
     path.join(home, ".local", "bin", "rin-install.cmd"),
   );
-  assert.equal(launchers.windowsGuiShortcutPaths.length, 2);
+  assert.equal(launchers.rinTuiPath, undefined);
+  assert.equal(launchers.rinGuiPath, undefined);
+  assert.equal(launchers.windowsGuiShortcutPaths, undefined);
+  assert.equal(launchers.windowsPathUpdate.skipped, true);
   const rinScript = await fs.readFile(launchers.rinPath, "utf8");
-  const tuiScript = await fs.readFile(launchers.rinTuiPath, "utf8");
   assert.match(rinScript, /dist[\\/]app[\\/]rin[\\/]main\.js/);
-  assert.match(tuiScript, /dist[\\/]app[\\/]rin-tui[\\/]main\.js/);
   assert.match(rinScript, /%\*/);
   assert.doesNotMatch(rinScript, /env node/);
   assert.doesNotMatch(rinScript, /start ""/);
-  await fs.access(launchers.windowsGuiShortcutPaths[0]);
+  await assert.rejects(
+    fs.access(path.join(home, ".local", "bin", "rin-tui.cmd")),
+  );
+  await assert.rejects(fs.access(path.join(home, "Desktop", "Rin GUI.cmd")));
 
   await fs.rm(home, { recursive: true, force: true });
 });

@@ -4,7 +4,6 @@ import { cac } from "cac";
 import { runStart, runStop, runRestart } from "./control.js";
 import { runDoctor } from "./doctor.js";
 import { launchDefaultRin } from "./launch.js";
-import { runGui } from "../rin-gui/main.js";
 import { runMemoryIndex, runMemoryIndexInternal } from "./memory-index.js";
 import { runNonInteractive, shouldRunNonInteractive } from "./run.js";
 import { runStatus, runStatusInternal } from "./status.js";
@@ -34,7 +33,6 @@ const RIN_COMMANDS = [
   ["doctor", "Show daemon/socket diagnostics for the target user"],
   ["status", "Show live worker and scheduled task activity"],
   ["tasks", "Operate scheduled task records"],
-  ["gui", "Start the cross-platform Rin GUI shell"],
   ["usage", "Show token telemetry dashboard and grouped usage stats"],
   ["self", "Show recent self-improve distillation runs and details"],
   ["versions", "List installed Rin runtime versions"],
@@ -139,9 +137,9 @@ export function resolveInternalRinDispatch(rawArgv: string[]) {
 }
 
 export function defaultLaunchModeForPlatform(
-  platform: NodeJS.Platform = process.platform,
+  _platform: NodeJS.Platform = process.platform,
 ) {
-  return platform === "win32" ? "gui" : "tui";
+  return "tui";
 }
 
 export async function startRinCli() {
@@ -191,8 +189,6 @@ export async function startRinCli() {
     return await runStatus(parsed, process.argv.slice(2));
   if (parsed.command === "tasks")
     return await runTasks(parsed, process.argv.slice(2));
-  if (parsed.command === "gui")
-    return await runGui(parsed, process.argv.slice(2));
   if (parsed.command === "usage")
     return await runUsage(parsed, process.argv.slice(2));
   if (parsed.command === "self")
@@ -203,11 +199,6 @@ export async function startRinCli() {
     return await runMemoryIndex(parsed, process.argv.slice(2));
   if (parsed.command === "version") {
     console.log(readRinPackageVersion());
-    return;
-  }
-
-  if (defaultLaunchModeForPlatform() === "gui") {
-    await runGui(parsed, process.argv.slice(2));
     return;
   }
 

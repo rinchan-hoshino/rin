@@ -25,7 +25,7 @@ Si Rin vous fait gagner du temps, vous pouvez soutenir sa maintenance sur [Ko-fi
 ## Installation
 
 > [!TIP]
-> La plupart des utilisateurs devraient commencer par la commande stable ci-dessous. Les canaux préversion et git sont dans les sections pliées.
+> La plupart des utilisateurs devraient commencer par la commande stable ci-dessous. Utilisez directement ces commandes d'installation ; l'installateur configure la commande `rin`. Les canaux préversion et git sont dans les sections pliées.
 
 Rin nécessite Node.js 22.19.0 ou une version ultérieure et npm sur toutes les plateformes.
 
@@ -69,7 +69,13 @@ Installez depuis PowerShell ou Windows Terminal.
 
 </details>
 
-Sous Windows, l'installateur interactif ouvre par défaut l'installateur GUI. Après installation, `rin` ouvre par défaut la GUI de bureau, et Rin écrit aussi des lanceurs GUI ainsi qu'un lanceur de démarrage par utilisateur pour le runtime en arrière-plan.
+Après l'installation, utilisez la même commande sur toutes les plateformes :
+
+```bash
+rin
+```
+
+L'installateur Windows écrit le lanceur de commande `rin` et ajoute, lorsque c'est possible, le dossier de lanceurs utilisateur de Rin au `PATH` utilisateur. Ouvrez un nouveau terminal si la session actuelle ne trouve pas immédiatement `rin`. Les entrées GUI de bureau sont temporairement désactivées pendant la refonte de l'interface.
 
 ## Sécurité et coûts
 

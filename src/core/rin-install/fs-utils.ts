@@ -25,8 +25,7 @@ import {
   installedRinDocsRoot,
   launcherMetadataPathForHome,
   launcherPathForHome,
-  windowsGuiDesktopLauncherPathForHome,
-  windowsGuiStartMenuLauncherPathForHome,
+  localBinDirForHome,
   windowsLauncherPathForHome,
 } from "./paths.js";
 
@@ -154,8 +153,6 @@ export function launcherTargetsForInstallDir(installDir: string) {
   return {
     rin: installedAppEntryCandidates(installDir, "rin"),
     rinInstall: installedAppEntryCandidates(installDir, "rin-install"),
-    rinTui: installedAppEntryCandidates(installDir, "rin-tui"),
-    rinGui: installedAppEntryCandidates(installDir, "rin-gui"),
   };
 }
 
@@ -164,6 +161,107 @@ export type LauncherWriteOptions = {
   findSystemUser?: (user: string) => any;
   platform?: NodeJS.Platform;
 };
+
+function normalizePathEntryForComparison(value: string) {
+  return path.win32.normalize(String(value || "").trim()).toLowerCase();
+}
+
+export function pathValueIncludesDirectory(
+  pathValue: string,
+  directory: string,
+  delimiter = process.platform === "win32" ? ";" : path.delimiter,
+) {
+  const normalizedDirectory = normalizePathEntryForComparison(directory);
+  if (!normalizedDirectory) return true;
+  return String(pathValue || "")
+    .split(delimiter)
+    .some(
+      (entry) => normalizePathEntryForComparison(entry) === normalizedDirectory,
+    );
+}
+
+export function buildPathValueWithDirectory(
+  pathValue: string,
+  directory: string,
+  delimiter = process.platform === "win32" ? ";" : path.delimiter,
+) {
+  const normalizedDirectory = String(directory || "").trim();
+  if (
+    !normalizedDirectory ||
+    pathValueIncludesDirectory(pathValue, directory, delimiter)
+  ) {
+    return String(pathValue || "");
+  }
+  const currentEntries = String(pathValue || "")
+    .split(delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return [normalizedDirectory, ...currentEntries].join(delimiter);
+}
+
+export function ensureWindowsUserPathIncludes(
+  directory: string,
+  deps: {
+    platform?: NodeJS.Platform;
+    readUserPath?: () => string;
+    writeUserPath?: (nextPath: string) => void;
+  } = {},
+) {
+  const platform = deps.platform || process.platform;
+  const launcherDir = String(directory || "").trim();
+  if (platform !== "win32" || !launcherDir) {
+    return { updated: false, skipped: true, launcherDir };
+  }
+  try {
+    const currentUserPath = deps.readUserPath
+      ? deps.readUserPath()
+      : execFileSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            "[Environment]::GetEnvironmentVariable('Path', 'User')",
+          ],
+          { encoding: "utf8" },
+        ).trim();
+    const nextUserPath = buildPathValueWithDirectory(
+      currentUserPath,
+      launcherDir,
+      ";",
+    );
+    const processPathKey = process.env.Path == null ? "PATH" : "Path";
+    process.env[processPathKey] = buildPathValueWithDirectory(
+      process.env[processPathKey] || "",
+      launcherDir,
+      ";",
+    );
+    if (nextUserPath === currentUserPath) {
+      return { updated: false, skipped: false, launcherDir };
+    }
+    if (deps.writeUserPath) {
+      deps.writeUserPath(nextUserPath);
+    } else {
+      execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-Command",
+          "[Environment]::SetEnvironmentVariable('Path', $args[0], 'User')",
+          nextUserPath,
+        ],
+        { stdio: "ignore" },
+      );
+    }
+    return { updated: true, skipped: false, launcherDir };
+  } catch (error) {
+    return {
+      updated: false,
+      skipped: true,
+      launcherDir,
+      error: error instanceof Error ? error.message : String(error || ""),
+    };
+  }
+}
 
 function writeLauncherExecutableForUser(
   userName: string,
@@ -226,53 +324,31 @@ export function writeLaunchersForUser(
     platform === "win32"
       ? windowsLauncherPathForHome(home, "rin-install")
       : launcherPathForHome(home, "rin-install");
-  const rinTuiPath =
-    platform === "win32"
-      ? windowsLauncherPathForHome(home, "rin-tui")
-      : launcherPathForHome(home, "rin-tui");
-  const rinGuiPath =
-    platform === "win32"
-      ? windowsLauncherPathForHome(home, "rin-gui")
-      : launcherPathForHome(home, "rin-gui");
   const launcherSpecs =
     platform === "win32"
       ? [
           [rinPath, windowsCmdLauncherScript(targets.rin)],
           [rinInstallPath, windowsCmdLauncherScript(targets.rinInstall)],
-          [rinTuiPath, windowsCmdLauncherScript(targets.rinTui)],
-          [
-            rinGuiPath,
-            windowsCmdLauncherScript(targets.rinGui, [], { detached: true }),
-          ],
         ]
       : [
           [rinPath, launcherScript(targets.rin)],
           [rinInstallPath, launcherScript(targets.rinInstall)],
-          [rinTuiPath, launcherScript(targets.rinTui)],
-          [rinGuiPath, launcherScript(targets.rinGui)],
         ];
   for (const [filePath, script] of launcherSpecs) {
     writeLauncherExecutableForUser(userName, filePath, script, options);
   }
-  const windowsGuiShortcutPaths: string[] = [];
-  if (platform === "win32") {
-    const script = windowsCmdLauncherScript(targets.rinGui, [], {
-      detached: true,
-    });
-    for (const filePath of [
-      windowsGuiStartMenuLauncherPathForHome(home),
-      windowsGuiDesktopLauncherPathForHome(home),
-    ]) {
-      writeLauncherExecutableForUser(userName, filePath, script, options);
-      windowsGuiShortcutPaths.push(filePath);
-    }
-  }
+  const windowsPathUpdate =
+    platform === "win32" && process.platform === "win32" && !options.elevated
+      ? ensureWindowsUserPathIncludes(localBinDirForHome(home))
+      : {
+          updated: false,
+          skipped: true,
+          launcherDir: localBinDirForHome(home),
+        };
   return {
     rinPath,
     rinInstallPath,
-    rinTuiPath,
-    rinGuiPath,
-    windowsGuiShortcutPaths,
+    windowsPathUpdate,
   };
 }
 

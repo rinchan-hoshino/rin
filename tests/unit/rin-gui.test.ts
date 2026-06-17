@@ -94,8 +94,8 @@ test("Electron desktop host is the concrete GUI framework behind the host contra
   assert.doesNotMatch(preload, /createServer|WebSocketServer|xdg-open/);
 });
 
-test("Windows default launch mode is GUI-first while other platforms keep TUI", () => {
-  assert.equal(main.defaultLaunchModeForPlatform("win32"), "gui");
+test("default rin launch mode is TUI on every platform", () => {
+  assert.equal(main.defaultLaunchModeForPlatform("win32"), "tui");
   assert.equal(main.defaultLaunchModeForPlatform("linux"), "tui");
   assert.equal(main.defaultLaunchModeForPlatform("darwin"), "tui");
 });
