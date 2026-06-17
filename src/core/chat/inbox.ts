@@ -242,7 +242,10 @@ export function restoreChatInboxSession(item: ChatInboxItem, bot?: any) {
 }
 
 export function claimChatInboxFile(agentDir: string, filePath: string) {
-  return claimFileToDir(filePath, processingDir(agentDir));
+  const claimedPath = claimFileToDir(filePath, processingDir(agentDir));
+  const item = claimedPath ? readChatInboxItem(claimedPath) : null;
+  if (item) touchChatInboxFile(claimedPath, item);
+  return claimedPath;
 }
 
 export function completeChatInboxFile(filePath: string) {

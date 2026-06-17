@@ -709,3 +709,39 @@ test("chat inbox retry helper isolates envelopes after repeated failures", async
   assert.equal(failed.attemptCount, 5);
   assert.equal(failed.lastError, "still failing");
 });
+
+test("chat inbox claim refreshes old envelopes before stale recovery checks", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  inbox.enqueueChatInboxItem(agentDir, {
+    chatKey: "telegram/1:claim-refresh",
+    messageId: "claim-refresh",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "claim-refresh",
+      userId: "3",
+      messageId: "claim-refresh",
+      timestamp: Date.now(),
+      content: "hello",
+      stripped: { content: "hello" },
+    },
+    elements: [{ type: "text", attrs: { content: "hello" } }],
+  });
+  const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
+  const oldItem = {
+    ...inbox.readChatInboxItem(pendingPath),
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  };
+  await fs.writeFile(pendingPath, `${JSON.stringify(oldItem)}\n`);
+
+  const claimedPath = inbox.claimChatInboxFile(agentDir, pendingPath);
+  const claimed = inbox.readChatInboxItem(claimedPath);
+  const restored = inbox.restoreProcessingChatInboxFiles(agentDir, {
+    staleMs: 10 * 60 * 1000,
+    nowMs: Date.now(),
+  });
+
+  assert.notEqual(claimed.updatedAt, oldItem.updatedAt);
+  assert.equal(restored.length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
+});
