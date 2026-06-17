@@ -31,7 +31,7 @@ Inputs and authority:
 
 - conversation evidence, especially owner corrections, frustration, repeated reminders, and repeated assistant failures;
 - authoritative docs for the surface being edited;
-- verified repository/runtime behavior when it proves the behavior need;
+- verified repository/runtime behavior when it proves the behavior need or the final reusable workflow shape;
 - existing self-improve artifacts as review context for merge, move, prune, or revision, not as independent authority for new doctrine.
 
 Output contract:
@@ -112,7 +112,7 @@ Run one cohesive same-class pass:
 6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, recall, or remove guidance that would otherwise cause future mistakes.
 7. For correction-based or repeated-failure evidence, inspect existing guidance first. If existing guidance caused or preserved the behavior, remove or rewrite it before considering any new guidance.
 8. Reject patch-layer fixes: do not add exceptions, bans, authorization clauses, or special cases when deleting or rewriting the wrong abstraction solves the problem.
-9. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, only restate existing artifact wording, or place a behavior change only in provenance.
+9. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, only restate existing artifact wording, or place a reusable procedure or behavior change only in provenance.
 10. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
 11. Choose the smallest correct destination using the priority list below.
 12. Merge overlapping guidance into one canonical owner.
@@ -131,7 +131,7 @@ Choose the first destination that satisfies the lesson's future-use contract and
 3. **Umbrella skill:** a broader existing skill cleanly owns the work class.
 4. **Skill `references/`:** reusable evidence, examples, command traces, or longer notes help future skill use while keeping `SKILL.md` concise.
 5. **New reusable skill:** existing skills lack a clean home, and the lesson is a recurring class-level workflow, domain, or playbook.
-6. **Memory-index pointer:** future lookup needs a compact dated handle to original evidence, chronology, or transaction context. For reusable behavior changes, pair it with the executable surface that owns the behavior; for invalidated guidance, keep provenance only when later retrieval of the dispute or deletion reason matters.
+6. **Memory-index pointer:** future lookup needs a compact dated handle to original evidence, chronology, or transaction context. For reusable behavior changes, including procedures recovered through history lookup or verified through a live/manual operation, pair it with the executable surface that owns the behavior; memory-index does not carry the executable procedure. For invalidated guidance, keep provenance only when later retrieval of the dispute or deletion reason matters.
 7. **Short-term continuity:** active temporary state still guides current work.
 8. **Leave unchanged:** existing guidance already covers the lesson or the candidate adds clutter.
 
@@ -158,7 +158,7 @@ Rewrite a prompt slot as a compact canonical replacement. Keep one dense line pe
 
 Location: `<agentDir>/self_improve/skills`
 
-Use ordinary skills for reusable workflows, procedures, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow.
+Use ordinary skills for reusable workflows, procedures, verified workflow shapes, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow.
 
 Put related lessons into the closest matching skill with clear headings. Use `references/` under the owning skill for detailed reusable evidence or examples that would make `SKILL.md` noisy. Keep `SKILL.md` as the operational entry point.
 
@@ -194,7 +194,7 @@ Before reporting success, check the revised library against these prompt-enginee
 - **Destination fit:** each lesson or cleanup lives in the narrowest surface that future matching work will use.
 - **Target-state cleanup:** repeated corrections and repeated assistant failures reduce wrong, stale, conflicting, or overgeneral guidance first. New guidance is allowed only when cleanup alone cannot encode the proven future behavior.
 - **No patch layering:** the revision must not preserve a bad rule by wrapping it in exceptions, prohibitions, authorization clauses, guard flags, or special cases.
-- **Instruction/data boundary:** original wording, chronology, and provenance stay retrievable through memory surfaces while self-improve stores distilled guidance.
+- **Instruction/data boundary:** original wording, chronology, and provenance stay retrievable through memory surfaces while self-improve stores distilled guidance, including reusable workflow shapes.
 - **Output contract:** the final report names changed artifacts and the behavior contract each artifact now owns.
 - **Entropy:** duplicate, stale, conflicting, or misplaced guidance shrinks rather than spreads.
 - **Trigger fit:** skills have descriptions that match the tasks that should use them.
