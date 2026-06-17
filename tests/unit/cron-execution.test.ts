@@ -1511,7 +1511,7 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")}. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records. Also review the previous 24 hours of Rin activity from available evidence surfaces such as scheduled task records, maintenance history, recent sessions, chat message records, and runtime state; use that retrospective to find proven additions, corrections, moves, pruning, or removals that affect future guidance. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. Merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, recall, or remove guidance that would cause future mistakes. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`,
+      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")} using the previous 24 hours of Rin session records as retrospective evidence. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records; use that retrospective to find proven additions, corrections, moves, pruning, or removals that affect future guidance. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. Merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, recall, or remove guidance that would cause future mistakes. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /Trigger:/);
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
@@ -1527,8 +1527,15 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.match(sleep.target.prompt, /reusable skills/);
     assert.match(sleep.target.prompt, /memory-index pointers/);
     assert.match(sleep.target.prompt, /short-term continuity records/);
-    assert.match(sleep.target.prompt, /previous 24 hours of Rin activity/);
-    assert.match(sleep.target.prompt, /scheduled task records/);
+    assert.match(
+      sleep.target.prompt,
+      /previous 24 hours of Rin session records/,
+    );
+    assert.match(sleep.target.prompt, /retrospective evidence/);
+    assert.doesNotMatch(sleep.target.prompt, /Also review/);
+    assert.doesNotMatch(sleep.target.prompt, /scheduled task records/);
+    assert.doesNotMatch(sleep.target.prompt, /message-store/);
+    assert.doesNotMatch(sleep.target.prompt, /final reusable workflow/);
     assert.match(
       sleep.target.prompt,
       /corrections, moves, pruning, or removals/,

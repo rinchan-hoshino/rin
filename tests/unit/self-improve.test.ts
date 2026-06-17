@@ -868,6 +868,8 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   );
   assert.match(prompt, /delete or rewrite wrong guidance/);
   assert.match(prompt, /reject patch-layer fixes/);
+  assert.doesNotMatch(prompt, /recall, transcript, or message-store evidence/);
+  assert.doesNotMatch(prompt, /final reusable workflow/);
   assert.match(prompt, /Report changed artifacts/);
   assert.doesNotMatch(prompt, /self_improve_manage/);
   assert.doesNotMatch(prompt, /skill-read contract/);
@@ -912,6 +914,16 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /Current skill/);
   assert.match(manual, /Umbrella skill/);
   assert.match(manual, /Skill `references\/`/);
+  assert.match(manual, /final reusable workflow shape/);
+  assert.match(
+    manual,
+    /reusable procedure or behavior change only in provenance/,
+  );
+  assert.match(manual, /verified workflow shapes/);
+  assert.match(manual, /procedures recovered through history lookup/);
+  assert.match(manual, /verified through a live\/manual operation/);
+  assert.match(manual, /memory-index does not carry the executable procedure/);
+  assert.match(manual, /reusable workflow shapes/);
   assert.match(
     manual,
     /Create a new ordinary skill when the trigger is reusable/,
