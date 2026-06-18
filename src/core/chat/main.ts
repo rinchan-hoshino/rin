@@ -12,7 +12,6 @@ import {
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
 import { nowIso } from "../time-utils.js";
-import { sleep } from "../platform/process.js";
 import {
   executeChatBridgeCode,
   renderChatBridgeResult,
@@ -752,7 +751,7 @@ export async function startChatBridge(
       return { retry: transientFailure, errorMessage };
     };
     try {
-      const result = await controller.runTurn({
+      await controller.runTurn({
         text: promptBody,
         attachments,
         promptMeta,
@@ -761,7 +760,7 @@ export async function startChatBridge(
         sessionFile: linkedSessionFile || undefined,
         ...resolveChatModelOptions(settings, decision.chatKey),
       });
-      return { retry: false, waitForProcessed: Boolean(result?.steered) };
+      return { retry: false };
     } catch (error) {
       return await handleTurnFailure(error);
     }
@@ -788,18 +787,6 @@ export async function startChatBridge(
     );
   };
 
-  const waitForClaimedInboxProcessed = async (job: ClaimedChatInboxJob) => {
-    const chatKey = safeString(job.envelope.chatKey).trim();
-    const messageId = safeString(job.envelope.messageId).trim();
-    const controller = getController(chatKey);
-    while (!isInboundMessageProcessed(chatKey, messageId)) {
-      if (!controller.hasActiveTurn()) {
-        throw new Error("chat_accepted_inbound_turn_not_active");
-      }
-      await sleep(500);
-    }
-  };
-
   const runClaimedInboxJob = async (
     job: ClaimedChatInboxJob,
     run: () => Promise<ChatInboxJobResult | undefined>,
@@ -815,9 +802,6 @@ export async function startChatBridge(
     }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
       const result = await run();
-      if (result?.waitForProcessed) {
-        await waitForClaimedInboxProcessed(job);
-      }
       finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
     } catch (error) {
       logger.warn(
@@ -892,24 +876,16 @@ export async function startChatBridge(
       };
     }
 
-    const controller = getController(decision.chatKey);
-    const alreadySteered = controller.hasPendingSteeredDeliveryTarget(
-      envelope.messageId,
-    );
     return {
       run: () =>
-        runClaimedInboxJob(job, async () => {
-          if (alreadySteered) {
-            await controller.connect();
-            return { retry: false, waitForProcessed: true };
-          }
-          return await handleAllowedChatTurnSession(
+        runClaimedInboxJob(job, () =>
+          handleAllowedChatTurnSession(
             queuedSession,
             queuedElements,
             identity,
             decision,
-          );
-        }),
+          ),
+        ),
     };
   };
 

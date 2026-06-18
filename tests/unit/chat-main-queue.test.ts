@@ -1296,15 +1296,22 @@ test("chat main submits same-chat follow-up as steer before the current turn is 
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
 
-      const processingDir = path.join(agentDir, "data", "chat", "inbox", "processing");
-      const processingItems = fs.existsSync(processingDir)
-        ? fs.readdirSync(processingDir)
-            .filter((name) => name.endsWith(".json"))
-            .map((name) => JSON.parse(fs.readFileSync(path.join(processingDir, name), "utf8")))
-        : [];
-      const hasSteeredProcessingItem = processingItems.some((item) => item.messageId === "m-two");
-      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "steer" || !hasSteeredProcessingItem) {
-        throw new Error(JSON.stringify({ promptModes, processingItems }));
+      const listInbox = (name) => {
+        const dir = path.join(agentDir, "data", "chat", "inbox", name);
+        return fs.existsSync(dir)
+          ? fs.readdirSync(dir)
+              .filter((entry) => entry.endsWith(".json"))
+              .map((entry) => JSON.parse(fs.readFileSync(path.join(dir, entry), "utf8")))
+          : [];
+      };
+      const inboxItems = [
+        ...listInbox("pending"),
+        ...listInbox("processing"),
+        ...listInbox("failed"),
+      ];
+      const hasDeliveredSteerInboxItem = inboxItems.some((item) => item.messageId === "m-two");
+      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "steer" || hasDeliveredSteerInboxItem) {
+        throw new Error(JSON.stringify({ promptModes, inboxItems }));
       }
       process.exit(0);
     `;
@@ -1327,7 +1334,7 @@ test("chat main submits same-chat follow-up as steer before the current turn is 
   }
 });
 
-test("chat main resumes a persisted steered target without submitting it twice", async () => {
+test("chat main completes a delivered inbox item without waiting for processing semantics", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1346,8 +1353,6 @@ test("chat main resumes a persisted steered target without submitting it twice",
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const helpersMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
-      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1356,32 +1361,15 @@ test("chat main resumes a persisted steered target without submitting it twice",
         trusted: [],
       });
 
-      const chatKey = "telegram/1:2";
-      const statePath = supportMod.chatStatePath(path.join(agentDir, "data"), chatKey);
-      fs.mkdirSync(path.dirname(statePath), { recursive: true });
-      fs.writeFileSync(statePath, JSON.stringify({
-        chatKey,
-        sessionFile: "restored-chat.jsonl",
-        pendingSteeredDeliveryTargets: [{
-          incomingMessageId: "m-restored",
-          replyToMessageId: "m-restored",
-          text: "restored steer",
-        }],
-      }, null, 2) + "\\n");
-
-      let connectCalls = 0;
-      let runTurnCalls = 0;
-      controllerMod.ChatController.prototype.connect = async function () {
-        connectCalls += 1;
-        helpersMod.markProcessedChatMessage(agentDir, this.chatKey, "m-restored", {
-          sessionFile: "restored-chat.jsonl",
-          acceptedAt: new Date().toISOString(),
-          processedAt: new Date().toISOString(),
-        });
+      const listInbox = (name) => {
+        const dir = path.join(agentDir, "data", "chat", "inbox", name);
+        return fs.existsSync(dir) ? fs.readdirSync(dir).filter((entry) => entry.endsWith(".json")) : [];
       };
+
+      let runTurnCalls = 0;
       controllerMod.ChatController.prototype.runTurn = async function () {
         runTurnCalls += 1;
-        throw new Error("runTurn should not be called for persisted steer recovery");
+        return { steered: true, sessionFile: "/tmp/delivered-steer.jsonl" };
       };
 
       const { app } = await mainMod.startChatBridge();
@@ -1401,24 +1389,31 @@ test("chat main resumes a persisted steered target without submitting it twice",
         selfId: "1",
         channelId: "2",
         userId: "owner-1",
-        messageId: "m-restored",
+        messageId: "m-delivered",
         isDirect: true,
-        content: "restored steer",
-        stripped: { content: "restored steer" },
-        elements: [h.createChatRuntimeH().text("restored steer")],
+        content: "delivered steer",
+        stripped: { content: "delivered steer" },
+        elements: [h.createChatRuntimeH().text("delivered steer")],
       });
 
       const deadline = Date.now() + 5000;
-      let stored = null;
       while (Date.now() < deadline) {
-        stored = storeMod.getChatMessage(agentDir, chatKey, "m-restored");
-        if (stored?.processedAt) break;
+        if (
+          runTurnCalls === 1 &&
+          listInbox("pending").length === 0 &&
+          listInbox("processing").length === 0 &&
+          listInbox("failed").length === 0
+        ) {
+          process.exit(0);
+        }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      if (!stored?.processedAt || connectCalls < 1 || runTurnCalls !== 0) {
-        throw new Error(JSON.stringify({ connectCalls, runTurnCalls, stored }));
-      }
-      process.exit(0);
+      throw new Error(JSON.stringify({
+        runTurnCalls,
+        pending: listInbox("pending"),
+        processing: listInbox("processing"),
+        failed: listInbox("failed"),
+      }));
     `;
 
     await execFileAsync(
