@@ -7,11 +7,21 @@
 - CLI and installer flows are clearer and safer: `rin` is now the unified interactive command, print mode can run without the daemon, update-mode source handling is more stable, and native Windows daemon/TUI install is supported.
 - Provider and compact-command failures now surface more accurately, including retry-exhaustion details without extra compact acknowledgements.
 - The todo tool can now read the current checklist when called without replacement data, matching the documented checklist workflow.
-- Scheduler and self-improve operations are easier to maintain with explicit scheduler reloads, more complete verified-success capture, 24-hour activity review during nightly distillation, and target-state distillation guidance.
-- Rin now tracks the Pi 0.79.5 dependency line for this release series.
+- Scheduler and self-improve operations are easier to maintain with explicit scheduler reloads, quiet-mode scheduled tasks, more complete verified-success capture, 24-hour activity review during nightly distillation, and target-state distillation guidance.
+- Installer lifecycle handling is smoother across first-run setup, cross-user Windows targets, and macOS/Windows daemon control.
+- Rin now tracks the Pi 0.79.6 dependency line for this release series.
 - Release executors now verify changelog coverage against included commits before publishing stable or prerelease metadata.
 
 <!-- rin-changelog-coverage
+5a2999d fix(chat): keep rich delivery after segment failures
+cc2212d fix(chat): finish inbox jobs after delivery ack
+737c1df fix(installer): hide cross-user local target on Windows
+e51eef4 fix(cli): support macOS and Windows daemon lifecycle
+a4fa9a4 feat(installer): simplify first-run setup ownership
+2232eba feat(cron): add quiet mode to scheduled tasks
+d128a82 fix(chat): mark steered inbox processed on start
+2920ef7 chore(deps): sync Pi 0.79.6
+278f865 docs(release): cover 0.5.0 nightly changes
 5cf9db2 fix(cli): run print mode without daemon
 e583326 test(installer): stabilize update-mode source boundary
 9adc476 fix(chat): stop gating queued inbox submissions
