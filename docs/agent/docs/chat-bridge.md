@@ -70,7 +70,44 @@ Rin's built-in direct chat runtime supports these adapter families:
 - Slack
 - Minecraft / QueQiao
 
-Use `/chat` in the TUI for interactive setup of official built-in adapters. For scripted setup, edit `settings.json -> chat` with the same adapter boundary and reload/restart the chat runtime according to the operation.
+Chat bridge configuration is agent-owned: edit `settings.json -> chat` directly, validate the JSON, then restart the target daemon so the hosted chat runtime reloads adapter entries. Do not rely on installer or TUI interactive adapter setup; those flows are intentionally absent.
+
+Minimal built-in adapter examples:
+
+```json
+{
+  "chat": {
+    "telegram": {
+      "token": "123456:ABCDEF...",
+      "protocol": "polling",
+      "slash": true
+    },
+    "onebot": {
+      "endpoint": "ws://127.0.0.1:3001",
+      "protocol": "ws",
+      "selfId": "123456789",
+      "token": ""
+    },
+    "qq": {
+      "id": "app-id",
+      "secret": "app-secret",
+      "token": "bot-token",
+      "type": "public"
+    },
+    "lark": { "platform": "feishu", "appId": "cli_xxx", "appSecret": "secret" },
+    "discord": { "token": "bot-token" },
+    "slack": { "protocol": "ws", "token": "xapp-...", "botToken": "xoxb-..." },
+    "minecraft": {
+      "url": "ws://127.0.0.1:8080",
+      "selfId": "minecraft",
+      "serverName": "Survival",
+      "token": ""
+    }
+  }
+}
+```
+
+Use only the adapter entries the owner requested. For multiple accounts of the same adapter, use an array of entries with `name` fields under that adapter key. After writing settings, restart with the target-aware launcher, for example `rin restart` or `rin -u <user> restart`, then verify with `rin status --json` and an adapter-specific send or stored-message check.
 
 ## Chat key and identity contract
 

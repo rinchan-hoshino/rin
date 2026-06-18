@@ -24,7 +24,6 @@ export const BUILTIN_SLASH_COMMANDS = [
   { name: "name", description: "Set session display name" },
   { name: "session", description: "Show session info and stats" },
   { name: "todos", description: "Show all todos on the current branch" },
-  { name: "chat", description: "Configure an official chat bridge adapter" },
   { name: "changelog", description: "Show changelog entries" },
   { name: "hotkeys", description: "Show all keyboard shortcuts" },
   { name: "fork", description: "Create a new fork from a previous message" },
@@ -41,7 +40,7 @@ export const BUILTIN_SLASH_COMMANDS = [
   { name: "quit", description: "Quit rin" },
 ] satisfies BuiltinSlashCommand[];
 
-const DAEMON_BUILTIN_SLASH_COMMAND_NAMES = new Set(["todos", "chat"]);
+const DAEMON_BUILTIN_SLASH_COMMAND_NAMES = new Set(["todos"]);
 
 export function isDaemonBuiltinSlashCommand(name: unknown) {
   return DAEMON_BUILTIN_SLASH_COMMAND_NAMES.has(String(name || "").trim());

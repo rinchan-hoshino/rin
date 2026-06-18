@@ -26,6 +26,10 @@ import { createFrontendSdkRuntimeWrapper } from "../rin-frontend-sdk/runtime-wra
 import { RpcInteractiveSession } from "./runtime.js";
 import { createRpcRuntimeHost } from "./runtime-host.js";
 import { applyRinTuiOverrides } from "../pi/tui-patches/index.js";
+import {
+  buildOnboardingPrompt,
+  prepareOnboardingStartup,
+} from "../self-improve/onboarding.js";
 
 type TuiInteractiveOptions = Pick<
   InteractiveModeOptions,
@@ -33,6 +37,7 @@ type TuiInteractiveOptions = Pick<
 > & {
   sessionName?: string;
   rinStartupWarnings?: string[];
+  rinStartHiddenInitialization?: boolean;
 };
 
 type StartTuiOptions = {
@@ -232,6 +237,28 @@ function applyTuiRuntimeRole(maintenanceMode: boolean) {
   );
 }
 
+export async function applyTuiOnboardingStartupState(
+  agentDir: string,
+  resourceOptions: Partial<TuiResourceOptions>,
+  interactiveOptions: TuiInteractiveOptions,
+) {
+  const resolveAgentDir = () => agentDir;
+  const startup = await prepareOnboardingStartup(
+    resolveAgentDir,
+    "tui_startup",
+  );
+  if (!startup.shouldStart) return startup;
+
+  resourceOptions.appendSystemPrompt = [
+    ...(resourceOptions.appendSystemPrompt || []),
+    buildOnboardingPrompt("auto"),
+  ];
+  interactiveOptions.initialMessage = undefined;
+  interactiveOptions.initialMessages = undefined;
+  interactiveOptions.rinStartHiddenInitialization = true;
+  return startup;
+}
+
 export async function prepareRpcSessionWorkerForInteractiveStartup(
   rpcSession: Pick<
     RpcInteractiveSession,
@@ -425,6 +452,11 @@ export async function startTui(options: StartTuiOptions = {}) {
     initialMessages: parsedTuiOptions.initialMessages,
     verbose: parsedTuiOptions.verbose,
   };
+  await applyTuiOnboardingStartupState(
+    runtime.agentDir,
+    resourceOptions,
+    interactiveOptions,
+  );
   profile.mark(maintenanceMode ? "mode=maintenance" : "mode=rpc");
 
   await applyRinTuiOverrides();

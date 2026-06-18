@@ -166,6 +166,9 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(chatBridge, /## Boundary selection/);
   assert.match(chatBridge, /platform\[\/botId\]:chatId/);
   assert.match(chatBridge, /Treat platform metadata as authoritative/);
+  assert.match(chatBridge, /Chat bridge configuration is agent-owned/);
+  assert.match(chatBridge, /restart the target daemon/);
+  assert.doesNotMatch(chatBridge, /Use `\/chat`/);
   assert.match(chatBridge, /rin\.chat\.evalBridge/);
   assert.match(chatBridge, /helpers\.useChat\(chatKey\)/);
   assert.match(chatBridge, /chat\.byChatKey/);
@@ -186,18 +189,29 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(richText, /## Attachment delivery contract/);
   assert.match(richText, /## Validation checks/);
   assert.match(richText, /chat identity\/log lookup path/);
-  assert.match(initialization, /Ask one focused question at a time/);
-  assert.match(initialization, /Route other material to its proper surface/);
-  assert.match(initialization, /Conversation contract/);
-  assert.match(initialization, /agent_profile/);
-  assert.match(initialization, /user_profile/);
-  assert.match(initialization, /core_doctrine/);
-  assert.match(initialization, /docs\/memory-layering\.md/);
+  assert.match(initialization, /meets a user for the first time/);
+  assert.match(initialization, /Success means the user feels welcomed/);
+  assert.match(initialization, /current agent role in the user's language/);
+  assert.match(initialization, /Ask in sequence, one question at a time/);
+  assert.match(initialization, /Make each question easy to answer or defer/);
+  assert.match(initialization, /agent name or identity the user wants/);
+  assert.match(initialization, /First-meeting flow/);
+  assert.match(initialization, /Establish the agent identity/);
   assert.match(
     initialization,
-    /builtin-skills\/rin-prompt-engineering\/SKILL\.md/,
+    /Use `docs\/self-improve-distillation\.md` as the persistence contract/,
   );
-  assert.doesNotMatch(initialization, /save_prompts/);
+  assert.match(initialization, /Learn how to address the user/);
+  assert.match(initialization, /Learn the desired presence/);
+  assert.match(initialization, /Save, summarize, and continue/);
+  assert.match(initialization, /init-state\.json/);
+  assert.match(initialization, /initialization_completed/);
+  assert.match(initialization, /agent_profile/);
+  assert.match(initialization, /user_profile/);
+  assert.match(
+    initialization,
+    /chat-platform interoperation and scheduled tasks/,
+  );
   assert.match(scheduledTasks, /`session\.mode: "dedicated"`/);
   assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
   assert.match(

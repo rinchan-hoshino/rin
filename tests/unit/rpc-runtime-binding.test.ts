@@ -935,7 +935,7 @@ test("rpc runtime routes daemon builtin slash commands from prompt to daemon", a
       if (payload.type === "get_commands") {
         return Promise.resolve({
           success: true,
-          data: { commands: [{ name: "chat", source: "builtin" }] },
+          data: { commands: [{ name: "todos", source: "builtin" }] },
         });
       }
       if (payload.type === "run_command") {
@@ -970,7 +970,7 @@ test("rpc runtime routes daemon builtin slash commands from prompt to daemon", a
   });
   session.sessionFile = "/tmp/rpc-session.jsonl";
 
-  await session.prompt("/chat telegram", { streamingBehavior: "steer" });
+  await session.prompt("/todos", { streamingBehavior: "steer" });
 
   assert.equal(
     sent.some((payload) => payload.type === "prompt"),
@@ -980,7 +980,7 @@ test("rpc runtime routes daemon builtin slash commands from prompt to daemon", a
     sent.find((payload) => payload.type === "run_command"),
     {
       type: "run_command",
-      commandLine: "/chat telegram",
+      commandLine: "/todos",
       sessionFile: "/tmp/rpc-session.jsonl",
     },
   );

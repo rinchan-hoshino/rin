@@ -1,5 +1,4 @@
 import { readChatCommandResponses } from "../chat/command-responses.js";
-import { runChatBridgeConfigureCommand } from "../chat/configure-chat-bridge.js";
 import { asArray } from "../json-utils.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
@@ -379,14 +378,6 @@ export async function runBuiltinCommand(
       return shown
         ? { handled: true }
         : handledText("/todos requires interactive mode.");
-    }
-    case "chat": {
-      const ui =
-        deps.uiContext || session.__rinCapabilities?.createContext?.().ui;
-      const shown = await runChatBridgeConfigureCommand(ui);
-      return shown
-        ? { handled: true }
-        : handledText("/chat requires interactive mode.");
     }
     case "changelog": {
       const { getChangelogPath, parseChangelog }: any =

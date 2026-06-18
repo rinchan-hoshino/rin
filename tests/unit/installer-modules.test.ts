@@ -772,7 +772,6 @@ test("persistInstallerOutputs stores configured language in settings", async () 
         thinkingLevel: "medium",
         language: "zh_CN",
         builtInExtensions: ["rin:browse"],
-        chatConfig: {},
         authData: {},
         elevated: false,
       },
@@ -1285,7 +1284,7 @@ test("persist normalizeInstalledChatSettings runs elevated migrations as target 
   });
 });
 
-test("persist persistInstallerOutputs normalizes malformed chat roots before merging adapters", async () => {
+test("persistInstallerOutputs does not install chat bridge adapter config", async () => {
   await withTempDir(async (dir) => {
     const ownerHome = path.join(dir, "home", "demo");
     const writes = [];
@@ -1297,7 +1296,6 @@ test("persist persistInstallerOutputs normalizes malformed chat roots before mer
         provider: "openai",
         modelId: "gpt",
         thinkingLevel: "medium",
-        chatConfig: { telegram: { token: "fresh-token" } },
         authData: { apiKey: "secret" },
         elevated: false,
       },
@@ -1306,10 +1304,7 @@ test("persist persistInstallerOutputs normalizes malformed chat roots before mer
         ensureDir: () => {},
         readInstallerJson: (filePath, fallback) => {
           if (filePath === path.join(dir, "settings.json")) {
-            return {
-              chat: "broken",
-              koishi: { telegram: { token: "legacy" } },
-            };
+            return { koishi: { telegram: { token: "legacy" } } };
           }
           if (filePath === path.join(dir, "auth.json")) {
             return { existing: true };
@@ -1333,9 +1328,7 @@ test("persist persistInstallerOutputs normalizes malformed chat roots before mer
       (entry) => entry.filePath === result.settingsPath,
     );
     assert.ok(settingsWrite);
-    assert.deepEqual(settingsWrite.value.chat, {
-      telegram: { token: "fresh-token" },
-    });
+    assert.equal("chat" in settingsWrite.value, false);
     assert.equal("koishi" in settingsWrite.value, false);
 
     const authWrite = writes.find(
@@ -1343,6 +1336,61 @@ test("persist persistInstallerOutputs normalizes malformed chat roots before mer
     );
     assert.ok(authWrite);
     assert.deepEqual(authWrite.value, { existing: true, apiKey: "secret" });
+
+    const initStateWrite = writes.find(
+      (entry) => entry.filePath === result.initStatePath,
+    );
+    assert.ok(initStateWrite);
+    assert.equal(initStateWrite.value.initialized, true);
+    assert.equal(initStateWrite.value.pending, false);
+    assert.equal(initStateWrite.value.lastTrigger, "install_existing");
+  });
+});
+
+test("persistInstallerOutputs marks fresh installs as needing initialization", async () => {
+  await withTempDir(async (dir) => {
+    const writes = [];
+    const result = await persist.persistInstallerOutputs(
+      {
+        currentUser: "demo",
+        targetUser: "demo",
+        installDir: dir,
+        provider: "openai",
+        modelId: "gpt",
+        thinkingLevel: "medium",
+        authData: {},
+        elevated: false,
+        initializationComplete: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000, home: dir }),
+        ensureDir: () => {},
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
+        launcherMetadataPathForUser: () => path.join(dir, "launcher.json"),
+        readJsonFile: (_filePath, fallback) => fallback,
+        writeLaunchersForUser: () => ({
+          rinPath: "/tmp/rin",
+          rinInstallPath: "/tmp/rin-install",
+        }),
+        reconcileInstallerManifest: persist.reconcileInstallerManifest,
+        runPrivileged: () => {},
+      },
+    );
+
+    const initStateWrite = writes.find(
+      (entry) => entry.filePath === result.initStatePath,
+    );
+    assert.ok(initStateWrite);
+    assert.deepEqual(initStateWrite.value, {
+      version: 2,
+      promptedAt: "",
+      completedAt: "",
+      lastTrigger: "install_fresh",
+      pending: false,
+      initialized: false,
+    });
   });
 });
 
@@ -1366,7 +1414,6 @@ test("persist persistInstallerOutputs applies install upgrade migrations before 
         provider: "openai",
         modelId: "gpt",
         thinkingLevel: "medium",
-        chatConfig: {},
         authData: {},
         elevated: false,
       },
@@ -1459,7 +1506,6 @@ test("persist persistInstallerOutputs forwards release metadata into currentRele
         provider: "openai",
         modelId: "gpt",
         thinkingLevel: "medium",
-        chatConfig: null,
         authData: {},
         release,
         currentReleaseName: "deadbeef",
@@ -1514,7 +1560,6 @@ test("persist persistInstallerOutputs can skip saving a launcher default target"
         modelId: "gpt",
         thinkingLevel: "medium",
         setDefaultTarget: false,
-        chatConfig: null,
         authData: {},
         elevated: false,
       },
@@ -1561,7 +1606,6 @@ test("persist persistInstallerOutputs writes launchers for current and target us
         provider: "openai",
         modelId: "gpt",
         thinkingLevel: "medium",
-        chatConfig: null,
         authData: {},
         elevated: true,
       },
@@ -1614,7 +1658,6 @@ test("persist persistInstallerOutputs normalizes malformed auth and launcher met
         provider: "openai",
         modelId: "gpt",
         thinkingLevel: "medium",
-        chatConfig: null,
         authData: { apiKey: "secret" },
         elevated: false,
       },

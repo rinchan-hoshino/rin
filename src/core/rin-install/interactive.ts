@@ -1,7 +1,6 @@
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
-import { promptChatBridgeSetup } from "../chat-bridge/setup.js";
 import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { BUILT_IN_RIN_EXTENSIONS } from "../rin-bundled-extensions.js";
 import {
@@ -577,18 +576,6 @@ export async function promptProviderSetup(
   return { provider, modelId, thinkingLevel, authResult };
 }
 
-export async function promptChatSetup(
-  prompt: PromptApi,
-  i18n: InstallerI18n = createInstallerI18n(),
-) {
-  const result = await promptChatBridgeSetup(prompt, {}, i18n);
-  return {
-    chatDescription: result.chatDescription,
-    chatDetail: result.chatDetail,
-    chatConfig: result.chatConfig,
-  };
-}
-
 export async function promptBuiltInExtensionSetup(
   prompt: PromptApi,
   _i18n: InstallerI18n = createInstallerI18n(),
@@ -628,8 +615,6 @@ export function buildInstallPlanText(
     modelId: string;
     thinkingLevel: string;
     authAvailable: boolean;
-    chatDescription: string;
-    chatDetail: string;
     language?: string;
     setDefaultTarget?: boolean;
   },
@@ -642,8 +627,6 @@ export function buildInstallPlanText(
     modelId: options.modelId,
     thinkingLevel: options.thinkingLevel,
     authAvailable: options.authAvailable,
-    chatDescription: options.chatDescription,
-    chatDetail: options.chatDetail,
     language: String(options.language || i18n.language || DEFAULT_LANGUAGE_TAG),
     setDefaultTarget: options.setDefaultTarget !== false,
   });

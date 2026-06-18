@@ -4,9 +4,6 @@ import path from "node:path";
 import { nowIso } from "./core/utils.js";
 import { initStatePath } from "./paths.js";
 
-const REQUIRED_INIT_SLOTS = ["agent_profile", "user_profile"];
-const OPTIONAL_INIT_SLOTS = ["core_doctrine"];
-
 function resolveInitStatePath(resolveAgentDir: () => string) {
   return initStatePath(resolveAgentDir());
 }
@@ -23,6 +20,7 @@ function readInitState(resolveAgentDir: () => string) {
       lastTrigger: "",
       pending: false,
       ...parsed,
+      initialized: Boolean(parsed?.initialized || parsed?.completedAt),
     };
   } catch {
     return {
@@ -31,6 +29,7 @@ function readInitState(resolveAgentDir: () => string) {
       completedAt: "",
       lastTrigger: "",
       pending: false,
+      initialized: false,
     };
   }
 }
@@ -55,6 +54,7 @@ export function buildOnboardingPrompt(
   return [
     "The user is requesting Rin initialization.",
     "Use `~/.rin/docs/rin/docs/initialization.md` as the initialization contract for this flow.",
+    "The initialization completed state is false; follow the initialization document through its completion-state update step.",
   ].join("\n");
 }
 
@@ -69,30 +69,22 @@ export function isOnboardingActive(
   return Boolean(state?.pending);
 }
 
-export async function getOnboardingStatus(
+export function setOnboardingInitialized(
   resolveAgentDir: () => string,
-  loadSelfImproveStore: () => Promise<any>,
+  initialized: boolean,
+  trigger: string,
 ) {
-  const service = await loadSelfImproveStore();
-  const docs = await service.loadActiveSelfImproveDocs(resolveAgentDir());
-  const missing = REQUIRED_INIT_SLOTS.concat(OPTIONAL_INIT_SLOTS).filter(
-    (slot, index, all) =>
-      all.indexOf(slot) === index &&
-      !docs.some(
-        (doc: any) =>
-          doc?.exposure === "self_improve_prompts" &&
-          doc?.self_improve_prompt_slot === slot,
-      ),
-  );
-  const requiredMissing = REQUIRED_INIT_SLOTS.filter((slot) =>
-    missing.includes(slot),
-  );
-  const optionalMissing = OPTIONAL_INIT_SLOTS.filter((slot) =>
-    missing.includes(slot),
-  );
   const state = readInitState(resolveAgentDir);
-  const complete = requiredMissing.length === 0;
-  return { state, requiredMissing, optionalMissing, complete };
+  const next = {
+    ...state,
+    version: 2,
+    completedAt: initialized ? state.completedAt || nowIso() : "",
+    lastTrigger: trigger,
+    pending: false,
+    initialized,
+  };
+  writeInitState(resolveAgentDir, next);
+  return next;
 }
 
 export async function markOnboardingPrompted(
@@ -107,28 +99,24 @@ export async function markOnboardingPrompted(
     completedAt: "",
     lastTrigger: trigger,
     pending: true,
+    initialized: false,
   };
   writeInitState(resolveAgentDir, next);
   return next;
 }
 
-export async function refreshOnboardingCompletion(
+export async function prepareOnboardingStartup(
   resolveAgentDir: () => string,
-  loadSelfImproveStore: () => Promise<any>,
+  trigger = "tui_startup",
 ) {
-  const status = await getOnboardingStatus(
-    resolveAgentDir,
-    loadSelfImproveStore,
-  );
-  if (status.complete) {
-    const next = {
-      ...status.state,
-      version: 2,
-      completedAt: nowIso(),
-      pending: false,
-    };
-    writeInitState(resolveAgentDir, next);
-    return { ...status, state: next, complete: true };
+  const current = readInitState(resolveAgentDir);
+  if (current.initialized) {
+    return { state: current, shouldStart: false, complete: true };
   }
-  return status;
+  const state = await markOnboardingPrompted(resolveAgentDir, trigger);
+  return {
+    state,
+    shouldStart: true,
+    complete: false,
+  };
 }

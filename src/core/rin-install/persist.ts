@@ -23,6 +23,7 @@ import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 import { loadFirstValidCandidate } from "./candidate-loader.js";
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
+import { initStatePath } from "../self-improve/paths.js";
 import { getManagedChatSessionDir } from "../session/managed-paths.js";
 import {
   defaultHomeForUser,
@@ -610,10 +611,6 @@ function normalizeInstallerRecord(value: unknown) {
   return isJsonRecord(value) ? value : {};
 }
 
-function normalizeChatConfigRoot(chatConfig: unknown) {
-  return isJsonRecord(chatConfig) ? chatConfig : null;
-}
-
 function normalizeConfiguredLanguage(language: unknown) {
   const normalizedLanguage = String(language || "").trim();
   return normalizedLanguage
@@ -667,21 +664,6 @@ function installerWriteOptions(
     ownerUser,
     ownerGroup,
   };
-}
-
-function mergeInstalledChatSettings(settingsJson: any, chatConfig?: any) {
-  const normalizedChatConfig = normalizeChatConfigRoot(chatConfig);
-  const normalized = normalizeStoredChatSettings(settingsJson, {
-    ensureChat: Boolean(normalizedChatConfig),
-  });
-  if (!normalizedChatConfig) return normalized;
-  for (const [adapterKey, adapterConfig] of Object.entries(
-    normalizedChatConfig,
-  )) {
-    if (adapterConfig === undefined) continue;
-    normalized.chat[adapterKey] = adapterConfig;
-  }
-  return normalized;
 }
 
 function normalizeInstalledReleaseInfo(
@@ -995,7 +977,6 @@ export async function persistInstallerOutputs(
     language?: string;
     setDefaultTarget?: boolean;
     builtInExtensions?: string[];
-    chatConfig: any;
     authData: any;
     release?: InstalledReleaseInfo;
     currentReleaseName?: string;
@@ -1004,6 +985,7 @@ export async function persistInstallerOutputs(
     previousReleaseName?: string;
     previousReleaseRoot?: string;
     elevated?: boolean;
+    initializationComplete?: boolean;
   },
   deps: {
     findSystemUser: (targetUser: string) => any;
@@ -1054,9 +1036,8 @@ export async function persistInstallerOutputs(
 
   const migrations = applyInstallUpgradeMigrations(options, deps);
   const settingsPath = installSettingsPath(options.installDir);
-  const settingsJson = mergeInstalledChatSettings(
+  const settingsJson = normalizeStoredChatSettings(
     deps.readInstallerJson<any>(settingsPath, {}, Boolean(options.elevated)),
-    options.chatConfig,
   );
   applyInstalledDefaults(settingsJson, options);
 
@@ -1067,6 +1048,15 @@ export async function persistInstallerOutputs(
   const nextAuthJson = {
     ...authJson,
     ...normalizeInstallerRecord(options.authData),
+  };
+  const initializationComplete = options.initializationComplete !== false;
+  const initStateJson = {
+    version: 2,
+    promptedAt: "",
+    completedAt: initializationComplete ? nowIso() : "",
+    lastTrigger: initializationComplete ? "install_existing" : "install_fresh",
+    pending: false,
+    initialized: initializationComplete,
   };
 
   const launcherPath = deps.launcherMetadataPathForUser(options.currentUser);
@@ -1099,8 +1089,10 @@ export async function persistInstallerOutputs(
     deps,
   );
 
+  const initStateFilePath = initStatePath(options.installDir);
   writeInstallerJson(settingsPath, settingsJson, writeOptions, deps);
   writeInstallerJson(authPath, nextAuthJson, writeOptions, deps);
+  writeInstallerJson(initStateFilePath, initStateJson, writeOptions, deps);
   deps.writeJsonFile(launcherPath, launcherJson);
   const currentLaunchers = deps.writeLaunchersForUser(
     options.currentUser,
@@ -1117,6 +1109,7 @@ export async function persistInstallerOutputs(
   return {
     settingsPath,
     authPath,
+    initStatePath: initStateFilePath,
     launcherPath,
     manifestPath,
     locatorManifestPath,

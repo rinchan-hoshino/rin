@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import { type FinalizeInstallOptions } from "./apply-plan.js";
 import {
   launcherMetadataPathForUser,
@@ -46,6 +48,14 @@ import {
   targetHomeForUser,
 } from "./users.js";
 
+function isFreshInstallDirectory(installDir: string) {
+  try {
+    return fs.readdirSync(installDir).length === 0;
+  } catch {
+    return true;
+  }
+}
+
 async function stopInstalledBrowseSidecars(installDir: string) {
   const status = getBrowseStatus(installDir);
   const instances = Array.isArray(status.instances) ? status.instances : [];
@@ -75,7 +85,6 @@ async function applyInstalledRuntime(
   const thinkingLevel = String(options.thinkingLevel || "");
   const language = String(options.language || "").trim();
   const setDefaultTarget = options.setDefaultTarget !== false;
-  const chatConfig = options.chatConfig || null;
   const authData = options.authData || {};
   const builtInExtensions = Array.isArray(options.builtInExtensions)
     ? options.builtInExtensions
@@ -84,6 +93,7 @@ async function applyInstalledRuntime(
     String(options.sourceRoot || "").trim() || repoRootFromHere();
   const persistInstallerState = Boolean(options.persistInstallerState);
   const release = options.release;
+  const freshInstallDirectory = isFreshInstallDirectory(installDir);
 
   const ownership = describeOwnership(targetUser, installDir);
   const installServiceNow = ["darwin", "linux", "win32"].includes(
@@ -164,7 +174,6 @@ async function applyInstalledRuntime(
           thinkingLevel,
           language,
           setDefaultTarget,
-          chatConfig,
           authData,
           builtInExtensions,
           release,
@@ -176,6 +185,7 @@ async function applyInstalledRuntime(
             ? installedReleaseRoot(installDir, previousReleaseName)
             : undefined,
           elevated: useElevatedWrite,
+          initializationComplete: !freshInstallDirectory,
         },
         {
           findSystemUser,

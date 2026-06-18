@@ -44,8 +44,6 @@ test("installer interactive helpers describe dir state and plan text", () => {
     modelId: "gpt-5",
     thinkingLevel: "medium",
     authAvailable: true,
-    chatDescription: "telegram",
-    chatDetail: "Chat bridge token: [saved]",
     setDefaultTarget: false,
   });
   assert.ok(plan.includes("Target daemon user: bob"));
@@ -53,12 +51,8 @@ test("installer interactive helpers describe dir state and plan text", () => {
   assert.ok(!plan.includes("Rin safety boundary:"));
   assert.ok(!plan.includes("TUI for the target user"));
   assert.ok(plan.includes("Default target user: not set"));
-  assert.ok(plan.includes("Chat bridge: telegram"));
-  assert.ok(
-    plan.includes(
-      "Chat authorization: installer guidance covers the first OWNER setup once; later role changes should be requested in normal conversation, not slash commands.",
-    ),
-  );
+  assert.equal(plan.includes("Chat bridge:"), false);
+  assert.equal(plan.includes("Chat authorization:"), false);
 
   const plainSection = interactive.buildPlainInstallerSection(
     "Install options",
@@ -106,13 +100,11 @@ test("installer interactive helpers describe dir state and plan text", () => {
       modelId: "gpt-5",
       thinkingLevel: "medium",
       authAvailable: true,
-      chatDescription: "telegram",
-      chatDetail: "\u804a\u5929\u63a5\u5165\u6a21\u5f0f\uff1apolling",
     },
     installerI18n.createInstallerI18n("zh_CN"),
   );
-  assert.ok(zhPlan.includes("\u804a\u5929\u63a5\u5165: telegram"));
-  assert.ok(zhPlan.includes("\u804a\u5929\u6388\u6743\uff1a"));
+  assert.equal(zhPlan.includes("\u804a\u5929\u63a5\u5165"), false);
+  assert.equal(zhPlan.includes("\u804a\u5929\u6388\u6743"), false);
   assert.ok(!zhPlan.includes("Chat bridge"));
 
   const zhSafety = interactive.buildInstallSafetyBoundaryText(
@@ -126,7 +118,7 @@ test("installer interactive helpers describe dir state and plan text", () => {
     targetUser: "bob",
   });
   assert.ok(initExit.includes("open Rin: rin -u bob"));
-  assert.ok(initExit.includes("restart initialization"));
+  assert.ok(initExit.includes("initialization completed state"));
 
   const launcherPath = "/home/alice/.local/bin/rin";
   const pathMissingInitExit = interactive.buildPostInstallInitExitText({
@@ -411,7 +403,6 @@ test("installer steps show progress after user input before work runs", () => {
     "src/core/rin-install/interactive.ts",
     "src/core/rin-install/provider-auth.ts",
     "src/core/rin-install/updater.ts",
-    "src/core/chat-bridge/setup.ts",
   ]
     .map((item) => readFileSync(path.join(rootDir, item), "utf8"))
     .join("\n");
@@ -421,7 +412,6 @@ test("installer steps show progress after user input before work runs", () => {
   assert.match(sources, /inspectingInstallDirectoryMessage/);
   assert.match(sources, /loadingModelChoicesMessage/);
   assert.match(sources, /savingProviderAuthMessage/);
-  assert.match(sources, /preparingChatBridgeMessage/);
   assert.match(sources, /refreshingInstalledTargetMessage/);
 });
 

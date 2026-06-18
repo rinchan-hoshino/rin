@@ -16,9 +16,6 @@ export type FinalizeInstallOptions = {
   thinkingLevel?: string;
   language?: string;
   setDefaultTarget?: boolean;
-  chatDescription?: string;
-  chatDetail?: string;
-  chatConfig?: any;
   authData?: any;
   builtInExtensions?: string[];
   sourceRoot?: string;

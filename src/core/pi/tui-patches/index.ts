@@ -1346,6 +1346,18 @@ export async function applyRinTuiOverrides() {
           }
         }
       }
+      if (this.options?.rinStartHiddenInitialization) {
+        try {
+          await this.session.prompt("", {
+            requestTag: "rin-init-startup",
+            source: "rin-init",
+          });
+        } catch (error) {
+          this.showError(
+            error instanceof Error ? error.message : "Unknown error occurred",
+          );
+        }
+      }
 
       while (true) {
         const userInput = await this.getUserInput();

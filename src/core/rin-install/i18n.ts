@@ -125,68 +125,9 @@ type InstallerDisplayCopy = {
   noReasoningHint: string;
   noModelsAvailableError: string;
   noModelsForProviderError: (provider: string) => string;
-  whereToFindLabel: string;
-  openLabel: string;
   fieldRequired: string;
   valueRequired: string;
   validUrlRequired: string;
-  configureChatBridgeNowMessage: string;
-  chooseChatPlatformMessage: string;
-  guidedSetupHint: string;
-  telegramHint: string;
-  onebotHint: string;
-  slackHint: string;
-  buildGuide: (
-    this: InstallerDisplayCopy,
-    message: string,
-    guide?: string,
-    links?: string | string[],
-  ) => string;
-  chatDisabledDescription: string;
-  telegramTokenMessage: string;
-  telegramTokenGuide: string;
-  telegramTokenDetail: string;
-  onebotEndpointMessage: string;
-  onebotEndpointGuide: string;
-  onebotSelfIdMessage: string;
-  onebotSelfIdGuide: string;
-  onebotTokenMessage: string;
-  onebotTokenGuide: string;
-  optionalTokenPlaceholder: string;
-  onebotDetail: (protocol: string, endpoint: string) => string;
-  discordTokenMessage: string;
-  discordTokenGuide: string;
-  discordDetail: string;
-  qqAppIdMessage: string;
-  qqCredentialsGuide: string;
-  qqSecretMessage: string;
-  qqTokenMessage: string;
-  qqScopeMessage: string;
-  qqScopeGuide: string;
-  publicLabel: string;
-  privateLabel: string;
-  qqDetail: string;
-  larkPlatformMessage: string;
-  larkPlatformGuide: string;
-  feishuLabel: string;
-  larkLabel: string;
-  feishuHint: string;
-  larkHint: string;
-  larkAppIdMessage: string;
-  larkAppIdGuide: string;
-  larkAppSecretMessage: string;
-  larkDetail: (platform: string) => string;
-  slackAppTokenMessage: string;
-  slackAppTokenGuide: string;
-  slackBotTokenMessage: string;
-  slackBotTokenGuide: string;
-  slackDetail: string;
-  minecraftUrlMessage: string;
-  minecraftUrlGuide: string;
-  minecraftSelfIdMessage: string;
-  minecraftServerNameMessage: string;
-  minecraftTokenMessage: string;
-  minecraftDetail: (url: string) => string;
   installSafetyBoundaryLines: string[];
   buildInstallSafetyBoundaryText: (this: InstallerDisplayCopy) => string;
   buildInstallPlanText: (
@@ -198,8 +139,6 @@ type InstallerDisplayCopy = {
       modelId: string;
       thinkingLevel: string;
       authAvailable: boolean;
-      chatDescription: string;
-      chatDetail: string;
       language: string;
       setDefaultTarget: boolean;
     },
@@ -290,7 +229,6 @@ type InstallerDisplayCopy = {
   inspectingInstallDirectoryMessage: string;
   loadingModelChoicesMessage: string;
   savingProviderAuthMessage: string;
-  preparingChatBridgeMessage: string;
   refreshingInstalledTargetMessage: string;
   publishingRuntimeMessageElevated: string;
   publishingRuntimeMessage: string;
@@ -309,13 +247,6 @@ type InstallerDisplayCopy = {
   enterApiKeyMessage: (providerName: string) => string;
   tokenRequired: string;
 };
-
-function formatOpenLinks(links?: string | string[]) {
-  const list = (Array.isArray(links) ? links : [links])
-    .map((item) => String(item || "").trim())
-    .filter(Boolean);
-  return list.join(" · ");
-}
 
 const INSTALLER_DISPLAY_COPY = {
   en_US: {
@@ -434,88 +365,9 @@ const INSTALLER_DISPLAY_COPY = {
     noModelsAvailableError: "rin_installer_no_models_available",
     noModelsForProviderError: (provider: string) =>
       `rin_installer_no_models_for_provider:${provider}`,
-    whereToFindLabel: "Where to find it",
-    openLabel: "Open",
     fieldRequired: "This field is required.",
     valueRequired: "A value is required.",
     validUrlRequired: "Use a valid URL.",
-    configureChatBridgeNowMessage: "Configure a chat bridge now?",
-    chooseChatPlatformMessage: "Choose a chat platform.",
-    guidedSetupHint: "guided setup",
-    telegramHint: "bot token",
-    onebotHint: "endpoint + protocol",
-    slackHint: "app token + bot token",
-    buildGuide(message: string, guide?: string, links?: string | string[]) {
-      const lines = [message.trim()];
-      if (guide) lines.push(`${this.whereToFindLabel}: ${guide.trim()}`);
-      const openLinks = formatOpenLinks(links);
-      if (openLinks) lines.push(`${this.openLabel}: ${openLinks}`);
-      return lines.join("\n");
-    },
-    chatDisabledDescription: "disabled for now",
-    telegramTokenMessage: "Enter the Telegram bot token.",
-    telegramTokenGuide: "Telegram @BotFather → choose your bot → API token.",
-    telegramTokenDetail:
-      "Chat bridge mode: polling · token saved to target settings.json",
-    onebotEndpointMessage: "Enter the OneBot endpoint URL.",
-    onebotEndpointGuide:
-      "Your OneBot bridge or client config, for example NapCat, LLOneBot, or another OneBot server.",
-    onebotSelfIdMessage:
-      "Enter the OneBot self ID if you already know it. Leave blank to fill later.",
-    onebotSelfIdGuide:
-      "Usually the bot QQ number from your OneBot client or bridge config.",
-    onebotTokenMessage:
-      "Enter the OneBot access token if required. Leave blank otherwise.",
-    onebotTokenGuide:
-      "Use the access token from your OneBot server config only if you enabled one.",
-    optionalTokenPlaceholder: "optional token",
-    onebotDetail: (protocol: string, endpoint: string) =>
-      `Chat bridge mode: ${protocol} · endpoint: ${endpoint}`,
-    discordTokenMessage: "Enter the Discord bot token.",
-    discordTokenGuide:
-      "Discord Developer Portal → your application → Bot → Reset Token / Token.",
-    discordDetail: "Chat bridge token: [saved to target settings.json]",
-    qqAppIdMessage: "Enter the QQ bot app ID.",
-    qqCredentialsGuide:
-      "QQ bot developer docs → create your bot application → app credentials.",
-    qqSecretMessage: "Enter the QQ bot secret.",
-    qqTokenMessage: "Enter the QQ bot token.",
-    qqScopeMessage: "Choose the QQ bot scope.",
-    qqScopeGuide: "Use the bot type shown in your QQ bot application settings.",
-    publicLabel: "Public",
-    privateLabel: "Private",
-    qqDetail:
-      "Chat bridge mode: websocket · app credentials saved to target settings.json",
-    larkPlatformMessage: "Choose the Lark / Feishu region.",
-    larkPlatformGuide:
-      "If your app is on open.feishu.cn use Feishu. If it is on open.larksuite.com use Lark.",
-    feishuLabel: "Feishu",
-    larkLabel: "Lark",
-    feishuHint: "China / open.feishu.cn",
-    larkHint: "Global / open.larksuite.com",
-    larkAppIdMessage: "Enter the Lark / Feishu app ID.",
-    larkAppIdGuide:
-      "Developer console → your app → Credentials / Basic information.",
-    larkAppSecretMessage: "Enter the Lark / Feishu app secret.",
-    larkDetail: (platform: string) =>
-      `Chat bridge mode: ws · platform: ${platform} · app credentials saved to target settings.json`,
-    slackAppTokenMessage: "Enter the Slack app-level token.",
-    slackAppTokenGuide:
-      "Slack app settings → Basic Information or Socket Mode → App-Level Tokens (starts with xapp-).",
-    slackBotTokenMessage: "Enter the Slack bot token.",
-    slackBotTokenGuide:
-      "Slack app settings → OAuth & Permissions → Bot User OAuth Token (starts with xoxb-).",
-    slackDetail: "Chat bridge mode: ws",
-    minecraftUrlMessage: "Enter the Minecraft QueQiao WebSocket URL.",
-    minecraftUrlGuide:
-      "Use the WebSocket address exposed by your QueQiao bridge or Minecraft adapter.",
-    minecraftSelfIdMessage:
-      "Enter the Minecraft bridge self ID if you want a custom one. Leave blank to use minecraft.",
-    minecraftServerNameMessage:
-      "Enter the Minecraft server name if you want it shown in chat logs. Leave blank otherwise.",
-    minecraftTokenMessage:
-      "Enter the QueQiao access token if required. Leave blank otherwise.",
-    minecraftDetail: (url: string) => `Chat bridge mode: ws · endpoint: ${url}`,
     installSafetyBoundaryLines: [
       "Rin safety boundary:",
       "- Rin always runs in YOLO mode.",
@@ -553,11 +405,6 @@ const INSTALLER_DISPLAY_COPY = {
         `Thinking level: ${options.thinkingLevel || skippedForNow}`,
         `Model auth status: ${authStatus}`,
         `${this.defaultTargetLabel}: ${options.setDefaultTarget ? this.defaultTargetSetValue(options.targetUser) : this.defaultTargetSkippedValue}`,
-        `Chat bridge: ${options.chatDescription}`,
-        options.chatDetail,
-        options.chatDescription === this.chatDisabledDescription
-          ? ""
-          : "Chat authorization: installer guidance covers the first OWNER setup once; later role changes should be requested in normal conversation, not slash commands.",
       ]
         .filter(Boolean)
         .join("\n");
@@ -670,7 +517,7 @@ const INSTALLER_DISPLAY_COPY = {
         "Next time:",
         `- open Rin: ${rinCommand}${userSuffix}`,
         `- check daemon state if needed: ${rinCommand} doctor${userSuffix}`,
-        "- restart initialization by asking Rin to initialize again",
+        "- restart initialization only after an agent resets the initialization completed state",
         ...pathHint,
       ].join("\n");
     },
@@ -715,7 +562,6 @@ const INSTALLER_DISPLAY_COPY = {
     inspectingInstallDirectoryMessage: "Inspecting install directory...",
     loadingModelChoicesMessage: "Loading model and provider state...",
     savingProviderAuthMessage: "Saving provider authentication...",
-    preparingChatBridgeMessage: "Preparing chat bridge configuration...",
     refreshingInstalledTargetMessage:
       "Publishing runtime and refreshing the installed target...",
     publishingRuntimeMessageElevated:
@@ -859,81 +705,9 @@ const INSTALLER_DISPLAY_COPY = {
     noModelsAvailableError: "rin_installer_no_models_available",
     noModelsForProviderError: (provider: string) =>
       `rin_installer_no_models_for_provider:${provider}`,
-    whereToFindLabel: "获取位置",
-    openLabel: "打开",
     fieldRequired: "此项必填。",
     valueRequired: "此项不能为空。",
     validUrlRequired: "请输入有效 URL。",
-    configureChatBridgeNowMessage: "现在配置聊天接入吗？",
-    chooseChatPlatformMessage: "选择聊天平台。",
-    guidedSetupHint: "引导配置",
-    telegramHint: "机器人令牌",
-    onebotHint: "端点 + 协议",
-    slackHint: "app token + bot token",
-    buildGuide(message: string, guide?: string, links?: string | string[]) {
-      const lines = [message.trim()];
-      if (guide) lines.push(`${this.whereToFindLabel}: ${guide.trim()}`);
-      const openLinks = formatOpenLinks(links);
-      if (openLinks) lines.push(`${this.openLabel}: ${openLinks}`);
-      return lines.join("\n");
-    },
-    chatDisabledDescription: "暂不启用",
-    telegramTokenMessage: "输入 Telegram 机器人令牌。",
-    telegramTokenGuide: "Telegram @BotFather → 选择你的机器人 → API token。",
-    telegramTokenDetail:
-      "聊天接入模式：polling · 令牌已保存到目标 settings.json",
-    onebotEndpointMessage: "输入 OneBot 端点 URL。",
-    onebotEndpointGuide:
-      "你的 OneBot 接入服务或客户端配置，例如 NapCat、LLOneBot 或其他 OneBot 服务。",
-    onebotSelfIdMessage:
-      "如果你已经知道 OneBot self ID，请输入；否则留空稍后再填。",
-    onebotSelfIdGuide: "通常是 OneBot 客户端或接入配置中的机器人 QQ 号。",
-    onebotTokenMessage: "如果需要，请输入 OneBot access token；否则留空。",
-    onebotTokenGuide: "仅在你的 OneBot 服务端配置启用了 access token 时填写。",
-    optionalTokenPlaceholder: "可选令牌",
-    onebotDetail: (protocol: string, endpoint: string) =>
-      `聊天接入模式：${protocol} · 端点：${endpoint}`,
-    discordTokenMessage: "输入 Discord 机器人令牌。",
-    discordTokenGuide:
-      "Discord Developer Portal → 你的应用 → Bot → Reset Token / Token。",
-    discordDetail: "聊天接入令牌：[已保存到目标 settings.json]",
-    qqAppIdMessage: "输入 QQ 机器人 App ID。",
-    qqCredentialsGuide: "QQ 机器人开发者文档 → 创建机器人应用 → app 凭据。",
-    qqSecretMessage: "输入 QQ 机器人密钥。",
-    qqTokenMessage: "输入 QQ 机器人令牌。",
-    qqScopeMessage: "选择 QQ 机器人范围。",
-    qqScopeGuide: "使用 QQ 机器人应用设置中显示的机器人类型。",
-    publicLabel: "公开",
-    privateLabel: "私有",
-    qqDetail: "聊天接入模式：websocket · 应用凭据已保存到目标 settings.json",
-    larkPlatformMessage: "选择 Lark / 飞书区域。",
-    larkPlatformGuide:
-      "如果你的应用在 open.feishu.cn 上，选飞书；如果在 open.larksuite.com 上，选 Lark。",
-    feishuLabel: "Feishu",
-    larkLabel: "Lark",
-    feishuHint: "中国 / open.feishu.cn",
-    larkHint: "全球 / open.larksuite.com",
-    larkAppIdMessage: "输入 Lark / 飞书 app ID。",
-    larkAppIdGuide: "开发者后台 → 你的应用 → 凭据 / 基本信息。",
-    larkAppSecretMessage: "输入 Lark / 飞书 app secret。",
-    larkDetail: (platform: string) =>
-      `聊天接入模式：ws · 平台：${platform} · 应用凭据已保存到目标 settings.json`,
-    slackAppTokenMessage: "输入 Slack app-level token。",
-    slackAppTokenGuide:
-      "Slack 应用设置 → Basic Information 或 Socket Mode → App-Level Tokens（以 xapp- 开头）。",
-    slackBotTokenMessage: "输入 Slack bot token。",
-    slackBotTokenGuide:
-      "Slack 应用设置 → OAuth & Permissions → Bot User OAuth Token（以 xoxb- 开头）。",
-    slackDetail: "聊天接入模式：ws",
-    minecraftUrlMessage: "输入 Minecraft QueQiao WebSocket URL。",
-    minecraftUrlGuide:
-      "使用 QueQiao 接入服务或 Minecraft 适配器暴露出的 WebSocket 地址。",
-    minecraftSelfIdMessage:
-      "如果你想自定义 Minecraft 接入 self ID，请输入；否则留空使用 minecraft。",
-    minecraftServerNameMessage:
-      "如果你希望聊天日志显示 Minecraft 服务器名称，请输入；否则留空。",
-    minecraftTokenMessage: "如果需要，请输入 QueQiao access token；否则留空。",
-    minecraftDetail: (url: string) => `聊天接入模式：ws · 端点：${url}`,
     installSafetyBoundaryLines: [
       "Rin 安全边界：",
       "- Rin 始终运行在 YOLO 模式。",
@@ -971,11 +745,6 @@ const INSTALLER_DISPLAY_COPY = {
         `思考强度: ${options.thinkingLevel || skippedForNow}`,
         `模型认证状态: ${authStatus}`,
         `${this.defaultTargetLabel}: ${options.setDefaultTarget ? this.defaultTargetSetValue(options.targetUser) : this.defaultTargetSkippedValue}`,
-        `聊天接入: ${options.chatDescription}`,
-        options.chatDetail,
-        options.chatDescription === this.chatDisabledDescription
-          ? ""
-          : "聊天授权：安装流程会一次性引导首次 OWNER 设置；后续角色变更应通过自然语言对话提出，不使用 slash command。",
       ]
         .filter(Boolean)
         .join("\n");
@@ -1124,7 +893,7 @@ const INSTALLER_DISPLAY_COPY = {
         "下次可用：",
         `- 打开 Rin: ${rinCommand}${userSuffix}`,
         `- 如有需要，检查守护进程状态: ${rinCommand} doctor${userSuffix}`,
-        "- 在 Rin 内直接请求重新初始化",
+        "- 仅在 agent 重置初始化完成状态后才会重新进入初始化",
         ...pathHint,
       ].join("\n");
     },
@@ -1167,7 +936,6 @@ const INSTALLER_DISPLAY_COPY = {
     inspectingInstallDirectoryMessage: "正在检查安装目录……",
     loadingModelChoicesMessage: "正在加载模型和提供商状态……",
     savingProviderAuthMessage: "正在保存提供商认证……",
-    preparingChatBridgeMessage: "正在准备聊天接入配置……",
     refreshingInstalledTargetMessage: "正在发布运行时并刷新已安装目标……",
     publishingRuntimeMessageElevated: "正在以提权方式发布运行时并写入配置……",
     publishingRuntimeMessage: "正在发布运行时并写入配置……",

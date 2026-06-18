@@ -252,7 +252,6 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
       thinkingLevel: "off",
       language: "en_US",
       setDefaultTarget: true,
-      chatConfig: {},
       authData: { openai: { type: "api_key", key: "test-key" } },
       release,
       elevated: false,

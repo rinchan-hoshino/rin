@@ -21,33 +21,30 @@ const adapters = await import(
   ).href
 );
 
-test("chat bridge adapter prompt options come from shared built-in specs", () => {
-  const options = adapters.listChatBridgeAdapterPromptOptions();
+test("chat bridge adapter labels and defaults come from shared built-in specs", () => {
+  const specs = adapters.listChatBridgeAdapterSpecs();
 
   assert.deepEqual(
-    options.find((item) => item.value === "telegram"),
-    {
-      value: "telegram",
-      label: "Telegram",
-      hint: "bot token",
-    },
+    specs.map((item) => item.key),
+    ["telegram", "onebot", "qq", "lark", "discord", "slack", "minecraft"],
   );
-  assert.deepEqual(
-    options.find((item) => item.value === "onebot"),
-    {
-      value: "onebot",
-      label: "OneBot",
-      hint: "endpoint + protocol",
-    },
-  );
-  assert.deepEqual(
-    options.find((item) => item.value === "slack"),
-    {
-      value: "slack",
-      label: "Slack",
-      hint: "app token + bot token",
-    },
-  );
+  assert.deepEqual(adapters.getChatBridgeAdapterSpec("telegram")?.defaults, {
+    protocol: "polling",
+    token: "",
+    slash: true,
+  });
+  assert.deepEqual(adapters.getChatBridgeAdapterSpec("slack")?.defaults, {
+    protocol: "ws",
+  });
+  assert.deepEqual(adapters.listSupportedChatBridgeLabels(), [
+    "Telegram",
+    "OneBot",
+    "QQ",
+    "Feishu / Lark",
+    "Discord",
+    "Slack",
+    "Minecraft / QueQiao",
+  ]);
 });
 
 test("chat bridge adapter config materialization covers built-in official adapters", () => {

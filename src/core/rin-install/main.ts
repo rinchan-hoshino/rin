@@ -28,7 +28,6 @@ import {
   wrapInstallerNoteText,
   describeInstallDirState,
   promptBuiltInExtensionSetup,
-  promptChatSetup,
   promptDefaultTargetUser,
   promptProviderSetup,
   promptInstallTarget,
@@ -190,11 +189,11 @@ export function readInstalledUpdateLanguage(
   );
 }
 
-async function launchInstallerInitTui(options: {
+async function launchInstallerTui(options: {
   rinPath: string;
   sourceRoot: string;
 }) {
-  return await runCommand(options.rinPath, ["--init"], {
+  return await runCommand(options.rinPath, [], {
     cwd: options.sourceRoot,
   });
 }
@@ -410,10 +409,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
 
   const { provider, modelId, thinkingLevel, authResult } =
     await promptProviderSetup(promptApi, installDir, readJsonFile, {}, i18n);
-  const { chatDescription, chatDetail, chatConfig } = await promptChatSetup(
-    promptApi,
-    i18n,
-  );
   const builtInExtensions = await promptBuiltInExtensionSetup(promptApi, i18n);
 
   note(
@@ -427,8 +422,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           modelId,
           thinkingLevel,
           authAvailable: Boolean(authResult.available),
-          chatDescription,
-          chatDetail,
           language: selectedLanguage,
           setDefaultTarget,
         },
@@ -490,9 +483,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           thinkingLevel,
           language: selectedLanguage,
           setDefaultTarget,
-          chatDescription,
-          chatDetail,
-          chatConfig,
           builtInExtensions,
           authData: authResult.authData || {},
           release: releaseInfoFromFile(cli.releaseFile),
@@ -555,7 +545,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
 
   if (daemonReady) {
     note(i18n.launchingInitText, i18n.launchingInitTitle);
-    await launchInstallerInitTui({
+    await launchInstallerTui({
       rinPath: written.rinPath,
       sourceRoot: repoRootFromHere(),
     });
