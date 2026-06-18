@@ -295,6 +295,7 @@ export type ChatBridgeTurnPayload = RinToolStartupOptions &
     disposeAfterTurn?: boolean;
     shutdownAfterTurn?: boolean;
     deliverFinal?: boolean;
+    quietMode?: boolean;
     text: string;
     sessionFile?: string;
     sessionName?: string;
@@ -1047,6 +1048,7 @@ export async function startChatBridge(
         piStartupOptions: payload?.piStartupOptions,
         promptMeta: payload?.promptMeta,
         deliverFinal: payload?.deliverFinal,
+        quietMode: payload?.quietMode,
       });
     } finally {
       if (!useBoundController && (disposeAfterTurn || shutdownAfterTurn)) {

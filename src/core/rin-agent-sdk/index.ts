@@ -24,6 +24,7 @@ export type ChatRunTurnOptions = RinToolStartupOptions & {
   disposeAfterTurn?: boolean;
   shutdownAfterTurn?: boolean;
   deliverFinal?: boolean;
+  quietMode?: boolean;
   promptMeta?: unknown;
 };
 

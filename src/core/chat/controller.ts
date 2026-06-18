@@ -223,6 +223,7 @@ export class ChatController {
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
   commandResponses?: ChatCommandResponses;
+  quietModeOverride?: boolean;
 
   constructor(
     app: any,
@@ -537,10 +538,24 @@ export class ChatController {
   }
 
   private isQuietModeEnabled() {
+    if (this.quietModeOverride !== undefined) return this.quietModeOverride;
     return resolveChatQuietModeEnabled(
       readJsonFile(path.join(this.agentDir, "settings.json"), {}),
       this.chatKey,
     );
+  }
+
+  private async runDriverTurnWithQuietMode(
+    quietMode: unknown,
+    input: Parameters<RinFrontendTurnDriver["runTurn"]>[0],
+  ) {
+    const previousQuietModeOverride = this.quietModeOverride;
+    if (quietMode !== undefined) this.quietModeOverride = Boolean(quietMode);
+    try {
+      return await this.driver.runTurn(input);
+    } finally {
+      this.quietModeOverride = previousQuietModeOverride;
+    }
   }
 
   private getWorkingIndicators() {
@@ -1525,6 +1540,7 @@ export class ChatController {
         managedSessionLeaf?: string;
         deliverFinal?: boolean;
         disabledRinCapabilities?: string[];
+        quietMode?: boolean;
       },
     mode: "prompt" | "steer" = "prompt",
   ) {
@@ -1552,7 +1568,7 @@ export class ChatController {
         startedAt: Date.now(),
       });
       const submittedText = formatPromptForChatContext(text, input.promptMeta);
-      const result = await this.driver.runTurn({
+      const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
         text: submittedText,
         images,
         sessionFile: wantedSessionFile,
@@ -1666,7 +1682,7 @@ export class ChatController {
           text,
           input.promptMeta,
         );
-        const result = await this.driver.runTurn({
+        const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
           text: submittedText,
           images,
           sessionFile: wantedSessionFile,

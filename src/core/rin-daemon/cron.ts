@@ -87,6 +87,7 @@ export type CronTaskRecord = {
   pausedAt?: string;
   frontend?: CronTaskFrontendBinding;
   deliverFinal?: boolean;
+  quiet?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
   disabledRinCapabilities?: string[];
@@ -114,6 +115,7 @@ export type CronTaskInput = {
   enabled?: boolean;
   frontend?: CronTaskFrontendBinding | null;
   deliverFinal?: boolean;
+  quiet?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
   disabledRinCapabilities?: string[] | null;
@@ -314,6 +316,7 @@ function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
     session: { mode: "none" },
     target: { kind: "shell_command", command },
     deliverFinal: true,
+    quiet: true,
     runCount: 0,
     running: false,
   };
@@ -350,6 +353,7 @@ function createBuiltInSelfImproveSleepConsolidationTask(
     target: { kind: "agent_prompt", prompt },
     disabledRinCapabilities: ["self_improve"],
     deliverFinal: true,
+    quiet: true,
     runCount: 0,
     running: false,
   };
@@ -561,6 +565,12 @@ export class CronScheduler {
         input.deliverFinal !== undefined
           ? Boolean(input.deliverFinal)
           : (existing?.deliverFinal ?? true),
+      quiet:
+        input.quiet !== undefined
+          ? Boolean(input.quiet)
+          : existing
+            ? existing.quiet
+            : true,
       model,
       thinkingLevel,
       disabledRinCapabilities,

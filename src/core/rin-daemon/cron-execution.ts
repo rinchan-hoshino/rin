@@ -332,8 +332,9 @@ export async function executeCronAgentTask(
           chatKey,
           affectChatBinding: true,
           deliverFinal: task.deliverFinal !== false,
+          quietMode: task.quiet !== false,
         }
-      : { affectChatBinding: false }),
+      : { affectChatBinding: false, quietMode: task.quiet !== false }),
     disposeAfterTurn: sessionMode === "none",
     shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(sessionMode),
     text: prompt,
@@ -409,6 +410,7 @@ export async function executeCronSessionInstructionTask(
     affectChatBinding: true,
     disposeAfterTurn: false,
     deliverFinal: task.deliverFinal !== false,
+    quietMode: task.quiet !== false,
     text: instruction,
     sessionFile,
     frontend: { kind: "chat", key: chatKey },

@@ -839,6 +839,7 @@ test("cron current-session instruction derives chat binding from session file me
     id: "cron_current_session",
     name: "Current Session Follow-up",
     session: { mode: "session_instruction", sessionFile },
+    quiet: false,
     model: "openai-codex/gpt-5.5",
     thinkingLevel: "low",
     target: {
@@ -891,6 +892,7 @@ test("cron current-session instruction derives chat binding from session file me
         model: calls[0].model,
         thinkingLevel: calls[0].thinkingLevel,
         frontend: calls[0].frontend,
+        quietMode: calls[0].quietMode,
       },
       {
         chatKey: "telegram/demo:1",
@@ -902,6 +904,7 @@ test("cron current-session instruction derives chat binding from session file me
         model: "openai-codex/gpt-5.5",
         thinkingLevel: "low",
         frontend: { kind: "chat", key: "telegram/demo:1" },
+        quietMode: false,
       },
     );
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
@@ -972,6 +975,130 @@ test("cron current-session instruction relies on bound delivery without duplicat
     assert.equal(calls[0].deliverFinal, true);
     assert.equal(sent.length, 0);
     assert.equal(task.lastResultText, "done");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler defaults task quiet mode on and preserves explicit off", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    const task = scheduler.upsertTask({
+      id: "cron_quiet_default",
+      trigger: { runAt: "2099-01-01T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    });
+    assert.equal(task.quiet, true);
+
+    const quietOff = scheduler.upsertTask({
+      id: "cron_quiet_default",
+      quiet: false,
+    });
+    assert.equal(quietOff.quiet, false);
+
+    const preserved = scheduler.upsertTask({
+      id: "cron_quiet_default",
+      name: "quiet remains off",
+    });
+    assert.equal(preserved.quiet, false);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler preserves old task records without quiet on unrelated updates", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  const hasQuiet = (value) =>
+    Object.prototype.hasOwnProperty.call(value || {}, "quiet");
+  const legacyTask = {
+    id: "cron_legacy_without_quiet",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    enabled: true,
+    deliverFinal: true,
+    trigger: { runAt: "2099-01-01T00:00:00.000Z" },
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt: "legacy" },
+    runCount: 0,
+    running: false,
+  };
+  await fs.mkdir(path.dirname(tasksFile), { recursive: true });
+  await fs.writeFile(
+    tasksFile,
+    `${JSON.stringify([legacyTask], null, 2)}\n`,
+    "utf8",
+  );
+
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    scheduler.start();
+    assert.equal(
+      hasQuiet(scheduler.getTask("cron_legacy_without_quiet")),
+      false,
+    );
+
+    const updated = scheduler.upsertTask({
+      id: "cron_legacy_without_quiet",
+      name: "legacy renamed",
+    });
+    assert.equal(hasQuiet(updated), false);
+
+    const persisted = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    const persistedTask = persisted.find(
+      (task) => task.id === "cron_legacy_without_quiet",
+    );
+    assert.equal(hasQuiet(persistedTask), false);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron agent tasks pass quiet mode to chat turns", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const calls = [];
+  try {
+    await execMod.executeCronAgentTask(
+      {
+        id: "cron_quiet_on",
+        frontend: { kind: "chat", key: "telegram/demo:1" },
+        session: { mode: "none" },
+        target: { kind: "agent_prompt", prompt: "hello" },
+      },
+      {
+        agentDir,
+        chat: {
+          runTurn: async (payload) => {
+            calls.push(payload);
+            return { finalText: "done", sessionFile: "/tmp/quiet-on.jsonl" };
+          },
+        },
+      },
+    );
+    await execMod.executeCronAgentTask(
+      {
+        id: "cron_quiet_off",
+        quiet: false,
+        frontend: { kind: "chat", key: "telegram/demo:1" },
+        session: { mode: "none" },
+        target: { kind: "agent_prompt", prompt: "hello" },
+      },
+      {
+        agentDir,
+        chat: {
+          runTurn: async (payload) => {
+            calls.push(payload);
+            return { finalText: "done", sessionFile: "/tmp/quiet-off.jsonl" };
+          },
+        },
+      },
+    );
+    assert.equal(calls[0].quietMode, true);
+    assert.equal(calls[1].quietMode, false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

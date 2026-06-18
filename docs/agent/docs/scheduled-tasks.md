@@ -68,7 +68,7 @@ Choose the smallest task shape that preserves the user-visible contract:
 5. **Task prompt:** use `rin-prompt-engineering` for `target.prompt` and `target.continuationPrompt`.
 6. **Storage/edit path:** SDK writes and CLI operations update daemon scheduler state and the same scheduler file. If `~/.rin/data/scheduler/tasks.json` is edited outside the daemon, run `rin tasks reload` or `rin.tasks.reload()` explicitly; the daemon does not watch the file automatically.
 7. **Session:** `none` for normal tasks; `dedicated` for a task-owned continuing thread; `session_instruction` for insertion into an existing chat session.
-8. **Delivery:** optional `frontend`, chat binding, and `deliverFinal`.
+8. **Delivery:** optional `frontend`, chat binding, `deliverFinal`, and `quiet`.
 9. **Termination:** optional `maxRuns` or `stopAt`.
 10. **Verification:** re-read the task and check liveness when active producers matter.
 
@@ -97,7 +97,7 @@ Verify these fields before reporting success:
 - `trigger`, `nextRunAt`, and expected local time;
 - `condition`, plus `condition.lastEvaluatedAt` / `condition.lastResult` after a run-now or due tick;
 - `session.mode`, and `dedicatedSessionFile` for dedicated sessions;
-- `target.kind`, prompt/command intent, `frontend`, and `deliverFinal`;
+- `target.kind`, prompt/command intent, `frontend`, `deliverFinal`, and `quiet`;
 - `model`, `thinkingLevel`;
 - `termination`, `runCount`, `lastStartedAt`, `lastFinishedAt`, `lastResultText`, `lastError`.
 
@@ -114,6 +114,7 @@ type Task = {
   enabled?: boolean;
   frontend?: { kind?: string; key: string } | null;
   deliverFinal?: boolean;
+  quiet?: boolean;
   model?: string;
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   trigger: {
@@ -311,6 +312,7 @@ Runs an agent turn. Use this for owner-facing reports, summaries, checks that ne
 - `frontend` binds execution to a frontend/controller identity.
 - `frontend: { kind: "chat", key: "..." }` binds delivery to a chat bridge target.
 - Root `deliverFinal: false` binds the turn while suppressing automatic final delivery.
+- Root `quiet` defaults to `true`. For chat-bound agent turns it has the same meaning as chat quiet mode: interim assistant updates and todo passive notices are suppressed while final delivery remains controlled by `deliverFinal`.
 - `model` and `thinkingLevel` override the run when present.
 - Rin stores a summarized final result in `lastResultText`.
 - If the agent turn has no canonical final assistant text, the task records `lastError`.

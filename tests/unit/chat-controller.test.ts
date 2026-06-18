@@ -1163,6 +1163,125 @@ test("chat controller quiet mode suppresses interim and todo notices", async () 
   ]);
 });
 
+test("chat controller runTurn quiet mode option overrides stored chat settings", async () => {
+  const quietController = await createController("telegram/1:2");
+  const quietDeliveries = [];
+  quietController.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .filter(Boolean)
+      .join(" ");
+    quietDeliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-quiet-${quietDeliveries.length}`];
+  };
+  quietController.driver.runTurn = async () => {
+    await quietController.handleFrontendEvent({
+      type: "assistant_interim",
+      text: "hidden interim",
+    });
+    await quietController.handleFrontendEvent({
+      type: "passive_notice",
+      text: "- [ ] hidden todo",
+      noticeKind: "todo",
+      deferDuringTurn: false,
+    });
+    await quietController.handleFrontendEvent({
+      type: "passive_notice",
+      text: "- [ ] hidden deferred todo",
+      noticeKind: "todo",
+    });
+    return { finalText: "final", sessionFile: "quiet-option.jsonl" };
+  };
+  await quietController.runTurn({
+    text: "hello",
+    attachments: [],
+    deliverFinal: false,
+    quietMode: true,
+  });
+  assert.deepEqual(quietDeliveries, []);
+  assert.deepEqual(quietController.pendingPassiveNotices, []);
+
+  const loudController = await createController("telegram/1:2");
+  await fs.writeFile(
+    path.join(loudController.agentDir, "settings.json"),
+    JSON.stringify({
+      chat: { byChatKey: { "telegram/1:2": { quietMode: true } } },
+    }),
+    "utf8",
+  );
+  const loudDeliveries = [];
+  loudController.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .filter(Boolean)
+      .join(" ");
+    loudDeliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-loud-${loudDeliveries.length}`];
+  };
+  loudController.driver.runTurn = async () => {
+    await loudController.handleFrontendEvent({
+      type: "assistant_interim",
+      text: "visible interim",
+    });
+    await loudController.handleFrontendEvent({
+      type: "passive_notice",
+      text: "- [ ] visible todo",
+      noticeKind: "todo",
+      deferDuringTurn: false,
+    });
+    return { finalText: "final", sessionFile: "loud-option.jsonl" };
+  };
+  await loudController.runTurn({
+    text: "hello",
+    attachments: [],
+    deliverFinal: false,
+    quietMode: false,
+  });
+  assert.deepEqual(loudDeliveries, [
+    { text: "··· visible interim", kind: "interim" },
+    { text: "- [ ] visible todo", kind: "passive_notice" },
+  ]);
+});
+
+test("chat controller runTurn quiet false allows deferred todo notices", async () => {
+  const controller = await createController("telegram/1:2");
+  await fs.writeFile(
+    path.join(controller.agentDir, "settings.json"),
+    JSON.stringify({
+      chat: { byChatKey: { "telegram/1:2": { quietMode: true } } },
+    }),
+    "utf8",
+  );
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .filter(Boolean)
+      .join(" ");
+    deliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-deferred-${deliveries.length}`];
+  };
+  controller.driver.runTurn = async () => {
+    await controller.handleFrontendEvent({
+      type: "passive_notice",
+      text: "- [ ] visible deferred todo",
+      noticeKind: "todo",
+    });
+    return { finalText: "final", sessionFile: "loud-deferred.jsonl" };
+  };
+
+  await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    quietMode: false,
+  });
+
+  assert.deepEqual(deliveries, [
+    { text: "final", kind: "final" },
+    { text: "- [ ] visible deferred todo", kind: "passive_notice" },
+  ]);
+});
+
 test("chat controller does not create processing turns for slash commands", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
