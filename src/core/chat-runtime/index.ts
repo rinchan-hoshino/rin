@@ -25,6 +25,7 @@ import {
   readBinaryFromNode,
   renderMarkdownFromNodes,
   renderPlainTextFromNodes,
+  renderRichDeliveryErrorPlaceholder,
   renderTelegramHtmlFromNodes,
   safeString,
   sleep,
@@ -861,29 +862,50 @@ class TelegramAdapter {
     }
   }
 
-  private async assertMediaSourcesReadable(nodes: any[]) {
-    for (const node of nodes) {
-      const type = safeString(node?.type).toLowerCase();
-      if (!isTelegramMediaNodeType(type)) continue;
-      const media = telegramMediaMethod(type);
-      const payload = await readBinaryFromNode(node);
-      if (!payload)
-        throw new Error(`telegram_media_source_missing:${media.field}`);
+  private async sendFailurePlaceholder(
+    chatId: string,
+    placeholder: string,
+    replyToMessageId?: string,
+  ) {
+    if (!placeholder) return "";
+    try {
+      return await this.sendText(chatId, placeholder, replyToMessageId);
+    } catch (placeholderError: any) {
+      this.logger.warn(
+        `rich failure placeholder failed err=${safeString(placeholderError?.message || placeholderError)}`,
+      );
+      return "";
     }
   }
 
   async sendMessage(chatId: string, content: any) {
     const { work, replyToMessageId } = prepareOutboundNodes(content);
-    await this.assertMediaSourcesReadable(work);
     const delivered: string[] = [];
-    try {
-      let cursor = 0;
-      let firstReply = replyToMessageId;
-      while (cursor < work.length) {
-        const node = work[cursor];
-        const type = safeString(node?.type).toLowerCase();
-        if (isTelegramMediaNodeType(type)) {
-          const media = telegramMediaMethod(type);
+    const failures: unknown[] = [];
+    let cursor = 0;
+    let firstReply = replyToMessageId;
+    const recordFailure = async (error: unknown, placeholder: string) => {
+      failures.push(error);
+      this.logger.warn(
+        `rich message segment failed err=${safeString((error as any)?.message || error)}`,
+      );
+      const placeholderId = await this.sendFailurePlaceholder(
+        chatId,
+        placeholder,
+        firstReply,
+      );
+      if (placeholderId) {
+        delivered.push(placeholderId);
+        firstReply = undefined;
+      }
+    };
+
+    while (cursor < work.length) {
+      const node = work[cursor];
+      const type = safeString(node?.type).toLowerCase();
+      if (isTelegramMediaNodeType(type)) {
+        const media = telegramMediaMethod(type);
+        try {
           const messageId = await this.sendBinaryMessage(
             media.method as any,
             media.field as any,
@@ -894,23 +916,29 @@ class TelegramAdapter {
           );
           if (messageId) delivered.push(messageId);
           firstReply = undefined;
-          cursor += 1;
-          continue;
+        } catch (error) {
+          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
         }
-        const textNodes: any[] = [];
-        let nextCursor = cursor;
-        while (nextCursor < work.length) {
-          const candidate = work[nextCursor];
-          const candidateType = safeString(candidate?.type).toLowerCase();
-          if (isTelegramMediaNodeType(candidateType)) break;
-          textNodes.push(candidate);
-          nextCursor += 1;
-        }
-        const text = renderTelegramHtmlFromNodes(textNodes);
-        for (const textChunk of splitPlainText(
-          text,
-          TELEGRAM_MAX_TEXT_LENGTH,
-        )) {
+        cursor += 1;
+        continue;
+      }
+      const textNodes: any[] = [];
+      let nextCursor = cursor;
+      while (nextCursor < work.length) {
+        const candidate = work[nextCursor];
+        const candidateType = safeString(candidate?.type).toLowerCase();
+        if (isTelegramMediaNodeType(candidateType)) break;
+        textNodes.push(candidate);
+        nextCursor += 1;
+      }
+      let text = "";
+      try {
+        text = renderTelegramHtmlFromNodes(textNodes);
+      } catch (error) {
+        await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+      }
+      for (const textChunk of splitPlainText(text, TELEGRAM_MAX_TEXT_LENGTH)) {
+        try {
           const messageId = await this.sendText(
             chatId,
             textChunk,
@@ -919,17 +947,15 @@ class TelegramAdapter {
           );
           if (messageId) delivered.push(messageId);
           firstReply = undefined;
+        } catch (error) {
+          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
         }
-        cursor = nextCursor;
       }
-      if (!delivered.length) {
-        throw new Error("telegram_send_message_empty");
-      }
-      return delivered;
-    } catch (error) {
-      if (delivered.length) throw partialChatDeliveryError(error, delivered);
-      throw error;
+      cursor = nextCursor;
     }
+    if (delivered.length) return delivered;
+    if (failures.length) throw failures[0];
+    throw new Error("telegram_send_message_empty");
   }
 
   async tickWorkingIndicator(context: any) {

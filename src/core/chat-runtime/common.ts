@@ -218,6 +218,15 @@ export function renderTelegramHtmlFromNodes(
   return renderChatNodesTelegramHtml(nodes, options);
 }
 
+export function renderRichDeliveryErrorPlaceholder(error: unknown) {
+  const message = (
+    safeString((error as any)?.message || error) || "send_failed"
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  return message.length > 500 ? `${message.slice(0, 500)}…` : message;
+}
+
 export function fileUrl(filePath: string) {
   return pathToFileURL(path.resolve(filePath)).href;
 }

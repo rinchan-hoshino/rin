@@ -19,6 +19,7 @@ import {
   readBinaryFromNode,
   renderMarkdownFromNodes,
   renderPlainTextFromNodes,
+  renderRichDeliveryErrorPlaceholder,
   safeString,
   sleep,
   splitPlainText,
@@ -433,16 +434,40 @@ export class DiscordAdapter {
       throw new Error(`discord_channel_not_sendable:${chatId}`);
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     const delivered: string[] = [];
+    const failures: unknown[] = [];
     let cursor = 0;
     let firstReply = replyToMessageId;
+    const recordFailure = async (error: unknown, placeholder: string) => {
+      failures.push(error);
+      this.logger.warn(
+        `rich message segment failed err=${safeString((error as any)?.message || error)}`,
+      );
+      if (!placeholder) return;
+      try {
+        const placeholderIds = await this.sendTextChunk(channel, {
+          text: placeholder,
+          replyToMessageId: firstReply,
+        });
+        delivered.push(...placeholderIds);
+        if (placeholderIds.length) firstReply = undefined;
+      } catch (placeholderError: any) {
+        this.logger.warn(
+          `rich failure placeholder failed err=${safeString(placeholderError?.message || placeholderError)}`,
+        );
+      }
+    };
     while (cursor < work.length) {
       const type = safeString(work[cursor]?.type).toLowerCase();
       let chunkIds: string[] = [];
       if (isOutboundMediaNodeType(type)) {
-        chunkIds = await this.sendMediaChunk(channel, {
-          node: work[cursor],
-          replyToMessageId: firstReply,
-        });
+        try {
+          chunkIds = await this.sendMediaChunk(channel, {
+            node: work[cursor],
+            replyToMessageId: firstReply,
+          });
+        } catch (error) {
+          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+        }
         cursor += 1;
       } else {
         const textNodes: any[] = [];
@@ -452,16 +477,34 @@ export class DiscordAdapter {
           textNodes.push(work[cursor]);
           cursor += 1;
         }
-        chunkIds = await this.sendTextChunk(channel, {
-          text: this.renderOutboundText(textNodes),
-          replyToMessageId: firstReply,
-        });
+        let text = "";
+        try {
+          text = this.renderOutboundText(textNodes);
+        } catch (error) {
+          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+        }
+        for (const textChunk of splitPlainText(text, DISCORD_MAX_TEXT_LENGTH)) {
+          try {
+            const textChunkIds = await this.sendTextChunk(channel, {
+              text: textChunk,
+              replyToMessageId: firstReply,
+            });
+            delivered.push(...textChunkIds);
+            if (textChunkIds.length) firstReply = undefined;
+          } catch (error) {
+            await recordFailure(
+              error,
+              renderRichDeliveryErrorPlaceholder(error),
+            );
+          }
+        }
       }
       delivered.push(...chunkIds);
       if (chunkIds.length) firstReply = undefined;
     }
-    if (!delivered.length) throw new Error("discord_send_message_empty_result");
-    return delivered;
+    if (delivered.length) return delivered;
+    if (failures.length) throw failures[0];
+    throw new Error("discord_send_message_empty_result");
   }
 
   private async handleMessage(message: any) {
@@ -798,16 +841,37 @@ export class SlackAdapter {
   private async sendMessage(chatId: string, content: any) {
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     const delivered: string[] = [];
+    const failures: unknown[] = [];
     let cursor = 0;
+    const recordFailure = async (error: unknown, placeholder: string) => {
+      failures.push(error);
+      this.logger.warn(
+        `rich message segment failed err=${safeString((error as any)?.message || error)}`,
+      );
+      if (!placeholder) return;
+      try {
+        delivered.push(
+          ...(await this.postText(chatId, placeholder, replyToMessageId)),
+        );
+      } catch (placeholderError: any) {
+        this.logger.warn(
+          `rich failure placeholder failed err=${safeString(placeholderError?.message || placeholderError)}`,
+        );
+      }
+    };
     while (cursor < work.length) {
       const type = safeString(work[cursor]?.type).toLowerCase();
       let messageIds: string[] = [];
       if (isOutboundMediaNodeType(type)) {
-        messageIds = await this.sendMedia(
-          chatId,
-          work[cursor],
-          replyToMessageId,
-        );
+        try {
+          messageIds = await this.sendMedia(
+            chatId,
+            work[cursor],
+            replyToMessageId,
+          );
+        } catch (error) {
+          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+        }
         cursor += 1;
       } else {
         const textNodes: any[] = [];
@@ -817,16 +881,18 @@ export class SlackAdapter {
           textNodes.push(work[cursor]);
           cursor += 1;
         }
-        messageIds = await this.postText(
-          chatId,
-          this.renderOutboundText(textNodes),
-          replyToMessageId,
-        );
+        try {
+          const text = this.renderOutboundText(textNodes);
+          messageIds = await this.postText(chatId, text, replyToMessageId);
+        } catch (error) {
+          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+        }
       }
       delivered.push(...messageIds);
     }
-    if (!delivered.length) throw new Error("slack_send_message_empty");
-    return delivered;
+    if (delivered.length) return delivered;
+    if (failures.length) throw failures[0];
+    throw new Error("slack_send_message_empty");
   }
 
   private async handleSlackEvent(envelope: any) {

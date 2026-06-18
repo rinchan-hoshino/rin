@@ -166,7 +166,7 @@ test("telegram adapter splits text and image rich parts in order", async () => {
   });
 });
 
-test("telegram adapter validates media before sending preceding text", async () => {
+test("telegram adapter reports a failed rich segment and continues later segments", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -182,15 +182,29 @@ test("telegram adapter validates media before sending preceding text", async () 
     };
 
     const missingPath = path.join(agentDir, "missing.png");
-    await assert.rejects(
-      () =>
-        app.bots[0].sendMessage("456", [
-          h.markdown(`leading text [image: missing](${missingPath})`),
-        ]),
-      /chat_media_file_missing:/,
-    );
+    const result = await app.bots[0].sendMessage("456", [
+      h.quote("77"),
+      h.markdown(
+        `leading text [image: missing](${missingPath})\ntrailing text`,
+      ),
+    ]);
 
-    assert.equal(calls.length, 0);
+    assert.deepEqual(result, ["1", "2", "3"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["sendMessage", "sendMessage", "sendMessage"],
+    );
+    assert.equal(calls[0].payload.reply_to_message_id, "77");
+    assert.equal(calls[0].payload.text, "leading text");
+    assert.match(calls[1].payload.text, /chat_media_file_missing:/);
+    assert.match(calls[1].payload.text, /missing\.png/);
+    assert.doesNotMatch(
+      calls[1].payload.text,
+      /\u5bcc\u6587\u672c\u7247\u6bb5\u53d1\u9001\u5931\u8d25/,
+    );
+    assert.equal(calls[1].payload.parse_mode, undefined);
+    assert.equal(calls[1].payload.reply_to_message_id, undefined);
+    assert.equal(calls[2].payload.text, "trailing text");
   });
 });
 
@@ -647,6 +661,41 @@ test("discord adapter keeps media before following text", async () => {
     assert.equal(calls[1].content, "caption after image");
     assert.equal(calls[1].files, undefined);
     assert.equal(calls[1].reply, undefined);
+  });
+});
+
+test("discord adapter reports a failed rich segment and continues later segments", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.fetchChannel = async () => ({
+      send: async (payload: any) => {
+        calls.push(payload);
+        return { id: String(calls.length) };
+      },
+    });
+
+    const result = await app.bots[0].sendMessage("456", [
+      h.text("leading text"),
+      h.image(path.join(agentDir, "missing.png")),
+      h.text("trailing text"),
+    ]);
+
+    assert.deepEqual(result, ["1", "2", "3"]);
+    assert.equal(calls[0].content, "leading text");
+    assert.match(calls[1].content, /chat_media_file_missing:/);
+    assert.match(calls[1].content, /missing\.png/);
+    assert.doesNotMatch(
+      calls[1].content,
+      /\u5bcc\u6587\u672c\u7247\u6bb5\u53d1\u9001\u5931\u8d25/,
+    );
+    assert.equal(calls[2].content, "trailing text");
   });
 });
 
@@ -1138,6 +1187,48 @@ test("slack adapter keeps media before following text", async () => {
     assert.equal(calls[0].thread_ts, "99");
     assert.equal(calls[1].text, "caption after image");
     assert.equal(calls[1].thread_ts, "99");
+  });
+});
+
+test("slack adapter reports a failed rich segment and continues later segments", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { token: "xapp", botToken: "xoxb" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.web = {
+      chat: {
+        postMessage: async (payload: any) => {
+          calls.push(payload);
+          return { ts: String(calls.length) };
+        },
+      },
+      files: {
+        uploadV2: async () => {
+          throw new Error("unexpected_upload");
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("C123", [
+      h.text("leading text"),
+      h.image(path.join(agentDir, "missing.png")),
+      h.text("trailing text"),
+    ]);
+
+    assert.deepEqual(result, ["1", "2", "3"]);
+    assert.equal(calls[0].text, "leading text");
+    assert.match(calls[1].text, /chat_media_file_missing:/);
+    assert.match(calls[1].text, /missing\.png/);
+    assert.doesNotMatch(
+      calls[1].text,
+      /\u5bcc\u6587\u672c\u7247\u6bb5\u53d1\u9001\u5931\u8d25/,
+    );
+    assert.equal(calls[2].text, "trailing text");
   });
 });
 
