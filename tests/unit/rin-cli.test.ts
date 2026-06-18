@@ -36,6 +36,9 @@ const run = await import(
 const main = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "main.js")).href
 );
+const control = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "control.js")).href
+);
 const installerMain = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "main.js"))
     .href
@@ -234,11 +237,43 @@ test("rin lifecycle control uses the recorded managed service boundary", () => {
     /installer\.json does not record a managed runtime service/,
   );
   assert.match(source, /tryManagedSystemdAction\(\[service\.label\]/);
+  assert.match(source, /launchctl/);
+  assert.match(source, /windows-startup/);
+  assert.match(source, /startWindowsDaemonProcess/);
   assert.match(source, /stopManagedBrowseSidecars\(context\.agentDir\)/);
   assert.match(source, /waitForDaemonUnavailable\(context\)/);
   assert.match(source, /rin_stop_incomplete/);
   assert.doesNotMatch(source, /pkill/);
 });
+
+for (const [kind, label, servicePath] of [
+  [
+    "systemd",
+    "rin-daemon-demo.service",
+    "/home/demo/.config/systemd/user/rin-daemon-demo.service",
+  ],
+  [
+    "launchd",
+    "com.rin.daemon.demo",
+    "/Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
+  ],
+  ["windows-startup", "Rin Daemon", "C:\\Users\\demo\\Startup\\Rin Daemon.cmd"],
+] as const) {
+  test(`rin lifecycle manifest accepts ${kind} managed service records`, () => {
+    const service = control.readManagedRuntimeService({
+      installDir: "/opt/rin",
+      targetUser: "demo",
+      currentUser: "demo",
+      readJson(filePath: string, fallback: any) {
+        assert.equal(filePath, path.join("/opt/rin", "installer.json"));
+        assert.deepEqual(fallback, {});
+        return { service: { kind, label, path: servicePath } };
+      },
+    });
+
+    assert.deepEqual(service, { kind, label, path: servicePath });
+  });
+}
 
 test("rin updater waits longer for daemon readiness than first install", () => {
   const updaterSource = fs.readFileSync(

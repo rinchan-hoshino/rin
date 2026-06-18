@@ -1,7 +1,7 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 import {
   captureCommandAsUser,
@@ -564,14 +564,70 @@ export function buildWindowsStartupLauncher(
     kind: "windows-startup" as const,
     label: "Rin Daemon",
     servicePath: launcherPath,
-    stdoutPath: daemonStdoutLogPath(context.targetHome),
-    stderrPath: daemonStderrLogPath(context.targetHome),
+    stdoutPath: daemonStdoutLogPath(installDir),
+    stderrPath: daemonStderrLogPath(installDir),
     service: buildWindowsStartupCommand({
       nodePath: process.execPath,
       daemonEntry: context.daemonEntry,
       installDir,
     }),
   };
+}
+
+export function buildWindowsDaemonLaunchSpec(
+  targetUser: string,
+  installDir: string,
+  targetHomeForUser: (user: string) => string,
+) {
+  const context = resolveDaemonLaunchContext(
+    targetUser,
+    installDir,
+    targetHomeForUser,
+  );
+  return {
+    command: process.execPath,
+    args: [context.daemonEntry],
+    cwd: context.targetHome,
+    env: { RIN_DIR: installDir },
+    stdoutPath: daemonStdoutLogPath(installDir),
+    stderrPath: daemonStderrLogPath(installDir),
+  };
+}
+
+export function startWindowsDaemonProcess(
+  targetUser: string,
+  installDir: string,
+  deps: {
+    targetHomeForUser: (user: string) => string;
+  },
+) {
+  if (process.platform !== "win32") return false;
+  const currentUser = currentSystemUser();
+  if (targetUser && targetUser !== currentUser) {
+    throw new Error(`rin_windows_daemon_cross_user_unsupported:${targetUser}`);
+  }
+  const spec = buildWindowsDaemonLaunchSpec(
+    targetUser,
+    installDir,
+    deps.targetHomeForUser,
+  );
+  ensureDir(path.dirname(spec.stdoutPath));
+  const stdout = fs.openSync(spec.stdoutPath, "a");
+  const stderr = fs.openSync(spec.stderrPath, "a");
+  try {
+    const child = spawn(spec.command, spec.args, {
+      cwd: spec.cwd,
+      detached: true,
+      env: { ...process.env, ...spec.env },
+      stdio: ["ignore", stdout, stderr],
+      windowsHide: true,
+    });
+    child.unref();
+    return true;
+  } finally {
+    fs.closeSync(stdout);
+    fs.closeSync(stderr);
+  }
 }
 
 export function installWindowsStartupLauncher(
@@ -588,6 +644,7 @@ export function installWindowsStartupLauncher(
     deps.targetHomeForUser,
   );
   writeManagedServiceFile(spec.servicePath, spec.service, { elevated });
+  startWindowsDaemonProcess(targetUser, installDir, deps);
   return spec;
 }
 

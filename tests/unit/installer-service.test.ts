@@ -78,10 +78,16 @@ test("installer service helpers prefer current daemon entry, quote systemd value
     } finally {
       process.env.PATH = oldPath;
     }
+    const windowsHome = path.join("C:\\Users", "demo space");
     const windowsStartup = service.buildWindowsStartupLauncher(
       "demo.user+test",
       installDir,
-      () => path.join("C:\\Users", "demo space"),
+      () => windowsHome,
+    );
+    const windowsDaemonLaunch = service.buildWindowsDaemonLaunchSpec(
+      "demo.user+test",
+      installDir,
+      () => windowsHome,
     );
 
     assert.equal(spec.kind, "systemd");
@@ -144,6 +150,14 @@ test("installer service helpers prefer current daemon entry, quote systemd value
     );
 
     assert.equal(windowsStartup.kind, "windows-startup");
+    assert.equal(
+      windowsStartup.stdoutPath,
+      path.join(installDir, "data", "logs", "daemon.stdout.log"),
+    );
+    assert.equal(
+      windowsStartup.stderrPath,
+      path.join(installDir, "data", "logs", "daemon.stderr.log"),
+    );
     assert.ok(
       windowsStartup.servicePath.endsWith(
         path.join(
@@ -168,6 +182,12 @@ test("installer service helpers prefer current daemon entry, quote systemd value
       windowsStartup.service,
       new RegExp(escapeRegex(currentDaemon)),
     );
+    assert.equal(windowsDaemonLaunch.command, process.execPath);
+    assert.deepEqual(windowsDaemonLaunch.args, [currentDaemon]);
+    assert.equal(windowsDaemonLaunch.cwd, windowsHome);
+    assert.deepEqual(windowsDaemonLaunch.env, { RIN_DIR: installDir });
+    assert.equal(windowsDaemonLaunch.stdoutPath, windowsStartup.stdoutPath);
+    assert.equal(windowsDaemonLaunch.stderrPath, windowsStartup.stderrPath);
   });
 });
 

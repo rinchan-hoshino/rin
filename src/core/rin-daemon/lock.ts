@@ -13,7 +13,7 @@ const OWNER_FILE_NAME = "owner.json";
 const PENDING_OWNER_GRACE_MS = 5_000;
 const LOCK_RETRY_DELAY_MS = 50;
 
-type DaemonLockOwner = {
+export type DaemonLockOwner = {
   pid?: number;
   processStartTime?: string;
   token?: string;
@@ -47,6 +47,10 @@ function readLockOwner(lockDir: string): DaemonLockOwner | null {
   } catch {
     return null;
   }
+}
+
+export function readDaemonInstanceLockOwner(agentDir: string) {
+  return readLockOwner(daemonInstanceLockPath(agentDir));
 }
 
 function writeLockOwner(lockDir: string, owner: DaemonLockOwner) {

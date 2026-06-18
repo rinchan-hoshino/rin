@@ -329,6 +329,14 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   rin_launchd_target_user_not_found: () =>
     "Rin could not find the target launchd user. Check the target user.",
+  rin_managed_service_action_failed: () =>
+    "Rin could not control the recorded background service.",
+  rin_managed_service_missing: () =>
+    "Rin install metadata does not record a background service.",
+  rin_managed_service_missing_path: () =>
+    "Rin install metadata points to a missing background service file.",
+  rin_managed_service_unsupported: () =>
+    "This Rin install does not support that lifecycle command on this platform.",
   rin_missing_required_tool: (detail) =>
     withDetail(
       "Rin is missing a required system tool",
@@ -396,6 +404,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin's background worker exited before the request finished.",
   rin_worker_failed: () =>
     "Rin's background worker failed before the request finished.",
+  rin_windows_daemon_cross_user_unsupported: () =>
+    "Rin cannot control another Windows user's daemon from this session.",
+  rin_windows_daemon_pid_missing: () =>
+    "Rin found a Windows daemon socket but could not find its process id.",
 
   rpc_turn_failed: () => "Rin failed while running the remote turn.",
   rpc_turn_final_output_missing: () =>
