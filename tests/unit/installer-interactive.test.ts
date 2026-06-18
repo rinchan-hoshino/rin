@@ -159,6 +159,19 @@ test("installer interactive helpers compute final requirements", () => {
   );
 });
 
+test("installer target menu hides cross-user local install on Windows", () => {
+  const linuxValues = interactive
+    .buildInstallTargetOptions("alice", undefined, "linux")
+    .map((option) => option.value);
+  const windowsValues = interactive
+    .buildInstallTargetOptions("alice", undefined, "win32")
+    .map((option) => option.value);
+
+  assert.ok(linuxValues.includes("local-user"));
+  assert.equal(windowsValues.includes("local-user"), false);
+  assert.deepEqual(windowsValues.slice(0, 2), ["current", "ssh"]);
+});
+
 test("promptTargetInstall falls back to all users when no other user exists", async () => {
   const seen = { selects: [] };
   const result = await interactive.promptTargetInstall(

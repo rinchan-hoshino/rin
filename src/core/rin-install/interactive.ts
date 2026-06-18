@@ -38,6 +38,54 @@ export type SystemUser = {
   shell: string;
 };
 
+export function buildInstallTargetOptions(
+  currentUser: string,
+  i18n: InstallerI18n = createInstallerI18n(),
+  platform: NodeJS.Platform = process.platform,
+) {
+  return [
+    {
+      value: "current",
+      label: i18n.currentInstallTargetLabel,
+      hint: currentUser,
+    },
+    ...(platform === "win32"
+      ? []
+      : [
+          {
+            value: "local-user",
+            label: i18n.localUserInstallTargetLabel,
+            hint: i18n.sameMachineHint,
+          },
+        ]),
+    {
+      value: "ssh",
+      label: i18n.sshInstallTargetLabel,
+      hint: i18n.reuseSshAuthHint,
+    },
+    {
+      value: "container",
+      label: i18n.containerInstallTargetLabel,
+      hint: i18n.containerIsolationHint,
+    },
+    {
+      value: "cloud",
+      label: i18n.cloudInstallTargetLabel,
+      hint: i18n.providerApiProvisionerHint,
+    },
+    {
+      value: "vm",
+      label: i18n.vmInstallTargetLabel,
+      hint: i18n.hypervisorProvisionerHint,
+    },
+    {
+      value: "nas",
+      label: i18n.nasInstallTargetLabel,
+      hint: i18n.nasIsolationHint,
+    },
+  ];
+}
+
 export async function promptInstallTarget(
   prompt: PromptApi,
   currentUser: string,
@@ -48,43 +96,7 @@ export async function promptInstallTarget(
   const targetMode = prompt.ensureNotCancelled(
     await prompt.select({
       message: i18n.chooseInstallTargetMessage,
-      options: [
-        {
-          value: "current",
-          label: i18n.currentInstallTargetLabel,
-          hint: currentUser,
-        },
-        {
-          value: "local-user",
-          label: i18n.localUserInstallTargetLabel,
-          hint: i18n.sameMachineHint,
-        },
-        {
-          value: "ssh",
-          label: i18n.sshInstallTargetLabel,
-          hint: i18n.reuseSshAuthHint,
-        },
-        {
-          value: "container",
-          label: i18n.containerInstallTargetLabel,
-          hint: i18n.containerIsolationHint,
-        },
-        {
-          value: "cloud",
-          label: i18n.cloudInstallTargetLabel,
-          hint: i18n.providerApiProvisionerHint,
-        },
-        {
-          value: "vm",
-          label: i18n.vmInstallTargetLabel,
-          hint: i18n.hypervisorProvisionerHint,
-        },
-        {
-          value: "nas",
-          label: i18n.nasInstallTargetLabel,
-          hint: i18n.nasIsolationHint,
-        },
-      ],
+      options: buildInstallTargetOptions(currentUser, i18n),
     }),
   );
 
