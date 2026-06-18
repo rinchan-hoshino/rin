@@ -1740,6 +1740,17 @@ test("chat controller keeps working reaction on current message while steer is q
   });
   await firstPromptStarted;
 
+  saveChatMessage(controller.agentDir, {
+    messageId: "m-steer",
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    chatId: "2",
+    chatType: "private",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "steer now",
+  });
+
   const steerResult = await controller.runTurn(
     {
       text: "steer now",
@@ -1798,6 +1809,15 @@ test("chat controller keeps working reaction on current message while steer is q
   assert.equal(activatedState.pendingSteeredDeliveryTargets, undefined);
   assert.equal(controller.currentTurn?.incomingMessageId, "m-steer");
   assert.equal(controller.currentTurn?.replyToMessageId, "m-steer");
+  const steeredMessage = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "m-steer",
+  );
+  assert.ok(
+    steeredMessage?.processedAt,
+    "steered inbox item should be processed when Pi starts the user message",
+  );
   assert.deepEqual(actions, [
     { chat_id: "2", action: "typing" },
     { chat_id: "2", action: "typing" },

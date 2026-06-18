@@ -496,6 +496,7 @@ export class ChatController {
       incomingMessageId: target?.incomingMessageId,
       replyToMessageId: target?.replyToMessageId,
     });
+    this.markProcessedMessage(target?.incomingMessageId);
     return true;
   }
 
