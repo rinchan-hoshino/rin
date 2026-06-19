@@ -451,20 +451,29 @@ function redrawCurrentSessionHistoryAfterRpcResync(instance: any) {
 
 function formatRinUpdateNotificationText(notice: RinUpdateNotice) {
   const channelPrefix = notice.channel === "stable" ? "" : `${notice.channel} `;
+  const updateInstruction =
+    theme.fg(
+      "muted",
+      `New ${channelPrefix}version ${notice.version} is available. Run `,
+    ) + theme.fg("accent", notice.command);
+  const changelogLine =
+    theme.fg("muted", "Changelog: ") + theme.fg("accent", getRinChangelogUrl());
   return [
-    `Rin ${channelPrefix}update available: ${notice.version}`,
-    `Run: ${notice.command}`,
-    `Changelog: ${getRinChangelogUrl()}`,
+    theme.bold(theme.fg("warning", "Update Available")),
+    updateInstruction,
+    changelogLine,
   ].join("\n");
-}
-
-function formatRinUpdateWarningText(text: string) {
-  return theme.fg("warning", `Warning: ${text}`);
 }
 
 export class DeferredRinUpdateNotification {
   private readonly spacer = new Spacer(1);
+  private readonly topBorder = new DynamicBorder((text) =>
+    theme.fg("warning", text),
+  );
   private readonly text = new Text("", 1, 0);
+  private readonly bottomBorder = new DynamicBorder((text) =>
+    theme.fg("warning", text),
+  );
   private active = false;
 
   setText(text: string) {
@@ -474,12 +483,19 @@ export class DeferredRinUpdateNotification {
 
   invalidate() {
     this.spacer.invalidate?.();
+    this.topBorder.invalidate?.();
     this.text.invalidate?.();
+    this.bottomBorder.invalidate?.();
   }
 
   render(width: number) {
     if (!this.active) return [];
-    return [...this.spacer.render(width), ...this.text.render(width)];
+    return [
+      ...this.spacer.render(width),
+      ...this.topBorder.render(width),
+      ...this.text.render(width),
+      ...this.bottomBorder.render(width),
+    ];
   }
 }
 
@@ -520,7 +536,7 @@ export function showRinUpdateNotification(
   instance[RIN_UPDATE_NOTICE_KEY] = notice;
   const target = ensureRinUpdateNotificationPlaceholder(instance, placeholder);
   const text = formatRinUpdateNotificationText(notice);
-  target.setText(formatRinUpdateWarningText(text));
+  target.setText(text);
   instance?.ui?.requestRender?.();
 }
 

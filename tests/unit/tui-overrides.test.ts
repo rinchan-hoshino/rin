@@ -146,6 +146,7 @@ test("shutdown resume hint uses rin command name", async () => {
           unregisterSignalHandlers() {},
           ui: { terminal: { async drainInput() {} } },
           stop() {},
+          themeController: { disableAutoSync() {} },
           runtimeHost: { async dispose() {} },
           sessionManager: {
             isPersisted: () => true,
@@ -249,10 +250,17 @@ test("async Rin update notice fills its startup placeholder instead of appending
 
   const rendered = renderText();
   assert.ok(rendered.includes(`${ESC}[`));
-  assert.ok(rendered.includes("mWarning: Rin update available: 1.2.3"));
+  assert.ok(rendered.includes("─".repeat(20)));
+  assert.ok(rendered.includes("Update Available"));
+  assert.ok(rendered.includes("New version 1.2.3 is available. Run"));
+  assert.ok(rendered.includes("rin update"));
+  assert.ok(!rendered.includes("pi update"));
+  assert.ok(rendered.includes("Changelog:"));
+  assert.ok(rendered.includes("github.com/rinchan-hoshino/rin"));
+  assert.ok(!rendered.includes("pi.dev/changelog"));
+  assert.ok(!rendered.includes("Warning: Rin update available"));
   assert.ok(
-    rendered.indexOf("Rin update available: 1.2.3") <
-      rendered.indexOf("startup line"),
+    rendered.indexOf("Update Available") < rendered.indexOf("startup line"),
   );
   assert.ok(
     rendered.indexOf("startup line") < rendered.indexOf("later async output"),
@@ -292,7 +300,10 @@ test("Rin update notice is reattached after chat redraw removes its placeholder"
   );
 
   const rendered = renderText();
-  assert.ok(rendered.includes("Rin update available: 1.2.3"));
+  assert.ok(rendered.includes("Update Available"));
+  assert.ok(rendered.includes("New version 1.2.3 is available. Run"));
+  assert.ok(rendered.includes("rin update"));
+  assert.ok(!rendered.includes("pi update"));
   assert.ok(rendered.includes("new session line"));
   assert.equal(renderRequests, 1);
 });
