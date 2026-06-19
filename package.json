@@ -72,7 +72,7 @@
     "strip-ansi": "^7.2.0",
     "turndown": "^7.2.4",
     "typebox": "^1.1.32",
-    "undici": "^7.24.6",
+    "undici": "^7.28.0",
     "ws": "^8.18.3",
     "yaml": "^2.8.3"
   },
@@ -95,5 +95,15 @@
   "funding": {
     "type": "ko-fi",
     "url": "https://ko-fi.com/THE_cattail"
+  },
+  "overrides": {
+    "axios": "^1.18.0",
+    "esbuild": "^0.28.1",
+    "discord.js": {
+      "undici": "6.27.0"
+    },
+    "@discordjs/rest": {
+      "undici": "6.27.0"
+    }
   }
 }
