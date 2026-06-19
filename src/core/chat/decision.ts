@@ -187,6 +187,15 @@ export async function isPrivateLikeGroupSession(session: any, trust: string) {
   return Number.isFinite(count) && count > 0 && count <= 2;
 }
 
+export async function isEffectivePrivateChatSession(
+  session: any,
+  identity: any,
+) {
+  if (directLike(session)) return true;
+  const context = normalizeDecisionSessionContext(session, identity);
+  return await isPrivateLikeGroupSession(session, context.trust);
+}
+
 export async function shouldProcessText(
   session: any,
   elements: any[],

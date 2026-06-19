@@ -78,7 +78,11 @@ import {
   type PreparedChatKeyWorkerJob,
   createChatKeyWorkerPool,
 } from "./chat-key-worker.js";
-import { isOwnerPresentForGroup, shouldProcessText } from "./decision.js";
+import {
+  isEffectivePrivateChatSession,
+  isOwnerPresentForGroup,
+  shouldProcessText,
+} from "./decision.js";
 import {
   createChatRuntimeApp,
   createChatRuntimeH,
@@ -530,8 +534,10 @@ export async function startChatBridge(
     );
   const isInboundMessageProcessed = (chatKey: string, messageId: string) =>
     hasInboundChatMessageReplyBoundary(runtime.agentDir, chatKey, messageId);
-  const handleUnmatchedCommandSession = async (session: any) => {
-    if (getChatType(session) !== "private") return { retry: false };
+  const handleUnmatchedCommandSession = async (session: any, identity: any) => {
+    if (!(await isEffectivePrivateChatSession(session, identity))) {
+      return { retry: false };
+    }
     const platform = safeString(session?.platform || "").trim();
     const chatKey = composeChatKey(
       platform,
@@ -854,7 +860,7 @@ export async function startChatBridge(
       return {
         run: () =>
           runClaimedInboxJob(job, () =>
-            handleUnmatchedCommandSession(queuedSession),
+            handleUnmatchedCommandSession(queuedSession, identity),
           ),
       };
     }
