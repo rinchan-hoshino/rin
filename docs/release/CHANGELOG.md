@@ -11,6 +11,8 @@
 - Installer lifecycle handling is smoother across first-run setup, cross-user Windows targets, and macOS/Windows daemon control.
 - Rin now tracks the Pi 0.79.6 dependency line for this release series.
 - Release executors now verify changelog coverage against included commits before publishing stable or prerelease metadata.
+- Chat delivery and command-error recovery are tighter: media outbox delivery now runs asynchronously, and command errors reuse the private-like scope when appropriate.
+- TUI update notices align with the Rin rendering boundary, and Rin now tracks the Pi 0.79.7 dependency line for this release series.
 
 <!-- rin-changelog-coverage
 5a2999d fix(chat): keep rich delivery after segment failures
@@ -56,6 +58,10 @@ b587d6e fix(chat): isolate outbox delivery stalls
 a961138 Refine Rin update installer flow
 ea1dccf docs(self-improve): prefer target-state distillation
 ff4bde6 fix(self-improve): require eligible producers for reviews
+811a469 chore(deps): sync Pi 0.79.7
+dc0c2e6 fix(tui): align Rin update notice rendering
+c6378b7 fix(chat): make media outbox delivery asynchronous
+5b38149 fix(chat): reuse private-like scope for command errors
 -->
 
 ## 0.4.0
