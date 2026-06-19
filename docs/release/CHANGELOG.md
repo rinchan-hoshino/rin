@@ -62,6 +62,7 @@ ff4bde6 fix(self-improve): require eligible producers for reviews
 dc0c2e6 fix(tui): align Rin update notice rendering
 c6378b7 fix(chat): make media outbox delivery asynchronous
 5b38149 fix(chat): reuse private-like scope for command errors
+9c271de docs(release): cover 0.5.0 nightly changes
 -->
 
 ## 0.4.0
