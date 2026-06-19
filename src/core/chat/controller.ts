@@ -1110,6 +1110,7 @@ export class ChatController {
       ? results.find((item: any) => item?.id === id)
       : null;
     if (own && own.status !== "delivered") {
+      if (own.status === "dispatched") return [];
       const errorMessage =
         safeString((own as any).error).trim() || "chat_outbox_delivery_pending";
       if (/^chat_outbox_delivery_timeout:/.test(errorMessage)) {

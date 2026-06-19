@@ -37,6 +37,20 @@ async function withTempDir(fn) {
   }
 }
 
+async function waitFor(assertion, timeoutMs = 1000) {
+  const start = Date.now();
+  let lastError;
+  while (Date.now() - start < timeoutMs) {
+    try {
+      return assertion();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  if (lastError) throw lastError;
+}
+
 test("chat boot localizes command descriptions for Chinese runtimes", () => {
   const rows = boot.getChatCommandRows("zh_CN");
   assert.deepEqual(
@@ -366,5 +380,191 @@ test("chat boot keeps retryable outbox delivery failures queued", async () => {
     assert.ok(
       warnings.some((message) => message.includes("chat outbox queued")),
     );
+  });
+});
+
+test("chat boot gives OneBot media outbox items the extended send timeout", () => {
+  assert.equal(
+    boot.getChatOutboxSendTimeoutMs({
+      payload: {
+        type: "text_delivery",
+        createdAt: new Date().toISOString(),
+        chatKey: "onebot/1:2",
+        text: "[file: pack.mrpack](/tmp/pack.mrpack)",
+      },
+    }),
+    boot.DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+  );
+  assert.equal(
+    boot.getChatOutboxSendTimeoutMs({
+      payload: {
+        type: "text_delivery",
+        createdAt: new Date().toISOString(),
+        chatKey: "onebot/1:2",
+        text: "plain text",
+      },
+    }),
+    boot.DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+  );
+  assert.equal(
+    boot.getChatOutboxSendTimeoutMs(
+      {
+        payload: {
+          type: "text_delivery",
+          createdAt: new Date().toISOString(),
+          chatKey: "onebot/1:2",
+          text: "[file: pack.mrpack](/tmp/pack.mrpack)",
+        },
+      },
+      { sendTimeoutMs: 42 },
+    ),
+    42,
+  );
+});
+
+test("chat boot dispatches media outbox items asynchronously after starting delivery", async () => {
+  await withTempDir(async (agentDir) => {
+    const filePath = path.join(agentDir, "pack.mrpack");
+    await fs.writeFile(filePath, Buffer.from("pack"));
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "parts_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/1:2",
+      parts: [
+        {
+          type: "file",
+          path: filePath,
+          name: "pack.mrpack",
+          mimeType: "application/octet-stream",
+        },
+      ],
+    });
+    const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
+    let resolveDelivery;
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "1",
+          sendMessage() {
+            return new Promise((resolve) => {
+              resolveDelivery = resolve;
+            });
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+      file(src, mimeType, attrs) {
+        return { type: "file", attrs: { src, mimeType, ...attrs } };
+      },
+    };
+
+    const results = await boot.drainChatOutbox(app, agentDir, h, { warn() {} });
+
+    assert.equal(results[0].status, "dispatched");
+    let stored = outbox.readChatOutboxItemById(agentDir, itemId).item;
+    assert.equal(stored.status, "sending");
+    assert.equal(stored.failureKind, "retryable");
+    assert.equal(stored.attempts, 1);
+    assert.match(stored.lastError, /chat_outbox_delivery_pending/);
+
+    resolveDelivery(["m1"]);
+    await waitFor(() => {
+      stored = outbox.readChatOutboxItemById(agentDir, itemId).item;
+      assert.equal(stored.status, "delivered");
+      assert.deepEqual(stored.deliveryResult, ["m1"]);
+    });
+  });
+});
+
+test("chat boot ignores dispatch-only completion for non-media outbox items", async () => {
+  await withTempDir(async (agentDir) => {
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "onebot/1:2",
+      text: "plain text",
+    });
+    let resolveDelivery;
+    const app = {
+      bots: [
+        {
+          platform: "onebot",
+          selfId: "1",
+          sendMessage() {
+            const delivery = new Promise((resolve) => {
+              resolveDelivery = resolve;
+            });
+            delivery.dispatched = Promise.resolve();
+            return delivery;
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+
+    const results = await boot.drainChatOutbox(
+      app,
+      agentDir,
+      h,
+      { warn() {} },
+      { sendTimeoutMs: 20, retryLeaseMs: 100 },
+    );
+
+    assert.equal(results[0].status, "queued");
+    assert.match(results[0].error, /chat_outbox_delivery_timeout/);
+    resolveDelivery(["m1"]);
+  });
+});
+
+test("chat boot keeps OneBot media send timeouts retryable", async () => {
+  await withTempDir(async (agentDir) => {
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "onebot/1:2",
+      text: "[file: pack.mrpack](/tmp/pack.mrpack)",
+    });
+    const app = {
+      bots: [
+        {
+          platform: "onebot",
+          selfId: "1",
+          async sendMessage() {
+            throw new Error("onebot_action_timeout:send_group_msg");
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+      quote(id) {
+        return { type: "quote", attrs: { id } };
+      },
+      file(src, mimeType, attrs) {
+        return { type: "file", attrs: { src, mimeType, ...attrs } };
+      },
+    };
+
+    const results = await boot.drainChatOutbox(app, agentDir, h, { warn() {} });
+
+    assert.equal(results[0].status, "dispatched");
+    await waitFor(() => {
+      const stored = outbox.listChatOutboxItems(agentDir)[0].item;
+      assert.equal(stored.status, "queued");
+      assert.equal(stored.failureKind, "retryable");
+      assert.equal(stored.attempts, 1);
+      assert.match(stored.lastError, /onebot_action_timeout:send_group_msg/);
+    });
   });
 });

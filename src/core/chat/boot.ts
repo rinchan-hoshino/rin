@@ -9,7 +9,10 @@ import { createRinI18n } from "../i18n.js";
 import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { RIN_NON_INTERACTIVE_COMMAND_NAMES } from "../rin-frontend-sdk/index.js";
 import { markProcessedChatMessage, safeString } from "./chat-helpers.js";
-import { sendOutboxPayload } from "./transport.js";
+import {
+  getChatDeliveryDispatchPromise,
+  sendOutboxPayload,
+} from "./transport.js";
 
 export type ChatCommandRow = {
   name: string;
@@ -125,7 +128,9 @@ export async function syncTelegramCommands(
 
 const CHAT_OUTBOX_MAX_ATTEMPTS = 4;
 const CHAT_OUTBOX_RETRY_DELAYS_MS = [1000, 3000, 10_000] as const;
-const DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS = 120_000;
+export const DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS = 120_000;
+export const DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS = 10 * 60_000;
+export const DEFAULT_CHAT_OUTBOX_DISPATCH_TIMEOUT_MS = 30_000;
 const DEFAULT_CHAT_OUTBOX_RETRY_LEASE_MS = 5 * 60_000;
 
 export type ChatOutboxDrainOptions = {
@@ -192,11 +197,42 @@ function normalizePositiveMilliseconds(value: unknown, fallback: number) {
   return Math.max(1, Math.floor(next));
 }
 
-function sendTimeoutMs(options: ChatOutboxDrainOptions = {}) {
-  return normalizePositiveMilliseconds(
-    options.sendTimeoutMs ?? process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS,
-    DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+function chatOutboxPayloadContainsMedia(payload: ChatOutboxItem["payload"]) {
+  if (payload?.type === "parts_delivery") {
+    return (payload.parts || []).some((part: any) =>
+      ["image", "file", "video", "audio", "sticker"].includes(
+        safeString(part?.type).trim().toLowerCase(),
+      ),
+    );
+  }
+  const text = safeString((payload as any)?.text);
+  return /!\[[^\]]*\]\([^)]+\)|\[(?:image|file|video|audio|sticker):[^\]]*\]\([^)]+\)/i.test(
+    text,
   );
+}
+
+function isOneBotMediaOutboxItem(item?: Pick<ChatOutboxItem, "payload">) {
+  return (
+    safeString(item?.payload?.chatKey).startsWith("onebot/") &&
+    chatOutboxPayloadContainsMedia(item?.payload)
+  );
+}
+
+export function getChatOutboxSendTimeoutMs(
+  item?: Pick<ChatOutboxItem, "payload">,
+  options: ChatOutboxDrainOptions = {},
+) {
+  const configured =
+    options.sendTimeoutMs ?? process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+  if (configured !== undefined) {
+    return normalizePositiveMilliseconds(
+      configured,
+      DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+    );
+  }
+  return isOneBotMediaOutboxItem(item)
+    ? DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS
+    : DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS;
 }
 
 function retryLeaseMs(options: ChatOutboxDrainOptions = {}) {
@@ -411,7 +447,7 @@ async function drainChatOutboxItem(
   if (!isOutboxItemDrainable(item)) {
     return null;
   }
-  const timeoutMs = sendTimeoutMs(options);
+  const timeoutMs = getChatOutboxSendTimeoutMs(item, options);
   const sending: ChatOutboxItem = {
     ...item,
     status: "sending",
@@ -422,7 +458,44 @@ async function drainChatOutboxItem(
     ).toISOString(),
   };
   writeChatOutboxItem(agentDir, sending);
-  const deliveryTask = sendOutboxPayload(app, agentDir, sending.payload, h);
+  let deliveryTask: ReturnType<typeof sendOutboxPayload>;
+  try {
+    deliveryTask = sendOutboxPayload(app, agentDir, sending.payload, h);
+  } catch (error: any) {
+    return settleChatOutboxFailure(agentDir, logger, sending, error);
+  }
+  const dispatched = chatOutboxPayloadContainsMedia(sending.payload)
+    ? getChatDeliveryDispatchPromise(deliveryTask)
+    : undefined;
+  if (dispatched) {
+    try {
+      await withChatOutboxSendTimeout(
+        dispatched,
+        DEFAULT_CHAT_OUTBOX_DISPATCH_TIMEOUT_MS,
+      );
+      const queued = queuedChatOutboxItem(
+        sending,
+        new Error("chat_outbox_delivery_pending"),
+        {
+          keepSending: true,
+          retryAfterMs: timeoutMs + retryLeaseMs(options),
+        },
+      );
+      writeChatOutboxItem(agentDir, queued);
+      void deliveryTask.then(
+        (deliveryResult) =>
+          settleLateChatOutboxSuccess(agentDir, sending, deliveryResult),
+        (lateError) =>
+          settleLateChatOutboxFailure(agentDir, logger, sending, lateError),
+      );
+      return {
+        status: "dispatched" as const,
+      };
+    } catch (error: any) {
+      void deliveryTask.catch(() => {});
+      return settleChatOutboxFailure(agentDir, logger, sending, error);
+    }
+  }
   try {
     const deliveryResult = await withChatOutboxSendTimeout(
       deliveryTask,

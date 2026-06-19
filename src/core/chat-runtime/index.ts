@@ -1096,7 +1096,7 @@ const NAPCAT_ONEBOT_EMOJI_ID_OVERRIDES: Record<string, string> = {
   "👀": "128064",
   // NapCat routes <=3-digit reaction IDs as QQ system faces. QQ desktop does
   // not render the Unicode 🤔 code point as a visible reaction, so use the
-  // cross-client /托腮 face instead.
+  // cross-client "chin-resting" QQ face instead.
   "🤔": "212",
 };
 
@@ -1123,6 +1123,8 @@ export const ONEBOT_MEDIA_CACHE_RELATIVE_DIR = path.join(
 export const ONEBOT_MEDIA_DOCKER_MOUNT_PATH =
   "$HOME/.rin/data/chat-media/onebot";
 export const ONEBOT_MEDIA_DOCKER_VOLUME_HINT = `-v "${ONEBOT_MEDIA_DOCKER_MOUNT_PATH}:${ONEBOT_MEDIA_DOCKER_MOUNT_PATH}:ro"`;
+export const ONEBOT_ACTION_TIMEOUT_MS = 20_000;
+export const ONEBOT_MEDIA_ACTION_TIMEOUT_MS = 10 * 60_000 + 5_000;
 
 function isOneBotLocalMediaAction(action: string) {
   return /^(send_private_msg|send_group_msg|send_msg|upload_private_file|upload_group_file)$/.test(
@@ -1130,12 +1132,32 @@ function isOneBotLocalMediaAction(action: string) {
   );
 }
 
-function oneBotParamsContainLocalMedia(params: any) {
-  const message = safeString(params?.message || params?.file || "");
-  return (
-    /\[CQ:(?:image|video|record|file),[^\]]*file=file:\/\//i.test(message) ||
-    /^file:\/\//i.test(message)
+function oneBotParamsText(params: any) {
+  if (!params || typeof params !== "object") return safeString(params);
+  const parts = [safeString(params.message), safeString(params.file)];
+  try {
+    parts.push(JSON.stringify(params));
+  } catch {}
+  return parts.join("\n");
+}
+
+function oneBotParamsReferenceMedia(action: string, params: any) {
+  if (/^upload_(?:private|group)_file$/.test(safeString(action).trim())) {
+    return true;
+  }
+  return /\[CQ:(?:image|video|record|file)\b|file:\/\/|"type"\s*:\s*"(?:image|video|audio|record|file|sticker)"/i.test(
+    oneBotParamsText(params),
   );
+}
+
+export function oneBotActionTimeoutMs(action: string, params?: any) {
+  if (
+    isOneBotLocalMediaAction(action) &&
+    oneBotParamsReferenceMedia(action, params)
+  ) {
+    return ONEBOT_MEDIA_ACTION_TIMEOUT_MS;
+  }
+  return ONEBOT_ACTION_TIMEOUT_MS;
 }
 
 function oneBotFailureText(payload: any) {
@@ -1154,16 +1176,13 @@ function isOneBotLocalMediaVisibilityFailure(
 ) {
   if (!isOneBotLocalMediaAction(action)) return false;
   const message = oneBotFailureText(payload);
-  const retcode = Number(payload?.retcode);
-  const mediaSend =
-    oneBotParamsContainLocalMedia(params) ||
-    /ENOENT|file:\/\/|rich[- ]?media|媒体|文件/i.test(message);
-  if (!mediaSend) return false;
-  return (
-    retcode === 1200 ||
-    /ENOENT|no such file|not found|rich[- ]?media|无法读取/i.test(message)
+  return /ENOENT|file:\/\/|no such file|not found|rich[- ]?media/i.test(
+    message,
   );
 }
+
+export const ONEBOT_LOCAL_MEDIA_VISIBILITY_HINT =
+  "OneBot/NapCat cannot read Rin's local media file. If NapCat runs in Docker, mount the media directory read-only:";
 
 export function formatOneBotActionFailureMessage(
   payload: any,
@@ -1174,12 +1193,12 @@ export function formatOneBotActionFailureMessage(
   if (!isOneBotLocalMediaVisibilityFailure(payload, action, params)) {
     return message;
   }
-  if (message.includes("OneBot/NapCat 无法读取 Rin 的本地媒体文件")) {
+  if (message.includes(ONEBOT_LOCAL_MEDIA_VISIBILITY_HINT)) {
     return message;
   }
   return [
     message,
-    "OneBot/NapCat 无法读取 Rin 的本地媒体文件。如果 NapCat 在 Docker 中运行，请给容器添加只读挂载：",
+    ONEBOT_LOCAL_MEDIA_VISIBILITY_HINT,
     ONEBOT_MEDIA_DOCKER_VOLUME_HINT,
   ].join("\n");
 }
@@ -1314,8 +1333,8 @@ class OneBotAdapter {
           },
         },
       ),
-      sendMessage: async (chatId: string, content: any) =>
-        await this.sendMessage(chatId, content),
+      sendMessage: (chatId: string, content: any, options?: any) =>
+        this.sendMessage(chatId, content, options),
       createReaction: async (
         chatId: string,
         messageId: string,
@@ -1460,26 +1479,51 @@ class OneBotAdapter {
     }
   }
 
-  private async callAction(action: string, params?: any) {
+  private callAction(action: string, params?: any) {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       throw new Error("onebot_not_connected");
     }
     const echo = `rin-${Date.now()}-${this.nextEchoId++}`;
-    return await new Promise((resolve, reject) => {
+    const timeoutMs = oneBotActionTimeoutMs(action, params);
+    let resolveDispatched: () => void = () => {};
+    let rejectDispatched: (error: unknown) => void = () => {};
+    const dispatched = new Promise<void>((resolve, reject) => {
+      resolveDispatched = resolve;
+      rejectDispatched = reject;
+    });
+    void dispatched.catch(() => {});
+    const actionPayload = JSON.stringify({
+      action,
+      params: params && typeof params === "object" ? params : {},
+      echo,
+    });
+    const task = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(echo);
         reject(new Error(`onebot_action_timeout:${action}`));
-      }, 20000);
+      }, timeoutMs);
       this.pending.set(echo, { resolve, reject, timer, action, params });
-      ws.send(
-        JSON.stringify({
-          action,
-          params: params && typeof params === "object" ? params : {},
-          echo,
-        }),
-      );
-    });
+      try {
+        ws.send(actionPayload, (error?: Error) => {
+          if (error) {
+            clearTimeout(timer);
+            this.pending.delete(echo);
+            rejectDispatched(error);
+            reject(error);
+            return;
+          }
+          resolveDispatched();
+        });
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(echo);
+        rejectDispatched(error);
+        reject(error);
+      }
+    }) as Promise<any> & { dispatched?: Promise<void> };
+    task.dispatched = dispatched;
+    return task;
   }
 
   private async normalizeOutboundMedia(node: any, type: "image" | "file") {
@@ -1550,30 +1594,54 @@ class OneBotAdapter {
     return parts.join("");
   }
 
-  private async sendMessage(chatId: string, content: any) {
-    const { nodes } = prepareOutboundNodes(content);
-    const message = await this.renderOutboundMessage(nodes);
-    if (!message) throw new Error("onebot_send_message_empty");
-    const isPrivate = safeString(chatId).startsWith("private:");
-    const targetId = Number(
-      safeString(chatId)
-        .replace(/^private:/, "")
-        .trim(),
-    );
-    const data: any = isPrivate
-      ? await this.callAction("send_private_msg", {
-          user_id: targetId,
-          message,
-          auto_escape: false,
-        })
-      : await this.callAction("send_group_msg", {
-          group_id: targetId,
-          message,
-          auto_escape: false,
-        });
-    const messageId = safeString(data?.message_id || data).trim();
-    if (!messageId) throw new Error("onebot_send_message_empty_result");
-    return [messageId];
+  private sendMessage(chatId: string, content: any, _options?: any) {
+    let resolveDispatched: () => void = () => {};
+    let rejectDispatched: (error: unknown) => void = () => {};
+    const dispatched = new Promise<void>((resolve, reject) => {
+      resolveDispatched = resolve;
+      rejectDispatched = reject;
+    });
+    void dispatched.catch(() => {});
+    const task = (async () => {
+      try {
+        const { nodes } = prepareOutboundNodes(content);
+        const message = await this.renderOutboundMessage(nodes);
+        if (!message) throw new Error("onebot_send_message_empty");
+        const isPrivate = safeString(chatId).startsWith("private:");
+        const targetId = Number(
+          safeString(chatId)
+            .replace(/^private:/, "")
+            .trim(),
+        );
+        const action = isPrivate ? "send_private_msg" : "send_group_msg";
+        const params = isPrivate
+          ? {
+              user_id: targetId,
+              message,
+              auto_escape: false,
+            }
+          : {
+              group_id: targetId,
+              message,
+              auto_escape: false,
+            };
+        const actionTask: any = this.callAction(action, params);
+        if (actionTask?.dispatched) {
+          void actionTask.dispatched.then(resolveDispatched, rejectDispatched);
+        } else {
+          resolveDispatched();
+        }
+        const data: any = await actionTask;
+        const messageId = safeString(data?.message_id || data).trim();
+        if (!messageId) throw new Error("onebot_send_message_empty_result");
+        return [messageId];
+      } catch (error) {
+        rejectDispatched(error);
+        throw error;
+      }
+    })() as Promise<string[]> & { dispatched?: Promise<void> };
+    task.dispatched = dispatched;
+    return task;
   }
 
   getWorkingIndicators(context: any) {

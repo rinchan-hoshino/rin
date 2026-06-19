@@ -37,6 +37,20 @@ async function withTempDir(fn) {
   }
 }
 
+async function waitFor(assertion, timeoutMs = 1000) {
+  const start = Date.now();
+  let lastError;
+  while (Date.now() - start < timeoutMs) {
+    try {
+      return assertion();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  if (lastError) throw lastError;
+}
+
 test("chat outbox enqueues payload on disk", async () => {
   await withTempDir(async (dir) => {
     const filePath = outbox.enqueueChatOutboxPayload(dir, {
@@ -97,8 +111,16 @@ test("chat outbox accepts SDK-style text and parts payloads", async () => {
     const results = await boot.drainChatOutbox(app, dir, h, { warn() {} });
     assert.deepEqual(
       results.map((result) => result.status),
-      ["delivered", "delivered"],
+      ["delivered", "dispatched"],
     );
+    await waitFor(() => {
+      assert.deepEqual(
+        queued.map(
+          (item) => outbox.readChatOutboxItemById(dir, item.id).item.status,
+        ),
+        ["delivered", "delivered"],
+      );
+    });
     assert.equal(sent.length, 2);
     assert.equal(sent[0].content[0].attrs.content, "plain sdk text");
     assert.equal(sent[1].content[0].attrs.content, "sdk parts text");

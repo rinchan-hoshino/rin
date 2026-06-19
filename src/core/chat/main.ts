@@ -395,6 +395,7 @@ export async function startChatBridge(
       throw new Error("chat_outbox_delivery_missing");
     }
     if (own.status !== "delivered") {
+      if (own.status === "dispatched") return;
       throw new Error(
         safeString((own as any).error).trim() || "chat_outbox_delivery_pending",
       );

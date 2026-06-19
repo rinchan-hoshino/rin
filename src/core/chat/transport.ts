@@ -326,14 +326,14 @@ function looksLikeMarkdown(text: string) {
   );
 }
 
-async function sendChatNodes(
+function sendChatNodes(
   app: any,
   chatKey: string,
   nodes: any[],
   options: Record<string, any> = {},
 ) {
   const { parsed, bot } = requireChatTarget(app, chatKey);
-  return await sendBotMessage(bot, parsed.chatId, nodes, options);
+  return sendBotMessage(bot, parsed.chatId, nodes, options);
 }
 
 function normalizeOutboxChatKey(chatKey: string) {
@@ -361,14 +361,39 @@ function normalizeDeliveredMessageIds(result: unknown) {
   return messageIds;
 }
 
-async function sendBotMessage(
+type ChatDeliveryPromise<T> = Promise<T> & { dispatched?: Promise<void> };
+
+function attachChatDeliveryDispatch<T>(
+  task: Promise<T>,
+  dispatched?: Promise<void>,
+): ChatDeliveryPromise<T> {
+  const delivery = task as ChatDeliveryPromise<T>;
+  if (dispatched) {
+    void dispatched.catch(() => {});
+    delivery.dispatched = dispatched;
+  }
+  return delivery;
+}
+
+export function getChatDeliveryDispatchPromise(
+  task: unknown,
+): Promise<void> | undefined {
+  const dispatched = (task as any)?.dispatched;
+  return dispatched && typeof dispatched.then === "function"
+    ? dispatched
+    : undefined;
+}
+
+function sendBotMessage(
   bot: any,
   chatId: string,
   content: any,
   options: Record<string, any> = {},
 ) {
-  return normalizeDeliveredMessageIds(
-    await bot.sendMessage(chatId, content, options),
+  const raw = bot.sendMessage(chatId, content, options);
+  return attachChatDeliveryDispatch(
+    Promise.resolve(raw).then((result) => normalizeDeliveredMessageIds(result)),
+    getChatDeliveryDispatchPromise(raw),
   );
 }
 
@@ -522,7 +547,7 @@ function summarizeOutgoingParts(parts: ChatMessagePart[]) {
     .trim();
 }
 
-export async function sendText(
+export function sendText(
   app: any,
   chatKey: string,
   text: string,
@@ -530,7 +555,7 @@ export async function sendText(
   replyToMessageId = "",
   options: Record<string, any> = {},
 ) {
-  return await sendChatNodes(
+  return sendChatNodes(
     app,
     chatKey,
     withReplyQuote(h, replyToMessageId, [
@@ -645,41 +670,46 @@ function buildPartsDeliveryRecord(rawParts: ChatMessagePart[]) {
   };
 }
 
-export async function sendOutboxPayload(
+export function sendOutboxPayload(
   app: any,
   agentDir: string,
   payload: ChatOutboxPayload,
   h: any,
 ) {
   if (payload?.type === "text_delivery") {
-    const chatKey = normalizeOutboxChatKey(payload.chatKey);
-    const text = normalizeOutboxText(payload.text);
-    const replyToMessageId = safeString(payload.replyToMessageId).trim();
-    const session =
-      payload.sessionBinding === "conversation"
-        ? normalizeSessionRef(payload)
-        : { sessionFile: undefined };
-    const deliveryKind = safeString(payload.deliveryKind).trim() || "final";
-    const deliveryResult = await sendText(
-      app,
-      chatKey,
-      text,
-      h,
-      replyToMessageId,
-      { deliveryKind },
-    );
-    return finalizeDeliveredAssistantOutput(agentDir, {
-      chatKey,
-      deliveryResult,
-      logText: text,
-      text,
-      rawContent: text,
-      replyToMessageId,
-      sessionFile: session.sessionFile,
-      sessionBinding: payload.sessionBinding,
-    });
+    try {
+      const chatKey = normalizeOutboxChatKey(payload.chatKey);
+      const text = normalizeOutboxText(payload.text);
+      const replyToMessageId = safeString(payload.replyToMessageId).trim();
+      const session =
+        payload.sessionBinding === "conversation"
+          ? normalizeSessionRef(payload)
+          : { sessionFile: undefined };
+      const deliveryKind = safeString(payload.deliveryKind).trim() || "final";
+      const delivery = sendText(app, chatKey, text, h, replyToMessageId, {
+        deliveryKind,
+      });
+      return attachChatDeliveryDispatch(
+        delivery.then((deliveryResult) =>
+          finalizeDeliveredAssistantOutput(agentDir, {
+            chatKey,
+            deliveryResult,
+            logText: text,
+            text,
+            rawContent: text,
+            replyToMessageId,
+            sessionFile: session.sessionFile,
+            sessionBinding: payload.sessionBinding,
+          }),
+        ),
+        Promise.resolve(),
+      );
+    } catch (error) {
+      return Promise.reject(error) as ChatDeliveryPromise<string[]>;
+    }
   }
-  if (payload?.type !== "parts_delivery") return [] as string[];
+  if (payload?.type !== "parts_delivery")
+    return Promise.resolve([] as string[]);
   const chatKey = normalizeOutboxChatKey(payload.chatKey);
   const session =
     payload.sessionBinding === "conversation"
@@ -688,24 +718,39 @@ export async function sendOutboxPayload(
   const rawParts = Array.isArray(payload.parts)
     ? payload.parts.filter(Boolean)
     : [];
-  if (!rawParts.length) throw new Error("chat_outbox_empty_message");
-
-  const nodes = (
-    await Promise.all(rawParts.map((part) => messagePartToNode(part, h)))
-  ).filter(Boolean);
-  if (!nodes.length) throw new Error("chat_outbox_empty_message");
-
-  const deliveryResult = await sendChatNodes(app, chatKey, nodes, {
-    deliveryKind: "final",
+  let resolveDispatched: () => void = () => {};
+  let rejectDispatched: (error: unknown) => void = () => {};
+  const dispatched = new Promise<void>((resolve, reject) => {
+    resolveDispatched = resolve;
+    rejectDispatched = reject;
   });
+  const delivery = (async () => {
+    try {
+      if (!rawParts.length) throw new Error("chat_outbox_empty_message");
+      const nodes = (
+        await Promise.all(rawParts.map((part) => messagePartToNode(part, h)))
+      ).filter(Boolean);
+      if (!nodes.length) throw new Error("chat_outbox_empty_message");
 
-  return finalizeDeliveredAssistantOutput(agentDir, {
-    chatKey,
-    deliveryResult,
-    sessionFile: session.sessionFile,
-    sessionBinding: payload.sessionBinding,
-    ...buildPartsDeliveryRecord(rawParts),
-  });
+      const chatDelivery = sendChatNodes(app, chatKey, nodes, {
+        deliveryKind: "final",
+      });
+      resolveDispatched();
+      const deliveryResult = await chatDelivery;
+
+      return finalizeDeliveredAssistantOutput(agentDir, {
+        chatKey,
+        deliveryResult,
+        sessionFile: session.sessionFile,
+        sessionBinding: payload.sessionBinding,
+        ...buildPartsDeliveryRecord(rawParts),
+      });
+    } catch (error) {
+      rejectDispatched(error);
+      throw error;
+    }
+  })();
+  return attachChatDeliveryDispatch(delivery, dispatched);
 }
 
 export function buildPromptText(text: string, _attachments: SavedAttachment[]) {
