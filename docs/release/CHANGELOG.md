@@ -63,6 +63,7 @@ dc0c2e6 fix(tui): align Rin update notice rendering
 c6378b7 fix(chat): make media outbox delivery asynchronous
 5b38149 fix(chat): reuse private-like scope for command errors
 9c271de docs(release): cover 0.5.0 nightly changes
+1750714 docs(release): cover changelog prep commit
 -->
 
 ## 0.4.0
