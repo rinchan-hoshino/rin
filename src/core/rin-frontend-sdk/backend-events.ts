@@ -109,6 +109,7 @@ function todoNoticeFromDetails(details: unknown) {
   if (!value) return "";
   const todos = normalizeRinTodoItems(value.todos);
   if (!todos) return "";
+  if (todos.length === 0) return "";
   const checklist = formatRinTodoChecklistContent(todos);
   const error = safeString(value.error).trim();
   return error ? `Error: ${error}\n${checklist}` : checklist;

@@ -261,6 +261,45 @@ test("frontend backend event translator emits todo notice for single todo execut
   );
 });
 
+test("frontend backend event translator suppresses empty todo notices", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolCallId: "todo-1",
+      toolName: "todo",
+      result: {
+        content: [{ type: "text", text: "No todos" }],
+        details: {
+          action: "clear",
+          todos: [],
+          nextId: 1,
+        },
+      },
+      isError: false,
+    }),
+    [{ type: "turn_accepted" }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolCallId: "todo-2",
+      toolName: "todo",
+      result: {
+        details: {
+          action: "write",
+          todos: [],
+          nextId: 1,
+          error: "invalid todo list",
+        },
+      },
+      isError: true,
+    }),
+    [{ type: "turn_accepted" }],
+  );
+});
+
 test("frontend backend event translator waits for the active tool batch before todo notice", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
