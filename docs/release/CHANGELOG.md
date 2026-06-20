@@ -71,6 +71,7 @@ a1307d3 chore(deps): sync Pi 0.79.8
 9af6acf chore(deps): resolve npm audit advisories
 d7871a0 fix(chat): async outbox dispatch and onebot timeouts
 e9be369 docs(release): cover 0.5.0 nightly changes
+81b7c78 docs(release): cover changelog prep commit
 -->
 
 ## 0.4.0
