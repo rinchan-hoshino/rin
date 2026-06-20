@@ -70,6 +70,7 @@ a1307d3 chore(deps): sync Pi 0.79.8
 42e06fe fix(chat): suppress empty todo notices
 9af6acf chore(deps): resolve npm audit advisories
 d7871a0 fix(chat): async outbox dispatch and onebot timeouts
+e9be369 docs(release): cover 0.5.0 nightly changes
 -->
 
 ## 0.4.0
