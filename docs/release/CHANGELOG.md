@@ -11,8 +11,10 @@
 - Installer lifecycle handling is smoother across first-run setup, cross-user Windows targets, and macOS/Windows daemon control.
 - Rin now tracks the Pi 0.79.6 dependency line for this release series.
 - Release executors now verify changelog coverage against included commits before publishing stable or prerelease metadata.
-- Chat delivery and command-error recovery are tighter: media outbox delivery now runs asynchronously, and command errors reuse the private-like scope when appropriate.
-- TUI update notices align with the Rin rendering boundary, and Rin now tracks the Pi 0.79.7 dependency line for this release series.
+- Chat delivery and command-error recovery are tighter: media outbox delivery now runs asynchronously, command errors reuse the private-like scope when appropriate, outbox dispatch no longer blocks the chat lane, and OneBot sends have bounded timeouts.
+- TUI update notices align with the Rin rendering boundary, and Rin now tracks the Pi 0.79.8 dependency line for this release series.
+- Dependency maintenance resolved the current npm audit advisories.
+- Empty todo-read results no longer emit noisy chat notices.
 
 <!-- rin-changelog-coverage
 5a2999d fix(chat): keep rich delivery after segment failures
@@ -64,6 +66,12 @@ c6378b7 fix(chat): make media outbox delivery asynchronous
 5b38149 fix(chat): reuse private-like scope for command errors
 9c271de docs(release): cover 0.5.0 nightly changes
 1750714 docs(release): cover changelog prep commit
+a1307d3 chore(deps): sync Pi 0.79.8
+42e06fe fix(chat): suppress empty todo notices
+9af6acf chore(deps): resolve npm audit advisories
+d7871a0 fix(chat): async outbox dispatch and onebot timeouts
+e9be369 docs(release): cover 0.5.0 nightly changes
+81b7c78 docs(release): cover changelog prep commit
 -->
 
 ## 0.4.0
