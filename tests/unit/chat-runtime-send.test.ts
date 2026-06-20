@@ -545,6 +545,10 @@ test("onebot adapter stages all local media under the fixed chat-media directory
     assert.deepEqual(result, ["m1"]);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].action, "send_private_msg");
+    assert.equal(
+      calls[0].params.timeout,
+      runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
+    );
     assert.doesNotMatch(calls[0].params.message, /runtime-cache/);
     assert.match(
       calls[0].params.message,
@@ -616,6 +620,44 @@ test("onebot media actions use the extended action timeout", () => {
       file: "/app/napcat/cache/pack.mrpack",
     }),
     runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
+  );
+});
+
+test("onebot send and upload actions pass bounded timeouts into NapCat payloads", () => {
+  assert.equal(
+    runtime.withOneBotActionTimeoutParam("send_group_msg", {
+      message: "plain text",
+    }).timeout,
+    runtime.ONEBOT_ACTION_TIMEOUT_MS,
+  );
+  for (const action of ["send_private_msg", "send_group_msg", "send_msg"]) {
+    assert.equal(
+      runtime.withOneBotActionTimeoutParam(action, {
+        message:
+          "[CQ:image,file=file:///home/rin/.rin/data/chat-media/onebot/card.png]",
+      }).timeout,
+      runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
+    );
+  }
+  for (const action of ["upload_private_file", "upload_group_file"]) {
+    assert.equal(
+      runtime.withOneBotActionTimeoutParam(action, {
+        file: "/home/rin/.rin/data/chat-media/onebot/card.png",
+      }).timeout,
+      runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
+    );
+  }
+  assert.equal(
+    runtime.withOneBotActionTimeoutParam("get_msg", { message_id: 1 }).timeout,
+    undefined,
+  );
+  assert.equal(
+    runtime.withOneBotActionTimeoutParam("send_group_msg", {
+      message:
+        "[CQ:image,file=file:///home/rin/.rin/data/chat-media/onebot/card.png]",
+      timeout: 42,
+    }).timeout,
+    42,
   );
 });
 

@@ -111,7 +111,7 @@ test("chat outbox accepts SDK-style text and parts payloads", async () => {
     const results = await boot.drainChatOutbox(app, dir, h, { warn() {} });
     assert.deepEqual(
       results.map((result) => result.status),
-      ["delivered", "dispatched"],
+      ["dispatched", "dispatched"],
     );
     await waitFor(() => {
       assert.deepEqual(
@@ -126,6 +126,21 @@ test("chat outbox accepts SDK-style text and parts payloads", async () => {
     assert.equal(sent[1].content[0].attrs.content, "sdk parts text");
     assert.equal(sent[1].content[1].type, "image");
   });
+});
+
+test("chat outbox async dispatch is selected by platform list", () => {
+  assert.equal(
+    transport.chatOutboxPayloadUsesAsyncDispatch({ chatKey: "onebot/1:2" }),
+    true,
+  );
+  assert.equal(
+    transport.chatOutboxPayloadUsesAsyncDispatch({ chatKey: "telegram/1:2" }),
+    true,
+  );
+  assert.equal(
+    transport.chatOutboxPayloadUsesAsyncDispatch({ chatKey: "unknown/1:2" }),
+    false,
+  );
 });
 
 test("chat outbox rejects SDK-style empty payloads before enqueue", async () => {
@@ -198,12 +213,15 @@ test("chat outbox retries queued payloads after send failure", async () => {
     const logger = { warn() {} };
 
     let results = await boot.drainChatOutbox(app, dir, h, logger);
-    assert.equal(results[0].status, "queued");
-    const stored = outbox.listChatOutboxItems(dir)[0].item;
-    assert.equal(stored.status, "queued");
-    assert.equal(stored.failureKind, "retryable");
-    assert.ok(stored.nextAttemptAt);
-    assert.ok(Date.parse(stored.nextAttemptAt) - Date.now() <= 1500);
+    assert.equal(results[0].status, "dispatched");
+    let stored;
+    await waitFor(() => {
+      stored = outbox.listChatOutboxItems(dir)[0].item;
+      assert.equal(stored.status, "queued");
+      assert.equal(stored.failureKind, "retryable");
+      assert.ok(stored.nextAttemptAt);
+      assert.ok(Date.parse(stored.nextAttemptAt) - Date.now() <= 1500);
+    });
 
     results = await boot.drainChatOutbox(app, dir, h, logger);
     assert.deepEqual(results, []);
@@ -213,9 +231,11 @@ test("chat outbox retries queued payloads after send failure", async () => {
       nextAttemptAt: new Date(Date.now() - 1000).toISOString(),
     });
     results = await boot.drainChatOutbox(app, dir, h, logger);
-    assert.equal(results[0].status, "delivered");
+    assert.equal(results[0].status, "dispatched");
+    await waitFor(() => {
+      assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+    });
     assert.deepEqual(deliveries, ["retry me", "retry me"]);
-    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
     assert.ok(
       await fs.stat(
         outbox.chatOutboxHistoryItemPath(dir, stored.id, "delivered"),
@@ -257,13 +277,16 @@ test("chat outbox fails partial delivery errors without retrying", async () => {
     const logger = { warn() {} };
 
     const results = await boot.drainChatOutbox(app, dir, h, logger);
-    assert.equal(results[0].status, "failed");
-    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
-    const failed = outbox.readChatOutboxItem(
-      dir,
-      outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
-    );
-    assert.equal(failed.status, "failed");
+    assert.equal(results[0].status, "dispatched");
+    let failed;
+    await waitFor(() => {
+      assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+      failed = outbox.readChatOutboxItem(
+        dir,
+        outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
+      );
+      assert.equal(failed.status, "failed");
+    });
     assert.equal(failed.failureKind, "permanent");
     assert.equal(failed.nextAttemptAt, undefined);
     assert.deepEqual(failed.deliveryResult, ["m-before-failure"]);
@@ -299,13 +322,16 @@ test("chat outbox stops retrying after repeated transient failures", async () =>
     const logger = { warn() {} };
 
     const results = await boot.drainChatOutbox(app, dir, h, logger);
-    assert.equal(results[0].status, "failed");
-    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
-    const failed = outbox.readChatOutboxItem(
-      dir,
-      outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
-    );
-    assert.equal(failed.status, "failed");
+    assert.equal(results[0].status, "dispatched");
+    let failed;
+    await waitFor(() => {
+      assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+      failed = outbox.readChatOutboxItem(
+        dir,
+        outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
+      );
+      assert.equal(failed.status, "failed");
+    });
     assert.equal(failed.failureKind, "attempts_exhausted");
   });
 });
@@ -365,13 +391,16 @@ test("chat outbox treats platform permission errors as permanent", async () => {
     const logger = { warn() {} };
 
     const results = await boot.drainChatOutbox(app, dir, h, logger);
-    assert.equal(results[0].status, "failed");
-    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
-    const stored = outbox.readChatOutboxItem(
-      dir,
-      outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
-    );
-    assert.equal(stored.status, "failed");
+    assert.equal(results[0].status, "dispatched");
+    let stored;
+    await waitFor(() => {
+      assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+      stored = outbox.readChatOutboxItem(
+        dir,
+        outbox.chatOutboxHistoryItemPath(dir, results[0].id, "failed"),
+      );
+      assert.equal(stored.status, "failed");
+    });
     assert.equal(stored.failureKind, "permanent");
   });
 });

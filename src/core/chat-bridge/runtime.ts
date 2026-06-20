@@ -3,6 +3,7 @@ import path from "node:path";
 import { chatDataPath } from "../data-layout.js";
 import {
   enqueueChatOutboxPayload,
+  readChatOutboxItemById,
   type ChatMessagePart,
 } from "../rin-lib/chat-outbox.js";
 import { formatLocalDateOnly } from "../chat/date.js";
@@ -166,6 +167,23 @@ function auditDir(agentDir: string) {
   return chatDataPath(agentDir, "eval");
 }
 
+async function waitForOutboxDelivery(
+  agentDir: string,
+  id: string,
+  timeoutMs = 1000,
+) {
+  const deadline = Date.now() + Math.max(1, timeoutMs);
+  while (Date.now() <= deadline) {
+    const current = readChatOutboxItemById(agentDir, id)?.item;
+    if (current?.status === "delivered") return current.deliveryResult || [];
+    if (current?.status === "failed") {
+      throw new Error(current.lastError || "chat_outbox_delivery_failed");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return null;
+}
+
 export function appendChatBridgeAudit(
   agentDir: string,
   entry: Record<string, unknown>,
@@ -241,9 +259,11 @@ export function createChatBridgeRuntime(options: {
         { warn() {} },
         { chatKey, itemId: id },
       );
-      return Array.isArray(results)
+      const deliveryResult = Array.isArray(results)
         ? results.flatMap((item: any) => item?.deliveryResult || [])
         : [];
+      if (deliveryResult.length) return deliveryResult;
+      return (await waitForOutboxDelivery(options.agentDir, id)) || [];
     };
 
     const scope: any = {

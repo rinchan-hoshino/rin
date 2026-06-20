@@ -314,11 +314,11 @@ test("chat boot releases a timed out outbox send without retrying before its lea
       },
     );
 
-    assert.equal(results[0].status, "queued");
+    assert.equal(results[0].status, "dispatched");
     const stored = outbox.listChatOutboxItems(agentDir)[0].item;
     assert.equal(stored.status, "sending");
     assert.equal(stored.failureKind, "retryable");
-    assert.match(stored.lastError, /chat_outbox_delivery_timeout/);
+    assert.match(stored.lastError, /chat_outbox_delivery_pending/);
     assert.ok(stored.nextAttemptAt);
 
     const second = await boot.drainChatOutbox(
@@ -481,7 +481,7 @@ test("chat boot dispatches media outbox items asynchronously after starting deli
   });
 });
 
-test("chat boot ignores dispatch-only completion for non-media outbox items", async () => {
+test("chat boot dispatches non-media outbox items asynchronously by platform list", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
       type: "text_delivery",
@@ -489,6 +489,7 @@ test("chat boot ignores dispatch-only completion for non-media outbox items", as
       chatKey: "onebot/1:2",
       text: "plain text",
     });
+    const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
     let resolveDelivery;
     const app = {
       bots: [
@@ -519,27 +520,39 @@ test("chat boot ignores dispatch-only completion for non-media outbox items", as
       { sendTimeoutMs: 20, retryLeaseMs: 100 },
     );
 
-    assert.equal(results[0].status, "queued");
-    assert.match(results[0].error, /chat_outbox_delivery_timeout/);
+    assert.equal(results[0].status, "dispatched");
+    let stored = outbox.readChatOutboxItemById(agentDir, itemId).item;
+    assert.equal(stored.status, "sending");
+    assert.equal(stored.failureKind, "retryable");
     resolveDelivery(["m1"]);
+    await waitFor(() => {
+      stored = outbox.readChatOutboxItemById(agentDir, itemId).item;
+      assert.equal(stored.status, "delivered");
+      assert.deepEqual(stored.deliveryResult, ["m1"]);
+    });
   });
 });
 
-test("chat boot keeps OneBot media send timeouts retryable", async () => {
+test("chat boot does not retry ambiguous timeout after dispatch", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
       type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "onebot/1:2",
-      text: "[file: pack.mrpack](/tmp/pack.mrpack)",
+      text: "plain text",
     });
+    const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
     const app = {
       bots: [
         {
           platform: "onebot",
           selfId: "1",
-          async sendMessage() {
-            throw new Error("onebot_action_timeout:send_group_msg");
+          sendMessage() {
+            const delivery = Promise.reject(
+              new Error("onebot_action_timeout:send_group_msg"),
+            );
+            delivery.dispatched = Promise.resolve();
+            return delivery;
           },
         },
       ],
@@ -551,20 +564,18 @@ test("chat boot keeps OneBot media send timeouts retryable", async () => {
       quote(id) {
         return { type: "quote", attrs: { id } };
       },
-      file(src, mimeType, attrs) {
-        return { type: "file", attrs: { src, mimeType, ...attrs } };
-      },
     };
 
     const results = await boot.drainChatOutbox(app, agentDir, h, { warn() {} });
 
     assert.equal(results[0].status, "dispatched");
     await waitFor(() => {
-      const stored = outbox.listChatOutboxItems(agentDir)[0].item;
-      assert.equal(stored.status, "queued");
-      assert.equal(stored.failureKind, "retryable");
+      const stored = outbox.readChatOutboxItemById(agentDir, itemId).item;
+      assert.equal(stored.status, "delivered");
+      assert.equal(stored.deliveryUnconfirmed, true);
       assert.equal(stored.attempts, 1);
       assert.match(stored.lastError, /onebot_action_timeout:send_group_msg/);
     });
+    assert.deepEqual(outbox.listChatOutboxItems(agentDir), []);
   });
 });

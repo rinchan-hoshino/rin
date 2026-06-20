@@ -10,7 +10,7 @@ import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { RIN_NON_INTERACTIVE_COMMAND_NAMES } from "../rin-frontend-sdk/index.js";
 import { markProcessedChatMessage, safeString } from "./chat-helpers.js";
 import {
-  getChatDeliveryDispatchPromise,
+  getChatOutboxDispatchPromise,
   sendOutboxPayload,
 } from "./transport.js";
 
@@ -271,6 +271,12 @@ function isChatOutboxTimeoutError(error: unknown) {
   return /^chat_outbox_delivery_timeout:/.test(chatOutboxErrorMessage(error));
 }
 
+function isAmbiguousDeliveryTimeout(error: unknown) {
+  return /(?:^chat_outbox_delivery_timeout:|\b(?:onebot_action_timeout|timeout|timed out)\b)/i.test(
+    chatOutboxErrorMessage(error),
+  );
+}
+
 async function withChatOutboxSendTimeout<T>(
   task: Promise<T>,
   timeoutMs: number,
@@ -302,6 +308,16 @@ function warnChatOutboxFailure(
   );
 }
 
+function warnChatOutboxDeliveryUnconfirmed(
+  logger: any,
+  item: ChatOutboxItem,
+  error: unknown,
+) {
+  logger.warn(
+    `chat outbox delivered_unconfirmed id=${item.id} chatKey=${safeString(item.payload?.chatKey)} attempts=${item.attempts} err=${chatOutboxErrorMessage(error)}`,
+  );
+}
+
 function applyPostDelivery(agentDir: string, item: ChatOutboxItem) {
   const markProcessed = item.postDelivery?.markProcessed;
   const messageId = safeString(markProcessed?.messageId).trim();
@@ -329,7 +345,25 @@ function deliveredChatOutboxItem(
     updatedAt: new Date().toISOString(),
     deliveredAt: new Date().toISOString(),
     deliveryResult,
+    deliveryUnconfirmed: undefined,
     lastError: undefined,
+    nextAttemptAt: undefined,
+    failureKind: undefined,
+  };
+}
+
+function deliveredUnconfirmedChatOutboxItem(
+  item: ChatOutboxItem,
+  error: unknown,
+): ChatOutboxItem {
+  return {
+    ...item,
+    status: "delivered",
+    updatedAt: new Date().toISOString(),
+    deliveredAt: new Date().toISOString(),
+    deliveryResult: item.deliveryResult || [],
+    deliveryUnconfirmed: true,
+    lastError: chatOutboxErrorMessage(error),
     nextAttemptAt: undefined,
     failureKind: undefined,
   };
@@ -428,6 +462,12 @@ function settleLateChatOutboxFailure(
     warnChatOutboxFailure(logger, failed, error, "failed");
     return;
   }
+  if (isAmbiguousDeliveryTimeout(error)) {
+    const delivered = deliveredUnconfirmedChatOutboxItem(current, error);
+    writeChatOutboxItem(agentDir, delivered);
+    warnChatOutboxDeliveryUnconfirmed(logger, delivered, error);
+    return;
+  }
   const queued = queuedChatOutboxItem(current, error);
   writeChatOutboxItem(agentDir, queued);
   warnChatOutboxFailure(logger, queued, error, "queued");
@@ -464,9 +504,10 @@ async function drainChatOutboxItem(
   } catch (error: any) {
     return settleChatOutboxFailure(agentDir, logger, sending, error);
   }
-  const dispatched = chatOutboxPayloadContainsMedia(sending.payload)
-    ? getChatDeliveryDispatchPromise(deliveryTask)
-    : undefined;
+  const dispatched = getChatOutboxDispatchPromise(
+    sending.payload,
+    deliveryTask,
+  );
   if (dispatched) {
     try {
       await withChatOutboxSendTimeout(

@@ -136,6 +136,7 @@ export type ChatOutboxItem = {
   failureKind?: "retryable" | "permanent" | "attempts_exhausted";
   deliveredAt?: string;
   deliveryResult?: string[];
+  deliveryUnconfirmed?: boolean;
   postDelivery?: ChatOutboxPostDelivery;
 };
 
@@ -311,6 +312,7 @@ function normalizeOutboxItem(
           .map((item: unknown) => safeString(item).trim())
           .filter(Boolean)
       : undefined,
+    deliveryUnconfirmed: raw?.deliveryUnconfirmed === true || undefined,
     postDelivery:
       raw?.postDelivery && typeof raw.postDelivery === "object"
         ? raw.postDelivery

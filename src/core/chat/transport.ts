@@ -336,6 +336,21 @@ function sendChatNodes(
   return sendBotMessage(bot, parsed.chatId, nodes, options);
 }
 
+const CHAT_OUTBOX_ASYNC_PLATFORMS = new Set([
+  "discord",
+  "lark",
+  "onebot",
+  "slack",
+  "telegram",
+]);
+
+export function chatOutboxPayloadUsesAsyncDispatch(
+  payload: Pick<ChatOutboxPayload, "chatKey"> | undefined,
+) {
+  const parsed = parseChatKey(safeString(payload?.chatKey));
+  return !!parsed && CHAT_OUTBOX_ASYNC_PLATFORMS.has(parsed.platform);
+}
+
 function normalizeOutboxChatKey(chatKey: string) {
   const nextChatKey = safeString(chatKey).trim();
   if (!nextChatKey) throw new Error("invalid_chatKey:");
@@ -382,6 +397,14 @@ export function getChatDeliveryDispatchPromise(
   return dispatched && typeof dispatched.then === "function"
     ? dispatched
     : undefined;
+}
+
+export function getChatOutboxDispatchPromise(
+  payload: ChatOutboxPayload,
+  task: unknown,
+): Promise<void> | undefined {
+  if (!chatOutboxPayloadUsesAsyncDispatch(payload)) return undefined;
+  return getChatDeliveryDispatchPromise(task);
 }
 
 function sendBotMessage(
@@ -702,7 +725,9 @@ export function sendOutboxPayload(
             sessionBinding: payload.sessionBinding,
           }),
         ),
-        Promise.resolve(),
+        chatOutboxPayloadUsesAsyncDispatch(payload)
+          ? Promise.resolve()
+          : undefined,
       );
     } catch (error) {
       return Promise.reject(error) as ChatDeliveryPromise<string[]>;
@@ -750,7 +775,10 @@ export function sendOutboxPayload(
       throw error;
     }
   })();
-  return attachChatDeliveryDispatch(delivery, dispatched);
+  return attachChatDeliveryDispatch(
+    delivery,
+    chatOutboxPayloadUsesAsyncDispatch(payload) ? dispatched : undefined,
+  );
 }
 
 export function buildPromptText(text: string, _attachments: SavedAttachment[]) {

@@ -1126,7 +1126,7 @@ export const ONEBOT_MEDIA_DOCKER_VOLUME_HINT = `-v "${ONEBOT_MEDIA_DOCKER_MOUNT_
 export const ONEBOT_ACTION_TIMEOUT_MS = 20_000;
 export const ONEBOT_MEDIA_ACTION_TIMEOUT_MS = 10 * 60_000 + 5_000;
 
-function isOneBotLocalMediaAction(action: string) {
+function isOneBotTimeoutParamAction(action: string) {
   return /^(send_private_msg|send_group_msg|send_msg|upload_private_file|upload_group_file)$/.test(
     safeString(action).trim(),
   );
@@ -1152,12 +1152,27 @@ function oneBotParamsReferenceMedia(action: string, params: any) {
 
 export function oneBotActionTimeoutMs(action: string, params?: any) {
   if (
-    isOneBotLocalMediaAction(action) &&
+    isOneBotTimeoutParamAction(action) &&
     oneBotParamsReferenceMedia(action, params)
   ) {
     return ONEBOT_MEDIA_ACTION_TIMEOUT_MS;
   }
   return ONEBOT_ACTION_TIMEOUT_MS;
+}
+
+export function withOneBotActionTimeoutParam(action: string, params?: any) {
+  const nextParams =
+    params && typeof params === "object" && !Array.isArray(params)
+      ? { ...params }
+      : {};
+  const existingTimeout = Number((nextParams as any).timeout);
+  if (
+    (!Number.isFinite(existingTimeout) || existingTimeout <= 0) &&
+    isOneBotTimeoutParamAction(action)
+  ) {
+    (nextParams as any).timeout = oneBotActionTimeoutMs(action, nextParams);
+  }
+  return nextParams;
 }
 
 function oneBotFailureText(payload: any) {
@@ -1174,7 +1189,7 @@ function isOneBotLocalMediaVisibilityFailure(
   action: string,
   params: any,
 ) {
-  if (!isOneBotLocalMediaAction(action)) return false;
+  if (!isOneBotTimeoutParamAction(action)) return false;
   const message = oneBotFailureText(payload);
   return /ENOENT|file:\/\/|no such file|not found|rich[- ]?media/i.test(
     message,
@@ -1485,7 +1500,8 @@ class OneBotAdapter {
       throw new Error("onebot_not_connected");
     }
     const echo = `rin-${Date.now()}-${this.nextEchoId++}`;
-    const timeoutMs = oneBotActionTimeoutMs(action, params);
+    const actionParams = withOneBotActionTimeoutParam(action, params);
+    const timeoutMs = oneBotActionTimeoutMs(action, actionParams);
     let resolveDispatched: () => void = () => {};
     let rejectDispatched: (error: unknown) => void = () => {};
     const dispatched = new Promise<void>((resolve, reject) => {
@@ -1495,7 +1511,7 @@ class OneBotAdapter {
     void dispatched.catch(() => {});
     const actionPayload = JSON.stringify({
       action,
-      params: params && typeof params === "object" ? params : {},
+      params: actionParams,
       echo,
     });
     const task = new Promise((resolve, reject) => {
@@ -1503,7 +1519,13 @@ class OneBotAdapter {
         this.pending.delete(echo);
         reject(new Error(`onebot_action_timeout:${action}`));
       }, timeoutMs);
-      this.pending.set(echo, { resolve, reject, timer, action, params });
+      this.pending.set(echo, {
+        resolve,
+        reject,
+        timer,
+        action,
+        params: actionParams,
+      });
       try {
         ws.send(actionPayload, (error?: Error) => {
           if (error) {
@@ -1625,7 +1647,10 @@ class OneBotAdapter {
               message,
               auto_escape: false,
             };
-        const actionTask: any = this.callAction(action, params);
+        const actionTask: any = this.callAction(
+          action,
+          withOneBotActionTimeoutParam(action, params),
+        );
         if (actionTask?.dispatched) {
           void actionTask.dispatched.then(resolveDispatched, rejectDispatched);
         } else {

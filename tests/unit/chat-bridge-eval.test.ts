@@ -129,7 +129,7 @@ return {
     assert.equal(result.value.botStatus, 1);
     assert.equal(result.value.currentChatKey, "telegram/1:2");
     assert.deepEqual(result.value.sent, ["m1"]);
-    assert.deepEqual(result.value.richSent, []);
+    assert.deepEqual(result.value.richSent, ["m2"]);
     assert.equal(result.value.chatInfo.chat.title, "Demo Chat");
     assert.equal(result.value.member.payload.user_id, 7);
     assert.equal(result.value.saved.trust, "TRUSTED");

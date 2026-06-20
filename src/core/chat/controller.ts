@@ -1062,6 +1062,26 @@ export class ChatController {
     return text;
   }
 
+  private async waitForOutboxDelivery(
+    id: string,
+    timeoutMs = 1000,
+  ): Promise<string[] | null> {
+    const deadline = Date.now() + Math.max(1, timeoutMs);
+    while (Date.now() <= deadline) {
+      const current = readChatOutboxItemById(this.agentDir, id)?.item;
+      if (current?.status === "delivered") return current.deliveryResult || [];
+      if (current?.status === "failed") {
+        throw new Error(current.lastError || "chat_outbox_delivery_failed");
+      }
+      const lastError = safeString(current?.lastError).trim();
+      if (lastError && !/^chat_outbox_delivery_pending$/.test(lastError)) {
+        throw new Error(lastError);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return null;
+  }
+
   private async enqueueAndDrainDelivery(
     payload: any,
     options: {
@@ -1075,6 +1095,8 @@ export class ChatController {
         | "command_ack"
         | "generic";
       postDelivery?: any;
+      requireDelivery?: boolean;
+      waitForDeliveryMs?: number;
     } = {},
   ) {
     const idempotencyKey = safeString(options.idempotencyKey).trim();
@@ -1110,7 +1132,25 @@ export class ChatController {
       ? results.find((item: any) => item?.id === id)
       : null;
     if (own && own.status !== "delivered") {
-      if (own.status === "dispatched") return [];
+      if (own.status === "dispatched") {
+        const deliveryResult = Number.isFinite(options.waitForDeliveryMs)
+          ? await this.waitForOutboxDelivery(id, options.waitForDeliveryMs)
+          : null;
+        if (deliveryResult) return deliveryResult;
+        if (options.requireDelivery) {
+          const current = readChatOutboxItemById(this.agentDir, id)?.item;
+          if (
+            current?.status === "sending" &&
+            /^chat_outbox_delivery_pending$/.test(
+              safeString(current.lastError).trim(),
+            )
+          ) {
+            return [];
+          }
+          throw new Error("chat_outbox_delivery_pending");
+        }
+        return [];
+      }
       const errorMessage =
         safeString((own as any).error).trim() || "chat_outbox_delivery_pending";
       if (/^chat_outbox_delivery_timeout:/.test(errorMessage)) {
@@ -1151,7 +1191,13 @@ export class ChatController {
         ...pending,
         createdAt: nowIso(),
       },
-      { deliveryKind: "final", postDelivery, ...deliveryOptions },
+      {
+        deliveryKind: "final",
+        postDelivery,
+        requireDelivery: true,
+        waitForDeliveryMs: 1000,
+        ...deliveryOptions,
+      },
     );
     this.stagedDelivery = null;
     if (clearProcessing) {
@@ -1292,7 +1338,7 @@ export class ChatController {
           text: trimmed,
           ...this.currentConversationSessionPayload(),
         },
-        { deliveryKind: "passive_notice" },
+        { deliveryKind: "passive_notice", waitForDeliveryMs: 1000 },
       );
       const messageId = safeString(messageIds?.[0]).trim();
       if (messageId) {
