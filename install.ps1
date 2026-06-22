@@ -8,7 +8,7 @@ function Build-BootstrapArgs([object[]]$RawArgs) {
   foreach ($arg in $RawArgs) {
     if ($null -ne $arg) { $result += [string]$arg }
   }
-  return ,$result
+  return $result
 }
 
 $bootstrapArgs = @(Build-BootstrapArgs $args)

@@ -322,6 +322,8 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     powerShell,
     /& \$bootstrapScript "--mode" \$mode @bootstrapArgs/,
   );
+  assert.match(powerShell, /return \$result/);
+  assert.doesNotMatch(powerShell, /return ,\$result/);
   assert.doesNotMatch(
     powerShell,
     /& \$(?:localBootstrapScript|bootstrapScript) -Mode \$mode/,

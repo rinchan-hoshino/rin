@@ -660,7 +660,8 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       installPowerShellWrapper,
       /\[CmdletBinding\(PositionalBinding = \$false\)\]/,
     );
-    assert.match(installPowerShellWrapper, /return ,\$result/);
+    assert.match(installPowerShellWrapper, /return \$result/);
+    assert.doesNotMatch(installPowerShellWrapper, /return ,\$result/);
     assert.match(
       installPowerShellWrapper,
       /\$bootstrapArgs = @\(Build-BootstrapArgs \$args\)/,
