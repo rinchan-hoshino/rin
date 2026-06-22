@@ -1094,7 +1094,7 @@ test("chat controller renders todo notices as plain characters for non-native ch
     {
       type: "text",
       attrs: {
-        content: "☐︎ Keep working\n☑︎ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
+        content: "☐ Keep working\n☑ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
       },
     },
   ]);
@@ -1130,7 +1130,7 @@ test("chat controller renders todo notices as character fallback for plain chats
     {
       type: "text",
       attrs: {
-        content: "☐︎ Keep working\n☑︎ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
+        content: "☐ Keep working\n☑ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
       },
     },
   ]);

@@ -70,7 +70,7 @@ test("todo state formats character-only chat fallback", () => {
       { text: "Open item", done: false },
       { text: "Done item", done: true },
     ]),
-    "☐︎ Open item\n☑︎ D̶o̶n̶e̶ i̶t̶e̶m̶",
+    "☐ Open item\n☑ D̶o̶n̶e̶ i̶t̶e̶m̶",
   );
 });
 

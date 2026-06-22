@@ -41,9 +41,6 @@ function formatRinTodoLineText(todo: Pick<RinTodoItem, "text">) {
   return formatRinTodoItemText(todo).replace(/\s+/g, " ").trim();
 }
 
-const RIN_TODO_OPEN_MARK = "☐\uFE0E";
-const RIN_TODO_DONE_MARK = "☑\uFE0E";
-
 export function rinTodoPlainStrikethrough(text: string) {
   return Array.from(safeString(text))
     .map((char) => (/\s/.test(char) ? char : `${char}\u0336`))
@@ -68,8 +65,7 @@ export function formatRinTodoChecklistCharacterContent(
   return todos
     .map((todo) => {
       const text = formatRinTodoLineText(todo);
-      const mark = todo.done ? RIN_TODO_DONE_MARK : RIN_TODO_OPEN_MARK;
-      return `${mark} ${todo.done ? rinTodoPlainStrikethrough(text) : text}`;
+      return `${todo.done ? "☑" : "☐"} ${todo.done ? rinTodoPlainStrikethrough(text) : text}`;
     })
     .join("\n");
 }
