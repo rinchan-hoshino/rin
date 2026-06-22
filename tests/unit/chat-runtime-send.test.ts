@@ -1308,6 +1308,61 @@ test("slack adapter keeps media before following text", async () => {
   });
 });
 
+test("slack adapter sends todo nodes as Block Kit checkboxes", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { token: "xapp", botToken: "xoxb" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.web = {
+      chat: {
+        postMessage: async (payload: any) => {
+          calls.push(payload);
+          return { ts: String(calls.length) };
+        },
+      },
+      files: {
+        uploadV2: async () => {
+          throw new Error("unexpected_upload");
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("C123", [
+      h.quote("99"),
+      h("todo", {
+        title: "Todo",
+        items: [
+          { text: "Keep working", done: false },
+          { text: "Ship renderer", done: true },
+        ],
+      }),
+    ]);
+
+    assert.deepEqual(result, ["1"]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].channel, "C123");
+    assert.equal(calls[0].thread_ts, "99");
+    assert.equal(calls[0].text, "Todo\n☐︎ Keep working\n☑︎ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶");
+    assert.equal(calls[0].blocks[0].text.text, "*Todo*");
+    const checkbox = calls[0].blocks[1].elements[0];
+    assert.equal(checkbox.type, "checkboxes");
+    assert.deepEqual(
+      checkbox.options.map((option: any) => option.text.text),
+      ["Keep working", "Ship renderer"],
+    );
+    assert.deepEqual(
+      checkbox.initial_options.map((option: any) => option.value),
+      ["todo_1"],
+    );
+    assert.equal(calls[0].blocks.length, 2);
+  });
+});
+
 test("slack adapter reports a failed rich segment and continues later segments", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {

@@ -22,6 +22,7 @@ import {
   type RinToolStartupOptions,
 } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
+import type { RinTodoItem } from "../rin-lib/todo-state.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
 import {
   normalizeFrontendIdentity,
@@ -76,6 +77,8 @@ export type RinFrontendPassiveNoticeEvent = {
   level?: "info" | "warning" | "error";
   deferDuringTurn?: boolean;
   noticeKind?: "compaction_end" | "todo";
+  todoItems?: RinTodoItem[];
+  todoError?: string;
 };
 
 export type RinFrontendTurnDriverEvent =
@@ -1483,6 +1486,8 @@ export class RinFrontendTurnDriver {
               ? { deferDuringTurn: event.deferDuringTurn }
               : {}),
             ...(event.noticeKind ? { noticeKind: event.noticeKind } : {}),
+            ...(event.todoItems ? { todoItems: event.todoItems } : {}),
+            ...(event.todoError ? { todoError: event.todoError } : {}),
           },
           { deferDuringTurn: event.deferDuringTurn },
         );

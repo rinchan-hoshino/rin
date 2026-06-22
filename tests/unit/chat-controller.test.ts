@@ -1065,6 +1065,120 @@ test("chat controller delivers non-deferred passive notices during active turns"
   ]);
 });
 
+test("chat controller renders todo notices as plain characters for non-native chats", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    deliveries.push({ nodes, kind: options?.deliveryKind });
+    return [`m-out-${deliveries.length}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "[ ] Keep working\n[x] Ship renderer",
+      noticeKind: "todo",
+      deferDuringTurn: false,
+      todoItems: [
+        { id: 1, text: "Keep working", done: false },
+        { id: 2, text: "Ship renderer", done: true },
+      ],
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].kind, "passive_notice");
+  assert.deepEqual(deliveries[0].nodes, [
+    {
+      type: "text",
+      attrs: {
+        content: "☐︎ Keep working\n☑︎ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
+      },
+    },
+  ]);
+});
+
+test("chat controller renders todo notices as character fallback for plain chats", async () => {
+  const controller = await createController("minecraft:overworld");
+  controller.app.bots[0].platform = "minecraft";
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    deliveries.push({ nodes, kind: options?.deliveryKind });
+    return [`m-out-${deliveries.length}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "[ ] Keep working\n[x] Ship renderer",
+      noticeKind: "todo",
+      deferDuringTurn: false,
+      todoItems: [
+        { id: 1, text: "Keep working", done: false },
+        { id: 2, text: "Ship renderer", done: true },
+      ],
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].kind, "passive_notice");
+  assert.deepEqual(deliveries[0].nodes, [
+    {
+      type: "text",
+      attrs: {
+        content: "☐︎ Keep working\n☑︎ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
+      },
+    },
+  ]);
+});
+
+test("chat controller sends structured todo nodes to native todo chats", async () => {
+  const controller = await createController("slack:C1");
+  controller.app.bots[0].platform = "slack";
+  controller.app.bots[0].selfId = "";
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (chatId, nodes, options) => {
+    deliveries.push({ chatId, nodes, kind: options?.deliveryKind });
+    return [`m-out-${deliveries.length}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "[ ] Keep working\n[x] Ship renderer",
+      noticeKind: "todo",
+      deferDuringTurn: false,
+      todoItems: [
+        { id: 1, text: "Keep working", done: false },
+        { id: 2, text: "Ship renderer", done: true },
+      ],
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].chatId, "C1");
+  assert.equal(deliveries[0].kind, "passive_notice");
+  assert.deepEqual(deliveries[0].nodes, [
+    {
+      type: "todo",
+      attrs: {
+        title: "Todo",
+        items: [
+          { text: "Keep working", done: false },
+          { text: "Ship renderer", done: true },
+        ],
+      },
+      children: [],
+    },
+  ]);
+});
+
 test("chat controller binds passive notices to the current session for quote resume", async () => {
   const controller = await createController("telegram/1:2");
   const chatKey = "telegram/1:2";

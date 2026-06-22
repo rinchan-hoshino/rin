@@ -2,6 +2,7 @@ import type {
   RinRpcCommandType,
   RinRpcResponseEnvelope,
 } from "../rin-lib/rpc-types.js";
+import type { RinTodoItem } from "../rin-lib/todo-state.js";
 import type { RinFrontendIdentity } from "./frontend-identity.js";
 import type { PromptContextMeta } from "./prompt-context.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
@@ -89,6 +90,8 @@ export type RinFrontendBackendEvent =
       level?: "info" | "warning" | "error";
       deferDuringTurn?: boolean;
       noticeKind?: "compaction_end" | "todo";
+      todoItems?: RinTodoItem[];
+      todoError?: string;
     }
   | { type: "compaction_start_notice"; text: string }
   | { type: "external_working_start" }

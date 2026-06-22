@@ -60,6 +60,20 @@ test("todo state formats checklist content without markdown list markers", () =>
   );
 });
 
+test("todo state formats plain strikethrough without markdown", () => {
+  assert.equal(todoState.rinTodoPlainStrikethrough("Done item"), "D̶o̶n̶e̶ i̶t̶e̶m̶");
+});
+
+test("todo state formats character-only chat fallback", () => {
+  assert.equal(
+    todoState.formatRinTodoChecklistCharacterContent([
+      { text: "Open item", done: false },
+      { text: "Done item", done: true },
+    ]),
+    "☐︎ Open item\n☑︎ D̶o̶n̶e̶ i̶t̶e̶m̶",
+  );
+});
+
 test("todo state does not expose hidden final-continuation helpers", () => {
   assert.equal(todoState.continueTodoFinalIfNeeded, undefined);
   assert.equal(todoState.buildTodoFinalContinuationPrompt, undefined);

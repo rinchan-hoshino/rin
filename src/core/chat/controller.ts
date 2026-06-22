@@ -20,6 +20,11 @@ import {
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import { nowIso } from "../time-utils.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
+import {
+  formatRinTodoChecklistCharacterContent,
+  normalizeRinTodoItems,
+  type RinTodoItem,
+} from "../rin-lib/todo-state.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
   readChatCommandResponses,
@@ -88,6 +93,26 @@ type ChatTextDelivery = {
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
+
+type TodoNoticeRenderMode = "native" | "characters";
+
+const NATIVE_TODO_NOTICE_PLATFORMS = new Set(["slack"]);
+
+function todoNoticeRenderModeForChatKey(chatKey: string): TodoNoticeRenderMode {
+  const parsed = parseChatKey(chatKey);
+  const platform = safeString(parsed?.platform).trim();
+  if (NATIVE_TODO_NOTICE_PLATFORMS.has(platform)) return "native";
+  return "characters";
+}
+
+function formatTodoNoticeText(
+  todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
+  error?: string,
+) {
+  const body = formatRinTodoChecklistCharacterContent(todos);
+  const errorText = safeString(error).trim();
+  return errorText ? `Error: ${errorText}\n${body}` : body;
+}
 
 function formatPromptForChatContext(
   text: string,
@@ -1303,6 +1328,49 @@ export class ChatController {
     }
   }
 
+  private async sendTodoPassiveNoticeNow(event: any) {
+    const todos = normalizeRinTodoItems(event?.todoItems);
+    if (!todos?.length) return await this.sendPassiveNoticeNow(event?.text);
+    if (!this.canDeliverReplies()) return true;
+
+    const error = safeString(event?.todoError).trim();
+    const mode = todoNoticeRenderModeForChatKey(this.chatKey);
+    if (mode !== "native") {
+      return await this.sendPassiveNoticeNow(
+        formatTodoNoticeText(todos, error),
+      );
+    }
+
+    try {
+      await this.enqueueAndDrainDelivery(
+        {
+          type: "parts_delivery",
+          createdAt: nowIso(),
+          chatKey: this.chatKey,
+          deliveryKind: "passive_notice",
+          parts: [
+            ...(error
+              ? [{ type: "text" as const, text: `Error: ${error}` }]
+              : []),
+            {
+              type: "todo" as const,
+              title: "Todo",
+              items: todos.map((todo) => ({
+                text: todo.text,
+                done: todo.done,
+              })),
+            },
+          ],
+          ...this.currentConversationSessionPayload(),
+        },
+        { deliveryKind: "passive_notice" },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async deliverPassiveNotice(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
@@ -1942,6 +2010,10 @@ export class ChatController {
         if (event.noticeKind === "compaction_end") {
           await this.finishCompactionNotice();
           await this.sendPassiveNoticeNow(event.text);
+          return;
+        }
+        if (event.noticeKind === "todo" && event.deferDuringTurn === false) {
+          await this.sendTodoPassiveNoticeNow(event);
           return;
         }
         if (event.deferDuringTurn === false) {

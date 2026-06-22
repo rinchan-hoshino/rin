@@ -256,6 +256,10 @@ test("frontend backend event translator emits todo notice for single todo execut
         level: "info",
         deferDuringTurn: false,
         noticeKind: "todo",
+        todoItems: [
+          { id: 1, text: "Keep working", done: false },
+          { id: 2, text: "Ship renderer", done: true },
+        ],
       },
     ],
   );
@@ -349,6 +353,10 @@ test("frontend backend event translator waits for the active tool batch before t
         level: "info",
         deferDuringTurn: false,
         noticeKind: "todo",
+        todoItems: [
+          { id: 1, text: "Keep working", done: false },
+          { id: 2, text: "Ship renderer", done: true },
+        ],
       },
     ],
   );
@@ -414,6 +422,10 @@ test("frontend backend event translator emits nested multi-tool todo notice when
         level: "info",
         deferDuringTurn: false,
         noticeKind: "todo",
+        todoItems: [
+          { id: 1, text: "Keep working", done: false },
+          { id: 2, text: "Ship renderer", done: true },
+        ],
       },
     ],
   );

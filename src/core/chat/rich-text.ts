@@ -1,5 +1,6 @@
 import { Lexer } from "marked";
 
+import { formatRinTodoChecklistCharacterContent } from "../rin-lib/todo-state.js";
 import { safeString } from "../text-utils.js";
 
 export type ChatMarkdownPolicy = "render" | "preserve" | "strip";
@@ -60,6 +61,31 @@ function mediaMarkdown(type: string, attrs: Record<string, any>) {
   return src
     ? `[${normalizedType}: ${label}](${src})`
     : `[${normalizedType}: ${label}]`;
+}
+
+function todoItemsFromAttrs(attrs: Record<string, any>) {
+  const rawItems = Array.isArray(attrs.items)
+    ? attrs.items
+    : Array.isArray(attrs.todos)
+      ? attrs.todos
+      : [];
+  return rawItems
+    .map((item) => {
+      const value = item && typeof item === "object" ? (item as any) : null;
+      if (!value) return null;
+      const text = safeString(value.text).replace(/\s+/g, " ").trim();
+      if (!text) return null;
+      return { text, done: Boolean(value.done) };
+    })
+    .filter((item): item is { text: string; done: boolean } => Boolean(item));
+}
+
+function todoPlainText(attrs: Record<string, any>) {
+  const items = todoItemsFromAttrs(attrs);
+  if (!items.length) return "";
+  const title = safeString(attrs.title).trim();
+  const body = formatRinTodoChecklistCharacterContent(items);
+  return title ? `${title}\n${body}` : body;
 }
 
 export function stripHtmlFormatting(text: string) {
@@ -173,6 +199,9 @@ function renderNodeMarkdown(
       return options.includeMedia === false
         ? ""
         : `\n${mediaMarkdown(type, attrs)}\n`;
+    case "todo":
+    case "checklist":
+      return todoPlainText(attrs);
     case "p":
     case "paragraph": {
       const rendered = renderNodeMarkdown(childrenOf(node), options);

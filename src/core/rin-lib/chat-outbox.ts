@@ -47,6 +47,11 @@ export type ChatMessagePart =
       url?: string;
       name?: string;
       mimeType?: string;
+    }
+  | {
+      type: "todo";
+      title?: string;
+      items: Array<{ text: string; done?: boolean }>;
     };
 
 export type ChatDeliveryKind = "final" | "interim" | "passive_notice";
@@ -73,6 +78,7 @@ export type ChatOutboxPayload =
       taskId?: string;
       runId?: string;
       chatKey: string;
+      deliveryKind?: ChatDeliveryKind;
       sessionId?: string;
       sessionFile?: string;
       sessionBinding?: "conversation";

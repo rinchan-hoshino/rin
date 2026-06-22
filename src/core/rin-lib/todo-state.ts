@@ -37,6 +37,19 @@ export function formatRinTodoItemText(todo: Pick<RinTodoItem, "text">) {
   return safeString(todo.text).trim();
 }
 
+function formatRinTodoLineText(todo: Pick<RinTodoItem, "text">) {
+  return formatRinTodoItemText(todo).replace(/\s+/g, " ").trim();
+}
+
+const RIN_TODO_OPEN_MARK = "☐\uFE0E";
+const RIN_TODO_DONE_MARK = "☑\uFE0E";
+
+export function rinTodoPlainStrikethrough(text: string) {
+  return Array.from(safeString(text))
+    .map((char) => (/\s/.test(char) ? char : `${char}\u0336`))
+    .join("");
+}
+
 export function formatRinTodoChecklistContent(
   todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
 ): string {
@@ -44,6 +57,20 @@ export function formatRinTodoChecklistContent(
 
   return todos
     .map((todo) => `[${todo.done ? "x" : " "}] ${formatRinTodoItemText(todo)}`)
+    .join("\n");
+}
+
+export function formatRinTodoChecklistCharacterContent(
+  todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
+): string {
+  if (todos.length === 0) return "No todos";
+
+  return todos
+    .map((todo) => {
+      const text = formatRinTodoLineText(todo);
+      const mark = todo.done ? RIN_TODO_DONE_MARK : RIN_TODO_OPEN_MARK;
+      return `${mark} ${todo.done ? rinTodoPlainStrikethrough(text) : text}`;
+    })
     .join("\n");
 }
 

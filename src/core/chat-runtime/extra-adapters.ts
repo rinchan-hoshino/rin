@@ -3,6 +3,7 @@ import path from "node:path";
 import WebSocket from "ws";
 
 import { getWorkingReactionFrame } from "../chat/transport.js";
+import { formatRinTodoChecklistCharacterContent } from "../rin-lib/todo-state.js";
 import {
   compactObject,
   createPrefixedLogger,
@@ -183,6 +184,54 @@ const QQ_REACTION_EMOJI_IDS: Record<string, string> = {
 function toSlackReactionName(emoji: string) {
   const value = safeString(emoji).trim();
   return SLACK_REACTION_NAMES[value] || value.replace(/^:+|:+$/g, "");
+}
+
+function escapeSlackMrkdwn(text: string) {
+  return safeString(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function truncateSlackPlainText(text: string, maxLength: number) {
+  const chars = Array.from(safeString(text).replace(/\s+/g, " ").trim());
+  if (chars.length <= maxLength) return chars.join("");
+  return `${chars
+    .slice(0, Math.max(1, maxLength - 1))
+    .join("")
+    .trimEnd()}…`;
+}
+
+function todoNodeItems(node: any) {
+  const attrs = node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
+  const rawItems = Array.isArray(attrs.items)
+    ? attrs.items
+    : Array.isArray(attrs.todos)
+      ? attrs.todos
+      : [];
+  return rawItems
+    .map((item: any) => {
+      const value = item && typeof item === "object" ? item : null;
+      if (!value) return null;
+      const text = safeString(value.text).replace(/\s+/g, " ").trim();
+      if (!text) return null;
+      return { text, done: Boolean(value.done) };
+    })
+    .filter(Boolean) as Array<{ text: string; done: boolean }>;
+}
+
+function todoNodeTitle(node: any) {
+  const attrs = node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
+  return safeString(attrs.title).trim() || "Todo";
+}
+
+function todoFallbackText(
+  title: string,
+  items: Array<{ text: string; done: boolean }>,
+) {
+  return [title, formatRinTodoChecklistCharacterContent(items)]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function toLarkReactionType(emoji: string) {
@@ -802,6 +851,59 @@ export class SlackAdapter {
     return delivered;
   }
 
+  private buildTodoBlocks(node: any) {
+    const items = todoNodeItems(node);
+    if (!items.length) return null;
+    const title = todoNodeTitle(node);
+    const blocks: any[] = [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: `*${escapeSlackMrkdwn(title)}*` },
+      },
+    ];
+    for (let offset = 0; offset < items.length; offset += 10) {
+      const chunk = items.slice(offset, offset + 10);
+      const options = chunk.map((item, index) => ({
+        text: {
+          type: "plain_text",
+          text: truncateSlackPlainText(item.text, 75),
+          emoji: true,
+        },
+        value: `todo_${offset + index}`,
+      }));
+      const initialOptions = options.filter(
+        (_option, index) => chunk[index]?.done,
+      );
+      blocks.push({
+        type: "actions",
+        elements: [
+          compactObject({
+            type: "checkboxes",
+            action_id: `rin_todo_${offset / 10}`,
+            options,
+            initial_options: initialOptions.length ? initialOptions : undefined,
+          }),
+        ],
+      });
+    }
+    return { blocks, text: todoFallbackText(title, items) };
+  }
+
+  private async postTodo(chatId: string, node: any, replyToMessageId?: string) {
+    const payload = this.buildTodoBlocks(node);
+    if (!payload) return [] as string[];
+    const sent = await this.web.chat.postMessage(
+      compactObject({
+        channel: chatId,
+        text: payload.text,
+        blocks: payload.blocks,
+        thread_ts: replyToMessageId || undefined,
+      }),
+    );
+    const ts = safeString(sent?.ts).trim();
+    return ts ? [ts] : [];
+  }
+
   private async uploadFile(
     chatId: string,
     payload: { data: Buffer; name: string },
@@ -862,7 +964,18 @@ export class SlackAdapter {
     while (cursor < work.length) {
       const type = safeString(work[cursor]?.type).toLowerCase();
       let messageIds: string[] = [];
-      if (isOutboundMediaNodeType(type)) {
+      if (type === "todo" || type === "checklist") {
+        try {
+          messageIds = await this.postTodo(
+            chatId,
+            work[cursor],
+            replyToMessageId,
+          );
+        } catch (error) {
+          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+        }
+        cursor += 1;
+      } else if (isOutboundMediaNodeType(type)) {
         try {
           messageIds = await this.sendMedia(
             chatId,
@@ -877,7 +990,12 @@ export class SlackAdapter {
         const textNodes: any[] = [];
         while (cursor < work.length) {
           const textType = safeString(work[cursor]?.type).toLowerCase();
-          if (isOutboundMediaNodeType(textType)) break;
+          if (
+            isOutboundMediaNodeType(textType) ||
+            textType === "todo" ||
+            textType === "checklist"
+          )
+            break;
           textNodes.push(work[cursor]);
           cursor += 1;
         }

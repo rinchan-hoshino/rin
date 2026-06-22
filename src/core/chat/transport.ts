@@ -14,6 +14,7 @@ import type {
   ChatMessagePart,
   ChatOutboxPayload,
 } from "../rin-lib/chat-outbox.js";
+import { formatRinTodoChecklistCharacterContent } from "../rin-lib/todo-state.js";
 import {
   findBot,
   inferChatType,
@@ -563,6 +564,13 @@ function summarizeOutgoingParts(parts: ChatMessagePart[]) {
         return `[#quote] ${safeString(part.id).trim()}`;
       if (part.type === "image")
         return `[#image] ${safeString(part.path).trim() || safeString(part.url).trim()}`;
+      if (part.type === "todo")
+        return formatRinTodoChecklistCharacterContent(
+          (part.items || []).map((item) => ({
+            text: item.text,
+            done: Boolean(item.done),
+          })),
+        );
       return `[#${part.type}] ${safeString((part as any).name).trim() || safeString((part as any).path).trim() || safeString((part as any).url).trim()}`;
     })
     .filter(Boolean)
@@ -642,6 +650,21 @@ export async function messagePartToNode(part: ChatMessagePart, h: any) {
     return h.at(id, part.name ? { name: part.name } : undefined);
   }
   if (part.type === "quote") return h.quote(part.id);
+  if (part.type === "todo") {
+    return {
+      type: "todo",
+      attrs: {
+        title: safeString(part.title).trim() || undefined,
+        items: (Array.isArray(part.items) ? part.items : [])
+          .map((item) => ({
+            text: safeString(item?.text).trim(),
+            done: Boolean(item?.done),
+          }))
+          .filter((item) => item.text),
+      },
+      children: [],
+    };
+  }
   if (["image", "video", "audio", "sticker"].includes(part.type)) {
     const localPath = safeString((part as any).path).trim();
     const remoteUrl = safeString((part as any).url).trim();
@@ -679,8 +702,20 @@ function buildPartsDeliveryRecord(rawParts: ChatMessagePart[]) {
     | undefined;
   const replyToMessageId = safeString(quotePart?.id).trim() || undefined;
   const logText = rawParts
-    .filter((part) => part.type === "text" || part.type === "markdown")
-    .map((part) => safeString((part as any).text).trim())
+    .map((part) => {
+      if (part.type === "text" || part.type === "markdown") {
+        return safeString((part as any).text).trim();
+      }
+      if (part.type === "todo") {
+        return formatRinTodoChecklistCharacterContent(
+          (part.items || []).map((item) => ({
+            text: item.text,
+            done: Boolean(item.done),
+          })),
+        );
+      }
+      return "";
+    })
     .filter(Boolean)
     .join("\n\n")
     .trim();
@@ -758,7 +793,7 @@ export function sendOutboxPayload(
       if (!nodes.length) throw new Error("chat_outbox_empty_message");
 
       const chatDelivery = sendChatNodes(app, chatKey, nodes, {
-        deliveryKind: "final",
+        deliveryKind: safeString(payload.deliveryKind).trim() || "final",
       });
       resolveDispatched();
       const deliveryResult = await chatDelivery;

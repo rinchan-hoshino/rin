@@ -9,6 +9,7 @@ import {
 import {
   formatRinTodoChecklistContent,
   normalizeRinTodoItems,
+  type RinTodoItem,
 } from "../rin-lib/todo-state.js";
 import { safeString } from "../text-utils.js";
 import {
@@ -61,9 +62,15 @@ function assistantInterimText(message: any) {
   ).trim();
 }
 
+type TodoNotice = {
+  text: string;
+  todos: RinTodoItem[];
+  error?: string;
+};
+
 type ActiveToolBatch = {
   pendingToolCallIds: Set<string>;
-  latestTodoNotice: string;
+  latestTodoNotice: TodoNotice | null;
 };
 
 const NESTED_TOOL_RESULT_KEYS = [
@@ -103,30 +110,34 @@ function toolNameFromRecord(value: Record<string, any>) {
   );
 }
 
-function todoNoticeFromDetails(details: unknown) {
+function todoNoticeFromDetails(details: unknown): TodoNotice | null {
   const value =
     details && typeof details === "object" ? (details as any) : null;
-  if (!value) return "";
+  if (!value) return null;
   const todos = normalizeRinTodoItems(value.todos);
-  if (!todos) return "";
-  if (todos.length === 0) return "";
+  if (!todos) return null;
+  if (todos.length === 0) return null;
   const checklist = formatRinTodoChecklistContent(todos);
   const error = safeString(value.error).trim();
-  return error ? `Error: ${error}\n${checklist}` : checklist;
+  return {
+    text: error ? `Error: ${error}\n${checklist}` : checklist,
+    todos,
+    ...(error ? { error } : {}),
+  };
 }
 
-function todoNoticeFromToolResult(result: unknown) {
+function todoNoticeFromToolResult(result: unknown): TodoNotice | null {
   const value = result && typeof result === "object" ? (result as any) : null;
   return value
     ? todoNoticeFromDetails(value.details) || todoNoticeFromDetails(value)
-    : "";
+    : null;
 }
 
 function collectNestedTodoNotices(
   value: unknown,
   depth = 0,
   seen = new Set<unknown>(),
-): string[] {
+): TodoNotice[] {
   if (depth > 6 || !value || typeof value !== "object") return [];
   if (seen.has(value)) return [];
   seen.add(value);
@@ -138,7 +149,7 @@ function collectNestedTodoNotices(
   }
 
   const record = value as Record<string, any>;
-  const notices: string[] = [];
+  const notices: TodoNotice[] = [];
   if (isTodoToolName(toolNameFromRecord(record))) {
     const notice = todoNoticeFromToolResult(
       record.result ?? record.toolResult ?? record.output ?? record,
@@ -154,12 +165,12 @@ function collectNestedTodoNotices(
   return notices;
 }
 
-function toolExecutionTodoNotice(payload: any) {
+function toolExecutionTodoNotice(payload: any): TodoNotice | null {
   if (isTodoToolName(payload?.toolName)) {
     return todoNoticeFromToolResult(payload?.result);
   }
   const notices = collectNestedTodoNotices(payload?.result);
-  return notices.length ? notices[notices.length - 1] : "";
+  return notices.length ? notices[notices.length - 1] : null;
 }
 
 function activeToolBatchFromAssistantMessage(message: any) {
@@ -172,17 +183,19 @@ function activeToolBatchFromAssistantMessage(message: any) {
         .map((part: any) => toolCallId(part.id || part.toolCallId))
         .filter(Boolean),
     ),
-    latestTodoNotice: "",
+    latestTodoNotice: null,
   } satisfies ActiveToolBatch;
 }
 
-function todoPassiveNotice(text: string) {
+function todoPassiveNotice(notice: TodoNotice) {
   return {
     type: "passive_notice",
-    text,
+    text: notice.text,
     level: "info",
     deferDuringTurn: false,
     noticeKind: "todo",
+    todoItems: notice.todos.map((todo) => ({ ...todo })),
+    ...(notice.error ? { todoError: notice.error } : {}),
   } satisfies RinFrontendBackendEvent;
 }
 
