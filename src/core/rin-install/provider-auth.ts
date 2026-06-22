@@ -106,6 +106,8 @@ export async function configureProviderAuth(
       readJsonFile: <T>(filePath: string, fallback: T) => T,
     ) => any | Promise<any>;
     selectPrompt?: (options: any) => Promise<any>;
+    textPrompt?: (options: any) => Promise<any>;
+    spinnerFactory?: typeof spinner;
   },
 ) {
   const i18n = deps.i18n || createInstallerI18n();
@@ -137,7 +139,7 @@ export async function configureProviderAuth(
   );
 
   if (oauthProvider) {
-    const loginSpinner = spinner();
+    const loginSpinner = (deps.spinnerFactory || spinner)();
     let lastAuthUrl = "";
     loginSpinner.start(i18n.startingLogin(oauthProvider.name || provider));
     try {
@@ -161,14 +163,20 @@ export async function configureProviderAuth(
             i18n.waitingForLogin(oauthProvider.name || provider),
           );
         },
-        async onPrompt(prompt: { message: string; placeholder?: string }) {
+        async onPrompt(prompt: {
+          message: string;
+          placeholder?: string;
+          allowEmpty?: boolean;
+        }) {
+          const allowEmpty = Boolean(prompt.allowEmpty);
           const value = String(
             deps.ensureNotCancelled(
-              await text({
+              await (deps.textPrompt || text)({
                 message: prompt.message || i18n.enterLoginValueMessage,
                 placeholder: prompt.placeholder,
                 validate(value) {
-                  if (!String(value || "").trim()) return i18n.valueRequired;
+                  if (!allowEmpty && !String(value || "").trim())
+                    return i18n.valueRequired;
                 },
               }),
             ),
@@ -213,7 +221,7 @@ export async function configureProviderAuth(
         async onManualCodeInput() {
           const value = String(
             deps.ensureNotCancelled(
-              await text({
+              await (deps.textPrompt || text)({
                 message: i18n.manualCodeInputMessage,
                 placeholder: i18n.manualCodePlaceholder(lastAuthUrl),
                 validate(value) {
@@ -243,7 +251,7 @@ export async function configureProviderAuth(
 
   const token = String(
     deps.ensureNotCancelled(
-      await text({
+      await (deps.textPrompt || text)({
         message: i18n.enterApiKeyMessage(provider),
         placeholder: "token",
         validate(value) {

@@ -35,6 +35,7 @@ import {
 } from "./provider-auth.js";
 import {
   describeOwnership,
+  isSameSystemUser,
   shouldUseElevatedWrite,
   targetHomeForUser,
 } from "./users.js";
@@ -279,9 +280,10 @@ export function buildGuiInstallerFinalizePlan(
   const installServiceNow = ["darwin", "linux", "win32"].includes(platform);
   const needsElevatedWrite = (
     deps.shouldUseElevatedWrite || shouldUseElevatedWrite
-  )(plan.targetUser, ownership);
+  )(plan.targetUser, ownership, plan.currentUser, platform);
   const needsElevatedService =
-    installServiceNow && plan.targetUser !== plan.currentUser;
+    installServiceNow &&
+    !isSameSystemUser(plan.targetUser, plan.currentUser, platform);
   return {
     options: {
       currentUser: plan.currentUser,

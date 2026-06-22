@@ -46,7 +46,9 @@ import {
 } from "../rin-lib/release.js";
 import {
   describeOwnership,
+  isSameSystemUser,
   listSystemUsers,
+  shouldUseElevatedWrite,
   targetHomeForUser,
 } from "./users.js";
 import { defaultInstallDirForHome, installSettingsPath } from "./paths.js";
@@ -402,10 +404,9 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     { successMessage: i18n.installStepComplete },
   );
   note(installDirNote.text, installDirNote.title);
-  const setDefaultTarget =
-    targetUser === currentUser
-      ? false
-      : await promptDefaultTargetUser(promptApi, targetUser, i18n);
+  const setDefaultTarget = isSameSystemUser(targetUser, currentUser)
+    ? false
+    : await promptDefaultTargetUser(promptApi, targetUser, i18n);
 
   const { provider, modelId, thinkingLevel, authResult } =
     await promptProviderSetup(promptApi, installDir, readJsonFile, {}, i18n);
@@ -443,8 +444,13 @@ export async function startInstaller(argv = process.argv.slice(2)) {
   const installServiceNow = ["darwin", "linux", "win32"].includes(
     process.platform,
   );
-  const needsElevatedWrite = !ownership.writable;
-  const needsElevatedService = installServiceNow && targetUser !== currentUser;
+  const needsElevatedWrite = shouldUseElevatedWrite(
+    targetUser,
+    ownership,
+    currentUser,
+  );
+  const needsElevatedService =
+    installServiceNow && !isSameSystemUser(targetUser, currentUser);
   const finalRequirements = buildFinalRequirements(
     {
       installServiceNow,

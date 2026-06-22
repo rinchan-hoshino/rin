@@ -1578,10 +1578,15 @@ export async function runCustomRpcMode(
                   intervalSeconds: info.intervalSeconds,
                   expiresInSeconds: info.expiresInSeconds,
                 }),
-              onPrompt: (prompt: { message: string; placeholder?: string }) =>
+              onPrompt: (prompt: {
+                message: string;
+                placeholder?: string;
+                allowEmpty?: boolean;
+              }) =>
                 waitForLoginInput(loginId, "prompt", {
                   message: prompt.message,
                   placeholder: prompt.placeholder,
+                  allowEmpty: prompt.allowEmpty,
                 }),
               onSelect: (prompt: {
                 message: string;

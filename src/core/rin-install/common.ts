@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { restoreTerminalCursor } from "./progress.js";
+import { normalizeUserName } from "./users.js";
 
 const FORWARDED_CHILD_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
@@ -46,21 +47,18 @@ export function runCommand(command: string, args: string[], options: any = {}) {
 }
 
 export function detectCurrentUser() {
-  const candidates = [
-    process.env.SUDO_USER,
-    process.env.LOGNAME,
-    process.env.USER,
-    (() => {
-      try {
-        return os.userInfo().username;
-      } catch {
-        return "";
-      }
-    })(),
-  ]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-  return candidates[0] || "unknown";
+  const osUser = (() => {
+    try {
+      return os.userInfo().username;
+    } catch {
+      return "";
+    }
+  })();
+  const candidates =
+    process.platform === "win32"
+      ? [process.env.USERNAME, osUser, process.env.LOGNAME, process.env.USER]
+      : [process.env.SUDO_USER, process.env.LOGNAME, process.env.USER, osUser];
+  return candidates.map(normalizeUserName).find(Boolean) || "unknown";
 }
 
 export function repoRootFromHere() {

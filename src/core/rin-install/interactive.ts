@@ -21,6 +21,7 @@ import {
 } from "../rin-targets/registry.js";
 import type { InstallTargetSelection } from "./deployment-targets.js";
 import { runInstallerProgress } from "./progress.js";
+import { isSameSystemUser } from "./users.js";
 
 export type PromptApi = {
   ensureNotCancelled: <T>(value: T | symbol | undefined | null) => T;
@@ -105,8 +106,10 @@ export async function promptInstallTarget(
       prompt,
       currentUser,
       targetMode === "current"
-        ? allUsers.filter((entry) => entry.name === currentUser)
-        : allUsers.filter((entry) => entry.name !== currentUser),
+        ? allUsers.filter((entry) => isSameSystemUser(entry.name, currentUser))
+        : allUsers.filter(
+            (entry) => !isSameSystemUser(entry.name, currentUser),
+          ),
       targetHomeForUser,
       i18n,
       targetMode === "current" ? "current" : "existing",
@@ -308,7 +311,9 @@ export async function promptTargetInstall(
   i18n: InstallerI18n = createInstallerI18n(),
   forcedMode?: "current" | "existing" | "new",
 ) {
-  const otherUsers = allUsers.filter((entry) => entry.name !== currentUser);
+  const otherUsers = allUsers.filter(
+    (entry) => !isSameSystemUser(entry.name, currentUser),
+  );
   const existingCandidates = otherUsers.length ? otherUsers : allUsers;
 
   const targetMode =

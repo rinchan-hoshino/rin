@@ -23,6 +23,7 @@ type LoginState = {
   onPrompt?: (prompt: {
     message: string;
     placeholder?: string;
+    allowEmpty?: boolean;
   }) => Promise<string>;
   onSelect?: (prompt: {
     message: string;
@@ -260,6 +261,9 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
               typeof payload.placeholder === "string"
                 ? payload.placeholder
                 : undefined,
+            ...(typeof payload.allowEmpty === "undefined"
+              ? {}
+              : { allowEmpty: Boolean(payload.allowEmpty) }),
           }) ?? Promise.resolve(""),
       );
       return;

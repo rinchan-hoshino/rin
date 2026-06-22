@@ -37,6 +37,7 @@ import {
   findManagedSystemdStatusSnapshot,
   tryManagedSystemdAction,
 } from "./managed-service.js";
+import { isSameSystemUser } from "./users.js";
 
 function currentSystemUser() {
   try {
@@ -44,6 +45,13 @@ function currentSystemUser() {
   } catch {
     return "";
   }
+}
+
+function isCurrentSystemUser(
+  targetUser: string,
+  currentUser = currentSystemUser(),
+) {
+  return !targetUser || isSameSystemUser(targetUser, currentUser);
 }
 
 function firstExistingCommand(candidates: string[], fallback: string) {
@@ -152,7 +160,7 @@ function captureCommandForTargetUser(
   args: string[],
   extraEnv: Record<string, string> = {},
 ) {
-  if (targetUser && targetUser !== currentSystemUser()) {
+  if (!isCurrentSystemUser(targetUser)) {
     return captureCommandAsUser(targetUser, command, args, extraEnv);
   }
   return execFileSync(command, args, {
@@ -202,7 +210,7 @@ export function systemctlCommandArgsForTargetUser(
   args: string[],
   currentUser = currentSystemUser(),
 ) {
-  return targetUser && targetUser !== currentUser
+  return !isCurrentSystemUser(targetUser, currentUser)
     ? systemctlMachineUserCommandArgs(targetUser, args)
     : systemctlUserCommandArgs(args);
 }
@@ -216,7 +224,7 @@ function runSystemdUserCommand(
   args: string[],
   elevated = false,
 ) {
-  const useMachine = Boolean(targetUser && targetUser !== currentSystemUser());
+  const useMachine = !isCurrentSystemUser(targetUser);
   const commandArgs = systemctlCommandArgsForTargetUser(targetUser, args);
   if (useMachine) {
     if (elevated) {
@@ -603,7 +611,7 @@ export function startWindowsDaemonProcess(
 ) {
   if (process.platform !== "win32") return false;
   const currentUser = currentSystemUser();
-  if (targetUser && targetUser !== currentUser) {
+  if (!isCurrentSystemUser(targetUser, currentUser)) {
     throw new Error(`rin_windows_daemon_cross_user_unsupported:${targetUser}`);
   }
   const spec = buildWindowsDaemonLaunchSpec(
@@ -681,7 +689,7 @@ export async function waitForSocket(
 ) {
   const startedAt = Date.now();
   const currentUser = currentSystemUser();
-  const isCurrentUser = !targetUser || targetUser === currentUser;
+  const isCurrentUser = isCurrentSystemUser(targetUser, currentUser);
   while (Date.now() - startedAt < timeoutMs) {
     const ok = await new Promise<boolean>((resolve) => {
       if (!isCurrentUser) {

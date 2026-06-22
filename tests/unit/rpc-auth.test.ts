@@ -79,6 +79,7 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   const authEvents = [];
   const deviceCodeEvents = [];
   const progressEvents = [];
+  const promptEvents = [];
   const selectPrompts = [];
   const auth = createAuthStorageProxy({
     send(payload) {
@@ -103,7 +104,10 @@ test("rpc auth proxy responds to oauth login events and applies completion state
     onDeviceCode(info) {
       deviceCodeEvents.push(info);
     },
-    onPrompt: async () => " code ",
+    onPrompt: async (prompt) => {
+      promptEvents.push(prompt);
+      return " code ";
+    },
     onSelect: async (prompt) => {
       selectPrompts.push(prompt);
       return "device";
@@ -140,6 +144,8 @@ test("rpc auth proxy responds to oauth login events and applies completion state
     event: "prompt",
     requestId: " req-1 ",
     message: "Enter code",
+    placeholder: "optional.example.com",
+    allowEmpty: true,
   });
   auth.handleEvent({
     type: "oauth_login_event",
@@ -181,6 +187,13 @@ test("rpc auth proxy responds to oauth login events and applies completion state
     },
   ]);
   assert.deepEqual(progressEvents, ["Waiting"]);
+  assert.deepEqual(promptEvents, [
+    {
+      message: "Enter code",
+      placeholder: "optional.example.com",
+      allowEmpty: true,
+    },
+  ]);
   assert.deepEqual(deviceCodeEvents, [
     {
       userCode: "ABCD-EFGH",

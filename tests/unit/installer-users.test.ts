@@ -108,6 +108,35 @@ exit 1
   });
 });
 
+test("installer users compare Windows account aliases case-insensitively", () => {
+  assert.equal(users.isSameSystemUser("DESKTOP\\Demo", "demo", "win32"), true);
+  assert.equal(users.isSameSystemUser("desktop/demo", "DEMO", "win32"), true);
+  assert.equal(
+    users.isSameSystemUser("desktop\\demo", "other\\demo", "win32"),
+    false,
+  );
+  assert.equal(users.isSameSystemUser("alice", "Alice", "linux"), false);
+});
+
+test("installer users avoid elevated writes for Windows current-user aliases", () => {
+  const ownership = {
+    ownerMatches: true,
+    writable: true,
+    statUid: -1,
+    statGid: -1,
+    targetUid: -1,
+    targetGid: -1,
+  };
+  assert.equal(
+    users.shouldUseElevatedWrite("DESKTOP\\Demo", ownership, "demo", "win32"),
+    false,
+  );
+  assert.equal(
+    users.shouldUseElevatedWrite("DESKTOP\\Other", ownership, "demo", "win32"),
+    true,
+  );
+});
+
 test("installer users describe ownership and elevated write decisions consistently", async () => {
   await withTempDir(async (dir) => {
     const currentUser = os.userInfo().username;

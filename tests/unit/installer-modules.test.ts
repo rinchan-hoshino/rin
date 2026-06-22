@@ -31,6 +31,14 @@ const updater = await import(
     .href
 );
 
+function createNoopSpinner() {
+  return {
+    start() {},
+    stop() {},
+    message() {},
+  };
+}
+
 async function withTempDir(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-installer-test-"));
   try {
@@ -179,6 +187,7 @@ test("provider-auth forwards OAuth device-code callbacks during installer login"
       ensureNotCancelled(value: any) {
         return value;
       },
+      spinnerFactory: createNoopSpinner,
       i18n: {
         loadingModelChoicesMessage: "loading",
         installStepComplete: "ok",
@@ -236,6 +245,51 @@ test("provider-auth forwards OAuth device-code callbacks during installer login"
   assert.equal(result.available, true);
 });
 
+test("provider-auth honors OAuth prompts that allow empty input", async () => {
+  let promptedValue = "not-called";
+  let validateResult: any = "not-called";
+  const result = await provider.configureProviderAuth(
+    "github-copilot",
+    "/tmp/rin-demo",
+    {
+      readJsonFile: (_filePath: string, fallback: any) => fallback,
+      ensureNotCancelled(value: any) {
+        return value;
+      },
+      spinnerFactory: createNoopSpinner,
+      async createAuthStorage() {
+        return {
+          hasAuth() {
+            return false;
+          },
+          getOAuthProviders() {
+            return [{ id: "github-copilot", name: "GitHub Copilot" }];
+          },
+          async login(_providerId: string, callbacks: any) {
+            promptedValue = await callbacks.onPrompt({
+              message: "GitHub Enterprise URL/domain (blank for github.com)",
+              placeholder: "company.ghe.com",
+              allowEmpty: true,
+            });
+          },
+          getAll() {
+            return { "github-copilot": { type: "oauth" } };
+          },
+        };
+      },
+      async textPrompt(options: any) {
+        validateResult = options.validate("");
+        return "";
+      },
+    },
+  );
+
+  assert.equal(validateResult, undefined);
+  assert.equal(promptedValue, "");
+  assert.equal(result.authKind, "oauth");
+  assert.equal(result.available, true);
+});
+
 test("provider-auth forwards OAuth select prompts during installer login", async () => {
   let selectedValue = "";
   let selectOptions: any;
@@ -247,6 +301,7 @@ test("provider-auth forwards OAuth select prompts during installer login", async
       ensureNotCancelled(value: any) {
         return value;
       },
+      spinnerFactory: createNoopSpinner,
       async createAuthStorage() {
         return {
           hasAuth() {

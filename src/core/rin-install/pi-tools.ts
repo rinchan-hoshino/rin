@@ -4,6 +4,7 @@ import {
   type PiEnsureTool,
   type PiManagedTool,
 } from "../pi/private-api.js";
+import { isSameSystemUser } from "./users.js";
 
 const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 
@@ -91,7 +92,7 @@ export async function preparePiManagedToolsForInstall(
 
   if (
     !targetUser ||
-    targetUser === currentUser ||
+    isSameSystemUser(targetUser, currentUser) ||
     process.platform === "win32"
   ) {
     const env = deps.env ?? process.env;

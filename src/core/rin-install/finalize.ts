@@ -44,6 +44,7 @@ import {
   describeOwnership,
   findSystemUser,
   homeForUser,
+  isSameSystemUser,
   shouldUseElevatedWrite,
   targetHomeForUser,
 } from "./users.js";
@@ -99,8 +100,13 @@ async function applyInstalledRuntime(
   const installServiceNow = ["darwin", "linux", "win32"].includes(
     process.platform,
   );
-  const useElevatedWrite = shouldUseElevatedWrite(targetUser, ownership);
-  const useElevatedService = installServiceNow && targetUser !== currentUser;
+  const useElevatedWrite = shouldUseElevatedWrite(
+    targetUser,
+    ownership,
+    currentUser,
+  );
+  const useElevatedService =
+    installServiceNow && !isSameSystemUser(targetUser, currentUser);
   const serviceDeps = { findSystemUser, targetHomeForUser };
 
   if (options.stopRuntimeBeforePublish) {
