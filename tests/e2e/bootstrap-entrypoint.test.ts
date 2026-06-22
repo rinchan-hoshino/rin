@@ -345,6 +345,15 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   );
   assert.match(entrypoint, /\$nodeExitCode = \$LASTEXITCODE/);
   assert.match(entrypoint, /if \(\$nodeExitCode -ne 0 -or -not \$rawVersion\)/);
+  assert.match(
+    entrypoint,
+    /Receive-Job -Job \$job -Wait -ErrorAction SilentlyContinue/,
+  );
+  assert.match(entrypoint, /if \(\$job\.State -eq "Failed"\)/);
+  assert.doesNotMatch(
+    entrypoint,
+    /Receive-Job -Job \$job -Wait -ErrorAction Stop/,
+  );
   assert.doesNotMatch(
     entrypoint,
     /& node -p "process\.versions\.node" 2>\$null \| Select-Object -First 1/,

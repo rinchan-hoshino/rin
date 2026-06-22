@@ -232,7 +232,16 @@ function Invoke-WithSpinner([string]$Label, [scriptblock]$Action) {
       $index = ($index + 1) % $frames.Count
       Start-Sleep -Milliseconds 100
     }
-    Receive-Job -Job $job -Wait -ErrorAction Stop | Out-Null
+    Receive-Job -Job $job -Wait -ErrorAction SilentlyContinue | Out-Null
+    if ($job.State -eq "Failed") {
+      $reason = @(
+        $job.ChildJobs |
+          ForEach-Object { $_.JobStateInfo.Reason } |
+          Where-Object { $_ }
+      )[0]
+      if ($reason) { throw $reason }
+      throw "background job failed"
+    }
     if (-not [Console]::IsOutputRedirected) {
       Write-Host ("`rOK {0}        " -f $Label)
     }
