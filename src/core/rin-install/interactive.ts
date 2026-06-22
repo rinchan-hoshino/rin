@@ -490,15 +490,26 @@ function removeTrailingAuthLabel(label: string, authLabel: string) {
     .trim();
 }
 
-function providerDisplayLabel(
+function providerDisplayLabel(model: any, i18n: InstallerI18n) {
+  return removeTrailingAuthLabel(
+    modelProviderLabel(model),
+    providerAuthLabel(model, i18n),
+  );
+}
+
+function providerHintLabel(
   model: any,
   i18n: InstallerI18n,
   modelCount: number,
+  readinessHint: string,
 ) {
-  const authLabel = providerAuthLabel(model, i18n);
-  const label = removeTrailingAuthLabel(modelProviderLabel(model), authLabel);
-  const details = [authLabel, i18n.modelCountLabel(modelCount)].filter(Boolean);
-  return details.length ? `${label} (${details.join(", ")})` : label;
+  return [
+    providerAuthLabel(model, i18n),
+    i18n.modelCountLabel(modelCount),
+    readinessHint,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export async function promptProviderSetup(
@@ -586,12 +597,18 @@ export async function promptProviderSetup(
           const availableCount = scoped.filter(
             (model) => model.available,
           ).length;
+          const readinessHint = availableCount
+            ? `${availableCount}/${scoped.length} ${i18n.providerReadyHint}`
+            : i18n.providerNeedsAuthHint;
           return {
             value: name,
-            label: providerDisplayLabel(firstModel, i18n, scoped.length),
-            hint: availableCount
-              ? `${availableCount}/${scoped.length} ${i18n.providerReadyHint}`
-              : i18n.providerNeedsAuthHint,
+            label: providerDisplayLabel(firstModel, i18n),
+            hint: providerHintLabel(
+              firstModel,
+              i18n,
+              scoped.length,
+              readinessHint,
+            ),
           };
         }),
       }),

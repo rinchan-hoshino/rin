@@ -733,14 +733,14 @@ test("promptProviderSetup labels subscription and API providers with subscriptio
   );
   assert.deepEqual(
     providerOptions.map((option) => option.label),
-    [
-      "ChatGPT Plus/Pro (Codex) (Subscription, 2 models)",
-      "OpenAI (API, 1 model)",
-    ],
+    ["ChatGPT Plus/Pro (Codex)", "OpenAI"],
   );
   assert.deepEqual(
     providerOptions.map((option) => option.hint),
-    ["needs auth/config", "needs auth/config"],
+    [
+      "Subscription · 2 models · needs auth/config",
+      "API · 1 model · needs auth/config",
+    ],
   );
 });
 
@@ -792,7 +792,11 @@ test("promptProviderSetup avoids repeating subscription in provider labels", asy
 
   assert.deepEqual(
     providerOptions.map((option) => option.label),
-    ["ChatGPT Plus/Pro (Codex) (Subscription, 1 model)"],
+    ["ChatGPT Plus/Pro (Codex)"],
+  );
+  assert.deepEqual(
+    providerOptions.map((option) => option.hint),
+    ["Subscription · 1 model · needs auth/config"],
   );
 });
 
