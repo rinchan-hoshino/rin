@@ -205,11 +205,13 @@ function Say([string]$Message) {
 
 function Assert-NodeVersion {
   try {
-    $rawVersion = (& node -p "process.versions.node" 2>$null | Select-Object -First 1)
+    $nodeVersionOutput = & node -p "process.versions.node" 2>$null
+    $nodeExitCode = $LASTEXITCODE
+    $rawVersion = @($nodeVersionOutput | Select-Object -First 1)[0]
   } catch {
     throw $script:nodeError
   }
-  if ($LASTEXITCODE -ne 0 -or -not $rawVersion) { throw $script:nodeError }
+  if ($nodeExitCode -ne 0 -or -not $rawVersion) { throw $script:nodeError }
   try {
     $currentVersion = [version]($rawVersion -replace "^v", "")
   } catch {

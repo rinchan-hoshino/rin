@@ -679,6 +679,15 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       /\$arg -ieq "install" -or \$arg -ieq "update"/,
     );
     assert.match(bootstrapPowerShell, /Parse-Args \$parseArgs/);
+    assert.match(
+      bootstrapPowerShell,
+      /\$nodeVersionOutput = & node -p "process\.versions\.node"/,
+    );
+    assert.match(bootstrapPowerShell, /\$nodeExitCode = \$LASTEXITCODE/);
+    assert.doesNotMatch(
+      bootstrapPowerShell,
+      /& node -p "process\.versions\.node" 2>\$null \| Select-Object -First 1/,
+    );
     assert.equal(fs.existsSync(path.join(tempDir, "stale.txt")), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

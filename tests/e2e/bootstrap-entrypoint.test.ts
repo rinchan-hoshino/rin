@@ -339,6 +339,16 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   assert.match(entrypoint, /\$RequestedMode -ieq "--mode"/);
   assert.match(entrypoint, /\$arg -ieq "install" -or \$arg -ieq "update"/);
   assert.match(entrypoint, /Parse-Args \$parseArgs/);
+  assert.match(
+    entrypoint,
+    /\$nodeVersionOutput = & node -p "process\.versions\.node"/,
+  );
+  assert.match(entrypoint, /\$nodeExitCode = \$LASTEXITCODE/);
+  assert.match(entrypoint, /if \(\$nodeExitCode -ne 0 -or -not \$rawVersion\)/);
+  assert.doesNotMatch(
+    entrypoint,
+    /& node -p "process\.versions\.node" 2>\$null \| Select-Object -First 1/,
+  );
 });
 
 test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {
