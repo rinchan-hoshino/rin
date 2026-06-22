@@ -15,6 +15,8 @@
 - TUI update notices align with the Rin rendering boundary, and Rin now tracks the Pi 0.79.8 dependency line for this release series.
 - Dependency maintenance resolved the current npm audit advisories.
 - Empty todo-read results no longer emit noisy chat notices.
+- Nightly release metadata commits now use the verified release gate explicitly, so executor metadata updates are not blocked by local hooks after validation already passed.
+- Rin now tracks the Pi 0.79.9 dependency line for this release series.
 
 <!-- rin-changelog-coverage
 5a2999d fix(chat): keep rich delivery after segment failures
@@ -72,6 +74,9 @@ a1307d3 chore(deps): sync Pi 0.79.8
 d7871a0 fix(chat): async outbox dispatch and onebot timeouts
 e9be369 docs(release): cover 0.5.0 nightly changes
 81b7c78 docs(release): cover changelog prep commit
+f803ef5 fix(release): keep nightly metadata commits hook-independent
+277d21a chore(deps): sync Pi 0.79.9
+13aa217 docs(release): cover 0.5.0 stable candidate
 -->
 
 ## 0.4.0
