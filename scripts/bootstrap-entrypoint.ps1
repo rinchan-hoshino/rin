@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$mode = if ($RequestedMode) { $RequestedMode.ToLowerInvariant() } else { "install" }
+$mode = "install"
 $channel = "stable"
 $branch = ""
 $version = ""
@@ -155,7 +155,15 @@ function Parse-Args([string[]]$Values) {
   if ($script:channel -eq "nightly" -and ($script:branch -or $script:version)) { throw "nightly does not support explicit selectors" }
 }
 
-Parse-Args @($RemainingArgs | ForEach-Object { [string]$_ })
+$parseArgs = @($RemainingArgs | ForEach-Object { [string]$_ })
+if ($RequestedMode) {
+  if ($RequestedMode -ieq "-mode" -or $RequestedMode -ieq "--mode") {
+    $parseArgs = @([string]$RequestedMode) + $parseArgs
+  } else {
+    $mode = $RequestedMode.ToLowerInvariant()
+  }
+}
+Parse-Args $parseArgs
 if ($mode -notin @("install", "update")) { throw "invalid mode: $mode" }
 
 if ($mode -eq "update") {

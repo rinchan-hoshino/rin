@@ -215,10 +215,41 @@ export class WorkerPool {
   private async terminateWorkerGracefullyAndFlush(worker: WorkerHandle) {
     if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
     worker.gracefulShutdownRequested = true;
+    const exitPromise = this.waitForWorkerExit(worker);
     const written = await this.writeWorkerStdinAndWait(worker, {
       type: "shutdown_session",
     });
-    if (!written) this.destroyWorker(worker);
+    if (!written) {
+      this.destroyWorker(worker);
+      return;
+    }
+    await exitPromise;
+  }
+
+  private async waitForWorkerExit(worker: WorkerHandle) {
+    if (!this.workers.has(worker)) return true;
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      function onExit() {
+        finish(true);
+      }
+      const timeout = setTimeout(() => {
+        this.destroyWorker(worker, { signal: "SIGKILL" });
+        finish(false);
+      }, this.internalCommandTimeoutMs);
+      function finish(result: boolean) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        worker.child.off("exit", onExit);
+        resolve(result);
+      }
+      timeout.unref?.();
+      worker.child.once("exit", onExit);
+      if (worker.child.exitCode !== null || worker.child.signalCode !== null) {
+        finish(true);
+      }
+    });
   }
 
   destroyWorker(
@@ -318,15 +349,23 @@ export class WorkerPool {
 
   async selectSession(connection: ConnectionState, selector: SessionSelector) {
     const wanted = sessionSelectorFromState(selector);
+    let previousWorker: WorkerHandle | undefined;
     if (
       connection.attachedWorker &&
       !this.workerMatchesSelector(connection.attachedWorker, wanted)
     ) {
-      const previousWorker = this.detachWorker(connection, { release: false });
-      if (previousWorker)
-        await this.terminateWorkerGracefullyIfUnattached(previousWorker);
+      previousWorker = this.detachWorker(connection, { release: false });
     }
     this.rememberSessionSelection(connection, wanted);
+    const existing = this.findWorkerBySelector(wanted);
+    if (existing) {
+      this.attachWorker(connection, existing);
+      if (previousWorker)
+        void this.terminateWorkerGracefullyIfUnattached(previousWorker);
+      return existing;
+    }
+    if (previousWorker)
+      await this.terminateWorkerGracefullyIfUnattached(previousWorker);
     return await this.ensureSelectedWorker(connection);
   }
 

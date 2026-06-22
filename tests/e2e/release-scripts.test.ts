@@ -672,7 +672,8 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
     assert.match(bootstrapPowerShell, /AppData\/Roaming\/rin\/install\.json/);
     assert.match(bootstrapPowerShell, /^param\(/);
     assert.match(bootstrapPowerShell, /\[Alias\("Mode"\)\]/);
-    assert.match(bootstrapPowerShell, /Parse-Args @\(\$RemainingArgs/);
+    assert.match(bootstrapPowerShell, /\$RequestedMode -ieq "--mode"/);
+    assert.match(bootstrapPowerShell, /Parse-Args \$parseArgs/);
     assert.equal(fs.existsSync(path.join(tempDir, "stale.txt")), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

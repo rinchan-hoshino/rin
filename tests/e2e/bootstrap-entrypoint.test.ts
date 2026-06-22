@@ -333,8 +333,9 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   );
   assert.match(entrypoint, /^param\(/);
   assert.match(entrypoint, /\[Alias\("Mode"\)\]/);
-  assert.match(entrypoint, /\$mode = if \(\$RequestedMode\)/);
-  assert.match(entrypoint, /Parse-Args @\(\$RemainingArgs \|/);
+  assert.match(entrypoint, /\$mode = "install"/);
+  assert.match(entrypoint, /\$RequestedMode -ieq "--mode"/);
+  assert.match(entrypoint, /Parse-Args \$parseArgs/);
 });
 
 test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {
