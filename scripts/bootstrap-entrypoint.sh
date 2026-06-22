@@ -560,10 +560,16 @@ const fs = require('node:fs');
 const file = 'package.json';
 try {
   const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  let changed = false;
   if (parsed && parsed.scripts && parsed.scripts.prepare) {
     delete parsed.scripts.prepare;
-    fs.writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
+    changed = true;
   }
+  if (parsed && parsed.dependencies && parsed.dependencies.electron) {
+    delete parsed.dependencies.electron;
+    changed = true;
+  }
+  if (changed) fs.writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
 } catch {}
 NODE
     run_step "Installing dependencies" npm install --omit=dev --no-fund --no-audit

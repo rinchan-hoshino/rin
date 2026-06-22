@@ -29,7 +29,18 @@ async function writeExecutable(filePath, content) {
 async function createSourceArchive(tempDir) {
   const sourceRoot = path.join(tempDir, "rin-main");
   await fs.mkdir(sourceRoot, { recursive: true });
-  await fs.writeFile(path.join(sourceRoot, "package.json"), "{\n}\n", "utf8");
+  await fs.writeFile(
+    path.join(sourceRoot, "package.json"),
+    JSON.stringify(
+      {
+        scripts: { prepare: "node ./scripts/prepare.js" },
+        dependencies: { electron: "^41.3.0", chalk: "^5.6.2" },
+      },
+      null,
+      2,
+    ) + "\n",
+    "utf8",
+  );
   await fs.mkdir(path.join(sourceRoot, "dist", "app", "rin-install"), {
     recursive: true,
   });
@@ -350,6 +361,10 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     /Receive-Job -Job \$job -Wait -ErrorAction SilentlyContinue/,
   );
   assert.match(entrypoint, /if \(\$job\.State -eq "Failed"\)/);
+  assert.match(
+    entrypoint,
+    /\$packageJson\.dependencies\.PSObject\.Properties\.Remove\("electron"\)/,
+  );
   assert.doesNotMatch(
     entrypoint,
     /Receive-Job -Job \$job -Wait -ErrorAction Stop/,
@@ -363,6 +378,12 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     entrypoint,
     /& node -p "process\.versions\.node" 2>\$null \| Select-Object -First 1/,
   );
+
+  const shell = await fs.readFile(
+    path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+    "utf8",
+  );
+  assert.match(shell, /delete parsed\.dependencies\.electron/);
 });
 
 test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {

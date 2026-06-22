@@ -650,6 +650,10 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       path.join(tempDir, "scripts", "bootstrap-entrypoint.ps1"),
       "utf8",
     );
+    const bootstrapShell = fs.readFileSync(
+      path.join(tempDir, "scripts", "bootstrap-entrypoint.sh"),
+      "utf8",
+    );
     assert.match(readme, /bootstrap branch/);
     assert.match(installWrapper, /^DEFAULT_BOOTSTRAP_BRANCH=bootstrap$/m);
     assert.match(
@@ -689,6 +693,11 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       /Receive-Job -Job \$job -Wait -ErrorAction SilentlyContinue/,
     );
     assert.match(bootstrapPowerShell, /if \(\$job\.State -eq "Failed"\)/);
+    assert.match(
+      bootstrapPowerShell,
+      /\$packageJson\.dependencies\.PSObject\.Properties\.Remove\("electron"\)/,
+    );
+    assert.match(bootstrapShell, /delete parsed\.dependencies\.electron/);
     assert.doesNotMatch(
       bootstrapPowerShell,
       /Receive-Job -Job \$job -Wait -ErrorAction Stop/,

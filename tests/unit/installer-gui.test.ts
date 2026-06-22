@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -33,6 +34,14 @@ test("installer GUI startup is disabled while the desktop UI is redesigned", asy
     () => installerMain.startInstaller(["--gui"]),
     /rin_installer_gui_disabled/,
   );
+});
+
+test("disabled desktop GUI host does not make Electron a production install dependency", () => {
+  const packageJson = JSON.parse(
+    fs.readFileSync(path.join(rootDir, "package.json"), "utf8"),
+  );
+  assert.equal(packageJson.dependencies?.electron, undefined);
+  assert.equal(typeof packageJson.devDependencies?.electron, "string");
 });
 
 test("installer GUI launcher resolves the bundled desktop host directly", () => {
