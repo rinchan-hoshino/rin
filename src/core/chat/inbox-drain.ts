@@ -75,8 +75,6 @@ export function createChatInboxDrain(deps: {
   getController: (chatKey: string) => ChatController;
   isInboundMessageProcessed: (chatKey: string, messageId: string) => boolean;
   enqueueClaimedInboxItem: (job: ClaimedChatInboxJob) => void;
-  maxActiveChatKeyWorkers?: number;
-  activeChatKeyWorkerCount?: () => number;
   hasActiveChatKeyWorker?: (chatKey: string) => boolean;
   canClaimDuringActiveChatKeyWorker?: (
     envelope: ChatInboxItem,
@@ -86,10 +84,6 @@ export function createChatInboxDrain(deps: {
 }) {
   const drainChatInboxOnce = async () => {
     const claimedChatKeys = new Set<string>();
-    const maxActiveChatKeyWorkers = () =>
-      Math.max(0, Number(deps.maxActiveChatKeyWorkers || 0));
-    const activeChatKeyWorkerCount = () =>
-      deps.activeChatKeyWorkerCount?.() || 0;
     for (const filePath of listPendingChatInboxFiles(deps.agentDir)) {
       const pendingEnvelope = readChatInboxItem(filePath);
       if (!pendingEnvelope) {
@@ -116,13 +110,6 @@ export function createChatInboxDrain(deps: {
           )
         : true;
       if (!canClaimBusyChatKey) continue;
-      if (
-        !hasBusyChatKey &&
-        maxActiveChatKeyWorkers() > 0 &&
-        activeChatKeyWorkerCount() >= maxActiveChatKeyWorkers()
-      ) {
-        continue;
-      }
       let claimedPath = "";
       try {
         claimedPath = claimChatInboxFile(deps.agentDir, filePath);

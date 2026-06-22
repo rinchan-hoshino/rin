@@ -130,7 +130,6 @@ const TYPING_POLL_INTERVAL_MS = 4000;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
 const CHAT_OUTBOX_POLL_INTERVAL_MS = 5000;
 const CHAT_OUTBOX_HISTORY_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const CHAT_INBOX_MAX_ACTIVE_CHAT_KEY_WORKERS = 4;
 const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
 
@@ -914,8 +913,6 @@ export async function startChatBridge(
     isInboundMessageProcessed,
     enqueueClaimedInboxItem: (job) =>
       chatKeyWorkers.enqueue(job.envelope.chatKey, job),
-    maxActiveChatKeyWorkers: CHAT_INBOX_MAX_ACTIVE_CHAT_KEY_WORKERS,
-    activeChatKeyWorkerCount: () => chatKeyWorkers.activeWorkerCount(),
     hasActiveChatKeyWorker: (chatKey) => chatKeyWorkers.hasWorker(chatKey),
     canClaimDuringActiveChatKeyWorker: async (envelope) => {
       const queuedSession = restoreChatInboxSession(

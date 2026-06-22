@@ -625,7 +625,7 @@ test("chat inbox processing restore honors a per-drain limit", async () => {
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
 });
 
-test("chat inbox drain caps active chat-key workers while backlog remains pending", async () => {
+test("chat inbox drain does not cap active chat-key workers", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   for (let index = 0; index < 5; index += 1) {
     inbox.enqueueChatInboxItem(agentDir, {
@@ -651,15 +651,13 @@ test("chat inbox drain caps active chat-key workers while backlog remains pendin
     getController: () => ({ claimsInboundMessage: () => false }),
     isInboundMessageProcessed: () => false,
     enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
-    maxActiveChatKeyWorkers: 2,
-    activeChatKeyWorkerCount: () => claimedJobs.length,
   });
 
   await drain.drainChatInboxOnce();
 
-  assert.equal(claimedJobs.length, 2);
-  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 3);
-  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 2);
+  assert.equal(claimedJobs.length, 5);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 5);
 });
 
 test("chat inbox drain does not cap pending claims at eight", async () => {
@@ -772,7 +770,7 @@ test("chat inbox drain only bypasses a busy chat-key worker for active-turn work
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
 });
 
-test("chat inbox drain lets active-turn work bypass the worker-count cap", async () => {
+test("chat inbox drain lets active-turn work bypass a busy chat-key worker", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   inbox.enqueueChatInboxItem(agentDir, {
     chatKey: "telegram/1:active-bypass",
@@ -799,8 +797,6 @@ test("chat inbox drain lets active-turn work bypass the worker-count cap", async
     }),
     isInboundMessageProcessed: () => false,
     enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
-    maxActiveChatKeyWorkers: 4,
-    activeChatKeyWorkerCount: () => 4,
     hasActiveChatKeyWorker: () => true,
     canClaimDuringActiveChatKeyWorker: () => true,
   });

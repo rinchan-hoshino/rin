@@ -7,7 +7,6 @@ export type PreparedChatKeyWorkerJob = {
 
 export type ChatKeyWorkerPool<T> = {
   enqueue: (chatKey: string, payload: T) => void;
-  activeWorkerCount: () => number;
   hasWorker: (chatKey: string) => boolean;
 };
 
@@ -113,9 +112,6 @@ export function createChatKeyWorkerPool<T>(deps: {
       }
       worker.queue.push(payload);
       pump(key);
-    },
-    activeWorkerCount() {
-      return workers.size;
     },
     hasWorker(chatKey: string) {
       const key = safeString(chatKey).trim() || "unknown";
