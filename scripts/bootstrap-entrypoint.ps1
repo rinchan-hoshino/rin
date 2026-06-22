@@ -1,3 +1,10 @@
+param(
+  [Alias("Mode")]
+  [string]$RequestedMode = "",
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [object[]]$RemainingArgs = @()
+)
+
 $ErrorActionPreference = "Stop"
 
 $mode = "install"
@@ -7,6 +14,7 @@ $version = ""
 $gitSelector = ""
 $explicitChannel = ""
 $expectGitSelector = $false
+$quickRun = $false
 
 function Is-Flag([string]$Value, [string]$Name) {
   return $Value -ieq "-$Name" -or $Value -ieq "--$Name"
@@ -34,9 +42,10 @@ function Set-Channel([string]$Requested) {
 
 function Show-Usage {
   @"
-Usage: install.ps1 [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
+Usage: install.ps1 [--quick-run] [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
 Install defaults to the stable release channel. Update defaults to the previously installed release channel.
+--quick-run fetches the selected channel, prepares the current user's config, and launches the TUI without installing an app release or daemon.
 --beta installs the current weekly beta candidate.
 --nightly installs the current nightly build.
 --git main or --git deadbeef selects a branch or ref directly.
@@ -117,6 +126,11 @@ function Parse-Args([string[]]$Values) {
       $script:expectGitSelector = $false
       continue
     }
+    if (Is-Flag $arg "quick-run") {
+      $script:quickRun = $true
+      $script:expectGitSelector = $false
+      continue
+    }
     if ((Is-Flag $arg "h") -or (Is-Flag $arg "help")) {
       Show-Usage
       exit 0
@@ -124,6 +138,10 @@ function Parse-Args([string[]]$Values) {
     if ($script:expectGitSelector -and -not $script:gitSelector -and -not $arg.StartsWith("-")) {
       $script:gitSelector = $arg
       $script:expectGitSelector = $false
+      continue
+    }
+    if ($arg -ieq "install" -or $arg -ieq "update") {
+      $script:mode = $arg.ToLowerInvariant()
       continue
     }
     if ($script:channel -in @("stable", "beta", "nightly")) {
@@ -148,7 +166,17 @@ function Parse-Args([string[]]$Values) {
   if ($script:channel -eq "nightly" -and ($script:branch -or $script:version)) { throw "nightly does not support explicit selectors" }
 }
 
-Parse-Args @($args | ForEach-Object { [string]$_ })
+$parseArgs = @($RemainingArgs | ForEach-Object { [string]$_ })
+if ($RequestedMode) {
+  if ($RequestedMode -ieq "-mode" -or $RequestedMode -ieq "--mode") {
+    $parseArgs = @([string]$RequestedMode) + $parseArgs
+  } else {
+    $mode = $RequestedMode.ToLowerInvariant()
+  }
+}
+Parse-Args $parseArgs
+if ($mode -notin @("install", "update")) { throw "invalid mode: $mode" }
+if ($quickRun -and $mode -ne "install") { throw "--quick-run is only supported by install.ps1" }
 
 if ($mode -eq "update") {
   $workPrefix = "rin-update"
@@ -165,6 +193,7 @@ if ($mode -eq "update") {
   $launchLabel = "Launching installer..."
   $nodeError = "rin installer requires Node.js >= 22.19.0"
 }
+if ($quickRun) { $launchLabel = "Launching Rin quick run..." }
 $minimumNodeVersion = [version]"22.19.0"
 
 $repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchan-hoshino/rin" }
@@ -185,11 +214,13 @@ function Say([string]$Message) {
 
 function Assert-NodeVersion {
   try {
-    $rawVersion = (& node -p "process.versions.node" 2>$null | Select-Object -First 1)
+    $nodeVersionOutput = & node -p "process.versions.node" 2>$null
+    $nodeExitCode = $LASTEXITCODE
+    $rawVersion = @($nodeVersionOutput | Select-Object -First 1)[0]
   } catch {
     throw $script:nodeError
   }
-  if ($LASTEXITCODE -ne 0 -or -not $rawVersion) { throw $script:nodeError }
+  if ($nodeExitCode -ne 0 -or -not $rawVersion) { throw $script:nodeError }
   try {
     $currentVersion = [version]($rawVersion -replace "^v", "")
   } catch {
@@ -210,7 +241,16 @@ function Invoke-WithSpinner([string]$Label, [scriptblock]$Action) {
       $index = ($index + 1) % $frames.Count
       Start-Sleep -Milliseconds 100
     }
-    Receive-Job -Job $job -Wait -ErrorAction Stop | Out-Null
+    Receive-Job -Job $job -Wait -ErrorAction SilentlyContinue | Out-Null
+    if ($job.State -eq "Failed") {
+      $reason = @(
+        $job.ChildJobs |
+          ForEach-Object { $_.JobStateInfo.Reason } |
+          Where-Object { $_ }
+      )[0]
+      if ($reason) { throw $reason }
+      throw "background job failed"
+    }
     if (-not [Console]::IsOutputRedirected) {
       Write-Host ("`rOK {0}        " -f $Label)
     }
@@ -381,6 +421,7 @@ try {
     }
     Say $launchLabel
     $installerArgs = @("dist/app/rin-install/main.js", "--release-file", $releaseFile)
+    if ($quickRun) { $installerArgs += "--quick-run" }
     if ($mode -eq "update") { $installerArgs += "--update" }
     node @installerArgs
     exit $LASTEXITCODE

@@ -8,13 +8,13 @@ function Build-BootstrapArgs([object[]]$RawArgs) {
   foreach ($arg in $RawArgs) {
     if ($null -ne $arg) { $result += [string]$arg }
   }
-  return ,$result
+  return $result
 }
 
 $bootstrapArgs = @(Build-BootstrapArgs $args)
 
 if ($localBootstrapScript -and (Test-Path -LiteralPath $localBootstrapScript)) {
-  & $localBootstrapScript -Mode $mode @bootstrapArgs
+  & $localBootstrapScript "--mode" $mode @bootstrapArgs
   exit $LASTEXITCODE
 }
 
@@ -44,7 +44,7 @@ try {
     }
   }
 
-  & $bootstrapScript -Mode $mode @bootstrapArgs
+  & $bootstrapScript "--mode" $mode @bootstrapArgs
   exit $LASTEXITCODE
 } finally {
   Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
