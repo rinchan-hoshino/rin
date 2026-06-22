@@ -82,7 +82,11 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add release-manifest.json
-          git commit -m 'chore(release): promote beta ${{ steps.plan.outputs.beta_version }} to stable ${{ steps.plan.outputs.version }}' || true
+          if git diff --cached --quiet; then
+            echo 'No stable metadata changes to commit.'
+          else
+            git commit --no-verify -m 'chore(release): promote beta ${{ steps.plan.outputs.beta_version }} to stable ${{ steps.plan.outputs.version }}'
+          fi
           git tag -a 'v${{ steps.plan.outputs.version }}' -m 'Rin v${{ steps.plan.outputs.version }}' '${{ steps.plan.outputs.beta_ref }}' || true
           if ! git push origin HEAD:main 'refs/tags/v${{ steps.plan.outputs.version }}'; then
             git fetch origin main
