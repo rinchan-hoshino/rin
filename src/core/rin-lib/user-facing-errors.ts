@@ -366,6 +366,20 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       ". Choose another version.",
     ),
   rin_request_failed: () => "Rin request failed.",
+  rin_quick_run_daemon_already_running: () =>
+    "Quick run needs the regular Rin background service to be stopped before it can start.",
+  rin_quick_run_daemon_exited: (detail) =>
+    withDetail(
+      "Quick run background service exited before it was ready",
+      detail,
+      ".",
+    ),
+  rin_quick_run_daemon_not_ready: () =>
+    "Quick run background service did not become ready before the timeout.",
+  rin_quick_run_install_dir_missing: () =>
+    "Quick run needs a local Rin directory before it can start.",
+  rin_quick_run_update_not_supported: () =>
+    "Quick run is only available from the installer. Remove the update option.",
   rin_rollback_no_previous_release: () =>
     "No previous Rin release is available to roll back to.",
   rin_rollback_target_is_current: () =>

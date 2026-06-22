@@ -56,9 +56,10 @@ LOCAL_MANIFEST_PATH="$REPO_ROOT/release-manifest.json"
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
+Usage: install.sh [--quick-run] [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
 Install defaults to the stable release channel. Update defaults to the previously installed release channel.
+`--quick-run` fetches the selected channel and runs a temporary local RPC backend plus TUI without installing.
 `--beta` installs the current weekly beta candidate.
 `--nightly` installs the current nightly build.
 `--git main` or `--git deadbeef` selects a branch or ref directly.
@@ -256,6 +257,7 @@ parse_args() {
   GIT_SELECTOR=
   EXPLICIT_CHANNEL=
   EXPECT_GIT_SELECTOR=
+  QUICK_RUN=
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -306,6 +308,14 @@ parse_args() {
         read_option_value --version "$@"
         VERSION=$OPTION_VALUE
         shift
+        ;;
+      --quick-run)
+        if [ "$MODE" != install ]; then
+          echo "--quick-run is only supported by install.sh" >&2
+          exit 1
+        fi
+        QUICK_RUN=1
+        EXPECT_GIT_SELECTOR=
         ;;
       -h|--help)
         usage
@@ -359,6 +369,12 @@ parse_args() {
   if [ "$CHANNEL" = nightly ] && { [ -n "$BRANCH" ] || [ -n "$VERSION" ]; }; then
     echo "nightly does not support explicit selectors" >&2
     exit 1
+  fi
+}
+
+adjust_quick_run_labels() {
+  if [ -n "$QUICK_RUN" ]; then
+    LAUNCH_LABEL='Launching Rin quick run...'
   fi
 }
 
@@ -525,6 +541,10 @@ NODE
 }
 
 launch_installer_entry() {
+  if [ -n "$QUICK_RUN" ]; then
+    node "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --quick-run
+    return $?
+  fi
   if [ "$MODE" = update ]; then
     node "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --update
     return $?
@@ -536,6 +556,7 @@ launch_installer_entry() {
 INSTALLER_ENTRY='dist/app/rin-install/main.js'
 PACKAGE_NAME='@hoshinorin/rin'
 parse_args "$@"
+adjust_quick_run_labels
 check_node_version
 : >"$LOGFILE"
 run_step "$MANIFEST_LABEL" fetch_manifest

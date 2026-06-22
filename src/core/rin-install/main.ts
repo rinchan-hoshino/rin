@@ -54,6 +54,7 @@ import {
 import { defaultInstallDirForHome, installSettingsPath } from "./paths.js";
 import { startUpdater } from "./updater.js";
 import { runInstallerProgress } from "./progress.js";
+import { runQuickRun } from "./quick-run.js";
 import {
   installCloudTarget,
   installContainerTarget,
@@ -140,6 +141,7 @@ function parseInstallerCliArgs(argv: string[]) {
     updateInstallDir: readValueArg(argv, "--install-dir"),
     updateAssumeYes: hasFlag("--yes"),
     updatePreconfirmed: hasFlag("--preconfirmed"),
+    quickRun: hasFlag("--quick-run"),
     guiDisabled,
     language: normalizeLanguageTag(readValueArg(argv, "--language"), ""),
     releaseFile: readValueArg(argv, "--release-file"),
@@ -227,6 +229,12 @@ export async function startInstaller(argv = process.argv.slice(2)) {
 
   if (cli.guiDisabled) {
     throw new Error("rin_installer_gui_disabled");
+  }
+
+  if (cli.quickRun) {
+    if (cli.update) throw new Error("rin_quick_run_update_not_supported");
+    await runQuickRun();
+    return;
   }
 
   if (cli.update) {

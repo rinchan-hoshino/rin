@@ -629,6 +629,53 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
   });
 });
 
+test("install wrapper forwards quick-run while preserving release channel selection", async () => {
+  await withTempDir(async (tempDir) => {
+    const archivePath = await createSourceArchive(tempDir);
+    const manifestPath = await createReleaseManifest(tempDir);
+    const fakeBin = path.join(tempDir, "bin");
+    const logPath = path.join(tempDir, "invocations.log");
+    const workRoot = path.join(tempDir, "work");
+    await createFakeBin(fakeBin, logPath);
+    await fs.mkdir(workRoot, { recursive: true });
+
+    const env = {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+      TMPDIR: workRoot,
+      RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
+      RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
+      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+        rootDir,
+        "scripts",
+        "bootstrap-entrypoint.sh",
+      ),
+      RIN_BOOTSTRAP_TEST_LOG: logPath,
+    };
+
+    await runBootstrapWrapper("install.sh", ["--quick-run", "--beta"], env);
+
+    const log = await fs.readFile(logPath, "utf8");
+    assert.match(
+      log,
+      /curl:-fsSL https:\/\/example\.invalid\/releases\/beta-1\.2\.4-beta\.20260420\.tar\.gz -o /,
+    );
+    assert.match(log, /npm:.*:ci --no-fund --no-audit/);
+    assert.match(log, /npm:.*:run build/);
+    assert.match(
+      log,
+      /node:.*:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js --release-file [^\s]+ --quick-run/,
+    );
+  });
+});
+
+test("update bootstrap rejects quick-run", async () => {
+  await assertBootstrapFails(["update", "--quick-run"], {
+    stderr: /--quick-run is only supported by install\.sh/,
+  });
+});
+
 test("bootstrap wrappers forward beta nightly and git channel selections", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);

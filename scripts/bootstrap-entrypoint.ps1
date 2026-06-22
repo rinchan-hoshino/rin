@@ -14,6 +14,7 @@ $version = ""
 $gitSelector = ""
 $explicitChannel = ""
 $expectGitSelector = $false
+$quickRun = $false
 
 function Is-Flag([string]$Value, [string]$Name) {
   return $Value -ieq "-$Name" -or $Value -ieq "--$Name"
@@ -41,9 +42,10 @@ function Set-Channel([string]$Requested) {
 
 function Show-Usage {
   @"
-Usage: install.ps1 [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
+Usage: install.ps1 [--quick-run] [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
 Install defaults to the stable release channel. Update defaults to the previously installed release channel.
+--quick-run fetches the selected channel and runs a temporary local RPC backend plus TUI without installing.
 --beta installs the current weekly beta candidate.
 --nightly installs the current nightly build.
 --git main or --git deadbeef selects a branch or ref directly.
@@ -124,6 +126,11 @@ function Parse-Args([string[]]$Values) {
       $script:expectGitSelector = $false
       continue
     }
+    if (Is-Flag $arg "quick-run") {
+      $script:quickRun = $true
+      $script:expectGitSelector = $false
+      continue
+    }
     if ((Is-Flag $arg "h") -or (Is-Flag $arg "help")) {
       Show-Usage
       exit 0
@@ -169,6 +176,7 @@ if ($RequestedMode) {
 }
 Parse-Args $parseArgs
 if ($mode -notin @("install", "update")) { throw "invalid mode: $mode" }
+if ($quickRun -and $mode -ne "install") { throw "--quick-run is only supported by install.ps1" }
 
 if ($mode -eq "update") {
   $workPrefix = "rin-update"
@@ -185,6 +193,7 @@ if ($mode -eq "update") {
   $launchLabel = "Launching installer..."
   $nodeError = "rin installer requires Node.js >= 22.19.0"
 }
+if ($quickRun) { $launchLabel = "Launching Rin quick run..." }
 $minimumNodeVersion = [version]"22.19.0"
 
 $repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchan-hoshino/rin" }
@@ -412,6 +421,7 @@ try {
     }
     Say $launchLabel
     $installerArgs = @("dist/app/rin-install/main.js", "--release-file", $releaseFile)
+    if ($quickRun) { $installerArgs += "--quick-run" }
     if ($mode -eq "update") { $installerArgs += "--update" }
     node @installerArgs
     exit $LASTEXITCODE
