@@ -68,7 +68,6 @@ const STARTING_STATUS_FRAMES = [
   "⠏",
 ];
 const STARTING_STATUS_INTERVAL_MS = 80;
-const RIN_DAEMON_SOCKET_ENV = "RIN_DAEMON_SOCKET";
 
 export function startTuiStartupStatusAnimation(
   stdout: TuiStartupTerminal = process.stdout,
@@ -379,10 +378,8 @@ async function startRpcTui(
   resourceOptions: Partial<TuiResourceOptions>,
   profile: ReturnType<typeof startupProfiler>,
   interactiveOptions: TuiInteractiveOptions,
-  socketPath?: string,
 ) {
   const client = new RinDaemonFrontendClient({
-    socketPath,
     frontendIdentity: TUI_FRONTEND_IDENTITY,
   });
   const rpcSession = new RpcInteractiveSession(client, resourceOptions);
@@ -448,12 +445,7 @@ export async function startTui(options: StartTuiOptions = {}) {
       options.additionalExtensionPaths ??
       parsedTuiOptions.resources.additionalExtensionPaths,
   };
-  const daemonSocketPath = String(
-    process.env[RIN_DAEMON_SOCKET_ENV] || "",
-  ).trim();
-  const maintenanceMode = await shouldStartMaintenanceMode({
-    socketPath: daemonSocketPath || undefined,
-  });
+  const maintenanceMode = await shouldStartMaintenanceMode();
   applyTuiRuntimeRole(maintenanceMode);
   const interactiveOptions: TuiInteractiveOptions = {
     initialMessage: parsedTuiOptions.initialMessage,
@@ -475,12 +467,7 @@ export async function startTui(options: StartTuiOptions = {}) {
   }
 
   try {
-    await startRpcTui(
-      resourceOptions,
-      profile,
-      interactiveOptions,
-      daemonSocketPath || undefined,
-    );
+    await startRpcTui(resourceOptions, profile, interactiveOptions);
   } catch (error) {
     if (!isRecoverableRpcStartupError(error)) throw error;
     applyTuiRuntimeRole(true);
