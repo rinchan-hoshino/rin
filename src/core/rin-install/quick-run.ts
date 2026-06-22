@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 
 import { cancel, confirm, isCancel, select, text } from "@clack/prompts";
@@ -8,7 +9,6 @@ import { cancel, confirm, isCancel, select, text } from "@clack/prompts";
 import { detectLocalLanguageTag, normalizeLanguageTag } from "../language.js";
 import { readJsonFile } from "../platform/fs.js";
 import { canConnectDaemonSocket } from "../rin-daemon/client.js";
-import { defaultDaemonSocketPath } from "../rin-lib/common.js";
 import { PI_CODING_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/profile.js";
 import { safeString } from "../text-utils.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
@@ -31,6 +31,7 @@ const QUICK_RUN_DAEMON_READY_TIMEOUT_MS = 15_000;
 const QUICK_RUN_DAEMON_READY_POLL_MS = 150;
 const RIN_QUICK_RUN_ENV = "RIN_QUICK_RUN";
 const RIN_SKIP_VERSION_CHECK_ENV = "RIN_SKIP_VERSION_CHECK";
+const RIN_DAEMON_SOCKET_ENV = "RIN_DAEMON_SOCKET";
 
 function normalizeRecord(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -49,13 +50,32 @@ export function quickRunInstallDirForCurrentUser(home = os.homedir()) {
 export function createQuickRunRuntimeEnv(
   installDir: string,
   env: NodeJS.ProcessEnv = process.env,
+  socketPath = "",
 ) {
-  return {
+  const nextEnv = {
     ...env,
     [RIN_DIR_ENV]: installDir,
     [PI_CODING_AGENT_DIR_ENV]: installDir,
     [RIN_QUICK_RUN_ENV]: "1",
     [RIN_SKIP_VERSION_CHECK_ENV]: "1",
+  };
+  const resolvedSocketPath = safeString(socketPath).trim();
+  if (resolvedSocketPath) nextEnv[RIN_DAEMON_SOCKET_ENV] = resolvedSocketPath;
+  return nextEnv;
+}
+
+function createQuickRunSocketPath() {
+  const id = `${process.pid}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  if (process.platform === "win32") {
+    return {
+      socketPath: `\\\\.\\pipe\\rin-quick-run-${id}`,
+      cleanupDir: "",
+    };
+  }
+  const cleanupDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-quick-run-"));
+  return {
+    socketPath: path.join(cleanupDir, "daemon.sock"),
+    cleanupDir,
   };
 }
 
@@ -212,22 +232,11 @@ function exitCodeFromSignal(signal: NodeJS.Signals | null) {
   return 1;
 }
 
-function ensureQuickRunUserSkillDir(installDir: string) {
-  fs.mkdirSync(path.join(installDir, "self_improve", "skills"), {
-    recursive: true,
-  });
-}
-
 async function launchQuickRunTui(plan: {
   installDir: string;
   sourceRoot: string;
 }) {
-  const socketPath = defaultDaemonSocketPath();
-  if (await canConnectDaemonSocket(socketPath, 250)) {
-    throw new Error(
-      "rin_quick_run_daemon_already_running: stop the existing Rin daemon before quick run",
-    );
-  }
+  const { socketPath, cleanupDir } = createQuickRunSocketPath();
 
   const daemonEntry = path.join(
     plan.sourceRoot,
@@ -243,7 +252,11 @@ async function launchQuickRunTui(plan: {
     "rin-tui",
     "main.js",
   );
-  const runtimeEnv = createQuickRunRuntimeEnv(plan.installDir);
+  const runtimeEnv = createQuickRunRuntimeEnv(
+    plan.installDir,
+    process.env,
+    socketPath,
+  );
 
   let daemon: ChildProcess | undefined;
   let tui: ChildProcess | undefined;
@@ -279,6 +292,7 @@ async function launchQuickRunTui(plan: {
     }
     await stopChild(tui);
     await stopChild(daemon);
+    if (cleanupDir) fs.rmSync(cleanupDir, { recursive: true, force: true });
   }
 }
 
@@ -329,8 +343,6 @@ export async function runQuickRun() {
       failureMessage: i18n.installStepFailed,
     },
   );
-
-  ensureQuickRunUserSkillDir(plan.installDir);
 
   await launchQuickRunTui(plan);
 }

@@ -93,6 +93,29 @@ function removeFile(
   } catch {}
 }
 
+function userSkillDir(installDir: string) {
+  return path.join(installDir, "self_improve", "skills");
+}
+
+function ensureRuntimeUserDirs(
+  options: { targetUser: string; installDir: string; elevated?: boolean },
+  deps: {
+    ensureDir: (dir: string) => void;
+    runCommandAsUser?: (
+      targetUser: string,
+      command: string,
+      args: string[],
+    ) => void;
+  },
+) {
+  const skillDir = userSkillDir(options.installDir);
+  if (options.elevated && deps.runCommandAsUser) {
+    deps.runCommandAsUser(options.targetUser, "mkdir", ["-p", skillDir]);
+    return;
+  }
+  deps.ensureDir(skillDir);
+}
+
 type InstallPathMoveResult = {
   id: string;
   fromPath: string;
@@ -1034,6 +1057,7 @@ export async function persistInstallerOutputs(
     options.elevated,
   );
   if (!options.elevated) deps.ensureDir(options.installDir);
+  ensureRuntimeUserDirs(options, deps);
 
   const migrations = applyInstallUpgradeMigrations(options, deps);
   const settingsPath = installSettingsPath(options.installDir);

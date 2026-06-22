@@ -136,10 +136,12 @@ test("quick run finalizes prepare-only state then launches temporary daemon and 
   assert.match(quickRunSource, /spawn\(process\.execPath, \[tuiEntry\]/);
   assert.match(quickRunSource, /waitForDaemonReady/);
   assert.match(quickRunSource, /canConnectDaemonSocket/);
-  assert.match(quickRunSource, /defaultDaemonSocketPath/);
-  assert.match(quickRunSource, /ensureQuickRunUserSkillDir/);
-  assert.match(quickRunSource, /self_improve/);
+  assert.match(quickRunSource, /createQuickRunSocketPath/);
+  assert.match(quickRunSource, /RIN_DAEMON_SOCKET_ENV/);
   assert.match(quickRunSource, /RIN_SKIP_VERSION_CHECK_ENV/);
+  assert.doesNotMatch(quickRunSource, /defaultDaemonSocketPath/);
+  assert.doesNotMatch(quickRunSource, /rin_quick_run_daemon_already_running/);
+  assert.doesNotMatch(quickRunSource, /ensureQuickRunUserSkillDir/);
   assert.doesNotMatch(quickRunSource, /Rin quick run will prepare/);
   assert.doesNotMatch(quickRunSource, /Rin quick run is ready/);
   assert.match(finalizeSource, /export async function finalizeQuickRunInstall/);
@@ -156,4 +158,14 @@ test("quick run runtime env targets ~/.rin and skips update version checks", () 
     RIN_QUICK_RUN: "1",
     RIN_SKIP_VERSION_CHECK: "1",
   });
+  assert.deepEqual(
+    createQuickRunRuntimeEnv("/tmp/rin-home/.rin", {}, "/tmp/rin.sock"),
+    {
+      RIN_DIR: "/tmp/rin-home/.rin",
+      PI_CODING_AGENT_DIR: "/tmp/rin-home/.rin",
+      RIN_QUICK_RUN: "1",
+      RIN_SKIP_VERSION_CHECK: "1",
+      RIN_DAEMON_SOCKET: "/tmp/rin.sock",
+    },
+  );
 });

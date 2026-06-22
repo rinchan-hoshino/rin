@@ -948,6 +948,82 @@ test("persist reconcileInstallerManifest removes chat settings from installer ma
   });
 });
 
+test("persistInstallerOutputs creates the runtime user skill directory", async () => {
+  await withTempDir(async (dir) => {
+    const ensured = [];
+    await persist.persistInstallerOutputs(
+      {
+        currentUser: "alice",
+        targetUser: "demo",
+        installDir: dir,
+        provider: "openai",
+        modelId: "gpt",
+        thinkingLevel: "medium",
+        authData: {},
+        elevated: false,
+        writeLaunchers: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000 }),
+        ensureDir: (dirPath) => ensured.push(dirPath),
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: () => {},
+        launcherMetadataPathForUser: () => path.join(dir, "launcher.json"),
+        readJsonFile: (_filePath, fallback) => fallback,
+        writeLaunchersForUser: () => ({}),
+        reconcileInstallerManifest: persist.reconcileInstallerManifest,
+        runPrivileged: () => {},
+      },
+    );
+
+    assert.equal(ensured.includes(dir), true);
+    assert.equal(
+      ensured.includes(path.join(dir, "self_improve", "skills")),
+      true,
+    );
+  });
+});
+
+test("persistInstallerOutputs creates elevated runtime user skill directory as target user", async () => {
+  await withTempDir(async (dir) => {
+    const commands = [];
+    await persist.persistInstallerOutputs(
+      {
+        currentUser: "alice",
+        targetUser: "demo",
+        installDir: dir,
+        provider: "openai",
+        modelId: "gpt",
+        thinkingLevel: "medium",
+        authData: {},
+        elevated: true,
+        writeLaunchers: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000 }),
+        ensureDir: () => {
+          throw new Error("elevated user dir should be created as target user");
+        },
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: () => {},
+        launcherMetadataPathForUser: () => path.join(dir, "launcher.json"),
+        readJsonFile: (_filePath, fallback) => fallback,
+        writeLaunchersForUser: () => ({}),
+        reconcileInstallerManifest: persist.reconcileInstallerManifest,
+        runPrivileged: () => {},
+        runCommandAsUser: (targetUser, command, args) =>
+          commands.push([targetUser, command, ...args]),
+      },
+    );
+
+    assert.deepEqual(commands, [
+      ["demo", "mkdir", "-p", path.join(dir, "self_improve", "skills")],
+    ]);
+  });
+});
+
 test("persistInstallerOutputs stores configured language in settings", async () => {
   await withTempDir(async (dir) => {
     const writes = [];

@@ -388,6 +388,20 @@ test("tui launcher maps quiet startup to Pi version-check skip env", () => {
   assert.equal(existingEnv.RIN_SKIP_VERSION_CHECK, "custom");
 });
 
+test("tui launcher accepts an explicit daemon socket from the environment", async () => {
+  const source = await fs.readFile(
+    path.join(rootDir, "src", "core", "rin-tui", "launcher.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /RIN_DAEMON_SOCKET/);
+  assert.match(
+    source,
+    /shouldStartMaintenanceMode\(\{\s*socketPath: daemonSocketPath/,
+  );
+  assert.match(source, /new RinDaemonFrontendClient\(\{\s*socketPath,/);
+});
+
 test("tui launcher preserves startup errors until the entrypoint display boundary", async () => {
   const source = await fs.readFile(
     path.join(rootDir, "src", "core", "rin-tui", "launcher.ts"),

@@ -367,7 +367,7 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   rin_request_failed: () => "Rin request failed.",
   rin_quick_run_daemon_already_running: () =>
-    "Quick run needs the regular Rin background service to be stopped before it can start.",
+    "Quick run found an existing daemon on its startup socket. Stop stale quick-run or Rin daemon processes and try again.",
   rin_quick_run_daemon_exited: (detail) =>
     withDetail(
       "Quick run background service exited before it was ready",
