@@ -693,11 +693,11 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       bootstrapPowerShell,
       /Receive-Job -Job \$job -Wait -ErrorAction Stop/,
     );
-    assert.match(
+    assert.doesNotMatch(
       bootstrapPowerShell,
       /Remove-Item -LiteralPath "node_modules"/,
     );
-    assert.match(
+    assert.doesNotMatch(
       bootstrapPowerShell,
       /Remove-Item -LiteralPath "package-lock\.json"/,
     );
