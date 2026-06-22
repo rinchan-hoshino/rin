@@ -7,12 +7,14 @@ import { cancel, confirm, isCancel, select, text } from "@clack/prompts";
 
 import { detectLocalLanguageTag, normalizeLanguageTag } from "../language.js";
 import { readJsonFile } from "../platform/fs.js";
+import { canConnectDaemonSocket } from "../rin-daemon/client.js";
+import { defaultDaemonSocketPath } from "../rin-lib/common.js";
 import { PI_CODING_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/profile.js";
 import { safeString } from "../text-utils.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { finalizeQuickRunInstall } from "./finalize.js";
 import { createInstallerI18n } from "./i18n.js";
-import { promptProviderSetup, wrapInstallerNoteText } from "./interactive.js";
+import { promptProviderSetup } from "./interactive.js";
 import {
   defaultInstallDirForHome,
   installAuthPath,
@@ -25,10 +27,19 @@ import {
 } from "./provider-auth.js";
 import { runInstallerProgress } from "./progress.js";
 
+const QUICK_RUN_DAEMON_READY_TIMEOUT_MS = 15_000;
+const QUICK_RUN_DAEMON_READY_POLL_MS = 150;
+const RIN_QUICK_RUN_ENV = "RIN_QUICK_RUN";
+const RIN_SKIP_VERSION_CHECK_ENV = "RIN_SKIP_VERSION_CHECK";
+
 function normalizeRecord(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, any>)
     : {};
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(1, ms)));
 }
 
 export function quickRunInstallDirForCurrentUser(home = os.homedir()) {
@@ -43,6 +54,8 @@ export function createQuickRunRuntimeEnv(
     ...env,
     [RIN_DIR_ENV]: installDir,
     [PI_CODING_AGENT_DIR_ENV]: installDir,
+    [RIN_QUICK_RUN_ENV]: "1",
+    [RIN_SKIP_VERSION_CHECK_ENV]: "1",
   };
 }
 
@@ -178,6 +191,20 @@ async function stopChild(child: ChildProcess | undefined) {
   }
 }
 
+async function waitForDaemonReady(child: ChildProcess, socketPath: string) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < QUICK_RUN_DAEMON_READY_TIMEOUT_MS) {
+    if (child.exitCode != null || child.signalCode) {
+      throw new Error(
+        `rin_quick_run_daemon_exited:${child.exitCode ?? child.signalCode ?? "unknown"}`,
+      );
+    }
+    if (await canConnectDaemonSocket(socketPath, 250)) return;
+    await sleep(QUICK_RUN_DAEMON_READY_POLL_MS);
+  }
+  throw new Error("rin_quick_run_daemon_not_ready");
+}
+
 function exitCodeFromSignal(signal: NodeJS.Signals | null) {
   if (signal === "SIGINT") return 130;
   if (signal === "SIGTERM") return 143;
@@ -185,10 +212,30 @@ function exitCodeFromSignal(signal: NodeJS.Signals | null) {
   return 1;
 }
 
+function ensureQuickRunUserSkillDir(installDir: string) {
+  fs.mkdirSync(path.join(installDir, "self_improve", "skills"), {
+    recursive: true,
+  });
+}
+
 async function launchQuickRunTui(plan: {
   installDir: string;
   sourceRoot: string;
 }) {
+  const socketPath = defaultDaemonSocketPath();
+  if (await canConnectDaemonSocket(socketPath, 250)) {
+    throw new Error(
+      "rin_quick_run_daemon_already_running: stop the existing Rin daemon before quick run",
+    );
+  }
+
+  const daemonEntry = path.join(
+    plan.sourceRoot,
+    "dist",
+    "app",
+    "rin-daemon",
+    "daemon.js",
+  );
   const tuiEntry = path.join(
     plan.sourceRoot,
     "dist",
@@ -196,22 +243,33 @@ async function launchQuickRunTui(plan: {
     "rin-tui",
     "main.js",
   );
-  const tui = spawn(process.execPath, [tuiEntry], {
-    cwd: plan.sourceRoot,
-    env: createQuickRunRuntimeEnv(plan.installDir),
-    stdio: "inherit",
-  });
+  const runtimeEnv = createQuickRunRuntimeEnv(plan.installDir);
+
+  let daemon: ChildProcess | undefined;
+  let tui: ChildProcess | undefined;
   const signalHandlers = new Map<NodeJS.Signals, () => void>();
   const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
   for (const signal of signals) {
     const handler = () => {
       process.exitCode = exitCodeFromSignal(signal);
       terminateChild(tui);
+      terminateChild(daemon);
     };
     signalHandlers.set(signal, handler);
     process.once(signal, handler);
   }
   try {
+    daemon = spawn(process.execPath, [daemonEntry, socketPath], {
+      cwd: plan.sourceRoot,
+      env: runtimeEnv,
+      stdio: ["ignore", "ignore", "inherit"],
+    });
+    await waitForDaemonReady(daemon, socketPath);
+    tui = spawn(process.execPath, [tuiEntry], {
+      cwd: plan.sourceRoot,
+      env: runtimeEnv,
+      stdio: "inherit",
+    });
     const result = await waitForChildExit(tui);
     if (result.signal) process.exitCode = exitCodeFromSignal(result.signal);
     else process.exitCode = result.code ?? 0;
@@ -220,6 +278,7 @@ async function launchQuickRunTui(plan: {
       process.off(signal, handler);
     }
     await stopChild(tui);
+    await stopChild(daemon);
   }
 }
 
@@ -262,20 +321,7 @@ export async function runQuickRun() {
   const plan = await prepareQuickRunInstallPlan();
   const i18n = createInstallerI18n(resolveQuickRunLanguage(plan.installDir));
 
-  process.stdout.write(
-    `${wrapInstallerNoteText(
-      [
-        "Rin quick run will prepare the current user's ~/.rin documents and configuration.",
-        `Install dir: ${plan.installDir}`,
-        `Model: ${plan.provider}/${plan.modelId}`,
-        `Thinking: ${plan.thinkingLevel}`,
-        "No app release, launcher, daemon service, or daemon process will be left behind.",
-      ].join("\n"),
-      process.stdout.columns,
-    )}\n`,
-  );
-
-  const result = await runInstallerProgress(
+  await runInstallerProgress(
     i18n.preparingInstallerMessage,
     () => finalizeQuickRunInstall(plan),
     {
@@ -284,18 +330,7 @@ export async function runQuickRun() {
     },
   );
 
-  process.stdout.write(
-    `${wrapInstallerNoteText(
-      [
-        "Rin quick run is ready.",
-        `Docs: ${result.installedDocsDir}`,
-        `Settings: ${result.written?.settingsPath || installSettingsPath(plan.installDir)}`,
-        "The installed app runtime and daemon were not started or recorded.",
-        "Launching Rin TUI...",
-      ].join("\n"),
-      process.stdout.columns,
-    )}\n`,
-  );
+  ensureQuickRunUserSkillDir(plan.installDir);
 
   await launchQuickRunTui(plan);
 }

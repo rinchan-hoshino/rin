@@ -506,6 +506,32 @@ test("startup header branding replaces upstream Pi name and version", async () =
   );
 });
 
+test("quick run startup header hides Rin version", async () => {
+  const previous = process.env.RIN_QUICK_RUN;
+  try {
+    process.env.RIN_QUICK_RUN = "1";
+    assert.equal(
+      overrides.rewriteRinStartupHeaderText(
+        "pi v0.74.0\nPi can help.",
+        "0.74.0",
+        "0.0.0",
+      ),
+      "rin\nRin can help.",
+    );
+    assert.equal(
+      overrides.rewriteRinStartupHeaderText(
+        "pi v0.74.0\nPi can help.",
+        undefined,
+        "0.0.0",
+      ),
+      "Rin\nRin can help.",
+    );
+  } finally {
+    if (previous === undefined) delete process.env.RIN_QUICK_RUN;
+    else process.env.RIN_QUICK_RUN = previous;
+  }
+});
+
 test("footer appends runtime mode to the model label before rendering", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);

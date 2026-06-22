@@ -751,7 +751,12 @@ function configureRootSessionSelectorPresentation(selector: any) {
   }
 }
 
+function shouldHideRinStartupVersion() {
+  return Boolean(process.env.RIN_QUICK_RUN);
+}
+
 function formatRinStartupVersionLabel(version = getCurrentRinVersion()) {
+  if (shouldHideRinStartupVersion()) return "";
   const trimmed = String(version || "unknown").trim() || "unknown";
   if (/^v\d+\.\d+\.\d+(?:[-+].*)?$/i.test(trimmed)) return trimmed;
   if (/^\d+\.\d+\.\d+(?:[-+].*)?$/i.test(trimmed)) return `v${trimmed}`;
@@ -778,9 +783,11 @@ export function rewriteRinStartupHeaderText(
     .join("Rin");
   const upstreamVersionText = String(upstreamVersion || "").trim();
   if (upstreamVersionText) {
-    next = next
-      .split(`v${upstreamVersionText}`)
-      .join(formatRinStartupVersionLabel(rinVersion));
+    const versionLabel = formatRinStartupVersionLabel(rinVersion);
+    next = next.split(`v${upstreamVersionText}`).join(versionLabel);
+    if (!versionLabel) next = next.replace(/[ \t]+\n/g, "\n");
+  } else if (shouldHideRinStartupVersion()) {
+    next = next.replace(/\brin\s+v[0-9A-Za-z.+-]+/i, "Rin");
   } else {
     next = next.replace(
       /\brin\s+v[0-9A-Za-z.+-]+/i,
@@ -864,7 +871,9 @@ export async function initializePiInteractiveModeWithoutManagedToolEnsure(
   if (instance.options.verbose || !instance.settingsManager.getQuietStartup()) {
     const logo =
       theme.bold(theme.fg("accent", APP_NAME)) +
-      theme.fg("dim", ` v${instance.version}`);
+      (shouldHideRinStartupVersion()
+        ? ""
+        : theme.fg("dim", ` v${instance.version}`));
     const hint = (keybinding: string, description: string) =>
       keyHint(keybinding as any, description);
     const key = (keybinding: string) => keyText(keybinding as any);

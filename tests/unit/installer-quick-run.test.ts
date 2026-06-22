@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import {
+  createQuickRunRuntimeEnv,
   pickQuickRunExistingProvider,
   quickRunInstallDirForCurrentUser,
 } from "../../src/core/rin-install/quick-run.js";
@@ -114,7 +115,7 @@ test("quick run defaults to an available existing subscription when settings are
   assert.equal(picked?.thinkingLevel, "off");
 });
 
-test("quick run finalizes prepare-only state then launches only the TUI", async () => {
+test("quick run finalizes prepare-only state then launches temporary daemon and TUI", async () => {
   const quickRunSource = await fs.readFile(
     path.join(rootDir, "src", "core", "rin-install", "quick-run.ts"),
     "utf8",
@@ -126,16 +127,33 @@ test("quick run finalizes prepare-only state then launches only the TUI", async 
 
   assert.match(quickRunSource, /finalizeQuickRunInstall/);
   assert.match(quickRunSource, /launchQuickRunTui/);
+  assert.match(quickRunSource, /rin-daemon/);
   assert.match(quickRunSource, /rin-tui/);
+  assert.match(
+    quickRunSource,
+    /spawn\(process\.execPath, \[daemonEntry, socketPath\]/,
+  );
   assert.match(quickRunSource, /spawn\(process\.execPath, \[tuiEntry\]/);
-  assert.match(quickRunSource, /RIN_DIR_ENV/);
-  assert.match(quickRunSource, /PI_CODING_AGENT_DIR_ENV/);
-  assert.doesNotMatch(quickRunSource, /canConnectDaemonSocket/);
-  assert.doesNotMatch(quickRunSource, /defaultDaemonSocketPath/);
-  assert.doesNotMatch(quickRunSource, /rin-daemon/);
+  assert.match(quickRunSource, /waitForDaemonReady/);
+  assert.match(quickRunSource, /canConnectDaemonSocket/);
+  assert.match(quickRunSource, /defaultDaemonSocketPath/);
+  assert.match(quickRunSource, /ensureQuickRunUserSkillDir/);
+  assert.match(quickRunSource, /self_improve/);
+  assert.match(quickRunSource, /RIN_SKIP_VERSION_CHECK_ENV/);
+  assert.doesNotMatch(quickRunSource, /Rin quick run will prepare/);
+  assert.doesNotMatch(quickRunSource, /Rin quick run is ready/);
   assert.match(finalizeSource, /export async function finalizeQuickRunInstall/);
   assert.match(finalizeSource, /publishRuntime:\s*false/);
   assert.match(finalizeSource, /manageDaemon:\s*false/);
   assert.match(finalizeSource, /prepareManagedTools:\s*false/);
   assert.match(finalizeSource, /writeLaunchers:\s*false/);
+});
+
+test("quick run runtime env targets ~/.rin and skips update version checks", () => {
+  assert.deepEqual(createQuickRunRuntimeEnv("/tmp/rin-home/.rin", {}), {
+    RIN_DIR: "/tmp/rin-home/.rin",
+    PI_CODING_AGENT_DIR: "/tmp/rin-home/.rin",
+    RIN_QUICK_RUN: "1",
+    RIN_SKIP_VERSION_CHECK: "1",
+  });
 });
