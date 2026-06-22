@@ -73,6 +73,10 @@ async function applyInstalledRuntime(
     daemonFailureCode: string;
     prepareBrowseRuntime?: boolean;
     stopRuntimeBeforePublish?: boolean;
+    publishRuntime?: boolean;
+    manageDaemon?: boolean;
+    prepareManagedTools?: boolean;
+    writeLaunchers?: boolean;
   },
 ) {
   const currentUser =
@@ -87,6 +91,10 @@ async function applyInstalledRuntime(
   const language = String(options.language || "").trim();
   const setDefaultTarget = options.setDefaultTarget !== false;
   const authData = options.authData || {};
+  const publishRuntime = options.publishRuntime !== false;
+  const manageDaemon = options.manageDaemon !== false;
+  const prepareManagedTools = options.prepareManagedTools !== false;
+  const writeLaunchers = options.writeLaunchers !== false;
   const builtInExtensions = Array.isArray(options.builtInExtensions)
     ? options.builtInExtensions
     : undefined;
@@ -97,9 +105,8 @@ async function applyInstalledRuntime(
   const freshInstallDirectory = isFreshInstallDirectory(installDir);
 
   const ownership = describeOwnership(targetUser, installDir);
-  const installServiceNow = ["darwin", "linux", "win32"].includes(
-    process.platform,
-  );
+  const installServiceNow =
+    manageDaemon && ["darwin", "linux", "win32"].includes(process.platform);
   const useElevatedWrite = shouldUseElevatedWrite(
     targetUser,
     ownership,
@@ -113,17 +120,21 @@ async function applyInstalledRuntime(
     await stopInstalledBrowseSidecars(installDir);
   }
 
-  const previousReleaseName = currentInstalledReleaseName(
-    installDir,
-    useElevatedWrite,
-  );
-  const publishedRuntime = publishInstalledRuntime(
-    sourceRoot,
-    installDir,
-    targetUser,
-    useElevatedWrite,
-    { findSystemUser, release },
-  );
+  const previousReleaseName = publishRuntime
+    ? currentInstalledReleaseName(installDir, useElevatedWrite)
+    : "";
+  const publishedRuntime = publishRuntime
+    ? publishInstalledRuntime(
+        sourceRoot,
+        installDir,
+        targetUser,
+        useElevatedWrite,
+        {
+          findSystemUser,
+          release,
+        },
+      )
+    : { releaseRoot: "", currentLink: "" };
   const currentReleaseName = publishedRuntime.releaseRoot
     ? publishedRuntime.releaseRoot.split(/[\\/]/).pop() || ""
     : "";
@@ -134,31 +145,38 @@ async function applyInstalledRuntime(
     useElevatedWrite,
     { findSystemUser },
   );
-  const prunedReleases = pruneInstalledReleases(
-    installDir,
-    3,
-    publishedRuntime.releaseRoot,
-    useElevatedWrite,
-  );
-  refreshManagedServiceFiles(
-    targetUser,
-    installDir,
-    useElevatedWrite,
-    serviceDeps,
-  );
-  await preparePiManagedToolsForInstall({
-    currentUser,
-    targetUser,
-    targetHome: targetHomeForUser(targetUser),
-    installDir,
-  });
+  const prunedReleases = publishRuntime
+    ? pruneInstalledReleases(
+        installDir,
+        3,
+        publishedRuntime.releaseRoot,
+        useElevatedWrite,
+      )
+    : [];
+  if (manageDaemon) {
+    refreshManagedServiceFiles(
+      targetUser,
+      installDir,
+      useElevatedWrite,
+      serviceDeps,
+    );
+  }
+  if (prepareManagedTools) {
+    await preparePiManagedToolsForInstall({
+      currentUser,
+      targetUser,
+      targetHome: targetHomeForUser(targetUser),
+      installDir,
+    });
+  }
   if (
     options.prepareBrowseRuntime !== false &&
     builtInExtensions?.includes("rin:browse")
   ) {
     await prepareSearxngRuntime(installDir).catch(() => undefined);
   }
-  const shouldRestartBeforePersist = !options.stopRuntimeBeforePublish;
+  const shouldRestartBeforePersist =
+    manageDaemon && !options.stopRuntimeBeforePublish;
   if (shouldRestartBeforePersist) {
     reconcileSystemdUserService(
       targetUser,
@@ -192,6 +210,7 @@ async function applyInstalledRuntime(
             : undefined,
           elevated: useElevatedWrite,
           initializationComplete: !freshInstallDirectory,
+          writeLaunchers,
         },
         {
           findSystemUser,
@@ -291,7 +310,7 @@ async function applyInstalledRuntime(
     },
   );
 
-  if (!shouldRestartBeforePersist) {
+  if (manageDaemon && !shouldRestartBeforePersist) {
     if (installServiceNow) {
       try {
         installedService = installDaemonService(
@@ -380,5 +399,19 @@ export async function finalizeInstallPlan(options: FinalizeInstallOptions) {
     ...options,
     persistInstallerState: true,
     daemonFailureCode: "rin_installer_daemon_not_ready",
+  });
+}
+
+export async function finalizeQuickRunInstall(options: FinalizeInstallOptions) {
+  return await applyInstalledRuntime({
+    ...options,
+    persistInstallerState: true,
+    publishRuntime: false,
+    manageDaemon: false,
+    prepareManagedTools: false,
+    prepareBrowseRuntime: false,
+    writeLaunchers: false,
+    setDefaultTarget: false,
+    daemonFailureCode: "rin_quick_run_install_failed",
   });
 }

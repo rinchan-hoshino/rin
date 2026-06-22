@@ -439,17 +439,16 @@ test("core update restarts runtime only after manifest persistence", () => {
   );
   const installBlock = source.slice(
     source.indexOf("export async function finalizeInstallPlan"),
+    source.indexOf("export async function finalizeQuickRunInstall"),
   );
 
   assert.match(source, /if \(options\.stopRuntimeBeforePublish\)/);
   assert.match(source, /stopInstalledBrowseSidecars\(installDir\)/);
   assert.match(source, /options\.prepareBrowseRuntime !== false/);
   assert.match(source, /builtInExtensions\?\.includes\("rin:browse"\)/);
-  assert.match(
-    source,
-    /const shouldRestartBeforePersist = !options\.stopRuntimeBeforePublish/,
-  );
-  assert.match(source, /if \(!shouldRestartBeforePersist\)/);
+  assert.match(source, /const shouldRestartBeforePersist =\s*manageDaemon &&/);
+  assert.match(source, /!options\.stopRuntimeBeforePublish/);
+  assert.match(source, /if \(manageDaemon && !shouldRestartBeforePersist\)/);
   assert.match(updateBlock, /stopRuntimeBeforePublish: true/);
   assert.match(updateBlock, /prepareBrowseRuntime: false/);
   assert.doesNotMatch(installBlock, /stopRuntimeBeforePublish: true/);

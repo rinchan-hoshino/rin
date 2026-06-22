@@ -986,6 +986,7 @@ export async function persistInstallerOutputs(
     previousReleaseRoot?: string;
     elevated?: boolean;
     initializationComplete?: boolean;
+    writeLaunchers?: boolean;
   },
   deps: {
     findSystemUser: (targetUser: string) => any;
@@ -1059,20 +1060,27 @@ export async function persistInstallerOutputs(
     initialized: initializationComplete,
   };
 
-  const launcherPath = deps.launcherMetadataPathForUser(options.currentUser);
+  const writeLaunchers = options.writeLaunchers !== false;
+  const launcherPath = writeLaunchers
+    ? deps.launcherMetadataPathForUser(options.currentUser)
+    : "";
   const shouldSetDefaultTarget = options.setDefaultTarget !== false;
-  const launcherJson = shouldSetDefaultTarget
-    ? normalizeInstallerRecord(deps.readJsonFile<any>(launcherPath, {}))
+  const launcherJson = writeLaunchers
+    ? shouldSetDefaultTarget
+      ? normalizeInstallerRecord(deps.readJsonFile<any>(launcherPath, {}))
+      : {}
     : {};
-  if (shouldSetDefaultTarget) {
-    launcherJson.defaultTargetUser = options.targetUser;
-    launcherJson.defaultInstallDir = options.installDir;
-  } else {
-    delete launcherJson.defaultTargetUser;
-    delete launcherJson.defaultInstallDir;
+  if (writeLaunchers) {
+    if (shouldSetDefaultTarget) {
+      launcherJson.defaultTargetUser = options.targetUser;
+      launcherJson.defaultInstallDir = options.installDir;
+    } else {
+      delete launcherJson.defaultTargetUser;
+      delete launcherJson.defaultInstallDir;
+    }
+    launcherJson.updatedAt = nowIso();
+    launcherJson.installedBy = options.currentUser;
   }
-  launcherJson.updatedAt = nowIso();
-  launcherJson.installedBy = options.currentUser;
 
   const { manifestPath, locatorManifestPath } = deps.reconcileInstallerManifest(
     {
@@ -1093,6 +1101,17 @@ export async function persistInstallerOutputs(
   writeInstallerJson(settingsPath, settingsJson, writeOptions, deps);
   writeInstallerJson(authPath, nextAuthJson, writeOptions, deps);
   writeInstallerJson(initStateFilePath, initStateJson, writeOptions, deps);
+  if (!writeLaunchers) {
+    return {
+      settingsPath,
+      authPath,
+      initStatePath: initStateFilePath,
+      manifestPath,
+      locatorManifestPath,
+      migrations,
+    };
+  }
+
   deps.writeJsonFile(launcherPath, launcherJson);
   const currentLaunchers = deps.writeLaunchersForUser(
     options.currentUser,

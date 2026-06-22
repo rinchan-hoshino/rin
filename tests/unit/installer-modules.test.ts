@@ -1784,6 +1784,55 @@ test("persist persistInstallerOutputs can skip saving a launcher default target"
   });
 });
 
+test("persist persistInstallerOutputs can skip launcher metadata and executable shims", async () => {
+  await withTempDir(async (dir) => {
+    const ownerHome = path.join(dir, "home", "demo");
+    const writes = [];
+    const launcherCalls = [];
+    const result = await persist.persistInstallerOutputs(
+      {
+        currentUser: "operator",
+        targetUser: "operator",
+        installDir: dir,
+        provider: "openai",
+        modelId: "gpt",
+        thinkingLevel: "medium",
+        authData: {},
+        elevated: false,
+        writeLaunchers: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000, home: ownerHome }),
+        ensureDir: () => {},
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
+        launcherMetadataPathForUser: () => path.join(dir, "launcher.json"),
+        readJsonFile: (_filePath, fallback) => fallback,
+        writeLaunchersForUser: (userName, _installDir, options) => {
+          launcherCalls.push({ userName, options });
+          return {
+            rinPath: path.join(dir, userName, "rin"),
+            rinInstallPath: path.join(dir, userName, "rin-install"),
+          };
+        },
+        reconcileInstallerManifest: persist.reconcileInstallerManifest,
+        runPrivileged: () => {},
+      },
+    );
+
+    assert.equal("launcherPath" in result, false);
+    assert.equal("currentRinPath" in result, false);
+    assert.deepEqual(launcherCalls, []);
+    assert.equal(
+      writes.some(
+        (entry) => entry.filePath === path.join(dir, "launcher.json"),
+      ),
+      false,
+    );
+  });
+});
+
 test("persist persistInstallerOutputs writes launchers for current and target users", async () => {
   await withTempDir(async (dir) => {
     const ownerHome = path.join(dir, "home", "demo");

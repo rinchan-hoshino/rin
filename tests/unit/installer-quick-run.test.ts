@@ -1,37 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import {
-  createQuickRunRuntimeEnv,
-  persistQuickRunProviderState,
   pickQuickRunExistingProvider,
   quickRunInstallDirForCurrentUser,
 } from "../../src/core/rin-install/quick-run.js";
 
-async function withTempDir(fn: (dir: string) => Promise<void>) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-quick-run-test-"));
-  try {
-    await fn(dir);
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-}
+const rootDir = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "..",
+  "..",
+);
 
 test("quick run targets only the current user's ~/.rin directory", () => {
   assert.equal(
     quickRunInstallDirForCurrentUser("/tmp/rin-home"),
     "/tmp/rin-home/.rin",
   );
-});
-
-test("quick run runtime env points Rin and Pi at the selected ~/.rin", () => {
-  const env = createQuickRunRuntimeEnv("/tmp/rin-home/.rin", { PATH: "/bin" });
-  assert.equal(env.RIN_DIR, "/tmp/rin-home/.rin");
-  assert.equal(env.PI_CODING_AGENT_DIR, "/tmp/rin-home/.rin");
-  assert.equal(env.PATH, "/bin");
 });
 
 test("quick run reuses an existing configured subscription without prompting", () => {
@@ -127,39 +114,23 @@ test("quick run defaults to an available existing subscription when settings are
   assert.equal(picked?.thinkingLevel, "off");
 });
 
-test("quick run persists only provider settings and auth needed by the temporary backend", async () => {
-  await withTempDir(async (home) => {
-    const installDir = path.join(home, ".rin");
-    await fs.mkdir(installDir, { recursive: true });
-    await fs.writeFile(
-      path.join(installDir, "settings.json"),
-      JSON.stringify({ keep: true, defaultModel: "old" }),
-      "utf8",
-    );
+test("quick run uses installer finalization without daemon or runtime launch paths", async () => {
+  const quickRunSource = await fs.readFile(
+    path.join(rootDir, "src", "core", "rin-install", "quick-run.ts"),
+    "utf8",
+  );
+  const finalizeSource = await fs.readFile(
+    path.join(rootDir, "src", "core", "rin-install", "finalize.ts"),
+    "utf8",
+  );
 
-    persistQuickRunProviderState({
-      installDir,
-      provider: "openai",
-      modelId: "gpt-5",
-      thinkingLevel: "medium",
-      language: "zh-CN",
-      authData: { openai: { type: "api_key", key: "test" } },
-    });
-
-    const settings = JSON.parse(
-      await fs.readFile(path.join(installDir, "settings.json"), "utf8"),
-    );
-    assert.deepEqual(settings, {
-      keep: true,
-      defaultProvider: "openai",
-      defaultModel: "gpt-5",
-      defaultThinkingLevel: "medium",
-      language: "zh_CN",
-    });
-    const auth = JSON.parse(
-      await fs.readFile(path.join(installDir, "auth.json"), "utf8"),
-    );
-    assert.deepEqual(auth, { openai: { type: "api_key", key: "test" } });
-    await assert.rejects(fs.stat(path.join(installDir, "app")), /ENOENT/);
-  });
+  assert.match(quickRunSource, /finalizeQuickRunInstall/);
+  assert.doesNotMatch(quickRunSource, /spawn\(/);
+  assert.doesNotMatch(quickRunSource, /canConnectDaemonSocket/);
+  assert.doesNotMatch(quickRunSource, /defaultDaemonSocketPath/);
+  assert.match(finalizeSource, /export async function finalizeQuickRunInstall/);
+  assert.match(finalizeSource, /publishRuntime:\s*false/);
+  assert.match(finalizeSource, /manageDaemon:\s*false/);
+  assert.match(finalizeSource, /prepareManagedTools:\s*false/);
+  assert.match(finalizeSource, /writeLaunchers:\s*false/);
 });
