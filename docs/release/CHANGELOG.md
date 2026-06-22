@@ -1,5 +1,13 @@
 # Rin Changelog
 
+## 0.6.0
+
+- Beta and stable release metadata commits now use the verified release gate explicitly, so executor metadata updates are not blocked by local hooks after validation already passed.
+
+<!-- rin-changelog-coverage
+7c03b8c fix(release): keep beta and stable metadata commits hook-independent
+-->
+
 ## 0.5.0
 
 - Chat and daemon recovery is more resilient: active submitted turns stay attached during recovery, accepted inbox turns recover after restarts, passive notices target the right chat session, replaced resume workers shut down cleanly, and outbox delivery stalls are isolated from other chat traffic.
