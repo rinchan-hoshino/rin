@@ -104,6 +104,92 @@ test("chat main consumes inbound localized help messages through the inbox path 
   }
 });
 
+test("chat main restores every stranded processing inbox item on startup", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    const byChatKey = {};
+    for (let index = 0; index < 9; index += 1) {
+      byChatKey[`telegram/1:${index}`] = { turnPolicy: "record_only" };
+    }
+    await fs.writeFile(
+      path.join(agentDir, "settings.json"),
+      JSON.stringify({ chat: { byChatKey } }) + "\n",
+      "utf8",
+    );
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+
+      for (let index = 0; index < 9; index += 1) {
+        inbox.enqueueChatInboxItem(agentDir, {
+          chatKey: \`telegram/1:\${index}\`,
+          messageId: \`startup-restore-\${index}\`,
+          session: {
+            platform: "telegram",
+            selfId: "1",
+            channelId: String(index),
+            userId: "u1",
+            messageId: \`startup-restore-\${index}\`,
+            timestamp: Date.now(),
+            isDirect: true,
+            content: "hello",
+            stripped: { content: "hello" },
+          },
+          elements: [{ type: "text", attrs: { content: "hello" } }],
+        });
+      }
+      for (const filePath of inbox.listPendingChatInboxFiles(agentDir)) {
+        inbox.claimChatInboxFile(agentDir, filePath);
+      }
+      if (inbox.listProcessingChatInboxFiles(agentDir).length !== 9) {
+        throw new Error("processing_fixture_not_ready");
+      }
+
+      const bridge = await mainMod.startChatBridge();
+      try {
+        const deadline = Date.now() + 5000;
+        let processingCount = Infinity;
+        while (Date.now() < deadline) {
+          processingCount = inbox.listProcessingChatInboxFiles(agentDir).length;
+          if (processingCount === 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (processingCount !== 0) {
+          throw new Error(JSON.stringify({ processingCount }));
+        }
+      } finally {
+        await bridge.stop();
+      }
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main records record-only chat messages without starting an agent turn", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

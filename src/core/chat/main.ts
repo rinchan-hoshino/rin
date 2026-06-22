@@ -1180,9 +1180,7 @@ export async function startChatBridge(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );
 
-  const restoredInboxItems = restoreProcessingChatInboxFiles(runtime.agentDir, {
-    limit: CHAT_INBOX_MAX_PROCESSING_RESTORE_PER_DRAIN,
-  });
+  const restoredInboxItems = restoreProcessingChatInboxFiles(runtime.agentDir);
   if (restoredInboxItems.length) {
     logger.warn(
       `chat inbox restored stranded processing items count=${restoredInboxItems.length}`,
