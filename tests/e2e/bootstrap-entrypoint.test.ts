@@ -326,6 +326,15 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     powerShell,
     /& \$(?:localBootstrapScript|bootstrapScript) -Mode \$mode/,
   );
+
+  const entrypoint = await fs.readFile(
+    path.join(rootDir, "scripts", "bootstrap-entrypoint.ps1"),
+    "utf8",
+  );
+  assert.match(entrypoint, /^param\(/);
+  assert.match(entrypoint, /\[Alias\("Mode"\)\]/);
+  assert.match(entrypoint, /\$mode = if \(\$RequestedMode\)/);
+  assert.match(entrypoint, /Parse-Args @\(\$RemainingArgs \|/);
 });
 
 test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {

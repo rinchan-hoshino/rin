@@ -1,6 +1,13 @@
+param(
+  [Alias("Mode")]
+  [string]$RequestedMode = "",
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [object[]]$RemainingArgs = @()
+)
+
 $ErrorActionPreference = "Stop"
 
-$mode = "install"
+$mode = if ($RequestedMode) { $RequestedMode.ToLowerInvariant() } else { "install" }
 $channel = "stable"
 $branch = ""
 $version = ""
@@ -148,7 +155,8 @@ function Parse-Args([string[]]$Values) {
   if ($script:channel -eq "nightly" -and ($script:branch -or $script:version)) { throw "nightly does not support explicit selectors" }
 }
 
-Parse-Args @($args | ForEach-Object { [string]$_ })
+Parse-Args @($RemainingArgs | ForEach-Object { [string]$_ })
+if ($mode -notin @("install", "update")) { throw "invalid mode: $mode" }
 
 if ($mode -eq "update") {
   $workPrefix = "rin-update"
