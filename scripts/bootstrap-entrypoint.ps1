@@ -133,6 +133,10 @@ function Parse-Args([string[]]$Values) {
       $script:expectGitSelector = $false
       continue
     }
+    if ($arg -ieq "install" -or $arg -ieq "update") {
+      $script:mode = $arg.ToLowerInvariant()
+      continue
+    }
     if ($script:channel -in @("stable", "beta", "nightly")) {
       throw "$script:channel does not support a flag selector"
     }

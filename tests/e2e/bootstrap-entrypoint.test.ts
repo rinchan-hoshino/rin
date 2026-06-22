@@ -335,6 +335,7 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   assert.match(entrypoint, /\[Alias\("Mode"\)\]/);
   assert.match(entrypoint, /\$mode = "install"/);
   assert.match(entrypoint, /\$RequestedMode -ieq "--mode"/);
+  assert.match(entrypoint, /\$arg -ieq "install" -or \$arg -ieq "update"/);
   assert.match(entrypoint, /Parse-Args \$parseArgs/);
 });
 
