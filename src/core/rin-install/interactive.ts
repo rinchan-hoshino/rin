@@ -480,13 +480,23 @@ function providerAuthLabel(model: any, i18n: InstallerI18n) {
     : i18n.apiAuthLabel;
 }
 
+function removeTrailingAuthLabel(label: string, authLabel: string) {
+  const normalizedAuthLabel = String(authLabel || "").trim();
+  if (!label || !normalizedAuthLabel) return label;
+  const escaped = normalizedAuthLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return label
+    .replace(new RegExp(`\\(([^)]*?)\\s+${escaped}\\)$`, "i"), "($1)")
+    .replace(new RegExp(`\\s+${escaped}$`, "i"), "")
+    .trim();
+}
+
 function providerDisplayLabel(
   model: any,
   i18n: InstallerI18n,
   modelCount: number,
 ) {
   const authLabel = providerAuthLabel(model, i18n);
-  const label = modelProviderLabel(model);
+  const label = removeTrailingAuthLabel(modelProviderLabel(model), authLabel);
   const details = [authLabel, i18n.modelCountLabel(modelCount)].filter(Boolean);
   return details.length ? `${label} (${details.join(", ")})` : label;
 }

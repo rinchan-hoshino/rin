@@ -744,6 +744,58 @@ test("promptProviderSetup labels subscription and API providers with subscriptio
   );
 });
 
+test("promptProviderSetup avoids repeating subscription in provider labels", async () => {
+  const providerOptions = [];
+  const prompt = {
+    ensureNotCancelled(value) {
+      return value;
+    },
+    async select(options) {
+      if (options.message === "Choose a provider to authenticate and use.") {
+        providerOptions.push(...options.options);
+        return "openai-codex";
+      }
+      if (options.message === "Choose a model.") return "gpt-5.5";
+      if (options.message === "Choose the default thinking level.")
+        return "high";
+      throw new Error(`unexpected select prompt: ${options.message}`);
+    },
+    async text() {
+      throw new Error("text prompt should not be used in this test");
+    },
+    async confirm() {
+      throw new Error("confirm prompt should not be used in this test");
+    },
+  };
+
+  await interactive.promptProviderSetup(prompt, "/tmp/demo", () => ({}), {
+    async loadModelChoices() {
+      return [
+        {
+          provider: "openai-codex",
+          providerLabel: "ChatGPT Plus/Pro (Codex Subscription)",
+          authKind: "subscription",
+          id: "gpt-5.5",
+          reasoning: true,
+          available: false,
+        },
+      ];
+    },
+    async configureProviderAuth() {
+      return {
+        available: true,
+        authKind: "oauth",
+        authData: { "openai-codex": { type: "oauth" } },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    providerOptions.map((option) => option.label),
+    ["ChatGPT Plus/Pro (Codex) (Subscription, 1 model)"],
+  );
+});
+
 test("promptProviderSetup prompts when no reusable provider config exists", async () => {
   const selectCalls = [];
   const authCalls = [];

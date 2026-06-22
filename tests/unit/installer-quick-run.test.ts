@@ -114,7 +114,7 @@ test("quick run defaults to an available existing subscription when settings are
   assert.equal(picked?.thinkingLevel, "off");
 });
 
-test("quick run uses installer finalization without daemon or runtime launch paths", async () => {
+test("quick run finalizes prepare-only state then launches only the TUI", async () => {
   const quickRunSource = await fs.readFile(
     path.join(rootDir, "src", "core", "rin-install", "quick-run.ts"),
     "utf8",
@@ -125,9 +125,14 @@ test("quick run uses installer finalization without daemon or runtime launch pat
   );
 
   assert.match(quickRunSource, /finalizeQuickRunInstall/);
-  assert.doesNotMatch(quickRunSource, /spawn\(/);
+  assert.match(quickRunSource, /launchQuickRunTui/);
+  assert.match(quickRunSource, /rin-tui/);
+  assert.match(quickRunSource, /spawn\(process\.execPath, \[tuiEntry\]/);
+  assert.match(quickRunSource, /RIN_DIR_ENV/);
+  assert.match(quickRunSource, /PI_CODING_AGENT_DIR_ENV/);
   assert.doesNotMatch(quickRunSource, /canConnectDaemonSocket/);
   assert.doesNotMatch(quickRunSource, /defaultDaemonSocketPath/);
+  assert.doesNotMatch(quickRunSource, /rin-daemon/);
   assert.match(finalizeSource, /export async function finalizeQuickRunInstall/);
   assert.match(finalizeSource, /publishRuntime:\s*false/);
   assert.match(finalizeSource, /manageDaemon:\s*false/);

@@ -59,7 +59,7 @@ usage() {
 Usage: install.sh [--quick-run] [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
 Install defaults to the stable release channel. Update defaults to the previously installed release channel.
-`--quick-run` fetches the selected channel and runs a temporary local RPC backend plus TUI without installing.
+`--quick-run` fetches the selected channel, prepares the current user's config, and launches the TUI without installing an app release or daemon.
 `--beta` installs the current weekly beta candidate.
 `--nightly` installs the current nightly build.
 `--git main` or `--git deadbeef` selects a branch or ref directly.
