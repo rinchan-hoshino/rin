@@ -2,9 +2,46 @@
 
 ## 0.6.0
 
-- Beta and stable release metadata commits now use the verified release gate explicitly, so executor metadata updates are not blocked by local hooks after validation already passed.
+- Installer and bootstrap flows are more reliable across Git/source installs, PowerShell wrappers, Node.js prerequisites, optional native dependency retries, and Electron dependency handling.
+- Quick-run setup now supports subscription and OAuth device-code login paths, keeps daemon sockets isolated, launches the TUI after preparation, and exits cleanly on interrupts or closed terminals.
+- Chat delivery and notices are calmer and clearer with restored stranded inbox items, fewer artificial inbox caps, markdown todo strikethrough rendering, improved todo notice rendering, and quiet handling for missing adapter state.
+- Beta, stable, and nightly release metadata commits now use the verified release gate explicitly, so executor metadata updates are not blocked by local hooks after validation already passed.
 
 <!-- rin-changelog-coverage
+234e03c fix(tui): exit when input terminal closes
+23ec260 fix(installer): exit quick run tui on interrupt
+22df209 fix(installer): keep quick run on default daemon socket
+61b2ee0 fix(installer): isolate quick run daemon socket
+4c09e42 fix(installer): restore quick run temporary backend
+08c7e24 fix(installer): keep provider details in prompt hints
+e492201 fix(installer): launch tui after quick run prepare
+32bc27a fix(installer): make quick run prepare-only
+d89e28f fix(chat): keep missing adapter state quiet
+f3f49fd fix(installer): route main wrappers through main entrypoint
+ebfeba8 docs(installer): route beta and git through source entrypoints
+740c406 fix(chat): use markdown todo strikethrough
+21ab805 feat(installer): add quick run mode
+4ba02e7 fix(installer): align oauth callbacks and user checks
+fc7eaeb fix(chat): remove inbox active worker cap
+1d40b45 fix(installer): support oauth device code login
+8cbe1f9 fix(chat): remove inbox drain stale and batch caps
+90c9dc8 fix(installer): support subscription login selection
+f0f51ac fix(build): make git install build cross-platform
+045fd4a fix(chat): restore all stranded inbox items on startup
+c283647 fix(bootstrap): remove stable Electron dependency rewrite
+07ef273 fix(bootstrap): exclude disabled Electron GUI dependency
+7302faa fix(chat): remove todo emoji text selector
+27915db fix(bootstrap): remove npm install retry cleanup
+95c191b feat(chat): improve todo notice rendering
+ccbb0dc fix(bootstrap): retry npm install after optional dependency miss
+c93f813 fix(bootstrap): tolerate native stderr warnings
+d281aa2 fix(bootstrap): preserve node version exit code
+a79e30d docs(readme): document Node.js install prerequisite
+d21777d fix(bootstrap): avoid splatting empty PowerShell args
+2d15136 fix(bootstrap): accept bare PowerShell mode args
+3a1a01a fix(bootstrap): handle PowerShell mode binding
+c2e27e5 fix(bootstrap): bind PowerShell entrypoint mode
+9919536 fix(bootstrap): pass PowerShell wrapper mode as parser args
 7c03b8c fix(release): keep beta and stable metadata commits hook-independent
 6b15b59 docs(release): cover 0.6.0 nightly changes
 -->
