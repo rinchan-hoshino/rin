@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { spinner, text } from "@clack/prompts";
+import { select, spinner, text } from "@clack/prompts";
 
 import { computeAvailableThinkingLevels } from "../model-thinking-levels.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
@@ -9,6 +9,15 @@ import { installAuthPath } from "./paths.js";
 import { runInstallerProgress } from "./progress.js";
 
 export { computeAvailableThinkingLevels };
+
+export type InstallerModelChoice = {
+  provider: string;
+  providerLabel: string;
+  authKind: "subscription" | "api";
+  id: string;
+  reasoning: boolean;
+  available: boolean;
+};
 
 export async function loadModelChoices(
   installDir = "",
@@ -26,10 +35,21 @@ export async function loadModelChoices(
     ? path.join(installDir, "models.json")
     : undefined;
   const modelRegistry = new ModelRegistry(authStorage, modelsJsonPath);
-  const merged = new Map<
-    string,
-    { provider: string; id: string; reasoning: boolean; available: boolean }
-  >();
+  const oauthProviders = Array.isArray(authStorage.getOAuthProviders?.())
+    ? authStorage.getOAuthProviders()
+    : [];
+  const subscriptionProviders = new Set(
+    oauthProviders
+      .map((entry: any) => String(entry?.id || "").trim())
+      .filter(Boolean),
+  );
+  const providerLabel = (provider: string) =>
+    String(
+      modelRegistry.getProviderDisplayName?.(provider) || provider,
+    ).trim() || provider;
+  const providerAuthKind = (provider: string): "subscription" | "api" =>
+    subscriptionProviders.has(provider) ? "subscription" : "api";
+  const merged = new Map<string, InstallerModelChoice>();
 
   const models = Array.isArray(modelRegistry.getAll?.())
     ? modelRegistry.getAll()
@@ -40,6 +60,8 @@ export async function loadModelChoices(
     if (!provider || !id) continue;
     merged.set(`${provider}/${id}`, {
       provider,
+      providerLabel: providerLabel(provider),
+      authKind: providerAuthKind(provider),
       id,
       reasoning: Boolean((model as any).reasoning),
       available: Boolean(modelRegistry.hasConfiguredAuth?.(model)),
@@ -48,7 +70,15 @@ export async function loadModelChoices(
 
   const choices = [...merged.values()];
   choices.sort(
-    (a, b) => a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id),
+    (a, b) =>
+      (a.authKind === b.authKind
+        ? 0
+        : a.authKind === "subscription"
+          ? -1
+          : 1) ||
+      a.providerLabel.localeCompare(b.providerLabel) ||
+      a.provider.localeCompare(b.provider) ||
+      a.id.localeCompare(b.id),
   );
   return choices;
 }
@@ -71,12 +101,21 @@ export async function configureProviderAuth(
     readJsonFile: <T>(filePath: string, fallback: T) => T;
     ensureNotCancelled: <T>(value: T | symbol) => T;
     i18n?: InstallerI18n;
+    createAuthStorage?: (
+      installDir: string,
+      readJsonFile: <T>(filePath: string, fallback: T) => T,
+    ) => any | Promise<any>;
+    selectPrompt?: (options: any) => Promise<any>;
   },
 ) {
   const i18n = deps.i18n || createInstallerI18n();
   const authStorage = await runInstallerProgress(
     i18n.loadingModelChoicesMessage,
-    () => createInstallerAuthStorage(installDir, deps.readJsonFile),
+    () =>
+      (deps.createAuthStorage || createInstallerAuthStorage)(
+        installDir,
+        deps.readJsonFile,
+      ),
     {
       successMessage: i18n.installStepComplete,
       failureMessage: i18n.installStepFailed,
@@ -130,6 +169,33 @@ export async function configureProviderAuth(
           loginSpinner.message(
             message || i18n.waitingForLogin(oauthProvider.name || provider),
           );
+        },
+        async onSelect(prompt: {
+          message: string;
+          options: { id: string; label: string }[];
+        }) {
+          const options = Array.isArray(prompt.options)
+            ? prompt.options
+                .map((option) => ({
+                  value: String(option?.id || "").trim(),
+                  label: String(option?.label || option?.id || "").trim(),
+                }))
+                .filter((option) => option.value)
+            : [];
+          if (!options.length) return undefined;
+          loginSpinner.stop(prompt.message || i18n.enterLoginValueMessage);
+          const value = String(
+            deps.ensureNotCancelled(
+              await (deps.selectPrompt || select)({
+                message: prompt.message || i18n.enterLoginValueMessage,
+                options,
+              }),
+            ),
+          ).trim();
+          loginSpinner.start(
+            i18n.waitingForLogin(oauthProvider.name || provider),
+          );
+          return value || undefined;
         },
         async onManualCodeInput() {
           const value = String(

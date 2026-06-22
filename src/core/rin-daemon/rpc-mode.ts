@@ -1571,6 +1571,14 @@ export async function runCustomRpcMode(
                   message: prompt.message,
                   placeholder: prompt.placeholder,
                 }),
+              onSelect: (prompt: {
+                message: string;
+                options: { id: string; label: string }[];
+              }) =>
+                waitForLoginInput(loginId, "select", {
+                  message: prompt.message,
+                  options: prompt.options,
+                }),
               onProgress: (message: string) =>
                 emitLoginEvent(loginId, "progress", { message }),
               onManualCodeInput: () =>

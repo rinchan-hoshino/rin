@@ -461,6 +461,26 @@ function hasStoredProviderAuth(authData: unknown, provider: string) {
   return Object.prototype.hasOwnProperty.call(record, provider);
 }
 
+function modelProviderLabel(model: any) {
+  return String(model?.providerLabel || model?.provider || "").trim();
+}
+
+function modelAuthKind(model: any): "subscription" | "api" {
+  return model?.authKind === "subscription" ? "subscription" : "api";
+}
+
+function providerAuthLabel(model: any, i18n: InstallerI18n) {
+  return modelAuthKind(model) === "subscription"
+    ? i18n.subscriptionAuthLabel
+    : i18n.apiAuthLabel;
+}
+
+function providerDisplayLabel(model: any, i18n: InstallerI18n) {
+  const authLabel = providerAuthLabel(model, i18n);
+  const label = modelProviderLabel(model);
+  return authLabel ? `${authLabel}: ${label}` : label;
+}
+
 export async function promptProviderSetup(
   prompt: PromptApi,
   installDir: string,
@@ -488,7 +508,19 @@ export async function promptProviderSetup(
   );
   const providerNames = [
     ...new Set(models.map((model) => model.provider).filter(Boolean)),
-  ];
+  ].sort((a, b) => {
+    const aModel = models.find((model) => model.provider === a);
+    const bModel = models.find((model) => model.provider === b);
+    return (
+      (modelAuthKind(aModel) === modelAuthKind(bModel)
+        ? 0
+        : modelAuthKind(aModel) === "subscription"
+          ? -1
+          : 1) ||
+      modelProviderLabel(aModel).localeCompare(modelProviderLabel(bModel)) ||
+      String(a).localeCompare(String(b))
+    );
+  });
   if (!providerNames.length) throw new Error(i18n.noModelsAvailableError);
 
   const existingDefaults = loadExistingProviderDefaults(
@@ -530,12 +562,13 @@ export async function promptProviderSetup(
         message: i18n.chooseProviderMessage,
         options: providerNames.map((name) => {
           const scoped = models.filter((model) => model.provider === name);
+          const firstModel = scoped[0];
           const availableCount = scoped.filter(
             (model) => model.available,
           ).length;
           return {
             value: name,
-            label: name,
+            label: providerDisplayLabel(firstModel, i18n),
             hint: availableCount
               ? `${availableCount}/${scoped.length} ${i18n.providerReadyHint}`
               : `${scoped.length} models`,

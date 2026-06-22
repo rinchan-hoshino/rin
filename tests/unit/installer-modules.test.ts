@@ -143,7 +143,18 @@ test("provider-auth loads installer model choices through the shared model regis
 
     assert.ok(
       choices.some(
-        (model) => model.provider === "openai" && model.available === true,
+        (model) =>
+          model.provider === "openai" &&
+          model.available === true &&
+          model.authKind === "api",
+      ),
+    );
+    assert.ok(
+      choices.some(
+        (model) =>
+          model.provider === "openai-codex" &&
+          model.authKind === "subscription" &&
+          String(model.providerLabel || "").includes("Codex"),
       ),
     );
     assert.ok(
@@ -156,6 +167,63 @@ test("provider-auth loads installer model choices through the shared model regis
       ),
     );
   });
+});
+
+test("provider-auth forwards OAuth select prompts during installer login", async () => {
+  let selectedValue = "";
+  let selectOptions: any;
+  const result = await provider.configureProviderAuth(
+    "openai-codex",
+    "/tmp/rin-demo",
+    {
+      readJsonFile: (_filePath: string, fallback: any) => fallback,
+      ensureNotCancelled(value: any) {
+        return value;
+      },
+      async createAuthStorage() {
+        return {
+          hasAuth() {
+            return false;
+          },
+          getOAuthProviders() {
+            return [
+              {
+                id: "openai-codex",
+                name: "ChatGPT Plus/Pro (Codex Subscription)",
+              },
+            ];
+          },
+          async login(_providerId: string, callbacks: any) {
+            selectedValue = await callbacks.onSelect({
+              message: "Choose login method",
+              options: [
+                { id: "browser", label: "Browser" },
+                { id: "device", label: "Device code" },
+              ],
+            });
+          },
+          getAll() {
+            return { "openai-codex": { type: "oauth" } };
+          },
+        };
+      },
+      async selectPrompt(options: any) {
+        selectOptions = options;
+        return "device";
+      },
+    },
+  );
+
+  assert.equal(selectedValue, "device");
+  assert.deepEqual(selectOptions, {
+    message: "Choose login method",
+    options: [
+      { value: "browser", label: "Browser" },
+      { value: "device", label: "Device code" },
+    ],
+  });
+  assert.equal(result.authKind, "oauth");
+  assert.equal(result.available, true);
 });
 
 test("install-record normalizes launcher metadata and installer manifests", () => {

@@ -666,6 +666,70 @@ test("promptProviderSetup does not reuse stale installer manifest provider confi
   assert.equal(result.thinkingLevel, "off");
 });
 
+test("promptProviderSetup labels subscription and API providers with subscriptions first", async () => {
+  let providerOptions: any[] = [];
+  const prompt = {
+    ensureNotCancelled(value: any) {
+      return value;
+    },
+    async select(options: any) {
+      if (options.message === "Choose a provider to authenticate and use.") {
+        providerOptions = options.options;
+        return "openai-codex";
+      }
+      if (options.message === "Choose a model.") return "gpt-5.5";
+      if (options.message === "Choose the default thinking level.")
+        return "medium";
+      throw new Error(`unexpected select prompt: ${options.message}`);
+    },
+    async text() {
+      throw new Error("text prompt should not be used in this test");
+    },
+    async confirm() {
+      throw new Error("confirm should not be used in this test");
+    },
+  };
+
+  await interactive.promptProviderSetup(prompt, "/tmp/demo", () => ({}), {
+    async loadModelChoices() {
+      return [
+        {
+          provider: "openai",
+          providerLabel: "OpenAI",
+          authKind: "api",
+          id: "gpt-5",
+          reasoning: true,
+          available: false,
+        },
+        {
+          provider: "openai-codex",
+          providerLabel: "ChatGPT Plus/Pro (Codex)",
+          authKind: "subscription",
+          id: "gpt-5.5",
+          reasoning: true,
+          available: false,
+        },
+      ];
+    },
+    async configureProviderAuth() {
+      return {
+        available: true,
+        authKind: "oauth",
+        authData: { "openai-codex": { type: "oauth" } },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    providerOptions.map((option) => option.value),
+    ["openai-codex", "openai"],
+  );
+  assert.deepEqual(
+    providerOptions.map((option) => option.label),
+    ["Subscription: ChatGPT Plus/Pro (Codex)", "API: OpenAI"],
+  );
+});
+
 test("promptProviderSetup prompts when no reusable provider config exists", async () => {
   const selectCalls = [];
   const authCalls = [];

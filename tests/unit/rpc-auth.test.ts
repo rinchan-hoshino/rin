@@ -78,6 +78,7 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   const sent = [];
   const authEvents = [];
   const progressEvents = [];
+  const selectPrompts = [];
   const auth = createAuthStorageProxy({
     send(payload) {
       sent.push(payload);
@@ -99,6 +100,10 @@ test("rpc auth proxy responds to oauth login events and applies completion state
       progressEvents.push(message);
     },
     onPrompt: async () => " code ",
+    onSelect: async (prompt) => {
+      selectPrompts.push(prompt);
+      return "device";
+    },
     onManualCodeInput: async () => "123456",
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -126,8 +131,19 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   auth.handleEvent({
     type: "oauth_login_event",
     loginId: "login-1",
-    event: "manual_code",
+    event: "select",
     requestId: " req-2 ",
+    message: "Choose login method",
+    options: [
+      { id: "browser", label: "Browser" },
+      { id: "device", label: "Device code" },
+    ],
+  });
+  auth.handleEvent({
+    type: "oauth_login_event",
+    loginId: "login-1",
+    event: "manual_code",
+    requestId: " req-3 ",
   });
 
   await new Promise((resolve) => setImmediate(resolve));
@@ -152,6 +168,15 @@ test("rpc auth proxy responds to oauth login events and applies completion state
     },
   ]);
   assert.deepEqual(progressEvents, ["Waiting"]);
+  assert.deepEqual(selectPrompts, [
+    {
+      message: "Choose login method",
+      options: [
+        { id: "browser", label: "Browser" },
+        { id: "device", label: "Device code" },
+      ],
+    },
+  ]);
   assert.deepEqual(sent, [
     { type: "oauth_login_start", providerId: "openai" },
     {
@@ -164,6 +189,12 @@ test("rpc auth proxy responds to oauth login events and applies completion state
       type: "oauth_login_respond",
       loginId: "login-1",
       requestId: "req-2",
+      value: "device",
+    },
+    {
+      type: "oauth_login_respond",
+      loginId: "login-1",
+      requestId: "req-3",
       value: "123456",
     },
   ]);

@@ -121,6 +121,8 @@ type InstallerDisplayCopy = {
   chooseThinkingLevelMessage: string;
   providerReadyHint: string;
   providerNeedsAuthHint: string;
+  subscriptionAuthLabel: string;
+  apiAuthLabel: string;
   reasoningHint: string;
   noReasoningHint: string;
   noModelsAvailableError: string;
@@ -360,6 +362,8 @@ const INSTALLER_DISPLAY_COPY = {
     chooseThinkingLevelMessage: "Choose the default thinking level.",
     providerReadyHint: "ready",
     providerNeedsAuthHint: "needs auth/config",
+    subscriptionAuthLabel: "Subscription",
+    apiAuthLabel: "API",
     reasoningHint: "reasoning",
     noReasoningHint: "no reasoning",
     noModelsAvailableError: "rin_installer_no_models_available",
@@ -700,6 +704,8 @@ const INSTALLER_DISPLAY_COPY = {
     chooseThinkingLevelMessage: "选择默认思考强度。",
     providerReadyHint: "已就绪",
     providerNeedsAuthHint: "需要认证/配置",
+    subscriptionAuthLabel: "订阅",
+    apiAuthLabel: "API",
     reasoningHint: "推理",
     noReasoningHint: "无推理",
     noModelsAvailableError: "rin_installer_no_models_available",

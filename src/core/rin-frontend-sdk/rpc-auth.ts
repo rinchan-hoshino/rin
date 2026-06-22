@@ -18,6 +18,10 @@ type LoginState = {
     message: string;
     placeholder?: string;
   }) => Promise<string>;
+  onSelect?: (prompt: {
+    message: string;
+    options: { id: string; label: string }[];
+  }) => Promise<string | undefined>;
   onProgress?: (message: string) => void;
   onManualCodeInput?: () => Promise<string>;
   resolve: () => void;
@@ -241,6 +245,22 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       );
       return;
     }
+    if (payload.event === "select") {
+      handleInteractiveEvent(
+        payload,
+        () =>
+          login.onSelect?.({
+            message: String(payload.message || ""),
+            options: Array.isArray(payload.options)
+              ? payload.options.map((option: any) => ({
+                  id: String(option?.id || ""),
+                  label: String(option?.label || option?.id || ""),
+                }))
+              : [],
+          }) ?? Promise.resolve(""),
+      );
+      return;
+    }
     if (payload.event === "manual_code") {
       handleInteractiveEvent(
         payload,
@@ -333,6 +353,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
         const login: LoginState = {
           onAuth: callbacks.onAuth,
           onPrompt: callbacks.onPrompt,
+          onSelect: callbacks.onSelect,
           onProgress: callbacks.onProgress,
           onManualCodeInput: callbacks.onManualCodeInput,
           resolve,
