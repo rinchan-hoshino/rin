@@ -34,7 +34,7 @@ async function createSourceArchive(tempDir) {
     JSON.stringify(
       {
         scripts: { prepare: "node ./scripts/prepare.js" },
-        dependencies: { electron: "^41.3.0", chalk: "^5.6.2" },
+        dependencies: { chalk: "^5.6.2" },
       },
       null,
       2,
@@ -361,10 +361,6 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     /Receive-Job -Job \$job -Wait -ErrorAction SilentlyContinue/,
   );
   assert.match(entrypoint, /if \(\$job\.State -eq "Failed"\)/);
-  assert.match(
-    entrypoint,
-    /\$packageJson\.dependencies\.PSObject\.Properties\.Remove\("electron"\)/,
-  );
   assert.doesNotMatch(
     entrypoint,
     /Receive-Job -Job \$job -Wait -ErrorAction Stop/,
@@ -383,7 +379,6 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
     "utf8",
   );
-  assert.match(shell, /delete parsed\.dependencies\.electron/);
 });
 
 test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {

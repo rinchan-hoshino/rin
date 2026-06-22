@@ -382,16 +382,8 @@ try {
         $packagePath = Join-Path $using:srcDir "package.json"
         try {
           $packageJson = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
-          $packageChanged = $false
           if ($packageJson.scripts -and (Get-Property $packageJson.scripts "prepare")) {
             $packageJson.scripts.PSObject.Properties.Remove("prepare")
-            $packageChanged = $true
-          }
-          if ($packageJson.dependencies -and (Get-Property $packageJson.dependencies "electron")) {
-            $packageJson.dependencies.PSObject.Properties.Remove("electron")
-            $packageChanged = $true
-          }
-          if ($packageChanged) {
             $packageJson | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding UTF8
           }
         } catch {}
