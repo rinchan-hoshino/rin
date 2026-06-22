@@ -751,12 +751,8 @@ function configureRootSessionSelectorPresentation(selector: any) {
   }
 }
 
-function isQuickRunTui() {
-  return Boolean(process.env.RIN_QUICK_RUN);
-}
-
 function shouldHideRinStartupVersion() {
-  return isQuickRunTui();
+  return Boolean(process.env.RIN_QUICK_RUN);
 }
 
 function formatRinStartupVersionLabel(version = getCurrentRinVersion()) {
@@ -1487,17 +1483,6 @@ export async function applyRinTuiOverrides() {
       };
   }
 
-  const originalHandleCtrlC = interactiveModeProto?.handleCtrlC;
-  if (typeof originalHandleCtrlC === "function") {
-    interactiveModeProto.handleCtrlC = function handleCtrlCWithQuickRunExit() {
-      if (isQuickRunTui()) {
-        void this.shutdown?.();
-        return;
-      }
-      return originalHandleCtrlC.call(this);
-    };
-  }
-
   const originalRegisterSignalHandlers =
     interactiveModeProto?.registerSignalHandlers;
   if (typeof originalRegisterSignalHandlers === "function") {
@@ -1510,6 +1495,16 @@ export async function applyRinTuiOverrides() {
         };
         process.on("SIGINT", handler);
         this.signalCleanupHandlers.push(() => process.off("SIGINT", handler));
+        const terminalClosedHandler = () => {
+          if (shouldIgnoreInteractiveSigint(this)) return;
+          this.emergencyTerminalExit?.();
+        };
+        process.stdin.once("end", terminalClosedHandler);
+        process.stdin.once("close", terminalClosedHandler);
+        this.signalCleanupHandlers.push(() => {
+          process.stdin.off("end", terminalClosedHandler);
+          process.stdin.off("close", terminalClosedHandler);
+        });
       };
   }
 

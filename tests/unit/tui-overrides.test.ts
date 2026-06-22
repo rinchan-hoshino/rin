@@ -506,17 +506,19 @@ test("startup header branding replaces upstream Pi name and version", async () =
   );
 });
 
-test("quick run TUI maps Ctrl+C to exit instead of clear", async () => {
+test("TUI exits when the input terminal closes", async () => {
   const source = await fs.readFile(
     path.join(rootDir, "src", "core", "pi", "tui-patches", "index.ts"),
     "utf8",
   );
 
-  assert.match(source, /function isQuickRunTui/);
-  assert.match(source, /handleCtrlCWithQuickRunExit/);
-  assert.match(source, /if \(isQuickRunTui\(\)\) \{/);
-  assert.match(source, /void this\.shutdown\?\.\(\)/);
-  assert.match(source, /originalHandleCtrlC\.call\(this\)/);
+  assert.doesNotMatch(source, /handleCtrlCWithQuickRunExit/);
+  assert.match(source, /process\.stdin\.once\("end", terminalClosedHandler\)/);
+  assert.match(
+    source,
+    /process\.stdin\.once\("close", terminalClosedHandler\)/,
+  );
+  assert.match(source, /this\.emergencyTerminalExit\?\.\(\)/);
 });
 
 test("quick run startup header hides Rin version", async () => {
