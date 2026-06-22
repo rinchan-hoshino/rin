@@ -429,9 +429,6 @@ export async function startChatBridge(
     ...builtInRuntimeAdapters,
     ...externalRuntimeAdapters,
   ];
-  if (!runtimeAdapters.length) {
-    logger.warn("no runtime chat adapters configured");
-  }
   const controllers = new Map<string, ChatController>();
   const detachedControllers = new Map<string, ChatController>();
   let inboxPollTimer: NodeJS.Timeout | null = null;
