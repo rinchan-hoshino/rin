@@ -76,6 +76,7 @@ e9be369 docs(release): cover 0.5.0 nightly changes
 81b7c78 docs(release): cover changelog prep commit
 f803ef5 fix(release): keep nightly metadata commits hook-independent
 277d21a chore(deps): sync Pi 0.79.9
+13aa217 docs(release): cover 0.5.0 stable candidate
 -->
 
 ## 0.4.0
