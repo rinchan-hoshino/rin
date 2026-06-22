@@ -17,6 +17,19 @@ const release = await import(
     .href
 );
 
+test("package build scripts stay cross-platform for git installs", async () => {
+  const packageJson = JSON.parse(
+    await fs.readFile(path.join(rootDir, "package.json"), "utf8"),
+  );
+  assert.equal(packageJson.scripts.build, "tsx scripts/build.ts");
+  assert.equal(
+    packageJson.scripts["build:core"],
+    "tsx scripts/build.ts --core",
+  );
+  assert.doesNotMatch(packageJson.scripts.build, /\b(?:rm|chmod)\b/);
+  assert.doesNotMatch(packageJson.scripts["build:core"], /\b(?:rm|chmod)\b/);
+});
+
 test("resolveParsedArgs marks omitted update channel as inherited", () => {
   const parsed = shared.resolveParsedArgs("update", {}, []);
   assert.equal(parsed.releaseChannel, "stable");

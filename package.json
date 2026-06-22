@@ -16,8 +16,8 @@
     "rin-install": "dist/app/rin-install/main.js"
   },
   "scripts": {
-    "build:core": "rm -rf dist && tsc -p tsconfig.json --pretty false",
-    "build": "npm run build:core && chmod +x dist/app/rin/main.js dist/app/rin-daemon/daemon.js dist/app/rin-daemon/worker.js dist/app/rin-tui/main.js dist/app/rin-install/main.js",
+    "build:core": "tsx scripts/build.ts --core",
+    "build": "tsx scripts/build.ts",
     "format": "tsx scripts/run-format-check.ts --write",
     "format:check": "tsx scripts/run-format-check.ts --check",
     "sync:upstreams": "tsx scripts/sync-upstreams.ts",
