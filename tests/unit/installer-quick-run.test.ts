@@ -137,6 +137,10 @@ test("quick run finalizes prepare-only state then launches temporary daemon and 
   assert.match(quickRunSource, /waitForDaemonReady/);
   assert.match(quickRunSource, /canConnectDaemonSocket/);
   assert.match(quickRunSource, /defaultDaemonSocketPath/);
+  assert.match(quickRunSource, /waitForQuickRunShutdownTrigger/);
+  assert.match(quickRunSource, /process\.stdin\.once\("close"/);
+  assert.match(quickRunSource, /stopQuickRunChildren\(tui, daemon\)/);
+  assert.match(quickRunSource, /Promise\.race/);
   assert.match(quickRunSource, /rin_quick_run_daemon_already_running/);
   assert.match(quickRunSource, /RIN_SKIP_VERSION_CHECK_ENV/);
   assert.doesNotMatch(quickRunSource, /RIN_DAEMON_SOCKET_ENV/);

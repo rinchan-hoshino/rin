@@ -212,6 +212,38 @@ function exitCodeFromSignal(signal: NodeJS.Signals | null) {
   return 1;
 }
 
+function exitCodeFromShutdownTrigger(trigger: string) {
+  if (trigger === "stdin") return 129;
+  return exitCodeFromSignal(trigger as NodeJS.Signals);
+}
+
+async function stopQuickRunChildren(
+  tui: ChildProcess | undefined,
+  daemon: ChildProcess | undefined,
+) {
+  await Promise.all([stopChild(tui), stopChild(daemon)]);
+}
+
+function waitForQuickRunShutdownTrigger(cleanup: (trigger: string) => void) {
+  const signalHandlers = new Map<NodeJS.Signals, () => void>();
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const signal of signals) {
+    const handler = () => cleanup(signal);
+    signalHandlers.set(signal, handler);
+    process.once(signal, handler);
+  }
+  const stdinHandler = () => cleanup("stdin");
+  process.stdin.once("end", stdinHandler);
+  process.stdin.once("close", stdinHandler);
+  return () => {
+    for (const [signal, handler] of signalHandlers) {
+      process.off(signal, handler);
+    }
+    process.stdin.off("end", stdinHandler);
+    process.stdin.off("close", stdinHandler);
+  };
+}
+
 async function launchQuickRunTui(plan: {
   installDir: string;
   sourceRoot: string;
@@ -241,17 +273,15 @@ async function launchQuickRunTui(plan: {
 
   let daemon: ChildProcess | undefined;
   let tui: ChildProcess | undefined;
-  const signalHandlers = new Map<NodeJS.Signals, () => void>();
-  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
-  for (const signal of signals) {
-    const handler = () => {
-      process.exitCode = exitCodeFromSignal(signal);
-      terminateChild(tui);
-      terminateChild(daemon);
-    };
-    signalHandlers.set(signal, handler);
-    process.once(signal, handler);
-  }
+  let resolveShutdown: ((trigger: string) => void) | undefined;
+  const shutdownRequested = new Promise<string>((resolve) => {
+    resolveShutdown = resolve;
+  });
+  const cleanupShutdownTrigger = waitForQuickRunShutdownTrigger((trigger) => {
+    process.exitCode = exitCodeFromShutdownTrigger(trigger);
+    resolveShutdown?.(trigger);
+    void stopQuickRunChildren(tui, daemon);
+  });
   try {
     daemon = spawn(process.execPath, [daemonEntry, socketPath], {
       cwd: plan.sourceRoot,
@@ -264,15 +294,18 @@ async function launchQuickRunTui(plan: {
       env: runtimeEnv,
       stdio: "inherit",
     });
-    const result = await waitForChildExit(tui);
+    const result = await Promise.race([
+      waitForChildExit(tui),
+      shutdownRequested.then((trigger) => ({
+        code: exitCodeFromShutdownTrigger(trigger),
+        signal: null,
+      })),
+    ]);
     if (result.signal) process.exitCode = exitCodeFromSignal(result.signal);
     else process.exitCode = result.code ?? 0;
   } finally {
-    for (const [signal, handler] of signalHandlers) {
-      process.off(signal, handler);
-    }
-    await stopChild(tui);
-    await stopChild(daemon);
+    cleanupShutdownTrigger();
+    await stopQuickRunChildren(tui, daemon);
   }
 }
 

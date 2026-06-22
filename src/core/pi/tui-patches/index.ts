@@ -751,8 +751,12 @@ function configureRootSessionSelectorPresentation(selector: any) {
   }
 }
 
-function shouldHideRinStartupVersion() {
+function isQuickRunTui() {
   return Boolean(process.env.RIN_QUICK_RUN);
+}
+
+function shouldHideRinStartupVersion() {
+  return isQuickRunTui();
 }
 
 function formatRinStartupVersionLabel(version = getCurrentRinVersion()) {
@@ -1481,6 +1485,17 @@ export async function applyRinTuiOverrides() {
           return { component: selector, focus: selector };
         });
       };
+  }
+
+  const originalHandleCtrlC = interactiveModeProto?.handleCtrlC;
+  if (typeof originalHandleCtrlC === "function") {
+    interactiveModeProto.handleCtrlC = function handleCtrlCWithQuickRunExit() {
+      if (isQuickRunTui()) {
+        void this.shutdown?.();
+        return;
+      }
+      return originalHandleCtrlC.call(this);
+    };
   }
 
   const originalRegisterSignalHandlers =
