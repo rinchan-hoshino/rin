@@ -6,6 +6,7 @@
 
 <!-- rin-changelog-coverage
 7c03b8c fix(release): keep beta and stable metadata commits hook-independent
+6b15b59 docs(release): cover 0.6.0 nightly changes
 -->
 
 ## 0.5.0
