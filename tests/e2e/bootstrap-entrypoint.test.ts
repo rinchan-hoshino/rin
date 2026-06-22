@@ -354,6 +354,8 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     entrypoint,
     /Receive-Job -Job \$job -Wait -ErrorAction Stop/,
   );
+  assert.match(entrypoint, /Remove-Item -LiteralPath "node_modules"/);
+  assert.match(entrypoint, /Remove-Item -LiteralPath "package-lock\.json"/);
   assert.doesNotMatch(
     entrypoint,
     /& node -p "process\.versions\.node" 2>\$null \| Select-Object -First 1/,

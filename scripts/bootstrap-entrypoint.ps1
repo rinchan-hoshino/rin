@@ -388,6 +388,11 @@ try {
           }
         } catch {}
         npm install --omit=dev --no-fund --no-audit
+        if ($LASTEXITCODE -ne 0) {
+          Remove-Item -LiteralPath "node_modules" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath "package-lock.json" -Force -ErrorAction SilentlyContinue
+          npm install --omit=dev --no-fund --no-audit
+        }
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
       }
     } elseif (Test-Path -LiteralPath "package-lock.json") {
@@ -400,6 +405,11 @@ try {
       Invoke-WithSpinner "Installing dependencies" {
         Set-Location $using:srcDir
         npm install --no-fund --no-audit
+        if ($LASTEXITCODE -ne 0) {
+          Remove-Item -LiteralPath "node_modules" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath "package-lock.json" -Force -ErrorAction SilentlyContinue
+          npm install --no-fund --no-audit
+        }
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
       }
     }
