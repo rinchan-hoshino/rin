@@ -309,6 +309,25 @@ test("bootstrap scripts render progress without rin-install log prefixes", async
   );
 });
 
+test("PowerShell install wrapper passes mode as parser args", async () => {
+  const powerShell = await fs.readFile(
+    path.join(rootDir, "install.ps1"),
+    "utf8",
+  );
+  assert.match(
+    powerShell,
+    /& \$localBootstrapScript "--mode" \$mode @bootstrapArgs/,
+  );
+  assert.match(
+    powerShell,
+    /& \$bootstrapScript "--mode" \$mode @bootstrapArgs/,
+  );
+  assert.doesNotMatch(
+    powerShell,
+    /& \$(?:localBootstrapScript|bootstrapScript) -Mode \$mode/,
+  );
+});
+
 test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);
