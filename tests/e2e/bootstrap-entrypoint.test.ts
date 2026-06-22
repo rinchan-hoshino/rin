@@ -325,6 +325,7 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     path.join(rootDir, "install.ps1"),
     "utf8",
   );
+  assert.match(powerShell, /^\$defaultBootstrapBranch = "main"$/m);
   assert.match(
     powerShell,
     /& \$localBootstrapScript "--mode" \$mode @bootstrapArgs/,
@@ -495,7 +496,7 @@ test("update wrapper inherits release channel from launcher metadata install dir
   });
 });
 
-test("wrapper-only main install script fetches the shared entrypoint from bootstrap", async () => {
+test("wrapper-only main install script fetches the shared entrypoint from main", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);
     const manifestPath = await createReleaseManifest(tempDir);
@@ -526,21 +527,29 @@ test("wrapper-only main install script fetches the shared entrypoint from bootst
       RIN_BOOTSTRAP_TEST_LOG: logPath,
     };
 
-    await execFileAsync("sh", [path.join(wrapperDir, "install.sh")], {
-      cwd: wrapperDir,
-      env,
-    });
+    await execFileAsync(
+      "sh",
+      [path.join(wrapperDir, "install.sh"), "--git", "--quick-run"],
+      {
+        cwd: wrapperDir,
+        env,
+      },
+    );
 
     const log = await fs.readFile(logPath, "utf8");
     assert.match(
       log,
-      /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/scripts\/bootstrap-entrypoint\.sh -o /,
+      /curl:-fsSL https:\/\/example\.invalid\/rin\/main\/scripts\/bootstrap-entrypoint\.sh -o /,
     );
     assert.equal(
-      /curl:-fsSL https:\/\/example\.invalid\/rin\/main\/scripts\/bootstrap-entrypoint\.sh -o /.test(
+      /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/scripts\/bootstrap-entrypoint\.sh -o /.test(
         log,
       ),
       false,
+    );
+    assert.match(
+      log,
+      /dist\/app\/rin-install\/main\.js --release-file [^\s]+ --quick-run/,
     );
   });
 });
