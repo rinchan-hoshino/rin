@@ -123,6 +123,7 @@ type InstallerDisplayCopy = {
   providerNeedsAuthHint: string;
   subscriptionAuthLabel: string;
   apiAuthLabel: string;
+  modelCountLabel: (count: number) => string;
   reasoningHint: string;
   noReasoningHint: string;
   noModelsAvailableError: string;
@@ -240,6 +241,7 @@ type InstallerDisplayCopy = {
   installStepComplete: string;
   startingLogin: (providerName: string) => string;
   openUrlToContinueLogin: (url: string, instructions?: string) => string;
+  deviceCodeLoginInstructions: (userCode: string) => string;
   enterLoginValueMessage: string;
   waitingForLogin: (providerName: string) => string;
   manualCodeInputMessage: string;
@@ -364,6 +366,8 @@ const INSTALLER_DISPLAY_COPY = {
     providerNeedsAuthHint: "needs auth/config",
     subscriptionAuthLabel: "Subscription",
     apiAuthLabel: "API",
+    modelCountLabel: (count: number) =>
+      `${count} ${count === 1 ? "model" : "models"}`,
     reasoningHint: "reasoning",
     noReasoningHint: "no reasoning",
     noModelsAvailableError: "rin_installer_no_models_available",
@@ -583,6 +587,8 @@ const INSTALLER_DISPLAY_COPY = {
       `Starting ${providerName} login...`,
     openUrlToContinueLogin: (url: string, instructions?: string) =>
       `Open this URL to continue login:\n${url}${instructions ? `\n${instructions}` : ""}`,
+    deviceCodeLoginInstructions: (userCode: string) =>
+      `Enter device code: ${userCode}`,
     enterLoginValueMessage: "Enter login value.",
     waitingForLogin: (providerName: string) =>
       `Waiting for ${providerName} login...`,
@@ -706,6 +712,7 @@ const INSTALLER_DISPLAY_COPY = {
     providerNeedsAuthHint: "需要认证/配置",
     subscriptionAuthLabel: "订阅",
     apiAuthLabel: "API",
+    modelCountLabel: (count: number) => `${count} 个模型`,
     reasoningHint: "推理",
     noReasoningHint: "无推理",
     noModelsAvailableError: "rin_installer_no_models_available",
@@ -956,6 +963,8 @@ const INSTALLER_DISPLAY_COPY = {
     startingLogin: (providerName: string) => `正在启动 ${providerName} 登录……`,
     openUrlToContinueLogin: (url: string, instructions?: string) =>
       `打开以下链接以继续登录：\n${url}${instructions ? `\n${instructions}` : ""}`,
+    deviceCodeLoginInstructions: (userCode: string) =>
+      `输入设备验证码：${userCode}`,
     enterLoginValueMessage: "输入登录所需的值。",
     waitingForLogin: (providerName: string) =>
       `正在等待 ${providerName} 登录……`,

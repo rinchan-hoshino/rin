@@ -14,6 +14,12 @@ type ProviderAuthStatusSummary = {
 };
 type LoginState = {
   onAuth?: (info: { url: string; instructions?: string }) => void;
+  onDeviceCode?: (info: {
+    userCode: string;
+    verificationUri: string;
+    intervalSeconds?: number;
+    expiresInSeconds?: number;
+  }) => void;
   onPrompt?: (prompt: {
     message: string;
     placeholder?: string;
@@ -231,6 +237,19 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       login.onProgress?.(String(payload.message || ""));
       return;
     }
+    if (payload.event === "device_code") {
+      login.onDeviceCode?.({
+        userCode: String(payload.userCode || ""),
+        verificationUri: String(payload.verificationUri || ""),
+        ...(typeof payload.intervalSeconds === "number"
+          ? { intervalSeconds: payload.intervalSeconds }
+          : {}),
+        ...(typeof payload.expiresInSeconds === "number"
+          ? { expiresInSeconds: payload.expiresInSeconds }
+          : {}),
+      });
+      return;
+    }
     if (payload.event === "prompt") {
       handleInteractiveEvent(
         payload,
@@ -352,6 +371,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       await new Promise<void>((resolve, reject) => {
         const login: LoginState = {
           onAuth: callbacks.onAuth,
+          onDeviceCode: callbacks.onDeviceCode,
           onPrompt: callbacks.onPrompt,
           onSelect: callbacks.onSelect,
           onProgress: callbacks.onProgress,

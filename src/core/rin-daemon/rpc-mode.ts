@@ -1566,6 +1566,18 @@ export async function runCustomRpcMode(
                   url: info.url,
                   instructions: info.instructions,
                 }),
+              onDeviceCode: (info: {
+                userCode: string;
+                verificationUri: string;
+                intervalSeconds?: number;
+                expiresInSeconds?: number;
+              }) =>
+                emitLoginEvent(loginId, "device_code", {
+                  userCode: info.userCode,
+                  verificationUri: info.verificationUri,
+                  intervalSeconds: info.intervalSeconds,
+                  expiresInSeconds: info.expiresInSeconds,
+                }),
               onPrompt: (prompt: { message: string; placeholder?: string }) =>
                 waitForLoginInput(loginId, "prompt", {
                   message: prompt.message,

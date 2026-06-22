@@ -709,6 +709,14 @@ test("promptProviderSetup labels subscription and API providers with subscriptio
           reasoning: true,
           available: false,
         },
+        {
+          provider: "openai-codex",
+          providerLabel: "ChatGPT Plus/Pro (Codex)",
+          authKind: "subscription",
+          id: "gpt-5.5-high",
+          reasoning: true,
+          available: false,
+        },
       ];
     },
     async configureProviderAuth() {
@@ -726,7 +734,14 @@ test("promptProviderSetup labels subscription and API providers with subscriptio
   );
   assert.deepEqual(
     providerOptions.map((option) => option.label),
-    ["Subscription: ChatGPT Plus/Pro (Codex)", "API: OpenAI"],
+    [
+      "ChatGPT Plus/Pro (Codex) (Subscription, 2 models)",
+      "OpenAI (API, 1 model)",
+    ],
+  );
+  assert.deepEqual(
+    providerOptions.map((option) => option.hint),
+    ["needs auth/config", "needs auth/config"],
   );
 });
 

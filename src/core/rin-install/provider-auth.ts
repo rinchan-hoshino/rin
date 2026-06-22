@@ -148,6 +148,19 @@ export async function configureProviderAuth(
             i18n.openUrlToContinueLogin(lastAuthUrl, info?.instructions),
           );
         },
+        onDeviceCode(info: { userCode: string; verificationUri: string }) {
+          lastAuthUrl = String(info?.verificationUri || "");
+          const userCode = String(info?.userCode || "").trim();
+          loginSpinner.stop(
+            i18n.openUrlToContinueLogin(
+              lastAuthUrl,
+              userCode ? i18n.deviceCodeLoginInstructions(userCode) : undefined,
+            ),
+          );
+          loginSpinner.start(
+            i18n.waitingForLogin(oauthProvider.name || provider),
+          );
+        },
         async onPrompt(prompt: { message: string; placeholder?: string }) {
           const value = String(
             deps.ensureNotCancelled(

@@ -475,10 +475,15 @@ function providerAuthLabel(model: any, i18n: InstallerI18n) {
     : i18n.apiAuthLabel;
 }
 
-function providerDisplayLabel(model: any, i18n: InstallerI18n) {
+function providerDisplayLabel(
+  model: any,
+  i18n: InstallerI18n,
+  modelCount: number,
+) {
   const authLabel = providerAuthLabel(model, i18n);
   const label = modelProviderLabel(model);
-  return authLabel ? `${authLabel}: ${label}` : label;
+  const details = [authLabel, i18n.modelCountLabel(modelCount)].filter(Boolean);
+  return details.length ? `${label} (${details.join(", ")})` : label;
 }
 
 export async function promptProviderSetup(
@@ -568,10 +573,10 @@ export async function promptProviderSetup(
           ).length;
           return {
             value: name,
-            label: providerDisplayLabel(firstModel, i18n),
+            label: providerDisplayLabel(firstModel, i18n, scoped.length),
             hint: availableCount
               ? `${availableCount}/${scoped.length} ${i18n.providerReadyHint}`
-              : `${scoped.length} models`,
+              : i18n.providerNeedsAuthHint,
           };
         }),
       }),

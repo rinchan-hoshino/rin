@@ -169,6 +169,73 @@ test("provider-auth loads installer model choices through the shared model regis
   });
 });
 
+test("provider-auth forwards OAuth device-code callbacks during installer login", async () => {
+  let deviceCodeSeen = false;
+  const result = await provider.configureProviderAuth(
+    "openai-codex",
+    "/tmp/rin-demo",
+    {
+      readJsonFile: (_filePath: string, fallback: any) => fallback,
+      ensureNotCancelled(value: any) {
+        return value;
+      },
+      i18n: {
+        loadingModelChoicesMessage: "loading",
+        installStepComplete: "ok",
+        installStepFailed: "failed",
+        startingLogin: () => "starting",
+        openUrlToContinueLogin(url: string, instructions?: string) {
+          assert.equal(url, "https://example.com/device");
+          assert.equal(instructions, "code: ABCD-EFGH");
+          return "open device url";
+        },
+        deviceCodeLoginInstructions(userCode: string) {
+          assert.equal(userCode, "ABCD-EFGH");
+          return `code: ${userCode}`;
+        },
+        enterLoginValueMessage: "enter",
+        waitingForLogin: () => "waiting",
+        manualCodeInputMessage: "manual",
+        manualCodePlaceholder: () => "placeholder",
+        loginComplete: () => "complete",
+        loginFailed: () => "failed",
+        enterApiKeyMessage: () => "api key",
+        valueRequired: "required",
+        tokenRequired: "token required",
+      },
+      async createAuthStorage() {
+        return {
+          hasAuth() {
+            return false;
+          },
+          getOAuthProviders() {
+            return [
+              {
+                id: "openai-codex",
+                name: "ChatGPT Plus/Pro (Codex Subscription)",
+              },
+            ];
+          },
+          async login(_providerId: string, callbacks: any) {
+            callbacks.onDeviceCode({
+              verificationUri: "https://example.com/device",
+              userCode: "ABCD-EFGH",
+            });
+            deviceCodeSeen = true;
+          },
+          getAll() {
+            return { "openai-codex": { type: "oauth" } };
+          },
+        };
+      },
+    },
+  );
+
+  assert.equal(deviceCodeSeen, true);
+  assert.equal(result.authKind, "oauth");
+  assert.equal(result.available, true);
+});
+
 test("provider-auth forwards OAuth select prompts during installer login", async () => {
   let selectedValue = "";
   let selectOptions: any;
