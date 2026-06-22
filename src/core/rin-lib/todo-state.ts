@@ -41,12 +41,6 @@ function formatRinTodoLineText(todo: Pick<RinTodoItem, "text">) {
   return formatRinTodoItemText(todo).replace(/\s+/g, " ").trim();
 }
 
-export function rinTodoPlainStrikethrough(text: string) {
-  return Array.from(safeString(text))
-    .map((char) => (/\s/.test(char) ? char : `${char}\u0336`))
-    .join("");
-}
-
 export function formatRinTodoChecklistContent(
   todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
 ): string {
@@ -54,6 +48,19 @@ export function formatRinTodoChecklistContent(
 
   return todos
     .map((todo) => `[${todo.done ? "x" : " "}] ${formatRinTodoItemText(todo)}`)
+    .join("\n");
+}
+
+export function formatRinTodoChecklistMarkdownContent(
+  todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
+): string {
+  if (todos.length === 0) return "No todos";
+
+  return todos
+    .map((todo) => {
+      const text = formatRinTodoLineText(todo);
+      return `${todo.done ? "☑" : "☐"} ${todo.done ? `~~${text}~~` : text}`;
+    })
     .join("\n");
 }
 
@@ -65,7 +72,7 @@ export function formatRinTodoChecklistCharacterContent(
   return todos
     .map((todo) => {
       const text = formatRinTodoLineText(todo);
-      return `${todo.done ? "☑" : "☐"} ${todo.done ? rinTodoPlainStrikethrough(text) : text}`;
+      return `${todo.done ? "☑" : "☐"} ${text}`;
     })
     .join("\n");
 }

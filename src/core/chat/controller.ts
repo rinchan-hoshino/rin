@@ -22,6 +22,7 @@ import { nowIso } from "../time-utils.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import {
   formatRinTodoChecklistCharacterContent,
+  formatRinTodoChecklistMarkdownContent,
   normalizeRinTodoItems,
   type RinTodoItem,
 } from "../rin-lib/todo-state.js";
@@ -94,22 +95,33 @@ type ChatTextDelivery = {
   sessionBinding?: "conversation";
 };
 
-type TodoNoticeRenderMode = "native" | "characters";
+type TodoNoticeRenderMode = "native" | "markdown" | "characters";
 
 const NATIVE_TODO_NOTICE_PLATFORMS = new Set(["slack"]);
+const MARKDOWN_TODO_NOTICE_PLATFORMS = new Set([
+  "discord",
+  "feishu",
+  "lark",
+  "telegram",
+]);
 
 function todoNoticeRenderModeForChatKey(chatKey: string): TodoNoticeRenderMode {
   const parsed = parseChatKey(chatKey);
-  const platform = safeString(parsed?.platform).trim();
+  const platform = safeString(parsed?.platform).trim().toLowerCase();
   if (NATIVE_TODO_NOTICE_PLATFORMS.has(platform)) return "native";
+  if (MARKDOWN_TODO_NOTICE_PLATFORMS.has(platform)) return "markdown";
   return "characters";
 }
 
 function formatTodoNoticeText(
   todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
   error?: string,
+  mode: Exclude<TodoNoticeRenderMode, "native"> = "characters",
 ) {
-  const body = formatRinTodoChecklistCharacterContent(todos);
+  const body =
+    mode === "markdown"
+      ? formatRinTodoChecklistMarkdownContent(todos)
+      : formatRinTodoChecklistCharacterContent(todos);
   const errorText = safeString(error).trim();
   return errorText ? `Error: ${errorText}\n${body}` : body;
 }
@@ -1337,7 +1349,7 @@ export class ChatController {
     const mode = todoNoticeRenderModeForChatKey(this.chatKey);
     if (mode !== "native") {
       return await this.sendPassiveNoticeNow(
-        formatTodoNoticeText(todos, error),
+        formatTodoNoticeText(todos, error, mode),
       );
     }
 

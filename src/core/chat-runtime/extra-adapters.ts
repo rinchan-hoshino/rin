@@ -3,7 +3,7 @@ import path from "node:path";
 import WebSocket from "ws";
 
 import { getWorkingReactionFrame } from "../chat/transport.js";
-import { formatRinTodoChecklistCharacterContent } from "../rin-lib/todo-state.js";
+import { formatRinTodoChecklistMarkdownContent } from "../rin-lib/todo-state.js";
 import {
   compactObject,
   createPrefixedLogger,
@@ -229,7 +229,7 @@ function todoFallbackText(
   title: string,
   items: Array<{ text: string; done: boolean }>,
 ) {
-  return [title, formatRinTodoChecklistCharacterContent(items)]
+  return [title, formatRinTodoChecklistMarkdownContent(items)]
     .filter(Boolean)
     .join("\n");
 }

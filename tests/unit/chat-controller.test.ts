@@ -1065,7 +1065,7 @@ test("chat controller delivers non-deferred passive notices during active turns"
   ]);
 });
 
-test("chat controller renders todo notices as plain characters for non-native chats", async () => {
+test("chat controller renders todo notices as markdown for markdown chats", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
@@ -1092,9 +1092,9 @@ test("chat controller renders todo notices as plain characters for non-native ch
   assert.equal(deliveries[0].kind, "passive_notice");
   assert.deepEqual(deliveries[0].nodes, [
     {
-      type: "text",
+      type: "markdown",
       attrs: {
-        content: "☐ Keep working\n☑ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
+        content: "☐ Keep working\n☑ ~~Ship renderer~~",
       },
     },
   ]);
@@ -1130,7 +1130,7 @@ test("chat controller renders todo notices as character fallback for plain chats
     {
       type: "text",
       attrs: {
-        content: "☐ Keep working\n☑ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
+        content: "☐ Keep working\n☑ Ship renderer",
       },
     },
   ]);

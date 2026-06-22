@@ -1,6 +1,6 @@
 import { Lexer } from "marked";
 
-import { formatRinTodoChecklistCharacterContent } from "../rin-lib/todo-state.js";
+import { formatRinTodoChecklistMarkdownContent } from "../rin-lib/todo-state.js";
 import { safeString } from "../text-utils.js";
 
 export type ChatMarkdownPolicy = "render" | "preserve" | "strip";
@@ -84,7 +84,7 @@ function todoPlainText(attrs: Record<string, any>) {
   const items = todoItemsFromAttrs(attrs);
   if (!items.length) return "";
   const title = safeString(attrs.title).trim();
-  const body = formatRinTodoChecklistCharacterContent(items);
+  const body = formatRinTodoChecklistMarkdownContent(items);
   return title ? `${title}\n${body}` : body;
 }
 

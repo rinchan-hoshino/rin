@@ -1347,7 +1347,7 @@ test("slack adapter sends todo nodes as Block Kit checkboxes", async () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].channel, "C123");
     assert.equal(calls[0].thread_ts, "99");
-    assert.equal(calls[0].text, "Todo\n☐ Keep working\n☑ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶");
+    assert.equal(calls[0].text, "Todo\n☐ Keep working\n☑ ~~Ship renderer~~");
     assert.equal(calls[0].blocks[0].text.text, "*Todo*");
     const checkbox = calls[0].blocks[1].elements[0];
     assert.equal(checkbox.type, "checkboxes");
