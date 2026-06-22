@@ -44,6 +44,7 @@ c2e27e5 fix(bootstrap): bind PowerShell entrypoint mode
 9919536 fix(bootstrap): pass PowerShell wrapper mode as parser args
 7c03b8c fix(release): keep beta and stable metadata commits hook-independent
 6b15b59 docs(release): cover 0.6.0 nightly changes
+8ff476f docs(release): cover 0.6.0 nightly changes
 -->
 
 ## 0.5.0
