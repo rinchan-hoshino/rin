@@ -625,7 +625,7 @@ test("chat inbox processing restore honors a per-drain limit", async () => {
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
 });
 
-test("chat inbox drain caps claimed work while backlog remains pending", async () => {
+test("chat inbox drain caps active chat-key workers while backlog remains pending", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   for (let index = 0; index < 5; index += 1) {
     inbox.enqueueChatInboxItem(agentDir, {
@@ -651,7 +651,6 @@ test("chat inbox drain caps claimed work while backlog remains pending", async (
     getController: () => ({ claimsInboundMessage: () => false }),
     isInboundMessageProcessed: () => false,
     enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
-    maxClaimsPerDrain: 10,
     maxActiveChatKeyWorkers: 2,
     activeChatKeyWorkerCount: () => claimedJobs.length,
   });
@@ -661,6 +660,196 @@ test("chat inbox drain caps claimed work while backlog remains pending", async (
   assert.equal(claimedJobs.length, 2);
   assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 3);
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 2);
+});
+
+test("chat inbox drain does not cap pending claims at eight", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  for (let index = 0; index < 9; index += 1) {
+    inbox.enqueueChatInboxItem(agentDir, {
+      chatKey: `telegram/1:no-claim-cap-${index}`,
+      messageId: `no-claim-cap-${index}`,
+      session: {
+        platform: "telegram",
+        selfId: "1",
+        channelId: `no-claim-cap-${index}`,
+        userId: "3",
+        messageId: `no-claim-cap-${index}`,
+        timestamp: Date.now(),
+        content: "hello",
+        stripped: { content: "hello" },
+      },
+      elements: [{ type: "text", attrs: { content: "hello" } }],
+    });
+  }
+
+  const claimedJobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({ claimsInboundMessage: () => false }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.equal(claimedJobs.length, 9);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 9);
+});
+
+test("chat inbox drain leaves same-chat backlog pending instead of processing-queueing it", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  for (let index = 0; index < 3; index += 1) {
+    inbox.enqueueChatInboxItem(agentDir, {
+      chatKey: "telegram/1:same-chat",
+      messageId: `same-chat-${index}`,
+      session: {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "same-chat",
+        userId: "3",
+        messageId: `same-chat-${index}`,
+        timestamp: Date.now(),
+        content: "hello",
+        stripped: { content: "hello" },
+      },
+      elements: [{ type: "text", attrs: { content: "hello" } }],
+    });
+  }
+
+  const claimedJobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({ claimsInboundMessage: () => false }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+    hasActiveChatKeyWorker: (chatKey) =>
+      claimedJobs.some((job) => job.envelope.chatKey === chatKey),
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.equal(claimedJobs.length, 1);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 2);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
+});
+
+test("chat inbox drain only bypasses a busy chat-key worker for active-turn work", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  inbox.enqueueChatInboxItem(agentDir, {
+    chatKey: "telegram/1:active-non-bypass",
+    messageId: "active-non-bypass",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "active-non-bypass",
+      userId: "3",
+      messageId: "active-non-bypass",
+      timestamp: Date.now(),
+      content: "hello",
+      stripped: { content: "hello" },
+    },
+    elements: [{ type: "text", attrs: { content: "hello" } }],
+  });
+
+  const claimedJobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      claimsInboundMessage: () => false,
+      hasActiveTurn: () => true,
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+    hasActiveChatKeyWorker: () => true,
+    canClaimDuringActiveChatKeyWorker: () => false,
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.equal(claimedJobs.length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
+});
+
+test("chat inbox drain lets active-turn work bypass the worker-count cap", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  inbox.enqueueChatInboxItem(agentDir, {
+    chatKey: "telegram/1:active-bypass",
+    messageId: "active-bypass",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "active-bypass",
+      userId: "3",
+      messageId: "active-bypass",
+      timestamp: Date.now(),
+      content: "/abort",
+      stripped: { content: "/abort" },
+    },
+    elements: [{ type: "text", attrs: { content: "/abort" } }],
+  });
+
+  const claimedJobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      claimsInboundMessage: () => false,
+      hasActiveTurn: () => true,
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+    maxActiveChatKeyWorkers: 4,
+    activeChatKeyWorkerCount: () => 4,
+    hasActiveChatKeyWorker: () => true,
+    canClaimDuringActiveChatKeyWorker: () => true,
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.equal(claimedJobs.length, 1);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
+});
+
+test("chat inbox drain leaves processing recovery to startup instead of stale polling", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  inbox.enqueueChatInboxItem(agentDir, {
+    chatKey: "telegram/1:stale-processing",
+    messageId: "stale-processing",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "stale-processing",
+      userId: "3",
+      messageId: "stale-processing",
+      timestamp: Date.now(),
+      content: "hello",
+      stripped: { content: "hello" },
+    },
+    elements: [{ type: "text", attrs: { content: "hello" } }],
+  });
+  const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
+  const claimedPath = inbox.claimChatInboxFile(agentDir, pendingPath);
+  const staleItem = {
+    ...inbox.readChatInboxItem(claimedPath),
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  };
+  await fs.writeFile(claimedPath, `${JSON.stringify(staleItem)}\n`);
+
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({ claimsInboundMessage: () => false }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: () => {
+      throw new Error("should_not_enqueue");
+    },
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
 });
 
 test("chat inbox retry helper isolates envelopes after repeated failures", async () => {

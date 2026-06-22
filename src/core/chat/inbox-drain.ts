@@ -8,7 +8,6 @@ import {
   readChatInboxItem,
   requeueChatInboxFile,
   restoreChatInboxFile,
-  restoreProcessingChatInboxFiles,
 } from "./inbox.js";
 import { safeString } from "../text-utils.js";
 
@@ -76,47 +75,54 @@ export function createChatInboxDrain(deps: {
   getController: (chatKey: string) => ChatController;
   isInboundMessageProcessed: (chatKey: string, messageId: string) => boolean;
   enqueueClaimedInboxItem: (job: ClaimedChatInboxJob) => void;
-  processingStaleMs?: number;
-  maxProcessingRestorePerDrain?: number;
-  maxClaimsPerDrain?: number;
   maxActiveChatKeyWorkers?: number;
   activeChatKeyWorkerCount?: () => number;
+  hasActiveChatKeyWorker?: (chatKey: string) => boolean;
+  canClaimDuringActiveChatKeyWorker?: (
+    envelope: ChatInboxItem,
+    controller: ChatController,
+  ) => boolean | Promise<boolean>;
   logger?: { warn?: (...args: any[]) => void };
 }) {
   const drainChatInboxOnce = async () => {
-    const restored = restoreProcessingChatInboxFiles(deps.agentDir, {
-      staleMs: deps.processingStaleMs,
-      limit: deps.maxProcessingRestorePerDrain,
-    });
-    if (restored.length) {
-      deps.logger?.warn?.(
-        `chat inbox restored stale processing items count=${restored.length}`,
-      );
-    }
-    let claimedCount = 0;
-    const canClaimMore = () => {
-      const maxClaimsPerDrain = Math.max(
-        0,
-        Number(deps.maxClaimsPerDrain || 0),
-      );
-      if (maxClaimsPerDrain > 0 && claimedCount >= maxClaimsPerDrain) {
-        return false;
-      }
-      const maxActiveChatKeyWorkers = Math.max(
-        0,
-        Number(deps.maxActiveChatKeyWorkers || 0),
-      );
-      const activeChatKeyWorkerCount = deps.activeChatKeyWorkerCount?.() || 0;
-      if (
-        maxActiveChatKeyWorkers > 0 &&
-        activeChatKeyWorkerCount >= maxActiveChatKeyWorkers
-      ) {
-        return false;
-      }
-      return true;
-    };
+    const claimedChatKeys = new Set<string>();
+    const maxActiveChatKeyWorkers = () =>
+      Math.max(0, Number(deps.maxActiveChatKeyWorkers || 0));
+    const activeChatKeyWorkerCount = () =>
+      deps.activeChatKeyWorkerCount?.() || 0;
     for (const filePath of listPendingChatInboxFiles(deps.agentDir)) {
-      if (!canClaimMore()) break;
+      const pendingEnvelope = readChatInboxItem(filePath);
+      if (!pendingEnvelope) {
+        completeChatInboxFile(filePath);
+        continue;
+      }
+      const pendingChatKey = safeString(pendingEnvelope.chatKey || "").trim();
+      if (!pendingChatKey) {
+        completeChatInboxFile(filePath);
+        continue;
+      }
+      const pendingController = deps.getController(pendingChatKey);
+      const hasBusyChatKey = Boolean(
+        claimedChatKeys.has(pendingChatKey) ||
+        deps.hasActiveChatKeyWorker?.(pendingChatKey),
+      );
+      const canClaimBusyChatKey = hasBusyChatKey
+        ? Boolean(
+            (pendingController as any)?.hasActiveTurn?.() &&
+            (await deps.canClaimDuringActiveChatKeyWorker?.(
+              pendingEnvelope,
+              pendingController,
+            )),
+          )
+        : true;
+      if (!canClaimBusyChatKey) continue;
+      if (
+        !hasBusyChatKey &&
+        maxActiveChatKeyWorkers() > 0 &&
+        activeChatKeyWorkerCount() >= maxActiveChatKeyWorkers()
+      ) {
+        continue;
+      }
       let claimedPath = "";
       try {
         claimedPath = claimChatInboxFile(deps.agentDir, filePath);
@@ -136,9 +142,12 @@ export function createChatInboxDrain(deps: {
         restoreChatInboxFile(deps.agentDir, claimedPath, envelope);
         continue;
       }
-      const controller = envelope.chatKey
-        ? deps.getController(envelope.chatKey)
-        : null;
+      const controller =
+        envelope.chatKey && envelope.chatKey === pendingChatKey
+          ? pendingController
+          : envelope.chatKey
+            ? deps.getController(envelope.chatKey)
+            : null;
       if (controller?.claimsInboundMessage(envelope.messageId)) {
         completeChatInboxFile(claimedPath);
         continue;
@@ -150,7 +159,7 @@ export function createChatInboxDrain(deps: {
         continue;
       }
       deps.enqueueClaimedInboxItem({ claimedPath, envelope });
-      claimedCount += 1;
+      claimedChatKeys.add(envelope.chatKey);
     }
   };
 
