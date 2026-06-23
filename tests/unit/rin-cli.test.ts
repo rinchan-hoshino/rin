@@ -574,7 +574,8 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
       "--json",
     ]),
     {
-      watch: true,
+      watch: false,
+      once: true,
       intervalMs: 2500,
       json: true,
       limit: 50,
@@ -584,8 +585,19 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
   );
 
   assert.deepEqual(status.parseStatusArgs(["status", "--interval=0.25"]), {
-    watch: false,
+    watch: true,
+    once: false,
     intervalMs: 250,
+    json: false,
+    limit: 50,
+    offset: 0,
+    help: false,
+  });
+
+  assert.deepEqual(status.parseStatusArgs(["status", "--once"]), {
+    watch: false,
+    once: true,
+    intervalMs: 1000,
     json: false,
     limit: 50,
     offset: 0,
@@ -602,6 +614,7 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
     ]),
     {
       watch: false,
+      once: true,
       intervalMs: 1000,
       json: true,
       limit: 100,
@@ -626,6 +639,9 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
   assert.equal(selfImproveArgs.explicitLimit, true);
   assert.equal(selfImproveArgs.status, "failed");
   assert.equal(selfImproveArgs.json, true);
+  assert.equal(selfImproveArgs.once, true);
+  assert.equal(selfImproveArgs.watch, false);
+  assert.equal(selfImproveArgs.intervalMs, 2000);
   assert.equal(selfImproveArgs.help, false);
 
   assert.deepEqual(memoryIndex.parseMemoryIndexArgs(["memory-index"]), {
@@ -708,6 +724,26 @@ test("self-improve report renders recent distillation history", () => {
     assert.match(report, /self_improve:periodic_review/);
     assert.match(report, /updated:self_improve\/skills\/demo\/SKILL.md/);
 
+    const tui = selfImprove.renderSelfImproveTui(
+      agentDir,
+      {
+        from: "2026-01-01T00:00:00.000Z",
+        limit: 20,
+        explicitLimit: false,
+        once: false,
+        watch: true,
+        intervalMs: 2000,
+        json: false,
+        help: false,
+      },
+      { selectedIndex: 0, expanded: false },
+      { width: 120, height: 24, interactive: true },
+    );
+    assert.match(tui, /Self-Improve Runs/);
+    assert.match(tui, /↑\/↓ j\/k move/);
+    assert.match(tui, /Details/);
+    assert.match(tui, /run-25/);
+
     const backend = JSON.parse(
       selfImprove.renderSelfImproveReport(agentDir, {
         from: "2026-01-01T00:00:00.000Z",
@@ -788,10 +824,12 @@ test("status report renders running session activity", () => {
     },
   });
 
-  assert.match(report, /running: 1 \/ 1 sessions/);
+  assert.match(report, /Rin Status/);
+  assert.match(report, /workers 1\/1/);
+  assert.match(report, /tasks 1\/1 running\/enabled/);
   assert.match(report, /worker_1/);
-  assert.doesNotMatch(report, /cron_demo/);
-  assert.doesNotMatch(report, /agent_prompt/);
+  assert.match(report, /cron_demo/);
+  assert.match(report, /Details/);
 });
 
 test("usage and status parsers reject invalid syntax", () => {

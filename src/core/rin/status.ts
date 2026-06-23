@@ -8,15 +8,16 @@ import {
   ParsedArgs,
   safeString,
 } from "./shared.js";
-import { sleep } from "../platform/process.js";
-import { formatReportTime, renderReportTable } from "./report-format.js";
+import { formatReportTime } from "./report-format.js";
 import {
   canConnectDaemonSocket,
   requestDaemonCommand,
 } from "../rin-daemon/client.js";
+import { runInteractiveList } from "./interactive-list.js";
 
 export type StatusCliOptions = {
   watch: boolean;
+  once: boolean;
   intervalMs: number;
   json: boolean;
   limit: number;
@@ -24,14 +25,29 @@ export type StatusCliOptions = {
   help: boolean;
 };
 
+type StatusItem = {
+  id: string;
+  kind: "worker" | "task";
+  marker: string;
+  state: string;
+  summary: string;
+  meta: string;
+  detail: string[];
+};
+
 function printStatusHelp() {
   console.log(
     [
       "rin status [options]",
       "",
+      "Default view:",
+      "  Opens an interactive, auto-refreshing TUI when stdout is a terminal.",
+      "  Use ↑/↓ or j/k to move, Enter/Space to expand details, q or Ctrl+C to exit.",
+      "",
       "Options:",
-      "  --watch              refresh the status view until interrupted",
-      "  --interval <sec>     watch refresh interval in seconds (default 1)",
+      "  --once               print one non-interactive snapshot",
+      "  --watch              open the interactive live view (default on TTY)",
+      "  --interval <sec>     refresh interval in seconds (default 1)",
       "  --json               print backend daemon activity plus session listing",
       "  --limit <n>          backend session page size (default 50)",
       "  --offset <n>         backend session page offset (default 0)",
@@ -39,7 +55,7 @@ function printStatusHelp() {
       "",
       "Examples:",
       "  rin status",
-      "  rin status --watch",
+      "  rin status --once",
       "  rin status --json",
     ].join("\n"),
   );
@@ -71,7 +87,8 @@ function parseNonNegativeInt(value: string, name: string) {
 export function parseStatusArgs(argv: string[]): StatusCliOptions {
   const args = extractSubcommandArgv(argv, "status");
   const result: StatusCliOptions = {
-    watch: false,
+    watch: true,
+    once: false,
     intervalMs: 1000,
     json: false,
     limit: 50,
@@ -86,10 +103,18 @@ export function parseStatusArgs(argv: string[]): StatusCliOptions {
     }
     if (arg === "--watch" || arg === "-w") {
       result.watch = true;
+      result.once = false;
+      continue;
+    }
+    if (arg === "--once") {
+      result.once = true;
+      result.watch = false;
       continue;
     }
     if (arg === "--json") {
       result.json = true;
+      result.once = true;
+      result.watch = false;
       continue;
     }
     if (arg === "--limit") {
@@ -175,54 +200,221 @@ function formatDuration(ms: unknown) {
   return `${hours}h${(minutes % 60).toString().padStart(2, "0")}m`;
 }
 
-function renderWorkerRows(workers: unknown[]) {
-  return workers.map((worker) => {
-    const value = asRecord(worker) ?? {};
-    const session = safeString(value.sessionFile || value.sessionId).trim();
-    return {
-      id: formatMaybe(value.id),
-      pid: formatMaybe(value.pid),
-      state: formatMaybe(value.state),
-      attached: formatMaybe(value.attachedConnections, "0"),
-      pending: formatMaybe(value.pendingResponses, "0"),
-      idle: value.idleSince
-        ? formatDuration(Date.now() - Number(value.idleSince))
-        : "-",
-      session: session ? session.replace(/^.*\/sessions\//, "sessions/") : "-",
-    };
-  });
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_COLOR_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
+
+function stripAnsi(value: string) {
+  return value.replace(ANSI_COLOR_PATTERN, "");
+}
+
+function truncate(value: string, width: number) {
+  const clean = stripAnsi(value);
+  if (clean.length <= width) return value;
+  if (width <= 1) return clean.slice(0, width);
+  return `${clean.slice(0, width - 1)}…`;
+}
+
+function pad(value: string, width: number) {
+  const clean = stripAnsi(value);
+  if (clean.length >= width) return truncate(value, width);
+  return `${value}${" ".repeat(width - clean.length)}`;
+}
+
+function statusDot(state: string) {
+  if (state === "working" || state === "compacting") return "●";
+  if (state === "stopping") return "◒";
+  if (state === "idle") return "○";
+  return "◌";
+}
+
+function sessionLabel(value: unknown) {
+  const text = safeString(value).trim();
+  if (!text) return "-";
+  return text.replace(/\\/g, "/").replace(/^.*\/sessions\//, "sessions/");
 }
 
 function isRunningWorker(worker: unknown) {
   const value = asRecord(worker) ?? {};
   const state = safeString(value.state).trim();
   return (
-    state === "working" || state === "stopping" || Boolean(value.rinWorking)
+    state === "working" ||
+    state === "compacting" ||
+    state === "stopping" ||
+    Boolean(value.rinWorking)
   );
 }
 
-export function renderStatusReport(snapshot: unknown) {
-  const status = asRecord(snapshot);
-  if (!status) return "Rin session status: unavailable";
+function workerItem(worker: unknown): StatusItem {
+  const value = asRecord(worker) ?? {};
+  const state = formatMaybe(value.state, "attached");
+  const flags = [
+    value.turnActive ? "turn" : "",
+    value.isStreaming ? "stream" : "",
+    value.isCompacting ? "compact" : "",
+    value.rinWorking ? "rin" : "",
+  ].filter(Boolean);
+  const idle = value.idleSince
+    ? formatDuration(Date.now() - Number(value.idleSince))
+    : "-";
+  const session = sessionLabel(value.sessionFile || value.sessionId);
+  return {
+    id: formatMaybe(value.id),
+    kind: "worker",
+    marker: `W ${statusDot(state)}`,
+    state,
+    summary: `${formatMaybe(value.id)}  ${state}`,
+    meta: `pid ${formatMaybe(value.pid)} · conn ${formatMaybe(value.attachedConnections, "0")} · pend ${formatMaybe(value.pendingResponses, "0")} · idle ${idle} · ${flags.join(",") || "-"}`,
+    detail: [
+      `worker      ${formatMaybe(value.id)}`,
+      `state       ${state}`,
+      `pid         ${formatMaybe(value.pid)}`,
+      `connections ${formatMaybe(value.attachedConnections, "0")}`,
+      `pending     ${formatMaybe(value.pendingResponses, "0")}`,
+      `flags       ${flags.join(", ") || "-"}`,
+      `session     ${session}`,
+    ],
+  };
+}
 
+function taskItem(task: unknown): StatusItem {
+  const value = asRecord(task) ?? {};
+  const running = Boolean(value.running);
+  const enabled = Boolean(value.enabled) && !value.completedAt;
+  const state = running ? "running" : enabled ? "enabled" : "stopped";
+  const active = running ? formatDuration(value.activeDurationMs) : "-";
+  const target = asRecord(value.target)?.kind || value.targetKind || "-";
+  const session = asRecord(value.session)?.mode || "-";
+  const next = formatMaybe(value.nextRunAt);
+  const last = formatMaybe(value.lastFinishedAt || value.lastStartedAt);
+  return {
+    id: formatMaybe(value.id),
+    kind: "task",
+    marker: `T ${running ? "●" : enabled ? "○" : "◌"}`,
+    state,
+    summary: `${formatMaybe(value.name || value.id)}  ${state}`,
+    meta: `next ${next} · active ${active} · runs ${formatMaybe(value.runCount, "0")} · ${target}`,
+    detail: [
+      `task        ${formatMaybe(value.id)}`,
+      `state       ${state}`,
+      `target      ${target}`,
+      `session     ${session}`,
+      `next        ${next}`,
+      `last        ${last}`,
+      `active      ${active}`,
+      `runs        ${formatMaybe(value.runCount, "0")}`,
+    ],
+  };
+}
+
+function buildStatusItems(snapshot: unknown) {
+  const status = asRecord(snapshot) ?? {};
+  const workers = asArray(status.workers).map(workerItem);
+  const tasks = asArray(asRecord(status.cron)?.tasks)
+    .map(taskItem)
+    .sort((a, b) => {
+      const priority = (item: StatusItem) =>
+        item.state === "running" ? 0 : item.state === "enabled" ? 1 : 2;
+      return priority(a) - priority(b) || a.id.localeCompare(b.id);
+    });
+  return [...workers, ...tasks];
+}
+
+function renderStatusDetail(item: StatusItem | undefined, width: number) {
+  const lines = item?.detail.length
+    ? item.detail
+    : ["select a row for details"];
+  return lines.map((line) => `  ${truncate(line, width - 2)}`).join("\n");
+}
+
+function renderStatusRows(
+  items: StatusItem[],
+  selectedIndex: number,
+  width: number,
+  maxRows: number,
+) {
+  if (!items.length) return "  no workers or scheduled tasks";
+  const start = clampViewportStart(selectedIndex, items.length, maxRows);
+  const visible = items.slice(start, start + maxRows);
+  return visible
+    .map((item, offset) => {
+      const index = start + offset;
+      const selected = index === selectedIndex;
+      const prefix = selected ? "▶" : " ";
+      const line = `${prefix} ${pad(item.marker, 4)} ${pad(item.summary, 34)} ${item.meta}`;
+      return truncate(line, width);
+    })
+    .join("\n");
+}
+
+function clampViewportStart(
+  selectedIndex: number,
+  count: number,
+  maxRows: number,
+) {
+  if (count <= maxRows) return 0;
+  const half = Math.floor(maxRows / 2);
+  return Math.min(Math.max(0, selectedIndex - half), count - maxRows);
+}
+
+function summaryLine(snapshot: unknown) {
+  const status = asRecord(snapshot) ?? {};
   const workers = asArray(status.workers);
-  const runningWorkers = workers.filter(isRunningWorker);
-  const lines = [
-    `Rin running sessions @ ${formatReportTime(status.generatedAt)}`,
-    `socket: ${formatMaybe(status.socketPath)}`,
-    `running: ${String(runningWorkers.length)} / ${String(status.workerCount ?? workers.length)} sessions`,
-    "",
-    renderReportTable(
-      renderWorkerRows(runningWorkers),
-      ["id", "pid", "state", "attached", "pending", "idle", "session"],
-      {
-        emptyText: "no running sessions",
-        indent: "  ",
-        maxColumnWidth: 44,
-      },
-    ),
-  ];
-  return lines.join("\n");
+  const activeWorkers = workers.filter(isRunningWorker).length;
+  const cron = asRecord(status.cron) ?? {};
+  return [
+    `workers ${activeWorkers}/${formatMaybe(status.workerCount ?? workers.length, "0")}`,
+    `tasks ${formatMaybe(cron.runningTaskCount, "0")}/${formatMaybe(cron.enabledTaskCount, "0")} running/enabled`,
+    `next ${formatMaybe(cron.nextRunAt)}`,
+    `socket ${formatMaybe(status.socketPath)}`,
+  ].join("  │  ");
+}
+
+export function renderStatusTui(
+  snapshot: unknown,
+  state: { selectedIndex?: number; expanded?: boolean } = {},
+  options: { width?: number; height?: number; interactive?: boolean } = {},
+) {
+  const width = Math.max(
+    60,
+    Math.min(160, options.width || process.stdout.columns || 100),
+  );
+  const height = Math.max(16, options.height || process.stdout.rows || 30);
+  const items = buildStatusItems(snapshot);
+  const selectedIndex = Math.min(
+    Math.max(0, state.selectedIndex || 0),
+    Math.max(0, items.length - 1),
+  );
+  const selected = items[selectedIndex];
+  const status = asRecord(snapshot) ?? {};
+  const detailRows = state.expanded ? Math.max(6, height - 8) : 8;
+  const listRows = state.expanded ? 0 : Math.max(5, height - detailRows - 7);
+  const headerRight = formatReportTime(status.generatedAt);
+  const title = "Rin Status";
+  const header = `${title}${" ".repeat(Math.max(1, width - title.length - headerRight.length))}${headerRight}`;
+  const hints = options.interactive
+    ? "↑/↓ j/k move · PgUp/PgDn · Enter/Space detail · q/Ctrl+C quit"
+    : "snapshot view · use `rin status` in a terminal for live TUI · `rin status --json` for backend";
+  const body = state.expanded
+    ? renderStatusDetail(selected, width)
+    : renderStatusRows(items, selectedIndex, width, listRows);
+  const detail = state.expanded
+    ? ""
+    : ["", "Details", renderStatusDetail(selected, width)].join("\n");
+  return [
+    header,
+    truncate(summaryLine(snapshot), width),
+    truncate(hints, width),
+    "─".repeat(width),
+    body,
+    detail,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+export function renderStatusReport(snapshot: unknown) {
+  if (!asRecord(snapshot)) return "Rin session status: unavailable";
+  return renderStatusTui(snapshot, {}, { interactive: false });
 }
 
 const STATUS_REQUEST_TIMEOUT_MS = 8_000;
@@ -272,31 +464,18 @@ async function renderOnce(options: StatusCliOptions, socketPath?: string) {
   return renderStatusReport(snapshot);
 }
 
-async function runStatusLoop(options: StatusCliOptions, socketPath?: string) {
-  while (true) {
-    try {
-      const output = await renderOnce(options, socketPath);
-      if (options.json) {
-        console.log(output);
-      } else {
-        process.stdout.write("\x1b[2J\x1b[H");
-        console.log(output);
-        console.log("\nPress Ctrl+C to stop.");
-      }
-    } catch (error: any) {
-      const message = formatStatusRequestFailure(
-        options,
-        error?.message || error,
-      );
-      if (options.json) console.log(message);
-      else {
-        process.stdout.write("\x1b[2J\x1b[H");
-        console.log(message);
-        console.log("\nPress Ctrl+C to stop.");
-      }
-    }
-    await sleep(options.intervalMs);
-  }
+async function runStatusTui(options: StatusCliOptions, socketPath?: string) {
+  const opened = await runInteractiveList({
+    intervalMs: options.intervalMs,
+    render: async (state) => {
+      const snapshot = await queryActivity(socketPath);
+      return {
+        content: renderStatusTui(snapshot, state, { interactive: true }),
+        itemCount: buildStatusItems(snapshot).length,
+      };
+    },
+  });
+  if (!opened) await printStatusOnce(options, socketPath);
 }
 
 async function printStatusOnce(options: StatusCliOptions, socketPath?: string) {
@@ -317,7 +496,7 @@ export async function runStatusInternal(rawArgv: string[]) {
     console.log(formatStatusUnavailable(options));
     return;
   }
-  if (options.watch) return await runStatusLoop(options);
+  if (!options.once && !options.json) return await runStatusTui(options);
   await printStatusOnce(options);
 }
 
@@ -329,7 +508,7 @@ export async function runStatus(parsed: ParsedArgs, rawArgv: string[]) {
   }
   const context = createTargetExecutionContext(parsed);
   if (!context.isTargetUser) {
-    if (options.watch) {
+    if (!options.once && !options.json) {
       context.exec([
         process.execPath,
         path.join(context.repoRoot, "dist", "app", "rin", "main.js"),
@@ -351,6 +530,7 @@ export async function runStatus(parsed: ParsedArgs, rawArgv: string[]) {
     console.log(formatStatusUnavailable(options));
     return;
   }
-  if (options.watch) return await runStatusLoop(options, context.socketPath);
+  if (!options.once && !options.json)
+    return await runStatusTui(options, context.socketPath);
   await printStatusOnce(options, context.socketPath);
 }

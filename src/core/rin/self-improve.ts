@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import {
   captureInternalRinCommand,
@@ -10,6 +11,7 @@ import {
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
 import { nowIso } from "../time-utils.js";
 import { formatReportTime, renderReportTable } from "./report-format.js";
+import { runInteractiveList } from "./interactive-list.js";
 
 export type SelfImproveCliOptions = {
   from?: string;
@@ -19,6 +21,9 @@ export type SelfImproveCliOptions = {
   status?: string;
   trigger?: string;
   id?: string;
+  once: boolean;
+  watch: boolean;
+  intervalMs: number;
   json: boolean;
   help: boolean;
 };
@@ -40,26 +45,39 @@ type MaintenanceHistoryRecord = {
   changedFiles?: Array<{ path?: string; change?: string }>;
 };
 
+type SelfImproveItem = {
+  id: string;
+  state: string;
+  title: string;
+  meta: string;
+  detail: string[];
+};
+
 function printSelfImproveHelp() {
   console.log(
     [
       "rin self-improve [options]",
       "",
-      "Frontend view:",
-      "  Shows all self-improve outcomes from the past 1 day.",
+      "Default view:",
+      "  Opens an interactive Pi resume-list style TUI for recent self-improve runs.",
+      "  Use ↑/↓ or j/k to move, Enter/Space to expand details, q or Ctrl+C to exit.",
       "",
       "Options:",
-      "  --id <id>           show details for one self-improve run",
+      "  --once              print one non-interactive text snapshot",
+      "  --watch             open the interactive live view (default on TTY)",
+      "  --interval <sec>    refresh interval in seconds (default 2)",
+      "  --id <id>           print details for one self-improve run",
       "  --json              backend view with complete filtered records and stats",
-      "  --from <time>       backend start time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
-      "  --to <time>         backend end time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
-      "  --limit <n>         backend run limit (default 20)",
-      "  --status <status>   backend filter: completed or failed",
-      "  --trigger <text>    backend substring filter for trigger",
+      "  --from <time>       start time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
+      "  --to <time>         end time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
+      "  --limit <n>         run limit for text/backend views (default 20)",
+      "  --status <status>   filter: completed or failed",
+      "  --trigger <text>    substring filter for trigger",
       "  --help              show this help",
       "",
       "Examples:",
       "  rin self-improve",
+      "  rin self-improve --once",
       "  rin self-improve --id run-20260623",
       "  rin self-improve --json --from 30d --status failed",
     ].join("\n"),
@@ -70,6 +88,16 @@ function parsePositiveInt(value: string, fallback: number) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return fallback;
   return Math.round(num);
+}
+
+function parseIntervalMs(value: string) {
+  const text = safeString(value).trim();
+  if (!text) throw new Error("missing_self_improve_interval");
+  const seconds = Number(text);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error(`invalid_self_improve_interval:${text}`);
+  }
+  return Math.max(100, Math.round(seconds * 1000));
 }
 
 function normalizeTimeArg(
@@ -111,6 +139,9 @@ export function parseSelfImproveArgs(argv: string[]): SelfImproveCliOptions {
   const result: SelfImproveCliOptions = {
     limit: 20,
     explicitLimit: false,
+    once: false,
+    watch: true,
+    intervalMs: 2000,
     json: false,
     help: false,
   };
@@ -120,12 +151,26 @@ export function parseSelfImproveArgs(argv: string[]): SelfImproveCliOptions {
       result.help = true;
       continue;
     }
+    if (arg === "--once") {
+      result.once = true;
+      result.watch = false;
+      continue;
+    }
+    if (arg === "--watch" || arg === "-w") {
+      result.once = false;
+      result.watch = true;
+      continue;
+    }
     if (arg === "--json") {
       result.json = true;
+      result.once = true;
+      result.watch = false;
       continue;
     }
     if (arg === "--id") {
       result.id = readArg(args, ++i);
+      result.once = true;
+      result.watch = false;
       continue;
     }
     if (arg === "--from") {
@@ -147,6 +192,14 @@ export function parseSelfImproveArgs(argv: string[]): SelfImproveCliOptions {
     }
     if (arg === "--trigger") {
       result.trigger = readArg(args, ++i);
+      continue;
+    }
+    if (arg === "--interval") {
+      result.intervalMs = parseIntervalMs(readArg(args, ++i));
+      continue;
+    }
+    if (arg.startsWith("--interval=")) {
+      result.intervalMs = parseIntervalMs(arg.slice("--interval=".length));
       continue;
     }
     throw new Error(`unknown_self_improve_arg:${arg}`);
@@ -206,11 +259,11 @@ function inRange(
   return true;
 }
 
-function changedFileSummary(record: MaintenanceHistoryRecord) {
+function changedFileSummary(record: MaintenanceHistoryRecord, max = 4) {
   const files = Array.isArray(record.changedFiles) ? record.changedFiles : [];
   if (!files.length) return "-";
   const visible = files
-    .slice(0, 4)
+    .slice(0, max)
     .map((file) => {
       const change = safeString(file.change).trim() || "updated";
       const path = safeString(file.path).trim();
@@ -276,17 +329,6 @@ function renderRecentRuns(records: MaintenanceHistoryRecord[]) {
 
 function frontendFromIso() {
   return new Date(Date.now() - 24 * 3_600_000).toISOString();
-}
-
-function isBackendSelfImproveRequest(options: SelfImproveCliOptions) {
-  return Boolean(
-    options.json ||
-    options.from ||
-    options.to ||
-    options.status ||
-    options.trigger ||
-    options.explicitLimit,
-  );
 }
 
 function querySelfImproveRecords(
@@ -390,6 +432,167 @@ export function buildSelfImproveBackendReport(
   };
 }
 
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_COLOR_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
+
+function stripAnsi(value: string) {
+  return value.replace(ANSI_COLOR_PATTERN, "");
+}
+
+function truncate(value: string, width: number) {
+  const clean = stripAnsi(value);
+  if (clean.length <= width) return value;
+  if (width <= 1) return clean.slice(0, width);
+  return `${clean.slice(0, width - 1)}…`;
+}
+
+function pad(value: string, width: number) {
+  const clean = stripAnsi(value);
+  if (clean.length >= width) return truncate(value, width);
+  return `${value}${" ".repeat(width - clean.length)}`;
+}
+
+function statusDot(status: string) {
+  if (status === "completed") return "●";
+  if (status === "failed") return "✖";
+  if (status === "skipped") return "◌";
+  return "○";
+}
+
+function selfImproveItem(
+  record: MaintenanceHistoryRecord,
+  index: number,
+): SelfImproveItem {
+  const id = safeString(record.id).trim() || `#${index + 1}`;
+  const state = safeString(record.status).trim() || "unknown";
+  const changedCount = Array.isArray(record.changedFiles)
+    ? record.changedFiles.length
+    : 0;
+  const time = formatReportTime(record.finishedAt || record.startedAt);
+  return {
+    id,
+    state,
+    title: `${time}  ${state}  ${safeString(record.trigger).trim() || "-"}`,
+    meta: `id ${id} · changes ${changedCount} · attempts ${String(record.attempts || 1)} · ${sessionLabel(record.sessionFile)}`,
+    detail: renderSelfImproveDetail(record).split("\n"),
+  };
+}
+
+function clampViewportStart(
+  selectedIndex: number,
+  count: number,
+  maxRows: number,
+) {
+  if (count <= maxRows) return 0;
+  const half = Math.floor(maxRows / 2);
+  return Math.min(Math.max(0, selectedIndex - half), count - maxRows);
+}
+
+function renderItems(
+  items: SelfImproveItem[],
+  selectedIndex: number,
+  width: number,
+  maxRows: number,
+) {
+  if (!items.length) return "  no self-improve outcomes in this window";
+  const start = clampViewportStart(selectedIndex, items.length, maxRows);
+  return items
+    .slice(start, start + maxRows)
+    .map((item, offset) => {
+      const index = start + offset;
+      const selected = index === selectedIndex;
+      const prefix = selected ? "▶" : " ";
+      const line = `${prefix} ${statusDot(item.state)} ${pad(item.title, 58)} ${item.meta}`;
+      return truncate(line, width);
+    })
+    .join("\n");
+}
+
+function renderDetail(item: SelfImproveItem | undefined, width: number) {
+  const lines = item?.detail.length
+    ? item.detail
+    : ["select a run for details"];
+  return lines.map((line) => `  ${truncate(line, width - 2)}`).join("\n");
+}
+
+function tuiRecords(agentDir: string, options: SelfImproveCliOptions) {
+  return querySelfImproveRecords(agentDir, {
+    ...options,
+    from: options.from || frontendFromIso(),
+    id: undefined,
+  });
+}
+
+export function renderSelfImproveTui(
+  agentDir: string,
+  options: SelfImproveCliOptions,
+  state: { selectedIndex?: number; expanded?: boolean } = {},
+  renderOptions: {
+    width?: number;
+    height?: number;
+    interactive?: boolean;
+  } = {},
+) {
+  const width = Math.max(
+    70,
+    Math.min(180, renderOptions.width || process.stdout.columns || 110),
+  );
+  const height = Math.max(
+    16,
+    renderOptions.height || process.stdout.rows || 30,
+  );
+  const records = tuiRecords(agentDir, options);
+  const items = records.map(selfImproveItem);
+  const selectedIndex = Math.min(
+    Math.max(0, state.selectedIndex || 0),
+    Math.max(0, items.length - 1),
+  );
+  const selected = items[selectedIndex];
+  const completed = records.filter(
+    (record) => record.status === "completed",
+  ).length;
+  const failed = records.filter((record) => record.status === "failed").length;
+  const changed = records.reduce(
+    (total, record) =>
+      total +
+      (Array.isArray(record.changedFiles) ? record.changedFiles.length : 0),
+    0,
+  );
+  const detailRows = state.expanded ? Math.max(6, height - 8) : 9;
+  const listRows = state.expanded ? 0 : Math.max(5, height - detailRows - 7);
+  const title = "Self-Improve Runs";
+  const headerRight = formatReportTime(nowIso());
+  const header = `${title}${" ".repeat(Math.max(1, width - title.length - headerRight.length))}${headerRight}`;
+  const scope = `${records.length} runs · ${completed} completed · ${failed} failed · ${changed} file changes`;
+  const filters = [
+    options.from ? `from ${options.from}` : "past 1d",
+    options.to ? `to ${options.to}` : "",
+    options.status ? `status ${options.status}` : "",
+    options.trigger ? `trigger ${options.trigger}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const hints = renderOptions.interactive
+    ? "↑/↓ j/k move · PgUp/PgDn · Enter/Space detail · q/Ctrl+C quit"
+    : "snapshot view · use `rin self-improve` in a terminal for list TUI · `--json` for backend";
+  const body = state.expanded
+    ? renderDetail(selected, width)
+    : renderItems(items, selectedIndex, width, listRows);
+  const detail = state.expanded
+    ? ""
+    : ["", "Details", renderDetail(selected, width)].join("\n");
+  return [
+    header,
+    truncate(`${scope}  │  ${filters}`, width),
+    truncate(hints, width),
+    "─".repeat(width),
+    body,
+    detail,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
 export function renderSelfImproveReport(
   agentDir: string,
   options: SelfImproveCliOptions,
@@ -410,8 +613,18 @@ export function renderSelfImproveReport(
       2,
     );
   }
-  if (isBackendSelfImproveRequest(options)) {
-    const records = querySelfImproveRecords(agentDir, options);
+  if (
+    options.once ||
+    options.explicitLimit ||
+    options.status ||
+    options.trigger ||
+    options.from ||
+    options.to
+  ) {
+    const effectiveOptions = options.once
+      ? { ...options, from: options.from || frontendFromIso() }
+      : options;
+    const records = querySelfImproveRecords(agentDir, effectiveOptions);
     const recent = records.slice(0, options.limit);
     return [
       `Rin self-improve history @ ${formatReportTime(nowIso())}`,
@@ -422,18 +635,30 @@ export function renderSelfImproveReport(
       renderRecentRuns(recent),
     ].join("\n");
   }
-  const records = querySelfImproveRecords(agentDir, {
-    ...options,
-    from: frontendFromIso(),
+  return renderSelfImproveTui(agentDir, options, {}, { interactive: false });
+}
+
+async function runSelfImproveTui(
+  agentDir: string,
+  options: SelfImproveCliOptions,
+) {
+  const opened = await runInteractiveList({
+    intervalMs: options.intervalMs,
+    render: async (state) => ({
+      content: renderSelfImproveTui(agentDir, options, state, {
+        interactive: true,
+      }),
+      itemCount: tuiRecords(agentDir, options).length,
+    }),
   });
-  return [
-    `Rin self-improve outcomes @ ${formatReportTime(nowIso())}`,
-    `window: past 1d · ${records.length} runs`,
-    "",
-    renderSelfImproveList(records),
-    "",
-    "Use `rin self-improve --id <id>` to view details, or `rin self-improve --json` for the backend record set.",
-  ].join("\n");
+  if (!opened)
+    console.log(
+      renderSelfImproveReport(agentDir, {
+        ...options,
+        once: true,
+        watch: false,
+      }),
+    );
 }
 
 export async function runSelfImproveInternal(rawArgv: string[]) {
@@ -442,7 +667,10 @@ export async function runSelfImproveInternal(rawArgv: string[]) {
     printSelfImproveHelp();
     return;
   }
-  console.log(renderSelfImproveReport(process.env.RIN_DIR || "", options));
+  const agentDir = process.env.RIN_DIR || "";
+  if (!options.once && !options.json && !options.id)
+    return await runSelfImproveTui(agentDir, options);
+  console.log(renderSelfImproveReport(agentDir, options));
 }
 
 export async function runSelfImprove(parsed: ParsedArgs, rawArgv: string[]) {
@@ -453,6 +681,15 @@ export async function runSelfImprove(parsed: ParsedArgs, rawArgv: string[]) {
   }
   const context = createTargetExecutionContext(parsed);
   if (!context.isTargetUser) {
+    if (!options.once && !options.json && !options.id) {
+      context.exec([
+        process.execPath,
+        path.join(context.repoRoot, "dist", "app", "rin", "main.js"),
+        "__self_improve_internal",
+        ...extractSubcommandArgv(rawArgv, "self-improve"),
+      ]);
+      return;
+    }
     const forwarded = captureInternalRinCommand(
       context,
       "__self_improve_internal",
@@ -462,5 +699,7 @@ export async function runSelfImprove(parsed: ParsedArgs, rawArgv: string[]) {
     process.stdout.write(forwarded);
     return;
   }
+  if (!options.once && !options.json && !options.id)
+    return await runSelfImproveTui(context.installDir, options);
   console.log(renderSelfImproveReport(context.installDir, options));
 }

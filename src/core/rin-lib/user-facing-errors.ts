@@ -229,12 +229,18 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Minecraft chat send failed because the outgoing message is empty. Add text.",
   minecraft_url_required: () =>
     "Minecraft chat adapter needs a server URL before it can start. Add the URL.",
+  invalid_self_improve_interval: () =>
+    "Self-improve live view needs a positive refresh interval.",
+  invalid_status_interval: () =>
+    "Status live view needs a positive refresh interval.",
   invalid_status_limit: () =>
     "Status backend needs a non-negative session limit.",
   invalid_status_offset: () =>
     "Status backend needs a non-negative session offset.",
+  missing_self_improve_interval: () =>
+    "Self-improve live view needs an interval value. Provide a valid interval.",
   missing_status_interval: () =>
-    "Status watch needs an interval value. Provide a valid interval.",
+    "Status live view needs an interval value. Provide a valid interval.",
   missing_status_limit: () => "Status backend needs a session limit value.",
   missing_status_offset: () => "Status backend needs a session offset value.",
 
