@@ -80,7 +80,7 @@ test("version reader prefers installed release metadata", () => {
     );
     fs.writeFileSync(
       path.join(installDir, "installer.json"),
-      `${JSON.stringify({ currentRelease: { release: { version: "1.2.3" } } })}\n`,
+      `\uFEFF${JSON.stringify({ currentRelease: { release: { version: "1.2.3" } } })}\n`,
       "utf8",
     );
 

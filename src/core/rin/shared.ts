@@ -474,7 +474,9 @@ function readInstalledRuntimeVersionForRoot(repoRoot: string) {
   if (!installDir) return "";
   try {
     const manifest = JSON.parse(
-      fs.readFileSync(installerManifestPath(installDir), "utf8"),
+      fs
+        .readFileSync(installerManifestPath(installDir), "utf8")
+        .replace(/^\uFEFF/, ""),
     );
     const releaseVersion = safeString(
       manifest?.currentRelease?.release?.version,
