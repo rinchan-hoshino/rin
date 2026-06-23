@@ -68,6 +68,53 @@ test("version subcommand prints package version without launching Rin", () => {
   assert.equal(parsed.releaseVersion, "1.2.3");
 });
 
+test("version reader prefers installed release metadata", () => {
+  const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-version-"));
+  try {
+    const runtimeRoot = path.join(installDir, "app", "current");
+    fs.mkdirSync(runtimeRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(runtimeRoot, "package.json"),
+      `${JSON.stringify({ version: "0.0.0" })}\n`,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(installDir, "installer.json"),
+      `${JSON.stringify({ currentRelease: { release: { version: "1.2.3" } } })}\n`,
+      "utf8",
+    );
+
+    assert.equal(shared.readRinPackageVersion(runtimeRoot), "1.2.3");
+  } finally {
+    fs.rmSync(installDir, { recursive: true, force: true });
+  }
+});
+
+test("version reader falls back to installed changelog for legacy installs", () => {
+  const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-version-"));
+  try {
+    const runtimeRoot = path.join(installDir, "app", "current");
+    fs.mkdirSync(runtimeRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(runtimeRoot, "package.json"),
+      `${JSON.stringify({ version: "0.0.0" })}\n`,
+      "utf8",
+    );
+    fs.mkdirSync(path.join(installDir, "docs", "release"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(installDir, "docs", "release", "CHANGELOG.md"),
+      "# Rin Changelog\n\n## 1.2.4\n\n- demo\n",
+      "utf8",
+    );
+
+    assert.equal(shared.readRinPackageVersion(runtimeRoot), "1.2.4");
+  } finally {
+    fs.rmSync(installDir, { recursive: true, force: true });
+  }
+});
+
 test("rin update --yes enables non-interactive updater confirmation", () => {
   const parsed = shared.resolveParsedArgs("update", { yes: true }, [
     "update",

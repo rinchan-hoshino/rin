@@ -452,7 +452,56 @@ export function collectTuiPassthroughArgs(argv: string[]) {
   return stripRinWrapperArgs(argv);
 }
 
+function installDirFromRuntimeRoot(repoRoot: string) {
+  const normalized = path.resolve(repoRoot);
+  if (
+    path.basename(normalized) === "current" &&
+    path.basename(path.dirname(normalized)) === "app"
+  ) {
+    return path.dirname(path.dirname(normalized));
+  }
+  if (
+    path.basename(path.dirname(normalized)) === "releases" &&
+    path.basename(path.dirname(path.dirname(normalized))) === "app"
+  ) {
+    return path.dirname(path.dirname(path.dirname(normalized)));
+  }
+  return "";
+}
+
+function parseInstalledChangelogVersion(installDir: string) {
+  try {
+    const changelog = fs.readFileSync(
+      path.join(installDir, "docs", "release", "CHANGELOG.md"),
+      "utf8",
+    );
+    const match = /^##\s+([^\s]+)/m.exec(changelog);
+    return safeString(match?.[1]).trim();
+  } catch {
+    return "";
+  }
+}
+
+function readInstalledRuntimeVersionForRoot(repoRoot: string) {
+  const installDir = installDirFromRuntimeRoot(repoRoot);
+  if (!installDir) return "";
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(installerManifestPath(installDir), "utf8"),
+    );
+    const releaseVersion = safeString(
+      manifest?.currentRelease?.release?.version,
+    ).trim();
+    if (releaseVersion) return releaseVersion;
+    const releaseName = safeString(manifest?.currentRelease?.name).trim();
+    if (releaseName && releaseName !== "0.0.0") return releaseName;
+  } catch {}
+  return parseInstalledChangelogVersion(installDir);
+}
+
 export function readRinPackageVersion(repoRoot = repoRootFromHere()) {
+  const installedVersion = readInstalledRuntimeVersionForRoot(repoRoot);
+  if (installedVersion) return installedVersion;
   try {
     const packageJson = JSON.parse(
       fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
