@@ -969,6 +969,13 @@ const INSTALLER_DISPLAY_COPY = {
   },
 } satisfies Record<InstallerDisplayLanguage, InstallerDisplayCopy>;
 
+function detectedInstallerLanguageInitialValue(detected: string) {
+  const exactOption = LANGUAGE_OPTIONS.find(
+    (option) => option.value !== "custom" && option.value === detected,
+  );
+  return exactOption?.value || resolveInstallerDisplayLanguage(detected);
+}
+
 export async function promptInstallerLanguage(
   prompt: InstallerLanguagePromptApi,
 ) {
@@ -979,6 +986,7 @@ export async function promptInstallerLanguage(
     prompt.ensureNotCancelled(
       await prompt.select({
         message: copy.chooseMessage,
+        initialValue: detectedInstallerLanguageInitialValue(detected),
         options: LANGUAGE_OPTIONS.map((option) => ({
           ...option,
           label: option.value === "custom" ? copy.customLabel : option.label,

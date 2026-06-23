@@ -331,6 +331,7 @@ test("promptInstallerLanguage localizes the picker copy for Chinese locales", as
     });
 
     assert.equal(result, "en_US");
+    assert.equal(selectOptions.initialValue, "zh_CN");
     assert.equal(
       selectOptions.message,
       "\u9009\u62e9\u5b89\u88c5\u5668\u8bed\u8a00",

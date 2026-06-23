@@ -44,6 +44,12 @@ import {
   targetHomeForUser,
 } from "./users.js";
 
+export function defaultDaemonReadyTimeoutMs(
+  platform: NodeJS.Platform = process.platform,
+) {
+  return platform === "win32" ? 30_000 : 5_000;
+}
+
 function isFreshInstallDirectory(installDir: string) {
   try {
     return fs.readdirSync(installDir).length === 0;
@@ -305,7 +311,7 @@ async function applyInstalledRuntime(
 
   const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
     ? Math.max(0, Number(options.daemonReadyTimeoutMs))
-    : 5000;
+    : defaultDaemonReadyTimeoutMs();
   const daemonReady = installedService
     ? await waitForSocket(
         daemonSocketPathForUser(targetUser, serviceDeps),

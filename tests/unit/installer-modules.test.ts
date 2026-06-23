@@ -30,6 +30,17 @@ const updater = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "updater.js"))
     .href
 );
+const finalize = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-install", "finalize.js"),
+  ).href
+);
+
+test("finalize uses a longer default daemon readiness timeout on Windows", () => {
+  assert.equal(finalize.defaultDaemonReadyTimeoutMs("win32"), 30_000);
+  assert.equal(finalize.defaultDaemonReadyTimeoutMs("linux"), 5_000);
+  assert.equal(finalize.defaultDaemonReadyTimeoutMs("darwin"), 5_000);
+});
 
 function createNoopSpinner() {
   return {
