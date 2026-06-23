@@ -61,6 +61,24 @@ test("session pruning is a no-op until more than four user turns exist", () => {
   assert.equal(pruning.pruneSessionContextMessages(messages), messages);
 });
 
+test("session pruning does not omit rich image content", () => {
+  const oldUserImage = { type: "image", data: "old-user-base64" };
+  const messages = [
+    { role: "user", content: [{ type: "text", text: "turn 1" }, oldUserImage] },
+    { role: "assistant", content: "done 1" },
+    { role: "user", content: "turn 2" },
+    { role: "assistant", content: "done 2" },
+    { role: "user", content: "turn 3" },
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    { role: "assistant", content: "done 4" },
+    { role: "user", content: "turn 5" },
+  ];
+
+  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
+  assert.equal(messages[0].content[1], oldUserImage);
+});
+
 test("session pruning keeps tool-result content shape stable and is idempotent", () => {
   const messages = [
     { role: "user", content: "turn 1" },

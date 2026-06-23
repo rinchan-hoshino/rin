@@ -1,19 +1,11 @@
-import {
-  buildPiToolContinuationPlan,
-  extractAssistantToolCallIds,
-} from "../pi/tool-continuation.js";
-
 export const RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS = 4;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
-  "[old tool result omitted to save context.]";
-export const RIN_SESSION_PRUNING_OMITTED_IMAGE =
-  "[image omitted to save context.]";
-
+  "old tool result omitted";
 type SessionPruningOptions = {
   protectRecentTurns?: number;
 };
 
-function normalizeProtectRecentTurns(value: unknown) {
+export function normalizeProtectRecentTurns(value: unknown) {
   const turns = Number(value);
   if (!Number.isFinite(turns) || turns <= 0) {
     return RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS;
@@ -25,65 +17,12 @@ function isUserMessage(message: any) {
   return String(message?.role || "").trim() === "user";
 }
 
-function isAssistantMessage(message: any) {
-  return String(message?.role || "").trim() === "assistant";
-}
-
 function isToolResultMessage(message: any) {
   const role = String(message?.role || "").trim();
   return role === "toolResult" || role === "tool_result";
 }
 
-function normalizePartType(value: unknown) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
-}
-
-function isImagePartType(type: string) {
-  return type === "image" || type === "img";
-}
-
-function omittedImageContent() {
-  return { type: "text", text: RIN_SESSION_PRUNING_OMITTED_IMAGE };
-}
-
-function pruneImageContent(content: any): {
-  content: any;
-  changed: boolean;
-} {
-  if (!content || typeof content !== "object") {
-    return { content, changed: false };
-  }
-
-  if (Array.isArray(content)) {
-    let changed = false;
-    const next = content.map((item) => {
-      const pruned = pruneImageContent(item);
-      if (pruned.changed) changed = true;
-      return pruned.content;
-    });
-    return { content: changed ? next : content, changed };
-  }
-
-  const type = normalizePartType(content.type);
-  if (isImagePartType(type)) {
-    return { content: omittedImageContent(), changed: true };
-  }
-
-  if (!Array.isArray(content.children) || !content.children.length) {
-    return { content, changed: false };
-  }
-
-  const prunedChildren = pruneImageContent(content.children);
-  if (!prunedChildren.changed) return { content, changed: false };
-  return {
-    content: { ...content, children: prunedChildren.content },
-    changed: true,
-  };
-}
-
-function findProtectedContextStart(
+export function findProtectedContextStart(
   messages: any[],
   protectRecentTurns: number,
 ) {
@@ -117,78 +56,18 @@ function omittedContentFor(content: any) {
   return RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT;
 }
 
-function createProviderVisibleMessagePlan(messages: any[]) {
-  const input = Array.isArray(messages) ? messages : [];
-  const piPlan = buildPiToolContinuationPlan(input);
-  const validToolCallIds = new Set<string>();
-  const invalidToolCallIds = new Set<string>();
-  const droppedMessages = new Set<any>();
-  let changed = false;
-  const filtered: any[] = [];
-
-  for (let index = 0; index < input.length; index += 1) {
-    const message = input[index];
-    if (
-      isAssistantMessage(message) &&
-      !piPlan.visibleMessageIndexes.has(index)
-    ) {
-      for (const id of extractAssistantToolCallIds(message)) {
-        invalidToolCallIds.add(id);
-      }
-      droppedMessages.add(message);
-      changed = true;
-      continue;
-    }
-
-    if (isAssistantMessage(message)) {
-      const toolCalls =
-        piPlan.visibleToolCallPartsByMessageIndex.get(index) || [];
-      for (const toolCall of toolCalls) {
-        const id = String(toolCall?.id || "").trim();
-        if (!id) continue;
-        validToolCallIds.add(id);
-        invalidToolCallIds.delete(id);
-      }
-      filtered.push(message);
-      continue;
-    }
-
-    if (isToolResultMessage(message)) {
-      const toolCallId = String(message?.toolCallId || "").trim();
-      if (
-        toolCallId &&
-        (invalidToolCallIds.has(toolCallId) ||
-          !validToolCallIds.has(toolCallId))
-      ) {
-        droppedMessages.add(message);
-        changed = true;
-        continue;
-      }
-    }
-
-    filtered.push(message);
-  }
-
-  return {
-    messages: changed ? filtered : input,
-    changed,
-    droppedMessages,
-  };
-}
-
 function createProviderBoundPrunePlan(
   messages: any[],
   options: SessionPruningOptions = {},
 ) {
   const input = Array.isArray(messages) ? messages : [];
-  const visible = createProviderVisibleMessagePlan(input);
   const protectedStart = findProtectedContextStart(
-    visible.messages,
+    input,
     normalizeProtectRecentTurns(options.protectRecentTurns),
   );
   const replacements = new Map<any, any>();
-  let changed = visible.changed;
-  const pruned = visible.messages.map((message, index) => {
+  let changed = false;
+  const pruned = input.map((message, index) => {
     if (index < protectedStart && isToolResultMessage(message)) {
       if (isAlreadyOmitted(message?.content)) return message;
       const replacement = {
@@ -199,35 +78,21 @@ function createProviderBoundPrunePlan(
       changed = true;
       return replacement;
     }
-
-    const shouldPruneImages =
-      isAssistantMessage(message) ||
-      (index < protectedStart && isUserMessage(message));
-    if (!shouldPruneImages) return message;
-
-    const prunedContent = pruneImageContent(message?.content);
-    if (!prunedContent.changed) return message;
-    const replacement = {
-      ...message,
-      content: prunedContent.content,
-    };
-    replacements.set(message, replacement);
-    changed = true;
-    return replacement;
+    return message;
   });
 
   return {
     messages: changed ? pruned : input,
     changed,
     replacements,
-    droppedMessages: visible.droppedMessages,
+    droppedMessages: new Set<any>(),
   };
 }
 
 export function dropProviderInvalidToolMessages(messages: any[]) {
-  const input = Array.isArray(messages) ? messages : [];
-  const plan = createProviderVisibleMessagePlan(input);
-  return plan.changed ? plan.messages : input;
+  // Compatibility no-op: provider-bound pruning no longer drops invalid or
+  // interrupted tool continuations beyond ordinary old tool-result omission.
+  return Array.isArray(messages) ? messages : [];
 }
 
 export function pruneSessionContextMessages(

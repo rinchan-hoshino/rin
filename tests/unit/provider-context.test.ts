@@ -14,98 +14,23 @@ const providerContext = await import(
   ).href
 );
 
-test("provider-bound context policy prunes images by role and protected turn window", () => {
-  const oldUserImage = {
-    type: "image",
-    data: "old-user-base64",
-    mimeType: "image/png",
-  };
-  const recentUserImage = {
-    type: "image",
-    data: "recent-user-base64",
-    mimeType: "image/png",
-  };
-  const assistantImage = {
-    type: "image",
-    data: "assistant-base64",
-    mimeType: "image/png",
-  };
-  const messages = [
-    {
-      role: "user",
-      content: [{ type: "text", text: "turn 1" }, oldUserImage],
-    },
-    { role: "assistant", content: [{ type: "text", text: "done 1" }] },
-    {
-      role: "user",
-      content: [{ type: "text", text: "turn 2" }, recentUserImage],
-    },
-    { role: "assistant", content: [{ type: "text", text: "done 2" }] },
-    { role: "user", content: [{ type: "text", text: "turn 3" }] },
-    { role: "assistant", content: [{ type: "text", text: "done 3" }] },
-    { role: "user", content: [{ type: "text", text: "turn 4" }] },
-    {
-      role: "assistant",
-      content: [{ type: "text", text: "done 4" }, assistantImage],
-    },
-    { role: "user", content: [{ type: "text", text: "turn 5" }] },
+test("provider-bound context leaves non-tool rich content unchanged", () => {
+  const userContent = "see image: [image: demo.png](file:///tmp/demo.png)";
+  const assistantContent = [
+    { type: "text", text: "done" },
+    { type: "image", data: "assistant-base64", mimeType: "image/png" },
   ];
-
-  const providerMessages =
-    providerContext.buildProviderBoundContextMessages(messages);
-
-  assert.notEqual(providerMessages, messages);
-  assert.deepEqual(providerMessages[0].content, [
-    { type: "text", text: "turn 1" },
-    { type: "text", text: "[image omitted to save context.]" },
-  ]);
-  assert.equal(providerMessages[2].content[1], recentUserImage);
-  assert.deepEqual(providerMessages[7].content, [
-    { type: "text", text: "done 4" },
-    { type: "text", text: "[image omitted to save context.]" },
-  ]);
-  assert.equal(messages[0].content[1], oldUserImage);
-  assert.equal(messages[7].content[1], assistantImage);
-});
-
-test("provider-bound context policy prunes nested assistant images", () => {
-  const messages = [
-    { role: "user", content: "start" },
-    {
-      role: "assistant",
-      content: [
-        {
-          type: "paragraph",
-          children: [
-            { type: "text", text: "see " },
-            { type: "image", attrs: { src: "file:///tmp/large.png" } },
-          ],
-        },
-      ],
-    },
+  const toolResultContent = [
+    { type: "text", text: "caption" },
+    { type: "image", data: "tool-base64", mimeType: "image/png" },
   ];
-
-  const providerMessages =
-    providerContext.buildProviderBoundContextMessages(messages);
-
-  assert.deepEqual(providerMessages[1].content, [
-    {
-      type: "paragraph",
-      children: [
-        { type: "text", text: "see " },
-        { type: "text", text: "[image omitted to save context.]" },
-      ],
-    },
-  ]);
-});
-
-test("provider-bound context policy keeps non-image rich media nodes", () => {
-  const filePart = { type: "file", attrs: { src: "file:///tmp/large.zip" } };
   const messages = [
-    { role: "user", content: "start" },
+    { role: "user", content: userContent },
+    { role: "assistant", content: assistantContent },
     {
-      role: "assistant",
-      content: [{ type: "text", text: "see " }, filePart],
+      role: "toolResult",
+      toolCallId: "call-image",
+      content: toolResultContent,
     },
   ];
 
@@ -113,7 +38,9 @@ test("provider-bound context policy keeps non-image rich media nodes", () => {
     providerContext.buildProviderBoundContextMessages(messages);
 
   assert.equal(providerMessages, messages);
-  assert.equal(providerMessages[1].content[1], filePart);
+  assert.equal(providerMessages[0].content, userContent);
+  assert.equal(providerMessages[1].content, assistantContent);
+  assert.equal(providerMessages[2].content, toolResultContent);
 });
 
 test("provider-bound context policy omits old tool results", () => {
@@ -135,15 +62,37 @@ test("provider-bound context policy omits old tool results", () => {
     providerContext.buildProviderBoundContextMessages(messages);
 
   assert.notEqual(providerMessages, messages);
-  assert.equal(
-    providerMessages[1].content,
-    "[old tool result omitted to save context.]",
-  );
+  assert.equal(providerMessages[1].content, "old tool result omitted");
   assert.equal(messages[1].content, "huge old output");
 });
 
+test("provider-bound context keeps recent four user turns' tool results", () => {
+  const oldToolResult = { role: "toolResult", content: "old output" };
+  const recentToolResult = { role: "toolResult", content: "recent output" };
+  const messages = [
+    { role: "user", content: "turn 1" },
+    oldToolResult,
+    { role: "assistant", content: "done 1" },
+    { role: "user", content: "turn 2" },
+    { role: "assistant", content: "done 2" },
+    { role: "user", content: "turn 3" },
+    recentToolResult,
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    { role: "assistant", content: "done 4" },
+    { role: "user", content: "turn 5" },
+    { role: "assistant", content: "done 5" },
+  ];
+
+  const providerMessages =
+    providerContext.buildProviderBoundContextMessages(messages);
+
+  assert.equal(providerMessages[1].content, "old tool result omitted");
+  assert.equal(providerMessages[6], recentToolResult);
+});
+
 for (const stopReason of ["error", "aborted"] as const) {
-  test(`provider-bound context drops ${stopReason} assistant tool calls and their tool results`, () => {
+  test(`provider-bound context keeps ${stopReason} assistant tool calls and their tool results`, () => {
     const incompleteAssistant = {
       role: "assistant",
       stopReason,
@@ -173,52 +122,13 @@ for (const stopReason of ["error", "aborted"] as const) {
     const providerMessages =
       providerContext.buildProviderBoundContextMessages(messages);
 
-    assert.notEqual(providerMessages, messages);
-    assert.equal(providerMessages.includes(incompleteAssistant), false);
-    assert.equal(providerMessages.includes(interruptedResult), false);
-    assert.equal(
-      providerMessages.some(
-        (message: any) => message?.toolCallId === "call-broken",
-      ),
-      false,
-    );
-    assert.equal(
-      providerMessages.some(
-        (message: any) => message?.toolCallId === "call-ok",
-      ),
-      true,
-    );
-    assert.equal(messages.includes(incompleteAssistant), true);
-    assert.equal(messages.includes(interruptedResult), true);
+    assert.equal(providerMessages, messages);
+    assert.equal(providerMessages.includes(incompleteAssistant), true);
+    assert.equal(providerMessages.includes(interruptedResult), true);
   });
 }
 
-test("provider-bound context pruning does not depend on model", () => {
-  const incompleteAssistant = {
-    role: "assistant",
-    stopReason: "error",
-    errorMessage: "WebSocket error",
-    content: [{ type: "toolCall", name: "write", id: "call-broken" }],
-  };
-  const interruptedResult = {
-    role: "toolResult",
-    toolCallId: "call-broken",
-    content: "The tool was interrupted because the daemon exited.",
-  };
-  const messages = [
-    { role: "user", content: "start" },
-    incompleteAssistant,
-    interruptedResult,
-    { role: "user", content: "next" },
-  ];
-
-  const providerMessages =
-    providerContext.buildProviderBoundContextMessages(messages);
-
-  assert.deepEqual(providerMessages, [messages[0], messages[3]]);
-});
-
-test("provider-bound context drops incomplete assistant messages without tool calls", () => {
+test("provider-bound context keeps incomplete assistant messages without tool calls", () => {
   const incompleteAssistant = {
     role: "assistant",
     stopReason: "error",
@@ -234,10 +144,10 @@ test("provider-bound context drops incomplete assistant messages without tool ca
   const providerMessages =
     providerContext.buildProviderBoundContextMessages(messages);
 
-  assert.deepEqual(providerMessages, [messages[0], messages[2]]);
+  assert.equal(providerMessages, messages);
 });
 
-test("provider-bound context drops orphan tool results without dropping later turns", () => {
+test("provider-bound context keeps orphan tool results", () => {
   const orphan = {
     role: "toolResult",
     toolCallId: "call-missing",
@@ -252,11 +162,11 @@ test("provider-bound context drops orphan tool results without dropping later tu
   const providerMessages =
     providerContext.buildProviderBoundContextMessages(messages);
 
-  assert.deepEqual(providerMessages, [messages[0], messages[2]]);
+  assert.equal(providerMessages, messages);
   assert.equal(messages.includes(orphan), true);
 });
 
-test("provider-bound context maps compaction slices without shifting dropped messages", () => {
+test("provider-bound context maps compaction slices without dropping messages", () => {
   const incompleteAssistant = {
     role: "assistant",
     stopReason: "error",
@@ -295,8 +205,14 @@ test("provider-bound context maps compaction slices without shifting dropped mes
     fullContext,
   );
 
-  assert.equal(mapped.length, 1);
-  assert.equal(mapped[0].content, "[old tool result omitted to save context.]");
+  assert.equal(mapped.length, 3);
+  assert.equal(mapped[0], incompleteAssistant);
+  assert.equal(mapped[1].content, "old tool result omitted");
+  assert.equal(mapped[2].content, "old tool result omitted");
+  assert.equal(
+    interruptedResult.content,
+    "The tool was interrupted because the daemon exited.",
+  );
   assert.equal(oldToolResult.content, "huge old output");
 });
 
@@ -327,7 +243,7 @@ test("provider-bound context policy maps compaction slices through the full cont
   );
 
   assert.notEqual(mapped, summarizedSlice);
-  assert.equal(mapped[1].content, "[old tool result omitted to save context.]");
+  assert.equal(mapped[1].content, "old tool result omitted");
   assert.equal(oldToolResult.content, "huge old output");
 });
 
@@ -377,8 +293,5 @@ test("provider-bound context event uses the same policy surface", () => {
 
   const result = providerContext.buildProviderBoundContextEvent({ messages });
 
-  assert.equal(
-    result.messages[1].content,
-    "[old tool result omitted to save context.]",
-  );
+  assert.equal(result.messages[1].content, "old tool result omitted");
 });

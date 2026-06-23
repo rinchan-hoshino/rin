@@ -48,6 +48,7 @@ import {
   pickUnsessionedOwnQuoteText,
   pickUserId,
   prependQuoteTextToPromptBody,
+  renderPromptTextWithSavedAttachments,
   safeString,
   hasInboundChatMessageReplyBoundary,
   isInboundChatMessageProcessed,
@@ -683,8 +684,11 @@ export async function startChatBridge(
       );
     }
     const inboundAttachmentNotice = buildInboundAttachmentNotice(failures);
+    const promptRichText = attachments.length
+      ? renderPromptTextWithSavedAttachments(elements, attachments)
+      : "";
     const turnText = prependQuoteTextToPromptBody(
-      decision.text,
+      promptRichText || decision.text,
       quotedOwnMessageText,
     );
     const promptBody = inboundAttachmentNotice

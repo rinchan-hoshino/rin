@@ -19,8 +19,10 @@ import {
   extractExistingFilePaths as extractExistingFilePathsFromText,
   extractImageParts as extractStructuredImageParts,
   extractMessageText,
+  normalizeMessageText,
 } from "../message-content.js";
 import { safeString } from "../text-utils.js";
+import { renderChatNodesMarkdown } from "./rich-text.js";
 import {
   resolveStoredSessionFile,
   toStoredSessionFile,
@@ -31,6 +33,7 @@ export type SavedAttachment = {
   path: string;
   name: string;
   mimeType?: string;
+  sourceMediaIndex?: number;
 };
 
 export type InboundAttachmentFailure = {
@@ -422,6 +425,79 @@ export function buildInboundAttachmentNotice(
   return `Note: the incoming message included media that could not be attached for the agent because ${parts.join(" and ")}.`;
 }
 
+function localAttachmentPath(filePath: string) {
+  return path.resolve(filePath);
+}
+
+function mediaElementName(element: any) {
+  const attrs =
+    element?.attrs && typeof element.attrs === "object" ? element.attrs : {};
+  return safeString(
+    attrs.name || attrs.file || attrs.fileName || attrs.title || "",
+  ).trim();
+}
+
+function findSavedAttachmentIndex(
+  attachments: SavedAttachment[],
+  kind: SavedAttachment["kind"],
+  name: string,
+  sourceMediaIndex: number,
+) {
+  const bySourceMediaIndex = attachments.findIndex(
+    (item) =>
+      item?.kind === kind &&
+      typeof item.sourceMediaIndex === "number" &&
+      item.sourceMediaIndex === sourceMediaIndex,
+  );
+  if (bySourceMediaIndex >= 0) return bySourceMediaIndex;
+  if (name) {
+    return attachments.findIndex(
+      (item) => item?.kind === kind && item?.name === name,
+    );
+  }
+  return -1;
+}
+
+export function renderPromptTextWithSavedAttachments(
+  elements: any[],
+  attachments: SavedAttachment[],
+) {
+  const attachmentQueue = (
+    Array.isArray(attachments) ? attachments : []
+  ).slice();
+  let mediaIndex = 0;
+  const nextElements = (Array.isArray(elements) ? elements : []).map(
+    (element) => {
+      const type = safeString(element?.type || "").toLowerCase();
+      const kind = mediaKindFromElementType(type);
+      if (!kind) return element;
+      mediaIndex += 1;
+      const attachmentIndex = findSavedAttachmentIndex(
+        attachmentQueue,
+        kind,
+        mediaElementName(element),
+        mediaIndex,
+      );
+      if (attachmentIndex < 0) return element;
+      const [attachment] = attachmentQueue.splice(attachmentIndex, 1);
+      if (!attachment?.path) return element;
+      return {
+        ...element,
+        attrs: {
+          ...(element?.attrs && typeof element.attrs === "object"
+            ? element.attrs
+            : {}),
+          src: localAttachmentPath(attachment.path),
+          file: attachment.name,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+        },
+      };
+    },
+  );
+  return normalizeMessageText(renderChatNodesMarkdown(nextElements));
+}
+
 export async function extractInboundAttachments(
   elements: any[],
   chatDir: string,
@@ -526,6 +602,7 @@ export async function extractInboundAttachments(
       path: filePath,
       name: fileName,
       mimeType,
+      sourceMediaIndex: index,
     });
   }
 

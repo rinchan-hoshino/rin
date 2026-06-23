@@ -281,6 +281,127 @@ test("chat chat helpers save inbound media when a standard resource is present",
   });
 });
 
+test("chat chat helpers render saved media as markdown local paths for prompts", async () => {
+  await withTempDir(async (dir) => {
+    const imagePath = path.join(dir, "demo.png");
+    const filePath = path.join(dir, "demo.txt");
+    await fs.writeFile(imagePath, Buffer.from("demo"));
+    await fs.writeFile(filePath, "hello", "utf8");
+
+    const text = helpers.renderPromptTextWithSavedAttachments(
+      [
+        { type: "at", attrs: { id: "owner", name: "Owner" } },
+        { type: "text", attrs: { content: " look " } },
+        { type: "image", attrs: { file: "demo.png" } },
+        { type: "file", attrs: { file: "demo.txt" } },
+      ],
+      [
+        {
+          kind: "image",
+          path: imagePath,
+          name: "demo.png",
+          mimeType: "image/png",
+        },
+        {
+          kind: "file",
+          path: filePath,
+          name: "demo.txt",
+          mimeType: "text/plain",
+        },
+      ],
+    );
+
+    assert.match(text, /^\[@Owner\]\(at:owner\) look\n/);
+    assert.match(text, /\[image: demo\.png\]\(.*demo\.png\)/);
+    assert.match(text, /\[file: demo\.txt\]\(.*demo\.txt\)/);
+    assert.doesNotMatch(text, /file:\/\//);
+  });
+});
+
+test("chat chat helpers do not shift saved media onto unmatched same-kind nodes", async () => {
+  await withTempDir(async (dir) => {
+    const secondImagePath = path.join(dir, "second.png");
+    await fs.writeFile(secondImagePath, Buffer.from("demo"));
+
+    const namedText = helpers.renderPromptTextWithSavedAttachments(
+      [
+        { type: "image", attrs: { file: "missing.png" } },
+        { type: "image", attrs: { file: "second.png" } },
+      ],
+      [
+        {
+          kind: "image",
+          path: secondImagePath,
+          name: "second.png",
+          mimeType: "image/png",
+        },
+      ],
+    );
+
+    assert.match(namedText, /\[image: missing\.png\]\(missing\.png\)/);
+    assert.match(namedText, /\[image: second\.png\]\(.*second\.png\)/);
+
+    const indexedText = helpers.renderPromptTextWithSavedAttachments(
+      [{ type: "image" }, { type: "image" }],
+      [
+        {
+          kind: "image",
+          path: secondImagePath,
+          name: "second.png",
+          mimeType: "image/png",
+          sourceMediaIndex: 2,
+        },
+      ],
+    );
+
+    assert.match(indexedText, /^\[image: image\]/);
+    assert.match(indexedText, /\[image: second\.png\]\(.*second\.png\)/);
+
+    const ambiguousText = helpers.renderPromptTextWithSavedAttachments(
+      [{ type: "image" }],
+      [
+        {
+          kind: "image",
+          path: secondImagePath,
+          name: "second.png",
+          mimeType: "image/png",
+        },
+      ],
+    );
+
+    assert.equal(ambiguousText, "[image: image]");
+  });
+});
+
+test("chat chat helpers keep extractor media indexes aligned when rendering prompts", async () => {
+  await withTempDir(async (dir) => {
+    const imageOne = `data:image/png;base64,${Buffer.from("one").toString("base64")}`;
+    const imageTwo = `data:image/png;base64,${Buffer.from("two").toString("base64")}`;
+    const elements = [
+      { type: "text", attrs: { content: "prefix" } },
+      { type: "image", attrs: { src: imageOne } },
+      { type: "text", attrs: { content: "middle" } },
+      { type: "image", attrs: { src: imageTwo } },
+    ];
+
+    const result = await helpers.extractInboundAttachments(elements, dir);
+    const text = helpers.renderPromptTextWithSavedAttachments(
+      elements,
+      result.attachments,
+    );
+
+    assert.equal(result.attachments.length, 2);
+    assert.equal(result.attachments[0].sourceMediaIndex, 1);
+    assert.equal(result.attachments[1].sourceMediaIndex, 2);
+    assert.match(text, /prefix/);
+    assert.match(text, /middle/);
+    assert.ok(text.includes(`[image: ${result.attachments[0].name}]`));
+    assert.ok(text.includes(`[image: ${result.attachments[1].name}]`));
+    assert.ok(text.includes(`${result.attachments[0].name})`));
+    assert.ok(text.includes(`${result.attachments[1].name})`));
+  });
+});
+
 test("chat chat helpers report fetch failures consistently across media sources", async () => {
   await withTempDir(async (dir) => {
     const missingFileUrl = pathToFileURL(path.join(dir, "missing.txt")).href;

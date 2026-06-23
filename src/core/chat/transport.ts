@@ -321,12 +321,6 @@ function markdownNode(h: any, text: string) {
     : { type: "markdown", attrs: { content: text } };
 }
 
-function looksLikeMarkdown(text: string) {
-  return /(^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>\s)|```|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|!?\[[^\]]+\]\([^)]+\)|\[(?:quote:\s*[^\]]+|(?:image|file|video|audio|sticker):\s*[^\]]*)\]/i.test(
-    safeString(text),
-  );
-}
-
 function sendChatNodes(
   app: any,
   chatKey: string,
@@ -589,11 +583,7 @@ export function sendText(
   return sendChatNodes(
     app,
     chatKey,
-    withReplyQuote(h, replyToMessageId, [
-      looksLikeMarkdown(text)
-        ? markdownNode(h, safeString(text))
-        : h.text(safeString(text)),
-    ]),
+    withReplyQuote(h, replyToMessageId, [markdownNode(h, safeString(text))]),
     options,
   );
 }
@@ -639,10 +629,7 @@ export async function sendGenericFile(
 }
 
 export async function messagePartToNode(part: ChatMessagePart, h: any) {
-  if (part.type === "text") {
-    const text = safeString(part.text);
-    return looksLikeMarkdown(text) ? markdownNode(h, text) : h.text(text);
-  }
+  if (part.type === "text") return markdownNode(h, safeString(part.text));
   if (part.type === "markdown") return markdownNode(h, part.text);
   if (part.type === "at") {
     const id = safeString(part.id).trim();
@@ -940,13 +927,6 @@ export async function restorePromptParts(processing: ChatPromptRestoreInput) {
   const attachments = (processing.attachments || []).filter(
     (item) => item && fs.existsSync(item.path),
   );
-  const images = await Promise.all(
-    attachments
-      .filter((item) => item.kind === "image")
-      .map((item) =>
-        attachmentToImageContent(item.path, item.mimeType || "image/png"),
-      ),
-  );
   const text = buildPromptText(processing.text, attachments);
-  return { text, images, attachments };
+  return { text, images: [], attachments };
 }

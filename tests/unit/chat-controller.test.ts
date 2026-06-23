@@ -189,7 +189,7 @@ test("chat controller delivers compact collapsed notice without summary text", a
       chatId: "2",
       content: [
         {
-          type: "text",
+          type: "markdown",
           attrs: {
             content: "Compacted from 108,642 tokens",
           },
@@ -1128,7 +1128,7 @@ test("chat controller renders todo notices as character fallback for plain chats
   assert.equal(deliveries[0].kind, "passive_notice");
   assert.deepEqual(deliveries[0].nodes, [
     {
-      type: "text",
+      type: "markdown",
       attrs: {
         content: "☐ Keep working\n☑ Ship renderer",
       },
@@ -3077,7 +3077,7 @@ test("chat controller treats a stale working frontend phase as a new onebot priv
   assert.equal(deliveries[0].chatId, "private:2");
   assert.deepEqual(deliveries[0].content, [
     { type: "quote", attrs: { id: "m-new-onebot" } },
-    { type: "text", attrs: { content: "ok" } },
+    { type: "markdown", attrs: { content: "ok" } },
   ]);
 });
 

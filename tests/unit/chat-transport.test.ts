@@ -91,7 +91,7 @@ test("chat transport keeps small model image payloads unchanged", () => {
   assert.equal(compressed.mimeType, "");
 });
 
-test("chat transport restorePromptParts rebuilds image payloads from disk", async () => {
+test("chat transport restorePromptParts keeps attachments out of Pi image payloads", async () => {
   await withTempDir(async (dir) => {
     const imagePath = path.join(dir, "demo.png");
     await fs.writeFile(imagePath, Buffer.from("abc"));
@@ -108,8 +108,8 @@ test("chat transport restorePromptParts rebuilds image payloads from disk", asyn
       ],
     });
     assert.equal(restored.text, "hi");
-    assert.equal(restored.images.length, 1);
-    assert.equal(restored.images[0].mimeType, "image/png");
+    assert.equal(restored.images.length, 0);
+    assert.equal(restored.attachments.length, 1);
   });
 });
 
@@ -166,7 +166,7 @@ test("chat transport forwards mixed parts as a single native chat send", async (
     assert.equal(sends.length, 1);
     assert.equal(sends[0].chatId, "2");
     assert.equal(sends[0].content[0].type, "quote");
-    assert.equal(sends[0].content[1].type, "text");
+    assert.equal(sends[0].content[1].type, "markdown");
     assert.equal(sends[0].content[2].type, "image");
     assert.equal(sends[0].content[3].type, "image");
 
@@ -475,7 +475,7 @@ test("chat transport direct send helpers prepend quotes and reuse file urls", as
     assert.deepEqual(
       sends.map((entry) => entry.content.map((node) => node.type)),
       [
-        ["quote", "text"],
+        ["quote", "markdown"],
         ["quote", "image"],
         ["quote", "file"],
       ],

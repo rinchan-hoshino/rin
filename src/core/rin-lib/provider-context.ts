@@ -71,22 +71,17 @@ export function stripStaleAssistantUsageAfterCompaction(messages: any[]) {
   const latestCompactionTimestamp =
     findLatestCompactionSummaryTimestamp(messages);
   if (!latestCompactionTimestamp) return messages;
-
   let changed = false;
-  const sanitized = messages.map((message) => {
-    if (String(message?.role || "") !== "assistant" || !message?.usage) {
-      return message;
-    }
+  const next = (Array.isArray(messages) ? messages : []).map((message) => {
+    if (String(message?.role || "") !== "assistant") return message;
+    if (!message?.usage) return message;
     const timestamp = readMessageTimestampMs(message);
     if (!timestamp || timestamp > latestCompactionTimestamp) return message;
-
-    const rest = { ...message };
-    delete rest.usage;
     changed = true;
+    const { usage: _usage, ...rest } = message;
     return rest;
   });
-
-  return changed ? sanitized : messages;
+  return changed ? next : messages;
 }
 
 export function estimateProviderBoundContextTokens(
@@ -96,12 +91,8 @@ export function estimateProviderBoundContextTokens(
 ) {
   if (typeof estimateContextTokens !== "function") return 0;
   const providerMessages = buildProviderBoundContextMessages(
-    messages || [],
+    stripStaleAssistantUsageAfterCompaction(messages),
     options,
   );
-  return normalizeContextTokenEstimate(
-    estimateContextTokens(
-      stripStaleAssistantUsageAfterCompaction(providerMessages),
-    ),
-  );
+  return normalizeContextTokenEstimate(estimateContextTokens(providerMessages));
 }
