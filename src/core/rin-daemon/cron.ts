@@ -74,6 +74,7 @@ export type CronTaskRecord = {
   createdAt: string;
   updatedAt: string;
   builtIn?: boolean;
+  hidden?: boolean;
   createdFrom?: {
     sessionFile?: string;
     sessionId?: string;
@@ -324,6 +325,34 @@ function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
   return task;
 }
 
+function createBuiltInAgentPracticesDocsSyncTask(
+  agentDir: string,
+): CronTaskRecord {
+  const createdAt = nowIso();
+  const command = `${shellQuote(process.execPath)} ${shellQuote(path.join(agentDir, "app", "current", "dist", "app", "rin", "main.js"))} __docs_internal sync-practices`;
+  const task: CronTaskRecord = {
+    id: "builtin_agent_practices_docs_sync_daily",
+    builtIn: true,
+    hidden: true,
+    createdAt,
+    updatedAt: createdAt,
+    name: "Sync agent practices docs",
+    enabled: true,
+    trigger: {
+      expression: "23 4 * * *",
+      timezone: "local",
+    },
+    session: { mode: "none" },
+    target: { kind: "shell_command", command },
+    deliverFinal: false,
+    quiet: true,
+    runCount: 0,
+    running: false,
+  };
+  task.nextRunAt = computeNextRunAt(task, Date.now());
+  return task;
+}
+
 function createBuiltInSelfImproveSleepConsolidationTask(
   agentDir: string,
 ): CronTaskRecord {
@@ -446,22 +475,32 @@ export class CronScheduler {
     this.save();
   }
 
-  listTasks(options: { includeBuiltIn?: boolean } = {}) {
+  listTasks(
+    options: { includeBuiltIn?: boolean; includeHidden?: boolean } = {},
+  ) {
     return Array.from(this.tasks.values())
+      .filter((task) => options.includeHidden || !task.hidden)
       .filter((task) => options.includeBuiltIn || !task.builtIn)
       .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
       .map((task) => this.publicTask(task));
   }
 
-  getTask(taskId: string, options: { includeBuiltIn?: boolean } = {}) {
+  getTask(
+    taskId: string,
+    options: { includeBuiltIn?: boolean; includeHidden?: boolean } = {},
+  ) {
     const task = this.tasks.get(taskId);
     if (!task) return undefined;
+    if (!options.includeHidden && task.hidden) return undefined;
     if (!options.includeBuiltIn && task.builtIn) return undefined;
     return this.publicTask(task);
   }
 
-  getStatusSnapshot(options: { includeBuiltIn?: boolean } = {}) {
+  getStatusSnapshot(
+    options: { includeBuiltIn?: boolean; includeHidden?: boolean } = {},
+  ) {
     const tasks = Array.from(this.tasks.values())
+      .filter((task) => options.includeHidden || !task.hidden)
       .filter((task) => options.includeBuiltIn || !task.builtIn)
       .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
       .map((task) => this.statusTask(task));
@@ -478,7 +517,7 @@ export class CronScheduler {
       enabledTaskCount,
       runningTaskCount,
       builtInTaskCount: Array.from(this.tasks.values()).filter(
-        (task) => task.builtIn,
+        (task) => task.builtIn && !task.hidden,
       ).length,
       nextRunAt,
       tasks,
@@ -888,6 +927,7 @@ export class CronScheduler {
     const builtins = [
       createBuiltInMemoryIndexRepairTask(this.options.agentDir),
       createBuiltInSelfImproveSleepConsolidationTask(this.options.agentDir),
+      createBuiltInAgentPracticesDocsSyncTask(this.options.agentDir),
     ];
     for (const builtin of builtins) {
       const existing = this.tasks.get(builtin.id);

@@ -2,6 +2,7 @@
 import { cac } from "cac";
 
 import { runStart, runStop, runRestart } from "./control.js";
+import { runDocsInternal } from "./docs.js";
 import { runDoctor } from "./doctor.js";
 import { launchDefaultRin } from "./launch.js";
 import { runMemoryIndex, runMemoryIndexInternal } from "./memory-index.js";
@@ -68,6 +69,11 @@ const INTERNAL_COMMANDS = [
     command: "tasks",
     run: runTasksInternal,
   },
+  {
+    marker: "__docs_internal",
+    command: "",
+    run: runDocsInternal,
+  },
 ] as const;
 
 function createCli() {
@@ -125,7 +131,7 @@ export function resolveInternalRinDispatch(rawArgv: string[]) {
     if (rawArgv[0] === handler.marker) {
       return { run: handler.run, args: rawArgv.slice(1) };
     }
-    if (hasSubcommandHelpFlag(rawArgv, handler.command)) {
+    if (handler.command && hasSubcommandHelpFlag(rawArgv, handler.command)) {
       return { run: handler.run, args: ["--help"] };
     }
   }

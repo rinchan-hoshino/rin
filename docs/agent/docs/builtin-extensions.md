@@ -6,11 +6,11 @@ The live tool list remains authoritative for the current turn.
 
 ## Capability source map
 
-| Source                       | Provides                                                                                                                                                                            | Configuration surface                                                                                         | Agent route                                                    |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Rin core                     | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                                                                | use live tools, CLI, SDK, or topic docs                        |
-| Browser/desktop operation    | browser or computer tools supplied by the live runtime, plus documented practice patterns                                                                                           | live tool list or external Pi extension config                                                                | read `practices/browser-use.md` or `practices/computer-use.md` |
-| Background extension runtime | trusted long-running services, chat adapters, and external memory providers                                                                                                         | `settings.json -> rinExtensions.backgroundServices` or trusted extension entries with background capabilities | inspect runtime state and relevant extension config            |
+| Source                                   | Provides                                                                                                                                                                            | Configuration surface                                                                                         | Agent route                                         |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                                                                | use live tools, CLI, SDK, or topic docs             |
+| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime, plus documented practice patterns                                                                          | live tool list or external Pi extension config                                                                | read `practices/README.md`                          |
+| Background extension runtime             | trusted long-running services, chat adapters, and external memory providers                                                                                                         | `settings.json -> rinExtensions.backgroundServices` or trusted extension entries with background capabilities | inspect runtime state and relevant extension config |
 
 ## Rin core capabilities
 
@@ -49,14 +49,17 @@ Rin currently ships no bundled optional foreground extensions. Existing installs
 
 Use ordinary Pi extension configuration for trusted third-party foreground extensions. Use the live tool list as the source of truth for which tools are available in the current turn.
 
-## Browser and desktop operation
+## Browser, computer, mobile, and search operation
 
-Browser and desktop tools are live-runtime capabilities. Use them when they appear in the live tool list.
+Browser, desktop, mobile, and search tools are live-runtime capabilities. Use them when they appear in the live tool list.
 
-Use practice docs for documented patterns and setup guidance:
+Use practice docs for current owner workflow routing and setup guidance:
 
-- browser automation: `practices/browser-use.md`.
-- desktop automation: `practices/computer-use.md`.
+- route map: `practices/README.md`.
+- browser operation: `practices/browser/README.md`.
+- desktop operation: `practices/computer/README.md`.
+- mobile operation: `practices/mobile/README.md`.
+- search operation: `practices/search/README.md`.
 
 Trusted third-party Pi extensions for browser or computer control are configured through normal Pi extension rules as explicit extension paths or packages.
 

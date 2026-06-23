@@ -100,6 +100,11 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat handling failed because the incoming text is empty. Send a non-empty message.",
   chat_turn_aborted: () => "The chat turn was aborted.",
 
+  agent_practices_fetch_failed: () =>
+    "Agent practice document refresh failed because a remote file could not be downloaded.",
+  agent_practices_fetch_unavailable: () =>
+    "Agent practice document refresh needs a runtime HTTP fetch implementation.",
+
   cron_chat_unavailable: () =>
     "Scheduled task delivery failed because the target chat is unavailable. Check the task frontend binding.",
   cron_final_assistant_text_missing: () =>
@@ -193,6 +198,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       ". Use a configured platform chat key.",
     ),
   invalid_json: () => "Invalid JSON. Fix the JSON.",
+  invalid_practices_manifest: () =>
+    "Agent practice document refresh received an invalid manifest.",
+  invalid_practices_manifest_path: () =>
+    "Agent practice document refresh received an unsafe manifest path.",
   invalid_model: invalidModel,
   invalid_model_ref: invalidModel,
 
@@ -468,6 +477,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Telegram adapter needs a bot token before it can start. Add the token.",
 
   unknown_model: modelNotFound,
+  unknown_docs_internal_command: () =>
+    "Internal document maintenance command is unknown.",
   unknown_run_option: (detail) =>
     withDetail(
       "Unknown run option",

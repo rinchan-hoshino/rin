@@ -4,18 +4,18 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 
 ## Capability index
 
-| Capability                    | Use when                                                                                                                      | Entry point                                                | Read next                                                      |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------- |
-| Rin launcher                  | Starting, status checks, update, rollback, or installed-runtime maintenance                                                   | `rin`, `rin status`, `rin update --yes`, `rin rollback`    | `docs/runtime-layout.md`                                       |
-| Runtime status and usage      | Checking daemon activity, workers, scheduled tasks, or token telemetry                                                        | `rin status`, `rin status --json`, `rin usage`             | `docs/execution-environment.md`, `docs/runtime-layout.md`      |
-| Memory and self-improve       | Choosing between original evidence/retrieval and distilled reusable guidance                                                  | `recall`, prompt baselines, skills                         | `docs/memory-layering.md`, `docs/self-improve-distillation.md` |
-| Non-interactive child runs    | Isolated scouting, review, verification, comparison, or bounded draft work                                                    | `rin -p`, `--mode json`, `--managed-session`               | `docs/non-interactive-cli.md`, `docs/session-awareness.md`     |
-| Scheduled tasks               | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                       | Rin Agent SDK `rin.tasks.*`                                | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
-| Chat bridge                   | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
-| Todo                          | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                      | live tool schema                                               |
-| Browser and desktop operation | Web or desktop work when a live browser/computer tool is present, or a task needs documented manual automation patterns       | live tool list, practice docs                              | `practices/browser-use.md`, `practices/computer-use.md`        |
-| Background extensions         | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.backgroundServices`        | `docs/builtin-extensions.md`                                   |
-| Initialization                | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                 | `docs/initialization.md`                                       |
+| Capability                               | Use when                                                                                                                      | Entry point                                                | Read next                                                      |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------- |
+| Rin launcher                             | Starting, status checks, update, rollback, or installed-runtime maintenance                                                   | `rin`, `rin status`, `rin update --yes`, `rin rollback`    | `docs/runtime-layout.md`                                       |
+| Runtime status and usage                 | Checking daemon activity, workers, scheduled tasks, or token telemetry                                                        | `rin status`, `rin status --json`, `rin usage`             | `docs/execution-environment.md`, `docs/runtime-layout.md`      |
+| Memory and self-improve                  | Choosing between original evidence/retrieval and distilled reusable guidance                                                  | `recall`, prompt baselines, skills                         | `docs/memory-layering.md`, `docs/self-improve-distillation.md` |
+| Non-interactive child runs               | Isolated scouting, review, verification, comparison, or bounded draft work                                                    | `rin -p`, `--mode json`, `--managed-session`               | `docs/non-interactive-cli.md`, `docs/session-awareness.md`     |
+| Scheduled tasks                          | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                       | Rin Agent SDK `rin.tasks.*`                                | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
+| Chat bridge                              | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
+| Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                      | live tool schema                                               |
+| Browser/computer/mobile/search operation | Web, desktop, mobile, or search work that needs the owner's current practice workflow                                         | live tool list, practice docs                              | `practices/README.md`                                          |
+| Background extensions                    | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.backgroundServices`        | `docs/builtin-extensions.md`                                   |
+| Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                 | `docs/initialization.md`                                       |
 
 ## Launcher, update, and rollback
 
@@ -64,12 +64,14 @@ Background extensions are trusted Node.js packages loaded by Rin's background ru
 
 Use them for intentionally configured background event bridges, chat adapters, or memory providers. Restart or reload Rin after changing background extension settings.
 
-## Browser and computer operation
+## Browser, computer, mobile, and search operation
 
-Use browser or desktop automation tools from the live tool list when they are present. Use the practice docs for documented manual or tool-specific patterns:
+Use browser, desktop, mobile, or search tools from the live tool list when they are present. For current owner practice routing, read `practices/README.md`, then the narrow page:
 
-- `practices/browser-use.md`
-- `practices/computer-use.md`
+- `practices/browser/README.md`
+- `practices/computer/README.md`
+- `practices/mobile/README.md`
+- `practices/search/README.md`
 
 ## Stable documentation paths
 

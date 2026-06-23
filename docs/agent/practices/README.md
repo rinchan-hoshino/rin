@@ -1,46 +1,24 @@
-# Practices
+# Agent Practices
 
-Use this directory when a task needs extra environment-control guidance beyond the main topic docs.
+This directory is the first stop for agent-operated external surfaces: browser work, desktop/computer work, mobile-device work, and network search. Read it when the live tool list, task wording, or owner request mentions a browser, webpage, desktop app, OS UI, phone, Android device, Google, SearXNG, search engine, current web evidence, login flow, download, screenshot, or manual account workflow.
 
-Practice pages are routing contracts. Choose the page that owns the interaction surface, follow its selection rule, and report the evidence bundle from that page.
+## Route map
 
-## Selection contract
+| Need                                                                           | Read first           | Then read                                                          |
+| ------------------------------------------------------------------------------ | -------------------- | ------------------------------------------------------------------ |
+| Web pages, login flows, downloads, screenshots, headful/headless browser state | `browser/README.md`  | `search/README.md` when search is needed                           |
+| Desktop or OS UI work                                                          | `computer/README.md` | `computer/windows.md`, `computer/linux.md`, or `computer/macos.md` |
+| Phone/tablet work                                                              | `mobile/README.md`   | `mobile/android.md`                                                |
+| Fast web search, Google URL construction, or local/private meta-search setup   | `search/README.md`   | `browser/README.md` for opening result pages                       |
 
-Start with the least visual path that proves the required fact: API, CLI, file, log, SDK, or repository test harness. Move to browser or desktop control when the user-visible state lives there.
+## General contract
 
-Use `browser-use.md` for:
+- Prefer the live tool list and owner-approved credentials/accounts over assumptions.
+- Keep evidence: URLs, titles, timestamps, screenshots, downloaded file paths, command output, or exact UI state.
+- Use the least invasive path first: direct URL/search -> browser automation -> desktop/mobile automation -> owner-assisted manual step.
+- Do not alter owner accounts, processes, files, OS settings, or devices without task-relevant need and clear approval.
+- If a task needs current external facts and no search/browser tool exists in the current environment, state the missing surface instead of fabricating evidence.
 
-- page navigation and JavaScript-rendered web state;
-- headless/headful browser choice;
-- browser profiles, downloads, screenshots, PDFs, DOM snapshots, network and console evidence;
-- local or remote browser execution.
+## Repository sync
 
-Use `computer-use.md` for:
-
-- OS or desktop application state;
-- windows, screenshots, keyboard/mouse input, accessibility controls, or native app automation;
-- local or remote Linux, Windows, or macOS desktop sessions;
-- file/service/process state tied to a visible desktop workflow.
-
-When both apply, identify the desktop/session target with `computer-use.md`, then use `browser-use.md` for page-level proof inside the browser.
-
-## Output contract
-
-When a practice page guides the work, report:
-
-- selected practice page;
-- target host/app/browser/session;
-- control path chosen;
-- evidence bundle produced;
-- validation that proves the final state.
-
-## Topics
-
-- [Browser Use](browser-use.md): browser-path selection and evidence for headless/headful, local, and remote browser work.
-- [Computer Use](computer-use.md): desktop/OS control-path selection and evidence for local and remote Linux, Windows, and macOS work.
-
-## Read next
-
-- Turn target and capability alignment: `../docs/execution-environment.md`.
-- Browser-specific page state and artifacts: `browser-use.md`.
-- Desktop/session control and OS automation: `computer-use.md`.
+Rin may seed these practices at install time and refresh the installed copy from the external practices repository. Treat the installed path `~/.rin/docs/rin/practices/` as the stable read path for agents.
