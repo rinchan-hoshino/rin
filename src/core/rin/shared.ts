@@ -469,6 +469,10 @@ function installDirFromRuntimeRoot(repoRoot: string) {
   return "";
 }
 
+function isGitHash(value: unknown) {
+  return /^[0-9a-f]{7,40}$/i.test(safeString(value).trim());
+}
+
 function readInstalledRuntimeVersion(installDir: string) {
   try {
     const manifest = JSON.parse(
@@ -476,7 +480,12 @@ function readInstalledRuntimeVersion(installDir: string) {
         .readFileSync(installerManifestPath(installDir), "utf8")
         .replace(/^\uFEFF/, ""),
     );
-    return safeString(manifest?.currentRelease?.release?.version).trim();
+    const release = manifest?.currentRelease?.release;
+    const version = safeString(release?.version).trim();
+    if (safeString(release?.channel).trim() === "git") {
+      return isGitHash(version) ? version : "";
+    }
+    return version;
   } catch {
     return "";
   }

@@ -353,6 +353,18 @@ test("release helpers keep trimmed env and manifest fallback precedence", () => 
   }
 });
 
+test("releaseInfoFromObject keeps git branch selectors out of version identity", () => {
+  const info = release.releaseInfoFromObject({
+    channel: "git",
+    branch: "main",
+    sourceLabel: "git branch main",
+  });
+  assert.equal(info?.channel, "git");
+  assert.equal(info?.version, "unknown");
+  assert.equal(info?.branch, "main");
+  assert.equal(info?.ref, "");
+});
+
 test("releaseInfoFromObject normalizes installer bootstrap metadata", () => {
   const info = release.releaseInfoFromObject({
     channel: "nightly",

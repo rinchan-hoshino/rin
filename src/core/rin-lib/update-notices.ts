@@ -145,13 +145,33 @@ function normalizeInstalledReleaseInfo(
   if (!version && !branch && !ref && !sourceLabel && !archiveUrl) {
     return undefined;
   }
+  if (channel === "git") {
+    const concreteRef = isGitHash(ref)
+      ? ref
+      : isGitHash(version)
+        ? version
+        : "";
+    const concreteVersion = isGitHash(version)
+      ? version
+      : concreteRef
+        ? concreteRef.slice(0, 12)
+        : "unknown";
+    return {
+      channel,
+      version: concreteVersion,
+      branch: branch || "main",
+      ref: concreteRef,
+      sourceLabel: sourceLabel || `git ${branch || "main"}`,
+      archiveUrl,
+      ...(installedAt ? { installedAt } : {}),
+    };
+  }
   return {
     channel,
-    version: version || ref || branch || "unknown",
+    version: version || "unknown",
     branch: branch || (channel === "stable" ? "stable" : "main"),
-    ref: ref || branch || version || "main",
-    sourceLabel:
-      sourceLabel || `${channel} ${version || branch || ref || "unknown"}`,
+    ref: ref || version || "main",
+    sourceLabel: sourceLabel || `${channel} ${version || ref || "unknown"}`,
     archiveUrl,
     ...(installedAt ? { installedAt } : {}),
   };
@@ -334,7 +354,11 @@ export async function checkForRinUpdateNotice(
   });
   if (channel === "git") {
     const currentRef = currentRelease?.ref || currentVersion;
-    if (!latestVersion || gitRefsMatch(latestVersion, currentRef)) {
+    if (
+      !latestVersion ||
+      !isGitHash(currentRef) ||
+      gitRefsMatch(latestVersion, currentRef)
+    ) {
       return undefined;
     }
     return {

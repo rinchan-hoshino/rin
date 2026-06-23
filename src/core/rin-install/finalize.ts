@@ -71,12 +71,14 @@ function readGitValue(sourceRoot: string, args: string[]) {
   }
 }
 
-function deriveGitReleaseMetadata(sourceRoot: string) {
+function deriveGitReleaseMetadata(sourceRoot: string, branchHint = "") {
   const ref = readGitValue(sourceRoot, ["rev-parse", "HEAD"]);
   if (!/^[0-9a-f]{40}$/i.test(ref)) return undefined;
   const version = ref.slice(0, 12);
   const branch =
-    readGitValue(sourceRoot, ["branch", "--show-current"]) || "main";
+    branchHint ||
+    readGitValue(sourceRoot, ["branch", "--show-current"]) ||
+    "main";
   const remoteUrl =
     readGitValue(sourceRoot, ["config", "--get", "remote.origin.url"]) ||
     "https://github.com/rinchan-hoshino/rin";
@@ -89,6 +91,16 @@ function deriveGitReleaseMetadata(sourceRoot: string) {
     archiveUrl: buildGitHubRefArchiveUrl(remoteUrl, ref),
     installedAt: new Date().toISOString(),
   };
+}
+
+function normalizeReleaseMetadataForInstall(
+  release: FinalizeInstallOptions["release"],
+  sourceRoot: string,
+) {
+  if (release?.channel === "git") {
+    return deriveGitReleaseMetadata(sourceRoot, release.branch) || release;
+  }
+  return release || deriveGitReleaseMetadata(sourceRoot);
 }
 
 async function applyInstalledRuntime(
@@ -121,7 +133,10 @@ async function applyInstalledRuntime(
   const sourceRoot =
     String(options.sourceRoot || "").trim() || repoRootFromHere();
   const persistInstallerState = Boolean(options.persistInstallerState);
-  const release = options.release || deriveGitReleaseMetadata(sourceRoot);
+  const release = normalizeReleaseMetadataForInstall(
+    options.release,
+    sourceRoot,
+  );
   const freshInstallDirectory = isFreshInstallDirectory(installDir);
 
   const ownership = describeOwnership(targetUser, installDir);

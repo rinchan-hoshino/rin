@@ -172,6 +172,21 @@ test("Rin update notices ignore top-level release metadata", async () => {
   });
 });
 
+test("Rin git branch selector metadata does not trigger update notices", async () => {
+  const notice = await notices.checkForRinUpdateNotice({
+    currentRelease: {
+      channel: "git",
+      version: "unknown",
+      branch: "main",
+      ref: "",
+      sourceLabel: "git branch main",
+      archiveUrl: "",
+    },
+    manifest: { git: { defaultBranch: "main" } },
+  });
+  assert.equal(notice, undefined);
+});
+
 test("Rin git installs do not receive stable package update notices", async () => {
   await withoutReleaseEnvHandoff(async () => {
     await withTempDir(async (dir) => {

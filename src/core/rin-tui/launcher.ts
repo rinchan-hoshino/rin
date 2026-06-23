@@ -111,7 +111,8 @@ const RPC_TUI_STARTUP_CONNECT_ERROR_RE =
   /\bconnect (?:ENOENT|ECONNREFUSED|ECONNRESET|EPIPE)\b/;
 const RPC_TUI_STARTUP_TRANSIENT_ERROR_RE =
   /\b(?:rin_timeout|rin_disconnected|daemon_timeout):|\brin_tui_not_connected\b/;
-const RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS = 5000;
+const RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS = 30_000;
+const RPC_STARTUP_DAEMON_STATUS_POLL_MS = 150;
 const RPC_STARTUP_READY_TIMEOUT_MS = 10_000;
 
 function errorMessage(error: unknown) {
@@ -171,21 +172,39 @@ function waitForRpcStartupStep<T>(operation: Promise<T>, label: string) {
   return withTuiStartupTimeout(operation, RPC_STARTUP_READY_TIMEOUT_MS, label);
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(1, ms)));
+}
+
 export async function isDaemonReadyForRpcStartup(
-  options: { socketPath?: string; timeoutMs?: number } = {},
+  options: { socketPath?: string; timeoutMs?: number; pollMs?: number } = {},
 ) {
-  try {
-    const status = await requestDaemonCommand(
-      { type: "daemon_status" },
-      {
-        socketPath: options.socketPath,
-        timeoutMs: options.timeoutMs ?? RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS,
-      },
+  const timeoutMs = Math.max(
+    1,
+    options.timeoutMs ?? RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS,
+  );
+  const pollMs = Math.max(
+    1,
+    options.pollMs ?? RPC_STARTUP_DAEMON_STATUS_POLL_MS,
+  );
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
+      const status = await requestDaemonCommand(
+        { type: "daemon_status" },
+        {
+          socketPath: options.socketPath,
+          timeoutMs: Math.min(1000, remainingMs),
+        },
+      );
+      if (status && typeof status === "object") return true;
+    } catch {}
+    await sleep(
+      Math.min(pollMs, Math.max(1, timeoutMs - (Date.now() - startedAt))),
     );
-    return Boolean(status && typeof status === "object");
-  } catch {
-    return false;
   }
+  return false;
 }
 
 export async function shouldStartMaintenanceMode(

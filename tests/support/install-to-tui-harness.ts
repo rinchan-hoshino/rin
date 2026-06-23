@@ -224,9 +224,10 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
 
   const release = {
     channel: "git",
-    version: "install-to-tui-test",
-    ref: "install-to-tui-test",
-    sourceLabel: "install-to-tui-test",
+    version: "123456789abc",
+    branch: "main",
+    ref: "123456789abcdef0123456789abcdef012345678",
+    sourceLabel: "git main @ 123456789abc",
   };
   const publishedRuntime = fsUtils.publishInstalledRuntime(
     rootDir,
@@ -401,7 +402,7 @@ export async function assertInstalledRuntimeSmoke() {
     const flow = await setupIsolatedInstalledRuntime(tempDir);
 
     const version = await runRin(flow.rinPath, ["version"], flow.env);
-    assert.equal(version.stdout.trim(), "install-to-tui-test");
+    assert.equal(version.stdout.trim(), "123456789abc");
 
     const doctor = await runRin(flow.rinPath, ["doctor"], flow.env);
     assert.match(doctor.stdout, new RegExp(`installDir=${flow.installDir}`));

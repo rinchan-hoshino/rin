@@ -427,6 +427,51 @@ test("tui launcher startup timeout rejects with a bounded startup error", async 
   );
 });
 
+test("tui launcher waits for delayed daemon status before maintenance mode", async () => {
+  const runtimeDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-tui-launcher-"),
+  );
+  const socketPath = path.join(runtimeDir, "daemon.sock");
+  const server = net.createServer((socket) => {
+    socket.on("data", (chunk) => {
+      const payload = JSON.parse(String(chunk).trim());
+      socket.write(
+        `${JSON.stringify({
+          type: "response",
+          id: payload.id,
+          command: payload.type,
+          success: true,
+          data: { ok: true },
+        })}\n`,
+      );
+    });
+  });
+
+  let listening = false;
+  server.once("listening", () => {
+    listening = true;
+  });
+  const timer = setTimeout(() => {
+    server.listen(socketPath);
+  }, 50);
+
+  try {
+    assert.equal(
+      await launcher.shouldStartMaintenanceMode({
+        requestedRole: "rpc-frontend",
+        socketPath,
+        timeoutMs: 1000,
+      }),
+      false,
+    );
+  } finally {
+    clearTimeout(timer);
+    if (listening)
+      await new Promise((resolve) => server.close(() => resolve()));
+    await fs.rm(runtimeDir, { recursive: true, force: true });
+  }
+});
+
 test("tui launcher treats daemon status as the rpc startup health check", async () => {
   const runtimeDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-tui-launcher-"),

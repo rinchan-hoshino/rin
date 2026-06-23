@@ -87,6 +87,10 @@ function firstReleaseValue(...values: unknown[]): string {
   return "";
 }
 
+function isGitHash(value: unknown) {
+  return /^[0-9a-f]{7,40}$/i.test(trimReleaseValue(value));
+}
+
 function resolveModuleRootFromHere() {
   return path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -428,14 +432,29 @@ export function releaseInfoFromObject(
   if (!version && !branch && !ref && !sourceLabel && !archiveUrl) {
     return undefined;
   }
+  if (channel === "git") {
+    const concreteRef = isGitHash(ref)
+      ? ref
+      : isGitHash(version)
+        ? version
+        : "";
+    return {
+      channel,
+      version: concreteRef ? concreteRef.slice(0, 12) : "unknown",
+      branch: firstReleaseValue(branch, "main"),
+      ref: concreteRef,
+      sourceLabel: sourceLabel || `git ${firstReleaseValue(branch, "main")}`,
+      archiveUrl,
+      installedAt: trimReleaseValue(record.installedAt) || nowIso(),
+    };
+  }
   return {
     channel,
-    version: firstReleaseValue(version, ref, branch, "unknown"),
+    version: firstReleaseValue(version, "unknown"),
     branch: firstReleaseValue(branch, channel === "stable" ? "stable" : "main"),
-    ref: firstReleaseValue(ref, branch, version, "main"),
+    ref: firstReleaseValue(ref, version, "main"),
     sourceLabel:
-      sourceLabel ||
-      `${channel} ${firstReleaseValue(version, branch, ref, "unknown")}`,
+      sourceLabel || `${channel} ${firstReleaseValue(version, ref, "unknown")}`,
     archiveUrl,
     installedAt: trimReleaseValue(record.installedAt) || nowIso(),
   };

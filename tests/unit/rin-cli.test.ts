@@ -65,6 +65,23 @@ test("version subcommand reports unknown without installed release metadata", ()
   assert.equal(parsed.releaseVersion, "1.2.3");
 });
 
+test("version reader rejects git branch selectors as runtime identity", () => {
+  const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-version-"));
+  try {
+    const runtimeRoot = path.join(installDir, "app", "current");
+    fs.mkdirSync(runtimeRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, "installer.json"),
+      `${JSON.stringify({ currentRelease: { release: { channel: "git", version: "main", branch: "main", ref: "main" } } })}\n`,
+      "utf8",
+    );
+
+    assert.equal(shared.readRinPackageVersion(runtimeRoot), "unknown");
+  } finally {
+    fs.rmSync(installDir, { recursive: true, force: true });
+  }
+});
+
 test("version reader prefers installed release metadata", () => {
   const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-version-"));
   try {
