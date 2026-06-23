@@ -92,9 +92,12 @@ env | grep -E '^(HOME|SHELL|PATH)='
 Rin runtime checks:
 
 ```sh
+rin doctor
+rin doctor --json
 rin status
 rin status --json
 rin usage
+rin self-improve
 ```
 
 Stable Rin paths:
@@ -104,7 +107,7 @@ Stable Rin paths:
 - `~/.rin/settings.json`: Rin/Pi settings.
 - `~/.rin/sessions/`: session records.
 - `~/.rin/memory/`: memory evidence and retrieval data.
-- `~/.rin/self_improve/`: distilled self-improve guidance, prompts, skills, and indexes.
+- `~/.rin/self_improve/`: distilled self-improve guidance, prompts, skills, and indexes. Inspect activity with `rin self-improve`.
 - `~/.rin/app/current/`: current installed runtime entrypoint.
 
 For repository work, inspect project state before choosing validation commands:
@@ -155,7 +158,10 @@ For tasks tied to a specific host, chat, repository, account, browser profile, d
 Choose validation that proves the target state:
 
 - command output, file diff, or test result for repository/source work;
-- `rin status --json` for daemon, scheduled task, worker, or runtime liveness;
+- `rin doctor --json` for whole-runtime health and service-log evidence;
+- `rin status --json`, RPC `daemon_activity` plus `list_sessions`, or SDK `rin.daemon.activity()` plus `rin.sessions.list()` for daemon, scheduled task, worker, running-session, or ended-session state;
+- `rin usage` backend filters for subscription/API usage history and quota evidence;
+- `rin self-improve --json` for structured self-improve history;
 - message store, SDK result, adapter result, or platform evidence for chat work;
 - screenshot, DOM assertion, file artifact, or app state for browser/desktop work;
 - manifest, service file, and `app/current/` target for installed-runtime work.

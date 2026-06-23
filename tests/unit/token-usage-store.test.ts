@@ -654,6 +654,7 @@ test("usage report keeps provider_model labels consistent in raw event tables", 
       events: true,
       includeZero: false,
       dimensions: false,
+      json: false,
       help: false,
     });
 
@@ -692,6 +693,7 @@ test("usage dashboard renders Codex subscription quota and token charts", async 
         events: false,
         includeZero: false,
         dimensions: false,
+        json: false,
         help: false,
       },
       [
@@ -727,15 +729,62 @@ test("usage dashboard renders Codex subscription quota and token charts", async 
 
     assert.match(report, /accounts & quota/);
     assert.match(report, /ChatGPT Codex\s+rin@example\.test \(pro\)/);
-    assert.match(report, /5-hour\s+█+░+ 75% left/);
-    assert.match(report, /weekly\s+█+░+ 40% left/);
+    assert.match(report, /5-hour\s+█+░+ 75% left · reset/);
+    assert.match(report, /weekly\s+█+░+ 40% left · reset/);
     assert.match(report, /Gemini CLI\s+gemini@example\.test/);
     assert.match(report, /temporarily unavailable \(quota unavailable\)/);
-    assert.match(report, /overview/);
-    assert.match(report, /top sessions/);
-    assert.doesNotMatch(report, /top sources/);
-    assert.match(report, /top hours/);
-    assert.match(report, /chart/);
+    assert.match(report, /recent usage/);
+    assert.match(report, /5h/);
+    assert.match(report, /1d/);
+    assert.match(report, /7d/);
+
+    const backendJson = JSON.parse(
+      usageCli.renderUsageReport(
+        root,
+        {
+          groupBy: [],
+          filters: [],
+          from: "2026-04-01T00:00:00.000Z",
+          limit: 20,
+          orderBy: "total_tokens",
+          direction: "desc",
+          events: false,
+          includeZero: false,
+          dimensions: false,
+          json: true,
+          help: false,
+        },
+        [
+          {
+            provider: "openai-codex",
+            label: "ChatGPT Codex",
+            configured: true,
+            windows: [{ name: "five_hour", percentLeft: 75 }],
+          },
+        ],
+      ),
+    );
+    assert.equal(backendJson.providerQuotas[0].provider, "openai-codex");
+    assert.equal(backendJson.overview.total_tokens, 100);
+
+    const backendReport = usageCli.renderUsageReport(root, {
+      groupBy: [],
+      filters: [],
+      from: "2026-04-01T00:00:00.000Z",
+      limit: 20,
+      orderBy: "total_tokens",
+      direction: "desc",
+      events: false,
+      includeZero: false,
+      dimensions: false,
+      json: false,
+      help: false,
+    });
+    assert.match(backendReport, /overview/);
+    assert.match(backendReport, /top sessions/);
+    assert.doesNotMatch(backendReport, /top sources/);
+    assert.match(backendReport, /top hours/);
+    assert.match(backendReport, /chart/);
   });
 });
 

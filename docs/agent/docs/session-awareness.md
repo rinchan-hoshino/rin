@@ -64,9 +64,11 @@ Use session awareness before work that touches shared or long-lived state:
 Start with low-risk state discovery:
 
 ```sh
+rin doctor
 rin status
 rin status --json
 rin usage
+rin self-improve
 find ~/.rin/sessions -maxdepth 3 -type f | sort | tail -40
 ps -ef | grep -E 'rin|node|tsx|npm|git|gh' | grep -v grep
 ```
@@ -88,7 +90,7 @@ Choose the evidence surface that matches the boundary:
 
 - **Archived memory:** original wording, evidence, chronology, older decisions, and cross-session rationale.
 - **Stored sessions:** recent exact session files and managed child-session records.
-- **Live daemon state:** workers, scheduled tasks, active/running state, and redacted prompt/command metadata.
+- **Live daemon state:** workers, scheduled tasks, active/running state, session listings, and redacted prompt/command metadata. Use `rin status --json`, RPC `daemon_activity` plus `list_sessions`, or SDK `rin.daemon.activity()` plus `rin.sessions.list()` for agent-readable state.
 - **Processes:** command lines, working directories, logs, output files, and child-agent runs.
 - **Repositories:** branches, worktrees, commits, locks, uncommitted changes, remotes, issues, and PR comments.
 - **Scheduled/background tasks:** task records, active producer state, next run time, and last result/error.

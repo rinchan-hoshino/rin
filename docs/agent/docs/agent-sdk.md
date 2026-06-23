@@ -53,6 +53,7 @@ Prefer direct turn tools when the current turn already has a purpose-built tool.
 
 Read the topic document before changing that surface:
 
+- status/doctor/usage/self-improve command split: `docs/diagnostic-commands.md`;
 - scheduled tasks: `docs/scheduled-tasks.md`;
 - chat bridge behavior: `docs/chat-bridge.md`;
 - rich chat output syntax: `docs/rich-text-output-format.md`;
@@ -177,9 +178,16 @@ For native mentions, quotes/replies, files, images, or attachment syntax, read `
 ```js
 const status = await rin.daemon.status();
 const activity = await rin.daemon.activity();
+const sessions = await rin.sessions.list({ limit: 100, offset: 0 });
 ```
 
-Use daemon helpers for structured inspection inside scripts. Use `rin status` or `rin status --json` for operator-facing status reports.
+Use daemon helpers for structured inspection inside scripts:
+
+- `rin.daemon.activity()` is the SDK form of the `daemon_activity` RPC. Use it for live session work state, workers, and scheduled-task activity.
+- `rin.daemon.status()` is the SDK form of the `daemon_status` RPC and includes daemon health extras such as chat bridge status.
+- `rin.sessions.list({ limit, offset })` is the SDK form of the `list_sessions` RPC. Use it when ended or detached sessions matter.
+
+Use `rin status --json` when a CLI backend should combine daemon activity and session listing. Use `rin doctor --json` when service-manager state or recent service logs are needed; that evidence is CLI-backed rather than SDK-backed. Use `rin usage` backend filters and `rin self-improve --json` for usage and self-improve history, because those read local telemetry/history stores rather than daemon RPC state.
 
 ## Final report contract
 

@@ -368,11 +368,11 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.match(output, /--yes/);
   assert.match(
     output,
-    /\n\s+self\s+Show recent self-improve distillation runs and details/,
+    /\n\s+self-improve\s+Show recent self-improve outcomes and backend history/,
   );
   assert.match(output, /\n\s+tasks\s+Operate scheduled task records/);
   assert.doesNotMatch(output, /\n\s+memory\s+Compatibility alias/);
-  assert.doesNotMatch(output, /\n\s+self-improve\s+/);
+  assert.doesNotMatch(output, /\n\s+self\s+/);
   assert.doesNotMatch(output, /--bind-chat-session/);
   assert.doesNotMatch(output, /\n\s+run\s+Run one non-interactive Rin turn/);
   assert.doesNotMatch(output, /\n\s+gui\s+/);
@@ -507,7 +507,7 @@ test("run parser supports managed session leaves for delegated non-interactive s
   );
 });
 
-test("usage, status, self, and memory-index parsers ignore wrapper args around the subcommand", () => {
+test("usage, status, self-improve, and memory-index parsers ignore wrapper args around the subcommand", () => {
   assert.deepEqual(
     usage.parseUsageArgs(["-u", "rin", "usage", "--events", "--limit", "5"]),
     {
@@ -519,6 +519,7 @@ test("usage, status, self, and memory-index parsers ignore wrapper args around t
       events: true,
       includeZero: false,
       dimensions: false,
+      json: false,
       help: false,
     },
   );
@@ -534,6 +535,7 @@ test("usage, status, self, and memory-index parsers ignore wrapper args around t
       events: true,
       includeZero: false,
       dimensions: false,
+      json: false,
       help: false,
     },
   );
@@ -557,6 +559,7 @@ test("usage, status, self, and memory-index parsers ignore wrapper args around t
       events: false,
       includeZero: false,
       dimensions: false,
+      json: false,
       help: false,
     },
   );
@@ -574,6 +577,8 @@ test("usage, status, self, and memory-index parsers ignore wrapper args around t
       watch: true,
       intervalMs: 2500,
       json: true,
+      limit: 50,
+      offset: 0,
       help: false,
     },
   );
@@ -582,22 +587,45 @@ test("usage, status, self, and memory-index parsers ignore wrapper args around t
     watch: false,
     intervalMs: 250,
     json: false,
+    limit: 50,
+    offset: 0,
     help: false,
   });
 
+  assert.deepEqual(
+    status.parseStatusArgs([
+      "status",
+      "--json",
+      "--limit",
+      "100",
+      "--offset=20",
+    ]),
+    {
+      watch: false,
+      intervalMs: 1000,
+      json: true,
+      limit: 100,
+      offset: 20,
+      help: false,
+    },
+  );
+
   const selfImproveArgs = selfImprove.parseSelfImproveArgs([
     "--user=rin",
-    "self",
+    "self-improve",
     "--from",
     "7d",
     "--limit",
     "5",
     "--status",
     "failed",
+    "--json",
   ]);
   assert.equal(typeof selfImproveArgs.from, "string");
   assert.equal(selfImproveArgs.limit, 5);
+  assert.equal(selfImproveArgs.explicitLimit, true);
   assert.equal(selfImproveArgs.status, "failed");
+  assert.equal(selfImproveArgs.json, true);
   assert.equal(selfImproveArgs.help, false);
 
   assert.deepEqual(memoryIndex.parseMemoryIndexArgs(["memory-index"]), {
@@ -650,34 +678,47 @@ test("self-improve report renders recent distillation history", () => {
     fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(
       path.join(stateDir, "maintenance-history.jsonl"),
-      [
-        {
-          id: "run-1",
-          kind: "self_improve_review",
-          status: "completed",
-          trigger: "self_improve:periodic_review",
-          sessionFile: path.join(agentDir, "sessions", "demo.jsonl"),
-          startedAt: "2026-05-01T00:00:00.000Z",
-          finishedAt: "2026-05-01T00:01:00.000Z",
-          attempts: 1,
-          changedFiles: [
-            { path: "self_improve/skills/demo/SKILL.md", change: "updated" },
-          ],
-        },
-      ]
+      Array.from({ length: 25 }, (_, index) => ({
+        id: `run-${index + 1}`,
+        kind: "self_improve_review",
+        status: "completed",
+        trigger: "self_improve:periodic_review",
+        sessionFile: path.join(agentDir, "sessions", `demo-${index + 1}.jsonl`),
+        startedAt: `2026-05-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        finishedAt: `2026-05-${String(index + 1).padStart(2, "0")}T00:01:00.000Z`,
+        attempts: 1,
+        changedFiles: [
+          { path: "self_improve/skills/demo/SKILL.md", change: "updated" },
+        ],
+      }))
         .map((row) => JSON.stringify(row))
         .join("\n") + "\n",
       "utf8",
     );
 
     const report = selfImprove.renderSelfImproveReport(agentDir, {
+      from: "2026-01-01T00:00:00.000Z",
       limit: 10,
+      explicitLimit: true,
+      json: false,
       help: false,
     });
 
-    assert.match(report, /Rin self-improve distillation/);
+    assert.match(report, /Rin self-improve history/);
     assert.match(report, /self_improve:periodic_review/);
     assert.match(report, /updated:self_improve\/skills\/demo\/SKILL.md/);
+
+    const backend = JSON.parse(
+      selfImprove.renderSelfImproveReport(agentDir, {
+        from: "2026-01-01T00:00:00.000Z",
+        limit: 20,
+        explicitLimit: false,
+        json: true,
+        help: false,
+      }),
+    );
+    assert.equal(backend.stats.totalRuns, 25);
+    assert.equal(backend.records.length, 25);
   } finally {
     fs.rmSync(agentDir, { recursive: true, force: true });
   }
@@ -711,7 +752,7 @@ test("captureInternalRinCommand forwards only subcommand args", () => {
   ]);
 });
 
-test("status report renders live worker and cron activity", () => {
+test("status report renders running session activity", () => {
   const report = status.renderStatusReport({
     generatedAt: "2026-04-29T01:00:00.000Z",
     socketPath: "/tmp/rin.sock",
@@ -747,11 +788,10 @@ test("status report renders live worker and cron activity", () => {
     },
   });
 
-  assert.match(report, /workers: 1 total, 1 active/);
+  assert.match(report, /running: 1 \/ 1 sessions/);
   assert.match(report, /worker_1/);
-  assert.match(report, /cron: 1 tasks, 1 enabled, 1 running/);
-  assert.match(report, /cron_demo/);
-  assert.match(report, /agent_prompt/);
+  assert.doesNotMatch(report, /cron_demo/);
+  assert.doesNotMatch(report, /agent_prompt/);
 });
 
 test("usage and status parsers reject invalid syntax", () => {
@@ -808,7 +848,7 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
   const selfHelp = main.resolveInternalRinDispatch([
     "-u",
     "rin",
-    "self",
+    "self-improve",
     "--help",
   ]);
   assert.ok(selfHelp);

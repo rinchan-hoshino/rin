@@ -34,8 +34,8 @@ const RIN_COMMANDS = [
   ["doctor", "Show daemon/socket diagnostics for the target user"],
   ["status", "Show live worker and scheduled task activity"],
   ["tasks", "Operate scheduled task records"],
-  ["usage", "Show token telemetry dashboard and grouped usage stats"],
-  ["self", "Show recent self-improve distillation runs and details"],
+  ["usage", "Show subscription/API usage status and backend usage reports"],
+  ["self-improve", "Show recent self-improve outcomes and backend history"],
   ["versions", "List installed Rin runtime versions"],
   ["rollback", "Rollback the installed Rin runtime to the previous version"],
   ["memory-index", "Repair the recall index from archived transcripts"],
@@ -56,7 +56,7 @@ const INTERNAL_COMMANDS = [
   },
   {
     marker: "__self_improve_internal",
-    command: "self",
+    command: "self-improve",
     run: runSelfImproveInternal,
   },
   {
@@ -186,14 +186,15 @@ export async function startRinCli() {
   if (parsed.command === "start") return await runStart(parsed);
   if (parsed.command === "stop") return await runStop(parsed);
   if (parsed.command === "restart") return await runRestart(parsed);
-  if (parsed.command === "doctor") return await runDoctor(parsed);
+  if (parsed.command === "doctor")
+    return await runDoctor(parsed, process.argv.slice(2));
   if (parsed.command === "status")
     return await runStatus(parsed, process.argv.slice(2));
   if (parsed.command === "tasks")
     return await runTasks(parsed, process.argv.slice(2));
   if (parsed.command === "usage")
     return await runUsage(parsed, process.argv.slice(2));
-  if (parsed.command === "self")
+  if (parsed.command === "self-improve")
     return await runSelfImprove(parsed, process.argv.slice(2));
   if (parsed.command === "versions") return runVersions(parsed);
   if (parsed.command === "rollback") return await runRollback(parsed);

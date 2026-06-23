@@ -85,8 +85,9 @@ async function waitForSocketState(
 ) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const { stdout } = await runCli(["doctor"], env);
-    if (stdout.includes(`socketReady=${expected}`)) return stdout;
+    const { stdout } = await runCli(["doctor", "--json"], env);
+    const status = JSON.parse(stdout);
+    if (status.socketReady === (expected === "yes")) return stdout;
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   throw new Error(`timed_out_waiting_for_socket_${expected}`);
@@ -95,8 +96,8 @@ async function waitForSocketState(
 test("isolated CLI doctor flow sees a daemon booted in a temporary agent dir", async () => {
   await withTempDir(async (tempDir) => {
     const { agentDir, env } = await setupIsolatedCliEnv(tempDir);
-    const before = await runCli(["doctor"], env);
-    assert.match(before.stdout, /socketReady=no/);
+    const before = await runCli(["doctor", "--json"], env);
+    assert.equal(JSON.parse(before.stdout).socketReady, false);
 
     const daemon = spawn(process.execPath, [daemonPath], {
       cwd: rootDir,
@@ -122,8 +123,9 @@ test("isolated CLI doctor flow sees a daemon booted in a temporary agent dir", a
 
     try {
       const doctor = await waitForSocketState(env, "yes");
-      assert.match(doctor, /socketReady=yes/);
-      assert.match(doctor, /targetUser=/);
+      const doctorStatus = JSON.parse(doctor);
+      assert.equal(doctorStatus.socketReady, true);
+      assert.ok(doctorStatus.targetUser);
 
       const agentData = path.join(agentDir, "data");
       await assert.doesNotReject(() => fs.access(agentData));

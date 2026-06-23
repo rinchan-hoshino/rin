@@ -339,9 +339,10 @@ export async function waitForDoctorSocket(
   const startedAt = Date.now();
   let lastOutput = "";
   while (Date.now() - startedAt < timeoutMs) {
-    const doctor = await runRin(rinPath, ["doctor"], env);
+    const doctor = await runRin(rinPath, ["doctor", "--json"], env);
     lastOutput = doctor.stdout;
-    if (doctor.stdout.includes(`socketReady=${expected}`)) return doctor;
+    const status = JSON.parse(doctor.stdout);
+    if (status.socketReady === (expected === "yes")) return doctor;
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   throw new Error(`timed_out_waiting_for_socket_${expected}:\n${lastOutput}`);
@@ -404,15 +405,14 @@ export async function assertInstalledRuntimeSmoke() {
     const version = await runRin(flow.rinPath, ["version"], flow.env);
     assert.equal(version.stdout.trim(), "123456789abc");
 
-    const doctor = await runRin(flow.rinPath, ["doctor"], flow.env);
-    assert.match(doctor.stdout, new RegExp(`installDir=${flow.installDir}`));
-    assert.match(
-      doctor.stdout,
-      new RegExp(
-        `socketPath=${path.join(flow.runtimeDir, "rin-daemon", "daemon.sock")}`,
-      ),
+    const doctor = await runRin(flow.rinPath, ["doctor", "--json"], flow.env);
+    const doctorStatus = JSON.parse(doctor.stdout);
+    assert.equal(doctorStatus.installDir, flow.installDir);
+    assert.equal(
+      doctorStatus.socketPath,
+      path.join(flow.runtimeDir, "rin-daemon", "daemon.sock"),
     );
-    assert.match(doctor.stdout, /socketReady=no/);
+    assert.equal(doctorStatus.socketReady, false);
 
     await assert.doesNotReject(() =>
       fs.access(flow.publishedRuntime.currentLink),

@@ -15,8 +15,11 @@ export type SelfImproveCliOptions = {
   from?: string;
   to?: string;
   limit: number;
+  explicitLimit: boolean;
   status?: string;
   trigger?: string;
+  id?: string;
+  json: boolean;
   help: boolean;
 };
 
@@ -40,20 +43,25 @@ type MaintenanceHistoryRecord = {
 function printSelfImproveHelp() {
   console.log(
     [
-      "rin self [options]",
+      "rin self-improve [options]",
+      "",
+      "Frontend view:",
+      "  Shows all self-improve outcomes from the past 1 day.",
       "",
       "Options:",
-      "  --from <time>       start time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
-      "  --to <time>         end time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
-      "  --limit <n>         recent run limit (default 20)",
-      "  --status <status>   completed or failed",
-      "  --trigger <text>    substring filter for trigger",
+      "  --id <id>           show details for one self-improve run",
+      "  --json              backend view with complete filtered records and stats",
+      "  --from <time>       backend start time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
+      "  --to <time>         backend end time (ISO, YYYY-MM-DD, 24h, 7d, 30m)",
+      "  --limit <n>         backend run limit (default 20)",
+      "  --status <status>   backend filter: completed or failed",
+      "  --trigger <text>    backend substring filter for trigger",
       "  --help              show this help",
       "",
       "Examples:",
-      "  rin self",
-      "  rin self --from 7d --limit 50",
-      "  rin self --status failed --from 30d",
+      "  rin self-improve",
+      "  rin self-improve --id run-20260623",
+      "  rin self-improve --json --from 30d --status failed",
     ].join("\n"),
   );
 }
@@ -99,12 +107,25 @@ function readArg(args: string[], index: number) {
 }
 
 export function parseSelfImproveArgs(argv: string[]): SelfImproveCliOptions {
-  const args = extractSubcommandArgv(argv, "self");
-  const result: SelfImproveCliOptions = { limit: 20, help: false };
+  const args = extractSubcommandArgv(argv, "self-improve");
+  const result: SelfImproveCliOptions = {
+    limit: 20,
+    explicitLimit: false,
+    json: false,
+    help: false,
+  };
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === "--help" || arg === "-h") {
       result.help = true;
+      continue;
+    }
+    if (arg === "--json") {
+      result.json = true;
+      continue;
+    }
+    if (arg === "--id") {
+      result.id = readArg(args, ++i);
       continue;
     }
     if (arg === "--from") {
@@ -117,6 +138,7 @@ export function parseSelfImproveArgs(argv: string[]): SelfImproveCliOptions {
     }
     if (arg === "--limit") {
       result.limit = parsePositiveInt(readArg(args, ++i), result.limit);
+      result.explicitLimit = true;
       continue;
     }
     if (arg === "--status") {
@@ -170,6 +192,9 @@ function inRange(
   if (options.from && timestamp < Date.parse(options.from)) return false;
   if (options.to && timestamp > Date.parse(options.to)) return false;
   if (options.status && safeString(record.status).trim() !== options.status) {
+    return false;
+  }
+  if (options.id && safeString(record.id).trim() !== options.id) {
     return false;
   }
   if (
@@ -249,6 +274,122 @@ function renderRecentRuns(records: MaintenanceHistoryRecord[]) {
   );
 }
 
+function frontendFromIso() {
+  return new Date(Date.now() - 24 * 3_600_000).toISOString();
+}
+
+function isBackendSelfImproveRequest(options: SelfImproveCliOptions) {
+  return Boolean(
+    options.json ||
+    options.from ||
+    options.to ||
+    options.status ||
+    options.trigger ||
+    options.explicitLimit,
+  );
+}
+
+function querySelfImproveRecords(
+  agentDir: string,
+  options: SelfImproveCliOptions,
+) {
+  return readHistory(agentDir)
+    .filter((record) => inRange(record, options))
+    .sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
+}
+
+function renderSelfImproveList(records: MaintenanceHistoryRecord[]) {
+  if (!records.length) return "  no self-improve outcomes in this window";
+  return records
+    .map((record, index) => {
+      const id = safeString(record.id).trim() || `#${index + 1}`;
+      const changed = changedFileSummary(record);
+      const error = record.error || record.skipped;
+      return [
+        `${String(index + 1).padStart(2, " ")}. ${formatReportTime(record.finishedAt || record.startedAt)}  ${record.status || "-"}  ${record.trigger || "-"}`,
+        `    id ${id} · session ${sessionLabel(record.sessionFile)} · attempts ${String(record.attempts || 1)}`,
+        `    changed ${changed}`,
+        error ? `    note ${error}` : undefined,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n");
+}
+
+function renderSelfImproveDetail(record: MaintenanceHistoryRecord | undefined) {
+  if (!record) return "Self-improve run not found";
+  const changedFiles = Array.isArray(record.changedFiles)
+    ? record.changedFiles
+    : [];
+  const lines = [
+    `Rin self-improve detail: ${safeString(record.id).trim() || "(no id)"}`,
+    `status: ${record.status || "-"}`,
+    `trigger: ${record.trigger || "-"}`,
+    `session: ${sessionLabel(record.sessionFile)}`,
+    `started: ${formatReportTime(record.startedAt)}`,
+    `finished: ${formatReportTime(record.finishedAt)}`,
+    `attempts: ${String(record.attempts || 1)}`,
+  ];
+  if (record.error || record.skipped) {
+    lines.push(`note: ${record.error || record.skipped}`);
+  }
+  lines.push(
+    "",
+    "changed files:",
+    ...(changedFiles.length
+      ? changedFiles.map(
+          (file) =>
+            `  - ${(safeString(file.change).trim() || "updated").padEnd(8)} ${safeString(file.path).trim() || "-"}`,
+        )
+      : ["  (none)"]),
+  );
+  if (record.outputPreview) {
+    lines.push("", "output preview:", record.outputPreview);
+  }
+  return lines.join("\n");
+}
+
+export function buildSelfImproveBackendReport(
+  agentDir: string,
+  options: SelfImproveCliOptions,
+) {
+  const records = querySelfImproveRecords(agentDir, options);
+  const returnedRecords = options.explicitLimit
+    ? records.slice(0, options.limit)
+    : records;
+  const completed = records.filter(
+    (record) => record.status === "completed",
+  ).length;
+  const failed = records.filter((record) => record.status === "failed").length;
+  const changedFiles = records.reduce(
+    (total, record) =>
+      total +
+      (Array.isArray(record.changedFiles) ? record.changedFiles.length : 0),
+    0,
+  );
+  return {
+    generatedAt: nowIso(),
+    filters: {
+      from: options.from,
+      to: options.to,
+      status: options.status,
+      trigger: options.trigger,
+      id: options.id,
+      limit: options.explicitLimit ? options.limit : undefined,
+    },
+    stats: {
+      totalRuns: records.length,
+      completed,
+      failed,
+      changedFiles,
+      first: recordTime(records.at(-1) || {}) || undefined,
+      last: recordTime(records[0] || {}) || undefined,
+    },
+    records: returnedRecords,
+  };
+}
+
 export function renderSelfImproveReport(
   agentDir: string,
   options: SelfImproveCliOptions,
@@ -257,17 +398,41 @@ export function renderSelfImproveReport(
     printSelfImproveHelp();
     return "";
   }
-  const records = readHistory(agentDir)
-    .filter((record) => inRange(record, options))
-    .sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
-  const recent = records.slice(0, options.limit);
+  if (options.id && !options.json) {
+    return renderSelfImproveDetail(
+      querySelfImproveRecords(agentDir, { ...options, limit: 1 })[0],
+    );
+  }
+  if (options.json) {
+    return JSON.stringify(
+      buildSelfImproveBackendReport(agentDir, options),
+      null,
+      2,
+    );
+  }
+  if (isBackendSelfImproveRequest(options)) {
+    const records = querySelfImproveRecords(agentDir, options);
+    const recent = records.slice(0, options.limit);
+    return [
+      `Rin self-improve history @ ${formatReportTime(nowIso())}`,
+      "",
+      summarize(records),
+      "",
+      "recent runs",
+      renderRecentRuns(recent),
+    ].join("\n");
+  }
+  const records = querySelfImproveRecords(agentDir, {
+    ...options,
+    from: frontendFromIso(),
+  });
   return [
-    `Rin self-improve distillation @ ${formatReportTime(nowIso())}`,
+    `Rin self-improve outcomes @ ${formatReportTime(nowIso())}`,
+    `window: past 1d · ${records.length} runs`,
     "",
-    summarize(records),
+    renderSelfImproveList(records),
     "",
-    "recent runs",
-    renderRecentRuns(recent),
+    "Use `rin self-improve --id <id>` to view details, or `rin self-improve --json` for the backend record set.",
   ].join("\n");
 }
 
@@ -292,7 +457,7 @@ export async function runSelfImprove(parsed: ParsedArgs, rawArgv: string[]) {
       context,
       "__self_improve_internal",
       rawArgv,
-      "self",
+      "self-improve",
     );
     process.stdout.write(forwarded);
     return;

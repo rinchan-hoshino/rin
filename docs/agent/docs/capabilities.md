@@ -4,26 +4,28 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 
 ## Capability index
 
-| Capability                               | Use when                                                                                                                      | Entry point                                                | Read next                                                      |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------- |
-| Rin launcher                             | Starting, status checks, update, rollback, or installed-runtime maintenance                                                   | `rin`, `rin status`, `rin update --yes`, `rin rollback`    | `docs/runtime-layout.md`                                       |
-| Runtime status and usage                 | Checking daemon activity, workers, scheduled tasks, or token telemetry                                                        | `rin status`, `rin status --json`, `rin usage`             | `docs/execution-environment.md`, `docs/runtime-layout.md`      |
-| Memory and self-improve                  | Choosing between original evidence/retrieval and distilled reusable guidance                                                  | `recall`, prompt baselines, skills                         | `docs/memory-layering.md`, `docs/self-improve-distillation.md` |
-| Non-interactive child runs               | Isolated scouting, review, verification, comparison, or bounded draft work                                                    | `rin -p`, `--mode json`, `--managed-session`               | `docs/non-interactive-cli.md`, `docs/session-awareness.md`     |
-| Scheduled tasks                          | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                       | Rin Agent SDK `rin.tasks.*`                                | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
-| Chat bridge                              | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
-| Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                      | live tool schema                                               |
-| Browser/computer/mobile/search operation | Web, desktop, mobile, or search work that needs the owner's current practice workflow                                         | live tool list, practice docs                              | `practices/README.md`                                          |
-| Background extensions                    | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.backgroundServices`        | `docs/builtin-extensions.md`                                   |
-| Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                 | `docs/initialization.md`                                       |
+| Capability                               | Use when                                                                                                                      | Entry point                                                 | Read next                                                      |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------- |
+| Rin launcher                             | Starting, status checks, update, rollback, or installed-runtime maintenance                                                   | `rin`, `rin doctor`, `rin update --yes`, `rin rollback`     | `docs/runtime-layout.md`                                       |
+| Runtime status and usage                 | Checking daemon health, session activity, subscription/API usage, or self-improve history                                     | `rin doctor`, `rin status`, `rin usage`, `rin self-improve` | `docs/diagnostic-commands.md`, `docs/runtime-layout.md`        |
+| Memory and self-improve                  | Choosing between original evidence/retrieval and distilled reusable guidance                                                  | `recall`, `rin self-improve`, prompt baselines, skills      | `docs/memory-layering.md`, `docs/self-improve-distillation.md` |
+| Non-interactive child runs               | Isolated scouting, review, verification, comparison, or bounded draft work                                                    | `rin -p`, `--mode json`, `--managed-session`                | `docs/non-interactive-cli.md`, `docs/session-awareness.md`     |
+| Scheduled tasks                          | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                       | Rin Agent SDK `rin.tasks.*`                                 | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
+| Chat bridge                              | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store  | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
+| Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                       | live tool schema                                               |
+| Browser/computer/mobile/search operation | Web, desktop, mobile, or search work that needs the owner's current practice workflow                                         | live tool list, practice docs                               | `practices/README.md`                                          |
+| Background extensions                    | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.backgroundServices`         | `docs/builtin-extensions.md`                                   |
+| Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                  | `docs/initialization.md`                                       |
 
 ## Launcher, update, and rollback
 
 Use the `rin` launcher as the installed-runtime entrypoint.
 
 - `rin`: normal interactive launch.
-- `rin status` / `rin status --json`: daemon, worker, and scheduled-task state.
-- `rin usage`: token telemetry and usage dashboard.
+- `rin doctor` / `rin doctor --json`: whole-runtime health and service logs.
+- `rin status` / `rin status --json`: session work state and daemon activity.
+- `rin usage`: subscription/API quota plus usage history and statistics.
+- `rin self-improve`: recent and historical self-improve outcomes.
 - `rin update --yes`: the only agent-facing installed-runtime update command.
 - `rin rollback`: switch to the `previousRelease` recorded in the install manifest.
 
@@ -38,7 +40,7 @@ Rin separates memory from self-improve:
 - memory preserves original evidence and supports retrieval through archived transcripts, memory indexes, and `recall`;
 - self-improve stores distilled guidance in prompt baselines, reusable skills, and short-term continuity records.
 
-Read `docs/memory-layering.md` before choosing a destination. Read `docs/self-improve-distillation.md` before running or editing self-improve distillation prompts.
+Read `docs/memory-layering.md` before choosing a destination. Read `docs/self-improve-distillation.md` before running or editing self-improve distillation prompts. Use `rin self-improve`, not `rin memory`, when inspecting self-evolution history.
 
 ## Core todo
 

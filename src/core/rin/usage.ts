@@ -31,6 +31,7 @@ export type UsageCliOptions = {
   events: boolean;
   includeZero: boolean;
   dimensions: boolean;
+  json: boolean;
   help: boolean;
 };
 
@@ -125,6 +126,7 @@ function printUsageHelp() {
       "  --events              show raw events instead of aggregates",
       "  --include-zero        include zero-token rows in aggregates",
       "  --dimensions          list supported dimensions",
+      "  --json                print an agent backend JSON report with quota and queried data",
       "  --help                show this help",
       "",
       "Examples:",
@@ -210,6 +212,7 @@ export function parseUsageArgs(argv: string[]): UsageCliOptions {
     events: false,
     includeZero: false,
     dimensions: false,
+    json: false,
     help: false,
   };
   for (let i = 0; i < args.length; i += 1) {
@@ -228,6 +231,10 @@ export function parseUsageArgs(argv: string[]): UsageCliOptions {
     }
     if (arg === "--dimensions") {
       result.dimensions = true;
+      continue;
+    }
+    if (arg === "--json") {
+      result.json = true;
       continue;
     }
     if (arg === "--from") {
@@ -875,6 +882,115 @@ function queryRecentMessageEvents(
   }).filter((row) => Number(row.total_tokens || 0) > 0);
 }
 
+function usageWindowStart(amountMs: number) {
+  return new Date(Date.now() - amountMs).toISOString();
+}
+
+function queryUsageWindow(agentDir: string, label: string, amountMs: number) {
+  const overview = getTokenUsageOverview({
+    agentDir,
+    from: usageWindowStart(amountMs),
+    filters: [],
+  });
+  return {
+    window: label,
+    events: formatInt(overview.total_events),
+    sessions: formatInt(overview.session_count),
+    input: formatInt(overview.input_tokens),
+    output: formatInt(overview.output_tokens),
+    total: formatInt(overview.total_tokens),
+    cost: `$${formatCost(overview.cost_total)}`,
+  };
+}
+
+function renderUsageFrontendReport(
+  agentDir: string,
+  providerQuotas?: ProviderQuotaStatus[],
+) {
+  return [
+    `Rin usage @ ${formatReportTime(nowIso())}`,
+    renderProviderQuotas(providerQuotas),
+    "",
+    "recent usage",
+    renderReportTable(
+      [
+        queryUsageWindow(agentDir, "5h", 5 * 3_600_000),
+        queryUsageWindow(agentDir, "1d", 24 * 3_600_000),
+        queryUsageWindow(agentDir, "7d", 7 * 24 * 3_600_000),
+      ],
+      ["window", "events", "sessions", "input", "output", "total", "cost"],
+      { indent: "  " },
+    ),
+  ].join("\n");
+}
+
+function isUsageBackendRequest(options: UsageCliOptions) {
+  return Boolean(
+    options.json ||
+    options.dimensions ||
+    options.events ||
+    options.groupBy.length > 0 ||
+    options.from ||
+    options.to ||
+    options.filters.length > 0 ||
+    options.includeZero,
+  );
+}
+
+function buildUsageBackendJson(
+  agentDir: string,
+  options: UsageCliOptions,
+  providerQuotas?: ProviderQuotaStatus[],
+) {
+  const scope = buildUsageScope(agentDir, options);
+  const base = {
+    schemaVersion: 1,
+    generatedAt: nowIso(),
+    filters: {
+      from: options.from,
+      to: options.to,
+      groupBy: options.groupBy,
+      filters: options.filters,
+      limit: options.limit,
+      orderBy: options.orderBy,
+      direction: options.direction,
+      includeZero: options.includeZero,
+    },
+    providerQuotas: providerQuotas || [],
+    dimensions: listTokenUsageDimensions(),
+  };
+  if (options.dimensions) return base;
+  if (options.events) {
+    return {
+      ...base,
+      events: queryTokenUsageEvents({ ...scope, limit: options.limit }),
+    };
+  }
+  if (options.groupBy.length > 0) {
+    return {
+      ...base,
+      aggregate: queryTokenUsageAggregate({
+        ...scope,
+        groupBy: options.groupBy,
+        limit: options.limit,
+        orderBy: options.orderBy,
+        direction: options.direction,
+        includeZero: options.includeZero,
+      }),
+    };
+  }
+  return {
+    ...base,
+    overview: getTokenUsageOverview(scope),
+    aggregates: DASHBOARD_AGGREGATE_SECTIONS.map((section) => ({
+      title: section.title,
+      groupBy: section.groupBy,
+      rows: queryDashboardAggregate(scope, section),
+    })),
+    recentTokenEvents: queryRecentMessageEvents(scope, 10),
+  };
+}
+
 export function renderUsageReport(
   agentDir: string,
   options: UsageCliOptions,
@@ -884,6 +1000,13 @@ export function renderUsageReport(
     printUsageHelp();
     return "";
   }
+  if (options.json) {
+    return JSON.stringify(
+      buildUsageBackendJson(agentDir, options, providerQuotas),
+      null,
+      2,
+    );
+  }
   if (options.dimensions) {
     return [
       "supported dimensions:",
@@ -891,6 +1014,9 @@ export function renderUsageReport(
     ].join("\n");
   }
   const scope = buildUsageScope(agentDir, options);
+  if (!isUsageBackendRequest(options)) {
+    return renderUsageFrontendReport(agentDir, providerQuotas);
+  }
   if (options.events) {
     return renderEventTable(
       queryTokenUsageEvents({ ...scope, limit: options.limit }),
@@ -934,11 +1060,11 @@ async function renderUsageReportForCli(
   agentDir: string,
   options: UsageCliOptions,
 ) {
-  if (options.events || options.groupBy.length > 0 || options.dimensions) {
-    return renderUsageReport(agentDir, options);
+  if (options.json || !isUsageBackendRequest(options)) {
+    const providerQuotas = await loadProviderQuotaStatuses(agentDir);
+    return renderUsageReport(agentDir, options, providerQuotas);
   }
-  const providerQuotas = await loadProviderQuotaStatuses(agentDir);
-  return renderUsageReport(agentDir, options, providerQuotas);
+  return renderUsageReport(agentDir, options);
 }
 
 export async function runUsageInternal(rawArgv: string[]) {

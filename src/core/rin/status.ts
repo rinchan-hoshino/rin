@@ -19,6 +19,8 @@ export type StatusCliOptions = {
   watch: boolean;
   intervalMs: number;
   json: boolean;
+  limit: number;
+  offset: number;
   help: boolean;
 };
 
@@ -30,7 +32,9 @@ function printStatusHelp() {
       "Options:",
       "  --watch              refresh the status view until interrupted",
       "  --interval <sec>     watch refresh interval in seconds (default 1)",
-      "  --json               print the raw daemon_activity RPC snapshot",
+      "  --json               print backend daemon activity plus session listing",
+      "  --limit <n>          backend session page size (default 50)",
+      "  --offset <n>         backend session page offset (default 0)",
       "  --help               show this help",
       "",
       "Examples:",
@@ -55,12 +59,23 @@ function parseIntervalMs(value: string) {
   return Math.max(100, Math.round(seconds * 1000));
 }
 
+function parseNonNegativeInt(value: string, name: string) {
+  const text = safeString(value).trim();
+  const num = Number(text);
+  if (!Number.isFinite(num) || num < 0) {
+    throw new Error(`invalid_status_${name}:${text}`);
+  }
+  return Math.round(num);
+}
+
 export function parseStatusArgs(argv: string[]): StatusCliOptions {
   const args = extractSubcommandArgv(argv, "status");
   const result: StatusCliOptions = {
     watch: false,
     intervalMs: 1000,
     json: false,
+    limit: 50,
+    offset: 0,
     help: false,
   };
   for (let i = 0; i < args.length; i += 1) {
@@ -75,6 +90,36 @@ export function parseStatusArgs(argv: string[]): StatusCliOptions {
     }
     if (arg === "--json") {
       result.json = true;
+      continue;
+    }
+    if (arg === "--limit") {
+      const next = readStatusArg(args, i + 1);
+      if (!next || next.startsWith("--"))
+        throw new Error("missing_status_limit");
+      i += 1;
+      result.limit = Math.max(1, parseNonNegativeInt(next, "limit"));
+      continue;
+    }
+    if (arg.startsWith("--limit=")) {
+      result.limit = Math.max(
+        1,
+        parseNonNegativeInt(arg.slice("--limit=".length), "limit"),
+      );
+      continue;
+    }
+    if (arg === "--offset") {
+      const next = readStatusArg(args, i + 1);
+      if (!next || next.startsWith("--"))
+        throw new Error("missing_status_offset");
+      i += 1;
+      result.offset = parseNonNegativeInt(next, "offset");
+      continue;
+    }
+    if (arg.startsWith("--offset=")) {
+      result.offset = parseNonNegativeInt(
+        arg.slice("--offset=".length),
+        "offset",
+      );
       continue;
     }
     if (arg === "--interval") {
@@ -148,55 +193,33 @@ function renderWorkerRows(workers: unknown[]) {
   });
 }
 
-function cronTaskState(task: Record<string, unknown>) {
-  if (task.running) return "running";
-  if (task.completedAt) return "completed";
-  if (!task.enabled) return "paused";
-  return task.nextRunAt ? "scheduled" : "idle";
-}
-
-function renderCronRows(tasks: unknown[]) {
-  return tasks.map((task) => {
-    const value = asRecord(task) ?? {};
-    const target = asRecord(value.target);
-    const session = asRecord(value.session);
-    return {
-      id: formatMaybe(value.id),
-      state: cronTaskState(value),
-      next: formatReportTime(value.nextRunAt),
-      active: value.activeDurationMs
-        ? formatDuration(value.activeDurationMs)
-        : "-",
-      runs: formatMaybe(value.runCount, "0"),
-      session: formatMaybe(session?.mode),
-      target: formatMaybe(target?.kind),
-    };
-  });
+function isRunningWorker(worker: unknown) {
+  const value = asRecord(worker) ?? {};
+  const state = safeString(value.state).trim();
+  return (
+    state === "working" || state === "stopping" || Boolean(value.rinWorking)
+  );
 }
 
 export function renderStatusReport(snapshot: unknown) {
   const status = asRecord(snapshot);
-  if (!status) return "Rin daemon status: unavailable";
+  if (!status) return "Rin session status: unavailable";
 
-  const cron = asRecord(status.cron) ?? {};
   const workers = asArray(status.workers);
-  const tasks = asArray(cron.tasks);
+  const runningWorkers = workers.filter(isRunningWorker);
   const lines = [
-    `Rin activity @ ${formatReportTime(status.generatedAt)}`,
+    `Rin running sessions @ ${formatReportTime(status.generatedAt)}`,
     `socket: ${formatMaybe(status.socketPath)}`,
+    `running: ${String(runningWorkers.length)} / ${String(status.workerCount ?? workers.length)} sessions`,
     "",
-    `workers: ${String(status.workerCount ?? workers.length)} total, ${String(status.activeWorkerCount ?? 0)} active`,
     renderReportTable(
-      renderWorkerRows(workers),
+      renderWorkerRows(runningWorkers),
       ["id", "pid", "state", "attached", "pending", "idle", "session"],
-      { emptyText: "(none)", indent: "  ", maxColumnWidth: 44 },
-    ),
-    "",
-    `cron: ${String(cron.taskCount ?? tasks.length)} tasks, ${String(cron.enabledTaskCount ?? 0)} enabled, ${String(cron.runningTaskCount ?? 0)} running, next ${formatReportTime(cron.nextRunAt)}`,
-    renderReportTable(
-      renderCronRows(tasks),
-      ["id", "state", "next", "active", "runs", "session", "target"],
-      { emptyText: "(none)", indent: "  ", maxColumnWidth: 44 },
+      {
+        emptyText: "no running sessions",
+        indent: "  ",
+        maxColumnWidth: 44,
+      },
     ),
   ];
   return lines.join("\n");
@@ -211,9 +234,42 @@ async function queryActivity(socketPath?: string) {
   );
 }
 
+async function querySessionPage(
+  options: StatusCliOptions,
+  socketPath?: string,
+) {
+  return await requestDaemonCommand(
+    {
+      id: "status_sessions_1",
+      type: "list_sessions",
+      limit: options.limit,
+      offset: options.offset,
+    },
+    { socketPath, timeoutMs: STATUS_REQUEST_TIMEOUT_MS },
+  );
+}
+
+async function queryStatusBackend(
+  options: StatusCliOptions,
+  socketPath?: string,
+) {
+  const [activity, sessions] = await Promise.all([
+    queryActivity(socketPath),
+    querySessionPage(options, socketPath),
+  ]);
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    activity,
+    sessions,
+  };
+}
+
 async function renderOnce(options: StatusCliOptions, socketPath?: string) {
+  if (options.json)
+    return JSON.stringify(await queryStatusBackend(options, socketPath));
   const snapshot = await queryActivity(socketPath);
-  return options.json ? JSON.stringify(snapshot) : renderStatusReport(snapshot);
+  return renderStatusReport(snapshot);
 }
 
 async function runStatusLoop(options: StatusCliOptions, socketPath?: string) {

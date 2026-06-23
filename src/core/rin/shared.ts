@@ -55,7 +55,7 @@ export type ParsedArgs = {
     | "tasks"
     | "gui"
     | "usage"
-    | "self"
+    | "self-improve"
     | "versions"
     | "rollback"
     | "memory-index"

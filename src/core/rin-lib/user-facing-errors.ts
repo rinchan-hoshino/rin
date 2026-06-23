@@ -229,8 +229,14 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Minecraft chat send failed because the outgoing message is empty. Add text.",
   minecraft_url_required: () =>
     "Minecraft chat adapter needs a server URL before it can start. Add the URL.",
+  invalid_status_limit: () =>
+    "Status backend needs a non-negative session limit.",
+  invalid_status_offset: () =>
+    "Status backend needs a non-negative session offset.",
   missing_status_interval: () =>
     "Status watch needs an interval value. Provide a valid interval.",
+  missing_status_limit: () => "Status backend needs a session limit value.",
+  missing_status_offset: () => "Status backend needs a session offset value.",
 
   new_session_session_file_unsupported: () =>
     "Could not start a new chat session because the command was bound to a replied message's old session.",

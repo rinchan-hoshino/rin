@@ -9,6 +9,11 @@ export type RinAgentSdkOptions = {
 
 export type TaskControlAction = "pause" | "resume";
 
+export type SessionListOptions = {
+  limit?: number;
+  offset?: number;
+};
+
 export type ChatRunTurnOptions = RinToolStartupOptions & {
   chatKey?: string;
   frontend?: RinFrontendIdentity;
@@ -122,6 +127,20 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
         await request({ type: "daemon_status" }, override),
       activity: async (override?: RinAgentSdkOptions) =>
         await request({ type: "daemon_activity" }, override),
+    },
+    sessions: {
+      list: async (
+        options: SessionListOptions = {},
+        override?: RinAgentSdkOptions,
+      ) =>
+        await request(
+          {
+            type: "list_sessions",
+            limit: options.limit,
+            offset: options.offset,
+          },
+          override,
+        ),
     },
     tasks: {
       list: async (override?: RinAgentSdkOptions) =>
