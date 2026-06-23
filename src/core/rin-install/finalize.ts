@@ -44,10 +44,8 @@ import {
   targetHomeForUser,
 } from "./users.js";
 
-export function defaultDaemonReadyTimeoutMs(
-  platform: NodeJS.Platform = process.platform,
-) {
-  return platform === "win32" ? 30_000 : 5_000;
+export function defaultDaemonReadyTimeoutMs() {
+  return 30_000;
 }
 
 function isFreshInstallDirectory(installDir: string) {

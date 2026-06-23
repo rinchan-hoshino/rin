@@ -36,10 +36,8 @@ const finalize = await import(
   ).href
 );
 
-test("finalize uses a longer default daemon readiness timeout on Windows", () => {
-  assert.equal(finalize.defaultDaemonReadyTimeoutMs("win32"), 30_000);
-  assert.equal(finalize.defaultDaemonReadyTimeoutMs("linux"), 5_000);
-  assert.equal(finalize.defaultDaemonReadyTimeoutMs("darwin"), 5_000);
+test("finalize uses a 30 second default daemon readiness timeout", () => {
+  assert.equal(finalize.defaultDaemonReadyTimeoutMs(), 30_000);
 });
 
 function createNoopSpinner() {
