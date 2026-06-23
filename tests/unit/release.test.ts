@@ -373,3 +373,24 @@ test("releaseInfoFromObject normalizes installer bootstrap metadata", () => {
   );
   assert.match(String(info.installedAt || ""), /^\d{4}-\d{2}-\d{2}T/);
 });
+
+test("releaseInfoFromObject accepts PowerShell bootstrap metadata casing", () => {
+  const info = release.releaseInfoFromObject({
+    Channel: "stable",
+    Version: "0.5.0",
+    Branch: "stable",
+    Ref: "b55b97965a1d",
+    SourceLabel: "stable 0.5.0",
+    ArchiveUrl:
+      "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.5.0.tgz",
+  });
+  assert.equal(info.channel, "stable");
+  assert.equal(info.version, "0.5.0");
+  assert.equal(info.branch, "stable");
+  assert.equal(info.ref, "b55b97965a1d");
+  assert.equal(info.sourceLabel, "stable 0.5.0");
+  assert.equal(
+    info.archiveUrl,
+    "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.5.0.tgz",
+  );
+});

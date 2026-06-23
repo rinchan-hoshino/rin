@@ -356,7 +356,14 @@ function Resolve-Release {
 }
 
 function Write-Release-Handoff($Release) {
-  $Release | ConvertTo-Json -Compress | Set-Content -LiteralPath $script:releaseFile -Encoding UTF8
+  [pscustomobject]@{
+    channel = [string]$Release.Channel
+    archiveUrl = [string]$Release.ArchiveUrl
+    version = [string]$Release.Version
+    branch = [string]$Release.Branch
+    ref = [string]$Release.Ref
+    sourceLabel = [string]$Release.SourceLabel
+  } | ConvertTo-Json -Compress | Set-Content -LiteralPath $script:releaseFile -Encoding UTF8
 }
 
 try {
