@@ -814,6 +814,32 @@ test("applyAutoReloadAfterCompaction queues one extra reload while a reload is i
   assert.equal(reloadCount, 2);
 });
 
+test("Rin compaction summary appends deterministic todo snapshot", () => {
+  const summary = runtimeMod.appendRinTodoSnapshotToCompactionSummary(
+    "handoff",
+    {
+      todos: [
+        { id: 1, text: "Keep exact <todo> text", done: false },
+        { id: 2, text: "Ship renderer", done: true },
+      ],
+    },
+  );
+
+  assert.match(summary, /^handoff\n\n---\n\n## Todo Snapshot/m);
+  assert.match(summary, /Source: todo tool state at compaction time\./);
+  assert.match(summary, /- \[ \] Keep exact <todo> text/);
+  assert.match(summary, /- \[x\] Ship renderer/);
+});
+
+test("Rin compaction summary omits todo snapshot when the checklist is empty", () => {
+  assert.equal(
+    runtimeMod.appendRinTodoSnapshotToCompactionSummary("handoff\n", {
+      todos: [],
+    }),
+    "handoff\n",
+  );
+});
+
 test("Rin compaction summary chunks oversized history before calling the model", async () => {
   const prompts = [];
   const result = await runtimeMod.completeRinCompactionSummaryBudgeted({

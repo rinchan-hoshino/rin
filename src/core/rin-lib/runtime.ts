@@ -6,6 +6,10 @@ import { completeSimple, isContextOverflow } from "@earendil-works/pi-ai";
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import todoCapability from "./todo.js";
 import {
+  readTodoSnapshotFromSession,
+  type RinTodoSnapshot,
+} from "./todo-state.js";
+import {
   buildConfiguredLanguageSystemPrompt,
   readConfiguredLanguageFromSettings,
 } from "../language.js";
@@ -399,6 +403,35 @@ function fitRinCompactionPromptToBudget(options: {
   }
 
   return prompt;
+}
+
+function formatRinTodoCompactionSnapshot(
+  snapshot: Pick<RinTodoSnapshot, "todos"> | undefined,
+) {
+  const todos = Array.isArray(snapshot?.todos) ? snapshot.todos : [];
+  if (!todos.length) return "";
+
+  return [
+    "## Todo Snapshot",
+    "",
+    "Source: todo tool state at compaction time.",
+    "Preserve order, text, and done state; use the todo tool as authoritative before modifying.",
+    "",
+    ...todos.map(
+      (todo) => `- [${todo.done ? "x" : " "}] ${String(todo.text || "")}`,
+    ),
+  ].join("\n");
+}
+
+export function appendRinTodoSnapshotToCompactionSummary(
+  summary: string,
+  snapshot: Pick<RinTodoSnapshot, "todos"> | undefined,
+) {
+  const baseSummary = String(summary || "");
+  const todoSnapshot = formatRinTodoCompactionSnapshot(snapshot);
+  if (!todoSnapshot) return baseSummary;
+  if (!baseSummary.trim()) return todoSnapshot;
+  return `${baseSummary}\n\n---\n\n${todoSnapshot}`;
 }
 
 export async function completeRinCompactionSummaryBudgeted(options: {
@@ -1667,6 +1700,10 @@ export async function createConfiguredAgentSession(
         });
         summary = `${summary}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixSummary}`;
       }
+      summary = appendRinTodoSnapshotToCompactionSummary(
+        summary,
+        readTodoSnapshotFromSession(session),
+      );
 
       return {
         compaction: {
