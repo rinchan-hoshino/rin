@@ -39,6 +39,37 @@ test("resolveInstallerDisplayLanguage treats all zh locales as Chinese", () => {
   assert.equal(language.resolveInstallerDisplayLanguage("nope nope"), "en_US");
 });
 
+test("detectLocalLanguageTag uses Windows UI culture when locale env is absent", () => {
+  const calls: Array<{ command: string; args: string[] }> = [];
+  const detected = language.detectLocalLanguageTag("en", {
+    platform: "win32",
+    env: {},
+    execFileSync(command: string, args: string[]) {
+      calls.push({ command, args });
+      return "zh-CN\r\n";
+    },
+  });
+
+  assert.equal(detected, "zh_CN");
+  assert.equal(calls[0]?.command, "powershell.exe");
+  assert.ok(
+    calls[0]?.args.some((arg) => String(arg).includes("CurrentUICulture")),
+  );
+});
+
+test("detectLocalLanguageTag falls back to Intl locale when native Windows probe fails", () => {
+  const detected = language.detectLocalLanguageTag("en", {
+    platform: "win32",
+    env: {},
+    intlLocale: "zh-Hant-TW",
+    execFileSync() {
+      throw new Error("missing powershell");
+    },
+  });
+
+  assert.equal(detected, "zh_Hant_TW");
+});
+
 test("detectLocalLanguageTag prefers LC_ALL then LC_MESSAGES then LANG", () => {
   const originalLang = process.env.LANG;
   const originalLcAll = process.env.LC_ALL;
@@ -49,6 +80,9 @@ test("detectLocalLanguageTag prefers LC_ALL then LC_MESSAGES then LANG", () => {
     process.env.LC_MESSAGES = "zh_CN.UTF-8:zh";
     process.env.LC_ALL = "ja_JP.UTF-8";
     assert.equal(language.detectLocalLanguageTag("en"), "ja_JP");
+
+    process.env.LC_ALL = "bad tag";
+    assert.equal(language.detectLocalLanguageTag("en"), "zh_CN");
 
     delete process.env.LC_ALL;
     assert.equal(language.detectLocalLanguageTag("en"), "zh_CN");
