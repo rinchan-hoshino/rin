@@ -1229,7 +1229,7 @@ test("chat controller binds passive notices to the current session for quote res
   assert.equal(linked?.sessionFile, sessionFile);
 });
 
-test("chat controller quiet mode suppresses interim and todo notices", async () => {
+test("chat controller quiet mode suppresses non-final visible messages", async () => {
   const controller = await createController("telegram/1:2");
   await fs.writeFile(
     path.join(controller.agentDir, "settings.json"),
@@ -1265,6 +1265,18 @@ test("chat controller quiet mode suppresses interim and todo notices", async () 
     type: "backend_event",
     payload: {
       type: "passive_notice",
+      text: "Hidden generic notice",
+      deferDuringTurn: false,
+    },
+  });
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: { type: "compaction_start" },
+  });
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
       text: "Compacted from 10,000 tokens",
       noticeKind: "compaction_end",
       deferDuringTurn: false,
@@ -1272,9 +1284,33 @@ test("chat controller quiet mode suppresses interim and todo notices", async () 
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(deliveries, [
-    { text: "Compacted from 10,000 tokens", kind: "passive_notice" },
-  ]);
+  assert.deepEqual(deliveries, []);
+  assert.equal(controller.compactionTurn, null);
+});
+
+test("chat controller quiet mode still sends final replies by delivery kind", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .filter(Boolean)
+      .join(" ");
+    deliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-final-${deliveries.length}`];
+  };
+  controller.driver.runTurn = async () => ({
+    finalText: "quiet final",
+    sessionFile: "quiet-final.jsonl",
+  });
+
+  await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    quietMode: true,
+  });
+
+  assert.deepEqual(deliveries, [{ text: "quiet final", kind: "final" }]);
 });
 
 test("chat controller runTurn quiet mode option overrides stored chat settings", async () => {
@@ -1304,6 +1340,21 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
       text: "- [ ] hidden deferred todo",
       noticeKind: "todo",
     });
+    await quietController.handleFrontendEvent({
+      type: "passive_notice",
+      text: "Hidden generic notice",
+      deferDuringTurn: false,
+    });
+    await quietController.handleFrontendEvent({
+      type: "compaction_start_notice",
+      text: "Compacting...",
+    });
+    await quietController.handleFrontendEvent({
+      type: "passive_notice",
+      text: "Compacted from 10,000 tokens",
+      noticeKind: "compaction_end",
+      deferDuringTurn: false,
+    });
     return { finalText: "final", sessionFile: "quiet-option.jsonl" };
   };
   await quietController.runTurn({
@@ -1314,6 +1365,7 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
   });
   assert.deepEqual(quietDeliveries, []);
   assert.deepEqual(quietController.pendingPassiveNotices, []);
+  assert.equal(quietController.compactionTurn, null);
 
   const loudController = await createController("telegram/1:2");
   await fs.writeFile(

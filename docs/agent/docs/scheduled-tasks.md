@@ -312,7 +312,7 @@ Runs an agent turn. Use this for owner-facing reports, summaries, checks that ne
 - `frontend` binds execution to a frontend/controller identity.
 - `frontend: { kind: "chat", key: "..." }` binds delivery to a chat bridge target.
 - Root `deliverFinal: false` binds the turn while suppressing automatic final delivery.
-- Root `quiet` defaults to `true`. For chat-bound agent turns it has the same meaning as chat quiet mode: interim assistant updates and todo passive notices are suppressed while final delivery remains controlled by `deliverFinal`.
+- Root `quiet` defaults to `true`. For chat-bound agent turns it has the same meaning as chat quiet mode: only deliveries that explicitly use final delivery semantics are sent, while final delivery itself remains controlled by `deliverFinal`.
 - `model` and `thinkingLevel` override the run when present.
 - Rin stores a summarized final result in `lastResultText`.
 - If the agent turn has no canonical final assistant text, the task records `lastError`.

@@ -239,7 +239,7 @@ Core chat storage records messages. Automation for record-only chats comes from 
 
 ## Quiet chat display mode
 
-Configure quiet display for specific chats under `settings.json -> chat.byChatKey[chatKey].quietMode` when the chat should still receive final replies and working indicators, but should not receive assistant interim messages or todo checklist notices.
+Configure quiet display for specific chats under `settings.json -> chat.byChatKey[chatKey].quietMode` when the chat should receive only messages that explicitly declare themselves as final deliveries, plus ordinary working indicators.
 
 ```json
 {
@@ -253,7 +253,7 @@ Configure quiet display for specific chats under `settings.json -> chat.byChatKe
 }
 ```
 
-Per-chat quiet entries may also be objects such as `{ "enabled": true }`. Quiet mode does not suppress final replies, errors, working indicators, or compaction notices.
+Per-chat quiet entries may also be objects such as `{ "enabled": true }`. Quiet mode does not inspect feature names such as todo or compaction; the delivery itself must use final delivery semantics to be sent.
 
 ## Per-chat model options
 

@@ -1119,6 +1119,10 @@ export class ChatController {
     return null;
   }
 
+  private shouldSuppressQuietDelivery(deliveryKind: string) {
+    return this.isQuietModeEnabled() && deliveryKind !== "final";
+  }
+
   private async enqueueAndDrainDelivery(
     payload: any,
     options: {
@@ -1151,6 +1155,10 @@ export class ChatController {
       !payload.deliveryKind
         ? { ...payload, deliveryKind }
         : payload;
+    const effectiveDeliveryKind = safeString(
+      normalizedPayload?.deliveryKind || deliveryKind,
+    ).trim();
+    if (this.shouldSuppressQuietDelivery(effectiveDeliveryKind)) return [];
     enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
       ...options,
       id,
@@ -1386,6 +1394,7 @@ export class ChatController {
   private async deliverPassiveNotice(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
+    if (this.shouldSuppressQuietDelivery("passive_notice")) return true;
     if (this.shouldDeferPassiveNotice()) {
       this.pendingPassiveNotices.push(trimmed);
       return true;
@@ -1393,10 +1402,16 @@ export class ChatController {
     return await this.sendPassiveNoticeNow(trimmed);
   }
 
-  private async flushPendingPassiveNotices() {
-    const notices = this.pendingPassiveNotices.splice(0);
-    for (const notice of notices) {
-      await this.sendPassiveNoticeNow(notice);
+  private async flushPendingPassiveNotices(quietMode?: unknown) {
+    const previousQuietModeOverride = this.quietModeOverride;
+    if (quietMode !== undefined) this.quietModeOverride = Boolean(quietMode);
+    try {
+      const notices = this.pendingPassiveNotices.splice(0);
+      for (const notice of notices) {
+        await this.sendPassiveNoticeNow(notice);
+      }
+    } finally {
+      this.quietModeOverride = previousQuietModeOverride;
     }
   }
 
@@ -1764,7 +1779,7 @@ export class ChatController {
         );
         this.awaitingTurnSettle = false;
         await new Promise((resolve) => setImmediate(resolve));
-        await this.flushPendingPassiveNotices();
+        await this.flushPendingPassiveNotices(input.quietMode);
       }
       return {
         finalText: result.finalText,
@@ -1873,7 +1888,7 @@ export class ChatController {
           );
           this.awaitingTurnSettle = false;
           await new Promise((resolve) => setImmediate(resolve));
-          await this.flushPendingPassiveNotices();
+          await this.flushPendingPassiveNotices(input.quietMode);
         }
         this.clearCurrentTurn();
         return {
@@ -1982,13 +1997,6 @@ export class ChatController {
 
   private async handleFrontendEvent(event: any) {
     if (!event || typeof event !== "object") return;
-    if (
-      this.isQuietModeEnabled() &&
-      (event.type === "assistant_interim" ||
-        (event.type === "passive_notice" && event.noticeKind === "todo"))
-    ) {
-      return;
-    }
     switch (event.type) {
       case "frontend_status":
         if (event.phase === "working") {
