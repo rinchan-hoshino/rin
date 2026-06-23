@@ -17,6 +17,7 @@ import {
 import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import {
   buildUserShell,
+  isSameSystemUser,
   readPasswdUser,
   socketPathForUser,
   targetUserRuntimeEnv,
@@ -164,7 +165,7 @@ function shouldUsePrivilegedTargetRead(options: TargetJsonReadOptions = {}) {
     options.currentUser || os.userInfo().username,
   ).trim();
   const targetUser = safeString(options.targetUser || currentUser).trim();
-  return Boolean(targetUser && targetUser !== currentUser);
+  return Boolean(targetUser && !isSameSystemUser(targetUser, currentUser));
 }
 
 export function readTargetJsonFile<T>(
@@ -231,8 +232,8 @@ export function resolveRuntimeAgentDirForTarget(
   if (
     explicitRinDir &&
     (!normalizedTargetUser ||
-      normalizedTargetUser === normalizedCurrentUser ||
-      normalizedTargetUser === normalizedProcessUser)
+      isSameSystemUser(normalizedTargetUser, normalizedCurrentUser) ||
+      isSameSystemUser(normalizedTargetUser, normalizedProcessUser))
   ) {
     return explicitRinDir;
   }
@@ -244,7 +245,8 @@ export function createTargetExecutionContext(
 ): TargetExecutionContext {
   const base = daemonControlContext(parsed);
   const currentUser = os.userInfo().username;
-  const isTargetUser = !base.targetUser || base.targetUser === currentUser;
+  const isTargetUser =
+    !base.targetUser || isSameSystemUser(base.targetUser, currentUser);
 
   const exec = (argv: string[], options: any = {}) => {
     const launch = buildUserShell(base.targetUser, argv, base.runtimeEnv);
@@ -430,10 +432,9 @@ function daemonControlContext(parsed: ParsedArgs) {
           ? "/bin/systemctl"
           : ""
       : "";
-  const socketPath =
-    targetUser === currentUser
-      ? socketPathForUser(targetUser)
-      : bridgeDaemonSocketPath(installDir);
+  const socketPath = isSameSystemUser(targetUser, currentUser)
+    ? socketPathForUser(targetUser)
+    : bridgeDaemonSocketPath(installDir);
   return {
     repoRoot,
     installDir,

@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
@@ -55,6 +55,33 @@ test("rin system normalizes current-user shell launches", () => {
     system.socketPathForUser(` ${currentUser} `),
     common.defaultDaemonSocketPath(),
   );
+});
+
+test("rin system treats current user aliases as the current runtime", () => {
+  const platformDescriptor = Object.getOwnPropertyDescriptor(
+    process,
+    "platform",
+  );
+  const userInfoMock = mock.method(os, "userInfo", () => ({
+    username: "THE_cattail",
+    uid: -1,
+    gid: -1,
+    shell: null,
+    homedir: "C:\\Users\\THE_cattail",
+  }));
+  Object.defineProperty(process, "platform", { value: "win32" });
+  try {
+    assert.equal(system.isSameSystemUser("the_cattail", "THE_CATTAIL"), true);
+    assert.equal(
+      system.socketPathForUser("the_cattail"),
+      common.defaultDaemonSocketPath(),
+    );
+  } finally {
+    userInfoMock.mock.restore();
+    if (platformDescriptor) {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
+  }
 });
 
 test("rin system falls back safely for unknown user runtime paths", () => {

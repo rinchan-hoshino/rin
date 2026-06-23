@@ -18,6 +18,41 @@ function normalizeUserName(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeComparableUserName(
+  value: unknown,
+  platform: NodeJS.Platform = process.platform,
+) {
+  const normalized = normalizeUserName(value);
+  if (platform !== "win32") return normalized;
+  return normalized.replace(/\//g, "\\").toLowerCase();
+}
+
+function windowsAccountParts(value: string) {
+  const parts = value.split("\\").filter(Boolean);
+  return {
+    domain: parts.length > 1 ? parts.slice(0, -1).join("\\") : "",
+    name: parts[parts.length - 1] || value,
+  };
+}
+
+export function isSameSystemUser(
+  a: unknown,
+  b: unknown,
+  platform: NodeJS.Platform = process.platform,
+) {
+  const left = normalizeComparableUserName(a, platform);
+  const right = normalizeComparableUserName(b, platform);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  if (platform !== "win32") return false;
+  const leftParts = windowsAccountParts(left);
+  const rightParts = windowsAccountParts(right);
+  return (
+    leftParts.name === rightParts.name &&
+    (!leftParts.domain || !rightParts.domain)
+  );
+}
+
 function defaultHomeForUser(targetUser: string) {
   const root =
     process.platform === "darwin"
@@ -155,7 +190,10 @@ export function homeForUser(targetUser: string) {
 export function socketPathForUser(targetUser: string) {
   const normalizedTargetUser = normalizeUserName(targetUser);
   const currentUser = normalizeUserName(os.userInfo().username);
-  if (!normalizedTargetUser || normalizedTargetUser === currentUser) {
+  if (
+    !normalizedTargetUser ||
+    isSameSystemUser(normalizedTargetUser, currentUser)
+  ) {
     return defaultDaemonSocketPath();
   }
   if (process.platform === "win32") {
@@ -205,7 +243,10 @@ export function buildUserShell(
 ) {
   const normalizedTargetUser = normalizeUserName(targetUser);
   const currentUser = normalizeUserName(os.userInfo().username);
-  if (!normalizedTargetUser || normalizedTargetUser === currentUser) {
+  if (
+    !normalizedTargetUser ||
+    isSameSystemUser(normalizedTargetUser, currentUser)
+  ) {
     return {
       command: argv[0],
       args: argv.slice(1),
