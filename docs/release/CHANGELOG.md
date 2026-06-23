@@ -76,6 +76,7 @@ ddada51 fix(browse): prepare SearXNG runtime on Windows
 0dcd66d fix(installer): launch Windows cmd shims through shell
 dab896e chore(deps): sync Pi 0.79.10
 4871772 docs(release): cover 0.6.0 nightly changes
+23bf20a docs(release): cover 0.6.0 nightly prep
 -->
 
 ## 0.5.0
