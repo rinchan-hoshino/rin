@@ -724,6 +724,7 @@ export class WorkerPool {
       cwd: this.options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
+      windowsHide: true,
     });
 
     const worker: WorkerHandle = {

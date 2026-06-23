@@ -2,7 +2,6 @@ import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import { DEFAULT_LANGUAGE_TAG } from "../language.js";
-import { BUILT_IN_RIN_EXTENSIONS } from "../rin-bundled-extensions.js";
 import {
   defaultInstallDirForHome,
   installAuthPath,
@@ -656,30 +655,6 @@ export async function promptProviderSetup(
   );
 
   return { provider, modelId, thinkingLevel, authResult };
-}
-
-export async function promptBuiltInExtensionSetup(
-  prompt: PromptApi,
-  _i18n: InstallerI18n = createInstallerI18n(),
-): Promise<string[]> {
-  if (!prompt.multiselect) return [];
-  const selected = prompt.ensureNotCancelled(
-    await prompt.multiselect({
-      message: "Enable optional built-in extensions",
-      required: false,
-      initialValues: BUILT_IN_RIN_EXTENSIONS.filter(
-        (extension) => extension.defaultEnabled,
-      ).map((extension) => extension.id),
-      options: BUILT_IN_RIN_EXTENSIONS.map((extension) => ({
-        value: extension.id,
-        label: extension.label,
-        hint: extension.defaultEnabled
-          ? `${extension.description} Enabled by default.`
-          : extension.description,
-      })),
-    }),
-  );
-  return Array.isArray(selected) ? selected.map((entry) => String(entry)) : [];
 }
 
 export function buildInstallSafetyBoundaryText(

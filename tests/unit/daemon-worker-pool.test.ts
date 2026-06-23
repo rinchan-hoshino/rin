@@ -1,6 +1,7 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 
 import { pathToFileURL } from "node:url";
@@ -95,6 +96,17 @@ afterEach(async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
   activeDirs.clear();
+});
+
+test("daemon workers hide Windows console windows", () => {
+  const source = fsSync.readFileSync(
+    path.join(rootDir, "src", "core", "rin-daemon", "worker-pool.ts"),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /spawn\(process\.execPath, workerArgs, \{[\s\S]*windowsHide: true/,
+  );
 });
 
 async function makeTempDir(prefix) {

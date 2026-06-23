@@ -16,24 +16,6 @@ function asRecord(value: unknown): Record<string, any> | undefined {
   return isJsonRecord(value) ? value : undefined;
 }
 
-export function renderBrowseDoctorLines(browseStatus: unknown) {
-  const status = asRecord(browseStatus);
-  const runtime = asRecord(status?.runtime);
-  const providers = asArray(runtime?.providers);
-  const instances = asArray(status?.instances);
-  return [
-    `browseRuntimeReady=${runtime?.ready ? "yes" : "no"}`,
-    `browseMode=${String(runtime?.mode || "unknown")}`,
-    `browseProviderCount=${String(runtime?.providerCount ?? 0)}`,
-    `browseInstanceCount=${String(instances.length)}`,
-    ...providers.map((provider) => `browseProvider=${String(provider)}`),
-    ...instances.map((instance) => {
-      const value = asRecord(instance) ?? {};
-      return `browseInstance=${value.instanceId} pid=${String(value.pid || 0)} alive=${value.alive ? "yes" : "no"} port=${String(value.port || "")} baseUrl=${value.baseUrl || ""}`;
-    }),
-  ];
-}
-
 export function renderChatBridgeDoctorLines(chatStatus: unknown) {
   const status = asRecord(chatStatus);
   return [
@@ -130,7 +112,6 @@ export async function runDoctor(parsed: ParsedArgs) {
   const daemonStatus = socketReady
     ? await context.queryDaemonStatus()
     : undefined;
-  const browseStatus = daemonStatus?.browse;
   const chatStatus = daemonStatus?.chat;
   const lines = [
     `targetUser=${context.targetUser}`,
@@ -141,7 +122,6 @@ export async function runDoctor(parsed: ParsedArgs) {
   ];
 
   lines.push(
-    ...renderBrowseDoctorLines(browseStatus),
     ...renderChatBridgeDoctorLines(chatStatus),
     ...renderDaemonWorkerDoctorLines(daemonStatus),
     ...collectSystemdDoctorLines(context),

@@ -1462,128 +1462,9 @@ export function patchRinRuntimeSessionShutdown(runtime: any) {
   };
 }
 
-const BACKEND_TOOL_EXECUTION_LOCKS_KEY = Symbol.for(
-  "rin.backendToolExecutionLocks",
-);
-const BACKEND_TOOL_LOCK_WRAPPED_KEY = Symbol.for(
-  "rin.backendToolExecutionLockWrapped",
-);
-const backendToolExecutionQueues = new Map<
-  string,
-  ReturnType<typeof createSerialExecutionQueue>
->();
-
 function normalizeQueueMode(value: unknown, fallback: "all" | "one-at-a-time") {
   return value === "all" || value === "one-at-a-time" ? value : fallback;
 }
-
-function createSerialExecutionQueue() {
-  let tail: Promise<void> = Promise.resolve();
-  return async function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-    let release = () => {};
-    const next = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const previous = tail;
-    tail = tail.then(
-      () => next,
-      () => next,
-    );
-    await previous.catch(() => {});
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
-  };
-}
-
-export function applyRinBackendToolExecutionLocks(
-  session: any,
-  toolNames = ["browse"],
-) {
-  if (!session || typeof session !== "object") return;
-  const targetNames = new Set(
-    toolNames.map((name) => String(name || "").trim()).filter(Boolean),
-  );
-  if (!targetNames.size) return;
-
-  const existingState = session[BACKEND_TOOL_EXECUTION_LOCKS_KEY] as
-    | {
-        targetNames: Set<string>;
-        patched: boolean;
-      }
-    | undefined;
-  const state = existingState || {
-    targetNames: new Set<string>(),
-    patched: false,
-  };
-  for (const name of targetNames) state.targetNames.add(name);
-  session[BACKEND_TOOL_EXECUTION_LOCKS_KEY] = state;
-
-  const getQueue = (name: string) => {
-    let queue = backendToolExecutionQueues.get(name);
-    if (!queue) {
-      queue = createSerialExecutionQueue();
-      backendToolExecutionQueues.set(name, queue);
-    }
-    return queue;
-  };
-
-  const wrapTool = (tool: any) => {
-    const name = String(tool?.name || "").trim();
-    if (!name || !state.targetNames.has(name)) return tool;
-    if (tool?.[BACKEND_TOOL_LOCK_WRAPPED_KEY]) return tool;
-    if (typeof tool?.execute !== "function") return tool;
-    const runExclusive = getQueue(name);
-    return {
-      ...tool,
-      [BACKEND_TOOL_LOCK_WRAPPED_KEY]: true,
-      execute: (...args: any[]) =>
-        runExclusive(() => tool.execute.call(tool, ...args)),
-    };
-  };
-
-  const wrapActiveTools = () => {
-    const tools = session?.agent?.state?.tools;
-    if (!Array.isArray(tools)) return;
-    let changed = false;
-    const nextTools = tools.map((tool) => {
-      const nextTool = wrapTool(tool);
-      if (nextTool !== tool) changed = true;
-      return nextTool;
-    });
-    if (changed) session.agent.state.tools = nextTools;
-  };
-
-  if (!state.patched) {
-    const originalSetActiveToolsByName =
-      typeof session.setActiveToolsByName === "function"
-        ? session.setActiveToolsByName.bind(session)
-        : null;
-    if (originalSetActiveToolsByName) {
-      session.setActiveToolsByName = (...args: any[]) => {
-        const result = originalSetActiveToolsByName(...args);
-        wrapActiveTools();
-        return result;
-      };
-    }
-
-    const originalRefreshToolRegistry =
-      bindPiSessionToolRegistryRefresher(session);
-    if (originalRefreshToolRegistry) {
-      replacePiSessionToolRegistryRefresher(session, (...args: any[]) => {
-        const result = originalRefreshToolRegistry(...args);
-        wrapActiveTools();
-        return result;
-      });
-    }
-    state.patched = true;
-  }
-
-  wrapActiveTools();
-}
-
 export function applyRinSettingsDefaults(settingsManager: any) {
   if (!settingsManager || settingsManager.__rinSettingsDefaultsApplied) return;
   settingsManager.__rinSettingsDefaultsApplied = true;
@@ -1859,7 +1740,6 @@ export async function createConfiguredAgentSession(
     applyRinProviderOverflowPreflight(result.session, {
       estimateContextTokens,
     });
-    applyRinBackendToolExecutionLocks(result.session);
 
     applyRinPromptBuilder(result.session);
     applyAutoReloadAfterCompaction(result.session);

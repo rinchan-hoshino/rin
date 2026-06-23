@@ -36,11 +36,6 @@ import {
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { preparePiManagedToolsForInstall } from "./pi-tools.js";
 import {
-  getBrowseStatus,
-  prepareSearxngRuntime,
-  stopSearxngSidecar,
-} from "../rin-browse/service.js";
-import {
   describeOwnership,
   findSystemUser,
   homeForUser,
@@ -57,21 +52,10 @@ function isFreshInstallDirectory(installDir: string) {
   }
 }
 
-async function stopInstalledBrowseSidecars(installDir: string) {
-  const status = getBrowseStatus(installDir);
-  const instances = Array.isArray(status.instances) ? status.instances : [];
-  for (const instance of instances) {
-    const instanceId = String(instance?.instanceId || "").trim();
-    if (!instanceId) continue;
-    await stopSearxngSidecar(installDir, { instanceId });
-  }
-}
-
 async function applyInstalledRuntime(
   options: FinalizeInstallOptions & {
     persistInstallerState?: boolean;
     daemonFailureCode: string;
-    prepareBrowseRuntime?: boolean;
     stopRuntimeBeforePublish?: boolean;
     publishRuntime?: boolean;
     manageDaemon?: boolean;
@@ -95,9 +79,6 @@ async function applyInstalledRuntime(
   const manageDaemon = options.manageDaemon !== false;
   const prepareManagedTools = options.prepareManagedTools !== false;
   const writeLaunchers = options.writeLaunchers !== false;
-  const builtInExtensions = Array.isArray(options.builtInExtensions)
-    ? options.builtInExtensions
-    : undefined;
   const sourceRoot =
     String(options.sourceRoot || "").trim() || repoRootFromHere();
   const persistInstallerState = Boolean(options.persistInstallerState);
@@ -115,10 +96,6 @@ async function applyInstalledRuntime(
   const useElevatedService =
     installServiceNow && !isSameSystemUser(targetUser, currentUser);
   const serviceDeps = { findSystemUser, targetHomeForUser };
-
-  if (options.stopRuntimeBeforePublish) {
-    await stopInstalledBrowseSidecars(installDir);
-  }
 
   const previousReleaseName = publishRuntime
     ? currentInstalledReleaseName(installDir, useElevatedWrite)
@@ -169,12 +146,6 @@ async function applyInstalledRuntime(
       installDir,
     });
   }
-  if (
-    options.prepareBrowseRuntime !== false &&
-    builtInExtensions?.includes("rin:browse")
-  ) {
-    await prepareSearxngRuntime(installDir).catch(() => undefined);
-  }
   const shouldRestartBeforePersist =
     manageDaemon && !options.stopRuntimeBeforePublish;
   if (shouldRestartBeforePersist) {
@@ -199,7 +170,6 @@ async function applyInstalledRuntime(
           language,
           setDefaultTarget,
           authData,
-          builtInExtensions,
           release,
           currentReleaseName,
           currentReleaseRoot: publishedRuntime.releaseRoot,
@@ -388,7 +358,6 @@ export async function finalizeCoreUpdate(options: {
     ...options,
     persistInstallerState: false,
     stopRuntimeBeforePublish: true,
-    prepareBrowseRuntime: false,
     daemonFailureCode: "rin_core_update_daemon_not_ready",
   });
   return { ...result, mode: "core-only" as const };
@@ -409,7 +378,6 @@ export async function finalizeQuickRunInstall(options: FinalizeInstallOptions) {
     publishRuntime: false,
     manageDaemon: false,
     prepareManagedTools: false,
-    prepareBrowseRuntime: false,
     writeLaunchers: false,
     setDefaultTarget: false,
     daemonFailureCode: "rin_quick_run_install_failed",

@@ -27,7 +27,6 @@ import {
   renderInstallerNote,
   wrapInstallerNoteText,
   describeInstallDirState,
-  promptBuiltInExtensionSetup,
   promptDefaultTargetUser,
   promptProviderSetup,
   promptInstallTarget,
@@ -418,8 +417,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
 
   const { provider, modelId, thinkingLevel, authResult } =
     await promptProviderSetup(promptApi, installDir, readJsonFile, {}, i18n);
-  const builtInExtensions = await promptBuiltInExtensionSetup(promptApi, i18n);
-
   note(
     wrapInstallerNoteText(
       buildInstallPlanText(
@@ -497,7 +494,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           thinkingLevel,
           language: selectedLanguage,
           setDefaultTarget,
-          builtInExtensions,
           authData: authResult.authData || {},
           release: releaseInfoFromFile(cli.releaseFile),
         },

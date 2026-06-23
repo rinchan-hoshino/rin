@@ -13,7 +13,6 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 | Scheduled tasks               | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                       | Rin Agent SDK `rin.tasks.*`                                | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
 | Chat bridge                   | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
 | Todo                          | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                      | live tool schema                                               |
-| Browse                        | Current, external, source-dependent, or version-sensitive web evidence; direct HTTP(S) page fetch                             | `browse`, `rin:browse` extension                           | `docs/builtin-extensions.md`                                   |
 | Browser and desktop operation | Web or desktop work when a live browser/computer tool is present, or a task needs documented manual automation patterns       | live tool list, practice docs                              | `practices/browser-use.md`, `practices/computer-use.md`        |
 | Background extensions         | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.backgroundServices`        | `docs/builtin-extensions.md`                                   |
 | Initialization                | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                 | `docs/initialization.md`                                       |
@@ -41,21 +40,9 @@ Rin separates memory from self-improve:
 
 Read `docs/memory-layering.md` before choosing a destination. Read `docs/self-improve-distillation.md` before running or editing self-improve distillation prompts.
 
-## Core todo and bundled browse
+## Core todo
 
 The core todo capability registers the `todo` tool and `/todos` command from Rin core. Use it for current-branch execution checklists when the live tool list includes `todo`.
-
-Rin ships `rin:browse` as the bundled optional foreground Pi extension alias:
-
-```json
-{
-  "extensions": ["rin:browse"]
-}
-```
-
-`rin:browse` registers `browse`. Search mode uses Rin-managed SearXNG; URL mode fetches readable content from a specific HTTP(S) page. Fresh installs enable the alias by default unless installer selection disables it. Existing installs follow their current `settings.json -> extensions` value.
-
-Use Pi resource filters such as `!rin:browse` to disable the alias from a broader extension list.
 
 ## Chat bridge
 

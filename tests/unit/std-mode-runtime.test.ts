@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,18 +15,6 @@ const runtimeMod = await import(
     .href
 );
 
-function listen(server: http.Server) {
-  return new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
-}
-
-function closeServer(server: http.Server) {
-  return new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-}
-
 async function pathExists(targetPath: string) {
   try {
     await fs.access(targetPath);
@@ -36,68 +23,6 @@ async function pathExists(targetPath: string) {
     return false;
   }
 }
-
-function deferred() {
-  let resolve = () => {};
-  const promise = new Promise<void>((nextResolve) => {
-    resolve = nextResolve;
-  });
-  return { promise, resolve };
-}
-
-test("Rin backend serializes browse execution without tool-side metadata", async () => {
-  const firstCanFinish = deferred();
-  const firstStarted = deferred();
-  const events: string[] = [];
-  const baseTool = {
-    name: "browse",
-    label: "Browse",
-    description:
-      "Browse the web, or fetch readable content from an HTTP(S) URL.",
-    execute: async (toolCallId: string) => {
-      events.push(`start:${toolCallId}`);
-      if (toolCallId === "first") {
-        firstStarted.resolve();
-        await firstCanFinish.promise;
-      }
-      events.push(`end:${toolCallId}`);
-      return { content: [], details: { toolCallId } };
-    },
-  };
-  const session: any = {
-    agent: { state: { tools: [baseTool] } },
-    setActiveToolsByName(toolNames: string[]) {
-      this.agent.state.tools = toolNames.includes("browse") ? [baseTool] : [];
-    },
-    _refreshToolRegistry() {
-      this.agent.state.tools = [baseTool];
-    },
-  };
-
-  runtimeMod.applyRinBackendToolExecutionLocks(session);
-
-  const lockedTool = session.agent.state.tools[0];
-  assert.equal(lockedTool.executionMode, undefined);
-
-  const first = lockedTool.execute("first");
-  await firstStarted.promise;
-  const second = lockedTool.execute("second");
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.deepEqual(events, ["start:first"]);
-
-  firstCanFinish.resolve();
-  await Promise.all([first, second]);
-  assert.deepEqual(events, [
-    "start:first",
-    "end:first",
-    "start:second",
-    "end:second",
-  ]);
-
-  session.setActiveToolsByName(["browse"]);
-  assert.notEqual(session.agent.state.tools[0], baseTool);
-  assert.equal(session.agent.state.tools[0].executionMode, undefined);
-});
 
 test("configured session persists once a user starts a real conversation", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-user-session-"));
@@ -144,54 +69,13 @@ test("configured sessions forward Pi tool startup options", async () => {
   }
 });
 
-test("std configured session keeps daemon-independent Rin tools usable without daemon", async () => {
+test("std configured session strips removed browse extension alias", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-std-runtime-"));
   const agentDir = path.join(root, "agent");
-  await fs.mkdir(agentDir, { recursive: true });
-
-  const server = http.createServer((request, response) => {
-    if (request.url?.startsWith("/search")) {
-      response.writeHead(200, {
-        "content-type": "application/json; charset=utf-8",
-      });
-      response.end(JSON.stringify({ results: [] }));
-      return;
-    }
-    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-    response.end("std fetch ok");
-  });
-  await listen(server);
-  const address = server.address();
-  assert.equal(typeof address, "object");
-  const sidecarBaseUrl = `http://127.0.0.1:${address?.port}`;
-  const sidecarStatePath = path.join(
-    agentDir,
-    "data",
-    "sidecars",
-    "browse",
-    "instances",
-    `process-${process.pid}`,
-    "state.json",
-  );
   await fs.mkdir(agentDir, { recursive: true });
   await fs.writeFile(
     path.join(agentDir, "settings.json"),
     `${JSON.stringify({ extensions: ["rin:browse"] })}\n`,
-    "utf8",
-  );
-  await fs.mkdir(path.dirname(sidecarStatePath), { recursive: true });
-  await fs.writeFile(
-    sidecarStatePath,
-    `${JSON.stringify({
-      pid: process.pid,
-      port: address?.port,
-      baseUrl: sidecarBaseUrl,
-      pythonBin: "/tmp/python",
-      sourceDir: "/tmp/searxng",
-      settingsPath: path.join(path.dirname(sidecarStatePath), "settings.yml"),
-      startedAt: new Date().toISOString(),
-      ownerPid: process.pid,
-    })}\n`,
     "utf8",
   );
 
@@ -202,17 +86,14 @@ test("std configured session keeps daemon-independent Rin tools usable without d
 
   try {
     const session = runtime.session;
-    for (const name of ["recall", "browse"]) {
-      assert.ok(session.getToolDefinition(name), `${name} should be available`);
-    }
-    assert.ok(
-      runtime.runtime?.session?.resourceLoader
-        ?.getExtensions?.()
-        ?.extensions?.some((extension: any) =>
-          extension.tools?.has?.("browse"),
-        ),
-      "browse should be provided by the built-in extension loader",
+    assert.ok(session.getToolDefinition("recall"));
+    assert.equal(session.getToolDefinition("browse"), undefined);
+    assert.deepEqual(
+      runtime.runtime?.session?.resourceLoader?.getExtensions?.()?.extensions ||
+        [],
+      [],
     );
+
     const memoryTool = session.getToolDefinition("recall");
     assert.equal(
       memoryTool.description,
@@ -225,10 +106,6 @@ test("std configured session keeps daemon-independent Rin tools usable without d
     assert.deepEqual(memoryTool.promptGuidelines, [
       "Use recall when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
     ]);
-    assert.match(
-      memoryTool.parameters.properties.query.description,
-      /Recall query/,
-    );
 
     const memoryResult = await memoryTool.execute(
       "tool-memory",
@@ -241,47 +118,9 @@ test("std configured session keeps daemon-independent Rin tools usable without d
     );
     assert.match(memoryResult.content[0].text, /recall recent/);
     assert.equal(memoryResult.details.emptyMessage, "No recall results found.");
-
-    const webTool = session.getToolDefinition("browse");
-    assert.equal(
-      webTool.description,
-      "Browse the web, or fetch readable content from an HTTP(S) URL.",
-    );
-    assert.equal(
-      webTool.promptSnippet,
-      "Browse the web or fetch readable content from a specific HTTP(S) page.",
-    );
-    assert.deepEqual(webTool.promptGuidelines, [
-      "Use browse when current, external, source-dependent, or version-sensitive web information matters.",
-      "Use browse URL mode when a specific HTTP(S) page is the evidence source.",
-    ]);
-    assert.match(
-      webTool.parameters.properties.q.description,
-      /Browse query or HTTP\(S\) URL/,
-    );
-
-    const fetchResult = await webTool.execute(
-      "tool-fetch",
-      { q: `http://127.0.0.1:${address?.port}/demo` },
-      undefined,
-      undefined,
-      { agentDir },
-    );
-    assert.match(fetchResult.content[0].text, /std fetch ok/);
-    assert.equal(fetchResult.details.mode, "fetch");
-
-    const searchResult = await webTool.execute(
-      "tool-search",
-      { q: "rin std smoke", limit: 1 },
-      undefined,
-      undefined,
-      { agentDir },
-    );
-    assert.equal(searchResult.isError, false);
-    assert.match(searchResult.content[0].text, /browse 0/);
   } finally {
     await runtime.runtime?.dispose?.().catch?.(() => {});
-    await closeServer(server).catch(() => {});
+    await fs.rm(root, { recursive: true, force: true });
   }
 });
 

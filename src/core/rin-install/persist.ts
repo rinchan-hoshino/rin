@@ -3,10 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { normalizeStoredChatSettings } from "../chat/settings.js";
-import {
-  BUILT_IN_RIN_EXTENSIONS,
-  setBuiltInRinExtensionEnabled,
-} from "../rin-bundled-extensions.js";
+import { stripRemovedBuiltInRinExtensionEntries } from "../rin-bundled-extensions.js";
 import {
   chatDataPath,
   LEGACY_DATA_LAYOUT_MOVES,
@@ -149,6 +146,7 @@ type InstallMigrationFileOps = {
   writeJsonObject: (filePath: string, value: unknown) => void;
   ensureDir: (dirPath: string) => void;
   rename: (fromPath: string, toPath: string) => void;
+  remove: (targetPath: string) => void;
 };
 
 function parseJsonObject(text: string) {
@@ -275,6 +273,16 @@ function createInstallMigrationFileOps(
         return;
       }
       fs.renameSync(fromPath, toPath);
+    },
+    remove(targetPath: string) {
+      if (elevated) {
+        runMigrationCommandAsTargetUser(options, deps, "rm", [
+          "-rf",
+          targetPath,
+        ]);
+        return;
+      }
+      fs.rmSync(targetPath, { recursive: true, force: true });
     },
   };
 }
@@ -614,6 +622,27 @@ function migrateInstalledChatSessionFilesToManaged(
   };
 }
 
+function removeInstalledBrowseRuntime(
+  installDir: string,
+  fileOps: InstallMigrationFileOps,
+) {
+  const root = path.resolve(String(installDir || "").trim() || ".");
+  const removedPaths: string[] = [];
+  for (const targetPath of [
+    path.join(root, "data", "sidecars", "browse"),
+    path.join(root, "data", "browse"),
+  ]) {
+    if (!fileOps.pathExists(targetPath)) continue;
+    fileOps.remove(targetPath);
+    removedPaths.push(targetPath);
+  }
+  return {
+    id: "remove-browse-runtime",
+    skipped: removedPaths.length === 0,
+    removedPaths,
+  };
+}
+
 export function applyInstallUpgradeMigrations(
   options: {
     targetUser: string;
@@ -625,6 +654,7 @@ export function applyInstallUpgradeMigrations(
   const fileOps = createInstallMigrationFileOps(options, deps);
   return [
     migrateInstalledDataLayout(options.installDir, fileOps),
+    removeInstalledBrowseRuntime(options.installDir, fileOps),
     rewriteInstalledChatStateSessionFileKeys(options.installDir, fileOps),
     migrateInstalledChatSessionFilesToManaged(options.installDir, fileOps),
   ];
@@ -648,7 +678,6 @@ function applyInstalledDefaults(
     modelId?: string;
     thinkingLevel?: string;
     language?: string;
-    builtInExtensions?: string[];
   },
 ) {
   if (options.provider) target.defaultProvider = options.provider;
@@ -658,20 +687,10 @@ function applyInstalledDefaults(
   }
   const language = normalizeConfiguredLanguage(options.language);
   if (language) target.language = language;
-  if (Array.isArray(options.builtInExtensions)) {
-    const selected = new Set(
-      options.builtInExtensions.map((entry) => String(entry)),
+  if (Array.isArray(target.extensions)) {
+    const extensions = stripRemovedBuiltInRinExtensionEntries(
+      target.extensions,
     );
-    let extensions = Array.isArray(target.extensions)
-      ? target.extensions.map((entry: unknown) => String(entry))
-      : [];
-    for (const { id } of BUILT_IN_RIN_EXTENSIONS) {
-      extensions = setBuiltInRinExtensionEnabled(
-        extensions,
-        id,
-        selected.has(id),
-      );
-    }
     if (extensions.length > 0) target.extensions = extensions;
     else delete target.extensions;
   }
@@ -999,7 +1018,6 @@ export async function persistInstallerOutputs(
     thinkingLevel: string;
     language?: string;
     setDefaultTarget?: boolean;
-    builtInExtensions?: string[];
     authData: any;
     release?: InstalledReleaseInfo;
     currentReleaseName?: string;

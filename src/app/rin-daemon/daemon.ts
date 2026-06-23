@@ -22,10 +22,6 @@ import {
   resolveRuntimeProfile,
 } from "../../core/rin-lib/profile.js";
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
-import {
-  cleanupOrphanSearxngSidecars,
-  stopSearxngSidecar,
-} from "../../core/rin-browse/service.js";
 import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/daemon-client.js";
 import {
   listBuiltInRinExtensionStatesWithLifecycle,
@@ -50,7 +46,6 @@ async function main() {
   applyRuntimeProfileEnvironment(runtime);
 
   const daemonSocketPath = process.argv[2] || defaultDaemonSocketPath();
-  const browseInstanceId = `daemon-${process.pid}`;
   let daemonLock: DaemonInstanceLock | null = null;
   let backgroundExtensionManager: RinBackgroundExtensionManager | null = null;
   let chatBridge: Awaited<ReturnType<typeof startChatBridge>> | null = null;
@@ -60,10 +55,6 @@ async function main() {
 
   const stopHostedServices = async () => {
     await chatBridge?.stop().catch(() => {});
-    await stopSearxngSidecar(runtime.agentDir, {
-      instanceId: browseInstanceId,
-      logger: console,
-    }).catch(() => {});
   };
 
   const stopAllServices = async () => {
@@ -85,10 +76,6 @@ async function main() {
     daemonLock = await acquireDaemonInstanceLock(runtime.agentDir, {
       socketPath: daemonSocketPath,
     });
-
-    void cleanupOrphanSearxngSidecars(runtime.agentDir, {
-      logger: console,
-    }).catch(() => {});
 
     backgroundExtensionManager = new RinBackgroundExtensionManager({
       cwd: runtime.cwd,

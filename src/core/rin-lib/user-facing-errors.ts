@@ -248,12 +248,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   background_extension_entrypoint_missing: () =>
     "Background extension is missing a Rin extension entry point. Export a Rin extension factory or background service.",
 
-  python_not_found: () =>
-    "Browse needs Python to start the local SearXNG sidecar. Install Python 3.10 or newer.",
-  python_version_unsupported: () =>
-    "Browse could not prepare a Python 3.10 or newer runtime for the local SearXNG sidecar. Check the network.",
-  uv_install_failed: () =>
-    "Browse could not install Rin's private Python helper. Check the network.",
   qq_app_id_required: () =>
     "QQ adapter needs an app id before it can start. Add the app id.",
   qq_reaction_requires_channel_chat: () =>
@@ -442,10 +436,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Choose either --session or --managed-session, not both.",
 
   recall_aborted: () => "Recall was aborted.",
-  searxng_start_failed: () =>
-    "The local SearXNG search sidecar exited before it became ready.",
-  searxng_start_timeout: () =>
-    "The local SearXNG search sidecar did not become ready in time.",
   self_improve_content_required: () =>
     "Self-improvement update needs content. Add content.",
   session_file_required: () =>
@@ -485,17 +475,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       ". Remove it or check the command help.",
     ),
   web_fetch_invalid_url: () => "Enter a valid HTTP or HTTPS URL.",
-  browse_failed: () => "Browse failed. Check the network or search backend.",
-  browse_query_required: () => "Enter a search query or URL.",
-  browse_runtime_fetch_tools_not_found: () =>
-    "Browse needs git, or curl/wget plus tar, to install the local SearXNG sidecar. Install the missing tool.",
-  browse_runtime_source_invalid: () =>
-    "The local SearXNG search runtime is incomplete.",
-  browse_runtime_not_installed: () =>
-    "The local SearXNG search runtime is not installed.",
-  browse_sidecar_unavailable: () =>
-    "The local SearXNG search sidecar is not available yet.",
-
   fetch_failed: () => "The network request failed.",
   unknown_error: () => "Rin hit an unexpected problem before it could finish.",
 };

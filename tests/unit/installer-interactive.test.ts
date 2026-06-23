@@ -442,17 +442,14 @@ test("core update restarts runtime only after manifest persistence", () => {
     source.indexOf("export async function finalizeQuickRunInstall"),
   );
 
-  assert.match(source, /if \(options\.stopRuntimeBeforePublish\)/);
-  assert.match(source, /stopInstalledBrowseSidecars\(installDir\)/);
-  assert.match(source, /options\.prepareBrowseRuntime !== false/);
-  assert.match(source, /builtInExtensions\?\.includes\("rin:browse"\)/);
+  assert.doesNotMatch(source, /stopInstalledBrowseSidecars/);
+  assert.doesNotMatch(source, /prepareBrowseRuntime/);
+  assert.doesNotMatch(source, /builtInExtensions/);
   assert.match(source, /const shouldRestartBeforePersist =\s*manageDaemon &&/);
   assert.match(source, /!options\.stopRuntimeBeforePublish/);
   assert.match(source, /if \(manageDaemon && !shouldRestartBeforePersist\)/);
   assert.match(updateBlock, /stopRuntimeBeforePublish: true/);
-  assert.match(updateBlock, /prepareBrowseRuntime: false/);
   assert.doesNotMatch(installBlock, /stopRuntimeBeforePublish: true/);
-  assert.doesNotMatch(installBlock, /prepareBrowseRuntime: false/);
 });
 
 test("installer i18n source keeps localized copy in one display table", () => {
@@ -526,22 +523,13 @@ test("update mode skips language prompt and reuses installer note renderer", () 
   assert.match(updaterSource, /rin_update_confirmation_required/);
 });
 
-test("promptBuiltInExtensionSetup defaults browse on for fresh installs", async () => {
-  let promptOptions;
-  const selected = await interactive.promptBuiltInExtensionSetup({
-    ensureNotCancelled: (value) => value,
-    select: async () => undefined,
-    text: async () => undefined,
-    confirm: async () => true,
-    multiselect: async (options) => {
-      promptOptions = options;
-      return options.initialValues;
-    },
-  });
-
-  assert.deepEqual(selected, ["rin:browse"]);
-  assert.deepEqual(promptOptions.initialValues, ["rin:browse"]);
-  assert.ok(promptOptions.options.length >= 1);
+test("installer no longer prompts for bundled extension selection", () => {
+  const source = readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "interactive.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /promptBuiltInExtensionSetup/);
+  assert.doesNotMatch(source, /Enable optional built-in extensions/);
 });
 
 test("promptProviderSetup reuses complete existing provider config", async () => {

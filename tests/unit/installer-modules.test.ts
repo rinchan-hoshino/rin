@@ -1024,7 +1024,7 @@ test("persistInstallerOutputs creates elevated runtime user skill directory as t
   });
 });
 
-test("persistInstallerOutputs stores configured language in settings", async () => {
+test("persistInstallerOutputs stores language and strips removed built-in extensions", async () => {
   await withTempDir(async (dir) => {
     const writes = [];
     const launchWrites = [];
@@ -1037,14 +1037,16 @@ test("persistInstallerOutputs stores configured language in settings", async () 
         modelId: "gpt",
         thinkingLevel: "medium",
         language: "zh_CN",
-        builtInExtensions: ["rin:browse"],
         authData: {},
         elevated: false,
       },
       {
         findSystemUser: () => ({ name: "demo", gid: 1000 }),
         ensureDir: async () => {},
-        readInstallerJson: (_filePath, fallback) => fallback,
+        readInstallerJson: (filePath, fallback) =>
+          String(filePath).endsWith("settings.json")
+            ? { extensions: ["rin:browse", "/opt/custom-extension"] }
+            : fallback,
         writeJsonFileWithPrivilege: () => {},
         writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
         launcherMetadataPathForUser: () => path.join(dir, "launcher.json"),
@@ -1074,7 +1076,7 @@ test("persistInstallerOutputs stores configured language in settings", async () 
     assert.equal(settingsWrite.value.defaultModel, "gpt");
     assert.equal(settingsWrite.value.defaultThinkingLevel, "medium");
     assert.equal(settingsWrite.value.language, "zh_CN");
-    assert.deepEqual(settingsWrite.value.extensions, ["rin:browse"]);
+    assert.deepEqual(settingsWrite.value.extensions, ["/opt/custom-extension"]);
 
     const manifestWrites = writes.filter(
       (entry) =>
@@ -1161,6 +1163,11 @@ test("persist normalizeInstalledChatSettings applies install upgrade migrations"
     });
     assert.deepEqual(result.migrations.slice(1), [
       {
+        id: "remove-browse-runtime",
+        skipped: true,
+        removedPaths: [],
+      },
+      {
         id: "chat-state-session-file-v1",
         markerPath: path.join(
           dir,
@@ -1189,8 +1196,42 @@ test("persist normalizeInstalledChatSettings applies install upgrade migrations"
         migratedFiles: [],
       },
     ]);
-    await assert.rejects(fs.access(result.migrations[1].markerPath));
     await assert.rejects(fs.access(result.migrations[2].markerPath));
+    await assert.rejects(fs.access(result.migrations[3].markerPath));
+  });
+});
+
+test("persist normalizeInstalledChatSettings removes old browse runtime data", async () => {
+  await withTempDir(async (dir) => {
+    const oldBrowse = path.join(dir, "data", "browse");
+    const sidecarBrowse = path.join(dir, "data", "sidecars", "browse");
+    await fs.mkdir(oldBrowse, { recursive: true });
+    await fs.mkdir(sidecarBrowse, { recursive: true });
+    await fs.writeFile(path.join(oldBrowse, "marker.txt"), "old");
+    await fs.writeFile(path.join(sidecarBrowse, "marker.txt"), "sidecar");
+
+    const result = persist.normalizeInstalledChatSettings(
+      {
+        targetUser: "demo",
+        installDir: dir,
+        elevated: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000 }),
+        readInstallerJson: (_filePath, fallback) => fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: () => {},
+        runPrivileged: () => {},
+      },
+    );
+
+    await assert.rejects(fs.access(oldBrowse));
+    await assert.rejects(fs.access(sidecarBrowse));
+    assert.deepEqual(result.migrations[1], {
+      id: "remove-browse-runtime",
+      skipped: false,
+      removedPaths: [sidecarBrowse, oldBrowse],
+    });
   });
 });
 
@@ -1279,14 +1320,14 @@ test("persist normalizeInstalledChatSettings migrates previous chat state sessio
         sessionFile: "turn.jsonl",
       },
     );
-    assert.equal(result.migrations[1].id, "chat-state-session-file-v1");
-    assert.equal(result.migrations[1].skipped, false);
-    assert.equal(result.migrations[1].scanned, 2);
-    assert.equal(result.migrations[1].migrated, 2);
-    assert.equal(result.migrations[2].id, "chat-session-managed-file-v1");
-    assert.equal(result.migrations[2].skipped, true);
-    await fs.access(result.migrations[1].markerPath);
-    await assert.rejects(fs.access(result.migrations[2].markerPath));
+    assert.equal(result.migrations[2].id, "chat-state-session-file-v1");
+    assert.equal(result.migrations[2].skipped, false);
+    assert.equal(result.migrations[2].scanned, 2);
+    assert.equal(result.migrations[2].migrated, 2);
+    assert.equal(result.migrations[3].id, "chat-session-managed-file-v1");
+    assert.equal(result.migrations[3].skipped, true);
+    await fs.access(result.migrations[2].markerPath);
+    await assert.rejects(fs.access(result.migrations[3].markerPath));
   });
 });
 
@@ -1408,12 +1449,12 @@ test("persist normalizeInstalledChatSettings moves chat-bound root sessions unde
       "root session\n",
     );
     await assert.rejects(fs.access(rootSessionPath));
-    assert.equal(result.migrations[2].id, "chat-session-managed-file-v1");
-    assert.equal(result.migrations[2].skipped, false);
-    assert.equal(result.migrations[2].scanned, 2);
-    assert.equal(result.migrations[2].migrated, 1);
-    assert.deepEqual(result.migrations[2].migratedFiles, [targetSessionPath]);
-    await fs.access(result.migrations[2].markerPath);
+    assert.equal(result.migrations[3].id, "chat-session-managed-file-v1");
+    assert.equal(result.migrations[3].skipped, false);
+    assert.equal(result.migrations[3].scanned, 2);
+    assert.equal(result.migrations[3].migrated, 1);
+    assert.deepEqual(result.migrations[3].migratedFiles, [targetSessionPath]);
+    await fs.access(result.migrations[3].markerPath);
   });
 });
 
@@ -1545,8 +1586,8 @@ test("persist normalizeInstalledChatSettings runs elevated migrations as target 
       "root session\n",
     );
     assert.equal(result.migrations[0].moved >= 1, true);
-    assert.equal(result.migrations[1].migrated, 1);
     assert.equal(result.migrations[2].migrated, 1);
+    assert.equal(result.migrations[3].migrated, 1);
   });
 });
 
@@ -1717,6 +1758,11 @@ test("persist persistInstallerOutputs applies install upgrade migrations before 
     });
     assert.deepEqual(result.migrations.slice(1), [
       {
+        id: "remove-browse-runtime",
+        skipped: true,
+        removedPaths: [],
+      },
+      {
         id: "chat-state-session-file-v1",
         markerPath: path.join(
           dir,
@@ -1745,8 +1791,8 @@ test("persist persistInstallerOutputs applies install upgrade migrations before 
         migratedFiles: [],
       },
     ]);
-    await assert.rejects(fs.access(result.migrations[1].markerPath));
     await assert.rejects(fs.access(result.migrations[2].markerPath));
+    await assert.rejects(fs.access(result.migrations[3].markerPath));
   });
 });
 

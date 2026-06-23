@@ -48,7 +48,6 @@ Use the SDK for:
 - scheduled-task create/read/update/reload/run/pause/resume/delete operations;
 - chat bridge sends, agent turns, typing, reactions, turn termination, and bridge-local evals;
 - daemon status/activity checks when a script needs structured daemon data;
-- installed built-in extension enable/disable/list operations.
 
 Prefer direct turn tools when the current turn already has a purpose-built tool. Use the SDK when the operation must be scripted, repeated, or composed with local verification.
 
@@ -57,7 +56,6 @@ Read the topic document before changing that surface:
 - scheduled tasks: `docs/scheduled-tasks.md`;
 - chat bridge behavior: `docs/chat-bridge.md`;
 - rich chat output syntax: `docs/rich-text-output-format.md`;
-- built-in extensions: `docs/builtin-extensions.md`.
 
 ## Import pattern
 
@@ -174,21 +172,14 @@ Chat helper contract:
 
 For native mentions, quotes/replies, files, images, or attachment syntax, read `docs/rich-text-output-format.md` before sending. For stored chat logs, identities, adapters, and bridge state, read `docs/chat-bridge.md`.
 
-## Daemon and built-in extension helpers
+## Daemon helpers
 
 ```js
 const status = await rin.daemon.status();
 const activity = await rin.daemon.activity();
-
-const { extensions } = await rin.builtInExtensions.list();
-await rin.builtInExtensions.enable("rin:browse");
-await rin.builtInExtensions.disable("rin:browse");
-await rin.builtInExtensions.setEnabled("rin:browse", true);
 ```
 
 Use daemon helpers for structured inspection inside scripts. Use `rin status` or `rin status --json` for operator-facing status reports.
-
-Use built-in extension helpers for installed built-in extension state. Read `docs/builtin-extensions.md` first; some capability changes also require dependency setup, service start/stop, or runtime restart outside a simple enable flag.
 
 ## Final report contract
 

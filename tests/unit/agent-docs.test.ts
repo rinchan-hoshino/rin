@@ -87,7 +87,10 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(runtimeLayout, /<installDir>\/installer\.json/);
   assert.match(runtimeLayout, /app\/current\//);
   assert.match(builtinCapabilities, /Capability source map/);
-  assert.match(builtinCapabilities, /Bundled optional foreground Pi extension/);
+  assert.match(
+    builtinCapabilities,
+    /Rin currently ships no bundled optional foreground extensions/,
+  );
   assert.match(builtinCapabilities, /Browser and desktop operation/);
   assert.doesNotMatch(builtinCapabilities, /provides `run_subagent`/);
   assert.doesNotMatch(builtinCapabilities, /rin:browser-use/);

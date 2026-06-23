@@ -299,7 +299,7 @@ test("core todo remains enabled when optional extensions are disabled", async ()
   }
 });
 
-test("stage B built-in extension controls update browse settings alias", async () => {
+test("stage B built-in extension controls expose no bundled foreground extensions", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
   try {
     await writeJson(path.join(agentDir, "settings.json"), {
@@ -308,28 +308,28 @@ test("stage B built-in extension controls update browse settings alias", async (
     const settingsManager = SettingsManager.create(agentDir, agentDir);
 
     assert.deepEqual(
-      builtInExtensionControls
-        .listBuiltInRinExtensionStates(settingsManager)
-        .map((entry: any) => [entry.id, entry.enabled]),
-      [["rin:browse", true]],
+      builtInExtensionControls.listBuiltInRinExtensionStates(settingsManager),
+      [],
     );
-
-    await builtInExtensionControls.disableBuiltInRinExtension(
-      settingsManager,
-      "rin:browse",
+    await assert.rejects(
+      () =>
+        builtInExtensionControls.disableBuiltInRinExtension(
+          settingsManager,
+          "rin:browse",
+        ),
+      /Unknown built-in Rin extension/,
     );
-    await settingsManager.flush();
-
-    const saved = JSON.parse(
-      await fs.readFile(path.join(agentDir, "settings.json"), "utf8"),
-    );
-    assert.deepEqual(saved.extensions ?? [], []);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-for (const removedAlias of ["rin:browser-use", "rin:computer-use"]) {
+for (const removedAlias of [
+  "rin:browse",
+  "!rin:browse",
+  "rin:browser-use",
+  "rin:computer-use",
+]) {
   test(`stage B removed built-in extension alias is not expanded: ${removedAlias}`, () => {
     assert.equal(
       bundledExtensions.resolveBundledRinExtensionPath(removedAlias),
@@ -337,14 +337,21 @@ for (const removedAlias of ["rin:browser-use", "rin:computer-use"]) {
     );
     assert.equal(
       bundledExtensions.expandBundledRinExtensionEntry(removedAlias),
-      removedAlias,
+      removedAlias === "rin:browse" || removedAlias === "!rin:browse"
+        ? ""
+        : removedAlias,
     );
   });
 }
 
 test("stage B built-in extension entrypoints stay self-contained", async () => {
   const extensionsDir = path.join(rootDir, "extensions");
-  const entries = await fs.readdir(extensionsDir, { withFileTypes: true });
+  const entries = await fs
+    .readdir(extensionsDir, { withFileTypes: true })
+    .catch((error: any) => {
+      if (error?.code === "ENOENT") return [];
+      throw error;
+    });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const entrypoint = path.join(extensionsDir, entry.name, "index.ts");
@@ -357,7 +364,7 @@ test("stage B built-in extension entrypoints stay self-contained", async () => {
   }
 });
 
-test("stage B browse loads as an external built-in extension", async () => {
+test("stage B removed browse alias does not load a tool", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-ext-"));
   try {
     await writeJson(path.join(agentDir, "settings.json"), {
@@ -366,7 +373,7 @@ test("stage B browse loads as an external built-in extension", async () => {
     const loader = await createExtensionLoader(agentDir);
     const toolNames = extensionToolNames(loader);
 
-    assert.equal(toolNames.includes("browse"), true);
+    assert.equal(toolNames.includes("browse"), false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

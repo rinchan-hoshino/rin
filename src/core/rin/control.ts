@@ -1,6 +1,5 @@
 import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import { sleep } from "../platform/process.js";
-import { getBrowseStatus, stopSearxngSidecar } from "../rin-browse/service.js";
 import { readDaemonInstanceLockOwner } from "../rin-daemon/lock.js";
 import { findSystemUser, targetHomeForUser } from "../rin-install/users.js";
 import { startWindowsDaemonProcess } from "../rin-install/service.js";
@@ -231,16 +230,6 @@ async function ensureLifecycleDaemonAvailable(
   await ensureDaemonAvailable(context);
 }
 
-async function stopManagedBrowseSidecars(agentDir: string) {
-  const status = getBrowseStatus(agentDir);
-  const instances = Array.isArray(status.instances) ? status.instances : [];
-  for (const instance of instances) {
-    const instanceId = String(instance?.instanceId || "").trim();
-    if (!instanceId) continue;
-    await stopSearxngSidecar(agentDir, { instanceId }).catch(() => {});
-  }
-}
-
 export async function runStart(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
   const unit = await tryManagedServiceAction(context, "start");
@@ -251,7 +240,6 @@ export async function runStart(parsed: ParsedArgs) {
 export async function runStop(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
   const unit = await tryManagedServiceAction(context, "stop");
-  await stopManagedBrowseSidecars(context.agentDir);
   if (!(await waitForDaemonUnavailable(context))) {
     throw new Error(
       `rin_stop_incomplete: daemon socket is still reachable for ${context.targetUser}`,

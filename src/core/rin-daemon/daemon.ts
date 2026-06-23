@@ -34,7 +34,6 @@ import {
   listBoundSessions,
   renameBoundSession,
 } from "../session/factory.js";
-import { getBrowseStatus } from "../rin-browse/service.js";
 import { CronScheduler } from "./cron.js";
 import {
   getCatalogOAuthState,
@@ -570,7 +569,6 @@ export async function startDaemon(
             ? activity
             : {
                 ...activity,
-                browse: getBrowseStatus(runtime.agentDir),
                 ...(extraStatus && typeof extraStatus === "object"
                   ? extraStatus
                   : {}),

@@ -1,17 +1,16 @@
 # Builtin Extensions and Capability Sources
 
-Use this page to identify where a Rin capability comes from: native Rin core, bundled optional foreground Pi extension, live third-party tool, practice document, or Rin background extension runtime. For task-level usage, start with `docs/capabilities.md`.
+Use this page to identify where a Rin capability comes from: native Rin core, live third-party tool, practice document, or Rin background extension runtime. For task-level usage, start with `docs/capabilities.md`.
 
 The live tool list remains authoritative for the current turn.
 
 ## Capability source map
 
-| Source                                   | Provides                                                                                                                                                                            | Configuration surface                                                                                         | Agent route                                                    |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                                                                | use live tools, CLI, SDK, or topic docs                        |
-| Bundled optional foreground Pi extension | `rin:browse` alias registering `browse`                                                                                                                                             | `settings.json -> extensions`                                                                                 | use `browse` when present                                      |
-| Browser/desktop operation                | browser or computer tools supplied by the live runtime, plus documented practice patterns                                                                                           | live tool list or external Pi extension config                                                                | read `practices/browser-use.md` or `practices/computer-use.md` |
-| Background extension runtime             | trusted long-running services, chat adapters, and external memory providers                                                                                                         | `settings.json -> rinExtensions.backgroundServices` or trusted extension entries with background capabilities | inspect runtime state and relevant extension config            |
+| Source                       | Provides                                                                                                                                                                            | Configuration surface                                                                                         | Agent route                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Rin core                     | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                                                                | use live tools, CLI, SDK, or topic docs                        |
+| Browser/desktop operation    | browser or computer tools supplied by the live runtime, plus documented practice patterns                                                                                           | live tool list or external Pi extension config                                                                | read `practices/browser-use.md` or `practices/computer-use.md` |
+| Background extension runtime | trusted long-running services, chat adapters, and external memory providers                                                                                                         | `settings.json -> rinExtensions.backgroundServices` or trusted extension entries with background capabilities | inspect runtime state and relevant extension config            |
 
 ## Rin core capabilities
 
@@ -44,34 +43,11 @@ Rin core always provides todo support. It registers:
 
 Todo state is reconstructed from session tool-result details, so forks and session branches can recover the matching checklist. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
 
-## Bundled optional foreground extension: `rin:browse`
+## Bundled foreground extensions
 
-Rin ships one bundled optional foreground Pi extension alias:
+Rin currently ships no bundled optional foreground extensions. Existing installs that still contain removed bundled aliases such as `rin:browse` have those entries stripped during install/update settings persistence.
 
-```json
-{
-  "extensions": ["rin:browse"]
-}
-```
-
-`rin:browse` expands to the bundled `extensions/rin-browse` Pi package and registers `browse`.
-
-`browse` modes:
-
-- search query: uses Rin-managed SearXNG;
-- HTTP(S) URL: fetches readable content from the specific page.
-
-Fresh installs enable `rin:browse` by default unless the installer selection disables it. Existing installs keep their current `settings.json -> extensions` value.
-
-Use Pi resource filters with the alias when a broader extension list needs filtering:
-
-```json
-{
-  "extensions": ["rin:browse", "!rin:browse"]
-}
-```
-
-When `extensions` is missing or empty, Rin core capabilities remain available and optional foreground extension tools follow the configured extension state.
+Use ordinary Pi extension configuration for trusted third-party foreground extensions. Use the live tool list as the source of truth for which tools are available in the current turn.
 
 ## Browser and desktop operation
 

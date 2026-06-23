@@ -240,7 +240,7 @@ test("rin lifecycle control uses the recorded managed service boundary", () => {
   assert.match(source, /launchctl/);
   assert.match(source, /windows-startup/);
   assert.match(source, /startWindowsDaemonProcess/);
-  assert.match(source, /stopManagedBrowseSidecars\(context\.agentDir\)/);
+  assert.doesNotMatch(source, /stopManagedBrowseSidecars/);
   assert.match(source, /waitForDaemonUnavailable\(context\)/);
   assert.match(source, /rin_stop_incomplete/);
   assert.doesNotMatch(source, /pkill/);

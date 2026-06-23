@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { safeString } from "./text-utils.js";
 
-export type BuiltInRinExtensionId = "rin:browse";
+export type BuiltInRinExtensionId = string;
 
 export type BuiltInRinExtensionDefinition = {
   id: BuiltInRinExtensionId;
@@ -15,22 +15,10 @@ export type BuiltInRinExtensionDefinition = {
   onEnable?: (context: { agentDir?: string }) => Promise<void> | void;
 };
 
-export const BUILT_IN_RIN_EXTENSIONS: BuiltInRinExtensionDefinition[] = [
-  {
-    id: "rin:browse",
-    label: "Browse",
-    description:
-      "Adds the browse tool and prepares Rin-managed SearXNG when enabled.",
-    directory: "rin-browse",
-    defaultEnabled: true,
-    installOnEnable: true,
-    async onEnable(context) {
-      const agentDir = String(context.agentDir || "").trim();
-      if (!agentDir) return;
-      const { prepareSearxngRuntime } = await import("./rin-browse/service.js");
-      await prepareSearxngRuntime(agentDir).catch(() => undefined);
-    },
-  },
+export const BUILT_IN_RIN_EXTENSIONS: BuiltInRinExtensionDefinition[] = [];
+
+const REMOVED_BUILT_IN_RIN_EXTENSIONS = [
+  { id: "rin:browse", directory: "rin-browse" },
 ];
 
 const BUNDLED_RIN_EXTENSION_DIRS: Record<string, string> = Object.fromEntries(
@@ -47,9 +35,44 @@ export function resolveBundledRinExtensionPath(name: string) {
   return path.join(getRepoRoot(), "extensions", extensionDir);
 }
 
+function removedBundledRinExtensionPaths() {
+  return REMOVED_BUILT_IN_RIN_EXTENSIONS.flatMap((entry) => {
+    const extensionPath = path.join(
+      getRepoRoot(),
+      "extensions",
+      entry.directory,
+    );
+    return [
+      entry.id,
+      extensionPath,
+      path.join(extensionPath, "index.ts"),
+      path.join(extensionPath, "index.js"),
+    ];
+  });
+}
+
+function stripEntryMarker(entry: string) {
+  const text = safeString(entry).trim();
+  const marker = ["!", "+", "-"].includes(text[0]) ? text[0] : "";
+  return { marker, value: marker ? text.slice(1) : text };
+}
+
+export function isRemovedBuiltInRinExtensionEntry(entry: string) {
+  const { value } = stripEntryMarker(entry);
+  return removedBundledRinExtensionPaths().includes(value);
+}
+
+export function stripRemovedBuiltInRinExtensionEntries(entries: unknown) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => safeString(entry).trim())
+    .filter((entry) => entry && !isRemovedBuiltInRinExtensionEntry(entry));
+}
+
 export function expandBundledRinExtensionEntry(entry: string) {
   const text = safeString(entry).trim();
   if (!text) return text;
+  if (isRemovedBuiltInRinExtensionEntry(text)) return "";
   const marker = ["!", "+", "-"].includes(text[0]) ? text[0] : "";
   const name = marker ? text.slice(1) : text;
   const extensionPath = resolveBundledRinExtensionPath(name);
@@ -60,13 +83,9 @@ export function expandBundledRinExtensionEntry(entry: string) {
 
 export function expandBundledRinExtensionEntries(entries: unknown) {
   if (!Array.isArray(entries)) return [];
-  return entries.map((entry) => expandBundledRinExtensionEntry(String(entry)));
-}
-
-function stripEntryMarker(entry: string) {
-  const text = safeString(entry).trim();
-  const marker = ["!", "+", "-"].includes(text[0]) ? text[0] : "";
-  return { marker, value: marker ? text.slice(1) : text };
+  return entries
+    .map((entry) => expandBundledRinExtensionEntry(String(entry)))
+    .filter(Boolean);
 }
 
 function builtInEntryMatches(entry: string, id: BuiltInRinExtensionId) {
@@ -100,9 +119,7 @@ export function setBuiltInRinExtensionEnabled(
   id: BuiltInRinExtensionId,
   enabled: boolean,
 ) {
-  const current = Array.isArray(entries)
-    ? entries.map((entry) => safeString(entry).trim()).filter(Boolean)
-    : [];
+  const current = stripRemovedBuiltInRinExtensionEntries(entries);
   const withoutTarget = current.filter(
     (entry) => !builtInEntryMatches(entry, id),
   );

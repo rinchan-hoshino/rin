@@ -17,7 +17,6 @@ export type FinalizeInstallOptions = {
   language?: string;
   setDefaultTarget?: boolean;
   authData?: any;
-  builtInExtensions?: string[];
   sourceRoot?: string;
   release?: InstalledReleaseInfo;
   daemonReadyTimeoutMs?: number;

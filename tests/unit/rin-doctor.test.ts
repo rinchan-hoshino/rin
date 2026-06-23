@@ -2,13 +2,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 
-import {
+import { pathToFileURL } from "node:url";
+
+const rootDir = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "..",
+  "..",
+);
+const {
   collectSystemdDoctorLines,
   existingManagedSystemdUnitsForDoctor,
   renderChatBridgeDoctorLines,
   renderDaemonWorkerDoctorLines,
-  renderBrowseDoctorLines,
-} from "../../src/core/rin/doctor.js";
+} = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "doctor.js")).href
+);
 
 test("rin doctor skips missing managed systemd unit candidates", () => {
   const units = ["rin-daemon-demo.service"];
@@ -83,13 +91,6 @@ test("rin doctor skips missing managed systemd unit candidates", () => {
 });
 
 test("rin doctor renderers report default daemon capability status", () => {
-  assert.deepEqual(renderBrowseDoctorLines(undefined), [
-    "browseRuntimeReady=no",
-    "browseMode=unknown",
-    "browseProviderCount=0",
-    "browseInstanceCount=0",
-  ]);
-
   assert.deepEqual(renderChatBridgeDoctorLines(undefined), [
     "chatBridgeReady=no",
     "chatBridgeAdapterCount=0",
@@ -102,36 +103,6 @@ test("rin doctor renderers report default daemon capability status", () => {
 });
 
 test("rin doctor renderers format daemon status details consistently", () => {
-  assert.deepEqual(
-    renderBrowseDoctorLines({
-      runtime: {
-        ready: true,
-        mode: "searxng-sidecar",
-        providerCount: 3,
-        providers: ["google", "bing", "duckduckgo"],
-      },
-      instances: [
-        {
-          instanceId: "primary",
-          pid: 123,
-          alive: true,
-          port: 8080,
-          baseUrl: "http://127.0.0.1:8080",
-        },
-      ],
-    }),
-    [
-      "browseRuntimeReady=yes",
-      "browseMode=searxng-sidecar",
-      "browseProviderCount=3",
-      "browseInstanceCount=1",
-      "browseProvider=google",
-      "browseProvider=bing",
-      "browseProvider=duckduckgo",
-      "browseInstance=primary pid=123 alive=yes port=8080 baseUrl=http://127.0.0.1:8080",
-    ],
-  );
-
   assert.deepEqual(
     renderChatBridgeDoctorLines({
       ready: true,
