@@ -361,9 +361,7 @@ export function buildGuiInstallerHtml() {
             <input name="targetUser" value="${escapeHtml(initialPlan.targetUser)}" />
           </label>
         </div>
-        <label>Install directory
-          <input name="installDir" value="${escapeHtml(initialPlan.installDir)}" />
-        </label>
+        <input type="hidden" name="installDir" value="${escapeHtml(initialPlan.installDir)}" />
         <div class="step-actions">
           <button type="button" data-next>Continue to model</button>
         </div>
@@ -386,7 +384,7 @@ export function buildGuiInstallerHtml() {
           <input name="apiKey" type="password" autocomplete="off" placeholder="Leave blank when existing auth is ready" />
         </label>
         <button id="save-auth-button" type="button">Save provider auth</button>
-        <p id="auth-status" class="notice">Use this only in the local desktop installer; tokens are saved to the selected install directory.</p>
+        <p id="auth-status" class="notice">Use this only in the local desktop installer; tokens are saved to the local Rin config.</p>
         <div class="step-actions">
           <button type="button" data-back>Back</button>
           <button type="button" data-next>Continue to review</button>
@@ -563,7 +561,6 @@ export function buildGuiInstallerHtml() {
       }
     });
 
-    form.elements.installDir.addEventListener('change', () => { loadModels(); });
     providerSelect.addEventListener('change', () => { refreshModelFields(); refreshPlan(); });
     modelSelect.addEventListener('change', () => { refreshModelFields(); refreshPlan(); });
     thinkingSelect.addEventListener('change', () => { refreshPlan(); });

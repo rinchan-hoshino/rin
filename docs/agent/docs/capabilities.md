@@ -27,7 +27,7 @@ Use the `rin` launcher as the installed-runtime entrypoint.
 - `rin update --yes`: the only agent-facing installed-runtime update command.
 - `rin rollback`: switch to the `previousRelease` recorded in the install manifest.
 
-Use `docs/runtime-layout.md` to audit launcher ownership, `installDir`, manifests, services, `app/current`, and release directories. Source checkout maintenance and installed-runtime maintenance are different surfaces.
+Use `docs/runtime-layout.md` to audit launcher ownership, agent directory, manifests, services, `app/current`, and release directories. Source checkout maintenance and installed-runtime maintenance are different surfaces.
 
 Before update or rollback, verify target ownership through the installed manifests or service files. After update or rollback, verify `app/current/`, release metadata, and `rin status` when daemon liveness matters.
 

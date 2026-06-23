@@ -33,8 +33,8 @@ test("installer interactive helpers describe dir state and plan text", () => {
     entryCount: 0,
     sample: [],
   });
-  assert.equal(created.title, "Install directory");
-  assert.ok(created.text.includes("Directory will be created"));
+  assert.equal(created.title, "Local Rin config");
+  assert.ok(created.text.includes("Local Rin config will be created"));
 
   const plan = interactive.buildInstallPlanText({
     currentUser: "alice",
@@ -173,7 +173,7 @@ test("installer target menu hides cross-user local install on Windows", () => {
 });
 
 test("promptTargetInstall falls back to all users when no other user exists", async () => {
-  const seen = { selects: [] };
+  const seen = { selects: [], texts: [] };
   const result = await interactive.promptTargetInstall(
     {
       ensureNotCancelled(value) {
@@ -184,6 +184,7 @@ test("promptTargetInstall falls back to all users when no other user exists", as
         return seen.selects.length === 1 ? "existing" : "alice";
       },
       async text(options) {
+        seen.texts.push(options);
         return options.defaultValue;
       },
       async confirm() {
@@ -206,6 +207,7 @@ test("promptTargetInstall falls back to all users when no other user exists", as
   assert.equal(result.cancelled, false);
   assert.equal(result.targetUser, "alice");
   assert.equal(result.installDir, "/home/alice/.rin");
+  assert.deepEqual(seen.texts, []);
   assert.deepEqual(
     result.existingCandidates.map((entry) => entry.name),
     ["alice"],
@@ -356,7 +358,7 @@ test("createInstallerI18n exposes localized post-install and update copy", () =>
   const en = installerI18n.createInstallerI18n("en_US");
   const zh = installerI18n.createInstallerI18n("zh_CN");
 
-  assert.equal(en.targetInstallDirLabel, "Target install dir");
+  assert.equal(en.targetInstallDirLabel, "Rin home");
   assert.equal(en.writtenPathLabel, "Written");
   assert.equal(en.serviceLabelLabel, "label");
   assert.equal(en.updaterIntroTitle, "Rin Updater");
@@ -385,10 +387,7 @@ test("createInstallerI18n exposes localized post-install and update copy", () =>
       })
       .includes("No download"),
   );
-  assert.equal(
-    zh.targetInstallDirLabel,
-    "\u76ee\u6807\u5b89\u88c5\u76ee\u5f55",
-  );
+  assert.equal(zh.targetInstallDirLabel, "Rin \u76ee\u5f55");
   assert.equal(zh.writtenPathLabel, "\u5df2\u5199\u5165");
   assert.equal(zh.serviceLabelLabel, "\u6807\u7b7e");
   assert.equal(zh.confirmActiveLabel, "\u662f");

@@ -282,7 +282,7 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_command_failed: (detail) =>
     withDetail("Rin command failed", detail, ". Check the command output."),
   rin_installer_fd_install_dir_missing: () =>
-    "Rin installer needs an install directory before preparing managed search tools. Choose an install directory.",
+    "Rin installer needs the default local config directory before preparing managed search tools.",
   rin_installer_fd_manager_unavailable: () =>
     "Rin installer could not prepare managed search tools.",
   rin_container_name_required: () =>
@@ -317,7 +317,7 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_installer_gui_disabled: () =>
     "Rin installer GUI is temporarily disabled while the desktop interface is redesigned. Use the terminal installer.",
   rin_installer_gui_install_dir_required: () =>
-    "Rin installer GUI needs an install directory. Choose a directory.",
+    "Rin installer GUI needs the default local config directory.",
   rin_installer_gui_model_required: () =>
     "Rin installer GUI needs a model selection. Choose a model.",
   rin_installer_gui_provider_required: () =>

@@ -376,20 +376,7 @@ export async function promptTargetInstall(
   }
 
   const defaultDir = defaultInstallDirForHome(targetHomeForUser(targetUser));
-  const installDir = String(
-    prompt.ensureNotCancelled(
-      await prompt.text({
-        message: i18n.chooseInstallDirMessage,
-        placeholder: defaultDir,
-        defaultValue: defaultDir,
-        validate(value: string) {
-          const next = String(value || "").trim();
-          if (!next) return i18n.directoryRequired;
-          if (!path.isAbsolute(next)) return i18n.directoryMustBeAbsolute;
-        },
-      }),
-    ),
-  ).trim();
+  const installDir = defaultDir;
 
   return {
     kind: "local" as const,

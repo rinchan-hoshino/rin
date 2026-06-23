@@ -8,7 +8,7 @@ Runtime layout work is a target-identification contract. The agent must identify
 
 Target surface:
 
-- agent directory under `~/.rin/` or a custom `installDir`;
+- agent directory under `~/.rin/`;
 - installed docs under `docs/rin/`, `docs/pi/`, and `docs/release/`;
 - launcher metadata and service files;
 - installer manifests;
@@ -23,13 +23,13 @@ Trusted inputs:
 - `rin status` / `rin status --json`;
 - launcher metadata;
 - target-home locator manifest;
-- install manifest inside `installDir`;
+- install manifest inside `~/.rin/`;
 - managed service files;
 - filesystem state for `app/current/` and release directories.
 
 Output contract:
 
-- target user and install directory;
+- target user and agent directory;
 - manifest path used;
 - active runtime entrypoint;
 - current and previous release names when relevant;
@@ -40,7 +40,7 @@ Output contract:
 
 A runtime-layout inspection is complete when:
 
-- `installDir` and `targetUser` come from a manifest, launcher, service, or explicit live state;
+- the agent directory and `targetUser` come from a manifest, launcher, service, or explicit live state;
 - `app/current/` identifies the active installed runtime entrypoint;
 - source checkout paths and installed runtime paths are treated as separate surfaces;
 - docs paths are resolved through the installed `docs/rin/` and `docs/pi/` roots;
@@ -48,7 +48,7 @@ A runtime-layout inspection is complete when:
 
 ## Agent directory contract
 
-The default agent directory is usually `~/.rin/`. Custom installs may use another `installDir`; use manifests to confirm the real target.
+The default agent directory is `~/.rin/`; use manifests to confirm the real target.
 
 Common top-level paths under the agent directory:
 
@@ -92,7 +92,7 @@ Find installed-runtime ownership in this order when the task depends on the acti
 
 1. `rin status --json` for live daemon/runtime data.
 2. `<targetHome>/.rin/installer.json` as the stable locator manifest under the target home.
-3. `<installDir>/installer.json` as the primary install manifest once `installDir` is known.
+3. `<targetHome>/.rin/installer.json` as the primary install manifest.
 4. User launcher metadata:
    - Linux: `~/.config/rin/install.json`
    - macOS: `~/Library/Application Support/rin/install.json`
@@ -102,12 +102,12 @@ Find installed-runtime ownership in this order when the task depends on the acti
 
 These surfaces identify:
 
-- `installDir`;
+- agent directory;
 - `targetUser`;
 - active release metadata in `currentRelease`;
 - rollback metadata in `previousRelease`;
 - installer-managed file inventory under `managedFiles.trees`;
-- service `RIN_DIR` for daemon launch context.
+- managed service launch context.
 
 ## Launcher and service contract
 
@@ -118,7 +118,7 @@ Typical launcher paths:
 - `~/.local/bin/rin`
 - `~/.local/bin/rin-install`
 
-The installer can write launchers for both the installer user and the daemon target user when those accounts differ. Launcher metadata records the current user's default `targetUser` and `installDir`.
+The installer can write launchers for both the installer user and the daemon target user when those accounts differ. Launcher metadata records the current user's default `targetUser` and agent directory.
 
 For normal agent operation, call `rin`. For launcher repair or ownership audits, compare:
 
@@ -126,7 +126,7 @@ For normal agent operation, call `rin`. For launcher repair or ownership audits,
 - launcher metadata;
 - target-home locator manifest;
 - install manifest;
-- service `RIN_DIR`.
+- managed service launch context.
 
 ## Installed runtime entrypoint
 
@@ -148,21 +148,20 @@ Use this document to identify the installed runtime target for launcher maintena
 Verify target ownership through:
 
 - `<targetHome>/.rin/installer.json`;
-- `<installDir>/installer.json`;
 - Linux service files under `~/.config/systemd/user/rin-daemon*.service`;
 - macOS launch agents under `~/Library/LaunchAgents/com.rin.daemon.*.plist`.
 
 After installed-runtime maintenance, verify:
 
 - `app/current/` target;
-- `currentRelease` and `previousRelease` in `<installDir>/installer.json`;
+- `currentRelease` and `previousRelease` in `<targetHome>/.rin/installer.json`;
 - `rin status` or `rin status --json` for the running daemon layer when daemon liveness matters.
 
 ## Source checkout boundary
 
 Source checkout maintenance and installed runtime maintenance are different surfaces. A repository checkout can contain newer source than the runtime behind `~/.rin/app/current/`.
 
-For source work, inspect the repository root, branch, status, scripts, and tests. For installed-runtime work, inspect `installDir`, manifests, service files, and `app/current/`.
+For source work, inspect the repository root, branch, status, scripts, and tests. For installed-runtime work, inspect `~/.rin/`, manifests, service files, and `app/current/`.
 
 ## Documentation install contract
 
@@ -175,7 +174,7 @@ Installed upstream Pi docs live under `docs/pi/`. Release-note metadata lives un
 For runtime-layout work, report:
 
 - target user;
-- install directory;
+- agent directory;
 - manifest path used;
 - active runtime entrypoint;
 - current/previous release when relevant;

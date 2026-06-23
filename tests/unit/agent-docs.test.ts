@@ -89,7 +89,8 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(runtimeLayout, /## Source checkout boundary/);
   assert.match(runtimeLayout, /## Report contract/);
   assert.match(runtimeLayout, /<targetHome>\/\.rin\/installer\.json/);
-  assert.match(runtimeLayout, /<installDir>\/installer\.json/);
+  assert.match(runtimeLayout, /agent directory/);
+  assert.doesNotMatch(runtimeLayout, /<installDir>\/installer\.json/);
   assert.match(runtimeLayout, /app\/current\//);
   assert.match(builtinCapabilities, /Capability source map/);
   assert.match(

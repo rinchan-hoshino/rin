@@ -109,13 +109,10 @@ type InstallerDisplayCopy = {
   usernamePlaceholder: string;
   usernameRequired: string;
   usernameInvalid: string;
-  chooseInstallDirMessage: string;
   chooseDefaultTargetMessage: (targetUser: string) => string;
   defaultTargetLabel: string;
   defaultTargetSetValue: (targetUser: string) => string;
   defaultTargetSkippedValue: string;
-  directoryRequired: string;
-  directoryMustBeAbsolute: string;
   chooseProviderMessage: string;
   chooseModelMessage: string;
   chooseThinkingLevelMessage: string;
@@ -279,7 +276,7 @@ const INSTALLER_DISPLAY_COPY = {
     installChoicesTitle: "Install choices",
     ownershipCheckTitle: "Ownership check",
     writtenPathsTitle: "Written paths",
-    targetInstallDirLabel: "Target install dir",
+    targetInstallDirLabel: "Rin home",
     writtenPathLabel: "Written",
     serviceLabelLabel: "label",
     launchingInitTitle: "Launching init",
@@ -287,7 +284,7 @@ const INSTALLER_DISPLAY_COPY = {
     confirmActiveLabel: "Yes",
     confirmInactiveLabel: "No",
     existingDirectoryTitle: "Existing directory",
-    installDirectoryTitle: "Install directory",
+    installDirectoryTitle: "Local Rin config",
     currentUserLabel: "Current user",
     existingOtherUserLabel: "Existing other user",
     newUserLabel: "New user",
@@ -322,7 +319,7 @@ const INSTALLER_DISPLAY_COPY = {
       sample: string[],
     ) {
       return [
-        `Directory exists: ${installDir}`,
+        `Path exists: ${installDir}`,
         `Existing entries: ${entryCount}`,
         sample.length ? `Sample: ${sample.join(", ")}` : "",
         "",
@@ -336,7 +333,7 @@ const INSTALLER_DISPLAY_COPY = {
     },
     newDirectoryText: (installDir: string) =>
       [
-        `Directory will be created: ${installDir}`,
+        `Local Rin config will be created: ${installDir}`,
         "",
         "Installer policy:",
         "- create only the files Rin needs",
@@ -350,15 +347,11 @@ const INSTALLER_DISPLAY_COPY = {
     usernamePlaceholder: "rin",
     usernameRequired: "Username is required.",
     usernameInvalid: "Use a normal Unix username.",
-    chooseInstallDirMessage:
-      "Choose the Rin data directory for the daemon user.",
     chooseDefaultTargetMessage: (targetUser: string) =>
       `Set ${targetUser} as the default target user for future rin / rin update runs from this launcher user?`,
     defaultTargetLabel: "Default target user",
     defaultTargetSetValue: (targetUser: string) => `set to ${targetUser}`,
     defaultTargetSkippedValue: "not set",
-    directoryRequired: "Directory is required.",
-    directoryMustBeAbsolute: "Use an absolute path.",
     chooseProviderMessage: "Choose a provider to authenticate and use.",
     chooseModelMessage: "Choose a model.",
     chooseThinkingLevelMessage: "Choose the default thinking level.",
@@ -406,7 +399,7 @@ const INSTALLER_DISPLAY_COPY = {
         : skippedForNow;
       return [
         `Target daemon user: ${options.targetUser}`,
-        `Install dir: ${options.installDir}`,
+        `Rin home: ${options.installDir}`,
         `Language: ${options.language}`,
         `Provider: ${options.provider || skippedForNow}`,
         `Model: ${options.modelId || skippedForNow}`,
@@ -456,13 +449,13 @@ const INSTALLER_DISPLAY_COPY = {
       return [
         `Current user: ${options.currentUser}`,
         `Selected daemon user: ${options.targetUser}`,
-        `Install dir: ${options.installDir}`,
+        `Rin home: ${options.installDir}`,
         `Discovered from: ${this.formatUpdateDiscoverySource(options.source)}`,
         `Owner home: ${options.ownerHome}`,
         `Requested source: ${this.formatUpdateSourceLabel(options.sourceLabel)}`,
         "",
         "Updater policy:",
-        "- publish a new runtime release into the existing install dir",
+        "- publish a new runtime release into the existing Rin home",
         "- prune old runtime releases and keep only the 3 most recent ones",
         "- refresh launchers and installer metadata for the current user",
         "- refresh managed daemon service files and restart the daemon when applicable",
@@ -532,12 +525,12 @@ const INSTALLER_DISPLAY_COPY = {
     buildFinalRequirements(options) {
       return [
         "write configuration and launchers",
-        "publish the runtime into the install directory",
+        "publish the runtime into Rin home",
         options.installServiceNow
           ? "install and start the daemon service"
           : "skip daemon service installation on this platform",
         options.needsElevatedWrite || options.needsElevatedService
-          ? "use sudo/doas if needed for the selected target and install dir"
+          ? "use sudo/doas if needed for the selected target and Rin home"
           : "no extra privilege escalation currently predicted",
       ];
     },
@@ -564,10 +557,10 @@ const INSTALLER_DISPLAY_COPY = {
       ].join("\n");
     },
     ownershipNotWritableText:
-      "The selected install directory is not writable by the current installer process.",
+      "The default local Rin directory is not writable by the current installer process.",
     preparingInstallerMessage: "Preparing installer context...",
     applyingTargetSelectionMessage: "Applying target selection...",
-    inspectingInstallDirectoryMessage: "Inspecting install directory...",
+    inspectingInstallDirectoryMessage: "Checking local Rin config...",
     loadingModelChoicesMessage: "Loading model and provider state...",
     savingProviderAuthMessage: "Saving provider authentication...",
     refreshingInstalledTargetMessage:
@@ -629,7 +622,7 @@ const INSTALLER_DISPLAY_COPY = {
     installChoicesTitle: "安装选项",
     ownershipCheckTitle: "所有权检查",
     writtenPathsTitle: "已写入路径",
-    targetInstallDirLabel: "目标安装目录",
+    targetInstallDirLabel: "Rin 目录",
     writtenPathLabel: "已写入",
     serviceLabelLabel: "标签",
     launchingInitTitle: "启动初始化",
@@ -637,7 +630,7 @@ const INSTALLER_DISPLAY_COPY = {
     confirmActiveLabel: "是",
     confirmInactiveLabel: "否",
     existingDirectoryTitle: "已有目录",
-    installDirectoryTitle: "安装目录",
+    installDirectoryTitle: "本地 Rin 配置",
     currentUserLabel: "当前用户",
     existingOtherUserLabel: "现有其他用户",
     newUserLabel: "新用户",
@@ -671,7 +664,7 @@ const INSTALLER_DISPLAY_COPY = {
       sample: string[],
     ) {
       return [
-        `目录已存在: ${installDir}`,
+        `路径已存在: ${installDir}`,
         `现有条目数: ${entryCount}`,
         sample.length ? `示例: ${sample.join(", ")}` : "",
         "",
@@ -685,7 +678,7 @@ const INSTALLER_DISPLAY_COPY = {
     },
     newDirectoryText: (installDir: string) =>
       [
-        `将创建目录: ${installDir}`,
+        `将创建本地 Rin 配置: ${installDir}`,
         "",
         "安装器策略：",
         "- 仅创建 Rin 必需的文件",
@@ -697,14 +690,11 @@ const INSTALLER_DISPLAY_COPY = {
     usernamePlaceholder: "rin",
     usernameRequired: "用户名不能为空。",
     usernameInvalid: "请输入正常的 Unix 用户名。",
-    chooseInstallDirMessage: "选择该守护进程用户的 Rin 数据目录。",
     chooseDefaultTargetMessage: (targetUser: string) =>
       `是否将 ${targetUser} 设为当前安装器用户后续运行 rin / rin update 时的默认目标用户？`,
     defaultTargetLabel: "默认目标用户",
     defaultTargetSetValue: (targetUser: string) => `设为 ${targetUser}`,
     defaultTargetSkippedValue: "不设置",
-    directoryRequired: "目录不能为空。",
-    directoryMustBeAbsolute: "请输入绝对路径。",
     chooseProviderMessage: "选择要认证并使用的模型提供商。",
     chooseModelMessage: "选择模型。",
     chooseThinkingLevelMessage: "选择默认思考强度。",
@@ -751,7 +741,7 @@ const INSTALLER_DISPLAY_COPY = {
         : skippedForNow;
       return [
         `目标守护进程用户: ${options.targetUser}`,
-        `安装目录: ${options.installDir}`,
+        `Rin 目录: ${options.installDir}`,
         `语言: ${options.language}`,
         `提供商: ${options.provider || skippedForNow}`,
         `模型: ${options.modelId || skippedForNow}`,
@@ -837,13 +827,13 @@ const INSTALLER_DISPLAY_COPY = {
       return [
         `当前用户: ${options.currentUser}`,
         `选中的守护进程用户: ${options.targetUser}`,
-        `安装目录: ${options.installDir}`,
+        `Rin 目录: ${options.installDir}`,
         `发现来源: ${this.formatUpdateDiscoverySource(options.source)}`,
         `用户主目录: ${options.ownerHome}`,
         `请求来源: ${this.formatUpdateSourceLabel(options.sourceLabel)}`,
         "",
         "更新器策略：",
-        "- 将新的运行时版本发布到现有安装目录",
+        "- 将新的运行时版本发布到现有 Rin 目录",
         "- 清理旧运行时版本，仅保留最近 3 个",
         "- 为当前用户刷新启动器和安装器元数据",
         "- 如适用，刷新托管守护进程服务文件并重启守护进程",
@@ -913,12 +903,12 @@ const INSTALLER_DISPLAY_COPY = {
     buildFinalRequirements(options) {
       return [
         "写入配置与启动器",
-        "将运行时发布到安装目录",
+        "将运行时发布到 Rin 目录",
         options.installServiceNow
           ? "安装并启动守护进程服务"
           : "在此平台上跳过守护进程服务安装",
         options.needsElevatedWrite || options.needsElevatedService
-          ? "如目标用户或安装目录需要，请使用 sudo/doas"
+          ? "如目标用户或 Rin 目录需要，请使用 sudo/doas"
           : "当前预计不需要额外提权",
       ];
     },
@@ -943,10 +933,10 @@ const INSTALLER_DISPLAY_COPY = {
         "如果安装器有权限，它仍会继续写入配置，但在完全切换前你可能需要先修复所有权。",
       ].join("\n");
     },
-    ownershipNotWritableText: "当前安装器进程对所选安装目录没有写权限。",
+    ownershipNotWritableText: "当前安装器进程对默认本地 Rin 目录没有写权限。",
     preparingInstallerMessage: "正在准备安装器上下文……",
     applyingTargetSelectionMessage: "正在应用目标选择……",
-    inspectingInstallDirectoryMessage: "正在检查安装目录……",
+    inspectingInstallDirectoryMessage: "正在检查本地 Rin 配置……",
     loadingModelChoicesMessage: "正在加载模型和提供商状态……",
     savingProviderAuthMessage: "正在保存提供商认证……",
     refreshingInstalledTargetMessage: "正在发布运行时并刷新已安装目标……",

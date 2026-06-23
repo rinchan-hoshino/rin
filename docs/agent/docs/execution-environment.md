@@ -86,7 +86,7 @@ pwd
 whoami
 hostname
 uname -a
-env | grep -E '^(RIN_DIR|PI_AGENT_DIR|HOME|SHELL|PATH)='
+env | grep -E '^(HOME|SHELL|PATH)='
 ```
 
 Rin runtime checks:

@@ -53,7 +53,7 @@ test("updater renders install-style note boxes", () => {
     [
       "Current user: demo",
       "Selected daemon user: demo",
-      "Install dir: /home/demo/.rin",
+      "Rin home: /home/demo/.rin",
     ].join("\n"),
     "Update plan",
   );
@@ -488,7 +488,7 @@ test("install-record normalizes launcher metadata and installer manifests", () =
   assert.equal(installRecord.normalizeInstallRecord("/home/demo", null), null);
 });
 
-test("persist reconcileInstallerManifest writes only install metadata for custom install dirs", async () => {
+test("persist reconcileInstallerManifest writes only install metadata for non-home Rin paths", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");
     const ownerHome = path.join(dir, "home", "demo");
@@ -817,7 +817,7 @@ test("persist reconcileInstallerManifest reuses only currentRelease state from p
   });
 });
 
-test("persist reconcileInstallerManifest avoids duplicate writes for default install dirs", async () => {
+test("persist reconcileInstallerManifest avoids duplicate writes for default Rin paths", async () => {
   await withTempDir(async (dir) => {
     const ownerHome = path.join(dir, "home", "demo");
     const installDir = path.join(ownerHome, ".rin");
