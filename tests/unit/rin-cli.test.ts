@@ -90,7 +90,7 @@ test("version reader prefers installed release metadata", () => {
   }
 });
 
-test("version reader falls back to installed changelog for legacy installs", () => {
+test("version reader does not use changelog as runtime identity", () => {
   const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-version-"));
   try {
     const runtimeRoot = path.join(installDir, "app", "current");
@@ -109,7 +109,7 @@ test("version reader falls back to installed changelog for legacy installs", () 
       "utf8",
     );
 
-    assert.equal(shared.readRinPackageVersion(runtimeRoot), "1.2.4");
+    assert.equal(shared.readRinPackageVersion(runtimeRoot), "0.0.0");
   } finally {
     fs.rmSync(installDir, { recursive: true, force: true });
   }

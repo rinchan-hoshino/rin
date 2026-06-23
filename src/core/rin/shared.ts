@@ -469,19 +469,6 @@ function installDirFromRuntimeRoot(repoRoot: string) {
   return "";
 }
 
-function parseInstalledChangelogVersion(installDir: string) {
-  try {
-    const changelog = fs.readFileSync(
-      path.join(installDir, "docs", "release", "CHANGELOG.md"),
-      "utf8",
-    );
-    const match = /^##\s+([^\s]+)/m.exec(changelog);
-    return safeString(match?.[1]).trim();
-  } catch {
-    return "";
-  }
-}
-
 function readInstalledRuntimeVersionForRoot(repoRoot: string) {
   const installDir = installDirFromRuntimeRoot(repoRoot);
   if (!installDir) return "";
@@ -496,7 +483,7 @@ function readInstalledRuntimeVersionForRoot(repoRoot: string) {
     const releaseName = safeString(manifest?.currentRelease?.name).trim();
     if (releaseName && releaseName !== "0.0.0") return releaseName;
   } catch {}
-  return parseInstalledChangelogVersion(installDir);
+  return "";
 }
 
 export function readRinPackageVersion(repoRoot = repoRootFromHere()) {
