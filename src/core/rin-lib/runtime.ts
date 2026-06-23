@@ -1,7 +1,10 @@
 import os from "node:os";
 import path from "node:path";
 
-import { completeSimple, isContextOverflow } from "@earendil-works/pi-ai";
+import {
+  completeSimple,
+  isContextOverflow,
+} from "@earendil-works/pi-ai/compat";
 
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import todoCapability from "./todo.js";
