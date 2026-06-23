@@ -46,6 +46,19 @@ const MIN_SEARXNG_PYTHON_MINOR = 10;
 const MANAGED_PYTHON_VERSION = "3.12";
 const SEARXNG_ARCHIVE_URL =
   "https://github.com/searxng/searxng/archive/refs/heads/master.tar.gz";
+const SEARXNG_GIT_URL = "https://github.com/searxng/searxng.git";
+const SEARXNG_WINDOWS_CHECKOUT_PATHS = [
+  "requirements.txt",
+  "requirements-dev.txt",
+  "requirements-server.txt",
+  "setup.py",
+  "babel.cfg",
+  "README.rst",
+  "LICENSE",
+  "AUTHORS.rst",
+  "searx",
+  "searxng_extra",
+];
 
 type LoggerLike = {
   info?: (message: string) => void;
@@ -335,6 +348,62 @@ function findUvForManagedPython(
   return installPrivateUv(stateRoot, tmpDir, logger);
 }
 
+export function managedWindowsPythonCandidates(
+  managedPythonDir: string,
+  version = MANAGED_PYTHON_VERSION,
+): string[] {
+  let entries: Array<{ name: string; link: boolean; python: string }> = [];
+  try {
+    entries = fs
+      .readdirSync(managedPythonDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .filter((entry) => entry.name.startsWith(`cpython-${version}`))
+      .map((entry) => {
+        const dir = path.join(managedPythonDir, entry.name);
+        let link = entry.isSymbolicLink();
+        try {
+          link = link || fs.lstatSync(dir).isSymbolicLink();
+        } catch {}
+        return {
+          name: entry.name,
+          link,
+          python: path.join(dir, "python.exe"),
+        };
+      });
+  } catch {
+    return [];
+  }
+
+  return entries
+    .sort((left, right) => {
+      if (left.link !== right.link) return left.link ? 1 : -1;
+      const leftVersioned = left.name.startsWith(`cpython-${version}.`);
+      const rightVersioned = right.name.startsWith(`cpython-${version}.`);
+      if (leftVersioned !== rightVersioned) return leftVersioned ? -1 : 1;
+      return right.name.localeCompare(left.name);
+    })
+    .map((entry) => entry.python);
+}
+
+function findInstalledManagedPythonByScan(stateRoot: string): string {
+  if (process.platform !== "win32") return "";
+  for (const python of managedWindowsPythonCandidates(
+    runtimeManagedPythonDirForState(stateRoot),
+  )) {
+    if (fs.existsSync(python) && isSearxngPythonSupported(python)) {
+      return python;
+    }
+  }
+  return "";
+}
+
+export function searxngPipCommand(
+  pythonBin: string,
+  args: string[],
+): { command: string; args: string[] } {
+  return { command: pythonBin, args: ["-m", "pip", ...args] };
+}
+
 function ensureManagedSearxngPython(
   stateRoot: string,
   tmpDir: string,
@@ -360,12 +429,20 @@ function ensureManagedSearxngPython(
     cwd: runtimeRootForState(stateRoot),
     env,
   });
-  const findResult = runCommandSync(
-    uvBin,
-    ["python", "find", MANAGED_PYTHON_VERSION],
-    { cwd: runtimeRootForState(stateRoot), env },
-  );
-  const python = safeText(findResult.stdout).split(/\r?\n/)[0]?.trim() || "";
+
+  let python = "";
+  try {
+    const findResult = runCommandSync(
+      uvBin,
+      ["python", "find", MANAGED_PYTHON_VERSION],
+      { cwd: runtimeRootForState(stateRoot), env },
+    );
+    python = safeText(findResult.stdout).split(/\r?\n/)[0]?.trim() || "";
+  } catch {}
+
+  if (!python || !fs.existsSync(python) || !isSearxngPythonSupported(python)) {
+    python = findInstalledManagedPythonByScan(stateRoot);
+  }
   if (!python || !fs.existsSync(python) || !isSearxngPythonSupported(python)) {
     throw new Error("python_version_unsupported");
   }
@@ -503,6 +580,87 @@ function installSearxngSourceFromArchive(
   }
 }
 
+function installSearxngSourceFromGit(
+  git: string,
+  runtimeDir: string,
+  sourceDir: string,
+  tmpDir: string,
+): void {
+  const env = runtimeCommandEnv(tmpDir);
+  const args = searxngGitInstallArgsForPlatform(sourceDir);
+  runCommandSync(git, args.clone, { cwd: runtimeDir, env });
+  if (args.checkout) {
+    runCommandSync(git, args.checkout, { cwd: sourceDir, env });
+  }
+}
+
+export function searxngGitInstallArgsForPlatform(
+  sourceDir: string,
+  platform: NodeJS.Platform = process.platform,
+): { clone: string[]; checkout?: string[] } {
+  if (platform === "win32") {
+    return {
+      clone: [
+        "clone",
+        "--depth",
+        "1",
+        "--no-checkout",
+        SEARXNG_GIT_URL,
+        sourceDir,
+      ],
+      checkout: ["checkout", "HEAD", "--", ...SEARXNG_WINDOWS_CHECKOUT_PATHS],
+    };
+  }
+  return {
+    clone: ["clone", "--depth", "1", SEARXNG_GIT_URL, sourceDir],
+  };
+}
+
+export function patchSearxngSourceForWindows(
+  sourceDir: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform !== "win32") return false;
+  const valkeyPath = path.join(sourceDir, "searx", "valkeydb.py");
+  let text = "";
+  try {
+    text = fs.readFileSync(valkeyPath, "utf8");
+  } catch {
+    return false;
+  }
+
+  const normalized = text.replace(/\r\n/g, "\n");
+  const next = normalized
+    .replace(
+      "import os\nimport pwd\nimport logging\n",
+      [
+        "import os",
+        "try:",
+        "    import pwd",
+        "except ImportError:",
+        "    pwd = None",
+        "import logging",
+        "",
+      ].join("\n"),
+    )
+    .replace(
+      [
+        "        _pw = pwd.getpwuid(os.getuid())",
+        `        logger.exception("[%s (%s)] can't connect valkey DB ...", _pw.pw_name, _pw.pw_uid)`,
+      ].join("\n"),
+      [
+        "        if pwd is not None and hasattr(os, 'getuid'):",
+        "            _pw = pwd.getpwuid(os.getuid())",
+        `            logger.exception("[%s (%s)] can't connect valkey DB ...", _pw.pw_name, _pw.pw_uid)`,
+        "        else:",
+        `            logger.exception("can't connect valkey DB ...")`,
+      ].join("\n"),
+    );
+  if (next === normalized) return false;
+  fs.writeFileSync(valkeyPath, next, "utf8");
+  return true;
+}
+
 function ensureSearxngSourceInstalled(
   runtimeDir: string,
   sourceDir: string,
@@ -516,17 +674,7 @@ function ensureSearxngSourceInstalled(
   try {
     if (git) {
       logInfo(logger, "browse: cloning searxng source");
-      runCommandSync(
-        git,
-        [
-          "clone",
-          "--depth",
-          "1",
-          "https://github.com/searxng/searxng.git",
-          sourceDir,
-        ],
-        { cwd: runtimeDir, env: runtimeCommandEnv(tmpDir) },
-      );
+      installSearxngSourceFromGit(git, runtimeDir, sourceDir, tmpDir);
     } else {
       logInfo(logger, "browse: downloading searxng source archive");
       installSearxngSourceFromArchive(runtimeDir, sourceDir, tmpDir);
@@ -626,6 +774,7 @@ function ensureSearxngRuntimeInstalled(
   const managedPythonBin = findSearxngPython(stateRoot, tmpDir, logger);
 
   ensureSearxngSourceInstalled(runtimeDir, sourceDir, tmpDir, logger);
+  patchSearxngSourceForWindows(sourceDir);
 
   if (!fs.existsSync(pythonBin)) {
     logInfo(logger, "browse: creating searxng virtualenv");
@@ -636,20 +785,17 @@ function ensureSearxngRuntimeInstalled(
   }
 
   logInfo(logger, "browse: installing searxng runtime dependencies");
-  runCommandSync(
-    pipBin,
+  for (const pipArgs of [
     ["install", "--upgrade", "pip", "wheel", "setuptools"],
-    { cwd: runtimeDir, env: runtimeCommandEnv(tmpDir) },
-  );
-  runCommandSync(
-    pipBin,
     ["install", "-r", path.join(sourceDir, "requirements.txt")],
-    { cwd: runtimeDir, env: runtimeCommandEnv(tmpDir) },
-  );
-  runCommandSync(pipBin, ["install", "--no-build-isolation", "-e", sourceDir], {
-    cwd: runtimeDir,
-    env: runtimeCommandEnv(tmpDir),
-  });
+    ["install", "--no-build-isolation", "-e", sourceDir],
+  ]) {
+    const command = searxngPipCommand(pythonBin, pipArgs);
+    runCommandSync(command.command, command.args, {
+      cwd: runtimeDir,
+      env: runtimeCommandEnv(tmpDir),
+    });
+  }
 
   const nextState: RuntimeBootstrapState = {
     ready: true,

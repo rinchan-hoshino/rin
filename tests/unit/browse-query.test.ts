@@ -245,6 +245,106 @@ test("browse service reports SearXNG sidecar runtime status by default", () => {
   assert.deepEqual(status.instances, []);
 });
 
+test("browse uses Windows-safe SearXNG git checkout args", () => {
+  const sourceDir =
+    "C:\\Users\\demo\\.rin\\data\\sidecars\\browse\\runtime\\src";
+  const args = service.searxngGitInstallArgsForPlatform(sourceDir, "win32");
+  assert.deepEqual(args.clone, [
+    "clone",
+    "--depth",
+    "1",
+    "--no-checkout",
+    "https://github.com/searxng/searxng.git",
+    sourceDir,
+  ]);
+  assert.deepEqual(args.checkout?.slice(0, 4), [
+    "checkout",
+    "HEAD",
+    "--",
+    "requirements.txt",
+  ]);
+  assert.ok(args.checkout?.includes("searx"));
+  assert.ok(args.checkout?.includes("searxng_extra"));
+  assert.ok(!args.checkout?.some((arg: string) => arg.includes(":")));
+});
+
+test("browse uses ordinary SearXNG git clone on POSIX", () => {
+  const sourceDir = "/tmp/rin/source";
+  const args = service.searxngGitInstallArgsForPlatform(sourceDir, "linux");
+  assert.deepEqual(args, {
+    clone: [
+      "clone",
+      "--depth",
+      "1",
+      "https://github.com/searxng/searxng.git",
+      sourceDir,
+    ],
+  });
+});
+
+test("browse prefers concrete Windows managed Python over uv alias links", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-python-"));
+  try {
+    const concrete = path.join(dir, "cpython-3.12.13-windows-x86_64-none");
+    const alias = path.join(dir, "cpython-3.12-windows-x86_64-none");
+    await fs.mkdir(concrete, { recursive: true });
+    await fs.writeFile(path.join(concrete, "python.exe"), "");
+    await fs.symlink(concrete, alias, "dir");
+    assert.deepEqual(service.managedWindowsPythonCandidates(dir), [
+      path.join(concrete, "python.exe"),
+      path.join(alias, "python.exe"),
+    ]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("browse runs pip through the venv python module", () => {
+  assert.deepEqual(
+    service.searxngPipCommand("C:/rin/venv/Scripts/python.exe", [
+      "install",
+      "--upgrade",
+      "pip",
+    ]),
+    {
+      command: "C:/rin/venv/Scripts/python.exe",
+      args: ["-m", "pip", "install", "--upgrade", "pip"],
+    },
+  );
+});
+
+test("browse patches SearXNG valkey pwd import on Windows", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-source-"));
+  try {
+    const searxDir = path.join(dir, "searx");
+    await fs.mkdir(searxDir, { recursive: true });
+    const valkeyPath = path.join(searxDir, "valkeydb.py");
+    await fs.writeFile(
+      valkeyPath,
+      [
+        "import os",
+        "import pwd",
+        "import logging",
+        "",
+        "def initialize():",
+        "    try:",
+        "        pass",
+        "    except Exception:",
+        "        _pw = pwd.getpwuid(os.getuid())",
+        `        logger.exception("[%s (%s)] can't connect valkey DB ...", _pw.pw_name, _pw.pw_uid)`,
+        "",
+      ].join("\r\n"),
+      "utf8",
+    );
+    assert.equal(service.patchSearxngSourceForWindows(dir, "win32"), true);
+    const patched = await fs.readFile(valkeyPath, "utf8");
+    assert.match(patched, /except ImportError:\n {4}pwd = None/);
+    assert.match(patched, /hasattr\(os, 'getuid'\)/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("browse status does not install or start SearXNG", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-"));
   try {
