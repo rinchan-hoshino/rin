@@ -87,12 +87,6 @@ function firstReleaseValue(...values: unknown[]): string {
   return "";
 }
 
-function releaseRecordValue(record: Record<string, unknown>, name: string) {
-  return (
-    record[name] ?? record[`${name.slice(0, 1).toUpperCase()}${name.slice(1)}`]
-  );
-}
-
 function resolveModuleRootFromHere() {
   return path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -425,20 +419,12 @@ export function releaseInfoFromObject(
   value: unknown,
 ): InstalledReleaseInfo | undefined {
   const record = value && typeof value === "object" ? (value as any) : {};
-  const channel = normalizeReleaseChannel(
-    releaseRecordValue(record, "channel"),
-  );
-  const version = trimReleaseValue(releaseRecordValue(record, "version"));
-  const branch = trimReleaseValue(releaseRecordValue(record, "branch"));
-  const ref = firstReleaseValue(
-    releaseRecordValue(record, "ref"),
-    branch,
-    version,
-  );
-  const sourceLabel = trimReleaseValue(
-    releaseRecordValue(record, "sourceLabel"),
-  );
-  const archiveUrl = trimReleaseValue(releaseRecordValue(record, "archiveUrl"));
+  const channel = normalizeReleaseChannel(record.channel);
+  const version = trimReleaseValue(record.version);
+  const branch = trimReleaseValue(record.branch);
+  const ref = firstReleaseValue(record.ref, branch, version);
+  const sourceLabel = trimReleaseValue(record.sourceLabel);
+  const archiveUrl = trimReleaseValue(record.archiveUrl);
   if (!version && !branch && !ref && !sourceLabel && !archiveUrl) {
     return undefined;
   }
@@ -451,8 +437,7 @@ export function releaseInfoFromObject(
       sourceLabel ||
       `${channel} ${firstReleaseValue(version, branch, ref, "unknown")}`,
     archiveUrl,
-    installedAt:
-      trimReleaseValue(releaseRecordValue(record, "installedAt")) || nowIso(),
+    installedAt: trimReleaseValue(record.installedAt) || nowIso(),
   };
 }
 

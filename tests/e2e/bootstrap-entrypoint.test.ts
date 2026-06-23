@@ -347,6 +347,13 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   );
   assert.match(entrypoint, /^param\(/);
   assert.match(entrypoint, /\[Alias\("Mode"\)\]/);
+  assert.match(entrypoint, /channel = \[string\]\$Release\.Channel/);
+  assert.match(entrypoint, /archiveUrl = \[string\]\$Release\.ArchiveUrl/);
+  assert.match(entrypoint, /version = \[string\]\$Release\.Version/);
+  assert.doesNotMatch(
+    entrypoint,
+    /\$Release \| ConvertTo-Json -Compress \| Set-Content -LiteralPath \$script:releaseFile/,
+  );
   assert.match(entrypoint, /\$mode = "install"/);
   assert.match(entrypoint, /\$RequestedMode -ieq "--mode"/);
   assert.match(entrypoint, /\$arg -ieq "install" -or \$arg -ieq "update"/);
