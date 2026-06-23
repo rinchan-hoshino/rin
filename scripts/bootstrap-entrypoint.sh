@@ -399,6 +399,7 @@ fetch_manifest() {
 resolve_release() {
   node - "$MANIFEST_PATH" "$REPO_URL" "$PACKAGE_NAME" "$CHANNEL" "$BRANCH" "$VERSION" "$BOOTSTRAP_BRANCH" <<'NODE'
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const [manifestPath, repoArg, packageArg, channelArg, branchArg, versionArg, bootstrapBranchArg] = process.argv.slice(2);
 const safeString = (value) => (value == null ? '' : String(value));
 const trimValue = (value) => safeString(value).trim();
@@ -472,6 +473,51 @@ const releaseRepoUrl = trimValue(manifest.repoUrl || repoUrl).replace(/\.git$/i,
 const releasePackageName = trimValue(manifest.packageName || packageName) || '@hoshinorin/rin';
 const buildRefArchiveUrl = (ref) => buildRefArchiveUrlForRepo(releaseRepoUrl, ref);
 const buildBranchArchiveUrl = (name) => buildRefArchiveUrlForRepo(releaseRepoUrl, `refs/heads/${name || 'main'}`);
+const isGitHash = (value) => /^[0-9a-f]{7,40}$/i.test(trimValue(value));
+const gitHubRepoParts = (value) => {
+  const normalized = trimValue(value).replace(/\.git$/i, '').replace(/\/+$/g, '');
+  const sshMatch = /^git@github\.com:([^/]+)\/([^/]+)$/i.exec(normalized);
+  if (sshMatch && sshMatch[1] && sshMatch[2]) return [sshMatch[1], sshMatch[2]];
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.hostname.toLowerCase() !== 'github.com') return [];
+    const [owner, repo] = parsed.pathname.split('/').filter(Boolean);
+    return owner && repo ? [owner, repo] : [];
+  } catch {
+    return [];
+  }
+};
+const resolveGitCommit = (selector, branchSelector) => {
+  const normalizedSelector = trimValue(selector || branchSelector || 'HEAD');
+  if (/^[0-9a-f]{40}$/i.test(normalizedSelector)) return normalizedSelector;
+  const lsRemoteSelectors = branchSelector
+    ? [`refs/heads/${branchSelector}`, branchSelector]
+    : [normalizedSelector];
+  for (const item of lsRemoteSelectors) {
+    try {
+      const raw = execFileSync('git', ['ls-remote', releaseRepoUrl, item], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      const hash = String(raw).split(/\s+/)[0] || '';
+      if (/^[0-9a-f]{40}$/i.test(hash)) return hash;
+    } catch {}
+  }
+  const [owner, repo] = gitHubRepoParts(releaseRepoUrl);
+  if (owner && repo) {
+    try {
+      const apiUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(normalizedSelector)}`;
+      const raw = execFileSync('curl', ['-fsSL', apiUrl], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const sha = trimValue(JSON.parse(raw).sha);
+      if (/^[0-9a-f]{40}$/i.test(sha)) return sha;
+    } catch {}
+  }
+  if (isGitHash(normalizedSelector)) return normalizedSelector;
+  throw new Error(`rin_git_ref_not_resolved:${normalizedSelector}`);
+};
 const shellEscape = (value) => `'${String(value ?? '').replace(/'/g, `"'"'"'`)}'`;
 let resolved;
 if (branch && version) throw new Error('rin_release_branch_and_version_conflict');
@@ -516,14 +562,16 @@ if (channel === 'stable') {
 } else {
   const git = manifest.git || {};
   const resolvedBranch = branch || trimValue(git.defaultBranch) || 'main';
-  const resolvedRef = version || resolvedBranch;
+  const selector = version || resolvedBranch;
+  const resolvedRef = resolveGitCommit(selector, version ? '' : resolvedBranch);
+  const shortRef = resolvedRef.slice(0, 12);
   resolved = {
     channel: 'git',
-    archiveUrl: version ? buildRefArchiveUrl(resolvedRef) : buildBranchArchiveUrl(resolvedBranch),
-    version: version || resolvedRef,
+    archiveUrl: buildRefArchiveUrl(resolvedRef),
+    version: shortRef,
     branch: resolvedBranch,
     ref: resolvedRef,
-    sourceLabel: version ? `git ref ${resolvedRef}` : `git branch ${resolvedRef}`,
+    sourceLabel: `git ${resolvedBranch} @ ${shortRef}`,
   };
 }
 for (const [key, value] of Object.entries({

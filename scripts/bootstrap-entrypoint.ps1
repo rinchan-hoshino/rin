@@ -284,6 +284,47 @@ function Get-Property($Object, [string]$Name) {
   return $Object.PSObject.Properties[$Name].Value
 }
 
+function Is-Git-Hash([string]$Value) {
+  return ([string]$Value).Trim() -match "^[0-9a-fA-F]{7,40}$"
+}
+
+function Get-GitHubRepoParts([string]$RepoUrl) {
+  $normalized = ([string]$RepoUrl).Trim() -replace "\.git$", "" -replace "/+$", ""
+  if ($normalized -match "^git@github\.com:([^/]+)/([^/]+)$") {
+    return @($Matches[1], $Matches[2])
+  }
+  if ($normalized -match "^https?://github\.com/([^/]+)/([^/]+)$") {
+    return @($Matches[1], $Matches[2])
+  }
+  return @()
+}
+
+function Resolve-Git-Commit([string]$RepoUrl, [string]$Selector, [string]$BranchSelector) {
+  $normalizedSelector = if ($Selector) { $Selector.Trim() } elseif ($BranchSelector) { $BranchSelector.Trim() } else { "HEAD" }
+  if ($normalizedSelector -match "^[0-9a-fA-F]{40}$") { return $normalizedSelector }
+  $selectors = if ($BranchSelector) { @("refs/heads/$BranchSelector", $BranchSelector) } else { @($normalizedSelector) }
+  foreach ($item in $selectors) {
+    try {
+      $raw = & git ls-remote $RepoUrl $item 2>$null
+      $hash = ([string](@($raw | Select-Object -First 1)[0]) -split "\s+")[0]
+      if ($hash -match "^[0-9a-fA-F]{40}$") { return $hash }
+    } catch {}
+  }
+  $parts = Get-GitHubRepoParts $RepoUrl
+  if ($parts.Count -ge 2) {
+    try {
+      $owner = [System.Uri]::EscapeDataString($parts[0])
+      $repo = [System.Uri]::EscapeDataString($parts[1])
+      $selector = [System.Uri]::EscapeDataString($normalizedSelector)
+      $response = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$repo/commits/$selector"
+      $sha = [string]$response.sha
+      if ($sha -match "^[0-9a-fA-F]{40}$") { return $sha }
+    } catch {}
+  }
+  if (Is-Git-Hash $normalizedSelector) { return $normalizedSelector }
+  throw "rin_git_ref_not_resolved:$normalizedSelector"
+}
+
 function Resolve-Release {
   $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
   $packageName = if ($manifest.packageName) { [string]$manifest.packageName } else { "@hoshinorin/rin" }
@@ -343,20 +384,29 @@ function Resolve-Release {
 
   $git = $manifest.git
   $resolvedBranch = if ($branch) { $branch } elseif ($git.defaultBranch) { [string]$git.defaultBranch } else { "main" }
-  $resolvedRef = if ($version) { $version } else { $resolvedBranch }
+  $selector = if ($version) { $version } else { $resolvedBranch }
+  $resolvedRef = Resolve-Git-Commit $releaseRepoUrl $selector $(if ($version) { "" } else { $resolvedBranch })
+  $shortRef = $resolvedRef.Substring(0, [Math]::Min(12, $resolvedRef.Length))
   return [pscustomobject]@{
     PackageName = $packageName
     Channel = "git"
-    ArchiveUrl = if ($version) { & $buildRefArchiveUrl $resolvedRef } else { & $buildBranchArchiveUrl $resolvedBranch }
-    Version = $resolvedRef
+    ArchiveUrl = & $buildRefArchiveUrl $resolvedRef
+    Version = $shortRef
     Branch = $resolvedBranch
     Ref = $resolvedRef
-    SourceLabel = if ($version) { "git ref $resolvedRef" } else { "git branch $resolvedRef" }
+    SourceLabel = "git $resolvedBranch @ $shortRef"
   }
 }
 
 function Write-Release-Handoff($Release) {
-  $Release | ConvertTo-Json -Compress | Set-Content -LiteralPath $script:releaseFile -Encoding UTF8
+  [pscustomobject]@{
+    channel = [string]$Release.Channel
+    archiveUrl = [string]$Release.ArchiveUrl
+    version = [string]$Release.Version
+    branch = [string]$Release.Branch
+    ref = [string]$Release.Ref
+    sourceLabel = [string]$Release.SourceLabel
+  } | ConvertTo-Json -Compress | Set-Content -LiteralPath $script:releaseFile -Encoding UTF8
 }
 
 try {

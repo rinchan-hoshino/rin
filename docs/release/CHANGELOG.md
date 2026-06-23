@@ -7,6 +7,12 @@
 - Chat delivery and notices are calmer and clearer with restored stranded inbox items, fewer artificial inbox caps, markdown todo strikethrough rendering, improved todo notice rendering, and quiet handling for missing adapter state.
 - Beta, stable, and nightly release metadata commits now use the verified release gate explicitly, so executor metadata updates are not blocked by local hooks after validation already passed.
 
+- Diagnostic commands now have dedicated interactive TUI frontends with shared backend logic for cleaner troubleshooting workflows.
+- Runtime and installer version reporting now use concrete release metadata instead of changelog fallbacks, with stricter git bootstrap version resolution and BOM-tolerant metadata reads.
+- Chat media delivery keeps media attachments as markdown paths and limits quiet delivery suppression to the intended final kinds.
+- Compaction preserves todo snapshots, the runtime recognizes current user aliases, and installer defaults better match the detected user, language, install directory, and daemon readiness behavior.
+- Browser/search setup is simpler after syncing agent practices docs, removing the bundled browse sidecar, and preparing SearXNG runtime dependencies on Windows.
+- Rin now tracks the Pi 0.79.10 dependency line for this release series.
 <!-- rin-changelog-coverage
 234e03c fix(tui): exit when input terminal closes
 23ec260 fix(installer): exit quick run tui on interrupt
@@ -45,6 +51,32 @@ c2e27e5 fix(bootstrap): bind PowerShell entrypoint mode
 7c03b8c fix(release): keep beta and stable metadata commits hook-independent
 6b15b59 docs(release): cover 0.6.0 nightly changes
 8ff476f docs(release): cover 0.6.0 nightly changes
+aa1bd7f feat: add interactive diagnostic TUIs
+dbeb4b7 feat: split diagnostic command frontends and backends
+08362f8 fix: preserve todo snapshot in compaction
+28c13ef fix(chat): keep media as markdown paths
+e763b2b fix(chat): gate quiet delivery by final kind
+0b3a285 fix: resolve git bootstrap versions to commits
+00681f5 fix: require concrete git runtime versions
+9207d16 fix: make runtime version metadata authoritative
+c3428eb fix: tolerate BOM in installed version metadata
+f77e32c fix: avoid changelog as runtime version
+fe8a450 fix: read installed runtime version
+cdd055e fix: recognize current user aliases in rin runtime
+876174b fix: use current profile home for installer user
+f20c302 fix: use uniform daemon readiness timeout
+ed7f302 fix: preselect detected installer language
+2b1d03c fix: remove install directory chooser
+3da1a57 fix: detect Windows installer language
+ed0dc62 feat: sync agent practices docs
+159bf22 refactor: remove bundled browse sidecar
+ddada51 fix(browse): prepare SearXNG runtime on Windows
+8337478 fix(installer): require canonical release handoff casing
+519a314 fix(installer): parse PowerShell release handoff
+0dcd66d fix(installer): launch Windows cmd shims through shell
+dab896e chore(deps): sync Pi 0.79.10
+4871772 docs(release): cover 0.6.0 nightly changes
+23bf20a docs(release): cover 0.6.0 nightly prep
 -->
 
 ## 0.5.0
