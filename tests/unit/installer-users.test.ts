@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -116,6 +116,40 @@ test("installer users compare Windows account aliases case-insensitively", () =>
     false,
   );
   assert.equal(users.isSameSystemUser("alice", "Alice", "linux"), false);
+});
+
+test("installer users prefer the current system profile home", () => {
+  const platformDescriptor = Object.getOwnPropertyDescriptor(
+    process,
+    "platform",
+  );
+  const userInfoMock = mock.method(os, "userInfo", () => ({
+    username: "the_cattail",
+    uid: -1,
+    gid: -1,
+    shell: "",
+    homedir: "C:\\Users\\THE_cattail",
+  }));
+  Object.defineProperty(process, "platform", { value: "win32" });
+  try {
+    assert.deepEqual(users.findSystemUser("CATTAIL-PC\\THE_CATTAIL"), {
+      name: "the_cattail",
+      uid: -1,
+      gid: -1,
+      home: "C:\\Users\\THE_cattail",
+      shell: "",
+    });
+    assert.equal(users.homeForUser("the_cattail"), "C:\\Users\\THE_cattail");
+    assert.equal(
+      users.targetHomeForUser("CATTAIL-PC\\the_cattail"),
+      "C:\\Users\\THE_cattail",
+    );
+  } finally {
+    userInfoMock.mock.restore();
+    if (platformDescriptor) {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
+  }
 });
 
 test("installer users avoid elevated writes for Windows current-user aliases", () => {

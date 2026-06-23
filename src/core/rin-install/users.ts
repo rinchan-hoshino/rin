@@ -75,6 +75,21 @@ function normalizeSystemUser(
   };
 }
 
+function currentSystemUser() {
+  try {
+    const current = os.userInfo();
+    return normalizeSystemUser({
+      name: current.username,
+      uid: current.uid,
+      gid: current.gid,
+      home: current.homedir,
+      shell: current.shell,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 function pushSystemUser(
   users: SystemUser[],
   input: Partial<SystemUser>,
@@ -145,6 +160,10 @@ export function listSystemUsers() {
 export function findSystemUser(targetUser: string) {
   const nextTargetUser = normalizeUserName(targetUser);
   if (!nextTargetUser) return undefined;
+  const current = currentSystemUser();
+  if (current && isSameSystemUser(nextTargetUser, current.name)) {
+    return current;
+  }
   return listSystemUsers().find((entry) => entry.name === nextTargetUser);
 }
 
