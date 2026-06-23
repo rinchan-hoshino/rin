@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { safeString } from "../text-utils.js";
@@ -51,15 +50,6 @@ const execFileAsync = promisify(execFile);
 
 function trim(value: unknown) {
   return safeString(value).trim();
-}
-
-function moduleRootFromHere() {
-  return path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "..",
-    "..",
-  );
 }
 
 export function parsePackageVersion(
@@ -112,17 +102,6 @@ export function comparePackageVersions(a: unknown, b: unknown) {
   if (left.minor !== right.minor) return left.minor - right.minor;
   if (left.patch !== right.patch) return left.patch - right.patch;
   return comparePrerelease(left.prerelease, right.prerelease);
-}
-
-export function readRinPackageVersion(sourceRoot = moduleRootFromHere()) {
-  try {
-    const packageJson = JSON.parse(
-      fs.readFileSync(path.join(sourceRoot, "package.json"), "utf8"),
-    );
-    return trim(packageJson.version) || "unknown";
-  } catch {
-    return "unknown";
-  }
 }
 
 function isReleaseChannel(value: string): value is ReleaseChannel {
@@ -207,16 +186,12 @@ export function readInstalledRinReleaseVersion(
 }
 
 export function getCurrentRinVersion(
-  sourceRoot?: string,
+  _sourceRoot?: string,
   currentRelease?: InstalledReleaseInfo,
 ) {
   const releaseVersion = trim(currentRelease?.version);
   if (releaseVersion) return releaseVersion;
-  if (!sourceRoot) {
-    const installedVersion = readInstalledRinReleaseVersion();
-    if (installedVersion) return installedVersion;
-  }
-  return readRinPackageVersion(sourceRoot);
+  return readInstalledRinReleaseVersion() || "unknown";
 }
 
 export function inferRinReleaseChannel(

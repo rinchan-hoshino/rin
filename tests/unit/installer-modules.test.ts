@@ -788,14 +788,14 @@ test("persist reconcileInstallerManifest reuses only currentRelease state from p
                 archiveUrl: "https://example.com/ignored.tar.gz",
               },
               currentRelease: {
-                name: "abc123",
-                path: path.join(installDir, "app", "releases", "abc123"),
+                name: "abc1234",
+                path: path.join(installDir, "app", "releases", "abc1234"),
                 release: {
                   channel: "git",
-                  version: "abc123",
+                  version: "abc1234",
                   branch: "main",
-                  ref: "abc123",
-                  sourceLabel: "git ref abc123",
+                  ref: "abc1234",
+                  sourceLabel: "git ref abc1234",
                   archiveUrl: "https://example.com/rin.tar.gz",
                 },
               },
@@ -820,8 +820,8 @@ test("persist reconcileInstallerManifest reuses only currentRelease state from p
       assert.equal("defaultModel" in entry.value, false);
       assert.equal("defaultProvider" in entry.value, false);
       assert.equal("release" in entry.value, false);
-      assert.equal(entry.value.currentRelease.name, "abc123");
-      assert.equal(entry.value.currentRelease.release.version, "abc123");
+      assert.equal(entry.value.currentRelease.name, "abc1234");
+      assert.equal(entry.value.currentRelease.release.version, "abc1234");
     }
   });
 });
@@ -1866,6 +1866,42 @@ test("persist persistInstallerOutputs forwards release metadata into currentRele
       assert.equal("chat" in entry.value, false);
     }
   });
+});
+
+test("persist reconcileInstallerManifest does not store git branch selectors as versions", () => {
+  const writes = [];
+  persist.reconcileInstallerManifest(
+    {
+      targetUser: "demo",
+      installDir: "/tmp/rin",
+      release: {
+        channel: "git",
+        version: "main",
+        branch: "main",
+        ref: "main",
+        sourceLabel: "git branch main",
+        archiveUrl: "https://example.invalid/main.tar.gz",
+      },
+      currentReleaseName: "main",
+      currentReleaseRoot: "/tmp/rin/app/releases/main",
+      elevated: false,
+    },
+    {
+      findSystemUser: () => ({ name: "demo", home: "/home/demo" }),
+      ensureDir: () => {},
+      readInstallerJson: (_filePath, fallback) => fallback,
+      writeJsonFileWithPrivilege: () => {},
+      writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
+      runPrivileged: () => {},
+    },
+  );
+
+  const manifest = writes.find((entry) =>
+    entry.filePath.endsWith("installer.json"),
+  )?.value;
+  assert.equal(manifest.currentRelease.release.channel, "git");
+  assert.equal(manifest.currentRelease.release.version, "unknown");
+  assert.equal(manifest.currentRelease.release.ref, "");
 });
 
 test("persist persistInstallerOutputs can skip saving a launcher default target", async () => {

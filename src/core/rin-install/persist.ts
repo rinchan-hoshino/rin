@@ -708,6 +708,10 @@ function installerWriteOptions(
   };
 }
 
+function isGitHash(value: string) {
+  return /^[0-9a-f]{7,40}$/i.test(value.trim());
+}
+
 function normalizeInstalledReleaseInfo(
   release: InstalledReleaseInfo | undefined,
 ): InstalledReleaseInfo | undefined {
@@ -721,20 +725,35 @@ function normalizeInstalledReleaseInfo(
       : "stable";
   const version = String(release.version || "").trim();
   const branch = String(release.branch || "").trim();
-  const ref = String(release.ref || branch || version).trim();
+  const rawRef = String(release.ref || "").trim();
   const sourceLabel = String(release.sourceLabel || "").trim();
   const archiveUrl = String(release.archiveUrl || "").trim();
   const installedAt = String(release.installedAt || "").trim();
-  if (!version && !branch && !ref && !sourceLabel && !archiveUrl)
+  if (!version && !branch && !rawRef && !sourceLabel && !archiveUrl)
     return undefined;
+  if (normalizedChannel === "git") {
+    const concreteRef = isGitHash(rawRef)
+      ? rawRef
+      : isGitHash(version)
+        ? version
+        : "";
+    return {
+      channel: normalizedChannel,
+      version: concreteRef ? concreteRef.slice(0, 12) : "unknown",
+      branch: branch || "main",
+      ref: concreteRef,
+      sourceLabel: sourceLabel || `git ${branch || "main"}`,
+      archiveUrl,
+      installedAt: installedAt || undefined,
+    };
+  }
   return {
     channel: normalizedChannel,
-    version: version || ref || branch || "unknown",
+    version: version || "unknown",
     branch: branch || (normalizedChannel === "stable" ? "stable" : "main"),
-    ref: ref || branch || version || "main",
+    ref: rawRef || version || "main",
     sourceLabel:
-      sourceLabel ||
-      `${normalizedChannel} ${version || branch || ref || "unknown"}`,
+      sourceLabel || `${normalizedChannel} ${version || rawRef || "unknown"}`,
     archiveUrl,
     installedAt: installedAt || undefined,
   };

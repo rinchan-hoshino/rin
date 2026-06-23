@@ -52,7 +52,7 @@ test("Rin update notices compare package versions with prerelease precedence", (
   assert.equal(notices.comparePackageVersions("invalid", "1.2.3"), 0);
 });
 
-test("current Rin version prefers installed release metadata outside source-root reads", async () => {
+test("current Rin version reads only installed release metadata", async () => {
   await withTempDir(async (dir) => {
     const previousRinDir = process.env.RIN_DIR;
     try {
@@ -67,7 +67,30 @@ test("current Rin version prefers installed release metadata outside source-root
 
       assert.equal(notices.readInstalledRinReleaseVersion(dir), "abc123def456");
       assert.equal(notices.getCurrentRinVersion(), "abc123def456");
-      assert.equal(notices.getCurrentRinVersion(rootDir), "0.0.0");
+      assert.equal(notices.getCurrentRinVersion(rootDir), "abc123def456");
+    } finally {
+      if (previousRinDir === undefined) delete process.env.RIN_DIR;
+      else process.env.RIN_DIR = previousRinDir;
+    }
+  });
+});
+
+test("current Rin version is unknown without installed release metadata", async () => {
+  await withTempDir(async (dir) => {
+    const previousRinDir = process.env.RIN_DIR;
+    try {
+      process.env.RIN_DIR = dir;
+      assert.equal(
+        notices.getCurrentRinVersion(rootDir, {
+          channel: "git",
+          version: "",
+          branch: "main",
+          ref: "",
+          sourceLabel: "git main",
+          archiveUrl: "",
+        }),
+        "unknown",
+      );
     } finally {
       if (previousRinDir === undefined) delete process.env.RIN_DIR;
       else process.env.RIN_DIR = previousRinDir;

@@ -183,11 +183,11 @@ if (args[0] === "-" && String(args[1] || "").endsWith("install.json")) {
     ],
     git: [
       "CHANNEL='git'",
-      "ARCHIVE_URL='https://example.invalid/releases/main.tar.gz'",
-      "VERSION='main'",
+      "ARCHIVE_URL='https://example.invalid/rin/archive/0123456789abcdef0123456789abcdef01234567.tar.gz'",
+      "VERSION='0123456789ab'",
       "BRANCH='main'",
-      "REF='main'",
-      "SOURCE_LABEL='git branch main'",
+      "REF='0123456789abcdef0123456789abcdef01234567'",
+      "SOURCE_LABEL='git main @ 0123456789ab'",
     ],
     stable: [
       "CHANNEL='stable'",
@@ -350,6 +350,9 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   assert.match(entrypoint, /channel = \[string\]\$Release\.Channel/);
   assert.match(entrypoint, /archiveUrl = \[string\]\$Release\.ArchiveUrl/);
   assert.match(entrypoint, /version = \[string\]\$Release\.Version/);
+  assert.match(entrypoint, /Resolve-Git-Commit/);
+  assert.match(entrypoint, /git ls-remote \$RepoUrl/);
+  assert.match(entrypoint, /rin_git_ref_not_resolved/);
   assert.doesNotMatch(
     entrypoint,
     /\$Release \| ConvertTo-Json -Compress \| Set-Content -LiteralPath \$script:releaseFile/,
@@ -387,6 +390,9 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
     "utf8",
   );
+  assert.match(shell, /resolveGitCommit/);
+  assert.match(shell, /git', \['ls-remote'/);
+  assert.match(shell, /rin_git_ref_not_resolved/);
 });
 
 test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {
@@ -497,7 +503,7 @@ test("update wrapper inherits release channel from launcher metadata install dir
     assert.match(log, /node:.*target-install\/installer\.json/);
     assert.match(
       log,
-      /curl:-fsSL https:\/\/example\.invalid\/releases\/main\.tar\.gz -o /,
+      /curl:-fsSL https:\/\/example\.invalid\/rin\/archive\/0123456789abcdef0123456789abcdef01234567\.tar\.gz -o /,
     );
     assert.match(log, /npm:.*:ci --no-fund --no-audit/);
   });

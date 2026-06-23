@@ -353,6 +353,30 @@ test("release helpers keep trimmed env and manifest fallback precedence", () => 
   }
 });
 
+test("releaseInfoFromFile tolerates BOM release handoff files", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-release-file-"));
+  try {
+    const filePath = path.join(dir, "release.json");
+    await fs.writeFile(
+      filePath,
+      `\uFEFF${JSON.stringify({
+        channel: "git",
+        version: "0123456789ab",
+        branch: "main",
+        ref: "0123456789abcdef0123456789abcdef01234567",
+        sourceLabel: "git main @ 0123456789ab",
+      })}\n`,
+      "utf8",
+    );
+    const info = release.releaseInfoFromFile(filePath);
+    assert.equal(info?.channel, "git");
+    assert.equal(info?.version, "0123456789ab");
+    assert.equal(info?.ref, "0123456789abcdef0123456789abcdef01234567");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("releaseInfoFromObject keeps git branch selectors out of version identity", () => {
   const info = release.releaseInfoFromObject({
     channel: "git",

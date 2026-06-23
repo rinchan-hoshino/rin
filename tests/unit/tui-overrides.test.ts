@@ -204,7 +204,7 @@ test("startup header override replaces upstream Pi branding with Rin", async () 
     true,
   );
 
-  assert.match(header.text, /Rin (?:v0\.0\.0|[0-9a-f]{7,40})/);
+  assert.match(header.text, /Rin (?:unknown|[0-9a-f]{7,40})/);
   assert.match(header.text, /Rin can explain its own features/);
   assert.match(header.text, /Ask Rin how to use or extend Rin/);
   assert.doesNotMatch(header.text, /\bpi v0\.74\.0\b/i);
@@ -498,7 +498,7 @@ test("startup header branding replaces upstream Pi name and version", async () =
 
   assert.match(
     currentText,
-    /^rin (?:v0\.0\.0|[0-9a-f]{7,40})\nExpanded Rin help\.$/,
+    /^rin (?:unknown|[0-9a-f]{7,40})\nExpanded Rin help\.$/,
   );
   assert.match(
     String(codingAgentModule.InteractiveMode.prototype.init),

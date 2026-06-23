@@ -467,7 +467,7 @@ export function releaseInfoFromFile(
   if (!resolvedPath) return undefined;
   try {
     return releaseInfoFromObject(
-      JSON.parse(fs.readFileSync(resolvedPath, "utf8")),
+      JSON.parse(fs.readFileSync(resolvedPath, "utf8").replace(/^\uFEFF/, "")),
     );
   } catch {
     return undefined;
