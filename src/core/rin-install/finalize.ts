@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 import { type FinalizeInstallOptions } from "./apply-plan.js";
@@ -35,6 +36,7 @@ import {
 } from "./service.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { preparePiManagedToolsForInstall } from "./pi-tools.js";
+import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
 import {
   describeOwnership,
   findSystemUser,
@@ -54,6 +56,39 @@ function isFreshInstallDirectory(installDir: string) {
   } catch {
     return true;
   }
+}
+
+function readGitValue(sourceRoot: string, args: string[]) {
+  try {
+    return String(
+      execFileSync("git", ["-C", sourceRoot, ...args], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }),
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
+function deriveGitReleaseMetadata(sourceRoot: string) {
+  const ref = readGitValue(sourceRoot, ["rev-parse", "HEAD"]);
+  if (!/^[0-9a-f]{40}$/i.test(ref)) return undefined;
+  const version = ref.slice(0, 12);
+  const branch =
+    readGitValue(sourceRoot, ["branch", "--show-current"]) || "main";
+  const remoteUrl =
+    readGitValue(sourceRoot, ["config", "--get", "remote.origin.url"]) ||
+    "https://github.com/rinchan-hoshino/rin";
+  return {
+    channel: "git" as const,
+    version,
+    branch,
+    ref,
+    sourceLabel: `git ${branch} @ ${version}`,
+    archiveUrl: buildGitHubRefArchiveUrl(remoteUrl, ref),
+    installedAt: new Date().toISOString(),
+  };
 }
 
 async function applyInstalledRuntime(
@@ -86,7 +121,7 @@ async function applyInstalledRuntime(
   const sourceRoot =
     String(options.sourceRoot || "").trim() || repoRootFromHere();
   const persistInstallerState = Boolean(options.persistInstallerState);
-  const release = options.release;
+  const release = options.release || deriveGitReleaseMetadata(sourceRoot);
   const freshInstallDirectory = isFreshInstallDirectory(installDir);
 
   const ownership = describeOwnership(targetUser, installDir);

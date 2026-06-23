@@ -49,17 +49,14 @@ const updateWorkflow = await import(
   ).href
 );
 
-test("version subcommand prints package version without launching Rin", () => {
-  const packageJson = JSON.parse(
-    fs.readFileSync(path.join(rootDir, "package.json"), "utf8"),
-  );
+test("version subcommand reports unknown without installed release metadata", () => {
   const output = execFileSync(
     process.execPath,
     [path.join(rootDir, "dist", "app", "rin", "main.js"), "version"],
     { cwd: rootDir, encoding: "utf8" },
   ).trim();
 
-  assert.equal(output, packageJson.version);
+  assert.equal(output, "unknown");
   const parsed = shared.resolveParsedArgs("update", { version: "1.2.3" }, [
     "update",
     "--version",
@@ -90,7 +87,7 @@ test("version reader prefers installed release metadata", () => {
   }
 });
 
-test("version reader does not use changelog as runtime identity", () => {
+test("version reader reports unknown installed runtime without release metadata", () => {
   const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-version-"));
   try {
     const runtimeRoot = path.join(installDir, "app", "current");
@@ -109,7 +106,7 @@ test("version reader does not use changelog as runtime identity", () => {
       "utf8",
     );
 
-    assert.equal(shared.readRinPackageVersion(runtimeRoot), "0.0.0");
+    assert.equal(shared.readRinPackageVersion(runtimeRoot), "unknown");
   } finally {
     fs.rmSync(installDir, { recursive: true, force: true });
   }

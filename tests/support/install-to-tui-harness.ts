@@ -23,10 +23,6 @@ const persist = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "persist.js"))
     .href
 );
-const packageJson = JSON.parse(
-  await fs.readFile(path.join(rootDir, "package.json"), "utf8"),
-);
-
 export const INNER_CONTAINER_ENV = "RIN_INSTALL_TUI_CONTAINER_INNER";
 export const DEFAULT_CONTAINER_IMAGE = "node:22-bookworm-slim";
 
@@ -254,6 +250,8 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
       setDefaultTarget: true,
       authData: { openai: { type: "api_key", key: "test-key" } },
       release,
+      currentReleaseName: path.basename(publishedRuntime.releaseRoot),
+      currentReleaseRoot: publishedRuntime.releaseRoot,
       elevated: false,
     },
     {
@@ -403,7 +401,7 @@ export async function assertInstalledRuntimeSmoke() {
     const flow = await setupIsolatedInstalledRuntime(tempDir);
 
     const version = await runRin(flow.rinPath, ["version"], flow.env);
-    assert.equal(version.stdout.trim(), String(packageJson.version || "0.0.0"));
+    assert.equal(version.stdout.trim(), "install-to-tui-test");
 
     const doctor = await runRin(flow.rinPath, ["doctor"], flow.env);
     assert.match(doctor.stdout, new RegExp(`installDir=${flow.installDir}`));
