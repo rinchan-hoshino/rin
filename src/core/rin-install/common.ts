@@ -8,6 +8,13 @@ import { normalizeUserName } from "./users.js";
 
 const FORWARDED_CHILD_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
+export function shouldRunCommandThroughShell(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+) {
+  return platform === "win32" && /\.(?:cmd|bat)$/i.test(String(command || ""));
+}
+
 function signalExitCode(signal: NodeJS.Signals) {
   if (signal === "SIGINT") return 130;
   if (signal === "SIGTERM") return 143;
@@ -17,7 +24,13 @@ function signalExitCode(signal: NodeJS.Signals) {
 
 export function runCommand(command: string, args: string[], options: any = {}) {
   return new Promise<number>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "inherit", ...options });
+    const child = spawn(command, args, {
+      stdio: "inherit",
+      ...options,
+      shell:
+        options.shell ??
+        shouldRunCommandThroughShell(command, process.platform),
+    });
     let forwardedSignal: NodeJS.Signals | null = null;
     const handlers = new Map<NodeJS.Signals, () => void>();
     for (const signal of FORWARDED_CHILD_SIGNALS) {
