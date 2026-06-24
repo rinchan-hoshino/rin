@@ -2409,6 +2409,93 @@ test("chat controller clears typing and working reactions after canonical comple
   assert.equal(await controller.pollTyping(), false);
 });
 
+test("chat controller keeps typing and working reaction until dispatched final delivery finishes", async () => {
+  const previousTimeout = process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+  process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS = "20";
+  try {
+    const controller = await createController("telegram/1:2");
+    const actions = [];
+    const reactions = [];
+    let resolveDelivery;
+    let turnSettled = false;
+    controller.app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "1",
+          workingIndicators: [testPollingIndicator(actions, reactions)],
+          sendMessage() {
+            return new Promise((resolve) => {
+              resolveDelivery = resolve;
+            });
+          },
+          internal: {
+            async sendChatAction(payload) {
+              actions.push(payload);
+            },
+          },
+        },
+      ],
+    };
+    controller.session = {
+      isStreaming: false,
+      messages: [],
+      sessionManager: {
+        getSessionFile: () => "/tmp/dispatched-final-delivery.jsonl",
+        getSessionId: () => "session-dispatched-final-delivery",
+        getSessionName: () => controller.chatKey,
+      },
+      ensureSessionReady: async () => ({
+        sessionFile: "/tmp/dispatched-final-delivery.jsonl",
+        sessionId: "session-dispatched-final-delivery",
+      }),
+      prompt: async (_text, options = {}) => {
+        await controller.handleSessionEvent({ type: "agent_start" });
+        emitRpcTurnComplete(controller, options, "done after upload");
+      },
+      switchSession: async () => {},
+    };
+
+    const turn = controller
+      .runTurn({
+        text: "hello",
+        attachments: [],
+        incomingMessageId: "m-dispatched-final",
+        replyToMessageId: "m-dispatched-final",
+      })
+      .finally(() => {
+        turnSettled = true;
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(turnSettled, false);
+    assert.equal(
+      controller.currentTurn?.incomingMessageId,
+      "m-dispatched-final",
+    );
+    assert.equal(await controller.pollTyping(), true);
+    assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+    assert.deepEqual(reactions, [["create", "2", "m-dispatched-final", "🤔"]]);
+
+    resolveDelivery(["m-final"]);
+    const result = await turn;
+
+    assert.equal(result.finalText, "done after upload");
+    assert.equal(controller.currentTurn, null);
+    assert.equal(controller.awaitingTurnSettle, false);
+    assert.deepEqual(reactions, [
+      ["create", "2", "m-dispatched-final", "🤔"],
+      ["delete", "2", "m-dispatched-final", "🤔", "1"],
+    ]);
+  } finally {
+    if (previousTimeout === undefined) {
+      delete process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+    } else {
+      process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS = previousTimeout;
+    }
+  }
+});
+
 test("chat controller uses adapter reaction capability for lark working indicators", async () => {
   const controller = await createController("lark:chat-1");
   const reactions = [];
@@ -3622,11 +3709,9 @@ test("chat controller leaves inbound unprocessed when final reply delivery fails
   assert.equal(stored?.processedAt, undefined);
 });
 
-test("chat controller releases the turn when final reply delivery times out", async () => {
+test("chat controller keeps the turn active while final reply delivery is still in flight", async () => {
   const previousTimeout = process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
-  const previousLease = process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS;
   process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS = "20";
-  process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS = "1000";
   try {
     const controller = await createController("telegram/1:2");
     const chatKey = "telegram/1:2";
@@ -3641,9 +3726,11 @@ test("chat controller releases the turn when final reply delivery times out", as
       receivedAt: new Date().toISOString(),
       text: "hello",
     });
-    controller.app.bots[0].sendMessage = async () => {
-      await new Promise(() => {});
-    };
+    let resolveDelivery;
+    controller.app.bots[0].sendMessage = () =>
+      new Promise((resolve) => {
+        resolveDelivery = resolve;
+      });
     controller.session = {
       isStreaming: false,
       messages: [],
@@ -3663,33 +3750,38 @@ test("chat controller releases the turn when final reply delivery times out", as
       switchSession: async () => {},
     };
 
-    const result = await controller.runTurn({
-      text: "hello",
-      attachments: [],
-      incomingMessageId: "m-timeout-send",
-      replyToMessageId: "m-timeout-send",
-    });
+    let turnSettled = false;
+    const turn = controller
+      .runTurn({
+        text: "hello",
+        attachments: [],
+        incomingMessageId: "m-timeout-send",
+        replyToMessageId: "m-timeout-send",
+      })
+      .finally(() => {
+        turnSettled = true;
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(turnSettled, false);
+    assert.equal(controller.currentTurn?.incomingMessageId, "m-timeout-send");
+    let stored = getChatMessage(controller.agentDir, chatKey, "m-timeout-send");
+    assert.ok(stored?.acceptedAt);
+    assert.equal(stored?.processedAt, undefined);
+
+    resolveDelivery(["m-final-timeout"]);
+    const result = await turn;
 
     assert.equal(result.finalText, "final pending delivery");
     assert.equal(controller.currentTurn, null);
     assert.equal(controller.awaitingTurnSettle, false);
-    const stored = getChatMessage(
-      controller.agentDir,
-      chatKey,
-      "m-timeout-send",
-    );
-    assert.ok(stored?.acceptedAt);
+    stored = getChatMessage(controller.agentDir, chatKey, "m-timeout-send");
     assert.ok(stored?.processedAt);
   } finally {
     if (previousTimeout === undefined) {
       delete process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
     } else {
       process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS = previousTimeout;
-    }
-    if (previousLease === undefined) {
-      delete process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS;
-    } else {
-      process.env.RIN_CHAT_OUTBOX_RETRY_LEASE_MS = previousLease;
     }
   }
 });

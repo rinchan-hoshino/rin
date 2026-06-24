@@ -872,6 +872,7 @@ export class ChatController {
 
   private shouldShowTypingIndicator() {
     if (!this.currentTurn) return false;
+    if (this.stagedDelivery) return true;
     if (this.externalWorkingVisible && this.awaitingTurnSettle) return true;
     if (typeof this.driver.hasVisibleChatWorkingTurn === "function") {
       return this.driver.hasVisibleChatWorkingTurn();
@@ -1101,10 +1102,13 @@ export class ChatController {
 
   private async waitForOutboxDelivery(
     id: string,
-    timeoutMs = 1000,
+    timeoutMs?: number,
   ): Promise<string[] | null> {
-    const deadline = Date.now() + Math.max(1, timeoutMs);
-    while (Date.now() <= deadline) {
+    const hasDeadline = Number.isFinite(timeoutMs);
+    const deadline = hasDeadline
+      ? Date.now() + Math.max(1, Number(timeoutMs))
+      : 0;
+    while (!hasDeadline || Date.now() <= deadline) {
       const current = readChatOutboxItemById(this.agentDir, id)?.item;
       if (current?.status === "delivered") return current.deliveryResult || [];
       if (current?.status === "failed") {
@@ -1138,6 +1142,7 @@ export class ChatController {
       postDelivery?: any;
       requireDelivery?: boolean;
       waitForDeliveryMs?: number;
+      waitUntilDeliverySettled?: boolean;
     } = {},
   ) {
     const idempotencyKey = safeString(options.idempotencyKey).trim();
@@ -1178,9 +1183,11 @@ export class ChatController {
       : null;
     if (own && own.status !== "delivered") {
       if (own.status === "dispatched") {
-        const deliveryResult = Number.isFinite(options.waitForDeliveryMs)
-          ? await this.waitForOutboxDelivery(id, options.waitForDeliveryMs)
-          : null;
+        const deliveryResult = options.waitUntilDeliverySettled
+          ? await this.waitForOutboxDelivery(id)
+          : Number.isFinite(options.waitForDeliveryMs)
+            ? await this.waitForOutboxDelivery(id, options.waitForDeliveryMs)
+            : null;
         if (deliveryResult) return deliveryResult;
         if (options.requireDelivery) {
           const current = readChatOutboxItemById(this.agentDir, id)?.item;
@@ -1231,19 +1238,17 @@ export class ChatController {
       }
       return;
     }
-    await this.enqueueAndDrainDelivery(
-      {
-        ...pending,
-        createdAt: nowIso(),
-      },
-      {
-        deliveryKind: "final",
-        postDelivery,
-        requireDelivery: true,
-        waitForDeliveryMs: 1000,
-        ...deliveryOptions,
-      },
-    );
+    const deliveryPayload = {
+      ...pending,
+      createdAt: nowIso(),
+    };
+    await this.enqueueAndDrainDelivery(deliveryPayload, {
+      deliveryKind: "final",
+      postDelivery,
+      requireDelivery: true,
+      waitUntilDeliverySettled: true,
+      ...deliveryOptions,
+    });
     this.stagedDelivery = null;
     if (clearProcessing) {
       await this.clearWorkingReaction().catch(() => {});
