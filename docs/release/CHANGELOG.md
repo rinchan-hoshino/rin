@@ -4,7 +4,8 @@
 
 - Installer and bootstrap flows are more reliable across Git/source installs, PowerShell wrappers, Node.js prerequisites, optional native dependency retries, and Electron dependency handling.
 - Quick-run setup now supports subscription and OAuth device-code login paths, keeps daemon sockets isolated, launches the TUI after preparation, and exits cleanly on interrupts or closed terminals.
-- Chat delivery and notices are calmer and clearer with restored stranded inbox items, fewer artificial inbox caps, markdown todo strikethrough rendering, improved todo notice rendering, and quiet handling for missing adapter state.
+- Chat delivery and notices are calmer and clearer with restored stranded inbox items, fewer artificial inbox caps, markdown todo strikethrough rendering, improved todo notice rendering, quiet handling for missing adapter state, more reliable Telegram Bot API routing, longer-lived working indicators, and retry-exhaustion errors that surface to chat users.
+- Prompts now require current web sources when source-dependent information matters, and context pruning keeps loaded skill guidance available.
 - Beta, stable, and nightly release metadata commits now use the verified release gate explicitly, so executor metadata updates are not blocked by local hooks after validation already passed.
 
 - Diagnostic commands now have dedicated interactive TUI frontends with shared backend logic for cleaner troubleshooting workflows.
@@ -77,6 +78,12 @@ ddada51 fix(browse): prepare SearXNG runtime on Windows
 dab896e chore(deps): sync Pi 0.79.10
 4871772 docs(release): cover 0.6.0 nightly changes
 23bf20a docs(release): cover 0.6.0 nightly prep
+186dfc1 fix(chat): report transient retry errors
+b993261 fix(chat): route Telegram Bot API through grammY
+99940f8 fix(chat): keep working indicators until final delivery settles
+d4f0f1a feat(prompt): require current web sources
+4d89f80 fix(context): preserve skill read results when pruning
+5dd0364 chore: sync Pi 0.80.1
 -->
 
 ## 0.5.0
