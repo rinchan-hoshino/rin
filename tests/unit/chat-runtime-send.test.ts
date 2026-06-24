@@ -34,6 +34,49 @@ function createRuntimeApp(agentDir: string, adapterEntry: Record<string, any>) {
   return app;
 }
 
+test("telegram adapter separates long-poll and outbound API fetch dispatchers", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ method: string; dispatcher: unknown }> = [];
+    try {
+      (globalThis as any).fetch = async (url: string, init: any) => {
+        const method = safeTelegramMethod(url);
+        calls.push({ method, dispatcher: init?.dispatcher });
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: method === "getUpdates" ? [] : { message_id: "1" },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      };
+
+      await adapter.callApi("getUpdates", { timeout: 25 });
+      await adapter.callApi("sendMessage", { chat_id: "456", text: "hi" });
+
+      assert.deepEqual(
+        calls.map((entry) => entry.method),
+        ["getUpdates", "sendMessage"],
+      );
+      assert.ok(calls[0].dispatcher);
+      assert.ok(calls[1].dispatcher);
+      assert.notEqual(calls[0].dispatcher, calls[1].dispatcher);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+function safeTelegramMethod(url: string) {
+  return String(url).split("/").pop() || "";
+}
+
 test("telegram adapter splits oversized text sends and keeps the reply only on the first chunk", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -249,26 +292,9 @@ test("telegram adapter retries local photos as documents when Telegram rejects d
     });
     const adapter = [...app.adapters][0];
     const h = runtime.createChatRuntimeH();
-    const calls: Array<{
-      method: string;
-      chatId: FormDataEntryValue | null;
-      replyToMessageId: FormDataEntryValue | null;
-      hasPhoto: boolean;
-      hasDocument: boolean;
-    }> = [];
-    adapter.callMultipart = async (
-      method: string,
-      build: (form: FormData) => void,
-    ) => {
-      const form = new FormData();
-      build(form);
-      calls.push({
-        method,
-        chatId: form.get("chat_id"),
-        replyToMessageId: form.get("reply_to_message_id"),
-        hasPhoto: form.has("photo"),
-        hasDocument: form.has("document"),
-      });
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
       if (method === "sendPhoto") {
         throw new Error("Bad Request: PHOTO_INVALID_DIMENSIONS");
       }
@@ -287,15 +313,17 @@ test("telegram adapter retries local photos as documents when Telegram rejects d
     assert.deepEqual(result, ["2"]);
     assert.equal(calls.length, 2);
     assert.equal(calls[0].method, "sendPhoto");
-    assert.equal(calls[0].chatId, "456");
-    assert.equal(calls[0].replyToMessageId, "77");
-    assert.equal(calls[0].hasPhoto, true);
-    assert.equal(calls[0].hasDocument, false);
+    assert.equal(calls[0].payload.chat_id, "456");
+    assert.equal(calls[0].payload.reply_to_message_id, "77");
+    assert.ok(calls[0].payload.photo);
+    assert.equal(calls[0].payload.photo.filename, "original.png");
+    assert.equal(calls[0].payload.document, undefined);
     assert.equal(calls[1].method, "sendDocument");
-    assert.equal(calls[1].chatId, "456");
-    assert.equal(calls[1].replyToMessageId, "77");
-    assert.equal(calls[1].hasPhoto, false);
-    assert.equal(calls[1].hasDocument, true);
+    assert.equal(calls[1].payload.chat_id, "456");
+    assert.equal(calls[1].payload.reply_to_message_id, "77");
+    assert.equal(calls[1].payload.photo, undefined);
+    assert.ok(calls[1].payload.document);
+    assert.equal(calls[1].payload.document.filename, "original.png");
   });
 });
 

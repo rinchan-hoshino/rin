@@ -2,6 +2,8 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 
+import { Api as GrammyApi, InputFile } from "grammy";
+import { Agent as UndiciAgent } from "undici";
 import WebSocket from "ws";
 
 import { getWorkingReactionFrame } from "../chat/transport.js";
@@ -319,6 +321,30 @@ export class ChatRuntimeApp extends EventEmitter {
   }
 }
 
+const TELEGRAM_ZERO_PAYLOAD_METHODS = new Set([
+  "getMe",
+  "getWebhookInfo",
+  "getForumTopicIconStickers",
+  "getAvailableGifts",
+  "logOut",
+  "close",
+  "getMyStarBalance",
+  "removeMyProfilePhoto",
+]);
+
+function translateAbortSignal(signal: any) {
+  if (!signal || typeof signal.addEventListener !== "function") {
+    return undefined;
+  }
+  const controller = new AbortController();
+  if (signal.aborted) {
+    controller.abort();
+  } else {
+    signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  return controller.signal;
+}
+
 class TelegramAdapter {
   private readonly app: ChatRuntimeApp;
   private readonly config: Record<string, any>;
@@ -329,6 +355,10 @@ class TelegramAdapter {
   private running = false;
   private pollPromise: Promise<void> | null = null;
   private nextOffset = 0;
+  private readonly pollDispatcher = new UndiciAgent({ connections: 1 });
+  private readonly apiDispatcher = new UndiciAgent({ connections: 8 });
+  private readonly pollApi: GrammyApi;
+  private readonly api: GrammyApi;
   private readonly workingReactions = new Map<string, string>();
   readonly bot: any;
 
@@ -356,6 +386,8 @@ class TelegramAdapter {
       "cursor.json",
     );
     ensureDir(this.cacheDir);
+    this.pollApi = this.createApi(this.pollDispatcher);
+    this.api = this.createApi(this.apiDispatcher);
     this.bot = {
       platform: "telegram",
       selfId: "",
@@ -428,10 +460,6 @@ class TelegramAdapter {
     emitBotStatus(this.app, this.bot, 0);
   }
 
-  private apiUrl(method: string) {
-    return `https://api.telegram.org/bot${safeString(this.config?.token).trim()}/${method}`;
-  }
-
   private fileUrl(filePath: string) {
     return `https://api.telegram.org/file/bot${safeString(this.config?.token).trim()}/${filePath}`;
   }
@@ -477,38 +505,28 @@ class TelegramAdapter {
     emitBotStatus(this.app, this.bot, 1);
   }
 
-  private async callApi(method: string, payload?: any, signal?: AbortSignal) {
-    const response = await fetch(this.apiUrl(method), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload || {}),
-      signal,
+  private createApi(dispatcher: UndiciAgent) {
+    return new GrammyApi(safeString(this.config?.token).trim(), {
+      fetch: ((url: any, init?: any) =>
+        fetch(url, {
+          ...(init || {}),
+          signal: translateAbortSignal(init?.signal),
+          dispatcher,
+          duplex: init?.body ? "half" : undefined,
+        } as any)) as any,
     });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || !body?.ok) {
-      const detail = safeString(
-        body?.description || response.statusText || method,
-      ).trim();
-      throw new Error(detail || `telegram_api_failed:${method}`);
-    }
-    return body.result;
   }
 
-  private async callMultipart(method: string, build: (form: FormData) => void) {
-    const form = new FormData();
-    build(form);
-    const response = await fetch(this.apiUrl(method), {
-      method: "POST",
-      body: form,
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || !body?.ok) {
-      const detail = safeString(
-        body?.description || response.statusText || method,
-      ).trim();
-      throw new Error(detail || `telegram_api_failed:${method}`);
+  private async callApi(method: string, payload?: any, signal?: AbortSignal) {
+    const client = method === "getUpdates" ? this.pollApi : this.api;
+    const fn = (client.raw as any)[method];
+    if (typeof fn !== "function") {
+      throw new Error(`telegram_api_method_missing:${method}`);
     }
-    return body.result;
+    if (TELEGRAM_ZERO_PAYLOAD_METHODS.has(method)) {
+      return await fn(signal);
+    }
+    return await fn(payload || {}, signal);
   }
 
   private async pollLoop() {
@@ -603,7 +621,9 @@ class TelegramAdapter {
     const file = await this.callApi("getFile", { file_id: options.fileId });
     const filePath = safeString(file?.file_path).trim();
     if (!filePath) return null;
-    const response = await fetch(this.fileUrl(filePath));
+    const response = await fetch(this.fileUrl(filePath), {
+      dispatcher: this.apiDispatcher,
+    } as any);
     if (!response.ok) return null;
     const buffer = Buffer.from(await response.arrayBuffer());
     const originalName = ensureFileName(
@@ -835,20 +855,16 @@ class TelegramAdapter {
         );
         return safeString(result?.message_id).trim();
       }
-      const result = await this.callMultipart(nextMethod, (form) => {
-        form.append("chat_id", safeString(chatId));
-        if (caption) form.append("caption", caption);
-        if (parseMode) form.append("parse_mode", safeString(parseMode));
-        if (replyToMessageId)
-          form.append("reply_to_message_id", safeString(replyToMessageId));
-        form.append(
-          nextField,
-          new Blob([payload.data], {
-            type: safeString(payload.mimeType).trim() || undefined,
-          }),
-          payload.name,
-        );
-      });
+      const result = await this.callApi(
+        nextMethod,
+        compactObject({
+          chat_id: chatId,
+          [nextField]: new InputFile(payload.data, payload.name),
+          caption: caption || undefined,
+          parse_mode: safeString(parseMode).trim() || undefined,
+          reply_to_message_id: replyToMessageId,
+        }),
+      );
       return safeString(result?.message_id).trim();
     };
 

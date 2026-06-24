@@ -60,6 +60,7 @@
     "extract-zip": "^2.0.1",
     "file-type": "^21.3.4",
     "glob": "^13.0.6",
+    "grammy": "^1.44.0",
     "hosted-git-info": "^9.0.2",
     "ignore": "^7.0.5",
     "jsdom": "^29.1.1",
