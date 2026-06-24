@@ -110,7 +110,12 @@ export function createRinCapabilityDefinitions(
     {
       name: "rin_provider_bound_context",
       hooks: {
-        context: [(event: any) => buildProviderBoundContextEvent(event)],
+        context: [
+          (event: any, ctx: any) =>
+            buildProviderBoundContextEvent(event, {
+              cwd: String(ctx?.cwd || options.cwd || process.cwd()),
+            }),
+        ],
       },
     },
   ];

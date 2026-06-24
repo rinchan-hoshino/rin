@@ -100,6 +100,63 @@ test("session pruning keeps tool-result content shape stable and is idempotent",
   assert.equal(pruning.pruneSessionContextMessages(once), once);
 });
 
+test("session pruning preserves old skill read results", () => {
+  const skillReadResult = {
+    role: "toolResult",
+    toolCallId: "call-skill",
+    toolName: "read",
+    content: "skill instructions",
+  };
+  const ordinaryReadResult = {
+    role: "toolResult",
+    toolCallId: "call-readme",
+    toolName: "read",
+    content: "old read output",
+  };
+  const messages = [
+    { role: "user", content: "turn 1" },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "call-skill",
+          name: "read",
+          arguments: {
+            path: "/home/rin/.rin/self_improve/skills/demo/SKILL.md",
+          },
+        },
+        {
+          type: "toolCall",
+          id: "call-readme",
+          name: "read",
+          arguments: { path: "/tmp/demo/README.md" },
+        },
+      ],
+    },
+    skillReadResult,
+    ordinaryReadResult,
+    { role: "assistant", content: "done 1" },
+    { role: "user", content: "turn 2" },
+    { role: "assistant", content: "done 2" },
+    { role: "user", content: "turn 3" },
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    { role: "assistant", content: "done 4" },
+    { role: "user", content: "turn 5" },
+    { role: "assistant", content: "done 5" },
+  ];
+
+  const result = pruning.pruneSessionContextMessages(messages);
+
+  assert.equal(result[2], skillReadResult);
+  assert.equal(
+    result[3].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+  assert.equal(ordinaryReadResult.content, "old read output");
+});
+
 test("session pruning maps compaction slices through the full provider-bound context", () => {
   const oldToolResult = { role: "toolResult", content: "huge old output" };
   const summarizedSlice = [

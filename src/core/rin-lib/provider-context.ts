@@ -5,6 +5,7 @@ import {
 
 type ProviderBoundContextOptions = {
   protectRecentTurns?: number;
+  cwd?: string;
 };
 
 type EstimateContextTokens = (messages: any[]) => any;

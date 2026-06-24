@@ -1,8 +1,12 @@
+import { extractToolCallParts } from "../message-content.js";
+import { isPiCompactSkillReadCall } from "../pi/private-api.js";
+
 export const RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS = 4;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "old tool result omitted";
 type SessionPruningOptions = {
   protectRecentTurns?: number;
+  cwd?: string;
 };
 
 export function normalizeProtectRecentTurns(value: unknown) {
@@ -20,6 +24,34 @@ function isUserMessage(message: any) {
 function isToolResultMessage(message: any) {
   const role = String(message?.role || "").trim();
   return role === "toolResult" || role === "tool_result";
+}
+
+function toolCallId(value: unknown) {
+  return String(value || "").trim();
+}
+
+function collectProtectedToolResultIds(messages: any[], cwd: string) {
+  const protectedIds = new Set<string>();
+  for (const message of messages) {
+    if (String(message?.role || "").trim() !== "assistant") continue;
+    for (const part of extractToolCallParts(message?.content)) {
+      if (String(part?.name || part?.toolName || "").trim() !== "read") {
+        continue;
+      }
+      if (!isPiCompactSkillReadCall(part?.arguments, cwd)) continue;
+      const id = toolCallId(part?.id);
+      if (id) protectedIds.add(id);
+    }
+  }
+  return protectedIds;
+}
+
+function isProtectedToolResult(
+  message: any,
+  protectedToolResultIds: Set<string>,
+) {
+  const id = toolCallId(message?.toolCallId);
+  return Boolean(id && protectedToolResultIds.has(id));
 }
 
 export function findProtectedContextStart(
@@ -66,9 +98,15 @@ function createProviderBoundPrunePlan(
     normalizeProtectRecentTurns(options.protectRecentTurns),
   );
   const replacements = new Map<any, any>();
+  const protectedToolResultIds = collectProtectedToolResultIds(
+    input,
+    String(options.cwd || process.cwd()),
+  );
   let changed = false;
   const pruned = input.map((message, index) => {
     if (index < protectedStart && isToolResultMessage(message)) {
+      if (isProtectedToolResult(message, protectedToolResultIds))
+        return message;
       if (isAlreadyOmitted(message?.content)) return message;
       const replacement = {
         ...message,
