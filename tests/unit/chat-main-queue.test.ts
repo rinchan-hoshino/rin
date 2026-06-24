@@ -1632,7 +1632,7 @@ test("chat main completes a delivered inbox item without waiting for processing 
   }
 });
 
-test("chat main retries a transient daemon startup failure without leaking the socket error into chat", async () => {
+test("chat main reports a transient daemon startup failure before retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1701,11 +1701,13 @@ test("chat main retries a transient daemon startup failure without leaking the s
       };
 
       const { app } = await mainMod.startChatBridge();
+      let sentCount = 0;
       app.bots.push({
         platform: "telegram",
         selfId: "1",
         async sendMessage() {
-          return ["assistant-1"];
+          sentCount += 1;
+          return ["assistant-" + sentCount];
         },
         internal: {
           async sendChatAction() {},
@@ -1736,10 +1738,10 @@ test("chat main retries a transient daemon startup failure without leaking the s
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const leaked = rows.some((item) => String(item.text || "").includes("ENOENT"));
+      const retryNotice = rows.find((item) => String(item.text || "").includes("connect ENOENT") && !String(item.text || "").includes("retrying"));
       const succeeded = rows.some((item) => item.text === "retry reply");
-      if (!succeeded || leaked || connectCalls < 2) {
-        throw new Error(JSON.stringify({ connectCalls, leaked, rows }));
+      if (!succeeded || !retryNotice || connectCalls < 2) {
+        throw new Error(JSON.stringify({ connectCalls, retryNotice, rows }));
       }
       process.exit(0);
     `;
@@ -1762,7 +1764,7 @@ test("chat main retries a transient daemon startup failure without leaking the s
   }
 });
 
-test("chat main retries a disposed frontend turn without leaking the dispose error into chat", async () => {
+test("chat main reports a disposed frontend turn before retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1837,11 +1839,13 @@ test("chat main retries a disposed frontend turn without leaking the dispose err
       };
 
       const { app } = await mainMod.startChatBridge();
+      let sentCount = 0;
       app.bots.push({
         platform: "telegram",
         selfId: "1",
         async sendMessage() {
-          return ["assistant-1"];
+          sentCount += 1;
+          return ["assistant-" + sentCount];
         },
         internal: {
           async sendChatAction() {},
@@ -1872,10 +1876,10 @@ test("chat main retries a disposed frontend turn without leaking the dispose err
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const leaked = rows.some((item) => String(item.text || "").includes("disposed"));
+      const retryNotice = rows.find((item) => String(item.text || "").includes("disposed") && !String(item.text || "").includes("retrying"));
       const succeeded = rows.some((item) => item.text === "retry after dispose");
-      if (!succeeded || leaked || runTurnCalls < 2 || connectCalls < 1) {
-        throw new Error(JSON.stringify({ runTurnCalls, connectCalls, leaked, rows }));
+      if (!succeeded || !retryNotice || runTurnCalls < 2 || connectCalls < 1) {
+        throw new Error(JSON.stringify({ runTurnCalls, connectCalls, retryNotice, rows }));
       }
       process.exit(0);
     `;
@@ -1898,7 +1902,7 @@ test("chat main retries a disposed frontend turn without leaking the dispose err
   }
 });
 
-test("chat main retries an offline-queued frontend turn without leaking the disconnect error into chat", async () => {
+test("chat main reports an offline-queued frontend turn before retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1971,11 +1975,13 @@ test("chat main retries an offline-queued frontend turn without leaking the disc
       };
 
       const { app } = await mainMod.startChatBridge();
+      let sentCount = 0;
       app.bots.push({
         platform: "telegram",
         selfId: "1",
         async sendMessage() {
-          return ["assistant-1"];
+          sentCount += 1;
+          return ["assistant-" + sentCount];
         },
         internal: {
           async sendChatAction() {},
@@ -2006,10 +2012,10 @@ test("chat main retries an offline-queued frontend turn without leaking the disc
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const leaked = rows.some((item) => String(item.text || "").includes("queued_offline"));
+      const retryNotice = rows.find((item) => String(item.text || "").includes("queued_offline") && !String(item.text || "").includes("retrying"));
       const succeeded = rows.some((item) => item.text === "retry after queued offline");
-      if (!succeeded || leaked || runTurnCalls < 2) {
-        throw new Error(JSON.stringify({ runTurnCalls, leaked, rows }));
+      if (!succeeded || !retryNotice || runTurnCalls < 2) {
+        throw new Error(JSON.stringify({ runTurnCalls, retryNotice, rows }));
       }
       process.exit(0);
     `;

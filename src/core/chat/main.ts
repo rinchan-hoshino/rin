@@ -791,6 +791,31 @@ export async function startChatBridge(
     );
   };
 
+  const deliverTransientRetryNotice = async (
+    job: ClaimedChatInboxJob,
+    result: ChatInboxJobResult | undefined,
+  ) => {
+    if (!result?.retry) return;
+    const chatKey = safeString(job.envelope.chatKey).trim();
+    if (!chatKey) return;
+    const errorMessage = safeString(
+      result.errorMessage || "chat_inbound_retry_needed",
+    );
+    await enqueueAndDrainOutbox(
+      {
+        type: "text_delivery",
+        createdAt: nowIso(),
+        chatKey,
+        text: formatChatRuntimeErrorForUser(errorMessage),
+      },
+      "error",
+    ).catch((error) => {
+      logger.warn(
+        `chat retry notice delivery failed chatKey=${chatKey} err=${safeString((error as any)?.message || error)}`,
+      );
+    });
+  };
+
   const runClaimedInboxJob = async (
     job: ClaimedChatInboxJob,
     run: () => Promise<ChatInboxJobResult | undefined>,
@@ -806,6 +831,7 @@ export async function startChatBridge(
     }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
       const result = await run();
+      await deliverTransientRetryNotice(job, result);
       finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
     } catch (error) {
       logger.warn(
