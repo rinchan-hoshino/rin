@@ -67,6 +67,13 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
 
   assert.ok(baseSystemPrompt.includes("Available tools:"));
   assert.match(baseSystemPrompt, /\nCurrent date: \d{4}-\d{2}-\d{2}$/);
+  const webSourceRequirement =
+    "When current, external, source-dependent, or version-sensitive web information matters, search the web for current sources rather than relying on model knowledge.";
+  assert.ok(baseSystemPrompt.includes(webSourceRequirement));
+  assert.ok(
+    baseSystemPrompt.indexOf(webSourceRequirement) <
+      baseSystemPrompt.indexOf("Available tools:"),
+  );
   assert.equal(baseSystemPrompt.includes("Current working directory:"), false);
   assert.ok(baseSystemPrompt.includes("- recall:"));
   assert.ok(
@@ -124,6 +131,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "You are running in the Rin runtime environment.",
     ),
   );
+  assert.ok(finalSystemPrompt.includes(webSourceRequirement));
   assert.ok(baseSystemPrompt.includes("Rin and Pi documentation:"));
   assert.ok(
     baseSystemPrompt.includes(

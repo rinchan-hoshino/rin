@@ -157,6 +157,10 @@ function buildRinRuntimeAwarenessBlock() {
   return "You are running in the Rin runtime environment.";
 }
 
+function buildWebSourceRequirementBlock() {
+  return "When current, external, source-dependent, or version-sensitive web information matters, search the web for current sources rather than relying on model knowledge.";
+}
+
 const RIN_COMPACTION_SYSTEM_PROMPT =
   "Write a compact, faithful continuation handoff for the next LLM. Optimize for safe resumption: actionable context only, no invented facts.";
 
@@ -616,6 +620,7 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
   const loadedSkills = resourcePromptState.skills;
   const loadedContextFiles = resourcePromptState.agentsFiles;
   const runtimeAwarenessBlock = buildRinRuntimeAwarenessBlock();
+  const webSourceRequirementBlock = buildWebSourceRequirementBlock();
   const docsBlock = buildRinDocsBlock(promptAgentDir);
   const configuredLanguageBlock = buildConfiguredLanguageSystemPrompt(
     readConfiguredLanguageFromSettings(promptAgentDir),
@@ -659,7 +664,7 @@ function buildRinSystemPrompt(session: any, toolNames: string[]) {
     readPersistedSessionSystemPromptBlocks(session),
   );
   prompt = `${prompt.trimEnd()}\nCurrent date: ${formatCurrentDateForSystemPrompt()}`;
-  return `${PROMPT_PREFIX}\n${runtimeAwarenessBlock}\n\n${prompt}`.trimEnd();
+  return `${PROMPT_PREFIX}\n${runtimeAwarenessBlock}\n${webSourceRequirementBlock}\n\n${prompt}`.trimEnd();
 }
 
 const LAZY_SYSTEM_PROMPT_STATE_KEY = Symbol.for("rin.lazySystemPromptState");
