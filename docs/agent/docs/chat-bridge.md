@@ -68,6 +68,7 @@ Rin's built-in direct chat runtime supports these adapter families:
 - Feishu / Lark
 - Discord
 - Slack
+- Matrix
 - Minecraft / QueQiao
 
 Chat bridge configuration is agent-owned: edit `settings.json -> chat` directly, validate the JSON, then restart the target daemon so the hosted chat runtime reloads adapter entries. Do not rely on installer or TUI interactive adapter setup; those flows are intentionally absent.
@@ -97,6 +98,11 @@ Minimal built-in adapter examples:
     "lark": { "platform": "feishu", "appId": "cli_xxx", "appSecret": "secret" },
     "discord": { "token": "bot-token" },
     "slack": { "protocol": "ws", "token": "xapp-...", "botToken": "xoxb-..." },
+    "matrix": {
+      "homeserverUrl": "https://matrix.example.com",
+      "accessTokenFile": "/path/to/matrix-access-token",
+      "respondRooms": ["!roomid:matrix.example.com"]
+    },
     "minecraft": {
       "url": "ws://127.0.0.1:8080",
       "selfId": "minecraft",

@@ -178,6 +178,21 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   frontend_turn_driver_disposed: () =>
     "Rin stopped the previous chat driver while recovering.",
 
+  matrix_access_token_required: () =>
+    "Matrix adapter needs an access token before it can start. Add the token or token file.",
+  matrix_api_failed: (detail) =>
+    withDetail(
+      "Matrix API request failed",
+      detail,
+      ". Check the homeserver response.",
+    ),
+  matrix_homeserver_url_required: () =>
+    "Matrix adapter needs a homeserver URL before it can start. Add homeserverUrl.",
+  matrix_send_message_empty: () =>
+    "Matrix send failed because the outgoing message is empty. Add text or an attachment.",
+  matrix_send_message_empty_result: () =>
+    "Matrix accepted the send request but returned no delivered event id. Check the room and bot permissions.",
+
   identity_first_owner_must_self_claim: () =>
     "The first owner identity must be claimed by the same platform user. Use the owner account.",
   identity_last_owner_required: () =>

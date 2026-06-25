@@ -5,6 +5,7 @@ export type ChatBridgeBuiltInAdapterKey =
   | "lark"
   | "discord"
   | "slack"
+  | "matrix"
   | "minecraft";
 
 export type ChatBridgeAdapterSpec = {
@@ -42,6 +43,14 @@ const DISCORD_DEFAULTS = {};
 
 const SLACK_DEFAULTS = {
   protocol: "ws",
+};
+
+const MATRIX_DEFAULTS = {
+  homeserverUrl: "",
+  accessToken: "",
+  accessTokenFile: "",
+  syncTimeoutMs: 30000,
+  respondRooms: [],
 };
 
 const MINECRAFT_DEFAULTS = {
@@ -88,6 +97,12 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     label: "Slack",
     pluginKey: "adapter-slack",
     defaults: SLACK_DEFAULTS,
+  },
+  {
+    key: "matrix",
+    label: "Matrix",
+    pluginKey: "adapter-matrix",
+    defaults: MATRIX_DEFAULTS,
   },
   {
     key: "minecraft",

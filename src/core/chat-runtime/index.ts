@@ -37,6 +37,7 @@ import {
 import {
   DiscordAdapter,
   LarkAdapter,
+  MatrixAdapter,
   MinecraftAdapter,
   QQAdapter,
   SlackAdapter,
@@ -2177,6 +2178,7 @@ const BUILT_IN_CHAT_RUNTIME_ADAPTER_FACTORIES: Record<
   lark: LarkAdapter,
   discord: DiscordAdapter,
   slack: SlackAdapter,
+  matrix: MatrixAdapter,
   minecraft: MinecraftAdapter,
 };
 

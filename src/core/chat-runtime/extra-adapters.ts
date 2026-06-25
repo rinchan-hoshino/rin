@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import WebSocket from "ws";
@@ -2059,6 +2060,294 @@ export class LarkAdapter {
         ? { messageId: safeString(message.parent_id).trim() }
         : undefined,
     });
+  }
+}
+
+function encodeMatrixPathSegment(value: string) {
+  return encodeURIComponent(value).replace(/%3A/gi, ":");
+}
+
+function normalizeMatrixBaseUrl(value: unknown) {
+  return safeString(value).trim().replace(/\/+$/, "");
+}
+
+export class MatrixAdapter {
+  private readonly app: any;
+  private readonly config: Record<string, any>;
+  private readonly logger: any;
+  private readonly cacheDir: string;
+  private readonly statePath: string;
+  private stopped = false;
+  private loopPromise: Promise<void> | null = null;
+  private since = "";
+  private accessToken = "";
+  private baseUrl = "";
+  readonly bot: any;
+
+  constructor(
+    app: any,
+    dataDir: string,
+    config: Record<string, any>,
+    logger: any,
+  ) {
+    this.app = app;
+    this.config = config;
+    this.logger = createPrefixedLogger("chat-runtime:matrix", logger);
+    this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "matrix");
+    ensureDir(this.cacheDir);
+    this.statePath = path.join(
+      this.cacheDir,
+      `${safeString(config?.name).trim() || "default"}.json`,
+    );
+    const internal: any = {
+      request: async (method: string, requestPath: string, body?: any) =>
+        await this.request(method, requestPath, body),
+      sendTyping: async (roomId: string) => await this.sendTyping(roomId),
+    };
+    this.bot = {
+      platform: "matrix",
+      selfId: safeString(config?.selfId).trim(),
+      status: 0,
+      workingIndicators: [
+        createPollingWorkingIndicator("matrix", () => this.bot),
+      ],
+      user: {},
+      internal,
+      sendMessage: async (chatId: string, content: any) =>
+        await this.sendMessage(chatId, content),
+    };
+    this.app.register(this, this.bot);
+  }
+
+  async start() {
+    this.baseUrl = normalizeMatrixBaseUrl(
+      this.config?.homeserverUrl || this.config?.baseUrl || this.config?.url,
+    );
+    if (!this.baseUrl) throw new Error("matrix_homeserver_url_required");
+    this.accessToken = await this.resolveAccessToken();
+    if (!this.accessToken) throw new Error("matrix_access_token_required");
+    this.restoreState();
+    const whoami = await this.request(
+      "GET",
+      "/_matrix/client/v3/account/whoami",
+    );
+    const userId = safeString(whoami?.user_id).trim();
+    this.bot.selfId = userId || this.bot.selfId;
+    this.bot.user = {
+      id: this.bot.selfId,
+      userId: this.bot.selfId,
+      name: this.bot.selfId,
+    };
+    emitBotStatus(this.app, this.bot, 1);
+    this.stopped = false;
+    this.loopPromise = this.runLoop();
+  }
+
+  async stop() {
+    this.stopped = true;
+    await this.loopPromise?.catch(() => {});
+    this.loopPromise = null;
+    emitBotStatus(this.app, this.bot, 0);
+  }
+
+  private async resolveAccessToken() {
+    const direct = safeString(
+      this.config?.accessToken || this.config?.token,
+    ).trim();
+    if (direct) return direct;
+    const tokenFile = safeString(
+      this.config?.accessTokenFile || this.config?.tokenFile,
+    ).trim();
+    if (!tokenFile) return "";
+    return (await fs.promises.readFile(tokenFile, "utf8")).trim();
+  }
+
+  private restoreState() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.statePath, "utf8"));
+      this.since = safeString(raw?.since).trim();
+    } catch {
+      this.since = "";
+    }
+  }
+
+  private saveState() {
+    try {
+      fs.writeFileSync(
+        this.statePath,
+        JSON.stringify({ since: this.since }, null, 2),
+      );
+    } catch (error: any) {
+      this.logger?.warn?.(
+        `state save failed err=${safeString(error?.message || error)}`,
+      );
+    }
+  }
+
+  private async request(method: string, requestPath: string, body?: any) {
+    const url = `${this.baseUrl}${requestPath}`;
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await response.text();
+    let parsed: any = {};
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = { raw: text };
+      }
+    }
+    if (!response.ok) {
+      throw new Error(
+        `matrix_api_failed:${response.status}:${safeString(parsed?.errcode || parsed?.error || text)}`,
+      );
+    }
+    return parsed;
+  }
+
+  private async runLoop() {
+    while (!this.stopped) {
+      try {
+        await this.syncOnce();
+      } catch (error: any) {
+        if (!this.stopped) {
+          this.logger?.warn?.(
+            `sync failed err=${safeString(error?.message || error)}`,
+          );
+          emitBotStatus(this.app, this.bot, 0);
+          await sleep(3000);
+          emitBotStatus(this.app, this.bot, 1);
+        }
+      }
+    }
+  }
+
+  private async syncOnce() {
+    const timeout = Math.max(1000, Number(this.config?.syncTimeoutMs) || 30000);
+    const params = new URLSearchParams({
+      timeout: this.since ? String(timeout) : "0",
+    });
+    if (this.since) params.set("since", this.since);
+    const payload = await this.request(
+      "GET",
+      `/_matrix/client/v3/sync?${params}`,
+    );
+    const previousSince = this.since;
+    this.since = safeString(payload?.next_batch).trim() || this.since;
+    if (this.since) this.saveState();
+    if (!previousSince) return;
+    this.handleSyncPayload(payload);
+  }
+
+  private respondRooms() {
+    const rooms = this.config?.respondRooms || this.config?.respondRoomIds;
+    return new Set(
+      (Array.isArray(rooms) ? rooms : [])
+        .map((item) => safeString(item).trim())
+        .filter(Boolean),
+    );
+  }
+
+  private shouldRespond(roomId: string, content: string) {
+    const rooms = this.respondRooms();
+    if (rooms.has(roomId)) return true;
+    const self = safeString(this.bot?.selfId).trim();
+    return !!self && content.includes(self);
+  }
+
+  private handleSyncPayload(payload: any) {
+    const joined = payload?.rooms?.join;
+    if (!joined || typeof joined !== "object") return;
+    for (const [roomId, room] of Object.entries(joined)) {
+      const events = Array.isArray((room as any)?.timeline?.events)
+        ? (room as any).timeline.events
+        : [];
+      for (const event of events) this.handleRoomEvent(roomId, event);
+    }
+  }
+
+  private handleRoomEvent(roomId: string, event: any) {
+    const eventType = safeString(event?.type).trim();
+    if (eventType !== "m.room.message") return;
+    const sender = safeString(event?.sender).trim();
+    if (!sender || sender === safeString(this.bot?.selfId).trim()) return;
+    const messageType = safeString(event?.content?.msgtype).trim();
+    const body = safeString(event?.content?.body).trim();
+    if (!body) return;
+    const messageId = safeString(event?.event_id).trim();
+    const isText =
+      messageType === "m.text" || messageType === "m.notice" || !messageType;
+    const content = isText
+      ? body
+      : `[${messageType || "message"}] ${body}`.trim();
+    const session = {
+      platform: "matrix",
+      selfId: safeString(this.bot?.selfId).trim(),
+      bot: this.bot,
+      messageId,
+      timestamp: Number.isFinite(Number(event?.origin_server_ts))
+        ? Number(event.origin_server_ts)
+        : Date.now(),
+      userId: sender,
+      author: { userId: sender, id: sender, name: sender, nick: sender },
+      user: { userId: sender, id: sender, name: sender, nick: sender },
+      channelId: roomId,
+      guildId: roomId,
+      isDirect: false,
+      content,
+      stripped: {
+        appel: this.shouldRespond(roomId, content),
+        content,
+      },
+      elements: [normalizeNode("text", { content })],
+    };
+    this.app.emit("message", session);
+  }
+
+  private async sendTyping(roomId: string) {
+    const userId = safeString(this.bot?.selfId).trim();
+    if (!userId) return;
+    await this.request(
+      "PUT",
+      `/_matrix/client/v3/rooms/${encodeMatrixPathSegment(roomId)}/typing/${encodeMatrixPathSegment(userId)}`,
+      { typing: true, timeout: 5000 },
+    );
+  }
+
+  private async sendMessage(chatId: string, content: any) {
+    const { work } = prepareOutboundNodes(content);
+    const text = renderMarkdownFromNodes(work, {
+      includeMedia: false,
+      markdown: "preserve",
+      renderAt(attrs) {
+        const id = safeString(attrs.id).trim();
+        return id || safeString(attrs.name).trim();
+      },
+    }).trim();
+    if (!text) throw new Error("matrix_send_message_empty");
+    const chunks = splitPlainText(
+      text,
+      Number(this.config?.maxMessageLength) || 4000,
+    );
+    const delivered: string[] = [];
+    for (const chunk of chunks) {
+      const txnId = `rin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const result = await this.request(
+        "PUT",
+        `/_matrix/client/v3/rooms/${encodeMatrixPathSegment(chatId)}/send/m.room.message/${txnId}`,
+        { msgtype: "m.text", body: chunk },
+      );
+      const eventId = safeString(result?.event_id).trim();
+      if (eventId) delivered.push(eventId);
+    }
+    if (!delivered.length) throw new Error("matrix_send_message_empty_result");
+    return delivered;
   }
 }
 
