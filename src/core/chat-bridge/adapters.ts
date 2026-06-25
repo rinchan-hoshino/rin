@@ -50,7 +50,6 @@ const MATRIX_DEFAULTS = {
   accessToken: "",
   accessTokenFile: "",
   syncTimeoutMs: 30000,
-  respondRooms: [],
 };
 
 const MINECRAFT_DEFAULTS = {

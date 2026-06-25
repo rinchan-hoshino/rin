@@ -16,6 +16,11 @@ const identity = {
   aliases: [
     { platform: "telegram", userId: "owner-1", personId: "owner" },
     { platform: "telegram", userId: "trusted-1", personId: "trusted" },
+    {
+      platform: "matrix",
+      userId: "@the_cattail:matrix.example.test",
+      personId: "owner",
+    },
     { platform: "lark", userId: "ou_owner", personId: "owner" },
   ],
   persons: {
@@ -107,6 +112,36 @@ test("chat decision lets two-member owner groups skip mention without changing c
 
   assert.equal(result.allow, true);
   assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
+  assert.equal(result.chatType, "group");
+  assert.equal(result.trust, "OWNER");
+});
+
+test("chat decision lets Matrix owner-only rooms skip mention through shared group policy", async () => {
+  const calls: string[] = [];
+  const result = await decision.shouldProcessText(
+    {
+      platform: "matrix",
+      guildId: "!admin:matrix.example.test",
+      channelId: "!admin:matrix.example.test",
+      selfId: "@rinchan:matrix.example.test",
+      userId: "@the_cattail:matrix.example.test",
+      bot: {
+        selfId: "@rinchan:matrix.example.test",
+        async getGuildMemberCount(chatId) {
+          calls.push(chatId);
+          return 2;
+        },
+      },
+      stripped: { content: "private note" },
+      elements: [{ type: "text", attrs: { content: "private note" } }],
+    },
+    [{ type: "text", attrs: { content: "private note" } }],
+    identity,
+  );
+
+  assert.deepEqual(calls, ["!admin:matrix.example.test"]);
+  assert.equal(result.allow, true);
+  assert.equal(result.chatKey, "matrix:!admin:matrix.example.test");
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
 });

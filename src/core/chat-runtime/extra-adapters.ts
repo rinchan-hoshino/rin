@@ -2103,6 +2103,8 @@ export class MatrixAdapter {
       request: async (method: string, requestPath: string, body?: any) =>
         await this.request(method, requestPath, body),
       sendTyping: async (roomId: string) => await this.sendTyping(roomId),
+      joinedMembers: async (roomId: string) =>
+        await this.getJoinedMembers(roomId),
     };
     this.bot = {
       platform: "matrix",
@@ -2113,6 +2115,10 @@ export class MatrixAdapter {
       ],
       user: {},
       internal,
+      getGuildMemberCount: async (chatId: string) =>
+        await this.getGuildMemberCount(chatId),
+      getGuildMember: async (chatId: string, userId: string) =>
+        await this.getGuildMember(chatId, userId),
       sendMessage: async (chatId: string, content: any) =>
         await this.sendMessage(chatId, content),
     };
@@ -2245,20 +2251,33 @@ export class MatrixAdapter {
     this.handleSyncPayload(payload);
   }
 
-  private respondRooms() {
-    const rooms = this.config?.respondRooms || this.config?.respondRoomIds;
-    return new Set(
-      (Array.isArray(rooms) ? rooms : [])
-        .map((item) => safeString(item).trim())
-        .filter(Boolean),
+  private async getJoinedMembers(roomId: string) {
+    const payload = await this.request(
+      "GET",
+      `/_matrix/client/v3/rooms/${encodeMatrixPathSegment(roomId)}/joined_members`,
     );
+    return payload?.joined && typeof payload.joined === "object"
+      ? payload.joined
+      : {};
   }
 
-  private shouldRespond(roomId: string, content: string) {
-    const rooms = this.respondRooms();
-    if (rooms.has(roomId)) return true;
-    const self = safeString(this.bot?.selfId).trim();
-    return !!self && content.includes(self);
+  private async getGuildMemberCount(roomId: string) {
+    return Object.keys(await this.getJoinedMembers(roomId)).length;
+  }
+
+  private async getGuildMember(roomId: string, userId: string) {
+    const nextUserId = safeString(userId).trim();
+    if (!nextUserId) return null;
+    const members = await this.getJoinedMembers(roomId);
+    const member = members[nextUserId];
+    if (!member) return null;
+    return {
+      id: nextUserId,
+      userId: nextUserId,
+      status: "member",
+      name: safeString(member?.display_name).trim() || nextUserId,
+      avatar: safeString(member?.avatar_url).trim() || undefined,
+    };
   }
 
   private handleSyncPayload(payload: any) {
@@ -2286,6 +2305,8 @@ export class MatrixAdapter {
     const content = isText
       ? body
       : `[${messageType || "message"}] ${body}`.trim();
+    const selfId = safeString(this.bot?.selfId).trim();
+    const mentionSelf = !!selfId && content.includes(selfId);
     const session = {
       platform: "matrix",
       selfId: safeString(this.bot?.selfId).trim(),
@@ -2302,7 +2323,7 @@ export class MatrixAdapter {
       isDirect: false,
       content,
       stripped: {
-        appel: this.shouldRespond(roomId, content),
+        appel: mentionSelf,
         content,
       },
       elements: [normalizeNode("text", { content })],

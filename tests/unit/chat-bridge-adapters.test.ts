@@ -50,7 +50,6 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
     accessToken: "",
     accessTokenFile: "",
     syncTimeoutMs: 30000,
-    respondRooms: [],
   });
   assert.deepEqual(adapters.listSupportedChatBridgeLabels(), [
     "Telegram",
@@ -113,7 +112,6 @@ test("chat bridge adapter config materialization applies minimal setup defaults"
       matrix: {
         homeserverUrl: "https://matrix.example.test",
         accessTokenFile: "/run/secrets/matrix-token",
-        respondRooms: ["!room:example.test"],
       },
     },
   });
@@ -143,7 +141,6 @@ test("chat bridge adapter config materialization applies minimal setup defaults"
     accessToken: "",
     accessTokenFile: "/run/secrets/matrix-token",
     syncTimeoutMs: 30000,
-    respondRooms: ["!room:example.test"],
   });
 });
 
@@ -155,7 +152,6 @@ test("chat bridge runtime adapter entries expose only configured built-in adapte
       matrix: {
         homeserverUrl: "https://matrix.example.test",
         accessTokenFile: "/run/secrets/matrix-token",
-        respondRooms: ["!room:example.test"],
       },
       minecraft: { url: "ws://127.0.0.1:8080", selfId: "minecraft" },
     },

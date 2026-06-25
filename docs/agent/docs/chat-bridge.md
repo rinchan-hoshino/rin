@@ -100,8 +100,7 @@ Minimal built-in adapter examples:
     "slack": { "protocol": "ws", "token": "xapp-...", "botToken": "xoxb-..." },
     "matrix": {
       "homeserverUrl": "https://matrix.example.com",
-      "accessTokenFile": "/path/to/matrix-access-token",
-      "respondRooms": ["!roomid:matrix.example.com"]
+      "accessTokenFile": "/path/to/matrix-access-token"
     },
     "minecraft": {
       "url": "ws://127.0.0.1:8080",
