@@ -824,6 +824,77 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("selected session recovery ignores workers that are already stopping", async () => {
+  const dir = await makeTempDir("rin-worker-pool-stopping-route-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = "/tmp/stopping-route.jsonl";
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + '\n');
+    if (command.type === 'sleep_session') {
+      setTimeout(() => process.exit(0), 250);
+      continue;
+    }
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { cancelled: false, sessionFile, sessionId: 'stopping-route' },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  const original = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(original, {
+    sessionFile,
+    sessionId: "stopping-route",
+  });
+  pool.attachWorker(connection, original);
+
+  pool.sleepWorkerGracefully(original);
+  await waitForCommandLogPrefix(logPath, ["sleep_session"]);
+
+  const replacement = await pool.ensureSelectedWorker(connection);
+
+  assert.ok(replacement);
+  assert.notEqual(replacement, original);
+  assert.equal(connection.attachedWorker, replacement);
+  assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
+    "sleep_session",
+    "switch_session",
+  ]);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("detached idle worker sleeps instead of terminating the session", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");

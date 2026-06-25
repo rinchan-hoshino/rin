@@ -384,9 +384,16 @@ export class WorkerPool {
     }
     if (
       connection.attachedWorker &&
+      this.isWorkerRoutable(connection.attachedWorker) &&
       this.workerMatchesSelector(connection.attachedWorker, wanted)
     ) {
       return connection.attachedWorker;
+    }
+    if (
+      connection.attachedWorker &&
+      !this.isWorkerRoutable(connection.attachedWorker)
+    ) {
+      this.detachWorker(connection, { release: false });
     }
     const existing = this.findWorkerBySelector(wanted);
     if (existing) {
@@ -423,6 +430,7 @@ export class WorkerPool {
     if (selectedWorker) return selectedWorker;
     if (
       connection.attachedWorker &&
+      this.isWorkerRoutable(connection.attachedWorker) &&
       (!hasSessionSelector(selector)
         ? true
         : this.workerMatchesSelector(connection.attachedWorker, selector))
@@ -983,16 +991,19 @@ export class WorkerPool {
   }
 
   private findWorkerBySelector(selector: SessionSelector) {
-    if (
-      selector.sessionFile &&
-      this.workersBySessionFile.has(selector.sessionFile)
-    ) {
-      return this.workersBySessionFile.get(selector.sessionFile);
+    if (selector.sessionFile) {
+      const worker = this.workersBySessionFile.get(selector.sessionFile);
+      if (worker && this.isWorkerRoutable(worker)) return worker;
     }
-    if (selector.sessionId && this.workersBySessionId.has(selector.sessionId)) {
-      return this.workersBySessionId.get(selector.sessionId);
+    if (selector.sessionId) {
+      const worker = this.workersBySessionId.get(selector.sessionId);
+      if (worker && this.isWorkerRoutable(worker)) return worker;
     }
     return undefined;
+  }
+
+  private isWorkerRoutable(worker: WorkerHandle) {
+    return this.workers.has(worker) && !worker.gracefulShutdownRequested;
   }
 
   private sessionClaimKey(selector: SessionSelector) {
