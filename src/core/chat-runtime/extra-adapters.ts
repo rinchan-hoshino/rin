@@ -2346,17 +2346,23 @@ export class MatrixAdapter {
     await this.client.sendTyping(roomId, true, 5000);
   }
 
-  private async sendMessage(chatId: string, content: any) {
-    const { work, replyToMessageId } = prepareOutboundNodes(content);
-    const text = renderMarkdownFromNodes(work, {
-      includeMedia: false,
-      markdown: "preserve",
-      renderAt(attrs) {
-        const id = safeString(attrs.id).trim();
-        return id || safeString(attrs.name).trim();
-      },
-    }).trim();
-    if (!text) throw new Error("matrix_send_message_empty");
+  private applyReplyToMessageContent(
+    messageContent: Record<string, any>,
+    replyToMessageId?: string,
+  ) {
+    const eventId = safeString(replyToMessageId).trim();
+    if (!eventId) return messageContent;
+    messageContent["m.relates_to"] = {
+      "m.in_reply_to": { event_id: eventId },
+    };
+    return messageContent;
+  }
+
+  private async sendTextChunks(
+    chatId: string,
+    text: string,
+    replyToMessageId?: string,
+  ) {
     const chunks = splitPlainText(
       text,
       Number(this.config?.maxMessageLength) || 4000,
@@ -2365,15 +2371,13 @@ export class MatrixAdapter {
     let firstReply = replyToMessageId;
     for (const chunk of chunks) {
       const txnId = `rin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const messageContent: Record<string, any> = {
-        msgtype: "m.text",
-        body: chunk,
-      };
-      if (firstReply) {
-        messageContent["m.relates_to"] = {
-          "m.in_reply_to": { event_id: firstReply },
-        };
-      }
+      const messageContent = this.applyReplyToMessageContent(
+        {
+          msgtype: "m.text",
+          body: chunk,
+        },
+        firstReply,
+      );
       const result = await this.client.sendMessage(
         chatId,
         messageContent,
@@ -2383,6 +2387,109 @@ export class MatrixAdapter {
       if (eventId) delivered.push(eventId);
       firstReply = undefined;
     }
+    return delivered;
+  }
+
+  private async readMatrixMediaNode(node: any) {
+    const media = await readBinaryFromNode(node);
+    if (!media) return null;
+    if (media.data) return media;
+    const url = safeString(media.url).trim();
+    if (!url) return null;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        `Matrix media fetch failed with status ${response.status}`,
+      );
+    }
+    const data = Buffer.from(await response.arrayBuffer());
+    const mimeType =
+      safeString(media.mimeType).trim() ||
+      safeString(response.headers.get("content-type")).trim();
+    return { ...media, data, mimeType, url: undefined };
+  }
+
+  private async sendMediaNode(
+    chatId: string,
+    node: any,
+    replyToMessageId?: string,
+  ) {
+    const media = await this.readMatrixMediaNode(node);
+    if (!media?.data) return [] as string[];
+    const type = safeString(node?.type).toLowerCase();
+    const mimeType =
+      safeString(media.mimeType).trim() || "application/octet-stream";
+    const name =
+      ensureExtension(ensureFileName(media.name, type || "file"), mimeType) ||
+      "file";
+    const uploaded = await this.client.uploadContent(media.data, {
+      name,
+      type: mimeType,
+    });
+    const contentUri = safeString(uploaded?.content_uri).trim();
+    if (!contentUri) throw new Error("Matrix upload returned no content URI");
+    const msgtype =
+      type === "image" || (type === "sticker" && isImageMimeType(mimeType))
+        ? "m.image"
+        : type === "video"
+          ? "m.video"
+          : type === "audio"
+            ? "m.audio"
+            : "m.file";
+    const messageContent = this.applyReplyToMessageContent(
+      {
+        msgtype,
+        body: name,
+        url: contentUri,
+        info: compactObject({
+          mimetype: mimeType,
+          size: media.data.length,
+        }),
+      },
+      replyToMessageId,
+    );
+    const txnId = `rin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const result = await this.client.sendMessage(chatId, messageContent, txnId);
+    const eventId = safeString(result?.event_id).trim();
+    return eventId ? [eventId] : [];
+  }
+
+  private renderMatrixTextNodes(nodes: any[]) {
+    return renderMarkdownFromNodes(nodes, {
+      includeMedia: false,
+      markdown: "preserve",
+      renderAt(attrs) {
+        const id = safeString(attrs.id).trim();
+        return id || safeString(attrs.name).trim();
+      },
+    }).trim();
+  }
+
+  private async sendMessage(chatId: string, content: any) {
+    const { work, replyToMessageId } = prepareOutboundNodes(content);
+    const delivered: string[] = [];
+    let firstReply = replyToMessageId;
+    let textBatch: any[] = [];
+    const flushText = async () => {
+      const text = this.renderMatrixTextNodes(textBatch);
+      textBatch = [];
+      if (!text) return;
+      const messageIds = await this.sendTextChunks(chatId, text, firstReply);
+      delivered.push(...messageIds);
+      if (messageIds.length) firstReply = undefined;
+    };
+    for (const node of work) {
+      const type = safeString(node?.type).toLowerCase();
+      if (isOutboundMediaNodeType(type)) {
+        await flushText();
+        const messageIds = await this.sendMediaNode(chatId, node, firstReply);
+        delivered.push(...messageIds);
+        if (messageIds.length) firstReply = undefined;
+        continue;
+      }
+      textBatch.push(node);
+    }
+    await flushText();
     if (!delivered.length) throw new Error("matrix_send_message_empty_result");
     return delivered;
   }

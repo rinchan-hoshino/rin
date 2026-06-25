@@ -72,6 +72,91 @@ test("matrix adapter sends quote nodes as Matrix native reply relations through 
   });
 });
 
+test("matrix adapter sends image-only rich content as Matrix media", async () => {
+  const { adapter, app } = makeMatrixAdapter();
+  const sent: Array<{ roomId: string; content: any; txnId: string }> = [];
+  const uploaded: Array<{ data: Buffer; opts: any }> = [];
+  adapter.client = {
+    async uploadContent(data: Buffer, opts: any) {
+      uploaded.push({ data, opts });
+      return { content_uri: "mxc://matrix.example.test/image-1" };
+    },
+    async sendMessage(roomId: string, content: any, txnId: string) {
+      sent.push({ roomId, content, txnId });
+      return { event_id: `$sent-${sent.length}` };
+    },
+  };
+
+  const delivered = await app.bot.sendMessage("!room:matrix.example.test", [
+    { type: "quote", attrs: { id: "$parent-event" } },
+    {
+      type: "image",
+      attrs: {
+        data: Buffer.from("png-bytes"),
+        name: "preview.png",
+        mimeType: "image/png",
+      },
+    },
+  ]);
+
+  assert.deepEqual(delivered, ["$sent-1"]);
+  assert.equal(uploaded.length, 1);
+  assert.equal(uploaded[0].data.toString(), "png-bytes");
+  assert.deepEqual(uploaded[0].opts, {
+    name: "preview.png",
+    type: "image/png",
+  });
+  assert.deepEqual(sent[0].content, {
+    msgtype: "m.image",
+    body: "preview.png",
+    url: "mxc://matrix.example.test/image-1",
+    info: { mimetype: "image/png", size: 9 },
+    "m.relates_to": {
+      "m.in_reply_to": { event_id: "$parent-event" },
+    },
+  });
+});
+
+test("matrix adapter preserves text and media order while only quoting the first event", async () => {
+  const { adapter, app } = makeMatrixAdapter();
+  const sent: Array<{ content: any }> = [];
+  adapter.client = {
+    async uploadContent() {
+      return { content_uri: "mxc://matrix.example.test/file-1" };
+    },
+    async sendMessage(_roomId: string, content: any) {
+      sent.push({ content });
+      return { event_id: `$sent-${sent.length}` };
+    },
+  };
+
+  const delivered = await app.bot.sendMessage("!room:matrix.example.test", [
+    { type: "quote", attrs: { id: "$parent-event" } },
+    { type: "text", attrs: { content: "before" } },
+    {
+      type: "file",
+      attrs: {
+        data: Buffer.from("file-bytes"),
+        name: "report.bin",
+        mimeType: "application/octet-stream",
+      },
+    },
+    { type: "text", attrs: { content: "after" } },
+  ]);
+
+  assert.deepEqual(delivered, ["$sent-1", "$sent-2", "$sent-3"]);
+  assert.equal(sent[0].content.msgtype, "m.text");
+  assert.equal(sent[0].content.body, "before");
+  assert.deepEqual(sent[0].content["m.relates_to"], {
+    "m.in_reply_to": { event_id: "$parent-event" },
+  });
+  assert.equal(sent[1].content.msgtype, "m.file");
+  assert.equal(sent[1].content["m.relates_to"], undefined);
+  assert.equal(sent[2].content.msgtype, "m.text");
+  assert.equal(sent[2].content.body, "after");
+  assert.equal(sent[2].content["m.relates_to"], undefined);
+});
+
 test("matrix adapter exposes inbound Matrix reply relations as chat quotes", () => {
   const { adapter, sessions } = makeMatrixAdapter();
 
