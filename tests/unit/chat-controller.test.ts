@@ -2070,11 +2070,14 @@ test("chat controller keeps working reaction on current message while steer is q
     restoredController.hasPendingSteeredDeliveryTarget("m-steer"),
     true,
   );
-  assert.deepEqual(actions, []);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
   assert.deepEqual(reactions, []);
 
   await controller.pollTyping();
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(actions, [
+    { chat_id: "2", action: "typing" },
+    { chat_id: "2", action: "typing" },
+  ]);
   assert.deepEqual(reactions, [["create", "2", "m-first", "🤔"]]);
 
   await controller.handleClientEvent({
@@ -2104,6 +2107,7 @@ test("chat controller keeps working reaction on current message while steer is q
     "steered inbox item should be processed when Pi starts the user message",
   );
   assert.deepEqual(actions, [
+    { chat_id: "2", action: "typing" },
     { chat_id: "2", action: "typing" },
     { chat_id: "2", action: "typing" },
   ]);

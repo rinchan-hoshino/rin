@@ -673,6 +673,37 @@ export class ChatController {
     return results.some(Boolean);
   }
 
+  private async sendImmediateTyping(
+    input: {
+      replyToMessageId?: string;
+    } = {},
+  ) {
+    if (!this.canDeliverReplies()) return false;
+    const indicators = this.activeWorkingIndicators.length
+      ? this.activeWorkingIndicators
+      : this.getWorkingIndicators();
+    this.activeWorkingIndicators = indicators;
+    const context = this.workingIndicatorContext({
+      event: "tick",
+      messageId: undefined,
+      replyToMessageId:
+        safeString(input.replyToMessageId || "").trim() || undefined,
+      reactionDue: false,
+      reactionTick: this.workingReactionTick,
+      reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
+    });
+    const results = await Promise.all(
+      indicators
+        .filter((indicator) => workingIndicatorKind(indicator) === "polling")
+        .map((indicator) =>
+          this.callWorkingIndicator(indicator, "tick", context).catch(
+            () => false,
+          ),
+        ),
+    );
+    return results.some(Boolean);
+  }
+
   private async clearCompactionWorkingReaction() {
     const indicators = this.compactionWorkingIndicators.length
       ? this.compactionWorkingIndicators
@@ -1715,6 +1746,14 @@ export class ChatController {
         startedAt: Date.now(),
       });
       const submittedText = formatPromptForChatContext(text, input.promptMeta);
+      if (deliverFinal) {
+        await Promise.race([
+          this.sendImmediateTyping({
+            replyToMessageId: input.replyToMessageId,
+          }).catch(() => false),
+          new Promise((resolve) => setImmediate(resolve)),
+        ]);
+      }
       const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
         text: submittedText,
         images,
