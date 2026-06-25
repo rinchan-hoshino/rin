@@ -72,9 +72,9 @@
     "promotionVersion": "0.5.0"
   },
   "nightly": {
-    "version": "0.6.0-nightly.20260624+8e6910c",
-    "archiveUrl": "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/8e6910c6066aa278f25c5ddbae95cf21352996ad",
-    "ref": "8e6910c6066aa278f25c5ddbae95cf21352996ad",
+    "version": "0.6.0-nightly.20260625+c0d4930",
+    "archiveUrl": "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/c0d49301a66802b253ab72eabace053323003e94",
+    "ref": "c0d49301a66802b253ab72eabace053323003e94",
     "branch": "main"
   },
   "git": {
