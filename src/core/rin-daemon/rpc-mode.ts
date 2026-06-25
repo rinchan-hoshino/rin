@@ -1062,7 +1062,6 @@ export async function runCustomRpcMode(
           await session.abort();
         } catch {}
         await runtime.dispose();
-        await forceFlushSessionFile(session);
         output(done(id, type, { shutdown: true }));
         return process.exit(0);
       }
@@ -1070,7 +1069,6 @@ export async function runCustomRpcMode(
         try {
           await session.abort();
         } catch {}
-        await forceFlushSessionFile(session);
         session.dispose();
         output(done(id, type, { sleeping: true }));
         return process.exit(0);

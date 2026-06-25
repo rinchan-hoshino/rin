@@ -98,7 +98,6 @@ test(
 
       assert.deepEqual(calls, [
         "session.abort",
-        "session.flush",
         "session.dispose",
         "process.exit",
       ]);
@@ -111,7 +110,7 @@ test(
 );
 
 test(
-  "rpc mode shutdown_session disposes runtime with stable frontend identity and flushes the session file",
+  "rpc mode shutdown_session disposes runtime with stable frontend identity",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -174,11 +173,7 @@ test(
       );
       await wait(20);
 
-      assert.deepEqual(calls, [
-        "runtime.dispose:tui",
-        "session.flush",
-        "process.exit",
-      ]);
+      assert.deepEqual(calls, ["runtime.dispose:tui", "process.exit"]);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
