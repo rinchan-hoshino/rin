@@ -7,6 +7,10 @@
 - Chat delivery and notices are calmer and clearer with restored stranded inbox items, fewer artificial inbox caps, markdown todo strikethrough rendering, improved todo notice rendering, quiet handling for missing adapter state, more reliable Telegram Bot API routing, longer-lived working indicators, and retry-exhaustion errors that surface to chat users.
 - Prompts now require current web sources when source-dependent information matters, and context pruning keeps loaded skill guidance available.
 - Beta, stable, and nightly release metadata commits now use the verified release gate explicitly, so executor metadata updates are not blocked by local hooks after validation already passed.
+- Matrix chat support now has a runtime adapter with shared room routing, SDK-based media sending, and throttled isolated typing requests.
+- Daemon/session shutdown is safer around lifecycle cancellation, worker exits, session routing, and in-flight turn settlement.
+- Chat steering and diagnostics are tighter with accepted-inbox deduplication and a compact usage command.
+- Rin now tracks the Pi 0.80.2 dependency line for this release series.
 
 - Diagnostic commands now have dedicated interactive TUI frontends with shared backend logic for cleaner troubleshooting workflows.
 - Runtime and installer version reporting now use concrete release metadata instead of changelog fallbacks, with stricter git bootstrap version resolution and BOM-tolerant metadata reads.
@@ -84,6 +88,21 @@ b993261 fix(chat): route Telegram Bot API through grammY
 d4f0f1a feat(prompt): require current web sources
 4d89f80 fix(context): preserve skill read results when pruning
 5dd0364 chore: sync Pi 0.80.1
+c1d6300 chore(deps): sync Pi 0.80.2
+7f4f09f fix(session): settle turns before lifecycle shutdown
+adf634f fix(daemon): skip stopping workers for session routing
+4a5dedb feat(chat): add Matrix runtime adapter
+42f0628 fix(chat): use shared routing for Matrix rooms
+d8bb1ac fix(chat): send typing for steered chat turns
+be830d1 Revert "fix(chat): send typing for steered chat turns"
+e662480 fix(daemon): stop flushing sessions on worker exit
+0c80991 fix(chat): make frontend lifecycle cancellation silent
+80af2d1 fix(chat): migrate Matrix adapter to SDK
+276128e fix(chat): send Matrix media through SDK
+431722e fix(chat): dedupe accepted steering inbox items
+b385a9c feat(chat): add compact usage command
+39af518 fix(chat): throttle Matrix typing requests
+8d1a85c fix(chat): isolate Matrix typing requests
 -->
 
 ## 0.5.0
