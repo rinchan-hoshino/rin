@@ -440,6 +440,32 @@ test("frontend SDK turn driver uses configured built-in command responses", asyn
   );
 });
 
+test("frontend SDK dispose settles an active turn with internal lifecycle cancellation", async () => {
+  const client = createFrontendClient();
+  let promptStarted = false;
+  client.prompt = async () => {
+    promptStarted = true;
+    await new Promise(() => {});
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const activeTurn = driver.runTurn({ text: "still running" });
+  activeTurn.catch(() => {});
+  await waitUntil(() => promptStarted, "active turn did not start");
+
+  driver.dispose();
+
+  await assert.rejects(activeTurn, (error: any) => {
+    assert.equal(error?.message, "rin_frontend_turn_cancelled");
+    assert.notEqual(error?.message, "frontend_turn_driver_disposed");
+    assert.equal(error?.silentChatRetry, true);
+    return true;
+  });
+});
+
 test("frontend SDK /new interrupts an active turn before creating the new session", async () => {
   const client = createFrontendClient();
   let promptStarted = false;

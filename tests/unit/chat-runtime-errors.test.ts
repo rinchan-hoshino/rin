@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   formatChatRuntimeErrorForUser,
+  isSilentChatRuntimeRetryError,
   isTransientChatRuntimeError,
 } from "../../src/core/chat/runtime-errors.js";
 
@@ -15,10 +16,18 @@ test("chat runtime treats websocket provider failures as transient", () => {
   );
 });
 
-test("chat runtime treats frontend turn disposal as transient", () => {
+test("chat runtime treats frontend lifecycle cancellation as silent transient", () => {
+  assert.equal(
+    isTransientChatRuntimeError("rin_frontend_turn_cancelled"),
+    true,
+  );
+  assert.equal(
+    isSilentChatRuntimeRetryError("rin_frontend_turn_cancelled"),
+    true,
+  );
   assert.equal(
     isTransientChatRuntimeError("frontend_turn_driver_disposed"),
-    true,
+    false,
   );
 });
 

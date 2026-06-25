@@ -60,8 +60,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin restarted the chat controller while handling this message.",
   chat_final_assistant_text_missing: () =>
     "Rin finished the chat turn but did not produce reply text.",
-  chat_frontend_driver_disposed: () =>
-    "Rin stopped the chat driver while recovering.",
   chat_inbox_chatKey_required: () =>
     "Chat inbox write failed because the chat key is missing. Check the adapter event.",
   chat_inbox_messageId_required: () =>
@@ -175,8 +173,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin waited for context compaction to finish, but it took too long.",
   frontend_turn_already_running: () =>
     "A turn is already running in this session. Wait for it to finish or abort it.",
-  frontend_turn_driver_disposed: () =>
-    "Rin stopped the previous chat driver while recovering.",
 
   matrix_access_token_required: () =>
     "Matrix adapter needs an access token before it can start. Add the token or token file.",

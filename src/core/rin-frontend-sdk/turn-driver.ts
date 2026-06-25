@@ -29,6 +29,7 @@ import {
   sourceFrontendIdentity,
   type RinFrontendIdentity,
 } from "./frontend-identity.js";
+import { createRinFrontendTurnCancelledError } from "./lifecycle-errors.js";
 import { injectPromptContextHeader } from "./prompt-context.js";
 import {
   submitNativeFrontendPromptTurn,
@@ -117,7 +118,7 @@ function isAgentAlreadyProcessingError(error: unknown) {
 function isRecoverableConnectionError(error: unknown) {
   const message = safeString((error as any)?.message || error);
   if (message.includes("rpc_turn_queued_offline")) return false;
-  return /rin_tui_not_connected|rin_disconnected|rin_session_recovering|frontend_turn_driver_disposed/.test(
+  return /rin_tui_not_connected|rin_disconnected|rin_session_recovering/.test(
     message,
   );
 }
@@ -212,7 +213,7 @@ export class RinFrontendTurnDriver {
   }
 
   dispose() {
-    this.failLiveTurn(new Error("frontend_turn_driver_disposed"));
+    this.failLiveTurn(createRinFrontendTurnCancelledError());
     this.resetAssistantSegmentTracking();
     this.frontendPhase = "idle";
     const client = this.client;

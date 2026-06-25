@@ -113,6 +113,7 @@ import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
 import {
   formatChatRuntimeErrorForUser,
+  isSilentChatRuntimeRetryError,
   isTransientChatRuntimeError,
 } from "./runtime-errors.js";
 
@@ -752,7 +753,11 @@ export async function startChatBridge(
         ).catch(() => {});
         void controller.clearProcessingState().catch(() => {});
       }
-      return { retry: transientFailure, errorMessage };
+      return {
+        retry: transientFailure,
+        errorMessage,
+        suppressRetryNotice: isSilentChatRuntimeRetryError(error),
+      };
     };
     try {
       await controller.runTurn({
@@ -795,7 +800,7 @@ export async function startChatBridge(
     job: ClaimedChatInboxJob,
     result: ChatInboxJobResult | undefined,
   ) => {
-    if (!result?.retry) return;
+    if (!result?.retry || result.suppressRetryNotice) return;
     const chatKey = safeString(job.envelope.chatKey).trim();
     if (!chatKey) return;
     const errorMessage = safeString(

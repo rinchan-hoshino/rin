@@ -1764,7 +1764,7 @@ test("chat main reports a transient daemon startup failure before retrying", asy
   }
 });
 
-test("chat main reports a disposed frontend turn before retrying", async () => {
+test("chat main silently retries frontend lifecycle cancellation", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1833,7 +1833,7 @@ test("chat main reports a disposed frontend turn before retrying", async () => {
       controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
         runTurnCalls += 1;
         if (runTurnCalls === 1) {
-          throw new Error("chat_frontend_driver_disposed");
+          throw new Error("rin_frontend_turn_cancelled");
         }
         return await originalRunTurn.call(this, input, mode);
       };
@@ -1876,10 +1876,10 @@ test("chat main reports a disposed frontend turn before retrying", async () => {
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const retryNotice = rows.find((item) => String(item.text || "").includes("disposed") && !String(item.text || "").includes("retrying"));
+      const leakedRetryNotice = rows.find((item) => String(item.text || "").includes("rin_frontend_turn_cancelled"));
       const succeeded = rows.some((item) => item.text === "retry after dispose");
-      if (!succeeded || !retryNotice || runTurnCalls < 2 || connectCalls < 1) {
-        throw new Error(JSON.stringify({ runTurnCalls, connectCalls, retryNotice, rows }));
+      if (!succeeded || leakedRetryNotice || runTurnCalls < 2 || connectCalls < 1) {
+        throw new Error(JSON.stringify({ runTurnCalls, connectCalls, leakedRetryNotice, rows }));
       }
       process.exit(0);
     `;
