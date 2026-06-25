@@ -517,6 +517,14 @@ export class ChatController {
     );
   }
 
+  ownsInboundMessage(messageId?: string) {
+    return (
+      this.claimsInboundMessage(messageId) ||
+      this.hasBackendAcceptedInboundMessage(messageId) ||
+      this.hasPendingSteeredDeliveryTarget(messageId)
+    );
+  }
+
   private async activatePendingSteeredDeliveryTarget(startedText?: string) {
     const text = safeString(startedText || "").trim();
     if (!text || !this.pendingSteeredDeliveryTargets.length) return false;

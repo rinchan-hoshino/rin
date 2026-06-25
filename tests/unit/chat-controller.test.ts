@@ -2050,6 +2050,7 @@ test("chat controller keeps working reaction on current message while steer is q
   assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
   assert.equal(controller.currentTurn?.replyToMessageId, "m-first");
   assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
+  assert.equal(controller.ownsInboundMessage("m-steer"), true);
   const steeredState = JSON.parse(
     await fs.readFile(controller.statePath, "utf8"),
   );

@@ -808,6 +808,45 @@ test("chat inbox drain lets active-turn work bypass a busy chat-key worker", asy
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
 });
 
+test("chat inbox drain drops duplicate envelopes already owned by active steering", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  for (const messageId of ["pending-steer", "accepted-steer"]) {
+    inbox.enqueueChatInboxItem(agentDir, {
+      chatKey: "telegram/1:active-steering-dedupe",
+      messageId,
+      session: {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "active-steering-dedupe",
+        userId: "3",
+        messageId,
+        timestamp: Date.now(),
+        content: "steered duplicate",
+        stripped: { content: "steered duplicate" },
+      },
+      elements: [{ type: "text", attrs: { content: "steered duplicate" } }],
+    });
+  }
+
+  const claimedJobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      claimsInboundMessage: () => false,
+      ownsInboundMessage: (messageId) =>
+        messageId === "pending-steer" || messageId === "accepted-steer",
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.equal(claimedJobs.length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
+});
+
 test("chat inbox drain leaves processing recovery to startup instead of stale polling", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   inbox.enqueueChatInboxItem(agentDir, {

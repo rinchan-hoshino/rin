@@ -136,7 +136,7 @@ export function createChatInboxDrain(deps: {
           : envelope.chatKey
             ? deps.getController(envelope.chatKey)
             : null;
-      if (controller?.claimsInboundMessage(envelope.messageId)) {
+      if (controller?.ownsInboundMessage?.(envelope.messageId)) {
         completeChatInboxFile(claimedPath);
         continue;
       }
