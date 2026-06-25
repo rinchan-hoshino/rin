@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { ClientEvent, createClient, RoomEvent } from "matrix-js-sdk";
+import { MemoryStore } from "matrix-js-sdk/lib/store/memory.js";
 import WebSocket from "ws";
 
 import { getWorkingReactionFrame } from "../chat/transport.js";
@@ -2077,11 +2079,11 @@ export class MatrixAdapter {
   private readonly logger: any;
   private readonly cacheDir: string;
   private readonly statePath: string;
-  private stopped = false;
-  private loopPromise: Promise<void> | null = null;
   private since = "";
   private accessToken = "";
   private baseUrl = "";
+  private store: MemoryStore | null = null;
+  private client: any = null;
   readonly bot: any;
 
   constructor(
@@ -2144,15 +2146,50 @@ export class MatrixAdapter {
       userId: this.bot.selfId,
       name: this.bot.selfId,
     };
+    this.store = new MemoryStore();
+    if (this.since) this.store.setSyncToken(this.since);
+    this.client = createClient({
+      baseUrl: this.baseUrl,
+      accessToken: this.accessToken,
+      userId: this.bot.selfId,
+      store: this.store,
+      timelineSupport: false,
+      useAuthorizationHeader: true,
+    });
+    this.client.on(
+      RoomEvent.Timeline,
+      (event: any, room: any, toStartOfTimeline: boolean) => {
+        if (toStartOfTimeline) return;
+        this.handleSdkRoomEvent(room, event);
+      },
+    );
+    this.client.on(ClientEvent.Sync, (state: string) => {
+      const token = safeString(this.store?.getSyncToken()).trim();
+      if (token && token !== this.since) {
+        this.since = token;
+        this.saveState();
+      }
+      if (state === "ERROR") {
+        emitBotStatus(this.app, this.bot, 0);
+      } else if (state === "PREPARED" || state === "SYNCING") {
+        emitBotStatus(this.app, this.bot, 1);
+      }
+    });
+    await this.client.startClient({
+      initialSyncLimit: 0,
+      pollTimeout: Math.max(1000, Number(this.config?.syncTimeoutMs) || 30000),
+      lazyLoadMembers: true,
+      disablePresence: true,
+    });
     emitBotStatus(this.app, this.bot, 1);
-    this.stopped = false;
-    this.loopPromise = this.runLoop();
   }
 
   async stop() {
-    this.stopped = true;
-    await this.loopPromise?.catch(() => {});
-    this.loopPromise = null;
+    try {
+      this.client?.stopClient?.();
+    } catch {}
+    this.client = null;
+    this.store = null;
     emitBotStatus(this.app, this.bot, 0);
   }
 
@@ -2217,45 +2254,13 @@ export class MatrixAdapter {
     return parsed;
   }
 
-  private async runLoop() {
-    while (!this.stopped) {
-      try {
-        await this.syncOnce();
-      } catch (error: any) {
-        if (!this.stopped) {
-          this.logger?.warn?.(
-            `sync failed err=${safeString(error?.message || error)}`,
-          );
-          emitBotStatus(this.app, this.bot, 0);
-          await sleep(3000);
-          emitBotStatus(this.app, this.bot, 1);
-        }
-      }
-    }
-  }
-
-  private async syncOnce() {
-    const timeout = Math.max(1000, Number(this.config?.syncTimeoutMs) || 30000);
-    const params = new URLSearchParams({
-      timeout: this.since ? String(timeout) : "0",
-    });
-    if (this.since) params.set("since", this.since);
-    const payload = await this.request(
-      "GET",
-      `/_matrix/client/v3/sync?${params}`,
-    );
-    const previousSince = this.since;
-    this.since = safeString(payload?.next_batch).trim() || this.since;
-    if (this.since) this.saveState();
-    if (!previousSince) return;
-    this.handleSyncPayload(payload);
-  }
-
   private async getJoinedMembers(roomId: string) {
-    const payload = await this.request(
-      "GET",
-      `/_matrix/client/v3/rooms/${encodeMatrixPathSegment(roomId)}/joined_members`,
-    );
+    const payload = this.client?.getJoinedRoomMembers
+      ? await this.client.getJoinedRoomMembers(roomId)
+      : await this.request(
+          "GET",
+          `/_matrix/client/v3/rooms/${encodeMatrixPathSegment(roomId)}/joined_members`,
+        );
     return payload?.joined && typeof payload.joined === "object"
       ? payload.joined
       : {};
@@ -2280,15 +2285,16 @@ export class MatrixAdapter {
     };
   }
 
-  private handleSyncPayload(payload: any) {
-    const joined = payload?.rooms?.join;
-    if (!joined || typeof joined !== "object") return;
-    for (const [roomId, room] of Object.entries(joined)) {
-      const events = Array.isArray((room as any)?.timeline?.events)
-        ? (room as any).timeline.events
-        : [];
-      for (const event of events) this.handleRoomEvent(roomId, event);
-    }
+  private handleSdkRoomEvent(room: any, event: any) {
+    const roomId = safeString(room?.roomId).trim();
+    if (!roomId) return;
+    this.handleRoomEvent(roomId, {
+      type: event?.getType?.(),
+      event_id: event?.getId?.(),
+      sender: event?.getSender?.(),
+      origin_server_ts: event?.getTs?.(),
+      content: event?.getContent?.(),
+    });
   }
 
   private handleRoomEvent(roomId: string, event: any) {
@@ -2300,6 +2306,9 @@ export class MatrixAdapter {
     const body = safeString(event?.content?.body).trim();
     if (!body) return;
     const messageId = safeString(event?.event_id).trim();
+    const replyToMessageId = safeString(
+      event?.content?.["m.relates_to"]?.["m.in_reply_to"]?.event_id,
+    ).trim();
     const isText =
       messageType === "m.text" || messageType === "m.notice" || !messageType;
     const content = isText
@@ -2327,22 +2336,18 @@ export class MatrixAdapter {
         content,
       },
       elements: [normalizeNode("text", { content })],
+      quote: replyToMessageId ? { messageId: replyToMessageId } : undefined,
     };
     this.app.emit("message", session);
   }
 
   private async sendTyping(roomId: string) {
-    const userId = safeString(this.bot?.selfId).trim();
-    if (!userId) return;
-    await this.request(
-      "PUT",
-      `/_matrix/client/v3/rooms/${encodeMatrixPathSegment(roomId)}/typing/${encodeMatrixPathSegment(userId)}`,
-      { typing: true, timeout: 5000 },
-    );
+    if (!this.client) return;
+    await this.client.sendTyping(roomId, true, 5000);
   }
 
   private async sendMessage(chatId: string, content: any) {
-    const { work } = prepareOutboundNodes(content);
+    const { work, replyToMessageId } = prepareOutboundNodes(content);
     const text = renderMarkdownFromNodes(work, {
       includeMedia: false,
       markdown: "preserve",
@@ -2357,15 +2362,26 @@ export class MatrixAdapter {
       Number(this.config?.maxMessageLength) || 4000,
     );
     const delivered: string[] = [];
+    let firstReply = replyToMessageId;
     for (const chunk of chunks) {
       const txnId = `rin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const result = await this.request(
-        "PUT",
-        `/_matrix/client/v3/rooms/${encodeMatrixPathSegment(chatId)}/send/m.room.message/${txnId}`,
-        { msgtype: "m.text", body: chunk },
+      const messageContent: Record<string, any> = {
+        msgtype: "m.text",
+        body: chunk,
+      };
+      if (firstReply) {
+        messageContent["m.relates_to"] = {
+          "m.in_reply_to": { event_id: firstReply },
+        };
+      }
+      const result = await this.client.sendMessage(
+        chatId,
+        messageContent,
+        txnId,
       );
       const eventId = safeString(result?.event_id).trim();
       if (eventId) delivered.push(eventId);
+      firstReply = undefined;
     }
     if (!delivered.length) throw new Error("matrix_send_message_empty_result");
     return delivered;
