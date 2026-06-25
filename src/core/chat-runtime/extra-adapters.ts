@@ -32,6 +32,9 @@ import {
 
 const DISCORD_MAX_TEXT_LENGTH = 2000;
 const SLACK_MAX_TEXT_LENGTH = 40000;
+const MATRIX_TYPING_TIMEOUT_MS = 60000;
+const MATRIX_TYPING_MIN_INTERVAL_MS = 30000;
+const MATRIX_TYPING_MAX_IN_FLIGHT = 1;
 
 function isOutboundMediaNodeType(type: string) {
   return ["image", "file", "video", "audio", "sticker"].includes(type);
@@ -52,14 +55,14 @@ function createPollingWorkingIndicator(platform: string, getBot: () => any) {
       if (!chatId) return false;
       let sent = false;
       if (typeof bot?.internal?.sendChatAction === "function") {
-        await bot.internal.sendChatAction({
+        const result = await bot.internal.sendChatAction({
           chat_id: chatId,
           action: "typing",
         });
-        sent = true;
+        sent = result !== false;
       } else if (typeof bot?.internal?.sendTyping === "function") {
-        await bot.internal.sendTyping(chatId);
-        sent = true;
+        const result = await bot.internal.sendTyping(chatId);
+        sent = result !== false;
       }
       const messageId = safeString(context?.messageId).trim();
       const createReaction =
@@ -2084,6 +2087,9 @@ export class MatrixAdapter {
   private baseUrl = "";
   private store: MemoryStore | null = null;
   private client: any = null;
+  private readonly typingInFlightRooms = new Set<string>();
+  private readonly lastTypingStartedAtByRoom = new Map<string, number>();
+  private matrixTypingInFlightCount = 0;
   readonly bot: any;
 
   constructor(
@@ -2190,6 +2196,9 @@ export class MatrixAdapter {
     } catch {}
     this.client = null;
     this.store = null;
+    this.typingInFlightRooms.clear();
+    this.lastTypingStartedAtByRoom.clear();
+    this.matrixTypingInFlightCount = 0;
     emitBotStatus(this.app, this.bot, 0);
   }
 
@@ -2342,8 +2351,35 @@ export class MatrixAdapter {
   }
 
   private async sendTyping(roomId: string) {
-    if (!this.client) return;
-    await this.client.sendTyping(roomId, true, 5000);
+    if (!this.client) return false;
+    const targetRoomId = safeString(roomId).trim();
+    if (!targetRoomId) return false;
+    const now = Date.now();
+    if (this.typingInFlightRooms.has(targetRoomId)) return false;
+    if (this.matrixTypingInFlightCount >= MATRIX_TYPING_MAX_IN_FLIGHT) {
+      return false;
+    }
+    const lastStartedAt = this.lastTypingStartedAtByRoom.get(targetRoomId) || 0;
+    if (lastStartedAt && now - lastStartedAt < MATRIX_TYPING_MIN_INTERVAL_MS) {
+      return false;
+    }
+    this.typingInFlightRooms.add(targetRoomId);
+    this.matrixTypingInFlightCount += 1;
+    this.lastTypingStartedAtByRoom.set(targetRoomId, now);
+    try {
+      await this.client.sendTyping(
+        targetRoomId,
+        true,
+        MATRIX_TYPING_TIMEOUT_MS,
+      );
+      return true;
+    } finally {
+      this.typingInFlightRooms.delete(targetRoomId);
+      this.matrixTypingInFlightCount = Math.max(
+        0,
+        this.matrixTypingInFlightCount - 1,
+      );
+    }
   }
 
   private applyReplyToMessageContent(
@@ -2455,9 +2491,9 @@ export class MatrixAdapter {
   }
 
   private renderMatrixTextNodes(nodes: any[]) {
-    return renderMarkdownFromNodes(nodes, {
+    return renderPlainTextFromNodes(nodes, {
       includeMedia: false,
-      markdown: "preserve",
+      markdown: "strip",
       renderAt(attrs) {
         const id = safeString(attrs.id).trim();
         return id || safeString(attrs.name).trim();
