@@ -35,6 +35,7 @@ const SLACK_MAX_TEXT_LENGTH = 40000;
 const MATRIX_TYPING_TIMEOUT_MS = 60000;
 const MATRIX_TYPING_MIN_INTERVAL_MS = 30000;
 const MATRIX_TYPING_MAX_IN_FLIGHT = 1;
+const MATRIX_TYPING_REQUEST_TIMEOUT_MS = 8000;
 
 function isOutboundMediaNodeType(type: string) {
   return ["image", "file", "video", "audio", "sticker"].includes(type);
@@ -2367,12 +2368,35 @@ export class MatrixAdapter {
     this.matrixTypingInFlightCount += 1;
     this.lastTypingStartedAtByRoom.set(targetRoomId, now);
     try {
-      await this.client.sendTyping(
-        targetRoomId,
-        true,
-        MATRIX_TYPING_TIMEOUT_MS,
+      const userId = safeString(this.bot?.selfId).trim();
+      if (!this.baseUrl || !this.accessToken || !userId) return false;
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(),
+        MATRIX_TYPING_REQUEST_TIMEOUT_MS,
       );
-      return true;
+      try {
+        const response = await fetch(
+          `${this.baseUrl}/_matrix/client/v3/rooms/${encodeMatrixPathSegment(targetRoomId)}/typing/${encodeMatrixPathSegment(userId)}`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${this.accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              typing: true,
+              timeout: MATRIX_TYPING_TIMEOUT_MS,
+            }),
+            signal: controller.signal,
+          },
+        );
+        return response.ok;
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(timeout);
+      }
     } finally {
       this.typingInFlightRooms.delete(targetRoomId);
       this.matrixTypingInFlightCount = Math.max(

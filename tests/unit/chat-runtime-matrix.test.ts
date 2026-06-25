@@ -44,79 +44,95 @@ function makeMatrixAdapter() {
   return { adapter, app, sessions };
 }
 
-test("matrix adapter extends typing timeout beyond the bridge poll interval", async () => {
-  const { adapter, app } = makeMatrixAdapter();
-  const calls: Array<{ roomId: string; typing: boolean; timeoutMs: number }> =
-    [];
-  adapter.client = {
-    async sendTyping(roomId: string, typing: boolean, timeoutMs: number) {
-      calls.push({ roomId, typing, timeoutMs });
-    },
+function mockFetch(handler: typeof fetch) {
+  const original = globalThis.fetch;
+  globalThis.fetch = handler;
+  return () => {
+    globalThis.fetch = original;
   };
+}
 
-  const sent = await app.bot.internal.sendTyping("!room:matrix.example.test");
+test("matrix adapter sends typing through an isolated Matrix API request", async () => {
+  const { adapter, app } = makeMatrixAdapter();
+  adapter.client = {};
+  const calls: Array<{ url: string; init: any }> = [];
+  const restoreFetch = mockFetch(async (url: any, init: any) => {
+    calls.push({ url: String(url), init });
+    return new Response("{}", { status: 200 });
+  });
+  try {
+    const sent = await app.bot.internal.sendTyping("!room:matrix.example.test");
 
-  assert.equal(sent, true);
-  assert.deepEqual(calls, [
-    {
-      roomId: "!room:matrix.example.test",
+    assert.equal(sent, true);
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0].url,
+      "https://matrix.example.test/_matrix/client/v3/rooms/!room:matrix.example.test/typing/%40rinchan:matrix.example.test",
+    );
+    assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
       typing: true,
-      timeoutMs: 60000,
-    },
-  ]);
+      timeout: 60000,
+    });
+  } finally {
+    restoreFetch();
+  }
 });
 
 test("matrix adapter suppresses overlapping typing requests per room", async () => {
   const { adapter, app } = makeMatrixAdapter();
-  const calls: Array<{ roomId: string; typing: boolean; timeoutMs: number }> =
-    [];
+  adapter.client = {};
+  const calls: string[] = [];
   let resolveTyping!: () => void;
-  adapter.client = {
-    async sendTyping(roomId: string, typing: boolean, timeoutMs: number) {
-      calls.push({ roomId, typing, timeoutMs });
-      await new Promise<void>((resolve) => {
-        resolveTyping = resolve;
-      });
-    },
-  };
+  const restoreFetch = mockFetch(async (url: any) => {
+    calls.push(String(url));
+    await new Promise<void>((resolve) => {
+      resolveTyping = resolve;
+    });
+    return new Response("{}", { status: 200 });
+  });
+  try {
+    const first = app.bot.internal.sendTyping("!room:matrix.example.test");
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = await app.bot.internal.sendTyping(
+      "!room:matrix.example.test",
+    );
+    resolveTyping();
 
-  const first = app.bot.internal.sendTyping("!room:matrix.example.test");
-  await new Promise((resolve) => setImmediate(resolve));
-  const second = await app.bot.internal.sendTyping("!room:matrix.example.test");
-  resolveTyping();
-
-  assert.equal(second, false);
-  assert.equal(await first, true);
-  assert.equal(calls.length, 1);
+    assert.equal(second, false);
+    assert.equal(await first, true);
+    assert.equal(calls.length, 1);
+  } finally {
+    restoreFetch();
+  }
 });
 
 test("matrix adapter suppresses concurrent typing requests across rooms", async () => {
   const { adapter, app } = makeMatrixAdapter();
-  const calls: Array<{ roomId: string; typing: boolean; timeoutMs: number }> =
-    [];
+  adapter.client = {};
+  const calls: string[] = [];
   let resolveTyping!: () => void;
-  adapter.client = {
-    async sendTyping(roomId: string, typing: boolean, timeoutMs: number) {
-      calls.push({ roomId, typing, timeoutMs });
-      await new Promise<void>((resolve) => {
-        resolveTyping = resolve;
-      });
-    },
-  };
+  const restoreFetch = mockFetch(async (url: any) => {
+    calls.push(String(url));
+    await new Promise<void>((resolve) => {
+      resolveTyping = resolve;
+    });
+    return new Response("{}", { status: 200 });
+  });
+  try {
+    const first = app.bot.internal.sendTyping("!room-one:matrix.example.test");
+    await new Promise((resolve) => setImmediate(resolve));
+    const second = await app.bot.internal.sendTyping(
+      "!room-two:matrix.example.test",
+    );
+    resolveTyping();
 
-  const first = app.bot.internal.sendTyping("!room-one:matrix.example.test");
-  await new Promise((resolve) => setImmediate(resolve));
-  const second = await app.bot.internal.sendTyping(
-    "!room-two:matrix.example.test",
-  );
-  resolveTyping();
-
-  assert.equal(second, false);
-  assert.equal(await first, true);
-  assert.deepEqual(
-    calls.map((call) => call.roomId),
-    ["!room-one:matrix.example.test"],
-  );
+    assert.equal(second, false);
+    assert.equal(await first, true);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /!room-one:matrix\.example\.test/);
+  } finally {
+    restoreFetch();
+  }
 });
 
 test("matrix adapter sends rich text as non-Markdown Matrix plain text", async () => {
