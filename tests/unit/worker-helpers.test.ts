@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -12,6 +14,10 @@ const workerHelpers = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-daemon", "worker-helpers.js"),
   ).href
+);
+const tokenUsageStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "token-usage", "store.js"))
+    .href
 );
 
 function createAuthStorageFixture() {
@@ -231,6 +237,11 @@ test("worker helpers expose normalized slash commands and oauth state", () => {
       (command) => command.name === "todos" && command.source === "builtin",
     ),
   );
+  assert.ok(
+    commands.some(
+      (command) => command.name === "usage" && command.source === "builtin",
+    ),
+  );
   assert.equal(
     commands.some((command) => command.name === "model"),
     true,
@@ -333,6 +344,57 @@ test("runBuiltinCommand lists available models before selection", async () => {
     SessionManager: { list: async () => [] },
   });
   assert.equal(empty.text, "No models available.");
+});
+
+test("runBuiltinCommand shows compact usage status", async () => {
+  const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-chat-usage-"));
+  try {
+    fs.writeFileSync(
+      path.join(agentDir, "auth.json"),
+      `${JSON.stringify({
+        "google-gemini-cli": {
+          type: "api_key",
+          email: "gemini@example.test",
+        },
+      })}\n`,
+      "utf8",
+    );
+    tokenUsageStore.appendTokenTelemetryEvent(
+      {
+        id: "chat-usage-event",
+        timestamp: new Date().toISOString(),
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        provider: "google-gemini-cli",
+        model: "gemini-test",
+        inputTokens: 80,
+        outputTokens: 20,
+        totalTokens: 100,
+      },
+      agentDir,
+    );
+
+    const result = await workerHelpers.runBuiltinCommand(
+      { agentDir, session: {} },
+      "/usage",
+      { SessionManager: { list: async () => [] } },
+    );
+
+    assert.equal(result.handled, true);
+    assert.match(String(result.text || ""), /Rin usage @/);
+    assert.match(String(result.text || ""), /accounts & quota/);
+    assert.match(
+      String(result.text || ""),
+      /Gemini CLI\s+gemini@example\.test/,
+    );
+    assert.match(String(result.text || ""), /quota\s+temporarily unavailable/);
+    assert.match(String(result.text || ""), /recent usage/);
+    assert.match(String(result.text || ""), /\b100\b/);
+    assert.doesNotMatch(String(result.text || ""), /overview/);
+  } finally {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("runBuiltinCommand shows the built-in todo list", async () => {

@@ -201,9 +201,8 @@ function normalizeTimeArg(
   throw new Error(`invalid_time:${raw}`);
 }
 
-export function parseUsageArgs(argv: string[]): UsageCliOptions {
-  const args = extractSubcommandArgv(argv, "usage");
-  const result: UsageCliOptions = {
+export function createDefaultUsageOptions(): UsageCliOptions {
+  return {
     groupBy: [],
     filters: [],
     limit: 20,
@@ -215,6 +214,11 @@ export function parseUsageArgs(argv: string[]): UsageCliOptions {
     json: false,
     help: false,
   };
+}
+
+export function parseUsageArgs(argv: string[]): UsageCliOptions {
+  const args = extractSubcommandArgv(argv, "usage");
+  const result: UsageCliOptions = createDefaultUsageOptions();
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === "--help" || arg === "-h") {
@@ -1054,6 +1058,14 @@ export function renderUsageReport(
     "recent token events",
     renderEventTable(recent),
   ].join("\n");
+}
+
+export async function renderCompactUsageReportForChat(
+  agentDir: string,
+): Promise<string> {
+  const options = createDefaultUsageOptions();
+  const providerQuotas = await loadProviderQuotaStatuses(agentDir);
+  return renderUsageReport(agentDir, options, providerQuotas);
 }
 
 async function renderUsageReportForCli(

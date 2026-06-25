@@ -23,6 +23,7 @@ export const BUILTIN_SLASH_COMMANDS = [
   { name: "copy", description: "Copy last agent message to clipboard" },
   { name: "name", description: "Set session display name" },
   { name: "session", description: "Show session info and stats" },
+  { name: "usage", description: "Show compact quota and usage status" },
   { name: "todos", description: "Show all todos on the current branch" },
   { name: "changelog", description: "Show changelog entries" },
   { name: "hotkeys", description: "Show all keyboard shortcuts" },

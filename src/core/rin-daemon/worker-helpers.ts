@@ -2,6 +2,7 @@ import { readChatCommandResponses } from "../chat/command-responses.js";
 import { asArray } from "../json-utils.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
+import { renderCompactUsageReportForChat } from "../rin/usage.js";
 import { readTodoSnapshotFromSession } from "../rin-lib/todo-state.js";
 import { showTodoList } from "../rin-lib/todo.js";
 import { listBoundSessions } from "../session/factory.js";
@@ -368,6 +369,13 @@ export async function runBuiltinCommand(
       return handledText(commandResponses.reload);
     case "session":
       return handledText(formatSessionStats(session.getSessionStats()));
+    case "usage": {
+      const agentDir = String(runtime?.agentDir || "").trim();
+      if (!agentDir) {
+        return handledText("Usage unavailable: missing Rin data directory.");
+      }
+      return handledText(await renderCompactUsageReportForChat(agentDir));
+    }
     case "todos": {
       const ui =
         deps.uiContext || session.__rinCapabilities?.createContext?.().ui;
