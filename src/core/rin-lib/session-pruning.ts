@@ -127,12 +127,6 @@ function createProviderBoundPrunePlan(
   };
 }
 
-export function dropProviderInvalidToolMessages(messages: any[]) {
-  // Compatibility no-op: provider-bound pruning no longer drops invalid or
-  // interrupted tool continuations beyond ordinary old tool-result omission.
-  return Array.isArray(messages) ? messages : [];
-}
-
 export function pruneSessionContextMessages(
   messages: any[],
   options: SessionPruningOptions = {},

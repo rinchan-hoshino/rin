@@ -473,6 +473,40 @@ async function runStandaloneTurn(
   const unsubscribe =
     typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
 
+  let disposed = false;
+  const disposeAfterAbort = async () => {
+    if (disposed) return;
+    disposed = true;
+    try {
+      unsubscribe?.();
+    } catch {}
+    try {
+      await session.abort?.();
+    } catch {}
+    try {
+      await runtime.dispose?.();
+    } catch {}
+  };
+
+  const signalCleanupHandlers: Array<() => void> = [];
+  let signalShutdownStarted = false;
+  const registerSignalHandlers = () => {
+    const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
+    if (process.platform !== "win32") signals.push("SIGHUP");
+    for (const signal of signals) {
+      const handler = () => {
+        if (signalShutdownStarted) return;
+        signalShutdownStarted = true;
+        const exitCode =
+          signal === "SIGINT" ? 130 : signal === "SIGHUP" ? 129 : 143;
+        void disposeAfterAbort().finally(() => process.exit(exitCode));
+      };
+      process.on(signal, handler);
+      signalCleanupHandlers.push(() => process.off(signal, handler));
+    }
+  };
+  registerSignalHandlers();
+
   try {
     const promptResult: any = await withRunTimeout(
       (async () => {
@@ -507,15 +541,12 @@ async function runStandaloneTurn(
     }
     return result;
   } finally {
-    try {
-      unsubscribe?.();
-    } catch {}
-    try {
-      await session.abort?.();
-    } catch {}
-    try {
-      await runtime.dispose?.();
-    } catch {}
+    for (const cleanup of signalCleanupHandlers) {
+      try {
+        cleanup();
+      } catch {}
+    }
+    await disposeAfterAbort();
   }
 }
 

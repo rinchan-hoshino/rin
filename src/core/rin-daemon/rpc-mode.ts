@@ -126,100 +126,6 @@ function ensureInterruptedAssistantPersisted(session: any, message: any) {
   manager.appendMessage(message);
 }
 
-function messageToolCallIds(message: any) {
-  return extractPiContinuableToolCallIds(message);
-}
-
-function toolResultHasMatchingAncestor(
-  entry: any,
-  byId: Map<string, any>,
-  validIds: Set<string>,
-) {
-  const toolCallId = safeString(entry?.message?.toolCallId).trim();
-  if (!toolCallId) return true;
-  let parentId = safeString(entry?.parentId).trim();
-  const seen = new Set<string>();
-  while (parentId && !seen.has(parentId)) {
-    seen.add(parentId);
-    if (!validIds.has(parentId)) return false;
-    const parent = byId.get(parentId);
-    if (!parent) return false;
-    const message = parent.type === "message" ? parent.message : undefined;
-    if (message?.role === "user") return false;
-    if (messageToolCallIds(message).includes(toolCallId)) return true;
-    parentId = safeString(parent.parentId).trim();
-  }
-  return false;
-}
-
-function rebuildSessionTreeIndexes(session: any, keptEntries: any[]) {
-  const manager = session?.sessionManager;
-  if (manager?.byId instanceof Map) {
-    manager.byId.clear();
-    for (const entry of keptEntries) {
-      if (entry?.id) manager.byId.set(entry.id, entry);
-    }
-  }
-  if ("leafId" in (manager || {})) {
-    manager.leafId =
-      [...keptEntries].reverse().find((entry) => entry?.type !== "session")
-        ?.id ?? null;
-  }
-}
-
-function repairProviderInvalidToolResultEntries(session: any) {
-  const entries = getSessionEntries(session);
-  if (!entries.length) return 0;
-  const byId = new Map<string, any>(
-    entries
-      .filter((entry: any) => safeString(entry?.id).trim())
-      .map((entry: any) => [safeString(entry.id).trim(), entry]),
-  );
-  const validIds = new Set<string>();
-  const keptEntries: any[] = [];
-  const replacementParents = new Map<string, string | null>();
-  let removed = 0;
-  let lastKeptId: string | null = null;
-
-  for (const entry of entries) {
-    const id = safeString(entry?.id).trim();
-    const originalParentId = safeString(entry?.parentId).trim();
-    const replacementParent = originalParentId
-      ? replacementParents.get(originalParentId)
-      : undefined;
-    const parentId = replacementParent ?? originalParentId;
-    if (replacementParent !== undefined) entry.parentId = parentId;
-    const parentValid = !parentId || validIds.has(parentId);
-    const toolResultValid =
-      entry?.type !== "message" ||
-      entry?.message?.role !== "toolResult" ||
-      toolResultHasMatchingAncestor(entry, byId, validIds);
-    if (!parentValid || !toolResultValid) {
-      removed += 1;
-      if (id)
-        replacementParents.set(id, parentValid ? parentId || null : lastKeptId);
-      continue;
-    }
-    keptEntries.push(entry);
-    if (id) {
-      validIds.add(id);
-      lastKeptId = id;
-    }
-  }
-
-  if (!removed) return 0;
-  entries.splice(0, entries.length, ...keptEntries);
-  rebuildSessionTreeIndexes(session, keptEntries);
-  rewritePiSessionManagerFile(session?.sessionManager);
-  if (Array.isArray(session?.agent?.state?.messages)) {
-    const context = session.sessionManager?.buildSessionContext?.();
-    if (Array.isArray(context?.messages)) {
-      session.agent.state.messages = context.messages;
-    }
-  }
-  return removed;
-}
-
 function appendInterruptedToolResults(
   session: any,
   options: { persistToSession?: boolean } = {},
@@ -992,7 +898,6 @@ export async function runCustomRpcMode(
   let unsubscribeSessionEvents: (() => void) | undefined;
   const bindCurrentSession = async () => {
     const session = getSession();
-    repairProviderInvalidToolResultEntries(session);
     await session.bindExtensions({
       uiContext: createExtensionUiContext(),
       mode: "rpc",
@@ -1153,6 +1058,9 @@ export async function runCustomRpcMode(
         if (frontendIdentity && session.sessionManager) {
           session.sessionManager.__rinFrontend = frontendIdentity;
         }
+        try {
+          await session.abort();
+        } catch {}
         await runtime.dispose();
         await forceFlushSessionFile(session);
         output(done(id, type, { shutdown: true }));

@@ -192,19 +192,11 @@ export class WorkerPool {
   }
 
   terminateWorkerGracefully(worker: WorkerHandle) {
-    if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
-    worker.gracefulShutdownRequested = true;
-    this.writeWorkerStdin(worker, { type: "shutdown_session" }, () => {
-      this.destroyWorker(worker);
-    });
+    void this.requestWorkerExitGracefully(worker, { type: "shutdown_session" });
   }
 
   sleepWorkerGracefully(worker: WorkerHandle) {
-    if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
-    worker.gracefulShutdownRequested = true;
-    this.writeWorkerStdin(worker, { type: "sleep_session" }, () => {
-      this.destroyWorker(worker, { signal: "SIGKILL" });
-    });
+    void this.requestWorkerExitGracefully(worker, { type: "sleep_session" });
   }
 
   private async terminateWorkerGracefullyIfUnattached(worker: WorkerHandle) {
@@ -213,12 +205,19 @@ export class WorkerPool {
   }
 
   private async terminateWorkerGracefullyAndFlush(worker: WorkerHandle) {
+    await this.requestWorkerExitGracefully(worker, {
+      type: "shutdown_session",
+    });
+  }
+
+  private async requestWorkerExitGracefully(
+    worker: WorkerHandle,
+    command: { type: "shutdown_session" | "sleep_session" },
+  ) {
     if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
     worker.gracefulShutdownRequested = true;
     const exitPromise = this.waitForWorkerExit(worker);
-    const written = await this.writeWorkerStdinAndWait(worker, {
-      type: "shutdown_session",
-    });
+    const written = await this.writeWorkerStdinAndWait(worker, command);
     if (!written) {
       this.destroyWorker(worker);
       return;
