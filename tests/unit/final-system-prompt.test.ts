@@ -68,7 +68,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("Available tools:"));
   assert.match(baseSystemPrompt, /\nCurrent date: \d{4}-\d{2}-\d{2}$/);
   const webSourceRequirement =
-    "When current, external, source-dependent, or version-sensitive web information matters, search the web for current sources rather than relying on model knowledge.";
+    "Always use a search engine to find current sources when current, external, source-dependent, or version-sensitive information matters.";
   assert.ok(baseSystemPrompt.includes(webSourceRequirement));
   assert.ok(
     baseSystemPrompt.indexOf(webSourceRequirement) <

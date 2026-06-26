@@ -158,7 +158,7 @@ function buildRinRuntimeAwarenessBlock() {
 }
 
 function buildWebSourceRequirementBlock() {
-  return "When current, external, source-dependent, or version-sensitive web information matters, search the web for current sources rather than relying on model knowledge.";
+  return "Always use a search engine to find current sources when current, external, source-dependent, or version-sensitive information matters.";
 }
 
 const RIN_COMPACTION_SYSTEM_PROMPT =
