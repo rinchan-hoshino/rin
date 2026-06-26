@@ -56,18 +56,13 @@ test("discord adapter treats guilds with only owner and bots as owner-only", asy
       ["bot-discord", { id: "bot-discord", user: { bot: true } }],
       ["other-bot", { id: "other-bot", user: { bot: true } }],
     ]);
-    const restCalls: string[] = [];
+    let unboundedGuildFetchCalled = false;
     (adapter as any).client = {
-      rest: {
-        async get(route: string) {
-          restCalls.push(route);
-          return Array.from(members.values());
-        },
-      },
       channels: {
         async fetch(channelId: string) {
           assert.equal(channelId, "channel-owner-only");
           return {
+            members: { cache: members },
             guild: {
               id: "guild-1",
               ownerId: "owner-discord",
@@ -75,6 +70,7 @@ test("discord adapter treats guilds with only owner and bots as owner-only", asy
               members: {
                 async fetch(userId?: string) {
                   if (userId) return members.get(userId);
+                  unboundedGuildFetchCalled = true;
                   throw new Error("guild member gateway fetch unavailable");
                 },
               },
@@ -89,7 +85,7 @@ test("discord adapter treats guilds with only owner and bots as owner-only", asy
       await bot.hasOnlyOwnerUsers("channel-owner-only", ["owner-discord"]),
       true,
     );
-    assert.deepEqual(restCalls, ["/guilds/guild-1/members"]);
+    assert.equal(unboundedGuildFetchCalled, false);
 
     members.set("other-human", {
       id: "other-human",
@@ -167,22 +163,10 @@ test("discord adapter proves owner-only channels from private permission overwri
               roles: { everyone: { id: "guild-1" }, cache: roles },
               members: {
                 async fetch(userId?: string) {
-                  if (!userId) {
-                    return new Map<string, any>([
-                      [
-                        "owner-discord",
-                        { id: "owner-discord", user: { bot: false } },
-                      ],
-                      [
-                        "bot-discord",
-                        { id: "bot-discord", user: { bot: true } },
-                      ],
-                      [
-                        "other-human",
-                        { id: "other-human", user: { bot: false } },
-                      ],
-                    ]);
-                  }
+                  assert.ok(
+                    userId,
+                    "owner-only check must not fetch all guild members",
+                  );
                   return {
                     id: userId,
                     user: {

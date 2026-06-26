@@ -453,56 +453,10 @@ export class DiscordAdapter {
     return await channel?.messages?.fetch?.(messageId);
   }
 
-  private async fetchGuildMembersForOwnerOnlyCheck(guild: any) {
-    const directMembers = await (async () => {
-      try {
-        return collectionValues(await guild?.members?.fetch?.());
-      } catch {
-        return [] as any[];
-      }
-    })();
-    if (directMembers.length) return directMembers;
-
-    const guildId = safeString(guild?.id || guild?.guildId || "").trim();
-    if (!guildId) return [] as any[];
-    const members: any[] = [];
-    let after = "0";
-    for (;;) {
-      const query = new URLSearchParams({ limit: "1000" });
-      if (after !== "0") query.set("after", after);
-      let page: any[] = [];
-      try {
-        const restPage = await this.client?.rest?.get?.(
-          `/guilds/${guildId}/members`,
-          { query },
-        );
-        page = Array.isArray(restPage) ? restPage : [];
-      } catch {}
-      if (!page.length) {
-        const token = safeString(this.config?.token).trim();
-        if (!token || typeof fetch !== "function") return [];
-        try {
-          const response = await fetch(
-            `https://discord.com/api/v10/guilds/${encodeURIComponent(
-              guildId,
-            )}/members?${query.toString()}`,
-            { headers: { Authorization: `Bot ${token}` } },
-          );
-          if (!response.ok) return [];
-          const payload = await response.json();
-          page = Array.isArray(payload) ? payload : [];
-        } catch {
-          return [];
-        }
-      }
-      members.push(...page);
-      if (page.length < 1000) return members;
-      const lastId = safeString(
-        page[page.length - 1]?.user?.id || page[page.length - 1]?.id || "",
-      ).trim();
-      if (!lastId || lastId === after) return [];
-      after = lastId;
-    }
+  private cachedChannelMembersForOwnerOnlyCheck(channel: any) {
+    const channelMembers = collectionValues(channel?.members);
+    if (channelMembers.length) return channelMembers;
+    return collectionValues(channel?.guild?.members?.cache);
   }
 
   private async hasOnlyOwnerUsers(channelId: string, ownerUserIds: string[]) {
@@ -519,8 +473,8 @@ export class DiscordAdapter {
       guild?.roles?.everyone?.id || guild?.id || "",
     ).trim();
     const overwrites = collectionValues(channel?.permissionOverwrites);
-    const guildMembers = await this.fetchGuildMembersForOwnerOnlyCheck(guild);
-    if (memberListHasOnlyOwnerHumanUsers(guildMembers, ownerIds)) return true;
+    const cachedMembers = this.cachedChannelMembersForOwnerOnlyCheck(channel);
+    if (memberListHasOnlyOwnerHumanUsers(cachedMembers, ownerIds)) return true;
     if (!everyoneRoleId || !overwrites.length) return false;
     if (
       hasUnboundedDiscordAdministratorBypass(
