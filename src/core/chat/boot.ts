@@ -218,6 +218,10 @@ function isOneBotMediaOutboxItem(item?: Pick<ChatOutboxItem, "payload">) {
   );
 }
 
+function isMatrixOutboxItem(item?: Pick<ChatOutboxItem, "payload">) {
+  return safeString(item?.payload?.chatKey).startsWith("matrix:");
+}
+
 export function getChatOutboxSendTimeoutMs(
   item?: Pick<ChatOutboxItem, "payload">,
   options: ChatOutboxDrainOptions = {},
@@ -462,7 +466,7 @@ function settleLateChatOutboxFailure(
     warnChatOutboxFailure(logger, failed, error, "failed");
     return;
   }
-  if (isAmbiguousDeliveryTimeout(error)) {
+  if (isAmbiguousDeliveryTimeout(error) && !isMatrixOutboxItem(current)) {
     const delivered = deliveredUnconfirmedChatOutboxItem(current, error);
     writeChatOutboxItem(agentDir, delivered);
     warnChatOutboxDeliveryUnconfirmed(logger, delivered, error);
@@ -500,7 +504,13 @@ async function drainChatOutboxItem(
   writeChatOutboxItem(agentDir, sending);
   let deliveryTask: ReturnType<typeof sendOutboxPayload>;
   try {
-    deliveryTask = sendOutboxPayload(app, agentDir, sending.payload, h);
+    deliveryTask = sendOutboxPayload(
+      app,
+      agentDir,
+      sending.payload,
+      h,
+      sending.id,
+    );
   } catch (error: any) {
     return settleChatOutboxFailure(agentDir, logger, sending, error);
   }

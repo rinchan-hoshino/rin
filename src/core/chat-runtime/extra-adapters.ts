@@ -2129,8 +2129,11 @@ export class MatrixAdapter {
         await this.getGuildMemberCount(chatId),
       getGuildMember: async (chatId: string, userId: string) =>
         await this.getGuildMember(chatId, userId),
-      sendMessage: async (chatId: string, content: any) =>
-        await this.sendMessage(chatId, content),
+      sendMessage: async (
+        chatId: string,
+        content: any,
+        options?: Record<string, any>,
+      ) => await this.sendMessage(chatId, content, options),
     };
     this.app.register(this, this.bot);
   }
@@ -2469,10 +2472,24 @@ export class MatrixAdapter {
     }
   }
 
+  private matrixTxnId(
+    scope: string,
+    index: number,
+    options: Record<string, any> = {},
+  ) {
+    const outboxId = safeString(options?.outboxId)
+      .trim()
+      .replace(/[^A-Za-z0-9._=-]+/g, "_")
+      .slice(0, 128);
+    if (outboxId) return `rin-${outboxId}-${scope}-${index}`;
+    return `rin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
   private async sendTextChunks(
     chatId: string,
     text: string,
     replyToMessageId?: string,
+    options: Record<string, any> = {},
   ) {
     const chunks = splitPlainText(
       text,
@@ -2480,8 +2497,8 @@ export class MatrixAdapter {
     );
     const delivered: string[] = [];
     let firstReply = replyToMessageId;
-    for (const chunk of chunks) {
-      const txnId = `rin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    for (const [index, chunk] of chunks.entries()) {
+      const txnId = this.matrixTxnId("text", index, options);
       const messageContent = this.applyReplyToMessageContent(
         {
           msgtype: "m.text",
@@ -2524,6 +2541,8 @@ export class MatrixAdapter {
     chatId: string,
     node: any,
     replyToMessageId?: string,
+    options: Record<string, any> = {},
+    index = 0,
   ) {
     const media = await this.readMatrixMediaNode(node);
     if (!media?.data) return [] as string[];
@@ -2559,7 +2578,7 @@ export class MatrixAdapter {
       },
       replyToMessageId,
     );
-    const txnId = `rin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const txnId = this.matrixTxnId("media", index, options);
     const result = await this.sendMatrixMessageContent(
       chatId,
       messageContent,
@@ -2580,7 +2599,11 @@ export class MatrixAdapter {
     }).trim();
   }
 
-  private async sendMessage(chatId: string, content: any) {
+  private async sendMessage(
+    chatId: string,
+    content: any,
+    options: Record<string, any> = {},
+  ) {
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     const delivered: string[] = [];
     let firstReply = replyToMessageId;
@@ -2589,7 +2612,12 @@ export class MatrixAdapter {
       const text = this.renderMatrixTextNodes(textBatch);
       textBatch = [];
       if (!text) return;
-      const messageIds = await this.sendTextChunks(chatId, text, firstReply);
+      const messageIds = await this.sendTextChunks(
+        chatId,
+        text,
+        firstReply,
+        options,
+      );
       delivered.push(...messageIds);
       if (messageIds.length) firstReply = undefined;
     };
@@ -2597,7 +2625,13 @@ export class MatrixAdapter {
       const type = safeString(node?.type).toLowerCase();
       if (isOutboundMediaNodeType(type)) {
         await flushText();
-        const messageIds = await this.sendMediaNode(chatId, node, firstReply);
+        const messageIds = await this.sendMediaNode(
+          chatId,
+          node,
+          firstReply,
+          options,
+          delivered.length,
+        );
         delivered.push(...messageIds);
         if (messageIds.length) firstReply = undefined;
         continue;

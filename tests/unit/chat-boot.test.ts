@@ -579,3 +579,50 @@ test("chat boot does not retry ambiguous timeout after dispatch", async () => {
     assert.deepEqual(outbox.listChatOutboxItems(agentDir), []);
   });
 });
+
+test("chat boot retries ambiguous Matrix timeout after dispatch", async () => {
+  await withTempDir(async (agentDir) => {
+    outbox.enqueueChatOutboxPayload(agentDir, {
+      type: "text_delivery",
+      createdAt: new Date().toISOString(),
+      chatKey: "matrix:!room:matrix.example.test",
+      text: "plain text",
+    });
+    const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
+    const app = {
+      bots: [
+        {
+          platform: "matrix",
+          selfId: "",
+          sendMessage() {
+            const delivery = Promise.reject(
+              new Error(
+                "matrix_api_failed:timeout:send request exceeded 20000ms",
+              ),
+            );
+            delivery.dispatched = Promise.resolve();
+            return delivery;
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+
+    const results = await boot.drainChatOutbox(app, agentDir, h, { warn() {} });
+
+    assert.equal(results[0].status, "dispatched");
+    await waitFor(() => {
+      const stored = outbox.readChatOutboxItemById(agentDir, itemId).item;
+      assert.equal(stored.status, "queued");
+      assert.equal(stored.deliveryUnconfirmed, undefined);
+      assert.equal(stored.failureKind, "retryable");
+      assert.equal(stored.attempts, 1);
+      assert.match(stored.lastError, /matrix_api_failed:timeout/);
+    });
+    assert.equal(outbox.listChatOutboxItems(agentDir).length, 1);
+  });
+});

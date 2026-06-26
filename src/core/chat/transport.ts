@@ -721,6 +721,7 @@ export function sendOutboxPayload(
   agentDir: string,
   payload: ChatOutboxPayload,
   h: any,
+  outboxId = "",
 ) {
   if (payload?.type === "text_delivery") {
     try {
@@ -734,6 +735,7 @@ export function sendOutboxPayload(
       const deliveryKind = safeString(payload.deliveryKind).trim() || "final";
       const delivery = sendText(app, chatKey, text, h, replyToMessageId, {
         deliveryKind,
+        ...(outboxId ? { outboxId } : {}),
       });
       return attachChatDeliveryDispatch(
         delivery.then((deliveryResult) =>
@@ -782,6 +784,7 @@ export function sendOutboxPayload(
 
       const chatDelivery = sendChatNodes(app, chatKey, nodes, {
         deliveryKind: safeString(payload.deliveryKind).trim() || "final",
+        ...(outboxId ? { outboxId } : {}),
       });
       resolveDispatched();
       const deliveryResult = await chatDelivery;

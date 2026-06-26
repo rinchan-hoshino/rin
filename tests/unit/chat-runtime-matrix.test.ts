@@ -232,6 +232,28 @@ test("matrix adapter sends rich text as non-Markdown Matrix plain text", async (
   }
 });
 
+test("matrix adapter uses outbox ids as stable Matrix transaction ids", async () => {
+  const { adapter, app } = makeMatrixAdapter();
+  const sent: Array<{ url: string; init: any; content: any }> = [];
+  adapter.client = {};
+  const restoreFetch = mockMatrixMessageFetch(sent);
+  try {
+    await app.bot.sendMessage(
+      "!room:matrix.example.test",
+      [{ type: "text", attrs: { content: "hello" } }],
+      { outboxId: "1782442762766-1379697-9qyuuoa6uwu" },
+    );
+
+    assert.equal(sent.length, 1);
+    assert.match(
+      sent[0].url,
+      /\/send\/m\.room\.message\/rin-1782442762766-1379697-9qyuuoa6uwu-text-0$/,
+    );
+  } finally {
+    restoreFetch();
+  }
+});
+
 test("matrix adapter sends quote nodes as Matrix native reply relations through isolated Matrix API", async () => {
   const { adapter, app } = makeMatrixAdapter();
   const sent: Array<{ url: string; init: any; content: any }> = [];
