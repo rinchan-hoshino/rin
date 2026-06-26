@@ -32,6 +32,44 @@ function normalizeDecisionSessionContext(
   };
 }
 
+function ownerUserIdsForPlatform(identity: any, platform: string) {
+  const aliases = ownerAliasesForPlatform(identity, platform);
+  return Array.from(
+    new Set(
+      aliases
+        .map((alias: any) => safeString(alias?.userId).trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+async function adapterConfirmsOnlyOwnerUsers(
+  session: any,
+  identity: any,
+  context: ReturnType<typeof normalizeDecisionSessionContext>,
+) {
+  if (context.trust !== "OWNER") return false;
+  if (!context.platform || !context.chatId) return false;
+  const ownerUserIds = ownerUserIdsForPlatform(identity, context.platform);
+  const senderUserId = pickUserId(session);
+  if (senderUserId && !ownerUserIds.includes(senderUserId)) {
+    ownerUserIds.push(senderUserId);
+  }
+  if (!ownerUserIds.length) return false;
+  const checker = session?.bot?.hasOnlyOwnerUsers;
+  if (typeof checker !== "function") return false;
+  try {
+    return Boolean(
+      await checker.call(session.bot, context.chatId, ownerUserIds, {
+        platform: context.platform,
+        botId: context.botId,
+        session,
+      }),
+    );
+  } catch {}
+  return false;
+}
+
 async function getPrivateLikeGroupMemberCount(
   session: any,
   platform: string,
@@ -183,11 +221,18 @@ export async function isOwnerPresentForGroup(session: any, identity: any) {
   );
 }
 
-export async function isPrivateLikeGroupSession(session: any, trust: string) {
-  if (!session?.guildId || trust !== "OWNER") return false;
-  const platform = safeString(session?.platform || "").trim();
-  const chatId = getChatId(session);
+export async function isPrivateLikeGroupSession(
+  session: any,
+  identity: any,
+  context = normalizeDecisionSessionContext(session, identity),
+) {
+  if (!session?.guildId || context.trust !== "OWNER") return false;
+  const platform = context.platform;
+  const chatId = context.chatId;
   if (!platform || !chatId) return false;
+  if (await adapterConfirmsOnlyOwnerUsers(session, identity, context)) {
+    return true;
+  }
   const count = await getPrivateLikeGroupMemberCount(session, platform, chatId);
   return Number.isFinite(count) && count > 0 && count <= 2;
 }
@@ -198,7 +243,7 @@ export async function isEffectivePrivateChatSession(
 ) {
   if (directLike(session)) return true;
   const context = normalizeDecisionSessionContext(session, identity);
-  return await isPrivateLikeGroupSession(session, context.trust);
+  return await isPrivateLikeGroupSession(session, identity, context);
 }
 
 export async function shouldProcessText(
@@ -228,7 +273,7 @@ export async function shouldProcessText(
   const chatType = directLike(session) ? "private" : "group";
   const privateLikeGroup =
     chatType === "group" &&
-    (await isPrivateLikeGroupSession(session, context.trust));
+    (await isPrivateLikeGroupSession(session, identity, context));
   const ownerPresent =
     chatType === "private" ||
     (await isOwnerPresentInGroupSession(session, identity, context));

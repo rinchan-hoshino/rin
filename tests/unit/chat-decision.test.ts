@@ -22,6 +22,7 @@ const identity = {
       personId: "owner",
     },
     { platform: "lark", userId: "ou_owner", personId: "owner" },
+    { platform: "discord", userId: "owner-discord", personId: "owner" },
   ],
   persons: {
     owner: { trust: "OWNER" },
@@ -174,6 +175,67 @@ test("chat decision lets Feishu owner-only groups skip mention without changing 
   assert.equal(result.chatKey, "lark:oc_owner_only");
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
+});
+
+test("chat decision lets Discord owner-only channels skip mention when the adapter proves no other users", async () => {
+  const calls: Array<{ chatId: string; ownerUserIds: string[] }> = [];
+  const result = await decision.shouldProcessText(
+    {
+      platform: "discord",
+      guildId: "guild-1",
+      channelId: "channel-owner-only",
+      selfId: "bot-discord",
+      userId: "owner-discord",
+      bot: {
+        selfId: "bot-discord",
+        async hasOnlyOwnerUsers(chatId, ownerUserIds) {
+          calls.push({ chatId, ownerUserIds });
+          return true;
+        },
+      },
+      stripped: { content: "private note" },
+      elements: [{ type: "text", attrs: { content: "private note" } }],
+    },
+    [{ type: "text", attrs: { content: "private note" } }],
+    identity,
+  );
+
+  assert.deepEqual(calls, [
+    { chatId: "channel-owner-only", ownerUserIds: ["owner-discord"] },
+  ]);
+  assert.equal(result.allow, true);
+  assert.equal(result.chatKey, "discord:channel-owner-only");
+  assert.equal(result.chatType, "group");
+  assert.equal(result.trust, "OWNER");
+  assert.equal(result.requiresMentionToStartTurn, false);
+});
+
+test("chat decision still requires mention in Discord channels when another user is present", async () => {
+  const result = await decision.shouldProcessText(
+    {
+      platform: "discord",
+      guildId: "guild-1",
+      channelId: "channel-shared",
+      selfId: "bot-discord",
+      userId: "owner-discord",
+      bot: {
+        selfId: "bot-discord",
+        async hasOnlyOwnerUsers() {
+          return false;
+        },
+      },
+      stripped: { content: "shared note" },
+      elements: [{ type: "text", attrs: { content: "shared note" } }],
+    },
+    [{ type: "text", attrs: { content: "shared note" } }],
+    identity,
+  );
+
+  assert.equal(result.allow, false);
+  assert.equal(result.chatKey, "discord:channel-shared");
+  assert.equal(result.chatType, "group");
+  assert.equal(result.trust, "OWNER");
+  assert.equal(result.requiresMentionToStartTurn, true);
 });
 
 test("chat decision keeps image-only owner messages routable", async () => {

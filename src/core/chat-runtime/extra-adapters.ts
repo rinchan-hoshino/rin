@@ -260,6 +260,76 @@ function toQqReactionPayload(messageId: string, emoji: string) {
   };
 }
 
+function collectionValues(value: any) {
+  if (!value) return [] as any[];
+  if (Array.isArray(value)) return value;
+  if (value instanceof Map) return Array.from(value.values());
+  if (value?.cache) return collectionValues(value.cache);
+  if (typeof value?.values === "function") {
+    try {
+      return Array.from(value.values());
+    } catch {}
+  }
+  return [] as any[];
+}
+
+function permissionSetHasFlag(value: any, name: string, bit: bigint) {
+  if (!value) return false;
+  try {
+    if (typeof value?.has === "function" && value.has(name)) return true;
+  } catch {}
+  try {
+    if (typeof value?.has === "function" && value.has(bit)) return true;
+  } catch {}
+  try {
+    const raw = value?.bitfield ?? value;
+    const bits = typeof raw === "bigint" ? raw : BigInt(raw);
+    return (bits & bit) === bit;
+  } catch {}
+  return false;
+}
+
+function permissionSetHasViewChannel(value: any) {
+  return permissionSetHasFlag(value, "ViewChannel", 1024n);
+}
+
+function permissionSetHasAdministrator(value: any) {
+  return permissionSetHasFlag(value, "Administrator", 8n);
+}
+
+function isSelfManagedBotRole(role: any, selfId: string) {
+  return (
+    Boolean(role?.managed) &&
+    safeString(role?.tags?.botId || role?.tags?.bot_id || "").trim() === selfId
+  );
+}
+
+function hasUnboundedDiscordAdministratorBypass(
+  guild: any,
+  ownerIds: Set<string>,
+  selfId: string,
+  everyoneRoleId: string,
+) {
+  const guildOwnerId = safeString(
+    guild?.ownerId || guild?.ownerID || "",
+  ).trim();
+  if (!guildOwnerId) return true;
+  if (guildOwnerId !== selfId && !ownerIds.has(guildOwnerId)) return true;
+  for (const role of collectionValues(guild?.roles)) {
+    const roleId = safeString(role?.id).trim();
+    if (!permissionSetHasAdministrator(role?.permissions)) continue;
+    if (
+      roleId &&
+      roleId !== everyoneRoleId &&
+      isSelfManagedBotRole(role, selfId)
+    ) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 export class DiscordAdapter {
   private readonly app: any;
   private readonly config: Record<string, any>;
@@ -319,6 +389,8 @@ export class DiscordAdapter {
         const channel = await this.fetchChannel(channelId);
         return await channel?.messages?.delete?.(messageId);
       },
+      hasOnlyOwnerUsers: async (channelId: string, ownerUserIds: string[]) =>
+        await this.hasOnlyOwnerUsers(channelId, ownerUserIds),
     };
     this.bot = {
       platform: "discord",
@@ -341,6 +413,17 @@ export class DiscordAdapter {
         messageId: string,
         emoji: string,
       ) => await internal.deleteOwnReaction(chatId, messageId, emoji),
+      getGuildMember: async (chatId: string, userId: string) => {
+        const channel = await this.fetchChannel(chatId);
+        const member = await channel?.guild?.members?.fetch?.(userId);
+        if (typeof channel?.permissionsFor === "function") {
+          const permissions = channel.permissionsFor(member);
+          if (!permissionSetHasViewChannel(permissions)) return null;
+        }
+        return member;
+      },
+      hasOnlyOwnerUsers: async (chatId: string, ownerUserIds: string[]) =>
+        await this.hasOnlyOwnerUsers(chatId, ownerUserIds),
     };
     this.app.register(this, this.bot);
   }
@@ -352,6 +435,47 @@ export class DiscordAdapter {
   private async fetchMessage(channelId: string, messageId: string) {
     const channel = await this.fetchChannel(channelId);
     return await channel?.messages?.fetch?.(messageId);
+  }
+
+  private async hasOnlyOwnerUsers(channelId: string, ownerUserIds: string[]) {
+    const channel = await this.fetchChannel(channelId);
+    const ownerIds = new Set(
+      (Array.isArray(ownerUserIds) ? ownerUserIds : [])
+        .map((id) => safeString(id).trim())
+        .filter(Boolean),
+    );
+    if (!channel || !ownerIds.size) return false;
+    const guild = channel?.guild;
+    const selfId = safeString(this.bot?.selfId).trim();
+    const everyoneRoleId = safeString(
+      guild?.roles?.everyone?.id || guild?.id || "",
+    ).trim();
+    const overwrites = collectionValues(channel?.permissionOverwrites);
+    if (!everyoneRoleId || !overwrites.length) return false;
+    if (
+      hasUnboundedDiscordAdministratorBypass(
+        guild,
+        ownerIds,
+        selfId,
+        everyoneRoleId,
+      )
+    ) {
+      return false;
+    }
+
+    const everyoneOverwrite = overwrites.find(
+      (overwrite) => safeString(overwrite?.id).trim() === everyoneRoleId,
+    );
+    if (!permissionSetHasViewChannel(everyoneOverwrite?.deny)) return false;
+
+    for (const overwrite of overwrites) {
+      if (!permissionSetHasViewChannel(overwrite?.allow)) continue;
+      const id = safeString(overwrite?.id).trim();
+      if (!id || id === everyoneRoleId) return false;
+      if (id === selfId || ownerIds.has(id)) continue;
+      return false;
+    }
+    return true;
   }
 
   async start() {
