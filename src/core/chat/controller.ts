@@ -1952,7 +1952,11 @@ export class ChatController {
             errorSession.sessionFile,
             this.driver.currentSessionFile(),
           );
-          if (errorSession.sessionFile && errorMessage) {
+          if (
+            errorSession.sessionFile &&
+            errorMessage &&
+            !isTransientChatRuntimeError(error)
+          ) {
             const deliveryTarget = this.currentDeliveryTarget(input);
             await this.deliverAssistantReply({
               text: formatChatRuntimeErrorForUser(errorMessage),

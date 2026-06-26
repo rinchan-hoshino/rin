@@ -148,6 +148,39 @@ test("matrix adapter suppresses concurrent typing requests across rooms", async 
   }
 });
 
+test("matrix adapter refreshes typing after the shorter minimum interval", async () => {
+  const { adapter, app } = makeMatrixAdapter();
+  adapter.client = {};
+  const calls: string[] = [];
+  const restoreFetch = mockFetch(async (url: any) => {
+    calls.push(String(url));
+    return new Response("{}", { status: 200 });
+  });
+  const originalNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  try {
+    assert.equal(
+      await app.bot.internal.sendTyping("!room:matrix.example.test"),
+      true,
+    );
+    now += 9_999;
+    assert.equal(
+      await app.bot.internal.sendTyping("!room:matrix.example.test"),
+      false,
+    );
+    now += 1;
+    assert.equal(
+      await app.bot.internal.sendTyping("!room:matrix.example.test"),
+      true,
+    );
+    assert.equal(calls.length, 2);
+  } finally {
+    Date.now = originalNow;
+    restoreFetch();
+  }
+});
+
 test("matrix adapter sends rich text as non-Markdown Matrix plain text", async () => {
   const { adapter, app } = makeMatrixAdapter();
   const sent: Array<{ url: string; init: any; content: any }> = [];

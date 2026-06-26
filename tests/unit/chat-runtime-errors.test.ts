@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   formatChatRuntimeErrorForUser,
+  isChatLifecycleRuntimeError,
   isSilentChatRuntimeRetryError,
   isTransientChatRuntimeError,
 } from "../../src/core/chat/runtime-errors.js";
@@ -31,8 +32,22 @@ test("chat runtime treats frontend lifecycle cancellation as silent transient", 
   );
 });
 
-test("chat runtime treats worker exits without detail as transient", () => {
+test("chat runtime treats worker exits without detail as silent lifecycle transients", () => {
   assert.equal(isTransientChatRuntimeError("rin_worker_exit"), true);
+  assert.equal(isChatLifecycleRuntimeError("rin_worker_exit"), true);
+  assert.equal(isSilentChatRuntimeRetryError("rin_worker_exit"), true);
+});
+
+/* Recovery timeout is not auto-retried, but chat should not expose the raw marker. */
+test("chat runtime formats recovery lifecycle errors as user-facing text", () => {
+  assert.equal(
+    isChatLifecycleRuntimeError("rin_turn_result_recovery_timeout"),
+    true,
+  );
+  assert.equal(
+    formatChatRuntimeErrorForUser("rin_turn_result_recovery_timeout"),
+    "Rin could not recover the remote turn result before the timeout.",
+  );
 });
 
 test("chat runtime prefixes terse Rin errors", () => {

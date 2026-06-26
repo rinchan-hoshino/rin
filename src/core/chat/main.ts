@@ -128,7 +128,7 @@ function createLogger(name: string) {
 }
 
 const logger = createLogger("rin-chat");
-const TYPING_POLL_INTERVAL_MS = 4000;
+const TYPING_POLL_INTERVAL_MS = 2500;
 const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
 const CHAT_OUTBOX_POLL_INTERVAL_MS = 5000;
 const CHAT_OUTBOX_HISTORY_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
