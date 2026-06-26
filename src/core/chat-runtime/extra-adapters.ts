@@ -297,11 +297,30 @@ function permissionSetHasAdministrator(value: any) {
   return permissionSetHasFlag(value, "Administrator", 8n);
 }
 
-function isSelfManagedBotRole(role: any, selfId: string) {
+function isManagedBotRole(role: any) {
   return (
     Boolean(role?.managed) &&
-    safeString(role?.tags?.botId || role?.tags?.bot_id || "").trim() === selfId
+    Boolean(safeString(role?.tags?.botId || role?.tags?.bot_id || "").trim())
   );
+}
+
+function isKnownOwnerOrBotMember(member: any, ownerIds: Set<string>) {
+  const user = member?.user || member;
+  const userId = safeString(
+    user?.id || user?.userId || member?.id || member?.userId || "",
+  ).trim();
+  if (!userId) return false;
+  if (ownerIds.has(userId)) return true;
+  return Boolean(user?.bot || member?.bot);
+}
+
+async function guildHasOnlyOwnerUsers(guild: any, ownerIds: Set<string>) {
+  try {
+    const members = collectionValues(await guild?.members?.fetch?.());
+    if (!members.length) return false;
+    return members.every((member) => isKnownOwnerOrBotMember(member, ownerIds));
+  } catch {}
+  return false;
 }
 
 function hasUnboundedDiscordAdministratorBypass(
@@ -318,11 +337,7 @@ function hasUnboundedDiscordAdministratorBypass(
   for (const role of collectionValues(guild?.roles)) {
     const roleId = safeString(role?.id).trim();
     if (!permissionSetHasAdministrator(role?.permissions)) continue;
-    if (
-      roleId &&
-      roleId !== everyoneRoleId &&
-      isSelfManagedBotRole(role, selfId)
-    ) {
+    if (roleId && roleId !== everyoneRoleId && isManagedBotRole(role)) {
       continue;
     }
     return true;
@@ -451,6 +466,7 @@ export class DiscordAdapter {
       guild?.roles?.everyone?.id || guild?.id || "",
     ).trim();
     const overwrites = collectionValues(channel?.permissionOverwrites);
+    if (await guildHasOnlyOwnerUsers(guild, ownerIds)) return true;
     if (!everyoneRoleId || !overwrites.length) return false;
     if (
       hasUnboundedDiscordAdministratorBypass(
@@ -473,6 +489,14 @@ export class DiscordAdapter {
       const id = safeString(overwrite?.id).trim();
       if (!id || id === everyoneRoleId) return false;
       if (id === selfId || ownerIds.has(id)) continue;
+      const role = collectionValues(guild?.roles).find(
+        (item: any) => safeString(item?.id).trim() === id,
+      );
+      if (isManagedBotRole(role)) continue;
+      try {
+        const member = await guild?.members?.fetch?.(id);
+        if (isKnownOwnerOrBotMember(member, ownerIds)) continue;
+      } catch {}
       return false;
     }
     return true;

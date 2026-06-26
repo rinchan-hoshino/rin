@@ -32,6 +32,69 @@ function adminPermission(value: boolean) {
   return namedPermission(value, "Administrator", 8n);
 }
 
+test("discord adapter treats guilds with only owner and bots as owner-only", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-"),
+  );
+  try {
+    let bot: any = null;
+    const adapter = new extraAdapters.DiscordAdapter(
+      {
+        register(_adapter: unknown, registeredBot: any) {
+          bot = registeredBot;
+        },
+      },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    assert.ok(bot);
+    bot.selfId = "bot-discord";
+
+    const members = new Map<string, any>([
+      ["owner-discord", { id: "owner-discord", user: { bot: false } }],
+      ["bot-discord", { id: "bot-discord", user: { bot: true } }],
+      ["other-bot", { id: "other-bot", user: { bot: true } }],
+    ]);
+    (adapter as any).client = {
+      channels: {
+        async fetch(channelId: string) {
+          assert.equal(channelId, "channel-owner-only");
+          return {
+            guild: {
+              id: "guild-1",
+              ownerId: "owner-discord",
+              roles: { everyone: { id: "guild-1" }, cache: new Map() },
+              members: {
+                async fetch(userId?: string) {
+                  return userId ? members.get(userId) : members;
+                },
+              },
+            },
+            permissionOverwrites: { cache: new Map() },
+          };
+        },
+      },
+    };
+
+    assert.equal(
+      await bot.hasOnlyOwnerUsers("channel-owner-only", ["owner-discord"]),
+      true,
+    );
+
+    members.set("other-human", {
+      id: "other-human",
+      user: { bot: false },
+    });
+    assert.equal(
+      await bot.hasOnlyOwnerUsers("channel-owner-only", ["owner-discord"]),
+      false,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("discord adapter proves owner-only channels from private permission overwrites", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-discord-"),
@@ -94,10 +157,28 @@ test("discord adapter proves owner-only channels from private permission overwri
               ownerId: guildOwnerId,
               roles: { everyone: { id: "guild-1" }, cache: roles },
               members: {
-                async fetch(userId: string) {
+                async fetch(userId?: string) {
+                  if (!userId) {
+                    return new Map<string, any>([
+                      [
+                        "owner-discord",
+                        { id: "owner-discord", user: { bot: false } },
+                      ],
+                      [
+                        "bot-discord",
+                        { id: "bot-discord", user: { bot: true } },
+                      ],
+                      [
+                        "other-human",
+                        { id: "other-human", user: { bot: false } },
+                      ],
+                    ]);
+                  }
                   return {
                     id: userId,
-                    user: { bot: userId === "bot-discord" },
+                    user: {
+                      bot: userId === "bot-discord" || userId === "other-bot",
+                    },
                   };
                 },
               },
@@ -133,7 +214,7 @@ test("discord adapter proves owner-only channels from private permission overwri
     });
     assert.equal(
       await bot.hasOnlyOwnerUsers("channel-owner-only", ["owner-discord"]),
-      false,
+      true,
     );
 
     overwrites.delete("other-bot");
