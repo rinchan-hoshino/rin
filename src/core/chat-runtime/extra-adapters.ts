@@ -36,6 +36,7 @@ const MATRIX_TYPING_TIMEOUT_MS = 60000;
 const MATRIX_TYPING_MIN_INTERVAL_MS = 30000;
 const MATRIX_TYPING_MAX_IN_FLIGHT = 1;
 const MATRIX_TYPING_REQUEST_TIMEOUT_MS = 8000;
+const MATRIX_SEND_REQUEST_TIMEOUT_MS = 20000;
 
 function isOutboundMediaNodeType(type: string) {
   return ["image", "file", "video", "audio", "sticker"].includes(type);
@@ -2418,6 +2419,57 @@ export class MatrixAdapter {
     return messageContent;
   }
 
+  private async sendMatrixMessageContent(
+    roomId: string,
+    messageContent: Record<string, any>,
+    txnId: string,
+  ) {
+    const timeoutMs = Math.max(
+      1000,
+      Number(this.config?.sendTimeoutMs) || MATRIX_SEND_REQUEST_TIMEOUT_MS,
+    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(
+        `${this.baseUrl}/_matrix/client/v3/rooms/${encodeMatrixPathSegment(roomId)}/send/m.room.message/${encodeMatrixPathSegment(txnId)}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(messageContent),
+          signal: controller.signal,
+        },
+      );
+      const text = await response.text();
+      let parsed: any = {};
+      if (text) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = { raw: text };
+        }
+      }
+      if (!response.ok) {
+        throw new Error(
+          `matrix_api_failed:${response.status}:${safeString(parsed?.errcode || parsed?.error || text)}`,
+        );
+      }
+      return parsed;
+    } catch (error: any) {
+      if (safeString(error?.name).trim() === "AbortError") {
+        throw new Error(
+          `matrix_api_failed:timeout:send request exceeded ${timeoutMs}ms`,
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private async sendTextChunks(
     chatId: string,
     text: string,
@@ -2438,7 +2490,7 @@ export class MatrixAdapter {
         },
         firstReply,
       );
-      const result = await this.client.sendMessage(
+      const result = await this.sendMatrixMessageContent(
         chatId,
         messageContent,
         txnId,
@@ -2509,7 +2561,11 @@ export class MatrixAdapter {
       replyToMessageId,
     );
     const txnId = `rin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const result = await this.client.sendMessage(chatId, messageContent, txnId);
+    const result = await this.sendMatrixMessageContent(
+      chatId,
+      messageContent,
+      txnId,
+    );
     const eventId = safeString(result?.event_id).trim();
     return eventId ? [eventId] : [];
   }
