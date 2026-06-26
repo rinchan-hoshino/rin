@@ -133,6 +133,8 @@ const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
 const CHAT_OUTBOX_POLL_INTERVAL_MS = 5000;
 const CHAT_OUTBOX_HISTORY_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
+const CHAT_STEERED_INBOX_WAIT_INTERVAL_MS = 1000;
+const CHAT_STEERED_INBOX_INACTIVE_GRACE_MS = 5000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
 
 async function buildTelegramInboundMediaDebug(session: any) {
@@ -821,6 +823,42 @@ export async function startChatBridge(
     });
   };
 
+  const waitForSteeredInboxCompletion = async (
+    job: ClaimedChatInboxJob,
+    result: (ChatInboxJobResult & { steered?: boolean }) | undefined,
+  ): Promise<ChatInboxJobResult | undefined> => {
+    if (!result?.steered) return result;
+    const chatKey = safeString(job.envelope.chatKey).trim();
+    const messageId = safeString(job.envelope.messageId).trim();
+    if (!chatKey || !messageId) return result;
+    const controller = getController(chatKey);
+    let inactiveSince = 0;
+    for (;;) {
+      if (isInboundMessageProcessed(chatKey, messageId)) return result;
+      const stillOwned = Boolean(
+        controller.ownsInboundMessage(messageId) || controller.hasActiveTurn(),
+      );
+      if (stillOwned) {
+        inactiveSince = 0;
+      } else {
+        inactiveSince ||= Date.now();
+        if (
+          Date.now() - inactiveSince >=
+          CHAT_STEERED_INBOX_INACTIVE_GRACE_MS
+        ) {
+          return {
+            retry: true,
+            errorMessage: "chat_steered_turn_unprocessed",
+            suppressRetryNotice: true,
+          };
+        }
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, CHAT_STEERED_INBOX_WAIT_INTERVAL_MS),
+      );
+    }
+  };
+
   const runClaimedInboxJob = async (
     job: ClaimedChatInboxJob,
     run: () => Promise<ChatInboxJobResult | undefined>,
@@ -835,7 +873,7 @@ export async function startChatBridge(
       }
     }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
-      const result = await run();
+      const result = await waitForSteeredInboxCompletion(job, await run());
       await deliverTransientRetryNotice(job, result);
       finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
     } catch (error) {

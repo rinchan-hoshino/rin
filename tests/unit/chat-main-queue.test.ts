@@ -1502,14 +1502,11 @@ test("chat main submits same-chat follow-up as steer before the current turn is 
               .map((entry) => JSON.parse(fs.readFileSync(path.join(dir, entry), "utf8")))
           : [];
       };
-      const inboxItems = [
-        ...listInbox("pending"),
-        ...listInbox("processing"),
-        ...listInbox("failed"),
-      ];
-      const hasDeliveredSteerInboxItem = inboxItems.some((item) => item.messageId === "m-two");
-      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "steer" || hasDeliveredSteerInboxItem) {
-        throw new Error(JSON.stringify({ promptModes, inboxItems }));
+      const pendingItems = listInbox("pending");
+      const processingItems = listInbox("processing");
+      const failedItems = listInbox("failed");
+      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "steer" || pendingItems.length || failedItems.length || processingItems.length < 1) {
+        throw new Error(JSON.stringify({ promptModes, pendingItems, processingItems, failedItems }));
       }
       process.exit(0);
     `;
@@ -1532,7 +1529,7 @@ test("chat main submits same-chat follow-up as steer before the current turn is 
   }
 });
 
-test("chat main completes a delivered inbox item without waiting for processing semantics", async () => {
+test("chat main completes a steered inbox item after the inbound message is processed", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1551,6 +1548,7 @@ test("chat main completes a delivered inbox item without waiting for processing 
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const chatHelpersMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1565,8 +1563,15 @@ test("chat main completes a delivered inbox item without waiting for processing 
       };
 
       let runTurnCalls = 0;
-      controllerMod.ChatController.prototype.runTurn = async function () {
+      controllerMod.ChatController.prototype.runTurn = async function (input) {
         runTurnCalls += 1;
+        setTimeout(() => {
+          chatHelpersMod.markProcessedChatMessage(agentDir, this.chatKey, input.incomingMessageId, {
+            acceptedAt: new Date().toISOString(),
+            processedAt: new Date().toISOString(),
+            sessionFile: "/tmp/delivered-steer.jsonl",
+          });
+        }, 100);
         return { steered: true, sessionFile: "/tmp/delivered-steer.jsonl" };
       };
 

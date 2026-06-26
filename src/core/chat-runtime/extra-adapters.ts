@@ -35,7 +35,7 @@ const SLACK_MAX_TEXT_LENGTH = 40000;
 const MATRIX_TYPING_TIMEOUT_MS = 60000;
 const MATRIX_TYPING_MIN_INTERVAL_MS = 10000;
 const MATRIX_TYPING_MAX_IN_FLIGHT = 1;
-const MATRIX_TYPING_REQUEST_TIMEOUT_MS = 8000;
+const MATRIX_TYPING_REQUEST_TIMEOUT_MS = 20000;
 const MATRIX_SEND_REQUEST_TIMEOUT_MS = 20000;
 
 function isOutboundMediaNodeType(type: string) {
@@ -2353,7 +2353,6 @@ export class MatrixAdapter {
   }
 
   private async sendTyping(roomId: string) {
-    if (!this.client) return false;
     const targetRoomId = safeString(roomId).trim();
     if (!targetRoomId) return false;
     const now = Date.now();

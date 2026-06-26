@@ -91,6 +91,24 @@ test("matrix adapter sends typing through an isolated Matrix API request", async
   }
 });
 
+test("matrix adapter sends typing through raw credentials even before the SDK client is exposed", async () => {
+  const { app } = makeMatrixAdapter();
+  const calls: Array<{ url: string; init: any }> = [];
+  const restoreFetch = mockFetch(async (url: any, init: any) => {
+    calls.push({ url: String(url), init });
+    return new Response("{}", { status: 200 });
+  });
+  try {
+    assert.equal(
+      await app.bot.internal.sendTyping("!room:matrix.example.test"),
+      true,
+    );
+    assert.equal(calls.length, 1);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test("matrix adapter suppresses overlapping typing requests per room", async () => {
   const { adapter, app } = makeMatrixAdapter();
   adapter.client = {};
