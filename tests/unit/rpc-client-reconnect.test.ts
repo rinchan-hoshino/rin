@@ -997,7 +997,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
   });
   assert.deepEqual(
     calls.map((payload) => payload.type),
-    ["get_state"],
+    ["get_state", "replay_pending_terminal_turn_event"],
   );
   assert.deepEqual(refreshes, [{ messages: true, session: true }]);
 
@@ -1065,7 +1065,7 @@ test("rpc interactive session finishes daemon-side session recovery without drop
   assert.equal(session.queuedOfflineOps.length, 0);
   assert.deepEqual(
     calls.map((payload) => payload.type),
-    ["get_state", "prompt"],
+    ["get_state", "replay_pending_terminal_turn_event", "prompt"],
   );
   assert.deepEqual(refreshes, [{ messages: true, session: true }]);
 

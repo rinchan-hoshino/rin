@@ -24,6 +24,7 @@ import { classifyRinFrontendCommand } from "../rin-frontend-sdk/command-dispatch
 import { waitForFrontendInputSubmissionReady } from "../rin-frontend-sdk/input-submission.js";
 import type { RpcFrontendClient } from "../rin-frontend-sdk/frontend-surface.js";
 import { createModelRegistry } from "../rin-frontend-sdk/model-registry.js";
+import { replayPendingTerminalTurnEvent } from "../rin-frontend-sdk/pending-terminal-turn.js";
 import {
   cycleRpcModel,
   cycleRpcThinkingLevel,
@@ -205,6 +206,17 @@ function asRawRuntimeError(error: unknown, fallback = "unknown error") {
   return new Error(rawErrorMessage(error) || fallback);
 }
 
+async function replayPendingTerminalTurnEventForTarget(target: any) {
+  return await replayPendingTerminalTurnEvent(
+    ({ type, ...payload }) => target.call(type, payload),
+    {
+      sessionFile:
+        target.sessionFile || target.sessionManager?.getSessionFile?.(),
+      sessionId: target.sessionId || target.sessionManager?.getSessionId?.(),
+    },
+  );
+}
+
 async function completeRpcRecovery(target: any) {
   const canApplyLightweightState =
     typeof target.call === "function" &&
@@ -219,6 +231,7 @@ async function completeRpcRecovery(target: any) {
     target.emitSessionResynced();
   }
   target.emitFrontendStatus(true);
+  await replayPendingTerminalTurnEventForTarget(target);
   const timedOutPrompts = [...(target.timedOutPromptOps || [])];
   target.timedOutPromptOps = [];
   const queued = [...target.queuedOfflineOps];

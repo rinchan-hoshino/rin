@@ -489,6 +489,56 @@ test("rpc session recovery events are delegated without fake turn termination", 
   ]);
 });
 
+test("tui recovery asks daemon to replay pending terminal turn events", async () => {
+  const calls = [];
+  const session = new runtime.RpcInteractiveSession({
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+  });
+  session.rpcConnected = true;
+  session.recoveryPending = true;
+  session.sessionFile = "/tmp/recovered-session.jsonl";
+  session.call = async (type, payload = {}) => {
+    calls.push({ type, payload });
+    if (type === "get_state") {
+      return {
+        sessionFile: "/tmp/recovered-session.jsonl",
+        sessionId: "session-id",
+        turnActive: false,
+        isStreaming: false,
+        isCompacting: false,
+        messageCount: 1,
+        pendingMessageCount: 0,
+      };
+    }
+    if (type === "replay_pending_terminal_turn_event") {
+      return { replayed: true };
+    }
+    if (type === "get_session_snapshot") return { entries: [], tree: [] };
+    return {};
+  };
+
+  await session.handleConnectionRestored();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    calls.filter((call) => call.type === "replay_pending_terminal_turn_event"),
+    [
+      {
+        type: "replay_pending_terminal_turn_event",
+        payload: {
+          sessionFile: "/tmp/recovered-session.jsonl",
+          sessionId: "session-id",
+        },
+      },
+    ],
+  );
+});
+
 test("rpc session listeners added during dispatch do not receive the current event", () => {
   const session = new runtime.RpcInteractiveSession({
     subscribe() {

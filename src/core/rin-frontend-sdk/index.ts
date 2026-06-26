@@ -83,6 +83,12 @@ export {
 } from "./prompt-context.js";
 
 export {
+  replayPendingTerminalTurnEvent,
+  type RinPendingTerminalTurnEventCommand,
+  type RinPendingTerminalTurnEventRequester,
+} from "./pending-terminal-turn.js";
+
+export {
   handleRinRpcSessionEvent,
   type RinRpcSessionEventRefresh,
   type RinRpcSessionEventTarget,

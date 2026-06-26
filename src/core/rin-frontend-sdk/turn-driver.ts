@@ -30,6 +30,7 @@ import {
   type RinFrontendIdentity,
 } from "./frontend-identity.js";
 import { createRinFrontendTurnCancelledError } from "./lifecycle-errors.js";
+import { replayPendingTerminalTurnEvent } from "./pending-terminal-turn.js";
 import { injectPromptContextHeader } from "./prompt-context.js";
 import {
   submitNativeFrontendPromptTurn,
@@ -877,14 +878,10 @@ export class RinFrontendTurnDriver {
 
   private async replayPendingTerminalTurnEvent(sessionFile?: string) {
     if (!this.client || !this.liveTurn) return false;
-    const wanted = safeString(sessionFile || this.currentSessionFile()).trim();
-    const response: any = await this.client
-      .request({
-        type: "replay_pending_terminal_turn_event",
-        ...(wanted ? { sessionFile: wanted } : {}),
-      })
-      .catch(() => null);
-    return Boolean(response?.replayed);
+    return await replayPendingTerminalTurnEvent(
+      (command) => this.client!.request(command),
+      { sessionFile: sessionFile || this.currentSessionFile() },
+    );
   }
 
   private async resolveSubmittedTurnForSession(
