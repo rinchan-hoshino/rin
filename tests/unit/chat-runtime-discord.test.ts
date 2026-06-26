@@ -56,7 +56,14 @@ test("discord adapter treats guilds with only owner and bots as owner-only", asy
       ["bot-discord", { id: "bot-discord", user: { bot: true } }],
       ["other-bot", { id: "other-bot", user: { bot: true } }],
     ]);
+    const restCalls: string[] = [];
     (adapter as any).client = {
+      rest: {
+        async get(route: string) {
+          restCalls.push(route);
+          return Array.from(members.values());
+        },
+      },
       channels: {
         async fetch(channelId: string) {
           assert.equal(channelId, "channel-owner-only");
@@ -67,7 +74,8 @@ test("discord adapter treats guilds with only owner and bots as owner-only", asy
               roles: { everyone: { id: "guild-1" }, cache: new Map() },
               members: {
                 async fetch(userId?: string) {
-                  return userId ? members.get(userId) : members;
+                  if (userId) return members.get(userId);
+                  throw new Error("guild member gateway fetch unavailable");
                 },
               },
             },
@@ -81,6 +89,7 @@ test("discord adapter treats guilds with only owner and bots as owner-only", asy
       await bot.hasOnlyOwnerUsers("channel-owner-only", ["owner-discord"]),
       true,
     );
+    assert.deepEqual(restCalls, ["/guilds/guild-1/members"]);
 
     members.set("other-human", {
       id: "other-human",
