@@ -282,14 +282,15 @@ export function buildChatInboxRouting(
 export function buildInboundStoredChatMessageInput(
   session: any,
   elements: any[],
-  options: { receivedAt?: string; trust?: string } = {},
+  options: { receivedAt?: string; trust?: string; chatKey?: string } = {},
 ): Omit<StoredChatMessage, "version" | "recordKey"> | null {
   const platform = safeString(session?.platform || "").trim();
   const botId = safeString(
     session?.selfId || session?.bot?.selfId || "",
   ).trim();
   const chatId = getChatId(session);
-  const chatKey = composeChatKey(platform, chatId, botId);
+  const chatKey =
+    safeString(options.chatKey).trim() || composeChatKey(platform, chatId);
   const messageId = pickMessageId(session);
   if (!chatKey || !messageId) return null;
   const userId = pickUserId(session);
@@ -322,10 +323,11 @@ export function buildInboundStoredChatMessageInput(
 export function buildInboundChatLogInput(
   session: any,
   elements: any[],
-  options: { timestamp?: string } = {},
+  options: { timestamp?: string; chatKey?: string } = {},
 ) {
   const inbound = buildInboundStoredChatMessageInput(session, elements, {
     receivedAt: options.timestamp,
+    chatKey: options.chatKey,
   });
   if (!inbound) return null;
   const text = normalizeStoredChatMessageText(inbound);

@@ -177,7 +177,10 @@ test("agent docs expose scheduled task operation workflow", () => {
     /The model-level chat bridge tool surface is unavailable/,
   );
   assert.match(chatBridge, /## Boundary selection/);
-  assert.match(chatBridge, /platform\[\/botId\]:chatId/);
+  assert.match(chatBridge, /platform:chatId/);
+  assert.match(chatBridge, /platform\/botId:chatId/);
+  assert.match(chatBridge, /first configured bot\/account uses the default/);
+  assert.match(chatBridge, /second and later bots use/);
   assert.match(chatBridge, /Treat platform metadata as authoritative/);
   assert.match(chatBridge, /Chat bridge configuration is agent-owned/);
   assert.match(chatBridge, /restart the target daemon/);

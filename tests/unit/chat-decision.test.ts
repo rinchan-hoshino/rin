@@ -111,7 +111,7 @@ test("chat decision lets two-member owner groups skip mention without changing c
   );
 
   assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
+  assert.equal(result.chatKey, "telegram:-1001447529496");
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
 });
@@ -224,7 +224,7 @@ test("chat decision allows owner group messages that explicitly at the bot even 
   );
 
   assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
+  assert.equal(result.chatKey, "telegram:-1001447529496");
   assert.equal(result.text, "ping");
 });
 
@@ -358,6 +358,6 @@ test("chat decision ignores owner group messages that only at other users", asyn
   );
 
   assert.equal(result.allow, false);
-  assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
+  assert.equal(result.chatKey, "telegram:-1001447529496");
   assert.equal(result.text, "see this");
 });

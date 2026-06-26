@@ -119,23 +119,29 @@ Use only the adapter entries the owner requested. For multiple accounts of the s
 `chatKey` identifies the platform target:
 
 ```text
-platform[/botId]:chatId
+platform:chatId
+platform/botId:chatId
 ```
 
 Examples:
 
 ```text
-telegram/123456:7890
-telegram/123456:-1001234567890
-onebot/2301401877:private:123456
-onebot/2301401877:1067390680
+telegram:7890
+telegram:-1001234567890
+telegram/second-bot-id:-1001234567890
+onebot:private:123456
+onebot/second-bot-id:1067390680
+discord:1519903290694045796
+discord/second-bot-id:1519903290694045796
 qq:123456789
 lark:oc_xxx
 ```
 
 Rules:
 
-- `telegram` and `onebot` require `botId`; other built-in platforms use `platform:chatId` unless their adapter layer documents a stricter shape.
+- For every platform, the first configured bot/account uses the default `platform:chatId` form.
+- When multiple bots/accounts are configured for the same platform, the second and later bots use `platform/botId:chatId`.
+- Explicit `platform/botId:chatId` remains valid for direct routing and stored records.
 - Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
 - OneBot private chats commonly use `private:<userId>`; group chats use the group id.
 - Keep `messageId` separate from `chatKey`; quote/reply delivery needs the platform message id.

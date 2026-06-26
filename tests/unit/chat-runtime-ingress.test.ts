@@ -46,10 +46,37 @@ test("chat runtime persists inbound sessions before emitting message events", as
   assert.equal(delivered, true);
   assert.deepEqual(seen, ["m1"]);
   assert.equal(files.length, 1);
-  assert.equal(stored.chatKey, "telegram/1:2");
+  assert.equal(stored.chatKey, "telegram:2");
   assert.equal(stored.messageId, "m1");
   assert.equal(stored.routing?.text, "hello");
   assert.equal(stored.routing?.isDirect, true);
+});
+
+test("chat runtime qualifies second bot keys for the same platform", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const app = runtime.createChatRuntimeApp(agentDir);
+  app.bots.push({ platform: "discord", selfId: "bot-1" });
+  app.bots.push({ platform: "discord", selfId: "bot-2" });
+
+  app.emit("message", {
+    platform: "discord",
+    selfId: "bot-2",
+    channelId: "channel-1",
+    messageId: "m-discord-2",
+    userId: "u1",
+    content: "hello",
+    stripped: { content: "hello" },
+    elements: [{ type: "text", attrs: { content: "hello" } }],
+  });
+
+  const files = inbox.listPendingChatInboxFiles(agentDir);
+  const stored = inbox.readChatInboxItem(files[0]);
+
+  assert.equal(files.length, 1);
+  assert.equal(stored.chatKey, "discord/bot-2:channel-1");
+  assert.equal(stored.messageId, "m-discord-2");
 });
 
 test("chat runtime derives the durable chat key from normalized chat identity", async () => {
@@ -74,7 +101,7 @@ test("chat runtime derives the durable chat key from normalized chat identity", 
   const stored = inbox.readChatInboxItem(files[0]);
 
   assert.equal(files.length, 1);
-  assert.equal(stored.chatKey, "onebot/1:private:42");
+  assert.equal(stored.chatKey, "onebot:private:42");
   assert.equal(stored.messageId, "m2");
   assert.equal(stored.routing?.chatType, "private");
   assert.equal(stored.routing?.userId, "42");

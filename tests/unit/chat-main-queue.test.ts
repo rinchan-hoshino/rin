@@ -62,7 +62,7 @@ test("chat main consumes inbound localized help messages through the inbox path 
       while (Date.now() < deadline) {
         const rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+          .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
         if (rows.length >= 1) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -70,7 +70,7 @@ test("chat main consumes inbound localized help messages through the inbox path 
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const rows = storeMod
         .listChatMessages(agentDir)
-        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
       const text = rows[0]?.text || "";
       if (
         rows.length !== 1 ||
@@ -202,7 +202,7 @@ test("chat main records record-only chat messages without starting an agent turn
       JSON.stringify({
         chat: {
           byChatKey: {
-            "telegram/1:2": { turnPolicy: "record_only" },
+            "telegram:2": { turnPolicy: "record_only" },
           },
         },
       }) + "\n",
@@ -261,7 +261,7 @@ test("chat main records record-only chat messages without starting an agent turn
       while (Date.now() < deadline) {
         rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "user");
+          .filter((item) => item.chatKey === "telegram:2" && item.role === "user");
         if (rows.length >= 1) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -303,7 +303,7 @@ test("chat main applies per-chat model options to inbound prompt turns", async (
       JSON.stringify({
         chat: {
           byChatKey: {
-            "telegram/1:2": {
+            "telegram:2": {
               model: "openai-codex/gpt-5.5",
               thinkingLevel: "low",
             },
@@ -402,7 +402,7 @@ test("chat runTurn lets explicit model options override per-chat defaults", asyn
       JSON.stringify({
         chat: {
           byChatKey: {
-            "telegram/1:2": {
+            "telegram:2": {
               model: "openai-codex/default",
               thinkingLevel: "low",
             },
@@ -428,13 +428,13 @@ test("chat runTurn lets explicit model options override per-chat defaults", asyn
 
       const bridge = await mainMod.startChatBridge();
       await bridge.runTurn({
-        chatKey: "telegram/1:2",
+        chatKey: "telegram:2",
         text: "explicit override",
         model: "openai-codex/override",
         thinkingLevel: "high",
       });
       await bridge.runTurn({
-        chatKey: "telegram/1:2",
+        chatKey: "telegram:2",
         text: "blank falls back",
         model: "  ",
         thinkingLevel: "",
@@ -538,7 +538,7 @@ test("chat main reports unmatched private slash commands without starting an age
       while (Date.now() < deadline) {
         rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+          .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
         if (rows.length >= 1) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -650,7 +650,7 @@ test("chat main reports unmatched owner-only group slash commands like private c
       while (Date.now() < deadline) {
         rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:-10042" && item.role === "assistant");
+          .filter((item) => item.chatKey === "telegram:-10042" && item.role === "assistant");
         if (rows.length >= 1) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -752,7 +752,7 @@ test("chat main silently consumes unmatched group slash commands", async () => {
       await new Promise((resolve) => setTimeout(resolve, 1200));
       const rows = storeMod
         .listChatMessages(agentDir)
-        .filter((item) => item.chatKey === "telegram/1:-10042" && item.role === "assistant");
+        .filter((item) => item.chatKey === "telegram:-10042" && item.role === "assistant");
 
       if (runCommandCalls !== 0 || seen.length !== 0 || rows.length !== 0) {
         throw new Error(JSON.stringify({ runCommandCalls, seen, rows }));
@@ -826,7 +826,7 @@ test("chat main forwards command sender identity without reply session binding",
       storeMod.saveChatMessage(agentDir, {
         messageId: "assistant-old",
         role: "assistant",
-        chatKey: "telegram/1:2",
+        chatKey: "telegram:2",
         platform: "telegram",
         botId: "1",
         chatId: "2",
@@ -875,7 +875,7 @@ test("chat main forwards command sender identity without reply session binding",
         call.promptMeta?.replyToMessageId !== undefined ||
         call.promptMeta?.source !== "chat-bridge" ||
         "triggerKind" in (call.promptMeta || {}) ||
-        call.promptMeta?.chatKey !== "telegram/1:2" ||
+        call.promptMeta?.chatKey !== "telegram:2" ||
         call.promptMeta?.chatType !== "private" ||
         call.promptMeta?.userId !== "trusted-1" ||
         call.promptMeta?.nickname !== "TrustedNick" ||
@@ -1075,7 +1075,7 @@ test("chat main does not retry a queued prompt while the controller is already h
 
       const rows = storeMod
         .listChatMessages(agentDir)
-        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
       if (promptCalls !== 1 || rows.length !== 1) {
         throw new Error(JSON.stringify({
           promptCalls,
@@ -1228,7 +1228,7 @@ test("chat main routes active-turn /new through the chatKey worker immediately",
       while (Date.now() < deadline) {
         rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+          .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
         if (
           newSessionCalls.length > baselineNewSessionCalls &&
           rows.some((item) => item.text === "Started a new session.")
@@ -1241,7 +1241,7 @@ test("chat main routes active-turn /new through the chatKey worker immediately",
       if (
         promptTags.length !== 1 ||
         newSessionCalls.length <= baselineNewSessionCalls ||
-        newSessionCalls.at(-1)?.chatKey !== "telegram/1:2" ||
+        newSessionCalls.at(-1)?.chatKey !== "telegram:2" ||
         newSessionCalls.at(-1)?.managedSessionLeaf !== "chat" ||
         !rows.some((item) => item.text === "Started a new session.")
       ) {
@@ -1369,7 +1369,7 @@ test("chat main submits /abort without waiting for a same-chat prompt to finish"
       while (Date.now() < deadline) {
         rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+          .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
         if (abortCalls > 0 && rows.some((item) => item.text === "Aborted current operation.")) {
           break;
         }
@@ -1735,14 +1735,14 @@ test("chat main reports a transient daemon startup failure before retrying", asy
       while (Date.now() < deadline) {
         const rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+          .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
         if (rows.some((item) => item.text === "retry reply")) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       const rows = storeMod
         .listChatMessages(agentDir)
-        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
       const retryNotice = rows.find((item) => String(item.text || "").includes("connect ENOENT") && !String(item.text || "").includes("retrying"));
       const succeeded = rows.some((item) => item.text === "retry reply");
       if (!succeeded || !retryNotice || connectCalls < 2) {
@@ -1873,14 +1873,14 @@ test("chat main silently retries frontend lifecycle cancellation", async () => {
       while (Date.now() < deadline) {
         const rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+          .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
         if (rows.some((item) => item.text === "retry after dispose")) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       const rows = storeMod
         .listChatMessages(agentDir)
-        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
       const leakedRetryNotice = rows.find((item) => String(item.text || "").includes("rin_frontend_turn_cancelled"));
       const succeeded = rows.some((item) => item.text === "retry after dispose");
       if (!succeeded || leakedRetryNotice || runTurnCalls < 2 || connectCalls < 1) {
@@ -2009,14 +2009,14 @@ test("chat main reports an offline-queued frontend turn before retrying", async 
       while (Date.now() < deadline) {
         const rows = storeMod
           .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+          .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
         if (rows.some((item) => item.text === "retry after queued offline")) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       const rows = storeMod
         .listChatMessages(agentDir)
-        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        .filter((item) => item.chatKey === "telegram:2" && item.role === "assistant");
       const retryNotice = rows.find((item) => String(item.text || "").includes("queued_offline") && !String(item.text || "").includes("retrying"));
       const succeeded = rows.some((item) => item.text === "retry after queued offline");
       if (!succeeded || !retryNotice || runTurnCalls < 2) {
@@ -2065,7 +2065,7 @@ test("chat main passes quoted reply session metadata through one normal prompt s
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
-      const chatKey = "telegram/1:2";
+      const chatKey = "telegram:2";
       const replySessionFile = path.join(agentDir, "sessions", "linked", "reply-history.jsonl");
       const seen = [];
 
@@ -2185,7 +2185,7 @@ test("chat main omits reply metadata when quoting the latest assistant message",
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
-      const chatKey = "telegram/1:2";
+      const chatKey = "telegram:2";
       const replySessionFile = path.join(agentDir, "sessions", "linked", "latest.jsonl");
       const seen = [];
 
@@ -2302,7 +2302,7 @@ test("chat main prepends own unsessioned quoted message to trigger text", async 
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
-      const chatKey = "telegram/1:-10042";
+      const chatKey = "telegram:-10042";
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -2431,7 +2431,7 @@ test("chat main uses own unsessioned quoted message as mention-only trigger text
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
-      const chatKey = "telegram/1:-10042";
+      const chatKey = "telegram:-10042";
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -2553,7 +2553,7 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
-      const chatKey = "telegram/1:2";
+      const chatKey = "telegram:2";
       const replySessionFile = path.join(agentDir, "sessions", "linked", "reply-history.jsonl");
       const seen = [];
 

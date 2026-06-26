@@ -11,7 +11,11 @@ import {
 import { renderChatNodesMarkdown } from "./rich-text.js";
 import { normalizeMessageText } from "../message-content.js";
 
-function normalizeDecisionSessionContext(session: any, identity: any) {
+function normalizeDecisionSessionContext(
+  session: any,
+  identity: any,
+  options: { chatKey?: string } = {},
+) {
   const platform = safeString(session?.platform || "").trim();
   const chatId = getChatId(session);
   const botId = safeString(
@@ -23,7 +27,8 @@ function normalizeDecisionSessionContext(session: any, identity: any) {
     chatId,
     botId,
     trust,
-    chatKey: composeChatKey(platform, chatId, botId),
+    chatKey:
+      safeString(options.chatKey).trim() || composeChatKey(platform, chatId),
   };
 }
 
@@ -200,6 +205,7 @@ export async function shouldProcessText(
   session: any,
   elements: any[],
   identity: any,
+  options: { chatKey?: string } = {},
 ) {
   const text = normalizeMessageText(
     renderChatNodesMarkdown(elements, { renderAt: () => "" }),
@@ -218,7 +224,7 @@ export async function shouldProcessText(
       requiresMentionToStartTurn: false,
     };
 
-  const context = normalizeDecisionSessionContext(session, identity);
+  const context = normalizeDecisionSessionContext(session, identity, options);
   const chatType = directLike(session) ? "private" : "group";
   const privateLikeGroup =
     chatType === "group" &&

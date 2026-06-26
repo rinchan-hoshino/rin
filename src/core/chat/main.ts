@@ -95,7 +95,7 @@ import {
   ensureChatRuntimeDependencies,
   listChatRuntimeAdapterEntries,
 } from "./runtime-config.js";
-import { composeChatKey, loadIdentity, trustOf } from "./support.js";
+import { composeChatKeyForBot, loadIdentity, trustOf } from "./support.js";
 import type { PromptContextMeta } from "../rin-frontend-sdk/prompt-context.js";
 import {
   normalizeFrontendIdentity,
@@ -529,18 +529,20 @@ export async function startChatBridge(
         safeString(bot?.platform).trim() === safeString(platform).trim() &&
         safeString(bot?.selfId).trim() === safeString(selfId).trim(),
     );
+  const sessionChatKey = (session: any) =>
+    composeChatKeyForBot(
+      app,
+      safeString(session?.platform || "").trim(),
+      getChatId(session),
+      safeString(session?.selfId || session?.bot?.selfId || "").trim(),
+    );
   const isInboundMessageProcessed = (chatKey: string, messageId: string) =>
     hasInboundChatMessageReplyBoundary(runtime.agentDir, chatKey, messageId);
   const handleUnmatchedCommandSession = async (session: any, identity: any) => {
     if (!(await isEffectivePrivateChatSession(session, identity))) {
       return { retry: false };
     }
-    const platform = safeString(session?.platform || "").trim();
-    const chatKey = composeChatKey(
-      platform,
-      getChatId(session),
-      safeString(session?.selfId || session?.bot?.selfId || "").trim(),
-    );
+    const chatKey = sessionChatKey(session);
     const messageId = pickMessageId(session);
     if (!chatKey) return { retry: false };
     await enqueueAndDrainOutbox(
@@ -563,11 +565,7 @@ export async function startChatBridge(
   ) => {
     const platform = safeString(session?.platform || "").trim();
     const trust = trustOf(identity, platform, pickUserId(session));
-    const chatKey = composeChatKey(
-      platform,
-      getChatId(session),
-      safeString(session?.selfId || session?.bot?.selfId || "").trim(),
-    );
+    const chatKey = sessionChatKey(session);
     const messageId = pickMessageId(session);
     if (!chatKey) return { retry: false };
     const promptMeta = {
@@ -782,8 +780,9 @@ export async function startChatBridge(
     elements: any[],
     identity: any,
   ) => {
-    const platform = safeString(session?.platform || "").trim();
-    const decision = await shouldProcessText(session, elements, identity);
+    const decision = await shouldProcessText(session, elements, identity, {
+      chatKey: sessionChatKey(session),
+    });
     if (!decision.allow) return { retry: false };
     if (
       resolveChatTurnPolicyMode(settings, decision.chatKey) === "record_only"
@@ -935,6 +934,7 @@ export async function startChatBridge(
       queuedSession,
       queuedElements,
       identity,
+      { chatKey: safeString(envelope.chatKey).trim() },
     );
     if (!decision.allow) {
       return {
@@ -1006,6 +1006,7 @@ export async function startChatBridge(
         queuedSession,
         queuedElements,
         identity,
+        { chatKey: safeString(envelope.chatKey).trim() },
       );
       if (!decision.allow) return false;
       return (
@@ -1020,15 +1021,18 @@ export async function startChatBridge(
       const identity = getIdentity();
       const elements = ensureSessionElements(session);
       try {
+        const chatKey = sessionChatKey(session);
         persistInboundMessage(
           runtime.agentDir,
           session,
           elements,
           identity,
           trustOf,
+          { chatKey },
         );
         const logEntry = buildInboundChatLogInput(session, elements, {
           timestamp: nowIso(),
+          chatKey,
         });
         if (logEntry) {
           appendChatLog(runtime.agentDir, logEntry);

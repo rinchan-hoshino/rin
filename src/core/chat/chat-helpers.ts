@@ -139,11 +139,13 @@ export function persistInboundMessage(
   elements: any[],
   identity: any,
   trustOf: (identity: any, platform: string, userId: string) => string,
+  options: { chatKey?: string } = {},
 ) {
   const platform = safeString(session?.platform || "").trim();
   const userId = pickUserId(session);
   const normalized = buildInboundStoredChatMessageInput(session, elements, {
     trust: trustOf(identity, platform, userId),
+    chatKey: options.chatKey,
   });
   return normalized ? saveChatMessage(agentDir, normalized) : null;
 }

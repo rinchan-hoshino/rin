@@ -13,7 +13,7 @@ import {
   getChatBridgeAdapterSpec,
   type ChatBridgeBuiltInAdapterKey,
 } from "../chat-bridge/adapters.js";
-import { composeChatKey } from "../chat/support.js";
+import { composeChatKeyForBot } from "../chat/support.js";
 import {
   compactObject,
   createPrefixedLogger,
@@ -281,7 +281,7 @@ export class ChatRuntimeApp extends EventEmitter {
     if (!nextAgentDir || !platform || !botId || !chatId || !messageId) {
       return;
     }
-    const chatKey = composeChatKey(platform, chatId, botId);
+    const chatKey = composeChatKeyForBot(this, platform, chatId, botId);
     if (!chatKey) return;
     const elements = Array.isArray(session?.elements) ? session.elements : [];
     enqueueChatInboxItem(nextAgentDir, {

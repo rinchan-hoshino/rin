@@ -43,11 +43,6 @@ function normalizeTrust(value: unknown) {
   return nextTrust === "OWNER" || nextTrust === "TRUSTED" ? nextTrust : "OTHER";
 }
 
-function platformRequiresBotId(platform: string) {
-  const nextPlatform = normalizeChatPlatform(platform).toLowerCase();
-  return nextPlatform === "telegram" || nextPlatform === "onebot";
-}
-
 export function inferChatType(target: {
   platform: string;
   chatId: string;
@@ -69,10 +64,9 @@ export function composeChatKey(platform: string, chatId: string, botId = "") {
   const nextChatId = normalizeChatId(chatId);
   const nextBotId = normalizeChatId(botId);
   if (!nextPlatform || !nextChatId) return "";
-  if (platformRequiresBotId(nextPlatform)) {
-    return nextBotId ? `${nextPlatform}/${nextBotId}:${nextChatId}` : "";
-  }
-  return `${nextPlatform}:${nextChatId}`;
+  return nextBotId
+    ? `${nextPlatform}/${nextBotId}:${nextChatId}`
+    : `${nextPlatform}:${nextChatId}`;
 }
 
 export function parseChatKey(chatKey: string): ParsedChatKey | null {
@@ -84,7 +78,6 @@ export function parseChatKey(chatKey: string): ParsedChatKey | null {
   const botId = normalizeChatId(match[2] || "");
   const chatId = normalizeChatId(match[3]);
   if (!platform || !chatId) return null;
-  if (platformRequiresBotId(platform) && !botId) return null;
   return { platform, botId, chatId };
 }
 
@@ -137,12 +130,10 @@ export function listChatStateFiles(chatsRoot: string) {
         const firstDir = path.join(platformDir, first);
         const directStatePath = path.join(firstDir, "state.json");
         if (fs.existsSync(directStatePath)) {
-          if (!platformRequiresBotId(platform)) {
-            out.push({
-              chatKey: composeChatKey(platform, first),
-              statePath: directStatePath,
-            });
-          }
+          out.push({
+            chatKey: composeChatKey(platform, first),
+            statePath: directStatePath,
+          });
           continue;
         }
         const levelTwo = fs
@@ -434,18 +425,41 @@ export function canRunCommand(trust: string, commandName: string) {
   return false;
 }
 
-export function findBot(app: any, platform: string, botId = "") {
+export function botsForPlatform(app: any, platform: string) {
   const bots = Array.isArray(app?.bots) ? app.bots : [];
   const nextPlatform = normalizeChatPlatform(platform);
-  const nextBotId = normalizeChatId(botId);
-  if (!nextPlatform) return null;
-  const matches = bots.filter(
+  if (!nextPlatform) return [];
+  return bots.filter(
     (bot: any) => normalizeChatPlatform(bot?.platform) === nextPlatform,
   );
+}
+
+export function isFirstBotForPlatform(app: any, platform: string, botId = "") {
+  const nextBotId = normalizeChatId(botId);
+  const matches = botsForPlatform(app, platform);
+  if (!matches.length) return true;
+  if (!nextBotId) return true;
+  return normalizeChatId(matches[0]?.selfId) === nextBotId;
+}
+
+export function composeChatKeyForBot(
+  app: any,
+  platform: string,
+  chatId: string,
+  botId = "",
+) {
+  return composeChatKey(
+    platform,
+    chatId,
+    isFirstBotForPlatform(app, platform, botId) ? "" : botId,
+  );
+}
+
+export function findBot(app: any, platform: string, botId = "") {
+  const matches = botsForPlatform(app, platform);
+  const nextBotId = normalizeChatId(botId);
   if (!matches.length) return null;
-  if (!nextBotId) {
-    return platformRequiresBotId(nextPlatform) ? null : matches[0];
-  }
+  if (!nextBotId) return matches[0];
   return (
     matches.find((bot: any) => normalizeChatId(bot?.selfId) === nextBotId) ||
     null

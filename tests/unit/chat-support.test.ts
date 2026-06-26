@@ -50,19 +50,40 @@ test("chat support keeps compose, parse, and normalize symmetric across bot requ
     "discord:channel-1",
   );
   assert.equal(
+    support.composeChatKey("discord", " channel-1 ", " bot-1 "),
+    "discord/bot-1:channel-1",
+  );
+  assert.equal(
     support.composeChatKey(" telegram ", " -100123 ", " 8623230033 "),
     "telegram/8623230033:-100123",
   );
-  assert.equal(support.composeChatKey("telegram", "-100123"), "");
+  assert.equal(
+    support.composeChatKey("telegram", "-100123"),
+    "telegram:-100123",
+  );
   assert.deepEqual(support.parseChatKey(" discord:channel-1 "), {
     platform: "discord",
     botId: "",
     chatId: "channel-1",
   });
+  assert.deepEqual(support.parseChatKey(" discord/bot-1:channel-1 "), {
+    platform: "discord",
+    botId: "bot-1",
+    chatId: "channel-1",
+  });
+  assert.deepEqual(support.parseChatKey(" telegram:-100123 "), {
+    platform: "telegram",
+    botId: "",
+    chatId: "-100123",
+  });
   assert.equal(support.normalizeChatKey(" discord/:channel-1 "), undefined);
   assert.equal(
     support.normalizeChatKey(" discord:channel-1 "),
     "discord:channel-1",
+  );
+  assert.equal(
+    support.normalizeChatKey(" discord/bot-1:channel-1 "),
+    "discord/bot-1:channel-1",
   );
   assert.equal(
     support.normalizeChatKey(" telegram/8623230033:-100123 "),
@@ -232,10 +253,24 @@ test("chat support normalizes trust lookup and bot selection over dirty metadata
     bots: [
       { platform: " telegram ", selfId: " 8623230033 ", name: "tg" },
       { platform: "discord", selfId: "1", name: "dc" },
+      { platform: "discord", selfId: "2", name: "dc2" },
     ],
   };
   assert.equal(support.findBot(app, "telegram", "8623230033")?.name, "tg");
-  assert.equal(support.findBot(app, "telegram"), null);
+  assert.equal(support.findBot(app, "telegram")?.name, "tg");
   assert.equal(support.findBot(app, "discord")?.name, "dc");
+  assert.equal(support.findBot(app, "discord", "2")?.name, "dc2");
   assert.equal(support.findBot(app, "onebot", "1"), null);
+  assert.equal(
+    support.composeChatKeyForBot(app, "discord", "channel-1", "1"),
+    "discord:channel-1",
+  );
+  assert.equal(
+    support.composeChatKeyForBot(app, "discord", "channel-1", "2"),
+    "discord/2:channel-1",
+  );
+  assert.equal(
+    support.composeChatKeyForBot(app, "telegram", "-100123", "8623230033"),
+    "telegram:-100123",
+  );
 });
