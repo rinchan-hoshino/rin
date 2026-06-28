@@ -10,7 +10,8 @@
 - Matrix chat support now has a runtime adapter with shared room routing, SDK-based media sending, and throttled isolated typing requests.
 - Daemon/session shutdown is safer around lifecycle cancellation, worker exits, session routing, and in-flight turn settlement.
 - Chat steering and diagnostics are tighter with accepted-inbox deduplication and a compact usage command.
-- Discord and Matrix chat routing is more robust around owner-only channel detection, first-bot defaults, recoverable steered inbox items, typing/lifecycle noise, message isolation, and outbox timeout retries.
+- Discord and Matrix chat routing is more robust around owner-only channel detection, first-bot defaults, slash-command syncing, recoverable steered inbox items, typing/lifecycle noise, message isolation, and outbox timeout retries.
+- Bundled upstream skill provenance is refreshed so installed built-in skill metadata stays traceable.
 - Rin now tracks the Pi 0.80.2 dependency line for this release series.
 
 - Diagnostic commands now have dedicated interactive TUI frontends with shared backend logic for cleaner troubleshooting workflows.
@@ -20,6 +21,9 @@
 - Browser/search setup is simpler after syncing agent practices docs, removing the bundled browse sidecar, and preparing SearXNG runtime dependencies on Windows.
 - Rin now tracks the Pi 0.79.10 dependency line for this release series.
 <!-- rin-changelog-coverage
+1098735 fix(chat): defer Discord command sync until ready
+161e576 feat(chat): add Discord slash commands
+e591789 chore(upstream): refresh skill-creator provenance
 84a812c fix(chat): avoid unbounded Discord owner-only member fetch
 7870b89 fix(chat): define Discord owner-only by human users
 231b6e6 fix(chat): allow bot-only Discord owner channels
