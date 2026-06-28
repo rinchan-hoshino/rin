@@ -464,6 +464,25 @@ export class DiscordAdapter {
     return rawItems.map((item) => safeString(item).trim()).filter(Boolean);
   }
 
+  private discordApplicationId() {
+    return safeString(
+      this.bot?.selfId ||
+        this.client?.application?.id ||
+        this.client?.user?.id ||
+        "",
+    ).trim();
+  }
+
+  private discordApplicationCommandsRoute(guildId = "") {
+    const applicationId = this.discordApplicationId();
+    if (!applicationId) return "";
+    const encodedApplicationId = encodeURIComponent(applicationId);
+    const encodedGuildId = encodeURIComponent(safeString(guildId).trim());
+    return encodedGuildId
+      ? `/applications/${encodedApplicationId}/guilds/${encodedGuildId}/commands`
+      : `/applications/${encodedApplicationId}/commands`;
+  }
+
   private async setApplicationCommands(payload: any) {
     const commands = Array.isArray(payload?.commands) ? payload.commands : [];
     const guildIds = this.discordCommandGuildIds(
@@ -472,20 +491,31 @@ export class DiscordAdapter {
         this.config?.applicationCommandGuildIds,
     );
     const setCommands = this.client?.application?.commands?.set;
-    if (typeof setCommands !== "function") {
-      throw new Error("discord_application_commands_unavailable");
-    }
-    if (guildIds.length) {
-      for (const guildId of guildIds) {
-        await setCommands.call(
-          this.client.application.commands,
-          commands,
-          guildId,
-        );
+    if (typeof setCommands === "function") {
+      if (guildIds.length) {
+        for (const guildId of guildIds) {
+          await setCommands.call(
+            this.client.application.commands,
+            commands,
+            guildId,
+          );
+        }
+        return true;
       }
+      await setCommands.call(this.client.application.commands, commands);
       return true;
     }
-    await setCommands.call(this.client.application.commands, commands);
+
+    const rest = this.client?.rest || this.bot?.internal?.rest;
+    if (typeof rest?.put !== "function") return false;
+    const routes = guildIds.length
+      ? guildIds.map((guildId) => this.discordApplicationCommandsRoute(guildId))
+      : [this.discordApplicationCommandsRoute()];
+    const validRoutes = routes.filter(Boolean);
+    if (!validRoutes.length) return false;
+    for (const route of validRoutes) {
+      await rest.put(route, { body: commands });
+    }
     return true;
   }
 

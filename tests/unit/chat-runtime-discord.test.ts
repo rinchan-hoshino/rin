@@ -79,6 +79,80 @@ test("discord adapter syncs application commands through the Discord client", as
   }
 });
 
+test("discord adapter falls back to Discord REST for command sync", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-"),
+  );
+  try {
+    let bot: any = null;
+    const adapter = new extraAdapters.DiscordAdapter(
+      {
+        register(_adapter: unknown, registeredBot: any) {
+          bot = registeredBot;
+        },
+      },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    assert.ok(bot);
+    bot.selfId = "bot-discord";
+    const calls: any[] = [];
+    (adapter as any).client = {
+      rest: {
+        async put(route: string, payload: any) {
+          calls.push({ route, payload });
+        },
+      },
+    };
+
+    await bot.internal.setApplicationCommands({
+      commands: [{ name: "status", description: "Show status", type: 1 }],
+      guildIds: ["guild-1"],
+    });
+
+    assert.deepEqual(calls, [
+      {
+        route: "/applications/bot-discord/guilds/guild-1/commands",
+        payload: {
+          body: [{ name: "status", description: "Show status", type: 1 }],
+        },
+      },
+    ]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("discord adapter treats command sync before ready as a no-op", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-"),
+  );
+  try {
+    let bot: any = null;
+    new extraAdapters.DiscordAdapter(
+      {
+        register(_adapter: unknown, registeredBot: any) {
+          bot = registeredBot;
+        },
+      },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    assert.ok(bot);
+
+    assert.equal(
+      await bot.internal.setApplicationCommands({
+        commands: [{ name: "status", description: "Show status", type: 1 }],
+      }),
+      false,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("discord adapter maps chat input interactions to Rin slash messages", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-discord-"),
