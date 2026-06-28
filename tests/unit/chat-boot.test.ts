@@ -92,6 +92,122 @@ test("chat boot localizes command descriptions for Chinese runtimes", () => {
   ]);
 });
 
+test("chat boot builds and syncs Discord application commands", async () => {
+  const calls = [];
+  const bot = {
+    platform: "discord",
+    selfId: "bot-1",
+    internal: {
+      async setApplicationCommands(payload) {
+        calls.push(payload);
+      },
+    },
+  };
+  const rows = boot.getChatCommandRows();
+  const expectedPayload = [
+    {
+      name: "help",
+      description: "Show available commands",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "abort",
+      description: "Abort current operation",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "new",
+      description: "Start a new session",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "compact",
+      description: "Compact the current session",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "reload",
+      description: "Reload extensions, prompts, skills, and themes",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "status",
+      description: "Show current chat processing status",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "session",
+      description: "Show current session status",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "model",
+      description: "Show or change the current model",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+  ];
+
+  assert.deepEqual(boot.buildDiscordCommandPayload(rows), expectedPayload);
+  assert.deepEqual(
+    boot.buildDiscordCommandPayload([
+      { name: "HELP", description: "override" },
+      { name: "help", description: "ignored duplicate" },
+      { name: "bad name" },
+      { name: "status" },
+    ]),
+    [
+      {
+        name: "help",
+        description: "override",
+        type: 1,
+        options: [
+          { name: "input", description: "Arguments", type: 3, required: false },
+        ],
+      },
+      {
+        name: "status",
+        description: "status",
+        type: 1,
+        options: [
+          { name: "input", description: "Arguments", type: 3, required: false },
+        ],
+      },
+    ],
+  );
+
+  await boot.syncDiscordCommands(
+    { bots: [bot, { platform: "telegram", internal: {} }] },
+    { warn() {} },
+    rows,
+  );
+
+  assert.deepEqual(calls, [{ commands: expectedPayload }]);
+});
+
 test("chat boot clears common telegram scopes before syncing default commands", async () => {
   const deletes = [];
   const sets = [];

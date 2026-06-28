@@ -47,6 +47,32 @@ function createTelegramCommandEntry(item: ChatCommandRow | undefined) {
   };
 }
 
+function normalizeDiscordCommandName(value: unknown) {
+  const rawName = safeString(value).trim().toLowerCase();
+  if (!/^[a-z0-9_-]{1,32}$/.test(rawName)) return "";
+  return rawName;
+}
+
+function truncateDiscordCommandDescription(value: string) {
+  return Array.from(value).slice(0, 100).join("");
+}
+
+function createDiscordCommandEntry(item: ChatCommandRow | undefined) {
+  const rawName = safeString(item?.name).trim();
+  const name = normalizeDiscordCommandName(rawName);
+  if (!name) return null;
+  return {
+    name,
+    description: truncateDiscordCommandDescription(
+      safeString(item?.description).trim() || rawName,
+    ),
+    type: 1,
+    options: [
+      { name: "input", description: "Arguments", type: 3, required: false },
+    ],
+  };
+}
+
 export function buildTelegramCommandPayload(commandRows: ChatCommandRow[]) {
   const payload: Array<{ command: string; description: string }> = [];
   const seen = new Set<string>();
@@ -67,6 +93,30 @@ export function buildTelegramCommandClearScopes() {
     { type: "all_group_chats" },
     { type: "all_chat_administrators" },
   ];
+}
+
+export function buildDiscordCommandPayload(commandRows: ChatCommandRow[]) {
+  const payload: Array<{
+    name: string;
+    description: string;
+    type: number;
+    options: Array<{
+      name: string;
+      description: string;
+      type: number;
+      required: boolean;
+    }>;
+  }> = [];
+  const seen = new Set<string>();
+
+  for (const item of commandRows) {
+    const entry = createDiscordCommandEntry(item);
+    if (!entry || seen.has(entry.name)) continue;
+    payload.push(entry);
+    seen.add(entry.name);
+  }
+
+  return payload;
 }
 
 async function syncTelegramCommandsViaInternal(
@@ -122,6 +172,31 @@ export async function syncTelegramCommands(
       await syncTelegramCommandsForBot(bot, commander, payload, clearScopes);
     } catch (error: any) {
       warnTelegramCommandSyncFailure(logger, bot, error);
+    }
+  }
+}
+
+function warnDiscordCommandSyncFailure(logger: any, bot: any, error: unknown) {
+  logger.warn(
+    `chat command sync failed platform=${safeString(bot?.platform)} selfId=${safeString(bot?.selfId)} err=${safeString((error as any)?.message || error)}`,
+  );
+}
+
+export async function syncDiscordCommands(
+  app: any,
+  logger: any,
+  commandRows: ChatCommandRow[] = [],
+) {
+  const payload = buildDiscordCommandPayload(commandRows);
+
+  for (const bot of Array.isArray(app.bots) ? app.bots : []) {
+    if (safeString(bot?.platform) !== "discord") continue;
+    if (typeof bot?.internal?.setApplicationCommands !== "function") continue;
+
+    try {
+      await bot.internal.setApplicationCommands({ commands: payload });
+    } catch (error: any) {
+      warnDiscordCommandSyncFailure(logger, bot, error);
     }
   }
 }

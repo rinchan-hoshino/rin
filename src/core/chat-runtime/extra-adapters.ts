@@ -405,6 +405,8 @@ export class DiscordAdapter {
         const channel = await this.fetchChannel(channelId);
         return await channel?.messages?.delete?.(messageId);
       },
+      setApplicationCommands: async (payload: any) =>
+        await this.setApplicationCommands(payload),
       hasOnlyOwnerUsers: async (channelId: string, ownerUserIds: string[]) =>
         await this.hasOnlyOwnerUsers(channelId, ownerUserIds),
     };
@@ -451,6 +453,40 @@ export class DiscordAdapter {
   private async fetchMessage(channelId: string, messageId: string) {
     const channel = await this.fetchChannel(channelId);
     return await channel?.messages?.fetch?.(messageId);
+  }
+
+  private discordCommandGuildIds(value: unknown) {
+    const rawItems = Array.isArray(value)
+      ? value
+      : safeString(value)
+          .split(",")
+          .map((item) => item.trim());
+    return rawItems.map((item) => safeString(item).trim()).filter(Boolean);
+  }
+
+  private async setApplicationCommands(payload: any) {
+    const commands = Array.isArray(payload?.commands) ? payload.commands : [];
+    const guildIds = this.discordCommandGuildIds(
+      payload?.guildIds ??
+        this.config?.commandGuildIds ??
+        this.config?.applicationCommandGuildIds,
+    );
+    const setCommands = this.client?.application?.commands?.set;
+    if (typeof setCommands !== "function") {
+      throw new Error("discord_application_commands_unavailable");
+    }
+    if (guildIds.length) {
+      for (const guildId of guildIds) {
+        await setCommands.call(
+          this.client.application.commands,
+          commands,
+          guildId,
+        );
+      }
+      return true;
+    }
+    await setCommands.call(this.client.application.commands, commands);
+    return true;
   }
 
   private cachedChannelMembersForOwnerOnlyCheck(channel: any) {
@@ -549,6 +585,14 @@ export class DiscordAdapter {
       void this.handleMessage(message).catch((error: any) => {
         this.logger?.warn?.(
           `message handling failed err=${safeString(error?.message || error)}`,
+        );
+      });
+    });
+
+    this.client.on(Discord.Events.InteractionCreate, (interaction: any) => {
+      void this.handleInteraction(interaction).catch((error: any) => {
+        this.logger?.warn?.(
+          `interaction handling failed err=${safeString(error?.message || error)}`,
         );
       });
     });
@@ -718,6 +762,83 @@ export class DiscordAdapter {
     if (delivered.length) return delivered;
     if (failures.length) throw failures[0];
     throw new Error("discord_send_message_empty_result");
+  }
+
+  private async acknowledgeInteraction(interaction: any) {
+    if (interaction?.deferred || interaction?.replied) return;
+    if (typeof interaction?.reply !== "function") return;
+    try {
+      await interaction.reply({
+        content: "Rin command received.",
+        ephemeral: true,
+      });
+    } catch (error: any) {
+      this.logger.warn(
+        `interaction acknowledge failed err=${safeString(error?.message || error)}`,
+      );
+    }
+  }
+
+  private discordInteractionCommandLine(interaction: any) {
+    const commandName = safeString(interaction?.commandName)
+      .trim()
+      .toLowerCase();
+    if (!commandName) return "";
+    let input = "";
+    try {
+      input = safeString(interaction?.options?.getString?.("input")).trim();
+    } catch {}
+    return `/${commandName}${input ? ` ${input}` : ""}`;
+  }
+
+  private async handleInteraction(interaction: any) {
+    if (!interaction?.isChatInputCommand?.()) return;
+    const userId = safeString(interaction?.user?.id).trim();
+    if (!userId || userId === safeString(this.bot?.selfId).trim()) return;
+    if (Boolean(interaction?.user?.bot)) return;
+    const commandLine = this.discordInteractionCommandLine(interaction);
+    if (!commandLine) return;
+    await this.acknowledgeInteraction(interaction);
+    const channelId = safeString(interaction?.channelId).trim();
+    const guildId = safeString(interaction?.guildId || "").trim();
+    const displayName =
+      safeString(interaction?.member?.displayName).trim() ||
+      safeString(interaction?.user?.globalName).trim() ||
+      safeString(interaction?.user?.username).trim() ||
+      undefined;
+    this.app.emit("message", {
+      platform: "discord",
+      selfId: safeString(this.bot?.selfId).trim() || undefined,
+      bot: this.bot,
+      messageId: safeString(interaction?.id).trim(),
+      timestamp: Number(interaction?.createdTimestamp) || Date.now(),
+      userId,
+      author: {
+        userId,
+        name: displayName,
+        nick: displayName,
+        username: safeString(interaction?.user?.username).trim() || undefined,
+      },
+      user: {
+        id: userId,
+        userId,
+        name: displayName,
+        nick: displayName,
+        username: safeString(interaction?.user?.username).trim() || undefined,
+      },
+      channelId,
+      channelName:
+        safeString(interaction?.channel?.name || "").trim() || undefined,
+      guildId: guildId || undefined,
+      guildName: safeString(interaction?.guild?.name || "").trim() || undefined,
+      isDirect: !guildId,
+      content: commandLine,
+      stripped: {
+        appel: true,
+        content: commandLine,
+      },
+      elements: [normalizeNode("text", { content: commandLine })],
+    });
   }
 
   private async handleMessage(message: any) {

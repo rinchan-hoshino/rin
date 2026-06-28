@@ -29,6 +29,7 @@ import {
 import {
   drainChatOutbox,
   getChatCommandRows,
+  syncDiscordCommands,
   syncTelegramCommands,
 } from "./boot.js";
 import {
@@ -1058,6 +1059,7 @@ export async function startChatBridge(
   app.on("bot-status-updated", (bot: any) => {
     if (bot?.status !== 1) return;
     void syncTelegramCommands(app, logger, commandRows);
+    void syncDiscordCommands(app, logger, commandRows);
   });
 
   const startedAt = nowIso();
@@ -1270,6 +1272,7 @@ export async function startChatBridge(
 
   await app.start();
   await syncTelegramCommands(app, logger, commandRows);
+  await syncDiscordCommands(app, logger, commandRows);
   logger.info(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );

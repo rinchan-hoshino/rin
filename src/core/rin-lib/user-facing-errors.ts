@@ -142,6 +142,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   cron_trigger_required: () =>
     "Scheduled task needs a trigger before it can run. Add a schedule or one-time trigger.",
 
+  discord_application_commands_unavailable: () =>
+    "Discord command sync failed because the application command API is not ready.",
   discord_channel_not_sendable: (detail) =>
     withDetail(
       "Discord send failed because the target channel cannot receive messages",

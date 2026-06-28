@@ -32,6 +32,129 @@ function adminPermission(value: boolean) {
   return namedPermission(value, "Administrator", 8n);
 }
 
+test("discord adapter syncs application commands through the Discord client", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-"),
+  );
+  try {
+    let bot: any = null;
+    const adapter = new extraAdapters.DiscordAdapter(
+      {
+        register(_adapter: unknown, registeredBot: any) {
+          bot = registeredBot;
+        },
+      },
+      agentDir,
+      { commandGuildIds: ["guild-1", " guild-2 "] },
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    assert.ok(bot);
+    const calls: any[] = [];
+    (adapter as any).client = {
+      application: {
+        commands: {
+          async set(commands: any[], guildId?: string) {
+            calls.push({ commands, guildId });
+          },
+        },
+      },
+    };
+
+    await bot.internal.setApplicationCommands({
+      commands: [{ name: "status", description: "Show status", type: 1 }],
+    });
+
+    assert.deepEqual(calls, [
+      {
+        commands: [{ name: "status", description: "Show status", type: 1 }],
+        guildId: "guild-1",
+      },
+      {
+        commands: [{ name: "status", description: "Show status", type: 1 }],
+        guildId: "guild-2",
+      },
+    ]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("discord adapter maps chat input interactions to Rin slash messages", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-"),
+  );
+  try {
+    const emitted: any[] = [];
+    const adapter = new extraAdapters.DiscordAdapter(
+      {
+        register() {},
+        emit(eventName: string, payload: any) {
+          emitted.push({ eventName, payload });
+        },
+      },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    (adapter as any).bot.selfId = "bot-discord";
+    const replies: any[] = [];
+
+    await (adapter as any).handleInteraction({
+      id: "interaction-1",
+      commandName: "model",
+      channelId: "channel-1",
+      channel: { name: "rin-dev" },
+      guildId: "guild-1",
+      guild: { name: "Rin Dev" },
+      createdTimestamp: 1710000000000,
+      user: {
+        id: "owner-discord",
+        bot: false,
+        globalName: "Owner",
+        username: "owner",
+      },
+      member: { displayName: "Owner Nick" },
+      options: {
+        getString(name: string) {
+          assert.equal(name, "input");
+          return "google/gemini-test";
+        },
+      },
+      isChatInputCommand() {
+        return true;
+      },
+      async reply(payload: any) {
+        replies.push(payload);
+      },
+    });
+
+    assert.deepEqual(replies, [
+      { content: "Rin command received.", ephemeral: true },
+    ]);
+    assert.equal(emitted.length, 1);
+    assert.equal(emitted[0].eventName, "message");
+    assert.equal(emitted[0].payload.platform, "discord");
+    assert.equal(emitted[0].payload.messageId, "interaction-1");
+    assert.equal(emitted[0].payload.channelId, "channel-1");
+    assert.equal(emitted[0].payload.guildId, "guild-1");
+    assert.equal(emitted[0].payload.userId, "owner-discord");
+    assert.equal(emitted[0].payload.content, "/model google/gemini-test");
+    assert.deepEqual(emitted[0].payload.stripped, {
+      appel: true,
+      content: "/model google/gemini-test",
+    });
+    assert.deepEqual(emitted[0].payload.elements, [
+      {
+        type: "text",
+        attrs: { content: "/model google/gemini-test" },
+        children: [],
+      },
+    ]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("discord adapter treats guilds with only owner and bots as owner-only", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-discord-"),
