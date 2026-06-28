@@ -112,7 +112,7 @@ test("chat decision lets two-member owner groups skip mention without changing c
   );
 
   assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "telegram:-1001447529496");
+  assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
 });
@@ -142,7 +142,10 @@ test("chat decision lets Matrix owner-only rooms skip mention through shared gro
 
   assert.deepEqual(calls, ["!admin:matrix.example.test"]);
   assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "matrix:!admin:matrix.example.test");
+  assert.equal(
+    result.chatKey,
+    "matrix/@rinchan:matrix.example.test:!admin:matrix.example.test",
+  );
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
 });
@@ -172,7 +175,7 @@ test("chat decision lets Feishu owner-only groups skip mention without changing 
 
   assert.deepEqual(calls, ["oc_owner_only"]);
   assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "lark:oc_owner_only");
+  assert.equal(result.chatKey, "lark/ou_bot:oc_owner_only");
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
 });
@@ -204,7 +207,7 @@ test("chat decision lets Discord owner-only channels skip mention when the adapt
     { chatId: "channel-owner-only", ownerUserIds: ["owner-discord"] },
   ]);
   assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "discord:channel-owner-only");
+  assert.equal(result.chatKey, "discord/bot-discord:channel-owner-only");
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
   assert.equal(result.requiresMentionToStartTurn, false);
@@ -232,7 +235,7 @@ test("chat decision still requires mention in Discord channels when another user
   );
 
   assert.equal(result.allow, false);
-  assert.equal(result.chatKey, "discord:channel-shared");
+  assert.equal(result.chatKey, "discord/bot-discord:channel-shared");
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
   assert.equal(result.requiresMentionToStartTurn, true);
@@ -286,7 +289,7 @@ test("chat decision allows owner group messages that explicitly at the bot even 
   );
 
   assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "telegram:-1001447529496");
+  assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
   assert.equal(result.text, "ping");
 });
 
@@ -420,6 +423,6 @@ test("chat decision ignores owner group messages that only at other users", asyn
   );
 
   assert.equal(result.allow, false);
-  assert.equal(result.chatKey, "telegram:-1001447529496");
+  assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
   assert.equal(result.text, "see this");
 });

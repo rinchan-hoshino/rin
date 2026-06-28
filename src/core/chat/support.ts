@@ -63,21 +63,19 @@ export function composeChatKey(platform: string, chatId: string, botId = "") {
   const nextPlatform = normalizeChatPlatform(platform);
   const nextChatId = normalizeChatId(chatId);
   const nextBotId = normalizeChatId(botId);
-  if (!nextPlatform || !nextChatId) return "";
-  return nextBotId
-    ? `${nextPlatform}/${nextBotId}:${nextChatId}`
-    : `${nextPlatform}:${nextChatId}`;
+  if (!nextPlatform || !nextBotId || !nextChatId) return "";
+  return `${nextPlatform}/${nextBotId}:${nextChatId}`;
 }
 
 export function parseChatKey(chatKey: string): ParsedChatKey | null {
   const match = safeString(chatKey)
     .trim()
-    .match(/^([^/:]+)(?:\/([^:]+))?:(.+)$/);
+    .match(/^([^/:]+)\/([^:]+):(.+)$/);
   if (!match) return null;
   const platform = normalizeChatPlatform(match[1]);
-  const botId = normalizeChatId(match[2] || "");
+  const botId = normalizeChatId(match[2]);
   const chatId = normalizeChatId(match[3]);
-  if (!platform || !chatId) return null;
+  if (!platform || !botId || !chatId) return null;
   return { platform, botId, chatId };
 }
 
@@ -91,22 +89,14 @@ export function normalizeChatKey(value: unknown) {
 export function chatStateDir(dataDir: string, chatKey: string) {
   const parsed = parseChatKey(chatKey);
   if (!parsed) throw new Error(`invalid_chatKey:${chatKey}`);
-  return parsed.botId
-    ? path.join(
-        dataDir,
-        "chat",
-        "session-state",
-        parsed.platform,
-        parsed.botId,
-        parsed.chatId,
-      )
-    : path.join(
-        dataDir,
-        "chat",
-        "session-state",
-        parsed.platform,
-        parsed.chatId,
-      );
+  return path.join(
+    dataDir,
+    "chat",
+    "session-state",
+    parsed.platform,
+    parsed.botId,
+    parsed.chatId,
+  );
 }
 
 export function chatStatePath(dataDir: string, chatKey: string) {
@@ -129,13 +119,7 @@ export function listChatStateFiles(chatsRoot: string) {
       for (const first of levelOne) {
         const firstDir = path.join(platformDir, first);
         const directStatePath = path.join(firstDir, "state.json");
-        if (fs.existsSync(directStatePath)) {
-          out.push({
-            chatKey: composeChatKey(platform, first),
-            statePath: directStatePath,
-          });
-          continue;
-        }
+        if (fs.existsSync(directStatePath)) continue;
         const levelTwo = fs
           .readdirSync(firstDir, { withFileTypes: true })
           .filter((e) => e.isDirectory())
@@ -434,32 +418,19 @@ export function botsForPlatform(app: any, platform: string) {
   );
 }
 
-export function isFirstBotForPlatform(app: any, platform: string, botId = "") {
-  const nextBotId = normalizeChatId(botId);
-  const matches = botsForPlatform(app, platform);
-  if (!matches.length) return true;
-  if (!nextBotId) return true;
-  return normalizeChatId(matches[0]?.selfId) === nextBotId;
-}
-
 export function composeChatKeyForBot(
-  app: any,
+  _app: any,
   platform: string,
   chatId: string,
   botId = "",
 ) {
-  return composeChatKey(
-    platform,
-    chatId,
-    isFirstBotForPlatform(app, platform, botId) ? "" : botId,
-  );
+  return composeChatKey(platform, chatId, botId);
 }
 
 export function findBot(app: any, platform: string, botId = "") {
   const matches = botsForPlatform(app, platform);
   const nextBotId = normalizeChatId(botId);
-  if (!matches.length) return null;
-  if (!nextBotId) return matches[0];
+  if (!matches.length || !nextBotId) return null;
   return (
     matches.find((bot: any) => normalizeChatId(bot?.selfId) === nextBotId) ||
     null

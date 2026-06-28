@@ -294,7 +294,7 @@ function isOneBotMediaOutboxItem(item?: Pick<ChatOutboxItem, "payload">) {
 }
 
 function isMatrixOutboxItem(item?: Pick<ChatOutboxItem, "payload">) {
-  return safeString(item?.payload?.chatKey).startsWith("matrix:");
+  return safeString(item?.payload?.chatKey).startsWith("matrix/");
 }
 
 export function getChatOutboxSendTimeoutMs(

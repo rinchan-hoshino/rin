@@ -1101,8 +1101,9 @@ test("chat controller renders todo notices as markdown for markdown chats", asyn
 });
 
 test("chat controller renders todo notices as character fallback for plain chats", async () => {
-  const controller = await createController("minecraft:overworld");
+  const controller = await createController("minecraft/minecraft:overworld");
   controller.app.bots[0].platform = "minecraft";
+  controller.app.bots[0].selfId = "minecraft";
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     deliveries.push({ nodes, kind: options?.deliveryKind });
@@ -1137,9 +1138,9 @@ test("chat controller renders todo notices as character fallback for plain chats
 });
 
 test("chat controller sends structured todo nodes to native todo chats", async () => {
-  const controller = await createController("slack:C1");
+  const controller = await createController("slack/B1:C1");
   controller.app.bots[0].platform = "slack";
-  controller.app.bots[0].selfId = "";
+  controller.app.bots[0].selfId = "B1";
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (chatId, nodes, options) => {
     deliveries.push({ chatId, nodes, kind: options?.deliveryKind });
@@ -2498,7 +2499,7 @@ test("chat controller keeps typing and working reaction until dispatched final d
 });
 
 test("chat controller uses adapter reaction capability for lark working indicators", async () => {
-  const controller = await createController("lark:chat-1");
+  const controller = await createController("lark/bot-1:chat-1");
   const reactions = [];
   let noticeSent = false;
   controller.app = {
@@ -2533,7 +2534,7 @@ test("chat controller uses adapter reaction capability for lark working indicato
 });
 
 test("chat controller uses discord typing and reaction capabilities together", async () => {
-  const controller = await createController("discord:channel-1");
+  const controller = await createController("discord/bot-1:channel-1");
   const actions = [];
   const reactions = [];
   controller.app = {

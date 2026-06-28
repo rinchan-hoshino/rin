@@ -121,7 +121,7 @@ test("chat main carries sender metadata to the controller with the prompt body",
     assert.equal(seen[0].mode, undefined);
     assert.equal(seen[0].text, "my name is?");
     assert.equal(seen[0].promptMeta.source, "chat-bridge");
-    assert.equal(seen[0].promptMeta.chatKey, "telegram:2");
+    assert.equal(seen[0].promptMeta.chatKey, "telegram/1:2");
     assert.equal(seen[0].promptMeta.userId, "guest-1");
     assert.equal(seen[0].promptMeta.nickname, "AccountNick");
     assert.equal(seen[0].promptMeta.groupNickname, undefined);

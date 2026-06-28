@@ -441,26 +441,24 @@ test("chat state paths stay stable", () => {
   );
 });
 
-test("chat state accepts default first-bot telegram chat keys", () => {
-  const statePath = support.chatStatePath("/tmp/rin-data", "telegram:1");
-  assert.ok(
-    statePath.endsWith(
-      path.join("chat", "session-state", "telegram", "1", "state.json"),
-    ),
+test("chat state rejects unqualified telegram chat keys", () => {
+  assert.throws(
+    () => support.chatStatePath("/tmp/rin-data", "telegram:1"),
+    /invalid_chatKey:telegram:1/,
   );
 });
 
-test("chat state discovery includes default first-bot telegram state dirs", async () => {
+test("chat state discovery only includes bot-qualified state dirs", async () => {
   await withTempDir(async (dir) => {
     const chatsRoot = path.join(dir, "chats");
-    await fs.mkdir(path.join(chatsRoot, "telegram", "primary-chat"), {
+    await fs.mkdir(path.join(chatsRoot, "telegram", "legacy-chat"), {
       recursive: true,
     });
     await fs.mkdir(path.join(chatsRoot, "telegram", "777", "scoped-chat"), {
       recursive: true,
     });
     await fs.writeFile(
-      path.join(chatsRoot, "telegram", "primary-chat", "state.json"),
+      path.join(chatsRoot, "telegram", "legacy-chat", "state.json"),
       "{}\n",
     );
     await fs.writeFile(
@@ -476,15 +474,6 @@ test("chat state discovery includes default first-bot telegram state dirs", asyn
           "telegram",
           "777",
           "scoped-chat",
-          "state.json",
-        ),
-      },
-      {
-        chatKey: "telegram:primary-chat",
-        statePath: path.join(
-          chatsRoot,
-          "telegram",
-          "primary-chat",
           "state.json",
         ),
       },

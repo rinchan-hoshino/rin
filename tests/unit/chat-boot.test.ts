@@ -701,7 +701,7 @@ test("chat boot retries ambiguous Matrix timeout after dispatch", async () => {
     outbox.enqueueChatOutboxPayload(agentDir, {
       type: "text_delivery",
       createdAt: new Date().toISOString(),
-      chatKey: "matrix:!room:matrix.example.test",
+      chatKey: "matrix/rin-matrix:!room:matrix.example.test",
       text: "plain text",
     });
     const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
@@ -709,7 +709,7 @@ test("chat boot retries ambiguous Matrix timeout after dispatch", async () => {
       bots: [
         {
           platform: "matrix",
-          selfId: "",
+          selfId: "rin-matrix",
           sendMessage() {
             const delivery = Promise.reject(
               new Error(

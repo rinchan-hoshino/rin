@@ -28,7 +28,8 @@ function normalizeDecisionSessionContext(
     botId,
     trust,
     chatKey:
-      safeString(options.chatKey).trim() || composeChatKey(platform, chatId),
+      safeString(options.chatKey).trim() ||
+      composeChatKey(platform, chatId, botId),
   };
 }
 

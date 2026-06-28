@@ -69,6 +69,23 @@ import { resolveChatQuietModeEnabled } from "./settings.js";
 const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
 const WORKING_REACTION_INTERVAL_MS = 30_000;
 
+function detachedControllerStatePath(dataDir: string, chatKey: string) {
+  return path.join(
+    dataDir,
+    "chat",
+    "session-state",
+    "detached",
+    sha256Hex(chatKey).slice(0, 16),
+    "state.json",
+  );
+}
+
+function statePathForControllerKey(dataDir: string, chatKey: string) {
+  return parseChatKey(chatKey)
+    ? chatStatePath(dataDir, chatKey)
+    : detachedControllerStatePath(dataDir, chatKey);
+}
+
 function sha256Hex(value: string) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
@@ -283,7 +300,8 @@ export class ChatController {
     this.dataDir = dataDir;
     this.agentDir = path.resolve(dataDir, "..");
     this.affectChatBinding = deps.affectChatBinding !== false;
-    this.statePath = deps.statePath || chatStatePath(dataDir, chatKey);
+    this.statePath =
+      deps.statePath || statePathForControllerKey(dataDir, chatKey);
     this.state = readJsonFile<ChatState>(this.statePath, { chatKey });
     this.pendingSteeredDeliveryTargets = normalizeChatTurnTargets(
       this.state.pendingSteeredDeliveryTargets,

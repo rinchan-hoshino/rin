@@ -290,7 +290,8 @@ export function buildInboundStoredChatMessageInput(
   ).trim();
   const chatId = getChatId(session);
   const chatKey =
-    safeString(options.chatKey).trim() || composeChatKey(platform, chatId);
+    safeString(options.chatKey).trim() ||
+    composeChatKey(platform, chatId, botId);
   const messageId = pickMessageId(session);
   if (!chatKey || !messageId) return null;
   const userId = pickUserId(session);

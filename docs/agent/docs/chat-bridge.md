@@ -119,29 +119,26 @@ Use only the adapter entries the owner requested. For multiple accounts of the s
 `chatKey` identifies the platform target:
 
 ```text
-platform:chatId
 platform/botId:chatId
 ```
 
 Examples:
 
 ```text
-telegram:7890
-telegram:-1001234567890
-telegram/second-bot-id:-1001234567890
-onebot:private:123456
-onebot/second-bot-id:1067390680
-discord:1519903290694045796
-discord/second-bot-id:1519903290694045796
-qq:123456789
-lark:oc_xxx
+telegram/8623230033:7890
+telegram/8623230033:-1001234567890
+onebot/2301401877:private:123456
+onebot/2301401877:1067390680
+discord/1519908956212822117:1519903290694045796
+qq/app-id:123456789
+lark/cli_xxx:oc_xxx
 ```
 
 Rules:
 
-- For every platform, the first configured bot/account uses the default `platform:chatId` form.
-- When multiple bots/accounts are configured for the same platform, the second and later bots use `platform/botId:chatId`.
-- Explicit `platform/botId:chatId` remains valid for direct routing and stored records.
+- Every platform chat key uses the same bot-qualified shape: `platform/botId:chatId`.
+- `botId` is the stable account/bot identity for the adapter instance, such as Telegram bot id, OneBot selfId, Discord bot id, Lark appId, QQ app id, Slack bot user id, Matrix user id, or Minecraft selfId.
+- Do not introduce platform-specific unqualified forms such as `platform:chatId`; migrate stored files and settings to the single canonical shape instead.
 - Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
 - OneBot private chats commonly use `private:<userId>`; group chats use the group id.
 - Keep `messageId` separate from `chatKey`; quote/reply delivery needs the platform message id.
@@ -155,7 +152,7 @@ Direct outbox delivery:
 
 ```js
 await rin.chat.send({
-  chatKey: "telegram/123456:7890",
+  chatKey: "telegram/8623230033:7890",
   text: "Ready.",
 });
 ```
@@ -164,7 +161,7 @@ Agent turn for a chat/frontend identity:
 
 ```js
 const result = await rin.chat.runTurn({
-  chatKey: "telegram/123456:7890",
+  chatKey: "telegram/8623230033:7890",
   text: "Summarize the latest stored status update for this room.",
   controllerKey: `agent-${Date.now()}`,
   affectChatBinding: false,
@@ -175,9 +172,9 @@ const result = await rin.chat.runTurn({
 Adapter-supported signals and active-turn control:
 
 ```js
-await rin.chat.typing("telegram/123456:7890");
+await rin.chat.typing("telegram/8623230033:7890");
 await rin.chat.react({
-  chatKey: "telegram/123456:7890",
+  chatKey: "telegram/8623230033:7890",
   messageId: "message-id",
   emoji: "👍",
 });
@@ -188,7 +185,7 @@ Bridge-local inspection or repair:
 
 ```js
 const result = await rin.chat.evalBridge({
-  currentChatKey: "telegram/123456:7890",
+  currentChatKey: "telegram/8623230033:7890",
   requestId: "agent-chat-inspect",
   code: `
     const log = store.listLog("2026-06-03");
@@ -208,7 +205,7 @@ Bridge runtime context includes `chat`, `bot`, `internal`, `store`, `identity`, 
 await rin.chat.evalBridge({
   requestId: "agent-detached-send",
   code: `
-    const scoped = helpers.useChat("telegram/123456:7890");
+    const scoped = helpers.useChat("telegram/8623230033:7890");
     return await scoped.helpers.send("Ready.");
   `,
 });
@@ -233,7 +230,7 @@ Allowed inbound chat messages normally start an agent turn after Rin stores the 
       "default": "start_on_message"
     },
     "byChatKey": {
-      "telegram/123456:7890": {
+      "telegram/8623230033:7890": {
         "turnPolicy": "record_only"
       }
     }
@@ -256,7 +253,7 @@ Configure quiet display for specific chats under `settings.json -> chat.byChatKe
 {
   "chat": {
     "byChatKey": {
-      "telegram/123456:7890": {
+      "telegram/8623230033:7890": {
         "quietMode": true
       }
     }
@@ -274,7 +271,7 @@ Configure a chat-specific model or thinking level under `settings.json -> chat.b
 {
   "chat": {
     "byChatKey": {
-      "telegram/123456:7890": {
+      "telegram/8623230033:7890": {
         "model": "openai-codex/gpt-5.5",
         "thinkingLevel": "low"
       }

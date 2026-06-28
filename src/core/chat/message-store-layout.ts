@@ -112,13 +112,11 @@ export function chatScopedDatePath(
   const day = normalizeLocalDateOnly(date, new Date());
   const platform = sanitizePathSegment(parsed.platform, "platform");
   const chatId = sanitizePathSegment(parsed.chatId, "chat");
-  return parsed.botId
-    ? path.join(
-        rootDir,
-        platform,
-        sanitizePathSegment(parsed.botId, "bot"),
-        chatId,
-        `${day}${extension}`,
-      )
-    : path.join(rootDir, platform, chatId, `${day}${extension}`);
+  return path.join(
+    rootDir,
+    platform,
+    sanitizePathSegment(parsed.botId, "bot"),
+    chatId,
+    `${day}${extension}`,
+  );
 }

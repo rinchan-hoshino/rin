@@ -44,11 +44,8 @@ test("chat support parses shared chat targets for private detection", () => {
   assert.equal(support.isPrivateChat(parsed), true);
 });
 
-test("chat support keeps compose, parse, and normalize symmetric across bot requirements", () => {
-  assert.equal(
-    support.composeChatKey("discord", " channel-1 "),
-    "discord:channel-1",
-  );
+test("chat support keeps compose, parse, and normalize symmetric for the single canonical bot-qualified shape", () => {
+  assert.equal(support.composeChatKey("discord", " channel-1 "), "");
   assert.equal(
     support.composeChatKey("discord", " channel-1 ", " bot-1 "),
     "discord/bot-1:channel-1",
@@ -57,30 +54,16 @@ test("chat support keeps compose, parse, and normalize symmetric across bot requ
     support.composeChatKey(" telegram ", " -100123 ", " 8623230033 "),
     "telegram/8623230033:-100123",
   );
-  assert.equal(
-    support.composeChatKey("telegram", "-100123"),
-    "telegram:-100123",
-  );
-  assert.deepEqual(support.parseChatKey(" discord:channel-1 "), {
-    platform: "discord",
-    botId: "",
-    chatId: "channel-1",
-  });
+  assert.equal(support.composeChatKey("telegram", "-100123"), "");
+  assert.equal(support.parseChatKey(" discord:channel-1 "), null);
   assert.deepEqual(support.parseChatKey(" discord/bot-1:channel-1 "), {
     platform: "discord",
     botId: "bot-1",
     chatId: "channel-1",
   });
-  assert.deepEqual(support.parseChatKey(" telegram:-100123 "), {
-    platform: "telegram",
-    botId: "",
-    chatId: "-100123",
-  });
+  assert.equal(support.parseChatKey(" telegram:-100123 "), null);
   assert.equal(support.normalizeChatKey(" discord/:channel-1 "), undefined);
-  assert.equal(
-    support.normalizeChatKey(" discord:channel-1 "),
-    "discord:channel-1",
-  );
+  assert.equal(support.normalizeChatKey(" discord:channel-1 "), undefined);
   assert.equal(
     support.normalizeChatKey(" discord/bot-1:channel-1 "),
     "discord/bot-1:channel-1",
@@ -257,13 +240,13 @@ test("chat support normalizes trust lookup and bot selection over dirty metadata
     ],
   };
   assert.equal(support.findBot(app, "telegram", "8623230033")?.name, "tg");
-  assert.equal(support.findBot(app, "telegram")?.name, "tg");
-  assert.equal(support.findBot(app, "discord")?.name, "dc");
+  assert.equal(support.findBot(app, "telegram"), null);
+  assert.equal(support.findBot(app, "discord"), null);
   assert.equal(support.findBot(app, "discord", "2")?.name, "dc2");
   assert.equal(support.findBot(app, "onebot", "1"), null);
   assert.equal(
     support.composeChatKeyForBot(app, "discord", "channel-1", "1"),
-    "discord:channel-1",
+    "discord/1:channel-1",
   );
   assert.equal(
     support.composeChatKeyForBot(app, "discord", "channel-1", "2"),
@@ -271,6 +254,6 @@ test("chat support normalizes trust lookup and bot selection over dirty metadata
   );
   assert.equal(
     support.composeChatKeyForBot(app, "telegram", "-100123", "8623230033"),
-    "telegram:-100123",
+    "telegram/8623230033:-100123",
   );
 });

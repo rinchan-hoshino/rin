@@ -66,7 +66,7 @@ test("chat inbound normalization keeps inbox, log, and store metadata aligned", 
   const routing = normalization.buildChatInboxRouting(session, elements);
   const snapshot = normalization.serializeChatInboxSession(session);
 
-  assert.equal(stored?.chatKey, "telegram:-100123");
+  assert.equal(stored?.chatKey, "telegram/8623230033:-100123");
   assert.equal(stored?.messageId, "m-aligned");
   assert.equal(stored?.text, "hello\nworld");
   assert.equal(stored?.nickname, "Alice");
@@ -191,7 +191,7 @@ test("chat inbound log input reuses stored text fallback order", () => {
     { timestamp: "2026-04-18T13:00:00.000Z" },
   );
 
-  assert.equal(logEntry?.chatKey, "telegram:-100123");
+  assert.equal(logEntry?.chatKey, "telegram/8623230033:-100123");
   assert.equal(logEntry?.text, "stripped fallback");
   assert.equal(logEntry?.timestamp, "2026-04-18T13:00:00.000Z");
 });
