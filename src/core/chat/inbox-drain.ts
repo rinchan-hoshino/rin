@@ -9,6 +9,7 @@ import {
   requeueChatInboxFile,
   restoreChatInboxFile,
 } from "./inbox.js";
+import { parseChatKey } from "./support.js";
 import { safeString } from "../text-utils.js";
 
 const CHAT_INBOX_RETRY_MIN_MS = 2000;
@@ -71,6 +72,10 @@ export function finalizeClaimedChatInboxJob(
   completeClaimedChatInboxJob(job);
 }
 
+function invalidChatKeyError(chatKey: string) {
+  return `invalid_chatKey:${safeString(chatKey).trim()}`;
+}
+
 export function createChatInboxDrain(deps: {
   agentDir: string;
   getController: (chatKey: string) => ChatController;
@@ -92,8 +97,13 @@ export function createChatInboxDrain(deps: {
         continue;
       }
       const pendingChatKey = safeString(pendingEnvelope.chatKey || "").trim();
-      if (!pendingChatKey) {
-        completeChatInboxFile(filePath);
+      if (!pendingChatKey || !parseChatKey(pendingChatKey)) {
+        failChatInboxFile(
+          deps.agentDir,
+          filePath,
+          pendingEnvelope,
+          invalidChatKeyError(pendingChatKey),
+        );
         continue;
       }
       const pendingController = deps.getController(pendingChatKey);
@@ -121,6 +131,16 @@ export function createChatInboxDrain(deps: {
       const envelope = readChatInboxItem(claimedPath);
       if (!envelope) {
         completeChatInboxFile(claimedPath);
+        continue;
+      }
+      const envelopeChatKey = safeString(envelope.chatKey || "").trim();
+      if (!envelopeChatKey || !parseChatKey(envelopeChatKey)) {
+        failChatInboxFile(
+          deps.agentDir,
+          claimedPath,
+          envelope,
+          invalidChatKeyError(envelopeChatKey),
+        );
         continue;
       }
       const nextAttemptAt = Date.parse(

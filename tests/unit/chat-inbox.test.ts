@@ -54,9 +54,10 @@ test("chat inbox enqueues a durable inbound envelope keyed by chat and message i
   assert.deepEqual(loaded.elements, elements);
 });
 
-test("chat inbox canonicalizes legacy unqualified queued items on read", async () => {
+test("chat inbox rejects legacy unqualified keys before controller selection", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+  const failedDir = path.join(agentDir, "data", "chat", "inbox", "failed");
   await fs.mkdir(pendingDir, { recursive: true });
   const oldItemId = createHash("sha1")
     .update("discord:channel-1\nmessage-1")
@@ -72,9 +73,7 @@ test("chat inbox canonicalizes legacy unqualified queued items on read", async (
         messageId: "message-1",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        attemptCount: 2,
-        nextAttemptAt: new Date(Date.now() + 60_000).toISOString(),
-        lastError: "invalid_chatKey:discord:channel-1",
+        attemptCount: 0,
         routing: {
           chatType: "group",
           isDirect: false,
@@ -92,15 +91,42 @@ test("chat inbox canonicalizes legacy unqualified queued items on read", async (
     ),
   );
 
-  const loaded = inbox.readChatInboxItem(filePath);
-  const expectedItemId = createHash("sha1")
-    .update("discord/bot-1:channel-1\nmessage-1")
-    .digest("hex");
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController(chatKey) {
+      throw new Error(`legacy key reached controller:${chatKey}`);
+    },
+    isInboundMessageProcessed() {
+      return false;
+    },
+    enqueueClaimedInboxItem() {
+      throw new Error("legacy key reached queue");
+    },
+  });
 
-  assert.equal(loaded.chatKey, "discord/bot-1:channel-1");
-  assert.equal(loaded.itemId, expectedItemId);
-  assert.equal(loaded.lastError, undefined);
-  assert.equal(loaded.nextAttemptAt, undefined);
+  await drain.drainChatInboxOnce();
+
+  assert.deepEqual(await fs.readdir(pendingDir), []);
+  const failed = JSON.parse(
+    await fs.readFile(path.join(failedDir, `${oldItemId}.json`), "utf8"),
+  );
+  assert.equal(failed.chatKey, "discord:channel-1");
+  assert.equal(failed.lastError, "invalid_chatKey:discord:channel-1");
+});
+
+test("chat inbox enqueue refuses legacy unqualified chat keys", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+
+  assert.throws(
+    () =>
+      inbox.enqueueChatInboxItem(agentDir, {
+        chatKey: "onebot:123",
+        messageId: "message-1",
+        session: { platform: "onebot", selfId: "bot-1", channelId: "123" },
+        elements: [],
+      }),
+    /invalid_chatKey:onebot:123/,
+  );
 });
 
 test("chat inbox preserves normalized mention routing hints needed for queued group turns", async () => {

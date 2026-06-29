@@ -18,7 +18,7 @@ import {
   buildChatInboxRouting,
   serializeChatInboxSession,
 } from "./inbound-normalization.js";
-import { readJsonFile } from "./support.js";
+import { parseChatKey, readJsonFile } from "./support.js";
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 import { chatDataPath } from "../data-layout.js";
@@ -82,6 +82,7 @@ export function buildChatInboxItem(input: {
   const chatKey = safeString(input.chatKey).trim();
   const messageId = safeString(input.messageId).trim();
   if (!chatKey) throw new Error("chat_inbox_chatKey_required");
+  if (!parseChatKey(chatKey)) throw new Error(`invalid_chatKey:${chatKey}`);
   if (!messageId) throw new Error("chat_inbox_messageId_required");
   const now = nowIso();
   return {
@@ -117,42 +118,8 @@ export function listProcessingChatInboxFiles(agentDir: string) {
   return listJsonFiles(processingDir(agentDir));
 }
 
-function parseLegacyUnqualifiedChatKey(chatKey: string) {
-  const match = safeString(chatKey)
-    .trim()
-    .match(/^([^/:]+):(.+)$/);
-  if (!match) return null;
-  const platform = safeString(match[1]).trim();
-  const chatId = safeString(match[2]).trim();
-  return platform && chatId ? { platform, chatId } : null;
-}
-
-function canonicalizeLegacyChatInboxItem(item: ChatInboxItem | null) {
-  if (!item) return item;
-  if (safeString(item.chatKey).includes("/")) return item;
-  const legacy = parseLegacyUnqualifiedChatKey(item.chatKey);
-  if (!legacy) return item;
-  const session = isJsonRecord(item.session) ? item.session : {};
-  const botId = pickTrimmedString(
-    session.selfId,
-    (session.bot as any)?.selfId,
-    (session.bot as any)?.id,
-  );
-  if (!botId) return item;
-  const chatKey = `${legacy.platform}/${botId}:${legacy.chatId}`;
-  return {
-    ...item,
-    itemId: hashKey(`${chatKey}\n${item.messageId}`),
-    chatKey,
-    lastError: undefined,
-    nextAttemptAt: undefined,
-  } satisfies ChatInboxItem;
-}
-
 export function readChatInboxItem(filePath: string) {
-  return canonicalizeLegacyChatInboxItem(
-    readJsonFile<ChatInboxItem | null>(filePath, null),
-  );
+  return readJsonFile<ChatInboxItem | null>(filePath, null);
 }
 
 function asRecord(value: unknown): Record<string, any> {

@@ -256,4 +256,5 @@ test("chat support normalizes trust lookup and bot selection over dirty metadata
     support.composeChatKeyForBot(app, "telegram", "-100123", "8623230033"),
     "telegram/8623230033:-100123",
   );
+  assert.equal(support.composeChatKeyForBot(app, "discord", "channel-1"), "");
 });
