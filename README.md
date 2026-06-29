@@ -27,14 +27,7 @@ If Rin saves you time, you can support its maintenance on [Ko-fi](https://ko-fi.
 > [!TIP]
 > Most users should start with the stable install command below. Use the install commands directly; the installer sets up the `rin` command. Pre-release and git channels are available in the folded sections.
 
-Rin requires Node.js 22.19.0 or newer and npm on every platform. Check your local version before installing:
-
-```bash
-node -v
-npm -v
-```
-
-If the installer prints `rin installer requires Node.js >= 22.19.0`, upgrade Node.js, open a new terminal, and run the install command again.
+Rin requires Node.js 22.19.0 or newer and npm on every platform.
 
 ### Linux and macOS
 
@@ -58,16 +51,6 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh
 ### Windows
 
 Install from PowerShell or Windows Terminal.
-
-If `node -v` is older than 22.19.0 on Windows, install or upgrade Node.js first:
-
-```powershell
-winget upgrade OpenJS.NodeJS.LTS
-# If winget reports that Node.js is not installed:
-winget install OpenJS.NodeJS.LTS
-```
-
-Then open a new PowerShell or Windows Terminal window and install Rin:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1)))
