@@ -913,9 +913,9 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /owner preferences and implicit patterns/);
   assert.match(
     manual,
-    /do not wait for explicit instructions or repeated failures/,
+    /explicit instructions and repeated failures as sufficient but not required/,
   );
-  assert.match(manual, /user_profile.*not preferences/);
+  assert.match(manual, /user_profile.*stable facts only/);
   assert.match(manual, /short-term-memory\/records/);
   assert.match(manual, /## Guidance maintenance rule/);
   assert.match(manual, /Corrections are not automatically new guidance/);
@@ -927,7 +927,7 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /final reusable workflow shape/);
   assert.match(
     manual,
-    /reusable procedure or behavior change only in provenance/,
+    /belongs only in provenance stays out of executable guidance/,
   );
   assert.match(manual, /verified workflow shapes/);
   assert.match(manual, /procedures recovered through history lookup/);

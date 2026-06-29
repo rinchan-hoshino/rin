@@ -57,7 +57,7 @@ For each candidate lesson or cleanup, identify:
 
 If any field is missing, do not write the candidate as self-improve guidance. Existing artifacts can prove cleanup needs, overlap, or stale state; they do not by themselves prove a new standing rule.
 
-For implicit patterns, do not wait for explicit instructions or repeated failures. When the evidence suggests a reusable preference or pattern, record the narrowest scoped default with provenance and a revision path. Ask before storing only when the scope, trigger, or consequence would be materially risky or conflicts with existing guidance.
+For implicit patterns, treat explicit instructions and repeated failures as sufficient but not required. High-salience directional evidence is enough to record the narrowest scoped default with provenance and a revision path. For material-risk or conflict cases, record a provenance-only candidate with the unresolved boundary for a future visible task; change executable guidance after that boundary is resolved.
 
 ## Guidance maintenance rule
 
@@ -118,7 +118,7 @@ Run one cohesive same-class pass:
 6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, preference application, recall, or remove guidance that would otherwise cause future mistakes.
 7. For correction-based or repeated-failure evidence, inspect existing guidance first. If existing guidance caused or preserved the behavior, remove or rewrite it before considering any new guidance.
 8. Reject patch-layer fixes: do not add exceptions, bans, authorization clauses, or special cases when deleting or rewriting the wrong abstraction solves the problem.
-9. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, only restate existing artifact wording, or place a reusable procedure or behavior change only in provenance. When evidence is directional but not absolute, prefer a narrow scoped candidate with provenance over dropping the lesson.
+9. Keep candidates with trusted evidence, a future trigger, and a future behavior difference. Directional evidence can support a narrow scoped candidate with provenance. Material that only restates existing artifact wording or belongs only in provenance stays out of executable guidance.
 10. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
 11. Choose the smallest correct destination using the priority list below.
 12. Merge overlapping guidance into one canonical owner.
@@ -132,7 +132,7 @@ Run one cohesive same-class pass:
 
 Choose the first destination that satisfies the lesson's future-use contract and the core rule:
 
-1. **Prompt baseline:** the rule is a stable cross-turn invariant that belongs in `agent_profile` or `core_doctrine` and should remain resident in most future turns. `user_profile` stores owner identity and stable facts, not preferences.
+1. **Prompt baseline:** the rule is a stable cross-turn invariant that belongs in `agent_profile` or `core_doctrine` and should remain resident in most future turns. `user_profile` stores owner identity and stable facts only.
 2. **Current skill:** the conversation used a skill and revealed a reusable gap, owner preference, implicit default, or workflow default in that skill.
 3. **Umbrella skill:** a broader existing skill cleanly owns the work class.
 4. **Skill `references/`:** reusable evidence, examples, command traces, or longer notes help future skill use while keeping `SKILL.md` concise.
@@ -153,7 +153,7 @@ Fixed semantic destinations:
 Location: `<agentDir>/self_improve/prompts/*.md`
 
 - `agent_profile.md`: stable agent role, voice, behavior style, and standing expectations.
-- `user_profile.md`: stable user identity and compact always-relevant owner facts, not preferences.
+- `user_profile.md`: stable user identity and compact always-relevant owner facts.
 - `core_doctrine.md`: durable methodology, values, and decision rules.
 
 Prompt baselines have the highest bar because they stay resident in future turns. Use them only for agent identity, owner identity/facts, and doctrine invariants that pass the core rule and apply across most future turns. Put owner preferences, procedures, examples, durable domain facts, troubleshooting detail, incident summaries, implementation vocabulary, and retrieval pointers in skills or memory-index destinations unless a preference has been distilled into a true methodology or decision invariant for `core_doctrine`.

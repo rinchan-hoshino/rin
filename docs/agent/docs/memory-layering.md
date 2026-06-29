@@ -52,12 +52,12 @@ Prompt baselines are compact rules that should influence most turns.
 Active prompt slots:
 
 - `agent_profile`: stable agent role, voice, behavior style, and standing response expectations.
-- `user_profile`: stable user identity and compact always-relevant user facts, not preferences.
+- `user_profile`: stable user identity and compact always-relevant user facts.
 - `core_doctrine`: durable methodology, values, and decision rules.
 
 Write prompt-baseline lines as dense target behavior. Use one line per topic. Replace superseded lines instead of appending parallel guidance.
 
-Do not store owner preferences in `user_profile`. Store preferences and implicit defaults in the matching skill by default; use `core_doctrine` only when a preference has become a true cross-turn methodology or decision invariant.
+Store owner preferences and implicit defaults in the matching skill by default; use `core_doctrine` only when a preference has become a true cross-turn methodology or decision invariant.
 
 ### Reusable skills
 
@@ -86,7 +86,7 @@ When adding or consolidating information, choose the destination in this order:
 
 1. **Memory only:** original wording, evidence, chronology, or provenance is enough; use transcript archives and `recall`.
 2. **Memory index pointer:** future lookup needs a compact dated handle to original evidence.
-3. **Prompt baseline:** distilled role, owner identity/fact, or methodology invariant must influence most future turns and fits one compact line; `user_profile` does not carry preferences.
+3. **Prompt baseline:** distilled role, owner identity/fact, or methodology invariant must influence most future turns and fits one compact line; `user_profile` carries owner identity/facts only.
 4. **Current matching skill:** distilled workflow, domain guidance, owner preference, or implicit default belongs in the active skill. For correction-based reusable behavior, the matching executable surface carries the rule unless it is already present.
 5. **Umbrella skill:** a broader existing skill cleanly owns the class of distilled guidance.
 6. **Skill reference:** reusable evidence, examples, commands, or traces are useful but too bulky for `SKILL.md`.
