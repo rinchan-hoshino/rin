@@ -40,14 +40,7 @@ type InstallerLanguagePromptCopy = {
 };
 
 type ChatCommandDescriptions = Record<
-  | "help"
-  | "abort"
-  | "new"
-  | "compact"
-  | "reload"
-  | "status"
-  | "session"
-  | "model",
+  "help" | "abort" | "new" | "compact" | "reload" | "usage",
   string
 >;
 
@@ -265,9 +258,7 @@ const INSTALLER_DISPLAY_COPY = {
       new: "Start a new session",
       compact: "Compact the current session",
       reload: "Reload extensions, prompts, skills, and themes",
-      status: "Show current chat processing status",
-      session: "Show current session status",
-      model: "Show or change the current model",
+      usage: "Show usage and quota status",
     },
     installerCancelled: "Installer cancelled.",
     introTitle: "Rin Installer",
@@ -611,9 +602,7 @@ const INSTALLER_DISPLAY_COPY = {
       new: "开始新会话",
       compact: "压缩当前会话",
       reload: "重新加载扩展、提示词、技能和主题",
-      status: "显示当前聊天处理状态",
-      session: "显示当前会话状态",
-      model: "显示或切换当前模型",
+      usage: "显示用量和配额状态",
     },
     installerCancelled: "安装器已取消。",
     introTitle: "Rin 安装器",

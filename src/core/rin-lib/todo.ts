@@ -6,7 +6,7 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   formatRinTodoChecklistContent,
@@ -155,98 +155,6 @@ function formatTodoChecklistRender(
 
 function renderTodoText(text: string) {
   return new Text(text, 0, 0);
-}
-
-class TodoListComponent {
-  private todos: Todo[];
-  private theme: Theme;
-  private onClose: () => void;
-  private cachedWidth?: number;
-  private cachedLines?: string[];
-
-  constructor(todos: Todo[], theme: Theme, onClose: () => void) {
-    this.todos = todos;
-    this.theme = theme;
-    this.onClose = onClose;
-  }
-
-  handleInput(data: string): void {
-    if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
-      this.onClose();
-    }
-  }
-
-  render(width: number): string[] {
-    if (this.cachedLines && this.cachedWidth === width) {
-      return this.cachedLines;
-    }
-
-    const lines: string[] = [];
-    const th = this.theme;
-
-    lines.push("");
-    const title = th.fg("accent", " Checklist ");
-    const headerLine =
-      th.fg("borderMuted", "─".repeat(3)) +
-      title +
-      th.fg("borderMuted", "─".repeat(Math.max(0, width - 10)));
-    lines.push(truncateToWidth(headerLine, width));
-    lines.push("");
-
-    if (this.todos.length === 0) {
-      lines.push(
-        truncateToWidth(
-          `  ${th.fg("dim", "○ No todos yet. Ask the agent to add some!")}`,
-          width,
-        ),
-      );
-    } else {
-      const done = this.todos.filter((todo) => todo.done).length;
-      const total = this.todos.length;
-      lines.push(
-        truncateToWidth(
-          `  ${th.fg("muted", `${done}/${total} completed`)}`,
-          width,
-        ),
-      );
-      lines.push("");
-
-      for (const todo of this.todos) {
-        const check = todo.done ? th.fg("success", "✓") : th.fg("dim", "○");
-        const itemText = formatRinTodoItemText(todo);
-        const text = todo.done
-          ? th.fg("dim", itemText)
-          : th.fg("text", itemText);
-        lines.push(truncateToWidth(`  ${check} ${text}`, width));
-      }
-    }
-
-    lines.push("");
-    lines.push(
-      truncateToWidth(`  ${th.fg("dim", "Press Escape to close")}`, width),
-    );
-    lines.push("");
-
-    this.cachedWidth = width;
-    this.cachedLines = lines;
-    return lines;
-  }
-
-  invalidate(): void {
-    this.cachedWidth = undefined;
-    this.cachedLines = undefined;
-  }
-}
-
-export async function showTodoList(ui: any, todos: Todo[]) {
-  if (!ui || typeof ui.custom !== "function") {
-    ui?.notify?.("/todos requires interactive mode", "error");
-    return false;
-  }
-  await ui.custom((_tui: any, theme: Theme, _kb: any, done: () => void) => {
-    return new TodoListComponent(todos, theme, () => done());
-  });
-  return true;
 }
 
 export default function todoCapability(): RinCapabilityDefinition {

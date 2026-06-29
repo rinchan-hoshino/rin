@@ -169,7 +169,7 @@ test("rpc prompt routes frontend /new command to local new session", async () =>
   );
 });
 
-test("rpc prompt routes daemon builtin slash commands without a side registry", async () => {
+test("rpc prompt routes run-command builtin slash commands from command metadata", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -181,8 +181,8 @@ test("rpc prompt routes daemon builtin slash commands without a side registry", 
             data: {
               commands: [
                 {
-                  name: "todos",
-                  description: "Show todos",
+                  name: "usage",
+                  description: "Show usage",
                   source: "builtin",
                 },
               ],
@@ -214,7 +214,7 @@ test("rpc prompt routes daemon builtin slash commands without a side registry", 
     },
   });
 
-  await session.prompt("/todos");
+  await session.prompt("/usage");
 
   assert.equal(
     sent.some((payload) => payload.type === "prompt"),
@@ -224,7 +224,7 @@ test("rpc prompt routes daemon builtin slash commands without a side registry", 
     sent.find((payload) => payload.type === "run_command"),
     {
       type: "run_command",
-      commandLine: "/todos",
+      commandLine: "/usage",
       sessionFile: "/tmp/s.jsonl",
     },
   );
@@ -918,7 +918,7 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
   assert.equal(sentTypes.at(-1), "get_resource_diagnostics");
 });
 
-test("rpc runtime routes daemon builtin slash commands from prompt to daemon", async () => {
+test("rpc runtime routes run-command builtin slash commands from prompt to daemon", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -926,7 +926,7 @@ test("rpc runtime routes daemon builtin slash commands from prompt to daemon", a
       if (payload.type === "get_commands") {
         return Promise.resolve({
           success: true,
-          data: { commands: [{ name: "todos", source: "builtin" }] },
+          data: { commands: [{ name: "usage", source: "builtin" }] },
         });
       }
       if (payload.type === "run_command") {
@@ -961,7 +961,7 @@ test("rpc runtime routes daemon builtin slash commands from prompt to daemon", a
   });
   session.sessionFile = "/tmp/rpc-session.jsonl";
 
-  await session.prompt("/todos", { streamingBehavior: "steer" });
+  await session.prompt("/usage", { streamingBehavior: "steer" });
 
   assert.equal(
     sent.some((payload) => payload.type === "prompt"),
@@ -971,7 +971,7 @@ test("rpc runtime routes daemon builtin slash commands from prompt to daemon", a
     sent.find((payload) => payload.type === "run_command"),
     {
       type: "run_command",
-      commandLine: "/todos",
+      commandLine: "/usage",
       sessionFile: "/tmp/rpc-session.jsonl",
     },
   );

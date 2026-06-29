@@ -1,50 +1,69 @@
+import { PI_BUILTIN_SLASH_COMMANDS } from "../pi/private-api.js";
+
+export type BuiltinSlashCommandOrigin = "pi" | "rin";
+export type BuiltinSlashCommandGenericPromptRoute = "run_command";
+
 export type BuiltinSlashCommand = {
   name: string;
   description: string;
+  origin?: BuiltinSlashCommandOrigin;
+  genericPromptRoute?: BuiltinSlashCommandGenericPromptRoute;
 };
 
-export const BUILTIN_SLASH_COMMANDS = [
-  { name: "abort", description: "Abort the current operation" },
-  { name: "settings", description: "Open settings menu" },
-  { name: "model", description: "Select model (opens selector UI)" },
+export const RIN_BUILTIN_SLASH_COMMANDS = [
+  { name: "abort", description: "Abort the current operation", origin: "rin" },
   {
-    name: "scoped-models",
-    description: "Enable/disable models for Ctrl+P cycling",
+    name: "usage",
+    description: "Show compact quota and usage status",
+    origin: "rin",
+    genericPromptRoute: "run_command",
   },
-  {
-    name: "export",
-    description: "Export session (HTML default, or specify path: .html/.jsonl)",
-  },
-  {
-    name: "import",
-    description: "Import and resume a session from a JSONL file",
-  },
-  { name: "share", description: "Share session as a secret GitHub gist" },
-  { name: "copy", description: "Copy last agent message to clipboard" },
-  { name: "name", description: "Set session display name" },
-  { name: "session", description: "Show session info and stats" },
-  { name: "usage", description: "Show compact quota and usage status" },
-  { name: "todos", description: "Show all todos on the current branch" },
-  { name: "changelog", description: "Show changelog entries" },
-  { name: "hotkeys", description: "Show all keyboard shortcuts" },
-  { name: "fork", description: "Create a new fork from a previous message" },
-  { name: "tree", description: "Navigate session tree (switch branches)" },
-  { name: "login", description: "Login with OAuth provider" },
-  { name: "logout", description: "Logout from OAuth provider" },
-  { name: "new", description: "Start a new session" },
-  { name: "compact", description: "Manually compact the session context" },
-  { name: "resume", description: "Resume a different session" },
-  {
-    name: "reload",
-    description: "Reload keybindings, extensions, skills, prompts, and themes",
-  },
-  { name: "quit", description: "Quit rin" },
 ] satisfies BuiltinSlashCommand[];
 
-const DAEMON_BUILTIN_SLASH_COMMAND_NAMES = new Set(["todos"]);
+function rinizePiCommandDescription(description: string) {
+  return description.replace(/\bPi\b/g, "Rin").replace(/\bpi\b/g, "rin");
+}
 
-export function isDaemonBuiltinSlashCommand(name: unknown) {
-  return DAEMON_BUILTIN_SLASH_COMMAND_NAMES.has(String(name || "").trim());
+function composeBuiltinSlashCommands(
+  piCommands: ReadonlyArray<{ name: string; description: string }>,
+  rinCommands: ReadonlyArray<BuiltinSlashCommand>,
+) {
+  const commands: BuiltinSlashCommand[] = [];
+  const indexes = new Map<string, number>();
+  for (const command of [
+    ...piCommands.map((item) => ({
+      ...item,
+      description: rinizePiCommandDescription(String(item.description || "")),
+      origin: "pi" as const,
+    })),
+    ...rinCommands,
+  ]) {
+    const name = String(command.name || "").trim();
+    if (!name) continue;
+    const normalized = { ...command, name };
+    const existingIndex = indexes.get(name);
+    if (existingIndex === undefined) {
+      indexes.set(name, commands.length);
+      commands.push(normalized);
+    } else {
+      commands[existingIndex] = normalized;
+    }
+  }
+  return commands;
+}
+
+export const BUILTIN_SLASH_COMMANDS = composeBuiltinSlashCommands(
+  PI_BUILTIN_SLASH_COMMANDS,
+  RIN_BUILTIN_SLASH_COMMANDS,
+);
+
+export function isGenericPromptRunCommandBuiltinSlashCommand(name: unknown) {
+  const commandName = String(name || "").trim();
+  return BUILTIN_SLASH_COMMANDS.some(
+    (command) =>
+      command.name === commandName &&
+      command.genericPromptRoute === "run_command",
+  );
 }
 
 const SESSION_SCOPED_COMMAND_NAMES = [

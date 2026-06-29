@@ -1827,64 +1827,6 @@ test("chat controller /new aborts a visible turn before driver live turn exists"
   assert.deepEqual(deliveries, ["Started a new session."]);
 });
 
-test("chat controller keeps /status immediate during an active chat turn", async () => {
-  const controller = await createController("cron/detached:test");
-  const calls = [];
-  let firstRequestTag = "";
-  controller.session = {
-    isStreaming: false,
-    sessionManager: {
-      getSessionFile: () => "/tmp/old-chat.jsonl",
-      getSessionId: () => "session-old",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/old-chat.jsonl",
-      sessionId: "session-old",
-    }),
-    prompt: async (_text, options = {}) => {
-      firstRequestTag = options.requestTag || "";
-      await controller.handleClientEvent({
-        type: "ui",
-        payload: { type: "rpc_frontend_status", phase: "working" },
-      });
-    },
-    runCommand: async (commandLine) => {
-      calls.push(`runCommand:${commandLine}`);
-      return { handled: true, text: "unreachable" };
-    },
-  };
-
-  const firstTurn = controller.runTurn({
-    text: "first",
-    attachments: [],
-    replyToMessageId: "m1",
-    incomingMessageId: "m1",
-  });
-  while (!firstRequestTag) {
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-
-  const status = await Promise.race([
-    controller.runCommand("/status", "m-status", "m-status"),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("status command queued")), 50),
-    ),
-  ]);
-
-  assert.equal(status.local, true);
-  assert.match(status.text, /Status: working/);
-  assert.deepEqual(calls, []);
-  assert.equal(controller.currentIncomingMessageId(), "m1");
-
-  await emitRpcTurnComplete(
-    controller,
-    { requestTag: firstRequestTag },
-    "first done",
-  );
-  assert.equal((await firstTurn).finalText, "first done");
-});
-
 test("chat controller suppresses /compact acknowledgement but keeps configured /reload response", async () => {
   for (const [command, resultText, expectedDeliveries] of [
     ["/compact", "Compacted session.", []],

@@ -24,7 +24,8 @@ test("frontend command dispatcher owns session command classification", () => {
     dispatcher.classifyRinFrontendCommand("/resume abc").kind,
     "frontend",
   );
-  assert.equal(dispatcher.classifyRinFrontendCommand("/todos").kind, "daemon");
+  assert.equal(dispatcher.classifyRinFrontendCommand("/todos").kind, "none");
+  assert.equal(dispatcher.classifyRinFrontendCommand("/usage").kind, "daemon");
   assert.equal(dispatcher.classifyRinFrontendCommand("/unknown").kind, "none");
   assert.equal(
     dispatcher.classifyRinFrontendCommand("/local", [
@@ -38,15 +39,17 @@ test("non-interactive command exposure and degraded interaction policy live in f
   assert.equal(dispatcher.isRinNonInteractiveCommandExposed("new"), true);
   assert.equal(dispatcher.isRinNonInteractiveCommandExposed("resume"), false);
   assert.equal(dispatcher.isRinNonInteractiveCommandExposed("todos"), false);
+  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("status"), false);
+  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("model"), false);
+  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("session"), false);
+  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("usage"), true);
   assert.deepEqual(dispatcher.RIN_NON_INTERACTIVE_COMMAND_NAMES, [
     "help",
     "abort",
     "new",
     "compact",
     "reload",
-    "status",
-    "session",
-    "model",
+    "usage",
   ]);
   assert.deepEqual(
     dispatcher.getRinNonInteractiveCommandInteractionPolicy("abort"),
@@ -73,7 +76,7 @@ test("non-interactive command exposure and degraded interaction policy live in f
     },
   );
   assert.deepEqual(
-    dispatcher.getRinNonInteractiveCommandInteractionPolicy("session"),
+    dispatcher.getRinNonInteractiveCommandInteractionPolicy("usage"),
     {
       skipSessionRecovery: false,
       acceptInboundBeforeExecution: false,

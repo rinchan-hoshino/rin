@@ -12,14 +12,13 @@ const support = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href
 );
 
-test("chat policy allows trusted users to check status, abort, and start new chat sessions", () => {
-  assert.equal(support.canRunCommand("TRUSTED", "status"), true);
+test("chat policy allows trusted users to abort and start new chat sessions", () => {
   assert.equal(support.canRunCommand("TRUSTED", "new"), true);
   assert.equal(support.canRunCommand("TRUSTED", "abort"), true);
 });
 
 test("chat policy still blocks higher-impact chat commands for trusted users", () => {
-  assert.equal(support.canRunCommand("TRUSTED", "model"), false);
+  assert.equal(support.canRunCommand("TRUSTED", "usage"), false);
   assert.equal(support.canRunCommand("TRUSTED", "reload"), false);
   assert.equal(support.canRunCommand("TRUSTED", "compact"), false);
 });
@@ -28,7 +27,7 @@ test("chat policy keeps non-help commands restricted while owners retain other c
   assert.equal(support.canRunCommand("OTHER", "help"), false);
   assert.equal(support.canRunCommand("OTHER", "abort"), false);
   assert.equal(support.canRunCommand("OWNER", "abort"), true);
-  assert.equal(support.canRunCommand("OWNER", "model"), true);
+  assert.equal(support.canRunCommand("OWNER", "usage"), true);
 });
 
 test("chat policy does not reserve a special /auth bootstrap command", () => {
@@ -93,7 +92,7 @@ test("chat policy normalizes trust values for input access and command checks", 
     }),
     false,
   );
-  assert.equal(support.canRunCommand(" trusted ", "/status"), true);
+  assert.equal(support.canRunCommand(" trusted ", "/usage"), false);
   assert.equal(support.canRunCommand(" owner ", "/abort"), true);
-  assert.equal(support.canRunCommand("invalid", "/status"), false);
+  assert.equal(support.canRunCommand("invalid", "/usage"), false);
 });

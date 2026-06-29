@@ -398,7 +398,7 @@ export function canAccessAgentInput({
   return trusted && (Boolean(mentionLike) || Boolean(allowWithoutMention));
 }
 
-const TRUSTED_COMMANDS = new Set(["new", "abort", "status"]);
+const TRUSTED_COMMANDS = new Set(["new", "abort"]);
 
 export function canRunCommand(trust: string, commandName: string) {
   const nextTrust = normalizeTrust(trust);

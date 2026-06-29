@@ -23,9 +23,12 @@ test("chat boot exposes the dedicated chat command registry", () => {
   assert.equal(rows[0].name, "help");
   assert.deepEqual(
     rows.map((row) => row.name),
-    ["help", "abort", "new", "compact", "reload", "status", "session", "model"],
+    ["help", "abort", "new", "compact", "reload", "usage"],
   );
   assert.ok(!rows.some((row) => row.name === "init"));
+  assert.ok(!rows.some((row) => row.name === "status"));
+  assert.ok(!rows.some((row) => row.name === "session"));
+  assert.ok(!rows.some((row) => row.name === "model"));
 });
 
 async function withTempDir(fn) {
@@ -61,9 +64,7 @@ test("chat boot localizes command descriptions for Chinese runtimes", () => {
       "\u5f00\u59cb\u65b0\u4f1a\u8bdd",
       "\u538b\u7f29\u5f53\u524d\u4f1a\u8bdd",
       "\u91cd\u65b0\u52a0\u8f7d\u6269\u5c55\u3001\u63d0\u793a\u8bcd\u3001\u6280\u80fd\u548c\u4e3b\u9898",
-      "\u663e\u793a\u5f53\u524d\u804a\u5929\u5904\u7406\u72b6\u6001",
-      "\u663e\u793a\u5f53\u524d\u4f1a\u8bdd\u72b6\u6001",
-      "\u663e\u793a\u6216\u5207\u6362\u5f53\u524d\u6a21\u578b",
+      "\u663e\u793a\u7528\u91cf\u548c\u914d\u989d\u72b6\u6001",
     ],
   );
   assert.deepEqual(boot.buildTelegramCommandPayload(rows), [
@@ -77,17 +78,8 @@ test("chat boot localizes command descriptions for Chinese runtimes", () => {
         "\u91cd\u65b0\u52a0\u8f7d\u6269\u5c55\u3001\u63d0\u793a\u8bcd\u3001\u6280\u80fd\u548c\u4e3b\u9898",
     },
     {
-      command: "status",
-      description:
-        "\u663e\u793a\u5f53\u524d\u804a\u5929\u5904\u7406\u72b6\u6001",
-    },
-    {
-      command: "session",
-      description: "\u663e\u793a\u5f53\u524d\u4f1a\u8bdd\u72b6\u6001",
-    },
-    {
-      command: "model",
-      description: "\u663e\u793a\u6216\u5207\u6362\u5f53\u524d\u6a21\u578b",
+      command: "usage",
+      description: "\u663e\u793a\u7528\u91cf\u548c\u914d\u989d\u72b6\u6001",
     },
   ]);
 });
@@ -146,24 +138,8 @@ test("chat boot builds and syncs Discord application commands", async () => {
       ],
     },
     {
-      name: "status",
-      description: "Show current chat processing status",
-      type: 1,
-      options: [
-        { name: "input", description: "Arguments", type: 3, required: false },
-      ],
-    },
-    {
-      name: "session",
-      description: "Show current session status",
-      type: 1,
-      options: [
-        { name: "input", description: "Arguments", type: 3, required: false },
-      ],
-    },
-    {
-      name: "model",
-      description: "Show or change the current model",
+      name: "usage",
+      description: "Show usage and quota status",
       type: 1,
       options: [
         { name: "input", description: "Arguments", type: 3, required: false },
@@ -177,7 +153,7 @@ test("chat boot builds and syncs Discord application commands", async () => {
       { name: "HELP", description: "override" },
       { name: "help", description: "ignored duplicate" },
       { name: "bad name" },
-      { name: "status" },
+      { name: "usage" },
     ]),
     [
       {
@@ -189,8 +165,8 @@ test("chat boot builds and syncs Discord application commands", async () => {
         ],
       },
       {
-        name: "status",
-        description: "status",
+        name: "usage",
+        description: "usage",
         type: 1,
         options: [
           { name: "input", description: "Arguments", type: 3, required: false },
@@ -234,9 +210,7 @@ test("chat boot clears common telegram scopes before syncing default commands", 
       command: "reload",
       description: "Reload extensions, prompts, skills, and themes",
     },
-    { command: "status", description: "Show current chat processing status" },
-    { command: "session", description: "Show current session status" },
-    { command: "model", description: "Show or change the current model" },
+    { command: "usage", description: "Show usage and quota status" },
   ];
 
   assert.deepEqual(boot.buildTelegramCommandPayload(rows), expectedPayload);
@@ -245,11 +219,11 @@ test("chat boot clears common telegram scopes before syncing default commands", 
       { name: "HELP", description: "override" },
       { name: "help", description: "ignored duplicate" },
       { name: "bad name" },
-      { name: "status" },
+      { name: "usage" },
     ]),
     [
       { command: "help", description: "override" },
-      { command: "status", description: "status" },
+      { command: "usage", description: "usage" },
     ],
   );
   assert.deepEqual(boot.buildTelegramCommandClearScopes(), [

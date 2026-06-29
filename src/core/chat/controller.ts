@@ -1,8 +1,6 @@
 import crypto from "node:crypto";
 import path from "node:path";
 
-import prettyMilliseconds from "pretty-ms";
-
 import {
   RinDaemonFrontendClient,
   RinFrontendTurnDriver,
@@ -177,13 +175,6 @@ function normalizeWorkingIndicators(value: unknown): WorkingIndicator[] {
       typeof indicator === "object" &&
       Boolean(workingIndicatorKind(indicator as WorkingIndicator)),
   );
-}
-
-function summarizePromptText(text: string, limit = 80) {
-  const value = safeString(text).replace(/\s+/g, " ").trim();
-  if (!value) return "";
-  if (value.length <= limit) return value;
-  return `${value.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
 }
 
 function shouldResetDriverOnTransientTurnError(
@@ -841,59 +832,6 @@ export class ChatController {
         safeString(result?.sessionFile || this.currentSessionFile()).trim() ||
         undefined,
     };
-  }
-
-  private buildStatusText() {
-    const lines = [`Status: ${this.frontendPhase}`, `Chat: ${this.chatKey}`];
-    const policy = this.getWorkingIndicatorPolicy();
-    const indicators = [
-      policy.polling ? "polling" : "",
-      policy.marker ? "marker" : "",
-    ].filter(Boolean);
-    lines.push(`Indicators: ${indicators.join(", ") || "none"}`);
-
-    const sessionFile = this.currentSessionFile();
-    if (sessionFile) lines.push(`Session file: ${sessionFile}`);
-
-    const currentTurn = this.currentTurn;
-    if (currentTurn?.startedAt) {
-      lines.push(
-        `Since: ${prettyMilliseconds(
-          Math.max(0, Date.now() - currentTurn.startedAt),
-          {
-            secondsDecimalDigits: 0,
-            unitCount: 2,
-          },
-        )}`,
-      );
-    }
-    const replyToMessageId = this.currentReplyToMessageId();
-    if (replyToMessageId) lines.push(`Reply target: ${replyToMessageId}`);
-    const promptPreview = summarizePromptText(
-      this.driver.latestAssistantText || "",
-    );
-    if (promptPreview) lines.push(`Latest: ${promptPreview}`);
-    return lines.join("\n");
-  }
-
-  private async runLocalStatusCommand(
-    replyToMessageId = "",
-    incomingMessageId = "",
-  ) {
-    const text = this.buildStatusText();
-    this.markProcessedMessage(incomingMessageId, false);
-    if (!this.canDeliverReplies()) return { handled: true, text, local: true };
-    await this.enqueueAndDrainDelivery(
-      {
-        type: "text_delivery",
-        chatKey: this.chatKey,
-        text,
-        replyToMessageId: safeString(replyToMessageId).trim() || undefined,
-        createdAt: nowIso(),
-      },
-      { deliveryKind: "command_ack" },
-    );
-    return { handled: true, text, local: true };
   }
 
   private shouldShowTypingIndicator() {
@@ -1595,12 +1533,6 @@ export class ChatController {
         this.stagedDelivery = null;
         this.saveState();
       }
-    }
-    if (commandName === "status") {
-      return await this.runLocalStatusCommand(
-        replyToMessageId,
-        incomingMessageId,
-      );
     }
     const skipSessionRecovery = commandPolicy.skipSessionRecovery;
     // Slash commands are controls; reply-bound session files belong to prompt turns only.

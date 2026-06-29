@@ -232,10 +232,11 @@ test("worker helpers expose normalized slash commands and oauth state", () => {
         command.source === "skill",
     ),
   );
-  assert.ok(
+  assert.equal(
     commands.some(
       (command) => command.name === "todos" && command.source === "builtin",
     ),
+    false,
   );
   assert.ok(
     commands.some(
@@ -397,45 +398,14 @@ test("runBuiltinCommand shows compact usage status", async () => {
   }
 });
 
-test("runBuiltinCommand shows the built-in todo list", async () => {
-  let rendered = "";
-  const runtime = {
-    session: {
-      agent: {
-        state: {
-          messages: [
-            {
-              role: "toolResult",
-              toolName: "todo",
-              details: {
-                todos: [{ id: 1, text: "Wire /todos", done: false }],
-                nextId: 2,
-              },
-            },
-          ],
-        },
-      },
-      sessionManager: {},
-    },
-  };
-  const result = await workerHelpers.runBuiltinCommand(runtime, "/todos", {
-    SessionManager: { list: async () => [] },
-    uiContext: {
-      custom(factory) {
-        const theme = {
-          fg: (_kind, text) => String(text),
-          bold: (text) => String(text),
-        };
-        rendered = factory(null, theme, null, () => {})
-          .render(80)
-          .join("\n");
-      },
-    },
-  });
+test("runBuiltinCommand no longer handles the removed todos slash command", async () => {
+  const result = await workerHelpers.runBuiltinCommand(
+    { session: {} },
+    "/todos",
+    { SessionManager: { list: async () => [] } },
+  );
 
-  assert.equal(result.handled, true);
-  assert.match(rendered, /Wire \/todos/);
-  assert.doesNotMatch(rendered, /#1/);
+  assert.deepEqual(result, { handled: false });
 });
 
 test("runBuiltinCommand uses runtime for session replacement commands", async () => {

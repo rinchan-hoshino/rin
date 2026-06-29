@@ -10,6 +10,8 @@ import { str } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/
 
 export { initTheme } from "@earendil-works/pi-coding-agent";
 export { APP_NAME } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/config.js";
+export type { BuiltinSlashCommand as PiBuiltinSlashCommand } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/slash-commands.js";
+export { BUILTIN_SLASH_COMMANDS as PI_BUILTIN_SLASH_COMMANDS } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/slash-commands.js";
 export { formatKeyText } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/keybinding-hints.js";
 export {
   onThemeChange,

@@ -75,7 +75,10 @@ test("chat main consumes inbound localized help messages through the inbox path 
       if (
         rows.length !== 1 ||
         !text.includes("/help — \u663e\u793a\u53ef\u7528\u547d\u4ee4") ||
-        !text.includes("/model — \u663e\u793a\u6216\u5207\u6362\u5f53\u524d\u6a21\u578b")
+        !text.includes("/usage — \u663e\u793a\u7528\u91cf\u548c\u914d\u989d\u72b6\u6001") ||
+        text.includes("/model —") ||
+        text.includes("/session —") ||
+        text.includes("/status —")
       ) {
         throw new Error(JSON.stringify({
           sentCount,
@@ -526,11 +529,11 @@ test("chat main reports unmatched private slash commands without starting an age
         selfId: "1",
         channelId: "2",
         userId: "owner-1",
-        messageId: "m-resume",
+        messageId: "m-model-command",
         isDirect: true,
-        content: "/resume",
-        stripped: { content: "/resume" },
-        elements: [h.createChatRuntimeH().text("/resume")],
+        content: "/model openai/gpt-5",
+        stripped: { content: "/model openai/gpt-5" },
+        elements: [h.createChatRuntimeH().text("/model openai/gpt-5")],
       });
 
       const deadline = Date.now() + 5000;

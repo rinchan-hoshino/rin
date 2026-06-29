@@ -1,4 +1,4 @@
-import { isDaemonBuiltinSlashCommand } from "../rin-lib/rpc.js";
+import { isGenericPromptRunCommandBuiltinSlashCommand } from "../rin-lib/rpc.js";
 import { safeString } from "../text-utils.js";
 import {
   frontendCommandNameFromLine,
@@ -76,9 +76,7 @@ export const RIN_NON_INTERACTIVE_COMMAND_NAMES = [
   "new",
   "compact",
   "reload",
-  "status",
-  "session",
-  "model",
+  "usage",
 ] as const;
 
 const RIN_NON_INTERACTIVE_COMMAND_NAME_SET = new Set<string>(
@@ -134,7 +132,9 @@ export function classifyRinFrontendCommand(
   if (isFrontendSessionCommandLine(commandLine)) {
     return { kind: "frontend", name };
   }
-  if (isDaemonBuiltinSlashCommand(name)) return { kind: "daemon", name };
+  if (isGenericPromptRunCommandBuiltinSlashCommand(name)) {
+    return { kind: "daemon", name };
+  }
   const catalogMatch = catalog.some(
     (command) =>
       safeString(command?.name).trim() === name &&

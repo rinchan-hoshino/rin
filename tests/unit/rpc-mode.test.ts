@@ -1348,7 +1348,7 @@ test(
 );
 
 test(
-  "rpc mode executes /todos through the daemon builtin command path",
+  "rpc mode executes /usage through the daemon builtin command path",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -1423,7 +1423,7 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "1", type: "run_command", commandLine: "/todos" })}\n`,
+          `${JSON.stringify({ id: "1", type: "run_command", commandLine: "/usage" })}\n`,
         ),
       );
       await wait(20);
@@ -1439,7 +1439,8 @@ test(
         .filter(Boolean)
         .find((line) => line.type === "response" && line.id === "1");
       assert.equal(response.success, true);
-      assert.deepEqual(response.data, { handled: true });
+      assert.equal(response.data?.handled, true);
+      assert.match(String(response.data?.text || ""), /Usage unavailable/);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

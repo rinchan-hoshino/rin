@@ -61,6 +61,31 @@ test("rpc helpers build success and failure envelopes", () => {
   });
 });
 
+test("rpc builtin slash commands compose Pi commands with Rin-only overlay", () => {
+  const names = rpc.BUILTIN_SLASH_COMMANDS.map((command) => command.name);
+  assert.equal(names.includes("clone"), true);
+  assert.equal(names.includes("trust"), true);
+  assert.equal(
+    rpc.BUILTIN_SLASH_COMMANDS.find((command) => command.name === "quit")
+      ?.description,
+    "Quit rin",
+  );
+  assert.deepEqual(
+    rpc.RIN_BUILTIN_SLASH_COMMANDS.map((command) => command.name),
+    ["abort", "usage"],
+  );
+  assert.equal(names.includes("todos"), false);
+  assert.equal(rpc.isGenericPromptRunCommandBuiltinSlashCommand("usage"), true);
+  assert.equal(
+    rpc.isGenericPromptRunCommandBuiltinSlashCommand("todos"),
+    false,
+  );
+  assert.equal(
+    rpc.isGenericPromptRunCommandBuiltinSlashCommand("model"),
+    false,
+  );
+});
+
 test("rpc helpers normalize scoped commands and return fresh empty session state", () => {
   assert.equal(rpc.isSessionScopedCommand(" reload "), true);
   assert.equal(rpc.isSessionScopedCommand(" nope "), false);
