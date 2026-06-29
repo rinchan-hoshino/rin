@@ -1,5 +1,29 @@
 # Rin Changelog
 
+## 0.7.0
+
+- Chat integrations now use stricter bot-qualified chat keys, clearer slash-command surfaces, and simpler Discord command acknowledgements while retiring the Matrix adapter path.
+- Prompt and self-improvement guidance now state the web-source and distillation rules more directly.
+- Update notices and runtime usage diagnostics are clearer, including bare `rin update` wording and Pi-backed context token estimates.
+<!-- rin-changelog-coverage
+f7eb689 fix(runtime): reuse Pi token estimates for context usage
+c813273 refactor(chat): remove Matrix adapter
+5b6800e fix(update): show bare rin update in notices
+09cc79a fix(chat): align slash command surfaces
+76b3050 docs(self-improve): emphasize whole-context distillation
+72eef7d docs(self-improve): clarify implicit distillation guidance
+6d87df4 docs(self-improve): remove interactive distillation fallback
+bebd37b docs(self-improve): make preference distillation proactive
+d796079 docs(self-improve): refine distillation destinations
+bd8ffc8 fix(prompt): shorten web source requirement
+139ed5c fix(prompt): refine web source requirement wording
+6da39b8 fix(prompt): strengthen web source authority
+9d061aa fix(chat): simplify Discord command acknowledgement
+5f1388e fix(chat): reject legacy inbox chat keys
+a2b1748 fix(chat): canonicalize legacy inbox keys
+6a6ee87 fix(chat): require bot-qualified chat keys
+-->
+
 ## 0.6.0
 
 - Installer and bootstrap flows are more reliable across Git/source installs, PowerShell wrappers, Node.js prerequisites, optional native dependency retries, and Electron dependency handling.
