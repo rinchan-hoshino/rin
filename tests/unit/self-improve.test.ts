@@ -911,6 +911,11 @@ test("self-improve distillation manual codifies review rules", async () => {
     /change future behavior, routing, decisions, execution, preference application, recall, or remove guidance/,
   );
   assert.match(manual, /owner preferences and implicit patterns/);
+  assert.match(
+    manual,
+    /do not wait for explicit instructions or repeated failures/,
+  );
+  assert.match(manual, /user_profile.*not preferences/);
   assert.match(manual, /short-term-memory\/records/);
   assert.match(manual, /## Guidance maintenance rule/);
   assert.match(manual, /Corrections are not automatically new guidance/);

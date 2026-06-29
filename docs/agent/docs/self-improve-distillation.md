@@ -22,7 +22,7 @@ Target surface:
 Goal:
 
 - maintain the smallest durable guidance that future matching work will use;
-- capture durable owner preferences and implicit reusable patterns when evidence shows future runs should apply them without the owner restating them;
+- actively infer and capture scoped owner preferences and implicit reusable patterns from high-salience evidence so future runs apply them without the owner restating them;
 - for correction-based or repeated-failure evidence, first identify whether existing guidance caused, preserved, or obscured the failure, then delete or rewrite that source guidance before considering any new guidance;
 - add new executable guidance only when the evidence proves a reusable future behavior that cleanup alone cannot encode;
 - preserve the trigger cues needed to recognize the same failure or work class again;
@@ -57,7 +57,7 @@ For each candidate lesson or cleanup, identify:
 
 If any field is missing, do not write the candidate as self-improve guidance. Existing artifacts can prove cleanup needs, overlap, or stale state; they do not by themselves prove a new standing rule.
 
-For implicit patterns, require enough evidence to name the scope and future trigger. Store them as scoped defaults or preferences, not universal rules; ask or leave provenance only when evidence is ambiguous.
+For implicit patterns, do not wait for explicit instructions or repeated failures. When the evidence suggests a reusable preference or pattern, record the narrowest scoped default with provenance and a revision path. Ask before storing only when the scope, trigger, or consequence would be materially risky or conflicts with existing guidance.
 
 ## Guidance maintenance rule
 
@@ -118,7 +118,7 @@ Run one cohesive same-class pass:
 6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, preference application, recall, or remove guidance that would otherwise cause future mistakes.
 7. For correction-based or repeated-failure evidence, inspect existing guidance first. If existing guidance caused or preserved the behavior, remove or rewrite it before considering any new guidance.
 8. Reject patch-layer fixes: do not add exceptions, bans, authorization clauses, or special cases when deleting or rewriting the wrong abstraction solves the problem.
-9. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, infer beyond the evidence, only restate existing artifact wording, or place a reusable procedure or behavior change only in provenance.
+9. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, only restate existing artifact wording, or place a reusable procedure or behavior change only in provenance. When evidence is directional but not absolute, prefer a narrow scoped candidate with provenance over dropping the lesson.
 10. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
 11. Choose the smallest correct destination using the priority list below.
 12. Merge overlapping guidance into one canonical owner.
@@ -132,8 +132,8 @@ Run one cohesive same-class pass:
 
 Choose the first destination that satisfies the lesson's future-use contract and the core rule:
 
-1. **Prompt baseline:** the rule or owner preference is a stable cross-turn invariant that belongs in `agent_profile`, `user_profile`, or `core_doctrine` and should remain resident in most future turns.
-2. **Current skill:** the conversation used a skill and revealed a reusable gap, domain-specific owner preference, or workflow default in that skill.
+1. **Prompt baseline:** the rule is a stable cross-turn invariant that belongs in `agent_profile` or `core_doctrine` and should remain resident in most future turns. `user_profile` stores owner identity and stable facts, not preferences.
+2. **Current skill:** the conversation used a skill and revealed a reusable gap, owner preference, implicit default, or workflow default in that skill.
 3. **Umbrella skill:** a broader existing skill cleanly owns the work class.
 4. **Skill `references/`:** reusable evidence, examples, command traces, or longer notes help future skill use while keeping `SKILL.md` concise.
 5. **New reusable skill:** existing skills lack a clean home, and the lesson is a recurring class-level workflow, domain, or playbook.
@@ -153,10 +153,10 @@ Fixed semantic destinations:
 Location: `<agentDir>/self_improve/prompts/*.md`
 
 - `agent_profile.md`: stable agent role, voice, behavior style, and standing expectations.
-- `user_profile.md`: stable user identity and compact always-relevant owner facts and preferences.
+- `user_profile.md`: stable user identity and compact always-relevant owner facts, not preferences.
 - `core_doctrine.md`: durable methodology, values, and decision rules.
 
-Prompt baselines have the highest bar because they stay resident in future turns. Use them only for agent identity, user identity, always-relevant owner preferences, and doctrine invariants that pass the core rule and apply across most future turns. Put procedures, examples, durable domain facts, domain-specific preferences, troubleshooting detail, incident summaries, implementation vocabulary, and retrieval pointers in skills or memory-index destinations.
+Prompt baselines have the highest bar because they stay resident in future turns. Use them only for agent identity, owner identity/facts, and doctrine invariants that pass the core rule and apply across most future turns. Put owner preferences, procedures, examples, durable domain facts, troubleshooting detail, incident summaries, implementation vocabulary, and retrieval pointers in skills or memory-index destinations unless a preference has been distilled into a true methodology or decision invariant for `core_doctrine`.
 
 Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic and shrink overgrown slots during review. A prompt-baseline change based on repeated, correction-based, or disputed evidence should have a memory-index pointer that can retrieve the original evidence.
 
@@ -164,7 +164,7 @@ Rewrite a prompt slot as a compact canonical replacement. Keep one dense line pe
 
 Location: `<agentDir>/self_improve/skills`
 
-Use ordinary skills for reusable workflows, procedures, verified workflow shapes, domain-specific owner preferences/defaults, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow.
+Use ordinary skills for reusable workflows, procedures, verified workflow shapes, owner preferences/defaults, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow.
 
 Put related lessons into the closest matching skill with clear headings. Use `references/` under the owning skill for detailed reusable evidence or examples that would make `SKILL.md` noisy. Keep `SKILL.md` as the operational entry point.
 
@@ -205,7 +205,7 @@ Before reporting success, check the revised library against these prompt-enginee
 - **Entropy:** duplicate, stale, conflicting, or misplaced guidance shrinks rather than spreads.
 - **Trigger fit:** skills have descriptions that match the tasks that should use them.
 - **Resident prompt fit:** prompt baselines contain only compact always-relevant behavior.
-- **Preference fit:** owner preferences and implicit patterns have enough evidence, scope, and trigger to avoid overgeneralizing.
+- **Preference fit:** owner preferences and implicit patterns are proactively captured as narrow scoped defaults with evidence, trigger, provenance, and a revision path.
 - **Short-term continuity fit:** `short-term-memory/SKILL.md` stays a light routing/index entry and active records are read narrowly by domain.
 - **Retrieval fit:** memory-index pointers name enough date/topic/keyword context for later lookup.
 

@@ -13,13 +13,13 @@ Keep these concepts separate even when implementation paths overlap. For example
 
 ## Surface model
 
-| Concept      | Surface               | Storage                                                                                | Use when                                                                                                                  |
-| ------------ | --------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Memory       | Transcript archives   | archived session memory                                                                | Original conversation text, evidence, wording, chronology, or provenance matters                                          |
-| Memory       | Memory index pointers | `self_improve/skills/memory-index/...`                                                 | A compact dated handle helps retrieve original evidence later                                                             |
-| Self-improve | Prompt baselines      | `self_improve/prompts/*.md`                                                            | A compact distilled rule or owner preference must influence most turns                                                    |
-| Self-improve | Reusable skills       | `self_improve/skills/<skill>/`                                                         | A reusable workflow, procedure, playbook, example, owner preference, or distilled domain fact should guide matching tasks |
-| Self-improve | Short-term continuity | `self_improve/skills/short-term-memory/SKILL.md` plus narrow record files when present | Active distilled handoff state guides current work                                                                        |
+| Concept      | Surface               | Storage                                                                                | Use when                                                                                                                                    |
+| ------------ | --------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Memory       | Transcript archives   | archived session memory                                                                | Original conversation text, evidence, wording, chronology, or provenance matters                                                            |
+| Memory       | Memory index pointers | `self_improve/skills/memory-index/...`                                                 | A compact dated handle helps retrieve original evidence later                                                                               |
+| Self-improve | Prompt baselines      | `self_improve/prompts/*.md`                                                            | A compact distilled role, identity fact, or methodology invariant must influence most turns                                                 |
+| Self-improve | Reusable skills       | `self_improve/skills/<skill>/`                                                         | A reusable workflow, procedure, playbook, example, owner preference, implicit default, or distilled domain fact should guide matching tasks |
+| Self-improve | Short-term continuity | `self_improve/skills/short-term-memory/SKILL.md` plus narrow record files when present | Active distilled handoff state guides current work                                                                                          |
 
 Use the least resident self-improve surface that changes future behavior. Use memory retrieval when original evidence matters.
 
@@ -52,12 +52,12 @@ Prompt baselines are compact rules that should influence most turns.
 Active prompt slots:
 
 - `agent_profile`: stable agent role, voice, behavior style, and standing response expectations.
-- `user_profile`: stable user identity and compact always-relevant user facts and preferences.
+- `user_profile`: stable user identity and compact always-relevant user facts, not preferences.
 - `core_doctrine`: durable methodology, values, and decision rules.
 
 Write prompt-baseline lines as dense target behavior. Use one line per topic. Replace superseded lines instead of appending parallel guidance.
 
-Use `user_profile` for stable preferences that should affect most future turns. Use a skill instead when the preference is domain-specific, needs steps, examples, exceptions, troubleshooting, domain detail, or a checklist.
+Do not store owner preferences in `user_profile`. Store preferences and implicit defaults in the matching skill by default; use `core_doctrine` only when a preference has become a true cross-turn methodology or decision invariant.
 
 ### Reusable skills
 
@@ -69,7 +69,7 @@ Use a skill for:
 - debugging or validation checklists;
 - domain-specific playbooks;
 - examples that teach behavior;
-- distilled facts or owner preferences useful only for matching tasks;
+- distilled facts, owner preferences, or implicit defaults useful for matching tasks;
 - references that would bloat the resident prompt.
 
 Skill descriptions are retrieval handles for distilled guidance. Put detailed instructions in `SKILL.md` or `references/`, not in prompt baselines.
@@ -86,8 +86,8 @@ When adding or consolidating information, choose the destination in this order:
 
 1. **Memory only:** original wording, evidence, chronology, or provenance is enough; use transcript archives and `recall`.
 2. **Memory index pointer:** future lookup needs a compact dated handle to original evidence.
-3. **Prompt baseline:** distilled guidance or owner preference must influence most future turns and fits one compact line.
-4. **Current matching skill:** distilled workflow, domain guidance, or domain-specific owner preference belongs in the active skill. For correction-based reusable behavior, the matching executable surface carries the rule unless it is already present.
+3. **Prompt baseline:** distilled role, owner identity/fact, or methodology invariant must influence most future turns and fits one compact line; `user_profile` does not carry preferences.
+4. **Current matching skill:** distilled workflow, domain guidance, owner preference, or implicit default belongs in the active skill. For correction-based reusable behavior, the matching executable surface carries the rule unless it is already present.
 5. **Umbrella skill:** a broader existing skill cleanly owns the class of distilled guidance.
 6. **Skill reference:** reusable evidence, examples, commands, or traces are useful but too bulky for `SKILL.md`.
 7. **New skill:** the distilled trigger is recurring, reusable, and not owned by an existing skill.
