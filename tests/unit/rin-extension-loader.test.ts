@@ -19,6 +19,7 @@ const runtimeModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"))
     .href
 );
+const piCodingAgent = await import("@earendil-works/pi-coding-agent");
 
 async function writeJson(filePath: string, value: unknown) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -69,6 +70,17 @@ test("Rin agent runtime owns the composed resource loading boundary", async () =
     { role: "toolResult", content: [{ type: "text", text: "abcd" }] },
   ]);
   assert.equal(estimate, 36);
+
+  const imageMessage = {
+    role: "user",
+    content: [
+      { type: "image", data: "base64-image-data", mimeType: "image/png" },
+    ],
+  };
+  assert.equal(
+    rinRuntime.estimateContextTokens([imageMessage]),
+    piCodingAgent.estimateTokens(imageMessage),
+  );
 });
 
 test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface", async () => {

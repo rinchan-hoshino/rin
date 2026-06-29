@@ -17,6 +17,7 @@ const providerAuth = await import(
     path.join(rootDir, "dist", "core", "rin-install", "provider-auth.js"),
   ).href
 );
+const piCodingAgent = await import("@earendil-works/pi-coding-agent");
 
 test("session helpers share deterministic thinking-level availability", () => {
   const codexMax = {
@@ -110,6 +111,39 @@ test("estimateContextTokens falls back to estimating every message when no usage
 
   assert.equal(sessionHelpers.estimateContextTokens(messages), 6);
   assert.equal(sessionHelpers.estimateMessageTokens(messages[2]), 3);
+});
+
+test("estimateContextTokens uses Pi message estimates for image content", () => {
+  const userImageMessage = {
+    role: "user",
+    content: [
+      { type: "image", data: "base64-image-data", mimeType: "image/png" },
+    ],
+  };
+  const toolResultImageMessage = {
+    role: "toolResult",
+    content: [
+      { type: "text", text: "abcd" },
+      { type: "image", data: "base64-image-data", mimeType: "image/png" },
+    ],
+  };
+
+  assert.equal(
+    sessionHelpers.estimateMessageTokens(userImageMessage),
+    piCodingAgent.estimateTokens(userImageMessage),
+  );
+  assert.equal(
+    sessionHelpers.estimateMessageTokens(toolResultImageMessage),
+    piCodingAgent.estimateTokens(toolResultImageMessage),
+  );
+  assert.equal(
+    sessionHelpers.estimateContextTokens([
+      userImageMessage,
+      toolResultImageMessage,
+    ]),
+    piCodingAgent.estimateTokens(userImageMessage) +
+      piCodingAgent.estimateTokens(toolResultImageMessage),
+  );
 });
 
 test("session helpers guard against non-array and malformed message inputs", () => {

@@ -1,7 +1,3 @@
-import {
-  calculateContextTokens,
-  estimateContextTokens,
-} from "../rin-frontend-sdk/session-helpers.js";
 import { createRinDefaultResourceLoader } from "./extension-loader.js";
 
 let rinAgentRuntimeModule: any;
@@ -47,11 +43,11 @@ function applyExtensionFlagValues(
   return diagnostics;
 }
 
-function composeRinAgentRuntimeExports(PiAgentRuntime: any) {
+function composeRinAgentRuntimeExports(PiAgentRuntime: any, tokenHelpers: any) {
   return {
     ...PiAgentRuntime,
-    calculateContextTokens,
-    estimateContextTokens,
+    calculateContextTokens: tokenHelpers.calculateContextTokens,
+    estimateContextTokens: tokenHelpers.estimateContextTokens,
   };
 }
 
@@ -117,8 +113,13 @@ function createRinAgentSessionServicesFactory(
 
 export async function loadRinAgentRuntime() {
   if (!rinAgentRuntimeModule) {
+    const [PiAgentRuntimeBase, tokenHelpers] = await Promise.all([
+      import("@earendil-works/pi-coding-agent"),
+      import("./context-token-estimator.js"),
+    ]);
     const PiAgentRuntime = composeRinAgentRuntimeExports(
-      await import("@earendil-works/pi-coding-agent"),
+      PiAgentRuntimeBase,
+      tokenHelpers,
     );
     const DefaultResourceLoader =
       createRinDefaultResourceLoader(PiAgentRuntime);
