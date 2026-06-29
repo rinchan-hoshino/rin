@@ -799,7 +799,7 @@ export class DiscordAdapter {
     if (typeof interaction?.reply !== "function") return;
     try {
       await interaction.reply({
-        content: "Rin command received.",
+        content: "Working...",
         ephemeral: true,
       });
     } catch (error: any) {

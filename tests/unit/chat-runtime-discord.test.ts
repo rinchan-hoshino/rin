@@ -202,9 +202,7 @@ test("discord adapter maps chat input interactions to Rin slash messages", async
       },
     });
 
-    assert.deepEqual(replies, [
-      { content: "Rin command received.", ephemeral: true },
-    ]);
+    assert.deepEqual(replies, [{ content: "Working...", ephemeral: true }]);
     assert.equal(emitted.length, 1);
     assert.equal(emitted[0].eventName, "message");
     assert.equal(emitted[0].payload.platform, "discord");
