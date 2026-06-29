@@ -220,7 +220,7 @@ export function rinUpdateCommandForChannel(
   _channel: ReleaseChannel,
   _currentRelease?: InstalledReleaseInfo,
 ) {
-  return "rin update --yes";
+  return "rin update";
 }
 
 function isGitHash(value: unknown) {

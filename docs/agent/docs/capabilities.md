@@ -6,7 +6,7 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 
 | Capability                               | Use when                                                                                                                      | Entry point                                                 | Read next                                                      |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------- |
-| Rin launcher                             | Starting, status checks, update, rollback, or installed-runtime maintenance                                                   | `rin`, `rin doctor`, `rin update --yes`, `rin rollback`     | `docs/runtime-layout.md`                                       |
+| Rin launcher                             | Starting, status checks, update, rollback, or installed-runtime maintenance                                                   | `rin`, `rin doctor`, `rin update`, `rin rollback`           | `docs/runtime-layout.md`                                       |
 | Runtime status and usage                 | Checking daemon health, session activity, subscription/API usage, or self-improve history                                     | `rin doctor`, `rin status`, `rin usage`, `rin self-improve` | `docs/diagnostic-commands.md`, `docs/runtime-layout.md`        |
 | Memory and self-improve                  | Choosing between original evidence/retrieval and distilled reusable guidance                                                  | `recall`, `rin self-improve`, prompt baselines, skills      | `docs/memory-layering.md`, `docs/self-improve-distillation.md` |
 | Non-interactive child runs               | Isolated scouting, review, verification, comparison, or bounded draft work                                                    | `rin -p`, `--mode json`, `--managed-session`                | `docs/non-interactive-cli.md`, `docs/session-awareness.md`     |
@@ -26,7 +26,7 @@ Use the `rin` launcher as the installed-runtime entrypoint.
 - `rin status` / `rin status --json`: session work state and daemon activity.
 - `rin usage`: subscription/API quota plus usage history and statistics.
 - `rin self-improve`: recent and historical self-improve outcomes.
-- `rin update --yes`: the only agent-facing installed-runtime update command.
+- `rin update`: the agent-facing installed-runtime update command.
 - `rin rollback`: switch to the `previousRelease` recorded in the install manifest.
 
 Use `docs/runtime-layout.md` to audit launcher ownership, agent directory, manifests, services, `app/current`, and release directories. Source checkout maintenance and installed-runtime maintenance are different surfaces.

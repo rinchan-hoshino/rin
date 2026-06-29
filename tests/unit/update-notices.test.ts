@@ -159,7 +159,7 @@ test("Rin update check follows installed release channel metadata", async () => 
 
       assert.equal(notice?.channel, "beta");
       assert.equal(notice?.version, "1.3.0-beta.2");
-      assert.equal(notice?.command, "rin update --yes");
+      assert.equal(notice?.command, "rin update");
       assert.equal(
         await notices.checkForNewRinVersion({
           sourceRoot,
@@ -266,7 +266,7 @@ test("Rin update notice follows the installed release channel", async () => {
   });
   assert.equal(betaNotice?.channel, "beta");
   assert.equal(betaNotice?.version, "1.3.0-beta.2");
-  assert.equal(betaNotice?.command, "rin update --yes");
+  assert.equal(betaNotice?.command, "rin update");
 
   const staleNightlyManifestNotice = await notices.checkForRinUpdateNotice({
     currentRelease: {
@@ -281,7 +281,7 @@ test("Rin update notice follows the installed release channel", async () => {
   });
   assert.equal(staleNightlyManifestNotice?.channel, "nightly");
   assert.equal(staleNightlyManifestNotice?.version, "1.3.0-nightly.2");
-  assert.equal(staleNightlyManifestNotice?.command, "rin update --yes");
+  assert.equal(staleNightlyManifestNotice?.command, "rin update");
 });
 
 test("Rin update notice reads installed release metadata", async () => {
@@ -358,7 +358,7 @@ test("Rin git update notice follows the installed git branch", async () => {
     });
     assert.equal(notice?.channel, "git");
     assert.equal(notice?.version, second.slice(0, 12));
-    assert.equal(notice?.command, "rin update --yes");
+    assert.equal(notice?.command, "rin update");
   });
 });
 
