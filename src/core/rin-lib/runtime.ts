@@ -158,7 +158,7 @@ function buildRinRuntimeAwarenessBlock() {
 }
 
 function buildWebSourceRequirementBlock() {
-  return "For external factual answers, always assume your built-in knowledge may be outdated. Use a search engine and treat the latest authoritative online sources as the source of truth.";
+  return "Always use a search engine to find current sources, assuming your built-in knowledge may be outdated and treating the latest authoritative online sources as the source of truth.";
 }
 
 const RIN_COMPACTION_SYSTEM_PROMPT =
