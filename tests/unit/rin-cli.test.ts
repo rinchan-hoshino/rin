@@ -297,7 +297,11 @@ test("rin lifecycle control uses the recorded managed service boundary", () => {
     source,
     /installer\.json does not record a managed runtime service/,
   );
-  assert.match(source, /tryManagedSystemdAction\(\[service\.label\]/);
+  assert.match(
+    source,
+    /context\.exec\(\[context\.systemctl, "--user", effectiveAction, service\.label\]\)/,
+  );
+  assert.doesNotMatch(source, /"status", candidate/);
   assert.match(source, /launchctl/);
   assert.match(source, /windows-startup/);
   assert.match(source, /startWindowsDaemonProcess/);

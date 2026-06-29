@@ -1,4 +1,3 @@
-import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import { sleep } from "../platform/process.js";
 import { readDaemonInstanceLockOwner } from "../rin-daemon/lock.js";
 import { findSystemUser, targetHomeForUser } from "../rin-install/users.js";
@@ -16,6 +15,13 @@ type ManagedRuntimeService = {
   kind: "systemd" | "launchd" | "windows-startup";
   label: string;
   path?: string;
+};
+
+type ManagedRuntimeServiceAction = "start" | "stop" | "restart";
+
+type ManagedRuntimeServiceActionResult = {
+  unit: string;
+  controlError?: unknown;
 };
 
 type ManagedRuntimeServiceReadContext = Pick<
@@ -61,29 +67,23 @@ function managedRuntimeServiceForAction(context: TargetExecutionContext) {
 function tryManagedSystemdServiceAction(
   context: ReturnType<typeof createTargetExecutionContext>,
   service: ManagedRuntimeService,
-  action: "start" | "stop" | "restart",
-) {
+  action: ManagedRuntimeServiceAction,
+): ManagedRuntimeServiceActionResult {
   if (!context.systemctl) {
     throw new Error("rin_managed_service_unsupported:systemd");
   }
   const effectiveAction = action === "start" ? "restart" : action;
-  const unit = tryManagedSystemdAction([service.label], {
-    daemonReload: () =>
-      context.capture([context.systemctl, "--user", "daemon-reload"], {
-        stdio: "ignore",
-      }),
-    probeUnit: (candidate) =>
-      context.capture([context.systemctl, "--user", "status", candidate], {
-        stdio: "ignore",
-      }),
-    runAction: (candidate) =>
-      context.exec([context.systemctl, "--user", effectiveAction, candidate]),
-  });
-  if (!unit)
-    throw new Error(
-      `rin_managed_service_action_failed:${action}:${service.label}`,
-    );
-  return unit;
+  try {
+    context.capture([context.systemctl, "--user", "daemon-reload"], {
+      stdio: "ignore",
+    });
+  } catch {}
+  try {
+    context.exec([context.systemctl, "--user", effectiveAction, service.label]);
+    return { unit: service.label };
+  } catch (error) {
+    return { unit: service.label, controlError: error };
+  }
 }
 
 function launchdDomainForTargetUser(targetUser: string) {
@@ -114,8 +114,8 @@ function tryBootoutLaunchd(
 function tryManagedLaunchdServiceAction(
   context: ReturnType<typeof createTargetExecutionContext>,
   service: ManagedRuntimeService,
-  action: "start" | "stop" | "restart",
-) {
+  action: ManagedRuntimeServiceAction,
+): ManagedRuntimeServiceActionResult {
   if (process.platform !== "darwin") {
     throw new Error("rin_managed_service_unsupported:launchd");
   }
@@ -126,7 +126,7 @@ function tryManagedLaunchdServiceAction(
   const serviceTarget = `${domain}/${service.label}`;
   if (action === "stop") {
     tryBootoutLaunchd(context, domain, service);
-    return service.label;
+    return { unit: service.label };
   }
   if (action === "restart") {
     tryBootoutLaunchd(context, domain, service);
@@ -137,7 +137,7 @@ function tryManagedLaunchdServiceAction(
     });
   } catch {}
   context.exec(["launchctl", "kickstart", "-k", serviceTarget]);
-  return service.label;
+  return { unit: service.label };
 }
 
 function stopWindowsDaemonFromLock(agentDir: string) {
@@ -155,8 +155,8 @@ function stopWindowsDaemonFromLock(agentDir: string) {
 async function tryManagedWindowsStartupAction(
   context: ReturnType<typeof createTargetExecutionContext>,
   service: ManagedRuntimeService,
-  action: "start" | "stop" | "restart",
-) {
+  action: ManagedRuntimeServiceAction,
+): Promise<ManagedRuntimeServiceActionResult> {
   if (process.platform !== "win32") {
     throw new Error("rin_managed_service_unsupported:windows-startup");
   }
@@ -179,13 +179,13 @@ async function tryManagedWindowsStartupAction(
       });
     }
   }
-  return service.label;
+  return { unit: service.label };
 }
 
 async function tryManagedServiceAction(
   context: ReturnType<typeof createTargetExecutionContext>,
-  action: "start" | "stop" | "restart",
-) {
+  action: ManagedRuntimeServiceAction,
+): Promise<ManagedRuntimeServiceActionResult> {
   const service = managedRuntimeServiceForAction(context);
   if (service.kind === "systemd") {
     return tryManagedSystemdServiceAction(context, service, action);
@@ -230,27 +230,67 @@ async function ensureLifecycleDaemonAvailable(
   await ensureDaemonAvailable(context);
 }
 
+function throwManagedServiceActionFailed(
+  action: ManagedRuntimeServiceAction,
+  result: ManagedRuntimeServiceActionResult,
+): never {
+  throw new Error(`rin_managed_service_action_failed:${action}:${result.unit}`);
+}
+
+function warnManagedServiceControlRecovered(
+  action: ManagedRuntimeServiceAction,
+  result: ManagedRuntimeServiceActionResult,
+) {
+  if (!result.controlError) return;
+  console.error(
+    `rin ${action} warning: managed service control reported failure, but the requested daemon state was reached: ${result.unit}`,
+  );
+}
+
+export async function runLifecycleActionForContext(
+  context: ReturnType<typeof createTargetExecutionContext>,
+  action: ManagedRuntimeServiceAction,
+) {
+  const result = await tryManagedServiceAction(context, action);
+  if (action === "stop") {
+    if (!(await waitForDaemonUnavailable(context))) {
+      if (result.controlError) throwManagedServiceActionFailed(action, result);
+      throw new Error(
+        `rin_stop_incomplete: daemon socket is still reachable for ${context.targetUser}`,
+      );
+    }
+    warnManagedServiceControlRecovered(action, result);
+    console.log(`rin stop complete: ${result.unit}`);
+    return;
+  }
+
+  try {
+    await ensureLifecycleDaemonAvailable(context);
+  } catch (error) {
+    if (result.controlError) throwManagedServiceActionFailed(action, result);
+    throw error;
+  }
+  warnManagedServiceControlRecovered(action, result);
+  console.log(`rin ${action} complete: ${result.unit}`);
+}
+
 export async function runStart(parsed: ParsedArgs) {
-  const context = createTargetExecutionContext(parsed);
-  const unit = await tryManagedServiceAction(context, "start");
-  await ensureLifecycleDaemonAvailable(context);
-  console.log(`rin start complete: ${unit}`);
+  await runLifecycleActionForContext(
+    createTargetExecutionContext(parsed),
+    "start",
+  );
 }
 
 export async function runStop(parsed: ParsedArgs) {
-  const context = createTargetExecutionContext(parsed);
-  const unit = await tryManagedServiceAction(context, "stop");
-  if (!(await waitForDaemonUnavailable(context))) {
-    throw new Error(
-      `rin_stop_incomplete: daemon socket is still reachable for ${context.targetUser}`,
-    );
-  }
-  console.log(`rin stop complete: ${unit}`);
+  await runLifecycleActionForContext(
+    createTargetExecutionContext(parsed),
+    "stop",
+  );
 }
 
 export async function runRestart(parsed: ParsedArgs) {
-  const context = createTargetExecutionContext(parsed);
-  const unit = await tryManagedServiceAction(context, "restart");
-  await ensureLifecycleDaemonAvailable(context);
-  console.log(`rin restart complete: ${unit}`);
+  await runLifecycleActionForContext(
+    createTargetExecutionContext(parsed),
+    "restart",
+  );
 }
