@@ -53,11 +53,9 @@ Active prompt slots:
 
 - `agent_profile`: stable agent role, voice, behavior style, and standing response expectations.
 - `user_profile`: stable user identity and compact always-relevant user facts.
-- `core_doctrine`: durable methodology, values, and decision rules.
+- `core_doctrine`: durable methodology, values, and decision rules, including a preference only after it becomes a cross-turn methodology or decision invariant.
 
 Write prompt-baseline lines as dense target behavior. Use one line per topic. Replace superseded lines instead of appending parallel guidance.
-
-Store owner preferences and implicit defaults in the matching skill by default; use `core_doctrine` only when a preference has become a true cross-turn methodology or decision invariant.
 
 ### Reusable skills
 

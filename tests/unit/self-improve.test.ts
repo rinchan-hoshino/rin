@@ -891,7 +891,7 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /## Core rule/);
   assert.match(
     manual,
-    /Distill only proven reusable guidance: behavior changes, owner preferences, implicit patterns, or cleanup/,
+    /Distill reusable guidance when evidence shows it will help future work/,
   );
   assert.match(manual, /## Success criteria/);
   assert.match(manual, /## Behavior contract/);
@@ -913,8 +913,10 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /owner preferences and implicit patterns/);
   assert.match(
     manual,
-    /explicit instructions and repeated failures as sufficient but not required/,
+    /explicit instructions and repeated failures are enough evidence, but they are not required/,
   );
+  assert.match(manual, /save the narrowest scoped default/);
+  assert.match(manual, /pending decision in memory-index/);
   assert.match(manual, /user_profile.*stable facts only/);
   assert.match(manual, /short-term-memory\/records/);
   assert.match(manual, /## Guidance maintenance rule/);
@@ -927,7 +929,7 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /final reusable workflow shape/);
   assert.match(
     manual,
-    /belongs only in provenance stays out of executable guidance/,
+    /only useful for lookup, store it as memory-index evidence rather than executable guidance/,
   );
   assert.match(manual, /verified workflow shapes/);
   assert.match(manual, /procedures recovered through history lookup/);
