@@ -66,10 +66,10 @@
     "promotedFromBetaVersion": "0.5.0-beta.20260622"
   },
   "beta": {
-    "version": "0.5.0-beta.20260622",
-    "archiveUrl": "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/b55b97965a1dc14e70ba6c9e40c2600d8953f231",
-    "ref": "b55b97965a1dc14e70ba6c9e40c2600d8953f231",
-    "promotionVersion": "0.5.0"
+    "version": "0.6.0-beta.20260629",
+    "archiveUrl": "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/0a1ee07932a42e3090a4b9556acc4ab39fd13bf1",
+    "ref": "0a1ee07932a42e3090a4b9556acc4ab39fd13bf1",
+    "promotionVersion": "0.6.0"
   },
   "nightly": {
     "version": "0.6.0-nightly.20260628+3d4795a",
