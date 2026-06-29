@@ -334,7 +334,6 @@ function sendChatNodes(
 const CHAT_OUTBOX_ASYNC_PLATFORMS = new Set([
   "discord",
   "lark",
-  "matrix",
   "onebot",
   "slack",
   "telegram",

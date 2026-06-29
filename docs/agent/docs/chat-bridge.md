@@ -68,7 +68,6 @@ Rin's built-in direct chat runtime supports these adapter families:
 - Feishu / Lark
 - Discord
 - Slack
-- Matrix
 - Minecraft / QueQiao
 
 Chat bridge configuration is agent-owned: edit `settings.json -> chat` directly, validate the JSON, then restart the target daemon so the hosted chat runtime reloads adapter entries. Do not rely on installer or TUI interactive adapter setup; those flows are intentionally absent.
@@ -98,10 +97,6 @@ Minimal built-in adapter examples:
     "lark": { "platform": "feishu", "appId": "cli_xxx", "appSecret": "secret" },
     "discord": { "token": "bot-token" },
     "slack": { "protocol": "ws", "token": "xapp-...", "botToken": "xoxb-..." },
-    "matrix": {
-      "homeserverUrl": "https://matrix.example.com",
-      "accessTokenFile": "/path/to/matrix-access-token"
-    },
     "minecraft": {
       "url": "ws://127.0.0.1:8080",
       "selfId": "minecraft",
@@ -137,7 +132,7 @@ lark/cli_xxx:oc_xxx
 Rules:
 
 - Every platform chat key uses the same bot-qualified shape: `platform/botId:chatId`.
-- `botId` is the stable account/bot identity for the adapter instance, such as Telegram bot id, OneBot selfId, Discord bot id, Lark appId, QQ app id, Slack bot user id, Matrix user id, or Minecraft selfId.
+- `botId` is the stable account/bot identity for the adapter instance, such as Telegram bot id, OneBot selfId, Discord bot id, Lark appId, QQ app id, Slack bot user id, or Minecraft selfId.
 - Do not introduce platform-specific unqualified forms such as `platform:chatId`; migrate stored files and settings to the single canonical shape instead.
 - Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
 - OneBot private chats commonly use `private:<userId>`; group chats use the group id.

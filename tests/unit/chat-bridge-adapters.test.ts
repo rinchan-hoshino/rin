@@ -26,16 +26,7 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
 
   assert.deepEqual(
     specs.map((item) => item.key),
-    [
-      "telegram",
-      "onebot",
-      "qq",
-      "lark",
-      "discord",
-      "slack",
-      "matrix",
-      "minecraft",
-    ],
+    ["telegram", "onebot", "qq", "lark", "discord", "slack", "minecraft"],
   );
   assert.deepEqual(adapters.getChatBridgeAdapterSpec("telegram")?.defaults, {
     protocol: "polling",
@@ -45,12 +36,6 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
   assert.deepEqual(adapters.getChatBridgeAdapterSpec("slack")?.defaults, {
     protocol: "ws",
   });
-  assert.deepEqual(adapters.getChatBridgeAdapterSpec("matrix")?.defaults, {
-    homeserverUrl: "",
-    accessToken: "",
-    accessTokenFile: "",
-    syncTimeoutMs: 30000,
-  });
   assert.deepEqual(adapters.listSupportedChatBridgeLabels(), [
     "Telegram",
     "OneBot",
@@ -58,7 +43,6 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
     "Feishu / Lark",
     "Discord",
     "Slack",
-    "Matrix",
     "Minecraft / QueQiao",
   ]);
 });
@@ -109,10 +93,6 @@ test("chat bridge adapter config materialization applies minimal setup defaults"
       qq: { id: "app-id", secret: "secret", token: "token", type: "public" },
       lark: { appId: "cli_xxx", appSecret: "secret_xxx" },
       slack: { token: "xapp-demo", botToken: "xoxb-demo" },
-      matrix: {
-        homeserverUrl: "https://matrix.example.test",
-        accessTokenFile: "/run/secrets/matrix-token",
-      },
     },
   });
 
@@ -136,12 +116,6 @@ test("chat bridge adapter config materialization applies minimal setup defaults"
     token: "xapp-demo",
     botToken: "xoxb-demo",
   });
-  assert.deepEqual(config.plugins["adapter-matrix"], {
-    homeserverUrl: "https://matrix.example.test",
-    accessToken: "",
-    accessTokenFile: "/run/secrets/matrix-token",
-    syncTimeoutMs: 30000,
-  });
 });
 
 test("chat bridge runtime adapter entries expose only configured built-in adapter keys", () => {
@@ -149,17 +123,13 @@ test("chat bridge runtime adapter entries expose only configured built-in adapte
     chat: {
       telegram: { token: "telegram-token", protocol: "polling" },
       onebot: { endpoint: "ws://127.0.0.1:3001", protocol: "ws", selfId: "42" },
-      matrix: {
-        homeserverUrl: "https://matrix.example.test",
-        accessTokenFile: "/run/secrets/matrix-token",
-      },
       minecraft: { url: "ws://127.0.0.1:8080", selfId: "minecraft" },
     },
   });
 
   assert.deepEqual(
     entries.map((item) => item.key),
-    ["telegram", "onebot", "matrix", "minecraft"],
+    ["telegram", "onebot", "minecraft"],
   );
 });
 

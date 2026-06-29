@@ -54,7 +54,7 @@ test("chat key migration canonicalizes legacy unqualified keys through a single 
     "telegram/8623230033:-1001447529496",
   );
   assert.equal(
-    migration.canonicalizeStoredChatKey("matrix:!room:example.org", botIds),
+    migration.canonicalizeStoredChatKey("slack:C0123456789", botIds),
     "",
   );
 });

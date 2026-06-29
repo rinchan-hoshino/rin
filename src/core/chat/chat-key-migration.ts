@@ -69,8 +69,6 @@ function inferBotIdForPlatform(platform: string, config: Record<string, any>) {
       return normalizeBotId(config.selfId || config.botId || config.id);
     case "lark":
       return normalizeBotId(config.selfId || config.botId || config.appId);
-    case "matrix":
-      return normalizeBotId(config.selfId || config.botId || config.userId);
     case "slack":
       return normalizeBotId(config.selfId || config.botId || config.botUserId);
     default:

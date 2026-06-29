@@ -293,10 +293,6 @@ function isOneBotMediaOutboxItem(item?: Pick<ChatOutboxItem, "payload">) {
   );
 }
 
-function isMatrixOutboxItem(item?: Pick<ChatOutboxItem, "payload">) {
-  return safeString(item?.payload?.chatKey).startsWith("matrix/");
-}
-
 export function getChatOutboxSendTimeoutMs(
   item?: Pick<ChatOutboxItem, "payload">,
   options: ChatOutboxDrainOptions = {},
@@ -541,7 +537,7 @@ function settleLateChatOutboxFailure(
     warnChatOutboxFailure(logger, failed, error, "failed");
     return;
   }
-  if (isAmbiguousDeliveryTimeout(error) && !isMatrixOutboxItem(current)) {
+  if (isAmbiguousDeliveryTimeout(error)) {
     const delivered = deliveredUnconfirmedChatOutboxItem(current, error);
     writeChatOutboxItem(agentDir, delivered);
     warnChatOutboxDeliveryUnconfirmed(logger, delivered, error);
