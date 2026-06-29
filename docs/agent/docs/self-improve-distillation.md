@@ -22,6 +22,7 @@ Target surface:
 Goal:
 
 - maintain the smallest durable guidance that future matching work will use;
+- capture durable owner preferences and implicit reusable patterns when evidence shows future runs should apply them without the owner restating them;
 - for correction-based or repeated-failure evidence, first identify whether existing guidance caused, preserved, or obscured the failure, then delete or rewrite that source guidance before considering any new guidance;
 - add new executable guidance only when the evidence proves a reusable future behavior that cleanup alone cannot encode;
 - preserve the trigger cues needed to recognize the same failure or work class again;
@@ -29,7 +30,8 @@ Goal:
 
 Inputs and authority:
 
-- conversation evidence, especially owner corrections, frustration, repeated reminders, and repeated assistant failures;
+- conversation evidence, especially owner corrections, owner preferences, accepted or rejected outputs, frustration, repeated reminders, and repeated assistant failures;
+- implicit reusable patterns inferred from repeated owner choices, corrections, accepted artifacts, rejected directions, and stable constraints;
 - authoritative docs for the surface being edited;
 - verified repository/runtime behavior when it proves the behavior need or the final reusable workflow shape;
 - existing self-improve artifacts as review context for merge, move, prune, or revision, not as independent authority for new doctrine.
@@ -44,24 +46,27 @@ Output contract:
 
 ## Core rule
 
-Distill only proven behavior changes.
+Distill only proven reusable guidance: behavior changes, owner preferences, implicit patterns, or cleanup.
 
 For each candidate lesson or cleanup, identify:
 
-- **Evidence:** the trusted conversation evidence, correction, repeated failure, authoritative doc, or verified runtime/repository behavior that proves the need.
-- **Trigger:** the future situation, wording, surface, or work class that should make the agent use, avoid, or ignore the guidance.
-- **Target behavior:** what future runs should do differently after the library is clean.
-- **Owning surface:** the narrowest self-improve surface that can carry the target behavior or the cleanup.
+- **Evidence:** the trusted conversation evidence, correction, preference statement, repeated owner choice, accepted or rejected output, repeated failure, authoritative doc, or verified runtime/repository behavior that proves the need.
+- **Trigger:** the future situation, wording, surface, or work class that should make the agent use, prefer, avoid, or ignore the guidance.
+- **Target behavior:** what future runs should do differently, which preference/default they should apply, or which stale guidance should disappear after the library is clean.
+- **Owning surface:** the narrowest self-improve surface that can carry the target behavior, preference, pattern, or cleanup.
 
 If any field is missing, do not write the candidate as self-improve guidance. Existing artifacts can prove cleanup needs, overlap, or stale state; they do not by themselves prove a new standing rule.
+
+For implicit patterns, require enough evidence to name the scope and future trigger. Store them as scoped defaults or preferences, not universal rules; ask or leave provenance only when evidence is ambiguous.
 
 ## Guidance maintenance rule
 
 Corrections are not automatically new guidance. A complete pass maintains the clean target state of the guidance library.
 
-For each correction, frustration, repeated reminder, or repeated assistant failure, first decide whether the evidence:
+For each correction, preference statement, accepted or rejected output, frustration, repeated reminder, or repeated assistant failure, first decide whether the evidence:
 
 - proves a new reusable behavior;
+- reveals a durable owner preference or implicit reusable default;
 - narrows or rewrites existing guidance;
 - invalidates an existing abstraction or rule;
 - only corrects the current execution.
@@ -75,7 +80,8 @@ Memory-index entries preserve dated provenance behind corrections and disputes. 
 A successful distillation pass makes future behavior easier to trigger and execute:
 
 - each changed guidance line or deletion can name its evidence, trigger, target behavior, and owning surface;
-- the new, revised, or removed guidance changes future behavior, routing, decisions, execution, or recall;
+- the new, revised, or removed guidance changes future behavior, routing, decisions, execution, preference application, or recall;
+- durable owner preferences and implicit patterns are captured with scope, trigger, and destination so the owner need not restate them;
 - correction-based or repeated-failure evidence first removes or rewrites wrong guidance; new executable guidance is added only when cleanup alone cannot produce the proven target behavior;
 - trigger cues are preserved, including exact wording when that wording is needed to recognize the future failure again;
 - each lesson has one canonical owner;
@@ -95,10 +101,10 @@ Inspect the surfaces that can own the lesson:
 - umbrella skills covering the same work class;
 - fixed semantic skills such as `people-and-relationships` and `object-relationships`;
 - memory-index monthly indexes and same-topic transaction files;
-- `short-term-memory/SKILL.md`;
+- `short-term-memory/SKILL.md` and matching short-term records under `short-term-memory/records/` when present;
 - `<agentDir>/self_improve/state/skill-usage.json` when present.
 
-Review high-salience conversation evidence before lower-salience artifact cleanup: owner corrections, frustration, repeated reminders, and repeated assistant failures. File only the target behavior or cleanup in the smallest self-improve surface that will affect later behavior.
+Review high-salience conversation evidence before lower-salience artifact cleanup: owner corrections, owner preferences, accepted or rejected outputs, implicit repeated expectations, frustration, repeated reminders, and repeated assistant failures. File only the target behavior, preference, pattern, or cleanup in the smallest self-improve surface that will affect later behavior.
 
 ## Behavior contract
 
@@ -107,18 +113,18 @@ Run one cohesive same-class pass:
 1. Read the current prompt baselines.
 2. Read the matching skill and any umbrella skill that owns the same work class.
 3. Check `skill-usage.json` for stale, overlapping, or rarely used skills worth merging, aliasing, pruning, or reshaping.
-4. Review high-salience conversation evidence first: owner corrections, repeated reminders, frustration, and repeated assistant failures.
-5. Extract candidate lessons or cleanups with evidence, trigger, target behavior, and the narrowest owning surface.
-6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, recall, or remove guidance that would otherwise cause future mistakes.
+4. Review high-salience conversation evidence first: owner corrections, owner preferences, accepted or rejected outputs, implicit repeated expectations, repeated reminders, frustration, and repeated assistant failures.
+5. Extract candidate lessons, preferences, implicit patterns, or cleanups with evidence, trigger, target behavior, and the narrowest owning surface.
+6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, preference application, recall, or remove guidance that would otherwise cause future mistakes.
 7. For correction-based or repeated-failure evidence, inspect existing guidance first. If existing guidance caused or preserved the behavior, remove or rewrite it before considering any new guidance.
 8. Reject patch-layer fixes: do not add exceptions, bans, authorization clauses, or special cases when deleting or rewriting the wrong abstraction solves the problem.
-9. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, only restate existing artifact wording, or place a reusable procedure or behavior change only in provenance.
+9. Reject candidates that lack trusted evidence, lack a future trigger, add no future behavior difference, infer beyond the evidence, only restate existing artifact wording, or place a reusable procedure or behavior change only in provenance.
 10. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
 11. Choose the smallest correct destination using the priority list below.
 12. Merge overlapping guidance into one canonical owner.
 13. Rewrite the destination as compact target-state guidance only after the trigger and target behavior are preserved.
 14. Update memory-index when evidence is repeated, correction-based, disputed, or used to justify resident prompt-baseline guidance.
-15. Prune stale short-term continuity records and move active state to the narrowest current owner.
+15. For short-term continuity, keep `SKILL.md` as the routing/index entry, inspect only matching records by domain, prune stale records, and move durable lessons out to their owning prompt, skill, or memory-index surface.
 16. Validate skill frontmatter after editing skills.
 17. Report changed self-improve artifacts or one concise unchanged reason.
 
@@ -126,8 +132,8 @@ Run one cohesive same-class pass:
 
 Choose the first destination that satisfies the lesson's future-use contract and the core rule:
 
-1. **Prompt baseline:** the rule is a stable cross-turn invariant that belongs in `agent_profile`, `user_profile`, or `core_doctrine` and should remain resident in most future turns.
-2. **Current skill:** the conversation used a skill and revealed a reusable gap in that skill.
+1. **Prompt baseline:** the rule or owner preference is a stable cross-turn invariant that belongs in `agent_profile`, `user_profile`, or `core_doctrine` and should remain resident in most future turns.
+2. **Current skill:** the conversation used a skill and revealed a reusable gap, domain-specific owner preference, or workflow default in that skill.
 3. **Umbrella skill:** a broader existing skill cleanly owns the work class.
 4. **Skill `references/`:** reusable evidence, examples, command traces, or longer notes help future skill use while keeping `SKILL.md` concise.
 5. **New reusable skill:** existing skills lack a clean home, and the lesson is a recurring class-level workflow, domain, or playbook.
@@ -147,10 +153,10 @@ Fixed semantic destinations:
 Location: `<agentDir>/self_improve/prompts/*.md`
 
 - `agent_profile.md`: stable agent role, voice, behavior style, and standing expectations.
-- `user_profile.md`: stable user identity and compact always-relevant user facts.
+- `user_profile.md`: stable user identity and compact always-relevant owner facts and preferences.
 - `core_doctrine.md`: durable methodology, values, and decision rules.
 
-Prompt baselines have the highest bar because they stay resident in future turns. Use them only for agent identity, user identity, and doctrine invariants that pass the core rule and apply across most future turns. Put procedures, examples, durable domain facts, troubleshooting detail, incident summaries, implementation vocabulary, and retrieval pointers in skills or memory-index destinations.
+Prompt baselines have the highest bar because they stay resident in future turns. Use them only for agent identity, user identity, always-relevant owner preferences, and doctrine invariants that pass the core rule and apply across most future turns. Put procedures, examples, durable domain facts, domain-specific preferences, troubleshooting detail, incident summaries, implementation vocabulary, and retrieval pointers in skills or memory-index destinations.
 
 Rewrite a prompt slot as a compact canonical replacement. Keep one dense line per topic and shrink overgrown slots during review. A prompt-baseline change based on repeated, correction-based, or disputed evidence should have a memory-index pointer that can retrieve the original evidence.
 
@@ -158,7 +164,7 @@ Rewrite a prompt slot as a compact canonical replacement. Keep one dense line pe
 
 Location: `<agentDir>/self_improve/skills`
 
-Use ordinary skills for reusable workflows, procedures, verified workflow shapes, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow.
+Use ordinary skills for reusable workflows, procedures, verified workflow shapes, domain-specific owner preferences/defaults, checklists, references, examples, and troubleshooting playbooks. Shape each skill around a recurring domain or workflow.
 
 Put related lessons into the closest matching skill with clear headings. Use `references/` under the owning skill for detailed reusable evidence or examples that would make `SKILL.md` noisy. Keep `SKILL.md` as the operational entry point.
 
@@ -174,7 +180,7 @@ Use one evolving memory-index transaction for repeated same-topic evidence. Upda
 
 ### Short-term continuity
 
-`short-term-memory/SKILL.md` holds active temporary continuity. Keep current goals, blockers, handoff state, pending validation, and near next actions there while they guide current work. Merge, promote, or remove entries as they become durable guidance, evidence pointers, or completed work.
+`short-term-memory/SKILL.md` is the light routing entry for active temporary continuity. Keep bulky active records in narrow files such as `short-term-memory/records/*.md` when available, and read only the matching record(s) for the current domain. Each record should hold current goals, blockers, handoff state, pending validation, and near next actions while they guide current work. Merge, promote, or remove records as they become durable guidance, evidence pointers, or completed work.
 
 ## Skill lifecycle
 
@@ -189,9 +195,9 @@ Use `disable-model-invocation: true` for skills that should remain explicit/manu
 Before reporting success, check the revised library against these prompt-engineering criteria:
 
 - **Evidence gate:** every changed guidance line traces to trusted evidence, an authoritative doc, or verified behavior.
-- **Target behavior:** every changed or removed guidance line changes a named future behavior, routing decision, execution step, or recall path.
+- **Target behavior:** every changed or removed guidance line changes a named future behavior, routing decision, execution step, preference application, or recall path.
 - **Trigger preservation:** compression keeps the wording or conditions needed to recognize the same failure again.
-- **Destination fit:** each lesson or cleanup lives in the narrowest surface that future matching work will use.
+- **Destination fit:** each lesson, preference, implicit pattern, or cleanup lives in the narrowest surface that future matching work will use.
 - **Target-state cleanup:** repeated corrections and repeated assistant failures reduce wrong, stale, conflicting, or overgeneral guidance first. New guidance is allowed only when cleanup alone cannot encode the proven future behavior.
 - **No patch layering:** the revision must not preserve a bad rule by wrapping it in exceptions, prohibitions, authorization clauses, guard flags, or special cases.
 - **Instruction/data boundary:** original wording, chronology, and provenance stay retrievable through memory surfaces while self-improve stores distilled guidance, including reusable workflow shapes.
@@ -199,6 +205,8 @@ Before reporting success, check the revised library against these prompt-enginee
 - **Entropy:** duplicate, stale, conflicting, or misplaced guidance shrinks rather than spreads.
 - **Trigger fit:** skills have descriptions that match the tasks that should use them.
 - **Resident prompt fit:** prompt baselines contain only compact always-relevant behavior.
+- **Preference fit:** owner preferences and implicit patterns have enough evidence, scope, and trigger to avoid overgeneralizing.
+- **Short-term continuity fit:** `short-term-memory/SKILL.md` stays a light routing/index entry and active records are read narrowly by domain.
 - **Retrieval fit:** memory-index pointers name enough date/topic/keyword context for later lookup.
 
 ## Final output

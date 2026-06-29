@@ -889,7 +889,10 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /## Prompt brief/);
   assert.doesNotMatch(manual, /Cosmetic wording cleanup/);
   assert.match(manual, /## Core rule/);
-  assert.match(manual, /Distill only proven behavior changes/);
+  assert.match(
+    manual,
+    /Distill only proven reusable guidance: behavior changes, owner preferences, implicit patterns, or cleanup/,
+  );
   assert.match(manual, /## Success criteria/);
   assert.match(manual, /## Behavior contract/);
   assert.match(manual, /## Evaluation checks/);
@@ -905,8 +908,10 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.doesNotMatch(manual, /lower guidance entropy/);
   assert.match(
     manual,
-    /change future behavior, routing, decisions, execution, recall, or remove guidance/,
+    /change future behavior, routing, decisions, execution, preference application, recall, or remove guidance/,
   );
+  assert.match(manual, /owner preferences and implicit patterns/);
+  assert.match(manual, /short-term-memory\/records/);
   assert.match(manual, /## Guidance maintenance rule/);
   assert.match(manual, /Corrections are not automatically new guidance/);
   assert.match(manual, /Reject patch-layer fixes/);
