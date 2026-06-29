@@ -889,10 +889,7 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /## Prompt brief/);
   assert.doesNotMatch(manual, /Cosmetic wording cleanup/);
   assert.match(manual, /## Core rule/);
-  assert.match(
-    manual,
-    /Distill reusable guidance when evidence shows it will help future work/,
-  );
+  assert.match(manual, /Distill what the conversation teaches future work/);
   assert.match(manual, /## Success criteria/);
   assert.match(manual, /## Behavior contract/);
   assert.match(manual, /## Evaluation checks/);
@@ -910,12 +907,10 @@ test("self-improve distillation manual codifies review rules", async () => {
     manual,
     /change future behavior, routing, decisions, execution, preference application, recall, or remove guidance/,
   );
-  assert.match(manual, /owner preferences and implicit patterns/);
-  assert.match(
-    manual,
-    /explicit instructions and repeated failures are enough evidence, but they are not required/,
-  );
-  assert.match(manual, /save the narrowest scoped default/);
+  assert.match(manual, /read the whole conversation/);
+  assert.match(manual, /owner preferences, workflows, and key knowledge/);
+  assert.match(manual, /Read beyond the owner's explicit requests/);
+  assert.match(manual, /workflows that worked, workflows that failed/);
   assert.match(manual, /pending decision in memory-index/);
   assert.match(manual, /user_profile.*stable facts only/);
   assert.match(manual, /short-term-memory\/records/);
