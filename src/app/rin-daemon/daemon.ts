@@ -30,6 +30,8 @@ import {
 import { loadRinAgentRuntime } from "../../core/rin-lib/agent-runtime.js";
 import { applyRinSettingsDefaults } from "../../core/rin-lib/runtime.js";
 
+type HostedChatBridge = Awaited<ReturnType<typeof startChatBridge>>;
+
 async function main() {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const ext = path.extname(fileURLToPath(import.meta.url)) || ".js";
@@ -48,10 +50,12 @@ async function main() {
   const daemonSocketPath = process.argv[2] || defaultDaemonSocketPath();
   let daemonLock: DaemonInstanceLock | null = null;
   let backgroundExtensionManager: RinBackgroundExtensionManager | null = null;
-  let chatBridge: Awaited<ReturnType<typeof startChatBridge>> | null = null;
-  let servicesPromise: Promise<
-    Awaited<ReturnType<typeof startChatBridge>>
-  > | null = null;
+  let chatBridge: HostedChatBridge | null = null;
+  let chatBridgeStartupError: string | null = null;
+  let servicesPromise: Promise<HostedChatBridge | null> | null = null;
+
+  const formatHostedServiceError = (error: any) =>
+    String(error?.message || error || "unknown").trim() || "unknown";
 
   const stopHostedServices = async () => {
     await chatBridge?.stop().catch(() => {});
@@ -84,17 +88,27 @@ async function main() {
     });
     servicesPromise = (async () => {
       await backgroundExtensionManager!.start();
-      chatBridge = await startChatBridge({
-        hosted: true,
-        chatAdapterProviders:
-          backgroundExtensionManager!.getChatAdapterProviders(),
-        frontendClientFactory: () =>
-          new RinDaemonFrontendClient({
-            socketPath: "inprocess://rin-daemon",
-            connectSocket: async () => (await localFrontendConnector)(),
-          }),
-      });
-      return chatBridge;
+      try {
+        chatBridge = await startChatBridge({
+          hosted: true,
+          chatAdapterProviders:
+            backgroundExtensionManager!.getChatAdapterProviders(),
+          frontendClientFactory: () =>
+            new RinDaemonFrontendClient({
+              socketPath: "inprocess://rin-daemon",
+              connectSocket: async () => (await localFrontendConnector)(),
+            }),
+        });
+        chatBridgeStartupError = null;
+        return chatBridge;
+      } catch (error) {
+        chatBridge = null;
+        chatBridgeStartupError = formatHostedServiceError(error);
+        console.error(
+          `rin_app_chat_bridge_startup_failed:${chatBridgeStartupError}`,
+        );
+        return null;
+      }
     })();
     void servicesPromise.catch(async (error) => {
       console.error(
@@ -104,7 +118,30 @@ async function main() {
       await daemonLock?.release().catch(() => {});
       process.exit(1);
     });
-    const getHostedChatBridge = async () => await servicesPromise!;
+    const getHostedChatBridge = async () => {
+      const bridge = chatBridge || (await servicesPromise!);
+      if (bridge) return bridge;
+      throw new Error(
+        chatBridgeStartupError
+          ? `chat_bridge_unavailable:${chatBridgeStartupError}`
+          : "chat_bridge_starting",
+      );
+    };
+    const runHostedChatCommand = async (
+      operation: (bridge: HostedChatBridge) => Promise<any>,
+    ) => {
+      try {
+        return {
+          success: true,
+          data: await operation(await getHostedChatBridge()),
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: formatHostedServiceError(error),
+        };
+      }
+    };
 
     await startDaemon({
       backgroundExtensionManager,
@@ -126,7 +163,11 @@ async function main() {
           await (await getHostedChatBridge()).terminateTurn(payload),
       },
       getExtraStatus: () => ({
-        chat: chatBridge?.getStatus() || { status: "starting" },
+        chat: chatBridge?.getStatus() || {
+          ready: false,
+          status: chatBridgeStartupError ? "failed" : "starting",
+          error: chatBridgeStartupError || undefined,
+        },
       }),
       handleLocalCommand: async (command) => {
         const type = String(command?.type || "").trim();
@@ -156,60 +197,39 @@ async function main() {
           };
         }
         if (type === "chat_send") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).send(command?.payload || {}),
-          };
+          return await runHostedChatCommand((bridge) =>
+            bridge.send(command?.payload || {}),
+          );
         }
         if (type === "chat_run_turn") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).runTurn(command?.payload || {}),
-          };
+          return await runHostedChatCommand((bridge) =>
+            bridge.runTurn(command?.payload || {}),
+          );
         }
         if (type === "chat_typing") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).typing(command?.payload || {}),
-          };
+          return await runHostedChatCommand((bridge) =>
+            bridge.typing(command?.payload || {}),
+          );
         }
         if (type === "chat_react") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).react(command?.payload || {}),
-          };
+          return await runHostedChatCommand((bridge) =>
+            bridge.react(command?.payload || {}),
+          );
         }
         if (type === "chat_set_working_visible") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).setWorkingVisible(command?.payload || {}),
-          };
+          return await runHostedChatCommand((bridge) =>
+            bridge.setWorkingVisible(command?.payload || {}),
+          );
         }
         if (type === "chat_terminate_turn") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).terminateTurn(command?.payload || {}),
-          };
+          return await runHostedChatCommand((bridge) =>
+            bridge.terminateTurn(command?.payload || {}),
+          );
         }
         if (type === "chat_bridge_eval") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).evalBridge(command?.payload || {}),
-          };
+          return await runHostedChatCommand((bridge) =>
+            bridge.evalBridge(command?.payload || {}),
+          );
         }
         return undefined;
       },

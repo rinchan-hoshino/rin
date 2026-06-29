@@ -329,6 +329,12 @@ export type ChatBridgeStatus = {
   botCount: number;
   controllerCount: number;
   detachedControllerCount: number;
+  failedAdapterCount?: number;
+  adapterErrors?: Array<{
+    platform?: string;
+    selfId?: string;
+    error: string;
+  }>;
 };
 
 export type ChatBridgeHandle = {
@@ -1313,15 +1319,22 @@ export async function startChatBridge(
     })();
     return await stoppingPromise;
   };
-  const getStatus = (): ChatBridgeStatus => ({
-    ready: true,
-    startedAt,
-    settingsPath,
-    adapterCount: runtimeAdapters.length,
-    botCount: Array.isArray(app.bots) ? app.bots.length : 0,
-    controllerCount: controllers.size,
-    detachedControllerCount: detachedControllers.size,
-  });
+  const getStatus = (): ChatBridgeStatus => {
+    const adapterErrors = Array.isArray((app as any).startupErrors)
+      ? (app as any).startupErrors
+      : [];
+    return {
+      ready: true,
+      startedAt,
+      settingsPath,
+      adapterCount: runtimeAdapters.length,
+      botCount: Array.isArray(app.bots) ? app.bots.length : 0,
+      controllerCount: controllers.size,
+      detachedControllerCount: detachedControllers.size,
+      failedAdapterCount: adapterErrors.length,
+      adapterErrors,
+    };
+  };
 
   if (!options.hosted) {
     const handleSignal = (code = 0) => {

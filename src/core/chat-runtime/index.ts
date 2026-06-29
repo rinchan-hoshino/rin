@@ -262,9 +262,17 @@ function partialChatDeliveryError(error: unknown, delivered: string[]) {
   return next;
 }
 
+export type ChatRuntimeAdapterStartupError = {
+  platform?: string;
+  selfId?: string;
+  error: string;
+};
+
 export class ChatRuntimeApp extends EventEmitter {
   bots: any[] = [];
+  startupErrors: ChatRuntimeAdapterStartupError[] = [];
   private readonly adapters = new Set<any>();
+  private readonly adapterBots = new Map<any, any>();
   readonly agentDir?: string;
 
   constructor(agentDir?: string) {
@@ -301,13 +309,33 @@ export class ChatRuntimeApp extends EventEmitter {
 
   register(adapter: any, bot: any) {
     if (bot) this.bots.push(bot);
-    if (adapter) this.adapters.add(adapter);
+    if (adapter) {
+      this.adapters.add(adapter);
+      this.adapterBots.set(adapter, bot);
+    }
   }
 
   async start() {
+    this.startupErrors = [];
     for (const adapter of this.adapters) {
-      if (typeof adapter?.start === "function") {
+      if (typeof adapter?.start !== "function") continue;
+      try {
         await adapter.start();
+      } catch (error: any) {
+        const message =
+          safeString(error?.message || error).trim() || "adapter_start_failed";
+        this.startupErrors.push(
+          compactObject({
+            platform: safeString(
+              this.adapterBots.get(adapter)?.platform,
+            ).trim(),
+            selfId: safeString(this.adapterBots.get(adapter)?.selfId).trim(),
+            error: message,
+          }),
+        );
+        try {
+          adapter?.logger?.warn?.(`start failed err=${message}`);
+        } catch {}
       }
     }
   }

@@ -1,12 +1,45 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { ChatRuntimeApp } from "../../src/core/chat-runtime/index.js";
 import {
   formatChatRuntimeErrorForUser,
   isChatLifecycleRuntimeError,
   isSilentChatRuntimeRetryError,
   isTransientChatRuntimeError,
 } from "../../src/core/chat/runtime-errors.js";
+
+test("chat runtime app keeps starting adapters after one adapter start failure", async () => {
+  const app = new ChatRuntimeApp();
+  const started: string[] = [];
+
+  app.register(
+    {
+      async start() {
+        throw new Error("bad_adapter_start");
+      },
+    },
+    { platform: "bad", selfId: "bad-bot" },
+  );
+  app.register(
+    {
+      async start() {
+        started.push("ok");
+      },
+    },
+    { platform: "ok", selfId: "ok-bot" },
+  );
+
+  await assert.doesNotReject(() => app.start());
+  assert.deepEqual(started, ["ok"]);
+  assert.deepEqual(app.startupErrors, [
+    {
+      platform: "bad",
+      selfId: "bad-bot",
+      error: "bad_adapter_start",
+    },
+  ]);
+});
 
 test("chat runtime treats websocket provider failures as transient", () => {
   assert.equal(isTransientChatRuntimeError("WebSocket closed 1009"), true);

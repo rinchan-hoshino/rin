@@ -93,6 +93,32 @@ async function waitForSocketState(
   throw new Error(`timed_out_waiting_for_socket_${expected}`);
 }
 
+async function stopDaemonProcess(
+  daemon: ReturnType<typeof spawn>,
+  daemonExit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>,
+  daemonLog: string,
+  env: Record<string, string>,
+) {
+  daemon.kill("SIGTERM");
+  const result = await Promise.race([
+    daemonExit,
+    new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve) =>
+        setTimeout(async () => {
+          daemon.kill("SIGKILL");
+          resolve(await daemonExit);
+        }, 2500),
+    ),
+  ]);
+  assert.ok(
+    result.code === 0 ||
+      result.signal === "SIGTERM" ||
+      result.signal === "SIGKILL",
+    daemonLog,
+  );
+  await waitForSocketState(env, "no", 5000).catch(() => undefined);
+}
+
 test("isolated CLI doctor flow sees a daemon booted in a temporary agent dir", async () => {
   await withTempDir(async (tempDir) => {
     const { agentDir, env } = await setupIsolatedCliEnv(tempDir);
@@ -130,24 +156,54 @@ test("isolated CLI doctor flow sees a daemon booted in a temporary agent dir", a
       const agentData = path.join(agentDir, "data");
       await assert.doesNotReject(() => fs.access(agentData));
     } finally {
-      daemon.kill("SIGTERM");
-      const result = await Promise.race([
-        daemonExit,
-        new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-          (resolve) =>
-            setTimeout(async () => {
-              daemon.kill("SIGKILL");
-              resolve(await daemonExit);
-            }, 2500),
-        ),
-      ]);
-      assert.ok(
-        result.code === 0 ||
-          result.signal === "SIGTERM" ||
-          result.signal === "SIGKILL",
-        daemonLog,
+      await stopDaemonProcess(daemon, daemonExit, daemonLog, env);
+    }
+  });
+});
+
+test("daemon remains reachable when hosted chat bridge startup fails", async () => {
+  await withTempDir(async (tempDir) => {
+    const { agentDir, env } = await setupIsolatedCliEnv(tempDir);
+    await fs.writeFile(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify({ chat: { discord: { token: "" } } }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const daemon = spawn(process.execPath, [daemonPath], {
+      cwd: rootDir,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let daemonLog = "";
+    daemon.stdout.on("data", (chunk) => {
+      daemonLog += String(chunk);
+    });
+    daemon.stderr.on("data", (chunk) => {
+      daemonLog += String(chunk);
+    });
+
+    const daemonExit = new Promise<{
+      code: number | null;
+      signal: NodeJS.Signals | null;
+    }>((resolve, reject) => {
+      daemon.once("error", reject);
+      daemon.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+
+    try {
+      const doctor = await waitForSocketState(env, "yes");
+      const doctorStatus = JSON.parse(doctor);
+      assert.equal(doctorStatus.socketReady, true);
+      assert.equal(doctorStatus.chatStatus?.ready, true);
+      assert.equal(doctorStatus.chatStatus?.failedAdapterCount, 1);
+      assert.match(
+        doctorStatus.chatStatus?.adapterErrors?.[0]?.error || "",
+        /discord_token_required/,
       );
-      await waitForSocketState(env, "no", 5000).catch(() => undefined);
+    } finally {
+      await stopDaemonProcess(daemon, daemonExit, daemonLog, env);
     }
   });
 });
