@@ -117,8 +117,42 @@ export function listProcessingChatInboxFiles(agentDir: string) {
   return listJsonFiles(processingDir(agentDir));
 }
 
+function parseLegacyUnqualifiedChatKey(chatKey: string) {
+  const match = safeString(chatKey)
+    .trim()
+    .match(/^([^/:]+):(.+)$/);
+  if (!match) return null;
+  const platform = safeString(match[1]).trim();
+  const chatId = safeString(match[2]).trim();
+  return platform && chatId ? { platform, chatId } : null;
+}
+
+function canonicalizeLegacyChatInboxItem(item: ChatInboxItem | null) {
+  if (!item) return item;
+  if (safeString(item.chatKey).includes("/")) return item;
+  const legacy = parseLegacyUnqualifiedChatKey(item.chatKey);
+  if (!legacy) return item;
+  const session = isJsonRecord(item.session) ? item.session : {};
+  const botId = pickTrimmedString(
+    session.selfId,
+    (session.bot as any)?.selfId,
+    (session.bot as any)?.id,
+  );
+  if (!botId) return item;
+  const chatKey = `${legacy.platform}/${botId}:${legacy.chatId}`;
+  return {
+    ...item,
+    itemId: hashKey(`${chatKey}\n${item.messageId}`),
+    chatKey,
+    lastError: undefined,
+    nextAttemptAt: undefined,
+  } satisfies ChatInboxItem;
+}
+
 export function readChatInboxItem(filePath: string) {
-  return readJsonFile<ChatInboxItem | null>(filePath, null);
+  return canonicalizeLegacyChatInboxItem(
+    readJsonFile<ChatInboxItem | null>(filePath, null),
+  );
 }
 
 function asRecord(value: unknown): Record<string, any> {

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -51,6 +52,55 @@ test("chat inbox enqueues a durable inbound envelope keyed by chat and message i
   assert.equal(loaded.chatKey, "onebot/1:private:2");
   assert.equal(loaded.messageId, "m1");
   assert.deepEqual(loaded.elements, elements);
+});
+
+test("chat inbox canonicalizes legacy unqualified queued items on read", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+  await fs.mkdir(pendingDir, { recursive: true });
+  const oldItemId = createHash("sha1")
+    .update("discord:channel-1\nmessage-1")
+    .digest("hex");
+  const filePath = path.join(pendingDir, `${oldItemId}.json`);
+  await fs.writeFile(
+    filePath,
+    JSON.stringify(
+      {
+        version: 1,
+        itemId: oldItemId,
+        chatKey: "discord:channel-1",
+        messageId: "message-1",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        attemptCount: 2,
+        nextAttemptAt: new Date(Date.now() + 60_000).toISOString(),
+        lastError: "invalid_chatKey:discord:channel-1",
+        routing: {
+          chatType: "group",
+          isDirect: false,
+          mentionLike: false,
+        },
+        session: {
+          platform: "discord",
+          selfId: "bot-1",
+          channelId: "channel-1",
+        },
+        elements: [],
+      },
+      null,
+      2,
+    ),
+  );
+
+  const loaded = inbox.readChatInboxItem(filePath);
+  const expectedItemId = createHash("sha1")
+    .update("discord/bot-1:channel-1\nmessage-1")
+    .digest("hex");
+
+  assert.equal(loaded.chatKey, "discord/bot-1:channel-1");
+  assert.equal(loaded.itemId, expectedItemId);
+  assert.equal(loaded.lastError, undefined);
+  assert.equal(loaded.nextAttemptAt, undefined);
 });
 
 test("chat inbox preserves normalized mention routing hints needed for queued group turns", async () => {
