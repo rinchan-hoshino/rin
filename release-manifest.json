@@ -8,9 +8,9 @@
     "nightlyBranch": "main"
   },
   "stable": {
-    "version": "0.5.0",
-    "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.5.0.tgz",
-    "ref": "b55b97965a1dc14e70ba6c9e40c2600d8953f231",
+    "version": "0.6.0",
+    "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.6.0.tgz",
+    "ref": "0a1ee07932a42e3090a4b9556acc4ab39fd13bf1",
     "versions": {
       "0.0.0": {
         "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.0.0.tgz",
@@ -61,9 +61,14 @@
         "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.5.0.tgz",
         "ref": "b55b97965a1dc14e70ba6c9e40c2600d8953f231",
         "promotedFromBetaVersion": "0.5.0-beta.20260622"
+      },
+      "0.6.0": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.6.0.tgz",
+        "ref": "0a1ee07932a42e3090a4b9556acc4ab39fd13bf1",
+        "promotedFromBetaVersion": "0.6.0-beta.20260629"
       }
     },
-    "promotedFromBetaVersion": "0.5.0-beta.20260622"
+    "promotedFromBetaVersion": "0.6.0-beta.20260629"
   },
   "beta": {
     "version": "0.6.0-beta.20260629",
