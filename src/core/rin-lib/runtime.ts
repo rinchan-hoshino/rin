@@ -158,7 +158,7 @@ function buildRinRuntimeAwarenessBlock() {
 }
 
 function buildWebSourceRequirementBlock() {
-  return "Always use a search engine to find current sources when current, external, source-dependent, or version-sensitive information matters.";
+  return "For external factual answers, always assume your built-in knowledge may be outdated. Use a search engine and treat the latest authoritative online sources as the source of truth.";
 }
 
 const RIN_COMPACTION_SYSTEM_PROMPT =
