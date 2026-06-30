@@ -608,7 +608,22 @@ adjust_quick_run_labels
 check_node_version
 : >"$LOGFILE"
 run_step "$MANIFEST_LABEL" fetch_manifest
-eval "$(resolve_release)"
+RELEASE_ENV="$WORKDIR/release.env"
+RELEASE_ERROR="$WORKDIR/release.err"
+set +e
+resolve_release >"$RELEASE_ENV" 2>"$RELEASE_ERROR"
+resolve_status=$?
+set -e
+if [ "$resolve_status" -ne 0 ]; then
+  unresolved_ref=$(sed -n 's/^Error: rin_git_ref_not_resolved:\([^[:space:]]*\).*/\1/p' "$RELEASE_ERROR" | head -n 1)
+  if [ -n "$unresolved_ref" ]; then
+    echo "failed to resolve git ref: $unresolved_ref" >&2
+  else
+    cat "$RELEASE_ERROR" >&2 || true
+  fi
+  exit "$resolve_status"
+fi
+eval "$(cat "$RELEASE_ENV")"
 PACKAGE_NAME=${PACKAGE_NAME:-@hoshinorin/rin}
 RELEASE_FILE="$WORKDIR/release.json"
 node - "$RELEASE_FILE" "$CHANNEL" "$VERSION" "$BRANCH" "$REF" "$SOURCE_LABEL" "$ARCHIVE_URL" <<'NODE'
