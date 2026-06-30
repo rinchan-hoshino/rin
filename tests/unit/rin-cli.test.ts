@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -63,6 +63,33 @@ test("version subcommand reports unknown without installed release metadata", ()
     "1.2.3",
   ]);
   assert.equal(parsed.releaseVersion, "1.2.3");
+});
+
+function runLightCliWithModuleDebug(args: string[]) {
+  const result = spawnSync(
+    process.execPath,
+    [path.join(rootDir, "dist", "app", "rin", "main.js"), ...args],
+    {
+      cwd: rootDir,
+      encoding: "utf8",
+      env: { ...process.env, NODE_DEBUG: "esm,module" },
+    },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.doesNotMatch(result.stderr, /pi-coding-agent/);
+  return result;
+}
+
+test("light CLI commands do not load the Pi runtime", () => {
+  assert.equal(
+    runLightCliWithModuleDebug(["version"]).stdout.trim(),
+    "unknown",
+  );
+  assert.match(runLightCliWithModuleDebug(["--help"]).stdout, /Usage:/);
+  assert.match(
+    runLightCliWithModuleDebug(["-p", "--help"]).stdout,
+    /AI coding assistant/,
+  );
 });
 
 test("version reader rejects git branch selectors as runtime identity", () => {
@@ -872,7 +899,8 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
     "--help",
   ]);
   assert.ok(usageHelp);
-  assert.equal(usageHelp.run, usage.runUsageInternal);
+  assert.equal(typeof usageHelp.run, "function");
+  assert.notEqual(usageHelp.run, usage.runUsageInternal);
   assert.deepEqual(usageHelp.args, ["--help"]);
 
   const memoryInternal = main.resolveInternalRinDispatch([
@@ -880,7 +908,8 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
     "repair",
   ]);
   assert.ok(memoryInternal);
-  assert.equal(memoryInternal.run, memoryIndex.runMemoryIndexInternal);
+  assert.equal(typeof memoryInternal.run, "function");
+  assert.notEqual(memoryInternal.run, memoryIndex.runMemoryIndexInternal);
   assert.deepEqual(memoryInternal.args, ["repair"]);
 
   const selfHelp = main.resolveInternalRinDispatch([
@@ -890,7 +919,8 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
     "--help",
   ]);
   assert.ok(selfHelp);
-  assert.equal(selfHelp.run, selfImprove.runSelfImproveInternal);
+  assert.equal(typeof selfHelp.run, "function");
+  assert.notEqual(selfHelp.run, selfImprove.runSelfImproveInternal);
   assert.deepEqual(selfHelp.args, ["--help"]);
 
   const removedMemoryAlias = main.resolveInternalRinDispatch([
@@ -907,7 +937,8 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
     "3",
   ]);
   assert.ok(selfImproveInternal);
-  assert.equal(selfImproveInternal.run, selfImprove.runSelfImproveInternal);
+  assert.equal(typeof selfImproveInternal.run, "function");
+  assert.notEqual(selfImproveInternal.run, selfImprove.runSelfImproveInternal);
   assert.deepEqual(selfImproveInternal.args, ["--limit", "3"]);
 
   const statusHelp = main.resolveInternalRinDispatch([
@@ -917,7 +948,8 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
     "--help",
   ]);
   assert.ok(statusHelp);
-  assert.equal(statusHelp.run, status.runStatusInternal);
+  assert.equal(typeof statusHelp.run, "function");
+  assert.notEqual(statusHelp.run, status.runStatusInternal);
   assert.deepEqual(statusHelp.args, ["--help"]);
 
   const tasksHelp = main.resolveInternalRinDispatch([
@@ -927,6 +959,7 @@ test("resolveInternalRinDispatch detects internal markers and wrapped subcommand
     "--help",
   ]);
   assert.ok(tasksHelp);
-  assert.equal(tasksHelp.run, tasks.runTasksInternal);
+  assert.equal(typeof tasksHelp.run, "function");
+  assert.notEqual(tasksHelp.run, tasks.runTasksInternal);
   assert.deepEqual(tasksHelp.args, ["--help"]);
 });

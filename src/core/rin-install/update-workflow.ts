@@ -12,6 +12,10 @@ import {
 import { type InstallerI18n } from "./i18n.js";
 import { restoreTerminalCursor, runInstallerProgress } from "./progress.js";
 import { readJsonFile } from "../platform/fs.js";
+import {
+  appendDependencyPruneLog,
+  pruneDuplicatePiCodingAgentDependencies,
+} from "./runtime-dependency-prune.js";
 
 export type UpdateRuntimeSourceWorkspace = {
   tempRoot: string;
@@ -393,7 +397,22 @@ export async function prepareUpdateRuntimeSource(options: {
         i18n.buildUpdateCommandFailureHeader,
       ),
     );
+    await runInstallerProgress(i18n.pruningUpdateDependenciesMessage, () =>
+      runLoggedUpdateCommandSync(
+        npm,
+        ["prune", "--omit=dev", "--no-fund", "--no-audit", "--loglevel=error"],
+        i18n.pruningUpdateDependenciesMessage,
+        workspace.logFile,
+        { cwd: workspace.sourceRoot, env: buildEnv },
+        i18n.buildUpdateCommandFailureHeader,
+      ),
+    );
   }
+
+  appendDependencyPruneLog(
+    workspace.logFile,
+    pruneDuplicatePiCodingAgentDependencies(workspace.sourceRoot),
+  );
 
   return workspace;
 }

@@ -468,6 +468,11 @@ try {
         npm run build
         if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
       }
+      Invoke-WithSpinner "Pruning dependencies" {
+        Set-Location $using:srcDir
+        npm prune --omit=dev --no-fund --no-audit
+        if ($LASTEXITCODE -ne 0) { throw "npm prune failed with exit code $LASTEXITCODE" }
+      }
     }
     Say $launchLabel
     $installerArgs = @("dist/app/rin-install/main.js", "--release-file", $releaseFile)

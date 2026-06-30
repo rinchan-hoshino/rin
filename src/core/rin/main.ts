@@ -1,27 +1,13 @@
 #!/usr/bin/env node
-import { cac } from "cac";
-
-import { runStart, runStop, runRestart } from "./control.js";
-import { runDocsInternal } from "./docs.js";
-import { runDoctor } from "./doctor.js";
-import { launchDefaultRin } from "./launch.js";
-import { runMemoryIndex, runMemoryIndexInternal } from "./memory-index.js";
-import { runNonInteractive, shouldRunNonInteractive } from "./run.js";
-import { runStatus, runStatusInternal } from "./status.js";
-import { runTasks, runTasksInternal } from "./tasks.js";
+import { printRunHelp, shouldRunNonInteractive } from "./run-lite.js";
 import {
   hasSubcommandHelpFlag,
-  ParsedArgs,
-  resolveParsedArgs,
+  type ParsedArgs,
   readRinPackageVersion,
-  runUpdate,
+  resolveParsedArgs,
   safeString,
-} from "./shared.js";
-import { runUsage, runUsageInternal } from "./usage.js";
-import { runSelfImprove, runSelfImproveInternal } from "./self-improve.js";
-import { runRollback, runVersions } from "./versions.js";
-import { runTargetCommand } from "./targets.js";
-import { resolveTargetForName, runRinOnTarget } from "../rin-targets/runner.js";
+  stripRinWrapperArgs,
+} from "./shared-lite.js";
 
 const RIN_COMMANDS = [
   [
@@ -43,40 +29,45 @@ const RIN_COMMANDS = [
   ["version", "Show Rin version"],
 ] as const satisfies ReadonlyArray<readonly [ParsedArgs["command"], string]>;
 
+type InternalCommandRunner = (args: string[]) => void | Promise<void>;
+
 const INTERNAL_COMMANDS = [
   {
     marker: "__usage_internal",
     command: "usage",
-    run: runUsageInternal,
+    loadRun: async () => (await import("./usage.js")).runUsageInternal,
   },
   {
     marker: "__memory_index_internal",
     command: "memory-index",
-    run: runMemoryIndexInternal,
+    loadRun: async () =>
+      (await import("./memory-index.js")).runMemoryIndexInternal,
   },
   {
     marker: "__self_improve_internal",
     command: "self-improve",
-    run: runSelfImproveInternal,
+    loadRun: async () =>
+      (await import("./self-improve.js")).runSelfImproveInternal,
   },
   {
     marker: "__status_internal",
     command: "status",
-    run: runStatusInternal,
+    loadRun: async () => (await import("./status.js")).runStatusInternal,
   },
   {
     marker: "__tasks_internal",
     command: "tasks",
-    run: runTasksInternal,
+    loadRun: async () => (await import("./tasks.js")).runTasksInternal,
   },
   {
     marker: "__docs_internal",
     command: "",
-    run: runDocsInternal,
+    loadRun: async () => (await import("./docs.js")).runDocsInternal,
   },
 ] as const;
 
-function createCli() {
+async function createCli() {
+  const { cac } = await import("cac");
   const cli = cac("rin");
   cli
     .usage(
@@ -126,13 +117,22 @@ function parseCommandName(name: string): ParsedArgs["command"] {
     : "";
 }
 
+function lazyInternalRun(
+  loadRun: () => Promise<InternalCommandRunner>,
+): InternalCommandRunner {
+  return async (args) => {
+    const run = await loadRun();
+    return await run(args);
+  };
+}
+
 export function resolveInternalRinDispatch(rawArgv: string[]) {
   for (const handler of INTERNAL_COMMANDS) {
     if (rawArgv[0] === handler.marker) {
-      return { run: handler.run, args: rawArgv.slice(1) };
+      return { run: lazyInternalRun(handler.loadRun), args: rawArgv.slice(1) };
     }
     if (handler.command && hasSubcommandHelpFlag(rawArgv, handler.command)) {
-      return { run: handler.run, args: ["--help"] };
+      return { run: lazyInternalRun(handler.loadRun), args: ["--help"] };
     }
   }
   return undefined;
@@ -144,8 +144,25 @@ export function defaultLaunchModeForPlatform(
   return "tui";
 }
 
+function hasExplicitTargetArg(rawArgv: string[]) {
+  return rawArgv.some(
+    (arg) => arg === "--target" || arg.startsWith("--target="),
+  );
+}
+
+function isLocalVersionFastPath(rawArgv: string[]) {
+  if (hasExplicitTargetArg(rawArgv)) return false;
+  const args = stripRinWrapperArgs(rawArgv);
+  return args.length === 1 && args[0] === "version";
+}
+
 export async function startRinCli() {
   const rawArgv = process.argv.slice(2);
+  if (isLocalVersionFastPath(rawArgv)) {
+    console.log(readRinPackageVersion());
+    return;
+  }
+
   const internalDispatch = resolveInternalRinDispatch(rawArgv);
   if (internalDispatch) {
     await internalDispatch.run(internalDispatch.args);
@@ -156,25 +173,32 @@ export async function startRinCli() {
     rawArgv.some((arg) => arg === "--help" || arg === "-h") &&
     shouldRunNonInteractive(rawArgv, true)
   ) {
-    await runNonInteractive(resolveParsedArgs("", {}, rawArgv), rawArgv);
+    printRunHelp();
     return;
   }
 
-  const cli = createCli();
+  const cli = await createCli();
   const parsedArgv = cli.parse(process.argv, { run: false });
-  const command = parseCommandName(safeString(cli.matchedCommandName).trim());
-  const parsed = resolveParsedArgs(command, parsedArgv.options, rawArgv);
   if (parsedArgv.options.help) {
     cli.outputHelp();
     return;
   }
 
+  const command = parseCommandName(safeString(cli.matchedCommandName).trim());
+  const parsed = resolveParsedArgs(command, parsedArgv.options, rawArgv);
+
   if (!command && shouldRunNonInteractive(rawArgv)) {
+    const { runNonInteractive } = await import("./run.js");
     return await runNonInteractive(parsed, rawArgv);
   }
 
-  if (parsed.command === "target") return await runTargetCommand(rawArgv);
+  if (parsed.command === "target") {
+    const { runTargetCommand } = await import("./targets.js");
+    return await runTargetCommand(rawArgv);
+  }
   if (parsed.explicitTarget) {
+    const { resolveTargetForName, runRinOnTarget } =
+      await import("../rin-targets/runner.js");
     const target = resolveTargetForName(parsed.targetName);
     if (!target) throw new Error(`rin_target_not_found:${parsed.targetName}`);
     const status = runRinOnTarget(target, rawArgv);
@@ -182,28 +206,59 @@ export async function startRinCli() {
     return;
   }
 
-  if (parsed.command === "update") return await runUpdate(parsed);
-  if (parsed.command === "start") return await runStart(parsed);
-  if (parsed.command === "stop") return await runStop(parsed);
-  if (parsed.command === "restart") return await runRestart(parsed);
-  if (parsed.command === "doctor")
+  if (parsed.command === "update") {
+    const { runUpdate } = await import("./shared.js");
+    return await runUpdate(parsed);
+  }
+  if (parsed.command === "start") {
+    const { runStart } = await import("./control.js");
+    return await runStart(parsed);
+  }
+  if (parsed.command === "stop") {
+    const { runStop } = await import("./control.js");
+    return await runStop(parsed);
+  }
+  if (parsed.command === "restart") {
+    const { runRestart } = await import("./control.js");
+    return await runRestart(parsed);
+  }
+  if (parsed.command === "doctor") {
+    const { runDoctor } = await import("./doctor.js");
     return await runDoctor(parsed, process.argv.slice(2));
-  if (parsed.command === "status")
+  }
+  if (parsed.command === "status") {
+    const { runStatus } = await import("./status.js");
     return await runStatus(parsed, process.argv.slice(2));
-  if (parsed.command === "tasks")
+  }
+  if (parsed.command === "tasks") {
+    const { runTasks } = await import("./tasks.js");
     return await runTasks(parsed, process.argv.slice(2));
-  if (parsed.command === "usage")
+  }
+  if (parsed.command === "usage") {
+    const { runUsage } = await import("./usage.js");
     return await runUsage(parsed, process.argv.slice(2));
-  if (parsed.command === "self-improve")
+  }
+  if (parsed.command === "self-improve") {
+    const { runSelfImprove } = await import("./self-improve.js");
     return await runSelfImprove(parsed, process.argv.slice(2));
-  if (parsed.command === "versions") return runVersions(parsed);
-  if (parsed.command === "rollback") return await runRollback(parsed);
-  if (parsed.command === "memory-index")
+  }
+  if (parsed.command === "versions") {
+    const { runVersions } = await import("./versions.js");
+    return runVersions(parsed);
+  }
+  if (parsed.command === "rollback") {
+    const { runRollback } = await import("./versions.js");
+    return await runRollback(parsed);
+  }
+  if (parsed.command === "memory-index") {
+    const { runMemoryIndex } = await import("./memory-index.js");
     return await runMemoryIndex(parsed, process.argv.slice(2));
+  }
   if (parsed.command === "version") {
     console.log(readRinPackageVersion());
     return;
   }
 
+  const { launchDefaultRin } = await import("./launch.js");
   await launchDefaultRin(parsed);
 }

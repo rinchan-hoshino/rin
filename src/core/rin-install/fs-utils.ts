@@ -28,6 +28,7 @@ import {
   localBinDirForHome,
   windowsLauncherPathForHome,
 } from "./paths.js";
+import { pruneDuplicatePiCodingAgentDependencies } from "./runtime-dependency-prune.js";
 
 export { ensureDir, readJsonFile, writeJsonFile };
 
@@ -841,6 +842,11 @@ export function publishInstalledRuntime(
       runPrivileged("rm", ["-rf", path.join(releaseRoot, name)]);
       runPrivileged("cp", ["-a", sourcePath, path.join(releaseRoot, name)]);
     }
+    runPrivileged(process.execPath, [
+      "-e",
+      `import(${JSON.stringify(new URL("./runtime-dependency-prune.js", import.meta.url).href)}).then((mod)=>mod.pruneDuplicatePiCodingAgentDependencies(process.argv[1]))`,
+      releaseRoot,
+    ]);
     runPrivileged("touch", [releaseRoot]);
     try {
       runPrivileged("rm", ["-rf", currentTmpLink]);
@@ -865,6 +871,7 @@ export function publishInstalledRuntime(
       syncTree(sourcePath, path.join(releaseRoot, name));
     }
   }
+  pruneDuplicatePiCodingAgentDependencies(releaseRoot);
   try {
     fs.utimesSync(releaseRoot, new Date(), new Date());
   } catch {}

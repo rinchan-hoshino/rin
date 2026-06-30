@@ -772,6 +772,7 @@ test("install wrapper forwards quick-run while preserving release channel select
     );
     assert.match(log, /npm:.*:ci --no-fund --no-audit/);
     assert.match(log, /npm:.*:run build/);
+    assert.match(log, /npm:.*:prune --omit=dev --no-fund --no-audit/);
     assert.match(
       log,
       /node:.*:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js --release-file [^\s]+ --quick-run/,

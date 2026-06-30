@@ -21,7 +21,7 @@ body:
     id: version
     attributes:
       label: Rin version
-      description: Paste the output of `rin --version`.
+      description: Paste the output of `rin version`.
       placeholder: 0.0.0
     validations:
       required: true

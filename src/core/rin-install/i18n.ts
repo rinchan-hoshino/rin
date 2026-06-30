@@ -153,6 +153,7 @@ type InstallerDisplayCopy = {
   preparingUpdateSourceMessage: string;
   installingUpdateDependenciesMessage: string;
   buildingUpdateRuntimeMessage: string;
+  pruningUpdateDependenciesMessage: string;
   buildUpdateCommandFailureHeader: (label: string) => string;
   formatUpdateDiscoverySource: (source: string) => string;
   formatUpdateSourceLabel: (sourceLabel: string) => string;
@@ -422,6 +423,7 @@ const INSTALLER_DISPLAY_COPY = {
     preparingUpdateSourceMessage: "Preparing update source",
     installingUpdateDependenciesMessage: "Installing update dependencies",
     buildingUpdateRuntimeMessage: "Building update runtime",
+    pruningUpdateDependenciesMessage: "Pruning update dependencies",
     buildUpdateCommandFailureHeader: (label: string) =>
       `${label} failed; recent log:`,
     formatUpdateDiscoverySource: (source: string) => source,
@@ -758,6 +760,7 @@ const INSTALLER_DISPLAY_COPY = {
     preparingUpdateSourceMessage: "正在准备更新源",
     installingUpdateDependenciesMessage: "正在安装更新依赖",
     buildingUpdateRuntimeMessage: "正在构建更新运行时",
+    pruningUpdateDependenciesMessage: "正在裁剪更新依赖",
     buildUpdateCommandFailureHeader: (label: string) =>
       `${label}失败；最近日志：`,
     formatUpdateDiscoverySource(source) {

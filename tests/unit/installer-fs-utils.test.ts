@@ -459,6 +459,41 @@ async function makeRuntimeSource(version = "0.0.0") {
   return tempRoot;
 }
 
+function packageDir(nodeModules: string, name: string) {
+  return path.join(nodeModules, ...name.split("/"));
+}
+
+async function writePackage(
+  nodeModules: string,
+  name: string,
+  version: string,
+) {
+  const dir = packageDir(nodeModules, name);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, "package.json"),
+    `${JSON.stringify({ name, version })}\n`,
+    "utf8",
+  );
+}
+
+async function makeRuntimeSourceWithRealNodeModules(version = "0.0.0") {
+  const tempRoot = await makeRuntimeSource(version);
+  await fs.rm(path.join(tempRoot, "node_modules"), { force: true });
+  const rootNodeModules = path.join(tempRoot, "node_modules");
+  const piNodeModules = path.join(
+    rootNodeModules,
+    "@earendil-works",
+    "pi-coding-agent",
+    "node_modules",
+  );
+  await writePackage(rootNodeModules, "same", "1.0.0");
+  await writePackage(rootNodeModules, "different", "2.0.0");
+  await writePackage(piNodeModules, "same", "1.0.0");
+  await writePackage(piNodeModules, "different", "1.0.0");
+  return tempRoot;
+}
+
 test("installedRuntimeReleaseId names git releases from a short commit hash", async () => {
   const tempRoot = await makeRuntimeSource();
 
@@ -505,6 +540,32 @@ test("publishInstalledRuntime names releases from release version metadata", asy
   await fs.access(
     path.join(published.releaseRoot, "dist", "app", "rin", "main.js"),
   );
+});
+
+test("publishInstalledRuntime prunes exact duplicate Pi shrinkwrap dependencies", async () => {
+  const tempRoot = await makeRuntimeSourceWithRealNodeModules();
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-dst-"),
+  );
+
+  const published = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    { findSystemUser: () => null },
+  );
+  const piNodeModules = path.join(
+    published.releaseRoot,
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+    "node_modules",
+  );
+
+  await assert.rejects(fs.access(packageDir(piNodeModules, "same")));
+  await fs.access(packageDir(piNodeModules, "different"));
+  await fs.access(path.join(published.releaseRoot, "node_modules", "same"));
 });
 
 test("publishInstalledRuntime no longer requires vendored pi-coding-agent sources", async () => {

@@ -663,6 +663,7 @@ fi
 
 if [ "$CHANNEL" != stable ]; then
   run_step "$BUILD_LABEL" npm run build
+  run_step "Pruning dependencies" npm prune --omit=dev --no-fund --no-audit
 fi
 say "$LAUNCH_LABEL"
 
