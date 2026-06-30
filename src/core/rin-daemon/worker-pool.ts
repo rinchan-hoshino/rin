@@ -51,6 +51,12 @@ type TerminalTurnWaiter = {
   reject: (error: Error) => void;
 };
 
+type InterruptedTurnRecoveryIntent = {
+  selector: SessionSelector;
+  source: string;
+  promise?: Promise<void>;
+};
+
 export type WorkerHandle = {
   id: string;
   child: ReturnType<typeof spawn>;
@@ -131,6 +137,10 @@ export class WorkerPool {
   private pendingSessionClaims = new Map<
     string,
     Promise<WorkerHandle | undefined>
+  >();
+  private interruptedTurnRecoveryIntents = new Map<
+    string,
+    InterruptedTurnRecoveryIntent
   >();
   private terminalTurnWaiters = new Set<TerminalTurnWaiter>();
   private workerSeq = 0;
@@ -609,11 +619,68 @@ export class WorkerPool {
   }) {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) return;
-    void this.restoreWorkerForSession(
+    const key = this.sessionClaimKey(selector);
+    if (!key) return;
+    const existing = this.interruptedTurnRecoveryIntents.get(key);
+    const intent = existing || {
       selector,
-      true,
-      item.source || "daemon-restart",
-    );
+      source: item.source || "daemon-restart",
+    };
+    intent.source = item.source || intent.source || "daemon-restart";
+    this.interruptedTurnRecoveryIntents.set(key, intent);
+    void this.runInterruptedTurnRecoveryIntent(key, intent);
+  }
+
+  private async runInterruptedTurnRecoveryIntent(
+    key: string,
+    intent: InterruptedTurnRecoveryIntent,
+  ) {
+    if (intent.promise) return await intent.promise;
+    intent.promise = (async () => {
+      const worker = await this.ensureWorkerForSession(intent.selector);
+      if (!this.isWorkerRoutable(worker)) return false;
+      if (this.isWorkerRunning(worker)) {
+        return this.hasPendingInterruptedTurnResume(worker);
+      }
+      worker.lastUsedAt = Date.now();
+      worker.idleSince = null;
+      const response = this.sendInternalCommand(worker, {
+        type: "resume_interrupted_turn",
+        source: intent.source || "daemon-restart",
+      });
+      this.syncRunningWorkerRecord(worker);
+      await response;
+      return true;
+    })()
+      .then((completed) => {
+        if (this.interruptedTurnRecoveryIntents.get(key) !== intent) return;
+        if (completed) {
+          this.interruptedTurnRecoveryIntents.delete(key);
+        } else {
+          intent.promise = undefined;
+        }
+      })
+      .catch(() => {
+        if (this.interruptedTurnRecoveryIntents.get(key) === intent) {
+          intent.promise = undefined;
+        }
+      });
+    return await intent.promise;
+  }
+
+  private hasPendingInterruptedTurnResume(worker: WorkerHandle) {
+    for (const pending of worker.pendingResponses.values()) {
+      if (pending.commandType === "resume_interrupted_turn") return true;
+    }
+    return false;
+  }
+
+  private getInterruptedTurnRecoveryIntent(worker: WorkerHandle) {
+    const key = this.sessionClaimKey(this.getWorkerSelector(worker));
+    if (!key) return undefined;
+    const intent = this.interruptedTurnRecoveryIntents.get(key);
+    if (!intent) return undefined;
+    return { key, intent };
   }
 
   private restoreWorkerForSession(
@@ -622,6 +689,13 @@ export class WorkerPool {
     source = "daemon-restart",
   ) {
     if (!selector.sessionFile) return;
+    if (resumeTurn) {
+      this.continueInterruptedTurnSessionWorker({
+        sessionFile: selector.sessionFile,
+        source,
+      });
+      return this.findWorkerBySelector(selector);
+    }
     const existing = this.findWorkerBySelector(selector);
     if (existing) return existing;
     const key = this.sessionClaimKey(selector);
@@ -640,12 +714,6 @@ export class WorkerPool {
           return existingAfterSwitch;
         }
         this.setWorkerSessionRefs(worker, selector);
-        if (resumeTurn) {
-          await this.sendInternalCommand(worker, {
-            type: "resume_interrupted_turn",
-            source,
-          });
-        }
         return worker;
       } catch {
         this.destroyWorker(worker);
@@ -996,6 +1064,14 @@ export class WorkerPool {
       worker.rinWorking
     ) {
       worker.idleSince = null;
+      return;
+    }
+    const pendingRecovery = this.getInterruptedTurnRecoveryIntent(worker);
+    if (pendingRecovery) {
+      void this.runInterruptedTurnRecoveryIntent(
+        pendingRecovery.key,
+        pendingRecovery.intent,
+      );
       return;
     }
     if (this.shuttingDown || this.gcIdleMs === 0) {

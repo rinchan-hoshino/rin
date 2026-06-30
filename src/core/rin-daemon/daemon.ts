@@ -592,6 +592,16 @@ export async function startDaemon(
     return false;
   };
 
+  clearLegacyRestartState(runtime.agentDir);
+  for (const sessionFile of listRunningWorkerSessionFiles(runtime.agentDir)) {
+    try {
+      workerPool.continueInterruptedTurnSessionWorker({
+        sessionFile,
+        source: "daemon-restart",
+      });
+    } catch {}
+  }
+
   const activeSockets = new Set<RpcSocketLike>();
 
   const attachConnectionSocket = (socket: RpcSocketLike) => {
@@ -712,16 +722,6 @@ export async function startDaemon(
 
   console.log(`rin daemon listening on ${socketPath}`);
   console.log(`rin daemon bridge listening on ${bridgeSocketPath}`);
-
-  clearLegacyRestartState(runtime.agentDir);
-  for (const sessionFile of listRunningWorkerSessionFiles(runtime.agentDir)) {
-    try {
-      workerPool.continueInterruptedTurnSessionWorker({
-        sessionFile,
-        source: "daemon-restart",
-      });
-    } catch {}
-  }
 
   let shuttingDown = false;
   const shutdownGraceMs = Math.max(0, Number(options.shutdownGraceMs ?? 3_000));
