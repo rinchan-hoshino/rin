@@ -82,7 +82,6 @@ import {
 } from "./chat-key-worker.js";
 import {
   isEffectivePrivateChatSession,
-  isOwnerPresentForGroup,
   shouldProcessText,
 } from "./decision.js";
 import {
@@ -537,9 +536,20 @@ export async function startChatBridge(
       getChatId(session),
       safeString(session?.selfId || session?.bot?.selfId || "").trim(),
     );
+  const isRecordOnlyChatKey = (chatKey: string) =>
+    resolveChatTurnPolicyMode(settings, chatKey) === "record_only";
   const isInboundMessageProcessed = (chatKey: string, messageId: string) =>
     hasInboundChatMessageReplyBoundary(runtime.agentDir, chatKey, messageId);
-  const handleUnmatchedCommandSession = async (session: any, identity: any) => {
+  const handleUnmatchedCommandSession = async (
+    session: any,
+    identity: any,
+    commandName: string,
+  ) => {
+    const platform = safeString(session?.platform || "").trim();
+    const trust = trustOf(identity, platform, pickUserId(session));
+    if (!canRunCommand(trust, commandName)) {
+      return { retry: false };
+    }
     if (!(await isEffectivePrivateChatSession(session, identity))) {
       return { retry: false };
     }
@@ -589,14 +599,7 @@ export async function startChatBridge(
           : undefined,
     };
 
-    if (
-      getChatType(session) === "group" &&
-      !(await isOwnerPresentForGroup(session, identity))
-    ) {
-      return { retry: false };
-    }
-
-    if (command.name !== "help" && !canRunCommand(trust, command.name)) {
+    if (!canRunCommand(trust, command.name)) {
       return { retry: false };
     }
 
@@ -785,9 +788,7 @@ export async function startChatBridge(
       chatKey: sessionChatKey(session),
     });
     if (!decision.allow) return { retry: false };
-    if (
-      resolveChatTurnPolicyMode(settings, decision.chatKey) === "record_only"
-    ) {
+    if (isRecordOnlyChatKey(decision.chatKey)) {
       return { retry: false };
     }
     return await handleAllowedChatTurnSession(
@@ -904,6 +905,13 @@ export async function startChatBridge(
     const queuedElements = Array.isArray(envelope.elements)
       ? envelope.elements
       : [];
+    const queuedChatKey =
+      safeString(envelope.chatKey).trim() || sessionChatKey(queuedSession);
+    if (isRecordOnlyChatKey(queuedChatKey)) {
+      return {
+        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
+      };
+    }
     const identity = getIdentity();
     const commandRequest = parseInboundCommandRequest(
       queuedSession,
@@ -926,7 +934,11 @@ export async function startChatBridge(
       return {
         run: () =>
           runClaimedInboxJob(job, () =>
-            handleUnmatchedCommandSession(queuedSession, identity),
+            handleUnmatchedCommandSession(
+              queuedSession,
+              identity,
+              commandRequest.name,
+            ),
           ),
       };
     }
@@ -935,16 +947,14 @@ export async function startChatBridge(
       queuedSession,
       queuedElements,
       identity,
-      { chatKey: safeString(envelope.chatKey).trim() },
+      { chatKey: queuedChatKey },
     );
     if (!decision.allow) {
       return {
         run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
       };
     }
-    if (
-      resolveChatTurnPolicyMode(settings, decision.chatKey) === "record_only"
-    ) {
+    if (isRecordOnlyChatKey(decision.chatKey)) {
       return {
         run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
       };
@@ -996,6 +1006,9 @@ export async function startChatBridge(
       const queuedElements = Array.isArray(envelope.elements)
         ? envelope.elements
         : [];
+      const queuedChatKey =
+        safeString(envelope.chatKey).trim() || sessionChatKey(queuedSession);
+      if (isRecordOnlyChatKey(queuedChatKey)) return false;
       const identity = getIdentity();
       const commandRequest = parseInboundCommandRequest(
         queuedSession,
@@ -1007,12 +1020,10 @@ export async function startChatBridge(
         queuedSession,
         queuedElements,
         identity,
-        { chatKey: safeString(envelope.chatKey).trim() },
+        { chatKey: queuedChatKey },
       );
       if (!decision.allow) return false;
-      return (
-        resolveChatTurnPolicyMode(settings, decision.chatKey) !== "record_only"
-      );
+      return !isRecordOnlyChatKey(decision.chatKey);
     },
     logger,
   });

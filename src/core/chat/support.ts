@@ -398,15 +398,11 @@ export function canAccessAgentInput({
   return trusted && (Boolean(mentionLike) || Boolean(allowWithoutMention));
 }
 
-const TRUSTED_COMMANDS = new Set(["new", "abort"]);
-
 export function canRunCommand(trust: string, commandName: string) {
   const nextTrust = normalizeTrust(trust);
   const nextName = safeString(commandName).trim().replace(/^\//, "");
   if (!nextName) return false;
-  if (nextTrust === "OWNER") return true;
-  if (nextTrust === "TRUSTED") return TRUSTED_COMMANDS.has(nextName);
-  return false;
+  return nextTrust === "OWNER" || nextTrust === "TRUSTED";
 }
 
 export function botsForPlatform(app: any, platform: string) {
