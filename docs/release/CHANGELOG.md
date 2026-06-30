@@ -2,10 +2,23 @@
 
 ## 0.7.0
 
-- Chat integrations now use stricter bot-qualified chat keys, clearer slash-command surfaces, and simpler Discord command acknowledgements while retiring the Matrix adapter path.
-- Prompt and self-improvement guidance now state the web-source and distillation rules more directly.
+- Chat integrations now use stricter bot-qualified chat keys, clearer slash-command surfaces, simpler Discord command acknowledgements, non-blocking platform acknowledgements, and channel-aware Discord metadata while retiring the Matrix adapter path.
+- Prompt and self-improvement guidance now state the web-source, distillation, and conflict-closure rules more directly.
 - Update notices and runtime usage diagnostics are clearer, including bare `rin update` wording and Pi-backed context token estimates.
+- Daemon and scheduler recovery is more resilient across restarts, with persisted turn recovery, decoupled restart recovery, and worker-pool session continuations.
+- Runtime and install paths are faster and safer, including CLI startup/dependency trimming, quieter Node 26 installs, and unresolved bootstrap git-ref handling.
 <!-- rin-changelog-coverage
+370a0be fix(daemon): persist turn recovery in running workers
+8dc83ff fix(self-improve): require conflict closure in distillation
+389a47d fix(daemon): recover TUI turns after restart
+fc4bb8d chore(deps): quiet Node 26 install warnings
+0b86961 fix(chat): include Discord channel path in metadata
+d2bb86e fix(daemon): decouple restart turn recovery
+ec6866f perf(runtime): trim CLI startup and install deps
+ea9e5d7 fix(install): handle unresolved bootstrap git refs
+07c9922 fix(chat): simplify command permissions
+f3cce42 fix(chat): avoid blocking chat ingress on platform acks
+d0745a9 fix(scheduler): resume session continuations via worker pool
 f7eb689 fix(runtime): reuse Pi token estimates for context usage
 c813273 refactor(chat): remove Matrix adapter
 5b6800e fix(update): show bare rin update in notices
