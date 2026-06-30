@@ -699,6 +699,204 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
+test("daemon auto-resumes recently interrupted tool-call sessions without frontend selection", async () => {
+  const agentDir = await makeTempDir("rin-daemon-dangling-tool-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.js");
+  const logPath = path.join(agentDir, "commands.log");
+  const sessionFile = path.join(agentDir, "sessions", "dangling-session.jsonl");
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(
+    sessionFile,
+    [
+      JSON.stringify({ type: "session", id: "dangling-session" }),
+      JSON.stringify({
+        type: "message",
+        message: { role: "user", content: "restart daemon" },
+      }),
+      JSON.stringify({
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call_restart",
+              name: "bash",
+              arguments: { command: "rin restart" },
+            },
+          ],
+        },
+      }),
+      "",
+    ].join("\n"),
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+const fs = require("node:fs");
+const process = require("node:process");
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+function log(type) { fs.appendFileSync(logPath, type + "\\n"); }
+let buffer = "";
+async function handle(command) {
+  log(command.type);
+  if (command.type === "switch_session") {
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false, sessionFile, sessionId: "dangling-session" } });
+    return;
+  }
+  if (command.type === "resume_interrupted_turn") {
+    send({ type: "agent_start" });
+    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+    return;
+  }
+  send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+}
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    handle(JSON.parse(line));
+  }
+});
+`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  try {
+    await waitForSocket(socketPath);
+    let status;
+    for (let i = 0; i < 20; i += 1) {
+      status = await rpc(socketPath, {
+        id: `dangling-${i}`,
+        type: "daemon_status",
+      });
+      const workers = status.data?.workers || [];
+      if (workers.length === 1 && workers[0].isStreaming === true) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const workers = status.data?.workers || [];
+
+    assert.equal(status.success, true);
+    assert.equal(workers.length, 1);
+    assert.equal(workers[0].sessionFile, sessionFile);
+    assert.equal(workers[0].attachedConnections, 0);
+    assert.equal(workers[0].isStreaming, true);
+    assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
+      "switch_session",
+      "resume_interrupted_turn",
+    ]);
+  } finally {
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("daemon auto-resumes sessions recorded as active turns before restart", async () => {
+  const agentDir = await makeTempDir("rin-daemon-active-turn-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.js");
+  const logPath = path.join(agentDir, "commands.log");
+  const sessionFile = path.join(
+    agentDir,
+    "sessions",
+    "active-turn-session.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.mkdir(path.join(agentDir, "data", "core", "workers"), {
+    recursive: true,
+  });
+  await fs.writeFile(sessionFile, "");
+  await fs.writeFile(
+    path.join(agentDir, "data", "core", "workers", "active-turns.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      sessionFiles: [sessionFile],
+    })}\n`,
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+const fs = require("node:fs");
+const process = require("node:process");
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+function log(type) { fs.appendFileSync(logPath, type + "\\n"); }
+let buffer = "";
+async function handle(command) {
+  log(command.type);
+  if (command.type === "switch_session") {
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false, sessionFile, sessionId: "active-turn-session" } });
+    return;
+  }
+  if (command.type === "resume_interrupted_turn") {
+    send({ type: "agent_start" });
+    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+    return;
+  }
+  send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+}
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    handle(JSON.parse(line));
+  }
+});
+`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  try {
+    await waitForSocket(socketPath);
+    let status;
+    for (let i = 0; i < 20; i += 1) {
+      status = await rpc(socketPath, {
+        id: `active-turn-${i}`,
+        type: "daemon_status",
+      });
+      const workers = status.data?.workers || [];
+      if (workers.length === 1 && workers[0].isStreaming === true) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const workers = status.data?.workers || [];
+
+    assert.equal(status.success, true);
+    assert.equal(workers.length, 1);
+    assert.equal(workers[0].sessionFile, sessionFile);
+    assert.equal(workers[0].attachedConnections, 0);
+    assert.equal(workers[0].isStreaming, true);
+    assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
+      "switch_session",
+      "resume_interrupted_turn",
+    ]);
+  } finally {
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("daemon auto-resumes sessions recorded as running before restart", async () => {
   const agentDir = await makeTempDir("rin-daemon-resume-");
   const socketPath = path.join(agentDir, "daemon.sock");

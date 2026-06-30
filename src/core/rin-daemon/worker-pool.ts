@@ -12,6 +12,7 @@ import {
   takePendingTerminalTurnEvent,
 } from "./pending-turn-events.js";
 import { setRunningWorkerSession } from "./running-workers.js";
+import { setActiveTurnSession } from "./turn-recovery-state.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import {
@@ -113,6 +114,12 @@ const RESUMABLE_COMMAND_TYPES = new Set([
   "compact",
   "send_user_message",
   "run_command",
+]);
+
+const ACTIVE_TURN_COMMAND_TYPES = new Set([
+  "prompt",
+  "resume_interrupted_turn",
+  "send_user_message",
 ]);
 
 function hasResumableWorkerActivity(worker: WorkerHandle) {
@@ -341,12 +348,16 @@ export class WorkerPool {
     }
     worker.lastUsedAt = Date.now();
     worker.idleSince = null;
+    const commandType = String(command?.type || "unknown");
     if (command?.id) {
       worker.pendingResponses.set(String(command.id), {
         id: String(command.id),
-        commandType: String(command?.type || "unknown"),
+        commandType,
         connection,
       });
+    }
+    if (ACTIVE_TURN_COMMAND_TYPES.has(commandType)) {
+      this.syncActiveTurnRecord(worker, command, true);
     }
     this.syncRunningWorkerRecord(worker);
     this.writeWorkerStdin(worker, command, (error) => {
@@ -757,6 +768,14 @@ export class WorkerPool {
       }
     }
 
+    if (
+      payload.type === "response" &&
+      payload.success !== true &&
+      ACTIVE_TURN_COMMAND_TYPES.has(String(payload.command || ""))
+    ) {
+      this.syncActiveTurnRecord(worker, payload, false);
+    }
+
     if (payload.type === "agent_start") {
       if (!worker.rpcTurnActive) worker.turnActive = true;
       worker.isStreaming = true;
@@ -794,6 +813,7 @@ export class WorkerPool {
       if (hasSessionSelector(selector)) {
         this.setWorkerSessionRefs(worker, selector, { syncConnections: false });
       }
+      this.syncActiveTurnRecord(worker, payload, true);
       worker.rpcTurnActive = true;
       worker.turnActive = true;
       this.syncRunningWorkerRecord(worker);
@@ -802,6 +822,7 @@ export class WorkerPool {
       payload.type === "rpc_turn_event" &&
       (payload.event === "complete" || payload.event === "error")
     ) {
+      this.syncActiveTurnRecord(worker, payload, false);
       worker.rpcTurnActive = false;
       worker.turnActive = false;
       worker.isStreaming = false;
@@ -1314,6 +1335,18 @@ export class WorkerPool {
     );
   }
 
+  private syncActiveTurnRecord(
+    worker: WorkerHandle,
+    selector: SessionSelector,
+    active: boolean,
+  ) {
+    const sessionFile =
+      sessionSelectorFromState(selector).sessionFile ||
+      this.getWorkerSelector(worker).sessionFile;
+    if (!sessionFile) return;
+    setActiveTurnSession(this.options.agentDir, sessionFile, active);
+  }
+
   private syncRunningWorkerRecord(worker: WorkerHandle) {
     const sessionFile = this.getWorkerSelector(worker).sessionFile;
     if (!sessionFile) return;
@@ -1497,7 +1530,11 @@ export class WorkerPool {
 
   private handleWorkerStdinFailure(worker: WorkerHandle, error: Error) {
     if (!this.workers.has(worker)) return;
+    let failedActiveTurnCommand = false;
     for (const pending of Array.from(worker.pendingResponses.values())) {
+      if (ACTIVE_TURN_COMMAND_TYPES.has(pending.commandType)) {
+        failedActiveTurnCommand = true;
+      }
       pending.finalize?.();
       if (pending.reject) {
         pending.reject(error);
@@ -1507,6 +1544,9 @@ export class WorkerPool {
           responseError(pending.id, pending.commandType, "rin_worker_exit"),
         );
       }
+    }
+    if (failedActiveTurnCommand) {
+      this.syncActiveTurnRecord(worker, {}, false);
     }
     worker.pendingResponses.clear();
     worker.ignoredResponseIds.clear();

@@ -956,6 +956,95 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("prompt turns keep an active-turn recovery record until terminal turn event", async () => {
+  const dir = await makeTempDir("rin-worker-pool-active-turn-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "active-turns.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    String.raw`process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { sessionFile: command.sessionFile, sessionId: 'active-turn' },
+    }) + '\n');
+    process.stdout.write(JSON.stringify({
+      type: 'rpc_turn_event',
+      event: 'start',
+      sessionFile: command.sessionFile,
+      sessionId: 'active-turn',
+    }) + '\n');
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({
+        type: 'rpc_turn_event',
+        event: 'complete',
+        sessionFile: command.sessionFile,
+        sessionId: 'active-turn',
+        finalText: 'done',
+      }) + '\n');
+    }, 80);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.requestWorker(
+    worker,
+    connection,
+    { id: "prompt-1", type: "prompt", sessionFile },
+    true,
+  );
+
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+  });
+
+  await sleep(160);
+
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [],
+  });
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("rpc turn start keeps a running record after an agent segment ends", async () => {
   const dir = await makeTempDir("rin-worker-pool-rpc-running-");
   const workerPath = path.join(dir, "worker-source");
