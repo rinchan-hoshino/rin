@@ -48,10 +48,6 @@ import {
 import { RinBackgroundExtensionManager } from "./extensions.js";
 import { runDueSessionTtlMaintenance } from "../session/ttl.js";
 import { listRunningWorkerSessionFiles } from "./running-workers.js";
-import {
-  listActiveTurnSessionFiles,
-  listRecentInterruptedTurnSessionFiles,
-} from "./turn-recovery-state.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 
@@ -597,12 +593,7 @@ export async function startDaemon(
   };
 
   clearLegacyRestartState(runtime.agentDir);
-  const restartRecoverySessionFiles = new Set([
-    ...listRunningWorkerSessionFiles(runtime.agentDir),
-    ...listActiveTurnSessionFiles(runtime.agentDir),
-    ...listRecentInterruptedTurnSessionFiles(runtime.agentDir),
-  ]);
-  for (const sessionFile of restartRecoverySessionFiles) {
+  for (const sessionFile of listRunningWorkerSessionFiles(runtime.agentDir)) {
     try {
       workerPool.continueInterruptedTurnSessionWorker({
         sessionFile,

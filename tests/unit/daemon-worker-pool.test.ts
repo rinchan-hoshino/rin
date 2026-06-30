@@ -878,7 +878,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("resumable worker commands persist a running record until they finish", async () => {
+test("non-turn resumable worker commands persist a running record until they finish", async () => {
   const dir = await makeTempDir("rin-worker-pool-running-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -935,7 +935,7 @@ setInterval(() => {}, 1000);
   pool.requestWorker(
     worker,
     connection,
-    { id: "prompt-1", type: "prompt", sessionFile },
+    { id: "compact-1", type: "compact", sessionFile },
     true,
   );
 
@@ -956,8 +956,8 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("prompt turns keep an active-turn recovery record until terminal turn event", async () => {
-  const dir = await makeTempDir("rin-worker-pool-active-turn-");
+test("prompt turns persist running-worker recovery from command session until terminal turn event", async () => {
+  const dir = await makeTempDir("rin-worker-pool-command-running-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
   const statePath = path.join(
@@ -965,7 +965,7 @@ test("prompt turns keep an active-turn recovery record until terminal turn event
     "data",
     "core",
     "workers",
-    "active-turns.json",
+    "running-workers.json",
   );
   await fs.writeFile(
     workerPath,
@@ -985,23 +985,25 @@ process.stdin.on('data', (chunk) => {
       type: 'response',
       command: command.type,
       success: true,
-      data: { sessionFile: command.sessionFile, sessionId: 'active-turn' },
+      data: { sessionFile: command.sessionFile, sessionId: 'command-running' },
     }) + '\n');
-    process.stdout.write(JSON.stringify({
-      type: 'rpc_turn_event',
-      event: 'start',
-      sessionFile: command.sessionFile,
-      sessionId: 'active-turn',
-    }) + '\n');
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({
+        type: 'rpc_turn_event',
+        event: 'start',
+        sessionFile: command.sessionFile,
+        sessionId: 'command-running',
+      }) + '\n');
+    }, 80);
     setTimeout(() => {
       process.stdout.write(JSON.stringify({
         type: 'rpc_turn_event',
         event: 'complete',
         sessionFile: command.sessionFile,
-        sessionId: 'active-turn',
+        sessionId: 'command-running',
         finalText: 'done',
       }) + '\n');
-    }, 80);
+    }, 160);
   }
 });
 setInterval(() => {}, 1000);
@@ -1025,16 +1027,24 @@ setInterval(() => {}, 1000);
   pool.requestWorker(
     worker,
     connection,
-    { id: "prompt-1", type: "prompt", sessionFile },
+    { id: "prompt-1", type: "prompt", sessionFile, requestTag: "tag-1" },
     true,
   );
+
+  assert.equal(worker.sessionFile, undefined);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+  });
+
+  await sleep(40);
 
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
     schemaVersion: 1,
     sessionFiles: [sessionFile],
   });
 
-  await sleep(160);
+  await sleep(180);
 
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
     schemaVersion: 1,
@@ -1042,6 +1052,82 @@ setInterval(() => {}, 1000);
   });
 
   pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("prompt running record survives shutdown after submission response before turn event", async () => {
+  const dir = await makeTempDir("rin-worker-pool-command-shutdown-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    String.raw`process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { sessionFile: command.sessionFile, sessionId: 'command-shutdown' },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.requestWorker(
+    worker,
+    connection,
+    { id: "prompt-1", type: "prompt", sessionFile, requestTag: "tag-1" },
+    true,
+  );
+
+  await sleep(60);
+  assert.equal(worker.pendingResponses.size, 0);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+  });
+
+  pool.beginShutdown();
+  pool.destroyAll();
+
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+  });
+
   await fs.rm(dir, { recursive: true, force: true });
 });
 

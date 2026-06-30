@@ -12,7 +12,6 @@ import {
   takePendingTerminalTurnEvent,
 } from "./pending-turn-events.js";
 import { setRunningWorkerSession } from "./running-workers.js";
-import { setActiveTurnSession } from "./turn-recovery-state.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import {
@@ -38,6 +37,8 @@ export type ConnectionState = {
 type PendingResponse = {
   id: string;
   commandType: string;
+  selector?: SessionSelector;
+  expectsTerminalTurnEvent?: boolean;
   connection?: ConnectionState;
   resolve?: (payload: any) => void;
   reject?: (error: Error) => void;
@@ -70,6 +71,7 @@ export type WorkerHandle = {
   sessionId?: string;
   turnActive: boolean;
   rpcTurnActive: boolean;
+  turnRecoveryPending: boolean;
   isStreaming: boolean;
   isCompacting: boolean;
   rinWorking: boolean;
@@ -116,15 +118,21 @@ const RESUMABLE_COMMAND_TYPES = new Set([
   "run_command",
 ]);
 
-const ACTIVE_TURN_COMMAND_TYPES = new Set([
+const TURN_RECOVERY_COMMAND_TYPES = new Set([
   "prompt",
   "resume_interrupted_turn",
   "send_user_message",
 ]);
 
+function expectsTerminalTurnEvent(commandType: string, command: any) {
+  if (commandType === "resume_interrupted_turn") return true;
+  return Boolean(String(command?.requestTag || "").trim());
+}
+
 function hasResumableWorkerActivity(worker: WorkerHandle) {
   if (
     worker.turnActive ||
+    worker.turnRecoveryPending ||
     worker.isStreaming ||
     worker.isCompacting ||
     worker.rinWorking
@@ -349,15 +357,29 @@ export class WorkerPool {
     worker.lastUsedAt = Date.now();
     worker.idleSince = null;
     const commandType = String(command?.type || "unknown");
+    const recoverySelector = resolveSessionSelector(
+      selector,
+      resolveSessionSelector(
+        this.getConnectionSelector(connection),
+        this.getWorkerSelector(worker),
+      ),
+    );
+    const keepUntilTerminalTurnEvent = expectsTerminalTurnEvent(
+      commandType,
+      command,
+    );
     if (command?.id) {
       worker.pendingResponses.set(String(command.id), {
         id: String(command.id),
         commandType,
+        selector: recoverySelector,
+        expectsTerminalTurnEvent: keepUntilTerminalTurnEvent,
         connection,
       });
     }
-    if (ACTIVE_TURN_COMMAND_TYPES.has(commandType)) {
-      this.syncActiveTurnRecord(worker, command, true);
+    if (TURN_RECOVERY_COMMAND_TYPES.has(commandType)) {
+      if (keepUntilTerminalTurnEvent) worker.turnRecoveryPending = true;
+      this.syncRunningWorkerRecordForSelector(recoverySelector, true);
     }
     this.syncRunningWorkerRecord(worker);
     this.writeWorkerStdin(worker, command, (error) => {
@@ -506,7 +528,10 @@ export class WorkerPool {
       String(item.requestTag || "").trim() ||
       `rin_resume_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
     const followActiveTurn = Boolean(
-      worker.turnActive || worker.rpcTurnActive || worker.isStreaming,
+      worker.turnActive ||
+      worker.rpcTurnActive ||
+      worker.turnRecoveryPending ||
+      worker.isStreaming,
     );
     const { promise: terminalEvent, waiter } = this.waitForTerminalTurnEvent(
       worker,
@@ -543,7 +568,10 @@ export class WorkerPool {
         ? "stopping"
         : worker.isCompacting
           ? "compacting"
-          : worker.turnActive || worker.isStreaming || worker.rinWorking
+          : worker.turnActive ||
+              worker.turnRecoveryPending ||
+              worker.isStreaming ||
+              worker.rinWorking
             ? "working"
             : worker.idleSince
               ? "idle"
@@ -749,6 +777,9 @@ export class WorkerPool {
   private updateWorkerMetadata(worker: WorkerHandle, payload: any) {
     if (!payload || typeof payload !== "object") return;
     worker.lastUsedAt = Date.now();
+    const pendingResponse = payload.id
+      ? worker.pendingResponses.get(String(payload.id))
+      : undefined;
 
     if (payload.type === "response" && payload.success === true) {
       const data = payload.data || {};
@@ -760,6 +791,7 @@ export class WorkerPool {
       }
       if (payload.command === "get_state") {
         worker.turnActive = Boolean(data.turnActive ?? data.isStreaming);
+        if (!worker.turnActive) worker.turnRecoveryPending = false;
         worker.isStreaming = Boolean(data.isStreaming);
         worker.isCompacting = Boolean(data.isCompacting);
         worker.rinWorking = false;
@@ -771,9 +803,19 @@ export class WorkerPool {
     if (
       payload.type === "response" &&
       payload.success !== true &&
-      ACTIVE_TURN_COMMAND_TYPES.has(String(payload.command || ""))
+      TURN_RECOVERY_COMMAND_TYPES.has(String(payload.command || ""))
     ) {
-      this.syncActiveTurnRecord(worker, payload, false);
+      worker.turnRecoveryPending = false;
+      this.syncRunningWorkerRecordForSelector(
+        resolveSessionSelector(
+          sessionSelectorFromState(payload),
+          resolveSessionSelector(
+            pendingResponse?.selector,
+            this.getWorkerSelector(worker),
+          ),
+        ),
+        false,
+      );
     }
 
     if (payload.type === "agent_start") {
@@ -813,7 +855,8 @@ export class WorkerPool {
       if (hasSessionSelector(selector)) {
         this.setWorkerSessionRefs(worker, selector, { syncConnections: false });
       }
-      this.syncActiveTurnRecord(worker, payload, true);
+      this.syncRunningWorkerRecordForSelector(selector, true);
+      worker.turnRecoveryPending = false;
       worker.rpcTurnActive = true;
       worker.turnActive = true;
       this.syncRunningWorkerRecord(worker);
@@ -822,7 +865,11 @@ export class WorkerPool {
       payload.type === "rpc_turn_event" &&
       (payload.event === "complete" || payload.event === "error")
     ) {
-      this.syncActiveTurnRecord(worker, payload, false);
+      this.syncRunningWorkerRecordForSelector(
+        sessionSelectorFromState(payload),
+        false,
+      );
+      worker.turnRecoveryPending = false;
       worker.rpcTurnActive = false;
       worker.turnActive = false;
       worker.isStreaming = false;
@@ -886,6 +933,7 @@ export class WorkerPool {
       ignoredResponseIds: new Set(),
       turnActive: false,
       rpcTurnActive: false,
+      turnRecoveryPending: false,
       isStreaming: false,
       isCompacting: false,
       rinWorking: false,
@@ -930,7 +978,10 @@ export class WorkerPool {
         ) {
           const pending = worker.pendingResponses.get(String(payload.id))!;
           worker.pendingResponses.delete(String(payload.id));
-          this.syncRunningWorkerRecord(worker);
+          const keepTurnRecoveryRecord =
+            payload.success === true &&
+            pending.expectsTerminalTurnEvent === true;
+          if (!keepTurnRecoveryRecord) this.syncRunningWorkerRecord(worker);
           if (pending.connection) {
             this.rememberSessionSelection(
               pending.connection,
@@ -1080,6 +1131,7 @@ export class WorkerPool {
     if (
       worker.pendingResponses.size > 0 ||
       worker.turnActive ||
+      worker.turnRecoveryPending ||
       worker.isStreaming ||
       worker.isCompacting ||
       worker.rinWorking
@@ -1326,6 +1378,7 @@ export class WorkerPool {
   private isWorkerRunning(worker: WorkerHandle) {
     return Boolean(
       worker.turnActive ||
+      worker.turnRecoveryPending ||
       worker.isStreaming ||
       worker.isCompacting ||
       worker.rinWorking ||
@@ -1335,16 +1388,13 @@ export class WorkerPool {
     );
   }
 
-  private syncActiveTurnRecord(
-    worker: WorkerHandle,
-    selector: SessionSelector,
-    active: boolean,
+  private syncRunningWorkerRecordForSelector(
+    selector: SessionSelector | undefined,
+    running: boolean,
   ) {
-    const sessionFile =
-      sessionSelectorFromState(selector).sessionFile ||
-      this.getWorkerSelector(worker).sessionFile;
+    const sessionFile = sessionSelectorFromState(selector).sessionFile;
     if (!sessionFile) return;
-    setActiveTurnSession(this.options.agentDir, sessionFile, active);
+    setRunningWorkerSession(this.options.agentDir, sessionFile, running);
   }
 
   private syncRunningWorkerRecord(worker: WorkerHandle) {
@@ -1530,10 +1580,16 @@ export class WorkerPool {
 
   private handleWorkerStdinFailure(worker: WorkerHandle, error: Error) {
     if (!this.workers.has(worker)) return;
-    let failedActiveTurnCommand = false;
     for (const pending of Array.from(worker.pendingResponses.values())) {
-      if (ACTIVE_TURN_COMMAND_TYPES.has(pending.commandType)) {
-        failedActiveTurnCommand = true;
+      if (TURN_RECOVERY_COMMAND_TYPES.has(pending.commandType)) {
+        worker.turnRecoveryPending = false;
+        this.syncRunningWorkerRecordForSelector(
+          resolveSessionSelector(
+            pending.selector,
+            this.getWorkerSelector(worker),
+          ),
+          false,
+        );
       }
       pending.finalize?.();
       if (pending.reject) {
@@ -1544,9 +1600,6 @@ export class WorkerPool {
           responseError(pending.id, pending.commandType, "rin_worker_exit"),
         );
       }
-    }
-    if (failedActiveTurnCommand) {
-      this.syncActiveTurnRecord(worker, {}, false);
     }
     worker.pendingResponses.clear();
     worker.ignoredResponseIds.clear();
@@ -1560,6 +1613,17 @@ export class WorkerPool {
     reject: (error: Error) => void,
     error: unknown,
   ) {
+    const pending = worker.pendingResponses.get(id);
+    if (pending && TURN_RECOVERY_COMMAND_TYPES.has(pending.commandType)) {
+      worker.turnRecoveryPending = false;
+      this.syncRunningWorkerRecordForSelector(
+        resolveSessionSelector(
+          pending.selector,
+          this.getWorkerSelector(worker),
+        ),
+        false,
+      );
+    }
     worker.pendingResponses.delete(id);
     worker.ignoredResponseIds.add(id);
     finalize();
@@ -1572,6 +1636,14 @@ export class WorkerPool {
   private sendInternalCommand(worker: WorkerHandle, command: any) {
     const id = `rin_internal_${++this.internalRequestSeq}`;
     const commandType = String(command?.type || "unknown");
+    const selector = resolveSessionSelector(
+      this.getSessionSelector(command),
+      this.getWorkerSelector(worker),
+    );
+    const keepUntilTerminalTurnEvent = expectsTerminalTurnEvent(
+      commandType,
+      command,
+    );
     let resolveCommand!: (value: any) => void;
     let rejectCommand!: (error: Error) => void;
     const pendingCommand = new Promise<any>((resolve, reject) => {
@@ -1581,9 +1653,12 @@ export class WorkerPool {
     pendingCommand.catch(() => {});
 
     const timeout = setTimeout(() => {
+      const pending = worker.pendingResponses.get(id);
       worker.pendingResponses.delete(id);
       worker.ignoredResponseIds.add(id);
-      this.syncRunningWorkerRecord(worker);
+      if (!pending || pending.expectsTerminalTurnEvent !== true) {
+        this.syncRunningWorkerRecord(worker);
+      }
       this.maybeReleaseWorker(worker);
       rejectCommand(new Error(`rin_internal_timeout:${commandType}`));
     }, this.getInternalCommandTimeoutMs(command));
@@ -1593,10 +1668,16 @@ export class WorkerPool {
     worker.pendingResponses.set(id, {
       id,
       commandType,
+      selector,
+      expectsTerminalTurnEvent: keepUntilTerminalTurnEvent,
       resolve: resolveCommand,
       reject: rejectCommand,
       finalize,
     });
+    if (TURN_RECOVERY_COMMAND_TYPES.has(commandType)) {
+      if (keepUntilTerminalTurnEvent) worker.turnRecoveryPending = true;
+      this.syncRunningWorkerRecordForSelector(selector, true);
+    }
 
     if (!this.isWorkerStdinWritable(worker)) {
       this.rejectInternalCommandWrite(
