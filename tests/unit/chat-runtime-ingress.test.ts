@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
@@ -17,6 +18,7 @@ const runtime = await import(
 const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
+const nodeRequire = createRequire(import.meta.url);
 
 test("chat runtime persists inbound sessions before emitting message events", async () => {
   const agentDir = await fs.mkdtemp(
@@ -77,6 +79,65 @@ test("chat runtime qualifies second bot keys for the same platform", async () =>
   assert.equal(files.length, 1);
   assert.equal(stored.chatKey, "discord/bot-2:channel-1");
   assert.equal(stored.messageId, "m-discord-2");
+});
+
+test("discord slash interactions emit without waiting for acknowledgement", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  const app = runtime.createChatRuntimeApp(agentDir);
+  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+    dataDir: path.join(agentDir, "data"),
+    settings: {},
+    adapterEntries: [
+      {
+        key: "discord",
+        name: "Discord",
+        config: { token: "abc" },
+      },
+    ],
+  });
+  const adapter = [...app.adapters][0];
+  const seen = [];
+  app.on("message", (session) => seen.push(session));
+
+  let replyStarted = false;
+  let resolveReply: () => void = () => {};
+  const replyGate = new Promise<void>((resolve) => {
+    resolveReply = resolve;
+  });
+
+  const handled = (adapter as any).handleInteraction({
+    id: "interaction-1",
+    commandName: "new",
+    createdTimestamp: 123,
+    channelId: "channel-1",
+    guildId: "guild-1",
+    user: { id: "owner-1", username: "owner" },
+    member: { displayName: "Owner" },
+    isChatInputCommand: () => true,
+    options: { getString: () => "" },
+    reply: async () => {
+      replyStarted = true;
+      await replyGate;
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  let assertionError: unknown;
+  try {
+    assert.equal(replyStarted, true);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].messageId, "interaction-1");
+    assert.equal(seen[0].content, "/new");
+  } catch (error) {
+    assertionError = error;
+  }
+
+  resolveReply();
+  await handled;
+  if (assertionError) throw assertionError;
 });
 
 test("chat runtime derives the durable chat key from normalized chat identity", async () => {
@@ -310,6 +371,80 @@ test("slack runtime acks only after the inbound event is emitted", async () => {
   await adapter.handleSlackEvent(envelope);
 
   assert.deepEqual(order, ["emit", "ack:1"]);
+});
+
+test("lark websocket events return before slow message handling settles", async () => {
+  const Lark = nodeRequire("@larksuiteoapi/node-sdk");
+  const originalClient = Lark.Client;
+  const originalWSClient = Lark.WSClient;
+  let capturedDispatcher: any;
+
+  class FakeWSClient {
+    start(params: any) {
+      capturedDispatcher = params.eventDispatcher;
+    }
+
+    close() {}
+  }
+
+  Lark.Client = class FakeClient {};
+  Lark.WSClient = FakeWSClient;
+
+  try {
+    const agentDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "rin-chat-runtime-"),
+    );
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        {
+          key: "lark",
+          name: "Lark",
+          config: { appId: "cli_1234567890abcdef", appSecret: "secret" },
+        },
+      ],
+    });
+    const adapter = [...app.adapters][0];
+    let resolveHandling: () => void = () => {};
+    let handlingStarted = false;
+    const handlingGate = new Promise<void>((resolve) => {
+      resolveHandling = resolve;
+    });
+    (adapter as any).handleMessage = async () => {
+      handlingStarted = true;
+      await handlingGate;
+    };
+
+    await adapter.start();
+    const handler = capturedDispatcher?.handles?.get("im.message.receive_v1");
+    assert.equal(typeof handler, "function");
+
+    const handled = Promise.resolve(
+      handler({ message: { message_id: "om_1" } }),
+    );
+    const firstTick = new Promise((resolve) => setImmediate(resolve));
+    const state = await Promise.race([
+      handled.then(() => "settled"),
+      firstTick.then(() => "pending"),
+    ]);
+
+    let assertionError: unknown;
+    try {
+      assert.equal(handlingStarted, true);
+      assert.equal(state, "settled");
+    } catch (error) {
+      assertionError = error;
+    }
+
+    resolveHandling();
+    await handled;
+    if (assertionError) throw assertionError;
+  } finally {
+    Lark.Client = originalClient;
+    Lark.WSClient = originalWSClient;
+  }
 });
 
 test("lark runtime reads merged forward messages into inbound text", async () => {

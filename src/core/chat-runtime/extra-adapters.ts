@@ -820,7 +820,7 @@ export class DiscordAdapter {
     if (Boolean(interaction?.user?.bot)) return;
     const commandLine = this.discordInteractionCommandLine(interaction);
     if (!commandLine) return;
-    await this.acknowledgeInteraction(interaction);
+    void this.acknowledgeInteraction(interaction);
     const channelId = safeString(interaction?.channelId).trim();
     const guildId = safeString(interaction?.guildId || "").trim();
     const displayName =
@@ -1892,8 +1892,12 @@ export class LarkAdapter {
     };
     await this.wsClient.start({
       eventDispatcher: new Lark.EventDispatcher({}).register({
-        "im.message.receive_v1": async (data: any) => {
-          await this.handleMessage(data);
+        "im.message.receive_v1": (data: any) => {
+          void this.handleMessage(data).catch((error: any) => {
+            this.logger?.warn?.(
+              `message handling failed err=${safeString(error?.message || error)}`,
+            );
+          });
         },
       }),
     });
