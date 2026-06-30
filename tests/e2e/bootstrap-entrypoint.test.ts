@@ -283,6 +283,93 @@ exit 0
   assert.match(powerShell, /requires Node\.js >= 22\.19\.0/);
 });
 
+test("bootstrap entrypoint reports unresolved git selectors without continuing", async () => {
+  await withTempDir(async (tempDir) => {
+    const manifestPath = await createReleaseManifest(tempDir);
+    const fakeBin = path.join(tempDir, "bin");
+    const logPath = path.join(tempDir, "invocations.log");
+    const workRoot = path.join(tempDir, "work");
+    await fs.mkdir(fakeBin, { recursive: true });
+    await fs.mkdir(workRoot, { recursive: true });
+    await fs.writeFile(logPath, "", "utf8");
+    await writeExecutable(
+      path.join(fakeBin, "curl"),
+      `#!/bin/sh
+echo "curl:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+OUT=
+URL=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT=$2; shift 2 ;;
+    -*) shift ;;
+    *) URL=$1; shift ;;
+  esac
+done
+case "$URL" in
+  *release-manifest.json)
+    cp "$RIN_BOOTSTRAP_TEST_MANIFEST" "$OUT"
+    ;;
+  *)
+    exit 22
+    ;;
+esac
+`,
+    );
+    await writeExecutable(
+      path.join(fakeBin, "git"),
+      `#!/bin/sh
+echo "git:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+if [ "$1" = "ls-remote" ]; then exit 0; fi
+exit 1
+`,
+    );
+
+    await assert.rejects(
+      execFileAsync(
+        "sh",
+        [
+          path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+          "install",
+          "--git",
+          "mains",
+        ],
+        {
+          cwd: rootDir,
+          env: {
+            ...process.env,
+            PATH: `${fakeBin}:${process.env.PATH}`,
+            RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+            TMPDIR: workRoot,
+            RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
+            RIN_BOOTSTRAP_TEST_LOG: logPath,
+          },
+        },
+      ),
+      (error) => {
+        const stderr = String(error.stderr || "");
+        assert.match(stderr, /failed to resolve git ref: mains/);
+        assert.doesNotMatch(
+          stderr,
+          /\[stdin\]|Node\.js v|REF:|unbound variable/,
+        );
+        return true;
+      },
+    );
+
+    const log = await fs.readFile(logPath, "utf8");
+    assert.match(
+      log,
+      /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/release-manifest\.json -o /,
+    );
+    assert.match(
+      log,
+      /git:ls-remote https:\/\/example\.invalid\/rin refs\/heads\/mains/,
+    );
+    assert.match(log, /git:ls-remote https:\/\/example\.invalid\/rin mains/);
+    assert.deepEqual(await fs.readdir(workRoot), []);
+  });
+});
+
 test("bootstrap scripts render progress without rin-install log prefixes", async () => {
   for (const scriptName of [
     "install.sh",
