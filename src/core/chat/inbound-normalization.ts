@@ -173,6 +173,9 @@ export function pickSenderNickname(session: any) {
 
 export function pickChatName(session: any) {
   const values = [
+    session?.chatName,
+    session?.channelPathName,
+    session?.channelPath,
     session?.channel?.name,
     session?.channelName,
     session?.guild?.name,

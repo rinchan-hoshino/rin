@@ -316,6 +316,65 @@ function memberListHasOnlyOwnerHumanUsers(
   );
 }
 
+function discordChannelDisplayName(channel: any) {
+  return safeString(channel?.name || channel?.rawName || "").trim();
+}
+
+function findDiscordChannelById(collection: any, channelId: string) {
+  const id = safeString(channelId).trim();
+  if (!id || !collection) return null;
+  try {
+    const found = collection?.get?.(id);
+    if (found) return found;
+  } catch {}
+  return (
+    collectionValues(collection).find(
+      (item: any) => safeString(item?.id).trim() === id,
+    ) || null
+  );
+}
+
+function resolveDiscordParentChannel(channel: any) {
+  if (!channel || typeof channel !== "object") return null;
+  if (channel.parent && typeof channel.parent === "object") {
+    return channel.parent;
+  }
+  const parentId = safeString(channel?.parentId || channel?.parent_id).trim();
+  if (!parentId) return null;
+  return (
+    findDiscordChannelById(channel?.guild?.channels?.cache, parentId) ||
+    findDiscordChannelById(channel?.guild?.channels, parentId)
+  );
+}
+
+function formatDiscordChannelPathName(
+  channel: any,
+  fallbackGuildName: unknown = "",
+) {
+  if (!channel || typeof channel !== "object") return "";
+  const chain: string[] = [];
+  const seen = new Set<string>();
+  let current = channel;
+  for (let depth = 0; current && depth < 8; depth += 1) {
+    const id = safeString(current?.id || current?.channelId || "").trim();
+    if (id) {
+      if (seen.has(id)) break;
+      seen.add(id);
+    }
+    const name = discordChannelDisplayName(current);
+    if (name) chain.push(name);
+    current = resolveDiscordParentChannel(current);
+  }
+  const guildName =
+    safeString(fallbackGuildName).trim() ||
+    safeString(channel?.guild?.name || "").trim();
+  const parts = [guildName, ...chain.reverse()]
+    .map((part) => safeString(part).trim())
+    .filter(Boolean)
+    .filter((part, index, values) => index === 0 || part !== values[index - 1]);
+  return parts.join(" / ");
+}
+
 function hasUnboundedDiscordAdministratorBypass(
   guild: any,
   ownerIds: Set<string>,
@@ -823,6 +882,11 @@ export class DiscordAdapter {
     void this.acknowledgeInteraction(interaction);
     const channelId = safeString(interaction?.channelId).trim();
     const guildId = safeString(interaction?.guildId || "").trim();
+    const rawChannelName = safeString(interaction?.channel?.name || "").trim();
+    const guildName = safeString(interaction?.guild?.name || "").trim();
+    const chatName =
+      formatDiscordChannelPathName(interaction?.channel, guildName) ||
+      rawChannelName;
     const displayName =
       safeString(interaction?.member?.displayName).trim() ||
       safeString(interaction?.user?.globalName).trim() ||
@@ -849,10 +913,11 @@ export class DiscordAdapter {
         username: safeString(interaction?.user?.username).trim() || undefined,
       },
       channelId,
-      channelName:
-        safeString(interaction?.channel?.name || "").trim() || undefined,
+      chatName: chatName || undefined,
+      channelPathName: chatName || undefined,
+      channelName: rawChannelName || undefined,
       guildId: guildId || undefined,
-      guildName: safeString(interaction?.guild?.name || "").trim() || undefined,
+      guildName: guildName || undefined,
       isDirect: !guildId,
       content: commandLine,
       stripped: {
@@ -875,6 +940,13 @@ export class DiscordAdapter {
     const userId = safeString(message?.author?.id).trim();
     if (!userId) return;
     const isDirect = !safeString(message?.guildId).trim();
+    const rawChannelName = safeString(message?.channel?.name || "").trim();
+    const guildName = safeString(
+      message?.guild?.name || message?.channel?.guild?.name || "",
+    ).trim();
+    const chatName =
+      formatDiscordChannelPathName(message?.channel, guildName) ||
+      rawChannelName;
     const mentionSelf = Boolean(
       message?.mentions?.users?.has?.(safeString(this.bot?.selfId).trim()),
     );
@@ -946,9 +1018,11 @@ export class DiscordAdapter {
         username: safeString(message?.author?.username).trim() || undefined,
       },
       channelId: safeString(message?.channelId).trim(),
-      channelName: safeString(message?.channel?.name || "").trim() || undefined,
+      chatName: chatName || undefined,
+      channelPathName: chatName || undefined,
+      channelName: rawChannelName || undefined,
       guildId: safeString(message?.guildId || "").trim() || undefined,
-      guildName: safeString(message?.guild?.name || "").trim() || undefined,
+      guildName: guildName || undefined,
       isDirect,
       content: rawText,
       stripped: {

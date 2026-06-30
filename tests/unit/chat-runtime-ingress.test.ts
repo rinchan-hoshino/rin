@@ -81,6 +81,81 @@ test("chat runtime qualifies second bot keys for the same platform", async () =>
   assert.equal(stored.messageId, "m-discord-2");
 });
 
+test("discord runtime persists guild channel paths as chat names", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-"),
+  );
+  try {
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        {
+          key: "discord",
+          name: "Discord",
+          config: { token: "abc" },
+        },
+      ],
+    });
+    const adapter = [...app.adapters][0];
+    (adapter as any).bot.selfId = "bot-discord";
+
+    const guild: any = {
+      id: "guild-1",
+      name: "Rin Dev",
+      channels: { cache: new Map<string, any>() },
+    };
+    const category = { id: "category-1", name: "Projects", guild };
+    const parentChannel = {
+      id: "parent-1",
+      name: "features",
+      guild,
+      parent: category,
+    };
+    const threadChannel = {
+      id: "thread-1",
+      name: "metadata-paths",
+      guild,
+      parent: parentChannel,
+    };
+    guild.channels.cache.set(category.id, category);
+    guild.channels.cache.set(parentChannel.id, parentChannel);
+    guild.channels.cache.set(threadChannel.id, threadChannel);
+
+    await (adapter as any).handleMessage({
+      id: "message-1",
+      createdTimestamp: 1710000000000,
+      guildId: "guild-1",
+      guild,
+      channelId: "thread-1",
+      channel: threadChannel,
+      author: {
+        id: "owner-discord",
+        bot: false,
+        globalName: "Owner",
+        username: "owner",
+      },
+      member: { displayName: "Owner Nick" },
+      mentions: { users: { has: () => false } },
+      attachments: new Map(),
+      content: "hello",
+    });
+
+    const files = inbox.listPendingChatInboxFiles(agentDir);
+    const stored = inbox.readChatInboxItem(files[0]);
+
+    assert.equal(files.length, 1);
+    assert.equal(stored?.chatKey, "discord/bot-discord:thread-1");
+    assert.equal(
+      stored?.routing?.chatName,
+      "Rin Dev / Projects / features / metadata-paths",
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("discord slash interactions emit without waiting for acknowledgement", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),

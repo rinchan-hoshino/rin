@@ -208,7 +208,11 @@ test("discord adapter maps chat input interactions to Rin slash messages", async
     assert.equal(emitted[0].payload.platform, "discord");
     assert.equal(emitted[0].payload.messageId, "interaction-1");
     assert.equal(emitted[0].payload.channelId, "channel-1");
+    assert.equal(emitted[0].payload.chatName, "Rin Dev / rin-dev");
+    assert.equal(emitted[0].payload.channelPathName, "Rin Dev / rin-dev");
+    assert.equal(emitted[0].payload.channelName, "rin-dev");
     assert.equal(emitted[0].payload.guildId, "guild-1");
+    assert.equal(emitted[0].payload.guildName, "Rin Dev");
     assert.equal(emitted[0].payload.userId, "owner-discord");
     assert.equal(emitted[0].payload.content, "/model google/gemini-test");
     assert.deepEqual(emitted[0].payload.stripped, {
