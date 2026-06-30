@@ -1713,7 +1713,7 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")} using the previous 24 hours of Rin session records as retrospective evidence. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records; use that retrospective to find proven additions, corrections, moves, pruning, or removals that affect future guidance. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. Merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, recall, or remove guidance that would cause future mistakes. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.`,
+      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")} using the previous 24 hours of Rin session records as retrospective evidence. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records; use that retrospective to find proven additions, corrections, moves, pruning, or removals that affect future guidance. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. For correction-based or repeated-failure evidence, run a conflict retrieval pass over prompt baselines, reusable skills, memory-index indexes and transactions, and matching short-term records using the owner's exact trigger wording, behavior keywords, old abstraction names, and likely synonyms; read every plausible active hit and remove or rewrite active conflicting guidance before adding anything. Before reporting unchanged or success, replay the future trigger and confirm the cleaned library routes to one owner and no active hit still recommends the rejected behavior. Merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, recall, or remove guidance that would cause future mistakes. Report changed artifacts, cleanup work, conflict-search closure, future-trigger replay, routed candidates, or one concise unchanged reason.`,
     );
     assert.doesNotMatch(sleep.target.prompt, /Trigger:/);
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
@@ -1745,6 +1745,18 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.match(sleep.target.prompt, /evidence, trigger, target behavior/);
     assert.match(sleep.target.prompt, /delete or rewrite wrong guidance/);
     assert.match(sleep.target.prompt, /reject patch-layer fixes/);
+    assert.match(
+      sleep.target.prompt,
+      /conflict retrieval pass over prompt baselines/,
+    );
+    assert.match(sleep.target.prompt, /memory-index indexes and transactions/);
+    assert.match(sleep.target.prompt, /read every plausible active hit/);
+    assert.match(sleep.target.prompt, /owner's exact trigger wording/);
+    assert.match(sleep.target.prompt, /replay the future trigger/);
+    assert.match(
+      sleep.target.prompt,
+      /no active hit still recommends the rejected behavior/,
+    );
     assert.match(sleep.target.prompt, /proven behavior changes/);
     assert.match(sleep.target.prompt, /routed candidates/);
     assert.doesNotMatch(sleep.target.prompt, /no-change result as exceptional/);

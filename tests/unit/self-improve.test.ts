@@ -851,7 +851,7 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   );
   assert.equal(
     prompt,
-    "Use /tmp/rin-agent/docs/rin/docs/self-improve-distillation.md as the self-improve distillation contract. Review /tmp/rin-agent/self_improve with the conversation above as evidence for this scoped pass. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. Merge, move, prune, rewrite, delete, or add self-improve guidance only when it improves future behavior, routing, decisions, execution, recall, or removes guidance that would cause future mistakes. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, routed candidates, or one concise unchanged reason.",
+    "Use /tmp/rin-agent/docs/rin/docs/self-improve-distillation.md as the self-improve distillation contract. Review /tmp/rin-agent/self_improve with the conversation above as evidence for this scoped pass. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. For correction-based or repeated-failure evidence, run a conflict retrieval pass over prompt baselines, reusable skills, memory-index indexes and transactions, and matching short-term records using the owner's exact trigger wording, behavior keywords, old abstraction names, and likely synonyms; read every plausible active hit and remove or rewrite active conflicting guidance before adding anything. Before reporting unchanged or success, replay the future trigger and confirm the cleaned library routes to one owner and no active hit still recommends the rejected behavior. Merge, move, prune, rewrite, delete, or add self-improve guidance only when it improves future behavior, routing, decisions, execution, recall, or removes guidance that would cause future mistakes. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, conflict-search closure, future-trigger replay, routed candidates, or one concise unchanged reason.",
   );
   assert.doesNotMatch(prompt, /Trigger:/);
   assert.doesNotMatch(prompt, /self_improve:periodic_review/);
@@ -868,6 +868,12 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   );
   assert.match(prompt, /delete or rewrite wrong guidance/);
   assert.match(prompt, /reject patch-layer fixes/);
+  assert.match(prompt, /conflict retrieval pass over prompt baselines/);
+  assert.match(prompt, /memory-index indexes and transactions/);
+  assert.match(prompt, /read every plausible active hit/);
+  assert.match(prompt, /owner's exact trigger wording/);
+  assert.match(prompt, /replay the future trigger/);
+  assert.match(prompt, /no active hit still recommends the rejected behavior/);
   assert.doesNotMatch(prompt, /recall, transcript, or message-store evidence/);
   assert.doesNotMatch(prompt, /final reusable workflow/);
   assert.match(prompt, /Report changed artifacts/);
@@ -917,6 +923,17 @@ test("self-improve distillation manual codifies review rules", async () => {
   assert.match(manual, /## Guidance maintenance rule/);
   assert.match(manual, /Corrections are not automatically new guidance/);
   assert.match(manual, /Reject patch-layer fixes/);
+  assert.match(manual, /Conflict closure/);
+  assert.match(manual, /Future-trigger replay/);
+  assert.match(
+    manual,
+    /exact owner wording, behavior keywords, old abstraction names, and likely synonyms/,
+  );
+  assert.match(manual, /Read every hit that could be active guidance/);
+  assert.match(
+    manual,
+    /If the replay would still choose the wrong behavior, the pass is not done/,
+  );
   assert.match(manual, /No patch layering/);
   assert.match(manual, /Current skill/);
   assert.match(manual, /Umbrella skill/);

@@ -24,6 +24,7 @@ Goal:
 - maintain the smallest durable guidance that future matching work will use;
 - read the whole conversation, understand what happened, and carry forward reusable owner preferences, workflows, and key knowledge so the owner does not have to repeat them;
 - for correction-based or repeated-failure evidence, first identify whether existing guidance caused, preserved, or obscured the failure, then delete or rewrite that source guidance before considering any new guidance;
+- for repeated reminders or owner-corrected behavior, prove conflict closure by searching for stale active guidance across the library and replaying the future trigger against the cleaned target state;
 - add new executable guidance only when the evidence proves a reusable future behavior that cleanup alone cannot encode;
 - preserve the trigger cues needed to recognize the same failure or work class again;
 - reduce guidance entropy only after the evidence, trigger, target behavior, and owning surface are clear.
@@ -42,7 +43,8 @@ Output contract:
 - merged, moved, deleted, or pruned artifacts;
 - cleanup work performed;
 - one concise unchanged reason when the library already satisfies the contract;
-- candidates routed to product work, memory retrieval, owner clarification, or left unchanged with the reason.
+- candidates routed to product work, memory retrieval, owner clarification, or left unchanged with the reason;
+- for correction-based or repeated-failure passes, the conflict search and future-trigger replay result: searched cues/surfaces, active conflicts removed or rewritten, historical hits intentionally kept as provenance, and the one owner future work should now hit.
 
 ## Core rule
 
@@ -83,6 +85,8 @@ A successful distillation pass makes future behavior easier to trigger and execu
 - the new, revised, or removed guidance changes future behavior, routing, decisions, execution, preference application, or recall;
 - owner preferences, reusable workflows, important boundaries, and key knowledge are captured with scope, trigger, and destination so the owner need not restate them;
 - correction-based or repeated-failure evidence first removes or rewrites wrong guidance; new executable guidance is added only when cleanup alone cannot produce the proven target behavior;
+- correction-based or repeated-failure passes close stale guidance by searching the library for exact owner wording, behavior keywords, old abstraction names, and likely synonyms, then reading every plausible hit before declaring the library clean;
+- future-trigger replay names the skill, prompt baseline, memory-index pointer, or short-term record future work should hit, and verifies no active hit still recommends the rejected behavior;
 - trigger cues are preserved, including exact wording when that wording is needed to recognize the future failure again;
 - each lesson has one canonical owner;
 - prompt baselines stay compact, resident-worthy, and limited to stable cross-turn invariants;
@@ -101,6 +105,7 @@ Inspect the surfaces that can own the lesson:
 - umbrella skills covering the same work class;
 - fixed semantic skills such as `people-and-relationships` and `object-relationships`;
 - memory-index monthly indexes and same-topic transaction files;
+- for correction-based or repeated-failure evidence, literal and semantic search hits across the entire self-improve library using exact owner wording, behavior keywords, old abstraction names, and likely synonyms, including historical transaction files that may have drifted into active guidance;
 - `short-term-memory/SKILL.md` and matching short-term records under `short-term-memory/records/` when present;
 - `<agentDir>/self_improve/state/skill-usage.json` when present.
 
@@ -116,17 +121,19 @@ Run one cohesive same-class pass:
 4. Review the whole conversation first: explicit requests, owner corrections, accepted or rejected outputs, preferences shown by choices, repeated friction, workflows that worked, workflows that failed, important boundaries, and key knowledge the owner had to supply.
 5. Extract candidate lessons, preferences, workflows, key knowledge, or cleanups with evidence, trigger, target behavior, and the narrowest owning surface.
 6. Keep candidates that pass the core rule and change future behavior, routing, decisions, execution, preference application, recall, or remove guidance that would otherwise cause future mistakes.
-7. For correction-based or repeated-failure evidence, inspect existing guidance first. If existing guidance caused or preserved the behavior, remove or rewrite it before considering any new guidance.
-8. Reject patch-layer fixes: do not add exceptions, bans, authorization clauses, or special cases when deleting or rewriting the wrong abstraction solves the problem.
-9. Keep candidates with trusted evidence, a future trigger, and a future behavior difference. Directional evidence can support a narrow scoped candidate with source evidence. If the material only repeats existing guidance or is only useful for lookup, store it as memory-index evidence rather than executable guidance.
-10. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
-11. Choose the smallest correct destination using the priority list below.
-12. Merge overlapping guidance into one canonical owner.
-13. Rewrite the destination as compact target-state guidance only after the trigger and target behavior are preserved.
-14. Update memory-index when evidence is repeated, correction-based, disputed, or used to justify resident prompt-baseline guidance.
-15. For short-term continuity, keep `SKILL.md` as the routing/index entry, inspect only matching records by domain, prune stale records, and move durable lessons out to their owning prompt, skill, or memory-index surface.
-16. Validate skill frontmatter after editing skills.
-17. Report changed self-improve artifacts or one concise unchanged reason.
+7. For correction-based or repeated-failure evidence, run a conflict retrieval pass before editing or reporting unchanged: search prompt baselines, all skills, memory-index indexes and transactions, and matching short-term records using exact owner wording, behavior keywords, old abstraction names, and likely synonyms. Read every hit that could be active guidance.
+8. If existing guidance caused, preserved, justified, or obscured the rejected behavior, remove or rewrite that source guidance before considering any new guidance. If a historical provenance hit must remain, make it clearly non-executable and point to the cleaned target behavior.
+9. Replay the future trigger against the cleaned library before success: name the owner surface future work should hit and verify no active hit still recommends the rejected behavior. If the replay would still choose the wrong behavior, the pass is not done.
+10. Reject patch-layer fixes: do not add exceptions, bans, authorization clauses, or special cases when deleting or rewriting the wrong abstraction solves the problem.
+11. Keep candidates with trusted evidence, a future trigger, and a future behavior difference. Directional evidence can support a narrow scoped candidate with source evidence. If the material only repeats existing guidance or is only useful for lookup, store it as memory-index evidence rather than executable guidance.
+12. Preserve exact wording when it is needed as a future trigger cue; compression may remove explanation, but not recognition cues.
+13. Choose the smallest correct destination using the priority list below.
+14. Merge overlapping guidance into one canonical owner.
+15. Rewrite the destination as compact target-state guidance only after the trigger and target behavior are preserved.
+16. Update memory-index when evidence is repeated, correction-based, disputed, used to justify resident prompt-baseline guidance, or needed to explain why active guidance was removed or rewritten.
+17. For short-term continuity, keep `SKILL.md` as the routing/index entry, inspect only matching records by domain, prune stale records, and move durable lessons out to their owning prompt, skill, or memory-index surface.
+18. Validate skill frontmatter after editing skills.
+19. Report changed self-improve artifacts, conflict-search closure, future-trigger replay, or one concise unchanged reason.
 
 ## Destination contract
 
@@ -199,6 +206,8 @@ Before reporting success, check the revised library against these prompt-enginee
 - **Trigger preservation:** compression keeps the wording or conditions needed to recognize the same failure again.
 - **Destination fit:** each lesson, preference, implicit pattern, or cleanup lives in the narrowest surface that future matching work will use.
 - **Target-state cleanup:** repeated corrections and repeated assistant failures reduce wrong, stale, conflicting, or overgeneral guidance first. New guidance is allowed only when cleanup alone cannot encode the proven future behavior.
+- **Conflict closure:** correction-based or repeated-failure passes searched exact owner wording, behavior keywords, old abstraction names, and synonyms across the full self-improve library; every plausible hit is either rewritten, deleted, or explicitly classified as non-executable provenance.
+- **Future-trigger replay:** before unchanged or success, the cleaned library can answer “when this wording/work class appears again, which surface fires and what behavior follows?” without routing to the rejected behavior.
 - **No patch layering:** the revision must not preserve a bad rule by wrapping it in exceptions, prohibitions, authorization clauses, guard flags, or special cases.
 - **Instruction/data boundary:** original wording, chronology, and provenance stay retrievable through memory surfaces while self-improve stores distilled guidance, including reusable workflow shapes.
 - **Output contract:** the final report names changed artifacts and the behavior contract each artifact now owns.
