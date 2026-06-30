@@ -2,7 +2,7 @@
 
 Use scheduled tasks when work should happen after the current turn: future reminders, recurrence, polling, conditional checks, or background automation.
 
-A scheduled task is an automation contract. Its prompt and record define the trigger, evidence source, allowed work, side effects, delivery target, stop condition, and verification required before reporting success.
+A scheduled task is an automation contract. Its record and target define the trigger, evidence source, allowed work, side effects, delivery target, stop condition, and verification required before reporting success.
 
 ## Prompt brief
 
@@ -23,7 +23,7 @@ Trusted inputs:
 - the user's requested time, recurrence, target chat, task goal, and permission boundary;
 - existing task record when updating an id;
 - current daemon/scheduler state from SDK reads or `rin status --json`;
-- stored chat session metadata for `session_instruction` tasks.
+- stored session file metadata for `session_continue` tasks.
 
 Output contract:
 
@@ -39,7 +39,7 @@ A scheduled-task operation is complete when:
 
 - the task record expresses the smallest correct contract for the request;
 - file-based edits have been explicitly loaded with `rin tasks reload` or `rin.tasks.reload()`, then verified by daemon state;
-- `target.prompt` or `target.command` has enough source-of-truth, scope, stop, validation, and report instructions to run later;
+- `target.prompt`, `target.command`, or `target.kind: "session_continue"` expresses the intended work without hidden extra prompt insertion;
 - `nextRunAt`, `enabled`, and lifecycle fields match the requested state;
 - delivery settings match the intended recipient or intentionally suppress automatic delivery;
 - recurring or polling tasks include a gate or report rule that controls duplicate work;
@@ -64,10 +64,10 @@ Choose the smallest task shape that preserves the user-visible contract:
 1. **Operation:** create, inspect, update, reload from disk, run now, wake, reschedule, pause, resume, complete, or delete.
 2. **Trigger:** one-time `runAt` or recurring cron `expression`.
 3. **Condition gate:** optional TypeScript `condition` for cheap “only run if needed” checks.
-4. **Target:** `agent_prompt` for reasoning or user-facing reports; `shell_command` for machine checks.
-5. **Task prompt:** use `rin-prompt-engineering` for `target.prompt` and `target.continuationPrompt`.
+4. **Target:** `agent_prompt` for reasoning or user-facing reports; `shell_command` for machine checks; `session_continue` for resuming the current stored session turn without adding a prompt.
+5. **Task prompt:** use `rin-prompt-engineering` for `target.prompt` and `target.continuationPrompt` on `agent_prompt` tasks.
 6. **Storage/edit path:** SDK writes and CLI operations update daemon scheduler state and the same scheduler file. If `~/.rin/data/scheduler/tasks.json` is edited outside the daemon, run `rin tasks reload` or `rin.tasks.reload()` explicitly; the daemon does not watch the file automatically.
-7. **Session:** `none` for normal tasks; `dedicated` for a task-owned continuing thread; `session_instruction` for insertion into an existing chat session.
+7. **Session:** `none` for normal tasks; `dedicated` for a task-owned continuing thread; `session_continue` for resuming an existing stored session turn.
 8. **Delivery:** optional `frontend`, chat binding, `deliverFinal`, and `quiet`.
 9. **Termination:** optional `maxRuns` or `stopAt`.
 10. **Verification:** re-read the task and check liveness when active producers matter.
@@ -97,7 +97,7 @@ Verify these fields before reporting success:
 - `trigger`, `nextRunAt`, and expected local time;
 - `condition`, plus `condition.lastEvaluatedAt` / `condition.lastResult` after a run-now or due tick;
 - `session.mode`, and `dedicatedSessionFile` for dedicated sessions;
-- `target.kind`, prompt/command intent, `frontend`, `deliverFinal`, and `quiet`;
+- `target.kind`, prompt/command/continue intent, `frontend`, `deliverFinal`, and `quiet`;
 - `model`, `thinkingLevel`;
 - `termination`, `runCount`, `lastStartedAt`, `lastFinishedAt`, `lastResultText`, `lastError`.
 
@@ -133,10 +133,11 @@ type Task = {
   } | null;
   session?:
     | { mode: "none" | "dedicated" }
-    | { mode: "session_instruction"; sessionFile: string };
+    | { mode: "session_continue"; sessionFile: string };
   target:
     | { kind: "agent_prompt"; prompt: string; continuationPrompt?: string }
-    | { kind: "shell_command"; command: string };
+    | { kind: "shell_command"; command: string }
+    | { kind: "session_continue" };
 
   // output-only lifecycle state
   createdAt?: string;
@@ -288,20 +289,19 @@ Behavior:
 
 Choose `dedicated` when the persistent conversation is part of the intended context, such as an intentionally guided recurring thread.
 
-### `session.mode: "session_instruction"`
+### `session.mode: "session_continue"`
 
-Use when the scheduled turn must be inserted into an existing stored chat session. Its context comes from `session.sessionFile`.
+Use when the scheduler should resume an existing stored session turn without adding a new prompt. Its context comes from `session.sessionFile`.
 
-Use this for chat-thread follow-ups such as “come back to this conversation later and ask about the pending review”.
+Use this only for true current-session continuation, such as resuming an interrupted assistant turn. Do not use it for reminders, follow-up questions, or new instructions; those need a normal `agent_prompt` task with an explicit frontend/chat target.
 
 Scheduler-enforced requirements:
 
-- `target.kind` must be `"agent_prompt"`.
-- Omit `frontend`; Rin derives the existing frontend/chat binding from the stored session file.
-- `session.sessionFile` must point to an existing stored session with a chat binding.
-- Root `deliverFinal: false` updates the session while suppressing automatic final delivery.
+- `target.kind` must be `"session_continue"`; no prompt or command is accepted.
+- Omit `frontend`; continuation is owned by the existing session worker/frontend attachment, not by chat delivery.
+- `session.sessionFile` must point to an existing stored session file.
 
-Rin inserts the follow-up into the existing session without scheduled-task prompt-context injection.
+Rin resumes the existing session through the daemon worker pool and does not insert scheduled-task prompt text.
 
 ## Target and delivery contract
 
@@ -324,6 +324,15 @@ Runs a shell command from the Rin user's home directory using the configured she
 Use this for machine-style diagnostics and stable scripts. If the recipient expects a domain summary, use an `agent_prompt` task that runs the script and summarizes the result. Shell delivery includes machine fields like `Command`, `Exit`, `stdout`, and `stderr`.
 
 Shell stdout/stderr are summarized before storage and delivery.
+
+### `target.kind: "session_continue"`
+
+Resumes an existing stored session turn without submitting prompt text. Use only with `session.mode: "session_continue"` and a stored `sessionFile`.
+
+- Rin calls the daemon worker pool for that `sessionFile`; it does not route through chat or submit a new prompt.
+- `frontend` must be omitted on the task record.
+- No `target.prompt`, `target.continuationPrompt`, or `target.command` is used.
+- Rin stores the resumed turn's final text in `lastResultText`; if no canonical final text is produced, the task records `lastError`.
 
 ## SDK operations
 
@@ -408,23 +417,19 @@ await rin.tasks.upsert({
 });
 ```
 
-### Current-session follow-up
+### Current-session continuation
 
 ```js
 await rin.tasks.upsert({
-  id: "cron_follow_up_here",
-  name: "Follow up in this chat",
+  id: "cron_continue_here",
+  name: "Resume this session turn",
   enabled: true,
   trigger: { runAt: "2026-05-08T15:00:00+08:00" },
   session: {
-    mode: "session_instruction",
+    mode: "session_continue",
     sessionFile: "/home/rin/.rin/sessions/managed/chat/example.jsonl",
   },
-  target: {
-    kind: "agent_prompt",
-    prompt:
-      "Continue this chat session and ask whether the pending review is done.",
-  },
+  target: { kind: "session_continue" },
 });
 ```
 
@@ -464,4 +469,4 @@ Report:
 - Run-now finished without a recipient-visible report: inspect `running`, `lastStartedAt`, active frontend turn, `lastError`, `frontend`, and `deliverFinal`.
 - Recurring task is noisy: add `condition`, lower `thinkingLevel`, or change the prompt to report only changed evidence.
 - Report formatting is raw: replace direct `shell_command` delivery with an `agent_prompt` wrapper.
-- Current-session follow-up fails: verify the `sessionFile` exists and has a stored chat binding, then let Rin derive the frontend binding from that session.
+- Current-session continuation fails: verify the `sessionFile` exists, has a stored chat binding, and represents a turn that can be continued; Rin will not insert a prompt for this mode.

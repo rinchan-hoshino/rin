@@ -160,6 +160,8 @@ export async function startDaemon(
     agentDir: runtime.agentDir,
     additionalExtensionPaths: options.additionalExtensionPaths,
     chat: options.chat,
+    resumeSessionTurn: async (payload) =>
+      await workerPool.resumeInterruptedTurnSession(payload),
   });
   cronScheduler.start();
 

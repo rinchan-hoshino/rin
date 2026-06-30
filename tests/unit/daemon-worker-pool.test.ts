@@ -339,6 +339,140 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("resumeInterruptedTurnSession resumes selected session and returns terminal result", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + ":" + (command.source || "") + ":" + (command.requestTag || "") + "\\n");
+    process.stdout.write(JSON.stringify({ id: command.id, type: "response", command: command.type, success: true, data: {} }) + "\\n");
+    if (command.type === "resume_interrupted_turn") {
+      setTimeout(() => {
+        process.stdout.write(JSON.stringify({
+          type: "rpc_turn_event",
+          event: "complete",
+          requestTag: command.requestTag,
+          sessionFile: "/tmp/session.jsonl",
+          sessionId: "session-1",
+          finalText: "continued final",
+          result: { messages: [{ type: "text", text: "continued final" }] }
+        }) + "\\n");
+      }, 0);
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
+  const result = await pool.resumeInterruptedTurnSession({
+    sessionFile: "/tmp/session.jsonl",
+    source: "scheduled-task",
+    requestTag: "run-1",
+  });
+
+  assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
+    "switch_session::",
+    "resume_interrupted_turn:scheduled-task:run-1",
+  ]);
+  assert.equal(result.finalText, "continued final");
+  assert.equal(result.sessionFile, "/tmp/session.jsonl");
+  assert.equal(result.sessionId, "session-1");
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("resumeInterruptedTurnSession follows an active turn without sending another resume", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + ":" + (command.source || "") + "\\n");
+    process.stdout.write(JSON.stringify({ id: command.id, type: "response", command: command.type, success: true, data: {} }) + "\\n");
+    if (command.type === "switch_session") {
+      process.stdout.write(JSON.stringify({
+        type: "rpc_turn_event",
+        event: "start",
+        requestTag: "active-1",
+        sessionFile: "/tmp/session.jsonl",
+        sessionId: "session-1"
+      }) + "\\n");
+      setTimeout(() => {
+        process.stdout.write(JSON.stringify({
+          type: "rpc_turn_event",
+          event: "complete",
+          requestTag: "active-1",
+          sessionFile: "/tmp/session.jsonl",
+          sessionId: "session-1",
+          finalText: "active final"
+        }) + "\\n");
+      }, 100);
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 1000 });
+  const worker = pool.restoreSessionWorker({
+    sessionFile: "/tmp/session.jsonl",
+  });
+  await waitForCommandLogPrefix(logPath, ["switch_session:"], 500);
+  assert.ok(worker);
+  worker.turnActive = true;
+  worker.rpcTurnActive = true;
+
+  const result = await pool.resumeInterruptedTurnSession({
+    sessionFile: "/tmp/session.jsonl",
+    source: "scheduled-task",
+    requestTag: "run-1",
+  });
+
+  assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
+    "switch_session:",
+  ]);
+  assert.equal(result.finalText, "active final");
+  assert.equal(result.sessionFile, "/tmp/session.jsonl");
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("selectSession waits for daemon-restart recovery instead of spawning a duplicate worker", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");

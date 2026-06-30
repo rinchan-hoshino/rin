@@ -245,12 +245,13 @@ test("agent docs expose scheduled task operation workflow", () => {
     scheduledTasks,
     /termination\?: \{ maxRuns\?: number; stopAt\?: string \}/,
   );
-  assert.match(scheduledTasks, /session\.mode: "session_instruction"/);
+  assert.match(scheduledTasks, /session\.mode: "session_continue"/);
   assert.match(scheduledTasks, /## Prompt brief/);
   assert.match(scheduledTasks, /## Success criteria/);
   assert.match(scheduledTasks, /Task prompt contract/);
   assert.match(scheduledTasks, /`rin-prompt-engineering`/);
   assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
+  assert.match(scheduledTasks, /target\.kind: "session_continue"/);
   assert.match(
     scheduledTasks,
     /Use `condition` when the schedule should wake only if agent-authored TypeScript returns true/,

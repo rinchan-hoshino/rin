@@ -6,7 +6,6 @@ import path from "node:path";
 
 const HOME_DIR = os.homedir();
 
-import { listChatMessages } from "../chat/message-store.js";
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
 import {
   MANAGED_TASK_SESSION_LEAF,
@@ -32,6 +31,12 @@ type CronChatCapability = {
     chatKey?: string;
   }) => Promise<any>;
 };
+
+type CronSessionResumeCapability = (payload: {
+  sessionFile: string;
+  source?: string;
+  requestTag?: string;
+}) => Promise<any>;
 
 export async function sendChatText(
   options: { chat?: CronChatCapability },
@@ -210,13 +215,7 @@ function buildCronTaskPromptContext(task: CronTaskRecord) {
   };
 }
 
-function chatMessageTimestamp(record: any) {
-  return (
-    Date.parse(String(record?.processedAt || record?.receivedAt || "")) || 0
-  );
-}
-
-export function resolveCronSessionInstructionChatKey(
+function resolveCronSessionContinueSessionFile(
   agentDir: string,
   sessionFile: string,
 ) {
@@ -225,23 +224,7 @@ export function resolveCronSessionInstructionChatKey(
   if (!existsSync(resolvedSessionFile)) {
     throw new Error("cron_session_file_not_found");
   }
-  const matched = listChatMessages(agentDir)
-    .filter((record) => {
-      const recordSessionFile = resolveStoredSessionFile(
-        agentDir,
-        record?.sessionFile,
-      );
-      return (
-        recordSessionFile &&
-        path.resolve(recordSessionFile) === path.resolve(resolvedSessionFile) &&
-        String(record?.chatKey || "").trim()
-      );
-    })
-    .sort((a, b) => chatMessageTimestamp(b) - chatMessageTimestamp(a))[0];
-  const chatKey = String(matched?.chatKey || "").trim();
-  if (!chatKey)
-    throw new Error("cron_session_instruction_chat_binding_not_found");
-  return { chatKey, sessionFile: resolvedSessionFile };
+  return resolvedSessionFile;
 }
 
 function isSelfImproveDistillationTask(task: CronTaskRecord) {
@@ -381,45 +364,33 @@ export async function executeCronAgentTask(
   };
 }
 
-export async function executeCronSessionInstructionTask(
+export async function executeCronSessionContinueTask(
   task: CronTaskRecord,
   options: {
     agentDir: string;
     additionalExtensionPaths?: string[];
     chat?: CronChatCapability;
+    resumeSessionTurn?: CronSessionResumeCapability;
     runId?: string;
   },
 ) {
-  if ((task.session as any)?.mode !== "session_instruction") {
-    throw new Error("cron_invalid_session_instruction_task");
+  if ((task.session as any)?.mode !== "session_continue") {
+    throw new Error("cron_invalid_session_continue_task");
   }
-  if (task.target.kind !== "agent_prompt") {
-    throw new Error("cron_session_instruction_requires_agent_prompt");
+  if (task.target.kind !== "session_continue") {
+    throw new Error("cron_session_continue_requires_target");
   }
-  if (typeof options.chat?.runTurn !== "function") {
-    throw new Error("cron_chat_unavailable");
+  if (typeof options.resumeSessionTurn !== "function") {
+    throw new Error("cron_session_continue_unavailable");
   }
-  const instruction = String(task.target.prompt || "").trim();
-  if (!instruction) throw new Error("cron_prompt_required");
-  const { chatKey, sessionFile } = resolveCronSessionInstructionChatKey(
+  const sessionFile = resolveCronSessionContinueSessionFile(
     options.agentDir,
     (task.session as any).sessionFile || "",
   );
-  const result = await options.chat.runTurn({
-    chatKey,
-    affectChatBinding: true,
-    disposeAfterTurn: false,
-    deliverFinal: task.deliverFinal !== false,
-    quietMode: task.quiet !== false,
-    text: instruction,
+  const result = await options.resumeSessionTurn({
     sessionFile,
-    frontend: { kind: "chat", key: chatKey },
-    promptMeta: buildCronTaskPromptContext(task),
-    ...(task.model ? { model: task.model } : {}),
-    ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
-    ...(task.disabledRinCapabilities
-      ? { disabledRinCapabilities: task.disabledRinCapabilities }
-      : {}),
+    source: "scheduled-task",
+    requestTag: options.runId || cronTaskRunId(task),
   });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
@@ -427,7 +398,7 @@ export async function executeCronSessionInstructionTask(
   return {
     text: finalText,
     sessionId: String(result?.sessionId || "").trim() || undefined,
-    sessionFile: String(result?.sessionFile || "").trim() || undefined,
+    sessionFile: String(result?.sessionFile || sessionFile).trim() || undefined,
   };
 }
 
@@ -437,6 +408,7 @@ export async function executeCronTask(
     agentDir: string;
     additionalExtensionPaths?: string[];
     chat?: CronChatCapability;
+    resumeSessionTurn?: CronSessionResumeCapability;
   },
 ) {
   const runId = cronTaskRunId(task);
@@ -449,12 +421,26 @@ export async function executeCronTask(
         sessionFile?: string;
       }
     | undefined;
-  const showExternalWorking = task.target.kind === "shell_command";
+  const isSessionContinueTask =
+    (task.session as any)?.mode === "session_continue";
+  const showExternalWorking =
+    task.target.kind === "shell_command" && !isSessionContinueTask;
   try {
     if (showExternalWorking) {
       await setCronTaskFrontendWorking(task, options, true);
     }
-    if (task.target.kind === "shell_command") {
+    if (isSessionContinueTask) {
+      const result = await executeCronSessionContinueTask(task, {
+        ...options,
+        runId,
+      });
+      task.lastResultText = result.text;
+      maintenanceHistoryRecord = {
+        status: "completed",
+        outputPreview: result.text,
+        sessionFile: result.sessionFile,
+      };
+    } else if (task.target.kind === "shell_command") {
       const text = await executeCronShellTask(task, {
         agentDir: options.agentDir,
       });
@@ -475,17 +461,6 @@ export async function executeCronTask(
           text,
         }).catch(() => {});
       }
-    } else if ((task.session as any)?.mode === "session_instruction") {
-      const result = await executeCronSessionInstructionTask(task, {
-        ...options,
-        runId,
-      });
-      task.lastResultText = result.text;
-      maintenanceHistoryRecord = {
-        status: "completed",
-        outputPreview: result.text,
-        sessionFile: result.sessionFile,
-      };
     } else {
       const result = await executeCronAgentTask(task, { ...options, runId });
       task.lastResultText = result.text;

@@ -43,6 +43,14 @@ type PendingResponse = {
   finalize?: () => void;
 };
 
+type TerminalTurnWaiter = {
+  worker: WorkerHandle;
+  selector: SessionSelector;
+  requestTag?: string;
+  resolve: (payload: any) => void;
+  reject: (error: Error) => void;
+};
+
 export type WorkerHandle = {
   id: string;
   child: ReturnType<typeof spawn>;
@@ -124,6 +132,7 @@ export class WorkerPool {
     string,
     Promise<WorkerHandle | undefined>
   >();
+  private terminalTurnWaiters = new Set<TerminalTurnWaiter>();
   private workerSeq = 0;
   private internalRequestSeq = 0;
   private shuttingDown = false;
@@ -256,6 +265,7 @@ export class WorkerPool {
     options: { signal?: NodeJS.Signals } = {},
   ) {
     if (!this.workers.has(worker)) return;
+    this.rejectTerminalTurnWaiters(worker, new Error("rin_worker_exit"));
     worker.gracefulShutdownRequested = true;
     this.workers.delete(worker);
     if (!this.shuttingDown || !this.isWorkerRunning(worker)) {
@@ -461,6 +471,49 @@ export class WorkerPool {
   async abortWorker(worker: WorkerHandle) {
     if (!this.workers.has(worker) || worker.gracefulShutdownRequested) return;
     await this.sendInternalCommand(worker, { type: "abort" });
+  }
+
+  async resumeInterruptedTurnSession(item: {
+    sessionFile?: string;
+    source?: string;
+    requestTag?: string;
+  }) {
+    const selector = sessionSelectorFromState(item);
+    if (!selector.sessionFile) throw new Error("rin_session_file_required");
+    const worker = await this.ensureWorkerForSession(selector);
+    const requestTag =
+      String(item.requestTag || "").trim() ||
+      `rin_resume_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const followActiveTurn = Boolean(
+      worker.turnActive || worker.rpcTurnActive || worker.isStreaming,
+    );
+    const { promise: terminalEvent, waiter } = this.waitForTerminalTurnEvent(
+      worker,
+      selector,
+      followActiveTurn ? undefined : requestTag,
+    );
+    if (!followActiveTurn) {
+      try {
+        await this.sendInternalCommand(worker, {
+          type: "resume_interrupted_turn",
+          requestTag,
+          source: String(item.source || "").trim() || "scheduled-task",
+        });
+      } catch (error) {
+        this.terminalTurnWaiters.delete(waiter);
+        throw error;
+      }
+    }
+    const payload = await terminalEvent;
+    if (payload?.event === "error") {
+      throw new Error(String(payload.error || "rin_turn_failed"));
+    }
+    return {
+      finalText: String(payload?.finalText || ""),
+      result: payload?.result,
+      sessionFile: String(payload?.sessionFile || selector.sessionFile),
+      sessionId: String(payload?.sessionId || selector.sessionId || ""),
+    };
   }
 
   getStatusSnapshot() {
@@ -810,6 +863,7 @@ export class WorkerPool {
           }
         }
         if (isTerminalRpcTurnEvent(payload)) {
+          this.resolveTerminalTurnWaiters(worker, payload);
           if (forwarded === 0) {
             rememberPendingTerminalTurnEvent(this.options.agentDir, payload);
           } else {
@@ -841,6 +895,10 @@ export class WorkerPool {
       }
       const selector = this.getWorkerSelector(worker);
       const shouldRecover = this.shouldRecoverWorker(worker, liveConnections);
+      this.rejectTerminalTurnWaiters(
+        worker,
+        new Error(shouldRecover ? "rin_session_recovering" : "rin_worker_exit"),
+      );
       this.deleteWorkerSessionRefs(worker);
       this.workers.delete(worker);
       for (const connection of Array.from(worker.connections)) {
@@ -988,6 +1046,85 @@ export class WorkerPool {
     const next = sessionSelectorFromState(selector);
     connection.sessionFile = next.sessionFile;
     connection.sessionId = next.sessionId;
+  }
+
+  private async ensureWorkerForSession(selector: SessionSelector) {
+    const wanted = sessionSelectorFromState(selector);
+    const existing = this.findWorkerBySelector(wanted);
+    if (existing) return existing;
+    if (!wanted.sessionFile) throw new Error("rin_session_file_required");
+
+    const claimed = await this.withSessionClaim(wanted, async () => {
+      const existing = this.findWorkerBySelector(wanted);
+      if (existing) return existing;
+      const worker = this.createWorker();
+      try {
+        await this.sendInternalCommand(
+          worker,
+          createSwitchSessionCommand(wanted.sessionFile!),
+        );
+        const existingAfterSwitch = this.findWorkerBySelector(wanted);
+        if (existingAfterSwitch && existingAfterSwitch !== worker) {
+          this.destroyWorker(worker);
+          return existingAfterSwitch;
+        }
+        this.setWorkerSessionRefs(worker, wanted);
+        return worker;
+      } catch (error) {
+        this.destroyWorker(worker);
+        throw error;
+      }
+    });
+    if (!claimed) throw new Error("rin_session_worker_unavailable");
+    return claimed;
+  }
+
+  private waitForTerminalTurnEvent(
+    worker: WorkerHandle,
+    selector: SessionSelector,
+    requestTag?: string,
+  ) {
+    let waiter!: TerminalTurnWaiter;
+    const promise = new Promise<any>((resolve, reject) => {
+      waiter = {
+        worker,
+        selector,
+        requestTag,
+        resolve,
+        reject,
+      };
+      this.terminalTurnWaiters.add(waiter);
+    });
+    return { promise, waiter };
+  }
+
+  private resolveTerminalTurnWaiters(worker: WorkerHandle, payload: any) {
+    for (const waiter of Array.from(this.terminalTurnWaiters)) {
+      if (waiter.worker !== worker) continue;
+      if (
+        waiter.requestTag &&
+        String(payload?.requestTag || "") !== waiter.requestTag
+      ) {
+        continue;
+      }
+      const payloadSelector = sessionSelectorFromState(payload);
+      if (
+        hasSessionSelector(payloadSelector) &&
+        !sessionMatchesSelector(payloadSelector, waiter.selector)
+      ) {
+        continue;
+      }
+      this.terminalTurnWaiters.delete(waiter);
+      waiter.resolve(payload);
+    }
+  }
+
+  private rejectTerminalTurnWaiters(worker: WorkerHandle, error: Error) {
+    for (const waiter of Array.from(this.terminalTurnWaiters)) {
+      if (waiter.worker !== worker) continue;
+      this.terminalTurnWaiters.delete(waiter);
+      waiter.reject(error);
+    }
   }
 
   private findWorkerBySelector(selector: SessionSelector) {

@@ -113,8 +113,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task configuration is not a valid agent task. Fix the task target.",
   cron_invalid_expression: () =>
     "Scheduled task cron expression is invalid. Fix the schedule.",
-  cron_invalid_session_instruction_task: () =>
-    "Scheduled task configuration is not a valid session-instruction task. Fix the task target.",
+  cron_invalid_session_continue_task: () =>
+    "Scheduled task configuration is not a valid current-session continuation task. Fix the task target.",
   cron_invalid_shell_task: () =>
     "Scheduled task configuration is not a valid shell task. Fix the task target.",
   cron_next_run_not_found: () =>
@@ -125,16 +125,14 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task session file was not found. Recreate or rebind the task session.",
   cron_session_file_required: () =>
     "Scheduled task needs a session file before it can run. Rebind the task session.",
-  cron_session_instruction_chat_binding_not_found: () =>
-    "Scheduled task cannot find the chat binding for this session. Rebind the task or choose another session.",
-  cron_session_instruction_chat_key_forbidden: () =>
-    "Scheduled task session instructions must use the session chat binding, not a separate chat key. Fix the task target.",
-  cron_session_instruction_frontend_forbidden: () =>
-    "Scheduled task session instructions must use the session's frontend binding, not a separate frontend target. Fix the task target.",
-  cron_session_instruction_requires_agent_prompt: () =>
-    "Scheduled task session instruction needs an agent prompt. Add the prompt.",
-  cron_session_instruction_requires_once: () =>
-    "Scheduled task session instruction must be a one-time task. Change the schedule.",
+  cron_session_continue_frontend_forbidden: () =>
+    "Scheduled task current-session continuations cannot specify a separate frontend target. Remove the task frontend binding.",
+  cron_session_continue_requires_session: () =>
+    "Scheduled task current-session continuation needs a current-session mode with a session file.",
+  cron_session_continue_requires_target: () =>
+    "Scheduled task current-session continuation cannot include a prompt or command. Use the current-session continuation target.",
+  cron_session_continue_unavailable: () =>
+    "Scheduled task current-session continuation is unavailable because the daemon session worker bridge is not ready.",
   cron_target_required: () =>
     "Scheduled task needs a target before it can run. Choose a target.",
   cron_tasks_file_invalid: () =>
@@ -397,8 +395,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "No previous Rin release is available to roll back to.",
   rin_rollback_target_is_current: () =>
     "The selected rollback target is already the current Rin release.",
+  rin_session_file_required: () =>
+    "Rin needs a session file before it can resume that session.",
   rin_session_recovering: () =>
     "Rin is still recovering the session after a disconnect or restart.",
+  rin_session_worker_unavailable: () =>
+    "Rin could not start a session worker for that session.",
   rin_service_install_unsupported: () =>
     "Managed service install is not supported on this platform. Use a supported platform or manual startup.",
   rin_stable_branch_not_supported: () =>

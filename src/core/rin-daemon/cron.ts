@@ -35,6 +35,9 @@ export type CronTaskTarget =
   | {
       kind: Extract<ScheduledTaskTargetKind, "shell_command">;
       command: string;
+    }
+  | {
+      kind: Extract<ScheduledTaskTargetKind, "session_continue">;
     };
 
 export type CronTaskTrigger = {
@@ -198,7 +201,7 @@ function normalizeTaskSession(session: CronTaskSessionBinding | undefined) {
     );
   }
   const normalizedSession: CronTaskSessionBinding = { mode: requestedMode };
-  if (requestedMode === "session_instruction") {
+  if (requestedMode === "session_continue") {
     normalizedSession.sessionFile = requireNonEmptyString(
       session?.sessionFile,
       "cron_session_file_required",
@@ -218,6 +221,9 @@ function normalizeTaskTarget(target: CronTaskTarget | undefined) {
       prompt,
       continuationPrompt: continuationPrompt || undefined,
     };
+  }
+  if (target.kind === "session_continue") {
+    return { kind: "session_continue" as const };
   }
   return {
     kind: "shell_command" as const,
@@ -455,6 +461,11 @@ export class CronScheduler {
           chatKey?: string;
         }) => Promise<any>;
       };
+      resumeSessionTurn?: (payload: {
+        sessionFile: string;
+        source?: string;
+        requestTag?: string;
+      }) => Promise<any>;
     },
   ) {}
 
@@ -541,9 +552,11 @@ export class CronScheduler {
       input.trigger ?? existing?.trigger,
     );
     const rawSession = input.session ?? existing?.session;
+    const rawSessionMode = normalizeScheduledTaskSessionMode(
+      (rawSession as any)?.mode,
+    );
     const { normalizedSession } = normalizeTaskSession(
-      rawSession?.mode === "session_instruction" &&
-        !(rawSession as any).sessionFile
+      rawSessionMode === "session_continue" && !(rawSession as any).sessionFile
         ? { ...rawSession, sessionFile: defaults.sessionFile }
         : rawSession,
     );
@@ -561,15 +574,21 @@ export class CronScheduler {
       input.disabledRinCapabilities,
       existing,
     );
-    const normalizedTarget = normalizeTaskTarget(
-      input.target ?? existing?.target,
-    );
-    if (session.mode === "session_instruction") {
-      if (frontend)
-        throw new Error("cron_session_instruction_frontend_forbidden");
-      if (normalizedTarget.kind !== "agent_prompt") {
-        throw new Error("cron_session_instruction_requires_agent_prompt");
+    const targetInput =
+      session.mode === "session_continue"
+        ? (input.target ??
+          (existing?.session?.mode === "session_continue"
+            ? existing?.target
+            : { kind: "session_continue" as const }))
+        : (input.target ?? existing?.target);
+    const normalizedTarget = normalizeTaskTarget(targetInput);
+    if (session.mode === "session_continue") {
+      if (frontend) throw new Error("cron_session_continue_frontend_forbidden");
+      if (normalizedTarget.kind !== "session_continue") {
+        throw new Error("cron_session_continue_requires_target");
       }
+    } else if (normalizedTarget.kind === "session_continue") {
+      throw new Error("cron_session_continue_requires_session");
     }
     const { dedicatedSessionFile, dedicatedSessionPersistent } =
       resolveDedicatedSessionBinding({
@@ -774,11 +793,14 @@ export class CronScheduler {
           undefined,
         );
         delete (row as any).chatKey;
-        const normalizedMode = normalizeScheduledTaskSessionMode(
-          (row.session as any)?.mode,
-        );
+        const rawSessionMode = safeString((row.session as any)?.mode).trim();
+        const normalizedMode =
+          normalizeScheduledTaskSessionMode(rawSessionMode);
+        if (rawSessionMode && !normalizedMode) {
+          throw new Error(`cron_invalid_session_mode:${rawSessionMode}`);
+        }
         row.session =
-          normalizedMode === "session_instruction"
+          normalizedMode === "session_continue"
             ? {
                 mode: normalizedMode,
                 sessionFile: requireNonEmptyString(
@@ -789,6 +811,17 @@ export class CronScheduler {
             : { mode: normalizedMode || "none" };
         row.trigger = normalizeTaskTrigger(row.trigger);
         row.condition = normalizeTaskCondition(row.condition, undefined);
+        row.target = normalizeTaskTarget(row.target);
+        if (row.session.mode === "session_continue") {
+          if (row.frontend) {
+            throw new Error("cron_session_continue_frontend_forbidden");
+          }
+          if (row.target.kind !== "session_continue") {
+            throw new Error("cron_session_continue_requires_target");
+          }
+        } else if (row.target.kind === "session_continue") {
+          throw new Error("cron_session_continue_requires_session");
+        }
         if (row.session.mode === "dedicated") {
           row.dedicatedSessionPersistent = true;
           row.dedicatedSessionFile = getManagedTaskSessionFile(
@@ -963,7 +996,13 @@ export class CronScheduler {
   }
 
   private terminateTaskSession(task: CronTaskRecord | undefined) {
-    if (!task || task.id.startsWith("builtin_self_improve_")) return;
+    if (
+      !task ||
+      task.id.startsWith("builtin_self_improve_") ||
+      task.session.mode === "session_continue"
+    ) {
+      return;
+    }
     const controllerKey =
       task.frontend && task.frontend.kind !== "chat"
         ? task.frontend.key

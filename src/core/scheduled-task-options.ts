@@ -1,12 +1,13 @@
 export const SCHEDULED_TASK_TARGET_KINDS = [
   "agent_prompt",
   "shell_command",
+  "session_continue",
 ] as const;
 
 export const SCHEDULED_TASK_SESSION_MODES = [
   "none",
   "dedicated",
-  "session_instruction",
+  "session_continue",
 ] as const;
 
 export const SCHEDULED_TASK_MANAGE_ACTIONS = [
