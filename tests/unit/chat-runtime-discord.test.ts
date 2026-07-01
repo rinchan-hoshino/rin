@@ -202,7 +202,7 @@ test("discord adapter maps chat input interactions to Rin slash messages", async
       },
     });
 
-    assert.deepEqual(replies, [{ content: "Working...", ephemeral: true }]);
+    assert.deepEqual(replies, [{ content: "Working...", flags: 64 }]);
     assert.equal(emitted.length, 1);
     assert.equal(emitted[0].eventName, "message");
     assert.equal(emitted[0].payload.platform, "discord");
@@ -227,6 +227,105 @@ test("discord adapter maps chat input interactions to Rin slash messages", async
       },
     ]);
   } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("discord adapter acknowledges chat input interactions with callback endpoint before emitting", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-"),
+  );
+  const originalFetch = globalThis.fetch;
+  try {
+    const emitted: any[] = [];
+    const warnings: string[] = [];
+    const events: string[] = [];
+    const adapter = new extraAdapters.DiscordAdapter(
+      {
+        register() {},
+        emit(eventName: string, payload: any) {
+          events.push("emit");
+          emitted.push({ eventName, payload });
+        },
+      },
+      agentDir,
+      {},
+      {
+        warn(message: string) {
+          warnings.push(message);
+        },
+        info() {},
+        error() {},
+        debug() {},
+      },
+    );
+    (adapter as any).bot.selfId = "bot-discord";
+
+    let resolveFetch: () => void = () => {};
+    const fetchGate = new Promise<void>((resolve) => {
+      resolveFetch = resolve;
+    });
+    const fetchCalls: Array<{ url: string; init: any }> = [];
+    globalThis.fetch = (async (url: any, init?: any) => {
+      events.push("fetch");
+      fetchCalls.push({ url: String(url), init });
+      await fetchGate;
+      return {
+        ok: true,
+        status: 204,
+        async text() {
+          return "";
+        },
+      } as any;
+    }) as any;
+
+    await (adapter as any).handleInteraction({
+      id: "interaction-1",
+      token: "interaction-token",
+      commandName: "new",
+      channelId: "channel-1",
+      channel: { name: "rin-dev" },
+      guildId: "guild-1",
+      guild: { name: "Rin Dev" },
+      createdTimestamp: 1710000000000,
+      user: {
+        id: "owner-discord",
+        bot: false,
+        globalName: "Owner",
+        username: "owner",
+      },
+      member: { displayName: "Owner Nick" },
+      options: { getString: () => "" },
+      isChatInputCommand() {
+        return true;
+      },
+      async reply() {
+        throw new Error("discord.js reply should not be used");
+      },
+    });
+
+    assert.deepEqual(events, ["fetch", "emit"]);
+    assert.equal(fetchCalls.length, 1);
+    assert.match(
+      fetchCalls[0].url,
+      /\/interactions\/interaction-1\/interaction-token\/callback$/,
+    );
+    assert.equal(fetchCalls[0].init.method, "POST");
+    assert.equal(
+      fetchCalls[0].init.headers["Content-Type"],
+      "application/json",
+    );
+    assert.deepEqual(JSON.parse(fetchCalls[0].init.body), {
+      type: 4,
+      data: { content: "Working...", flags: 64 },
+    });
+    assert.equal(emitted.length, 1);
+    assert.equal(emitted[0].payload.content, "/new");
+    resolveFetch();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(warnings, []);
+  } finally {
+    globalThis.fetch = originalFetch;
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

@@ -27,6 +27,9 @@ import {
   stripMentionTokens,
 } from "./common.js";
 
+const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
+const DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE_WITH_SOURCE = 4;
+const DISCORD_MESSAGE_FLAG_EPHEMERAL = 1 << 6;
 const DISCORD_MAX_TEXT_LENGTH = 2000;
 const SLACK_MAX_TEXT_LENGTH = 40000;
 
@@ -847,12 +850,41 @@ export class DiscordAdapter {
 
   private async acknowledgeInteraction(interaction: any) {
     if (interaction?.deferred || interaction?.replied) return;
+    const interactionId = safeString(interaction?.id).trim();
+    const interactionToken = safeString(interaction?.token).trim();
+    const responseBody = {
+      type: DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE_WITH_SOURCE,
+      data: {
+        content: "Working...",
+        flags: DISCORD_MESSAGE_FLAG_EPHEMERAL,
+      },
+    };
+    if (interactionId && interactionToken && typeof fetch === "function") {
+      try {
+        const response = await fetch(
+          `${DISCORD_API_BASE_URL}/interactions/${encodeURIComponent(interactionId)}/${encodeURIComponent(interactionToken)}/callback`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(responseBody),
+          },
+        );
+        if (response.ok) return;
+        const detail = safeString(await response.text()).trim();
+        this.logger.warn(
+          `interaction acknowledge failed status=${response.status}${detail ? ` err=${detail}` : ""}`,
+        );
+        return;
+      } catch (error: any) {
+        this.logger.warn(
+          `interaction acknowledge direct callback failed err=${safeString(error?.message || error)}`,
+        );
+      }
+    }
+    if (interaction?.deferred || interaction?.replied) return;
     if (typeof interaction?.reply !== "function") return;
     try {
-      await interaction.reply({
-        content: "Working...",
-        ephemeral: true,
-      });
+      await interaction.reply(responseBody.data);
     } catch (error: any) {
       this.logger.warn(
         `interaction acknowledge failed err=${safeString(error?.message || error)}`,
