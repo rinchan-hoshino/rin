@@ -215,7 +215,7 @@ test("startup header override replaces upstream Pi branding with Rin", async () 
   );
 });
 
-test("async Rin update notice fills its startup placeholder instead of appending later", () => {
+test("Rin update notice appends like the upstream Pi update notification", () => {
   themeModule.initTheme("dark", false);
   const chatContainer = new piTuiModule.Container();
   const renderText = () =>
@@ -230,23 +230,17 @@ test("async Rin update notice fills its startup placeholder instead of appending
     },
   };
 
-  const placeholder =
-    overrides.insertRinUpdateNotificationPlaceholder(instance);
   chatContainer.addChild(new piTuiModule.Text("startup line", 1, 0));
   chatContainer.addChild(new piTuiModule.Text("later async output", 1, 0));
 
   assert.equal(renderText(), " startup line\n later async output");
 
-  overrides.showRinUpdateNotification(
-    instance,
-    {
-      version: "1.2.3",
-      channel: "stable",
-      currentVersion: "1.2.2",
-      command: "rin update",
-    },
-    placeholder,
-  );
+  overrides.showRinUpdateNotification(instance, {
+    version: "1.2.3",
+    channel: "stable",
+    currentVersion: "1.2.2",
+    command: "rin update",
+  });
 
   const rendered = renderText();
   assert.ok(rendered.includes(`${ESC}[`));
@@ -260,52 +254,212 @@ test("async Rin update notice fills its startup placeholder instead of appending
   assert.ok(!rendered.includes("pi.dev/changelog"));
   assert.ok(!rendered.includes("Warning: Rin update available"));
   assert.ok(
-    rendered.indexOf("Update Available") < rendered.indexOf("startup line"),
+    rendered.indexOf("startup line") < rendered.indexOf("later async output"),
   );
   assert.ok(
-    rendered.indexOf("startup line") < rendered.indexOf("later async output"),
+    rendered.indexOf("later async output") <
+      rendered.indexOf("Update Available"),
   );
   assert.equal(renderRequests, 1);
 });
 
-test("Rin update notice is reattached after chat redraw removes its placeholder", () => {
+function createResourceChromeInstance() {
+  const chatContainer = new piTuiModule.Container();
+  const proto = codingAgentModule.InteractiveMode.prototype;
+  const instance = {
+    chatContainer,
+    options: { verbose: true },
+    toolOutputExpanded: false,
+    settingsManager: {
+      getQuietStartup() {
+        return false;
+      },
+    },
+    session: {
+      promptTemplates: [],
+      resourceLoader: {
+        getAgentsFiles() {
+          return { agentsFiles: [] };
+        },
+        getSkills() {
+          return {
+            skills: [
+              {
+                name: "sample-skill",
+                description: "sample skill",
+                filePath: "/tmp/sample-skill/SKILL.md",
+              },
+            ],
+            diagnostics: [],
+          };
+        },
+        getPrompts() {
+          return { prompts: [], diagnostics: [] };
+        },
+        getThemes() {
+          return { themes: [], diagnostics: [] };
+        },
+        getExtensions() {
+          return { extensions: [], errors: [] };
+        },
+      },
+      extensionRunner: {
+        getRegisteredCommands() {
+          return [];
+        },
+        getCommandDiagnostics() {
+          return [];
+        },
+        getShortcutDiagnostics() {
+          return [];
+        },
+      },
+    },
+    sessionManager: {
+      getCwd() {
+        return "/tmp";
+      },
+      getEntries() {
+        return [];
+      },
+      buildSessionContext() {
+        return {
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: "history line" }],
+            },
+          ],
+        };
+      },
+    },
+    renderSessionContext(context) {
+      for (const message of context.messages || []) {
+        const text = Array.isArray(message.content)
+          ? message.content.map((part) => part.text || "").join("")
+          : String(message.content || "");
+        this.chatContainer.addChild(new piTuiModule.Text(text, 1, 0));
+      }
+    },
+    renderProjectTrustWarningIfNeeded() {},
+    showStatus() {},
+    ...Object.fromEntries(
+      [
+        "formatDisplayPath",
+        "formatExtensionDisplayPath",
+        "formatContextPath",
+        "getStartupExpansionState",
+        "getShortPath",
+        "getCompactPathLabel",
+        "getCompactPackageSourceLabel",
+        "getCompactExtensionLabel",
+        "getCompactDisplayPathSegments",
+        "getCompactNonPackageExtensionLabel",
+        "getCompactExtensionLabels",
+        "getDisplaySourceInfo",
+        "getScopeGroup",
+        "isPackageSource",
+        "buildScopeGroups",
+        "formatScopeGroups",
+        "findSourceInfoForPath",
+        "formatPathWithSource",
+        "formatDiagnostics",
+        "getBuiltInCommandConflictDiagnostics",
+        "showLoadedResources",
+      ].map((name) => [name, proto[name]]),
+    ),
+  };
+  return instance;
+}
+
+test("Rin update notice is transient when chat redraw clears startup chrome", () => {
   themeModule.initTheme("dark", false);
   const chatContainer = new piTuiModule.Container();
   const renderText = () =>
     chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
-  let renderRequests = 0;
   const instance = {
     chatContainer,
     ui: {
-      requestRender() {
-        renderRequests += 1;
-      },
+      requestRender() {},
     },
   };
 
-  const placeholder =
-    overrides.insertRinUpdateNotificationPlaceholder(instance);
+  overrides.showRinUpdateNotification(instance, {
+    version: "1.2.3",
+    channel: "stable",
+    currentVersion: "1.2.2",
+    command: "rin update",
+  });
+  assert.ok(renderText().includes("Update Available"));
+
   chatContainer.clear();
   chatContainer.addChild(new piTuiModule.Text("new session line", 1, 0));
 
-  overrides.showRinUpdateNotification(
+  const rendered = renderText();
+  assert.ok(!rendered.includes("Update Available"));
+  assert.ok(rendered.includes("new session line"));
+});
+
+test("chat rebuild keeps Pi transient startup chrome behavior for Rin update notice", async () => {
+  await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
+
+  const instance = createResourceChromeInstance();
+  const renderText = () =>
+    instance.chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
+
+  codingAgentModule.InteractiveMode.prototype.showLoadedResources.call(
     instance,
-    {
-      version: "1.2.3",
-      channel: "stable",
-      currentVersion: "1.2.2",
-      command: "rin update",
-    },
-    placeholder,
+    { force: true },
+  );
+  overrides.showRinUpdateNotification(instance, {
+    version: "1.2.3",
+    channel: "stable",
+    currentVersion: "1.2.2",
+    command: "rin update",
+  });
+
+  assert.ok(renderText().includes("sample-skill"));
+  assert.ok(renderText().includes("Update Available"));
+
+  codingAgentModule.InteractiveMode.prototype.rebuildChatFromMessages.call(
+    instance,
   );
 
   const rendered = renderText();
-  assert.ok(rendered.includes("Update Available"));
-  assert.ok(rendered.includes("New version 1.2.3 is available. Run"));
-  assert.ok(rendered.includes("rin update"));
-  assert.ok(!rendered.includes("pi update"));
-  assert.ok(rendered.includes("new session line"));
-  assert.equal(renderRequests, 1);
+  assert.ok(!rendered.includes("sample-skill"));
+  assert.ok(!rendered.includes("Update Available"));
+  assert.ok(rendered.includes("history line"));
+});
+
+test("direct initial-message redraw keeps Pi transient startup chrome behavior for Rin update notice", async () => {
+  await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
+
+  const instance = createResourceChromeInstance();
+  const renderText = () =>
+    instance.chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
+
+  codingAgentModule.InteractiveMode.prototype.showLoadedResources.call(
+    instance,
+    { force: true },
+  );
+  overrides.showRinUpdateNotification(instance, {
+    version: "1.2.3",
+    channel: "stable",
+    currentVersion: "1.2.2",
+    command: "rin update",
+  });
+  instance.chatContainer.clear();
+
+  codingAgentModule.InteractiveMode.prototype.renderInitialMessages.call(
+    instance,
+  );
+
+  const rendered = renderText();
+  assert.ok(!rendered.includes("sample-skill"));
+  assert.ok(!rendered.includes("Update Available"));
+  assert.ok(rendered.includes("history line"));
 });
 
 test("session rebind does not own chat startup decoration rendering", async () => {
@@ -353,6 +507,60 @@ test("session rebind does not own chat startup decoration rendering", async () =
     "settings",
     "bind",
     "subscribe",
+    "providers",
+    "border",
+    "title",
+  ]);
+});
+
+test("session rebind preserves render-before-bind replacement redraw", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const calls: string[] = [];
+  const instance = {
+    unsubscribe() {
+      calls.push("unsubscribe");
+    },
+    applyRuntimeSettings() {
+      calls.push("settings");
+    },
+    renderCurrentSessionState() {
+      calls.push("render");
+    },
+    subscribeToAgent() {
+      calls.push("subscribe");
+    },
+    async bindCurrentSessionExtensions() {
+      calls.push("bind");
+    },
+    async updateAvailableProviderCount() {
+      calls.push("providers");
+    },
+    updateEditorBorderColor() {
+      calls.push("border");
+    },
+    updateTerminalTitle() {
+      calls.push("title");
+    },
+    showLoadedResources() {
+      calls.push("resources");
+    },
+    showStartupNoticesIfNeeded() {
+      calls.push("startup-notices");
+    },
+  };
+
+  await codingAgentModule.InteractiveMode.prototype.rebindCurrentSession.call(
+    instance,
+    { renderBeforeBind: true },
+  );
+
+  assert.deepEqual(calls, [
+    "unsubscribe",
+    "settings",
+    "render",
+    "subscribe",
+    "bind",
     "providers",
     "border",
     "title",

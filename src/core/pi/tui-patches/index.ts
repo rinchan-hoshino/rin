@@ -61,9 +61,6 @@ const PRESERVE_SCROLLBACK_PATCH = Symbol.for(
 const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
 const RPC_TRANSPORT_STATUS_COMPONENT_KEY = "__rinRpcTransportStatusComponent";
 const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
-const RIN_UPDATE_NOTICE_KEY = "__rinUpdateNotice";
-const RIN_UPDATE_NOTIFICATION_COMPONENT_KEY =
-  "__rinUpdateNotificationComponent";
 const SESSION_SELECTOR_PAGE_SIZE = 30;
 const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "starting",
@@ -411,7 +408,6 @@ export function renderRinInitialSessionChrome(instance: any) {
     showDiagnosticsWhenQuiet: true,
   });
   instance.showStartupNoticesIfNeeded?.();
-  restoreRinUpdateNotificationAfterSessionRedraw(instance);
 }
 
 export function renderRinCurrentSessionStateAfterReplacement(instance: any) {
@@ -420,7 +416,6 @@ export function renderRinCurrentSessionStateAfterReplacement(instance: any) {
     renderRinInitialSessionChrome(instance);
   }
   instance.renderInitialMessages?.();
-  restoreRinUpdateNotificationAfterSessionRedraw(instance);
 }
 
 async function withoutRebindChatDecorations(
@@ -465,99 +460,27 @@ function formatRinUpdateNotificationText(notice: RinUpdateNotice) {
   ].join("\n");
 }
 
-export class DeferredRinUpdateNotification {
-  private readonly spacer = new Spacer(1);
-  private readonly topBorder = new DynamicBorder((text) =>
-    theme.fg("warning", text),
-  );
-  private readonly text = new Text("", 1, 0);
-  private readonly bottomBorder = new DynamicBorder((text) =>
-    theme.fg("warning", text),
-  );
-  private active = false;
-
-  setText(text: string) {
-    this.active = true;
-    this.text.setText(text);
-  }
-
-  invalidate() {
-    this.spacer.invalidate?.();
-    this.topBorder.invalidate?.();
-    this.text.invalidate?.();
-    this.bottomBorder.invalidate?.();
-  }
-
-  render(width: number) {
-    if (!this.active) return [];
-    return [
-      ...this.spacer.render(width),
-      ...this.topBorder.render(width),
-      ...this.text.render(width),
-      ...this.bottomBorder.render(width),
-    ];
-  }
-}
-
-function containerHasChild(container: any, child: any) {
-  return Boolean(
-    child &&
-    Array.isArray(container?.children) &&
-    container.children.includes(child),
-  );
-}
-
-export function insertRinUpdateNotificationPlaceholder(instance: any) {
-  const placeholder = new DeferredRinUpdateNotification();
-  instance[RIN_UPDATE_NOTIFICATION_COMPONENT_KEY] = placeholder;
-  instance.chatContainer.addChild(placeholder);
-  return placeholder;
-}
-
-function ensureRinUpdateNotificationPlaceholder(
-  instance: any,
-  placeholder?: DeferredRinUpdateNotification,
-) {
-  if (containerHasChild(instance?.chatContainer, placeholder)) {
-    return placeholder;
-  }
-  const current = instance?.[RIN_UPDATE_NOTIFICATION_COMPONENT_KEY];
-  if (containerHasChild(instance?.chatContainer, current)) {
-    return current;
-  }
-  return insertRinUpdateNotificationPlaceholder(instance);
-}
-
 export function showRinUpdateNotification(
   instance: any,
   notice: RinUpdateNotice,
-  placeholder?: DeferredRinUpdateNotification,
 ) {
-  instance[RIN_UPDATE_NOTICE_KEY] = notice;
-  const target = ensureRinUpdateNotificationPlaceholder(instance, placeholder);
   const text = formatRinUpdateNotificationText(notice);
-  target.setText(text);
+  instance.chatContainer.addChild(new Spacer(1));
+  instance.chatContainer.addChild(
+    new DynamicBorder((borderText) => theme.fg("warning", borderText)),
+  );
+  instance.chatContainer.addChild(new Text(text, 1, 0));
+  instance.chatContainer.addChild(
+    new DynamicBorder((borderText) => theme.fg("warning", borderText)),
+  );
   instance?.ui?.requestRender?.();
 }
 
-export function restoreRinUpdateNotificationAfterSessionRedraw(instance: any) {
-  const notice = instance?.[RIN_UPDATE_NOTICE_KEY];
-  if (!notice) return false;
-  showRinUpdateNotification(instance, notice);
-  return true;
-}
-
 function scheduleRinUpdateNotificationWhenReady(instance: any) {
-  const placeholder = insertRinUpdateNotificationPlaceholder(instance);
-  void sleep(0).then(() =>
-    showRinUpdateNotificationWhenReady(instance, placeholder),
-  );
+  void sleep(0).then(() => showRinUpdateNotificationWhenReady(instance));
 }
 
-async function showRinUpdateNotificationWhenReady(
-  instance: any,
-  placeholder: DeferredRinUpdateNotification,
-) {
+async function showRinUpdateNotificationWhenReady(instance: any) {
   try {
     const notice = await checkForRinUpdateNotice();
     if (!notice) return;
@@ -565,7 +488,7 @@ async function showRinUpdateNotificationWhenReady(
       if (instance?.isInitialized) break;
       await sleep(50);
     }
-    showRinUpdateNotification(instance, notice, placeholder);
+    showRinUpdateNotification(instance, notice);
   } catch {
     // Update checks must never block the TUI.
   }
@@ -1419,9 +1342,9 @@ export async function applyRinTuiOverrides() {
     interactiveModeProto?.rebindCurrentSession;
   if (typeof originalRebindCurrentSession === "function") {
     interactiveModeProto.rebindCurrentSession =
-      async function rebindCurrentSessionWithoutChatDecoration() {
+      async function rebindCurrentSessionWithoutChatDecoration(...args: any[]) {
         return await withoutRebindChatDecorations(this, () =>
-          originalRebindCurrentSession.call(this),
+          originalRebindCurrentSession.apply(this, args),
         );
       };
   }
