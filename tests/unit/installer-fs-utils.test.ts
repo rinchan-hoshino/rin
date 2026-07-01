@@ -80,6 +80,33 @@ test("Windows PATH helpers add the launcher directory once", () => {
   assert.equal(written, `${launcherDir};C:\\Windows`);
 });
 
+test("writeLaunchersForUser uses the managed node runtime when present", async () => {
+  const home = await fs.mkdtemp(path.join(tempBaseDir, "rin-managed-home-"));
+  const installDir = path.join(home, ".rin");
+  const nodePath = path.join(
+    installDir,
+    "runtime",
+    "node",
+    "current",
+    "bin",
+    "node",
+  );
+  await fs.mkdir(path.dirname(nodePath), { recursive: true });
+  await fs.writeFile(nodePath, "#!/bin/sh\n", "utf8");
+  await fs.chmod(nodePath, 0o755);
+
+  const launchers = fsUtils.writeLaunchersForUser(
+    "demo",
+    installDir,
+    () => home,
+  );
+  const rinScript = await fs.readFile(launchers.rinPath, "utf8");
+  assert.ok(rinScript.includes(`'${nodePath}'`));
+  assert.equal(rinScript.includes("'/usr/bin/env' 'node'"), false);
+
+  await fs.rm(home, { recursive: true, force: true });
+});
+
 test("writeLaunchersForUser writes native Windows rin command launchers", async () => {
   const home = await fs.mkdtemp(path.join(tempBaseDir, "rin-win-home-"));
   const installDir = path.join(home, ".rin");

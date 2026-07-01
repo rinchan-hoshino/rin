@@ -104,6 +104,73 @@ function normalizeReleaseMetadataForInstall(
   return release || deriveGitReleaseMetadata(sourceRoot);
 }
 
+function launcherMetadataMatchesTarget(
+  metadata: any,
+  targetUser: string,
+  installDir: string,
+) {
+  return (
+    String(metadata?.defaultTargetUser || "").trim() === targetUser &&
+    String(metadata?.defaultInstallDir || "").trim() === installDir
+  );
+}
+
+export function refreshCoreUpdateLaunchers(
+  options: {
+    currentUser: string;
+    targetUser: string;
+    installDir: string;
+    elevated?: boolean;
+  },
+  deps: {
+    homeForUser?: (user: string) => string;
+    findSystemUser?: (user: string) => any;
+    readJsonFile?: <T>(filePath: string, fallback: T) => T;
+    launcherMetadataPathForUser?: typeof launcherMetadataPathForUser;
+    writeLaunchersForUser?: typeof writeLaunchersForUser;
+  } = {},
+) {
+  const resolveHomeForUser = deps.homeForUser || homeForUser;
+  const resolveLauncherMetadataPath =
+    deps.launcherMetadataPathForUser || launcherMetadataPathForUser;
+  const readLauncherJson = deps.readJsonFile || readJsonFile;
+  const writeUserLaunchers =
+    deps.writeLaunchersForUser || writeLaunchersForUser;
+  const findUser = deps.findSystemUser || findSystemUser;
+  const writeForUser = (userName: string, elevated: boolean) =>
+    writeUserLaunchers(userName, options.installDir, resolveHomeForUser, {
+      elevated,
+      findSystemUser: findUser,
+    });
+
+  const targetLaunchers = writeForUser(
+    options.targetUser,
+    Boolean(options.elevated),
+  );
+  if (options.currentUser === options.targetUser) {
+    return { targetLaunchers, currentLaunchers: targetLaunchers };
+  }
+
+  const currentLauncherMetadata = readLauncherJson<any>(
+    resolveLauncherMetadataPath(options.currentUser, resolveHomeForUser),
+    {},
+  );
+  if (
+    launcherMetadataMatchesTarget(
+      currentLauncherMetadata,
+      options.targetUser,
+      options.installDir,
+    )
+  ) {
+    return {
+      targetLaunchers,
+      currentLaunchers: writeForUser(options.currentUser, false),
+    };
+  }
+
+  return { targetLaunchers, currentLaunchers: null };
+}
+
 async function applyInstalledRuntime(
   options: FinalizeInstallOptions & {
     persistInstallerState?: boolean;
@@ -192,6 +259,15 @@ async function applyInstalledRuntime(
     useElevatedWrite,
     { findSystemUser },
   );
+  const coreUpdateLaunchers =
+    !persistInstallerState && writeLaunchers
+      ? refreshCoreUpdateLaunchers({
+          currentUser,
+          targetUser,
+          installDir,
+          elevated: useElevatedWrite,
+        })
+      : null;
   if (manageDaemon) {
     refreshManagedServiceFiles(
       targetUser,
@@ -389,6 +465,7 @@ async function applyInstalledRuntime(
     installerManifest,
     publishedRuntime,
     managedNodeRuntime,
+    coreUpdateLaunchers,
     installedDocs,
     installedDocsDir: installedDocs.rin,
     prunedReleases,
