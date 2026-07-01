@@ -6,10 +6,11 @@
 - Prompt and self-improvement guidance now state the web-source, distillation, and conflict-closure rules more directly.
 - Update notices and runtime usage diagnostics are clearer, including bare `rin update` wording and Pi-backed context token estimates.
 - Daemon and scheduler recovery is more resilient across restarts, with persisted turn recovery, decoupled restart recovery, and worker-pool session continuations.
-- Runtime and install paths are faster and safer, including CLI startup/dependency trimming, managed Node runtime bundles, managed-node update handoffs, launcher refreshes, PATH warnings, and unresolved bootstrap git-ref handling.
+- Runtime and install paths are faster and safer, including CLI startup/dependency trimming, managed Node runtime bundles, managed-node update handoffs, launcher refreshes, PATH warnings, platform bundles without optional bundled extensions, and unresolved bootstrap git-ref handling.
 - TUI and CLI session flows now handle resume listing, session rebind options, and non-interactive tool help more accurately.
 - Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, compact usage trend charts, and cached group member counts.
 <!-- rin-changelog-coverage
+ea07040 fix(release): tolerate absent bundled extensions
 6bf9b52 fix(tui): index resume session listing
 149fc38 fix(chat): cache group member counts
 a150cb6 docs(self-improve): capture lessons and working style
