@@ -13,6 +13,15 @@ export type ReleaseRequest = {
   version?: string;
 };
 
+export type PlatformReleaseAsset = {
+  bundleUrl?: string;
+  archiveUrl?: string;
+  sha256?: string;
+  nodeVersion?: string;
+};
+
+export type PlatformReleaseAssets = Record<string, PlatformReleaseAsset>;
+
 export type ReleaseManifest = {
   schemaVersion?: number;
   packageName?: string;
@@ -27,9 +36,15 @@ export type ReleaseManifest = {
     archiveUrl?: string;
     ref?: string;
     promotedFromBetaVersion?: string;
+    assets?: PlatformReleaseAssets;
     versions?: Record<
       string,
-      { archiveUrl?: string; ref?: string; promotedFromBetaVersion?: string }
+      {
+        archiveUrl?: string;
+        ref?: string;
+        promotedFromBetaVersion?: string;
+        assets?: PlatformReleaseAssets;
+      }
     >;
   };
   beta?: {
@@ -38,14 +53,22 @@ export type ReleaseManifest = {
     ref?: string;
     promotionVersion?: string;
     defaultBranch?: string;
-    branches?: Record<string, { version?: string; archiveUrl?: string }>;
-    versions?: Record<string, { branch?: string; archiveUrl?: string }>;
+    assets?: PlatformReleaseAssets;
+    branches?: Record<
+      string,
+      { version?: string; archiveUrl?: string; assets?: PlatformReleaseAssets }
+    >;
+    versions?: Record<
+      string,
+      { branch?: string; archiveUrl?: string; assets?: PlatformReleaseAssets }
+    >;
   };
   nightly?: {
     version?: string;
     archiveUrl?: string;
     ref?: string;
     branch?: string;
+    assets?: PlatformReleaseAssets;
   };
   git?: {
     defaultBranch?: string;
@@ -60,6 +83,7 @@ export type ResolvedRelease = {
   branch: string;
   ref: string;
   sourceLabel: string;
+  assets?: PlatformReleaseAssets;
 };
 
 export type InstalledReleaseInfo = ResolvedRelease & {
@@ -250,6 +274,7 @@ function resolveLegacyBetaRelease(
       branch: resolvedBranch,
       ref: version,
       sourceLabel: `beta version ${version}`,
+      ...(entry?.assets ? { assets: entry.assets } : {}),
     };
   }
   const resolvedBranch = firstReleaseValue(branch, beta.defaultBranch, "main");
@@ -263,6 +288,7 @@ function resolveLegacyBetaRelease(
     branch: resolvedBranch,
     ref: resolvedBranch,
     sourceLabel: `beta branch ${resolvedBranch}`,
+    ...(entry?.assets ? { assets: entry.assets } : {}),
   };
 }
 
@@ -298,6 +324,7 @@ export function resolveReleaseRequest(
     const archiveUrl =
       firstReleaseValue(explicit?.archiveUrl, manifest.stable?.archiveUrl) ||
       buildNpmTarballUrl(packageName, resolvedVersion);
+    const assets = version ? explicit?.assets : manifest.stable?.assets;
     return {
       channel,
       archiveUrl,
@@ -307,6 +334,7 @@ export function resolveReleaseRequest(
       sourceLabel: version
         ? `stable version ${resolvedVersion}`
         : `stable ${resolvedVersion}`,
+      ...(assets ? { assets } : {}),
     };
   }
 
@@ -328,6 +356,7 @@ export function resolveReleaseRequest(
       branch: "beta",
       ref: resolvedRef,
       sourceLabel: `beta ${resolvedVersion}`,
+      ...(manifest.beta?.assets ? { assets: manifest.beta.assets } : {}),
     };
   }
 
@@ -357,6 +386,7 @@ export function resolveReleaseRequest(
       branch: resolvedBranch,
       ref: resolvedRef,
       sourceLabel: `nightly ${resolvedVersion}`,
+      ...(manifest.nightly?.assets ? { assets: manifest.nightly.assets } : {}),
     };
   }
 

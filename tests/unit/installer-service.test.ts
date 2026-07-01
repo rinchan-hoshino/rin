@@ -191,6 +191,64 @@ test("installer service helpers prefer current daemon entry, quote systemd value
   });
 });
 
+test("installer service uses managed node runtime when present", async () => {
+  await withTempDir(async (dir) => {
+    const installDir = path.join(dir, "install");
+    const targetHome = "/home/demo";
+    const currentDaemon = path.join(
+      installDir,
+      "app",
+      "current",
+      "dist",
+      "app",
+      "rin-daemon",
+      "daemon.js",
+    );
+    const managedNode = path.join(
+      installDir,
+      "runtime",
+      "node",
+      "current",
+      "bin",
+      "node",
+    );
+    await fs.mkdir(path.dirname(currentDaemon), { recursive: true });
+    await fs.mkdir(path.dirname(managedNode), { recursive: true });
+    await fs.writeFile(currentDaemon, "export {};\n", "utf8");
+    await fs.writeFile(managedNode, "#!/bin/sh\n", { mode: 0o755 });
+
+    const spec = service.buildSystemdUserService(
+      "demo",
+      installDir,
+      () => targetHome,
+    );
+    const plist = service.buildLaunchdPlist(
+      "demo",
+      installDir,
+      () => targetHome,
+    );
+
+    assert.match(
+      spec.service,
+      new RegExp(
+        `^ExecStart="${escapeRegex(managedNode)}" "${escapeRegex(currentDaemon)}"$`,
+        "m",
+      ),
+    );
+    assert.match(
+      spec.service,
+      new RegExp(
+        `^Environment="PATH=${escapeRegex(path.dirname(managedNode))}:`,
+        "m",
+      ),
+    );
+    assert.ok(
+      plist.plist.includes(`<string>${escapeXml(managedNode)}</string>`),
+    );
+    assert.ok(plist.plist.includes(`${escapeXml(path.dirname(managedNode))}:`));
+  });
+});
+
 test("resolveDaemonEntryForInstall falls back to legacy installed daemon entry and fails without an installed runtime", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "install");

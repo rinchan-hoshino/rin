@@ -69,11 +69,15 @@ It:
 5. verifies the candidate `docs/release/CHANGELOG.md` contains the stable version heading, release-note bullets, and commit coverage from the previous stable ref to the beta candidate ref
 6. validates that candidate with the focused release test set
 7. sets the package version only inside the candidate worktree
-8. publishes `@hoshinorin/rin` to npm using dist-tag `latest`
-9. updates `release-manifest.json -> stable` with the promoted ref and beta provenance
-10. tags the promoted candidate ref as `v<version>`
-11. commits the manifest update back to `main`
-12. refreshes `bootstrap`
+8. builds the stable `linux-x64` platform bundle with the managed Node runtime
+9. publishes `@hoshinorin/rin` to npm using dist-tag `latest`
+10. tags the promoted candidate ref as `v<version>` and uploads the platform bundle to that GitHub release
+11. updates `release-manifest.json -> stable` with the promoted ref, beta provenance, and platform bundle asset metadata
+
+The stable release tag intentionally points at the promoted candidate ref. The later manifest commit is release metadata on `main`, not part of the tagged runtime source.
+
+12. commits the manifest update back to `main`
+13. refreshes `bootstrap`
 
 ### Hotfix
 
@@ -86,12 +90,22 @@ It:
 2. verifies the candidate `docs/release/CHANGELOG.md` contains the hotfix version heading, release-note bullets, and commit coverage from the current stable ref to the hotfix ref
 3. validates the candidate with the focused release test set
 4. sets the requested patch version in the candidate worktree
-5. publishes that patch to npm as `latest`
-6. updates `release-manifest.json -> stable`
-7. tags the hotfix ref as `v<version>`
-8. refreshes `bootstrap`
+5. builds the hotfix `linux-x64` platform bundle with the managed Node runtime
+6. publishes that patch to npm as `latest`
+7. tags the hotfix ref as `v<version>` and uploads the platform bundle to that GitHub release
+8. updates `release-manifest.json -> stable` with platform bundle asset metadata
+
+The hotfix release tag intentionally points at the requested hotfix ref. The later manifest commit is release metadata on `main`, not part of the tagged runtime source.
+
+9. refreshes `bootstrap`
 
 After a hotfix, merge or cherry-pick the fix back to `main` and into any still-relevant train work before the next regular cycle.
+
+## Platform runtime bundles
+
+Stable and hotfix releases publish a `linux-x64` platform bundle alongside the npm package. The bundle contains the built app runtime (`dist`, production `node_modules`, `extensions`, `package.json`) plus a managed Node runtime under `runtime/node/current`. Bootstrap scripts prefer matching platform bundle metadata from generated `release-assets.env`; when available, install/update can start the installer with the bundled Node instead of requiring system Node/npm.
+
+`release-manifest.json` stores the durable asset URL/checksum metadata under `stable.assets[platform]`, and `release-assets.env` is a shell-friendly projection for the bootstrap branch. If no matching platform asset is present, bootstrap falls back to the legacy source/npm path.
 
 ## Bootstrap branch
 
@@ -101,8 +115,12 @@ It should contain only:
 
 - `install.sh`
 - `update.sh`
+- `install.ps1`
+- `update.ps1`
 - `scripts/bootstrap-entrypoint.sh`
+- `scripts/bootstrap-entrypoint.ps1`
 - `release-manifest.json`
+- generated `release-assets.env`
 - `docs/release/CHANGELOG.md`
 - generated bootstrap `README.md`
 

@@ -26,6 +26,9 @@ import {
   launcherMetadataPathForHome,
   launcherPathForHome,
   localBinDirForHome,
+  managedNodeBinDir,
+  managedNodeExecutablePath,
+  managedNodeRoot,
   windowsLauncherPathForHome,
 } from "./paths.js";
 import { pruneDuplicatePiCodingAgentDependencies } from "./runtime-dependency-prune.js";
@@ -97,8 +100,12 @@ const RUNTIME_COPY_ENTRY_NAMES = [
   "package.json",
 ] as const;
 
-export function installedRuntimePathValue(home?: string) {
+export function installedRuntimePathValue(
+  home?: string,
+  prependDirs: string[] = [],
+) {
   return [
+    ...prependDirs,
     home ? path.join(home, ".local", "bin") : "",
     ...COMMON_RUNTIME_BIN_DIRS,
   ]
@@ -106,15 +113,53 @@ export function installedRuntimePathValue(home?: string) {
     .join(path.delimiter);
 }
 
-export function installedRuntimeNodeCommandArgs(
-  platform: NodeJS.Platform = process.platform,
+export type InstalledRuntimeNodeCommandOptions =
+  | NodeJS.Platform
+  | {
+      installDir?: string;
+      platform?: NodeJS.Platform;
+    };
+
+function normalizeInstalledRuntimeNodeCommandOptions(
+  options: InstalledRuntimeNodeCommandOptions = process.platform,
 ) {
+  if (typeof options === "string") return { platform: options };
+  return {
+    installDir: options.installDir,
+    platform: options.platform || process.platform,
+  };
+}
+
+export function installedRuntimeNodePathDirs(
+  options: InstalledRuntimeNodeCommandOptions = process.platform,
+) {
+  const { installDir, platform } =
+    normalizeInstalledRuntimeNodeCommandOptions(options);
+  if (!installDir) return [];
+  const executable = managedNodeExecutablePath(installDir, platform);
+  return fs.existsSync(executable)
+    ? [managedNodeBinDir(installDir, platform)]
+    : [];
+}
+
+export function installedRuntimeNodeCommandArgs(
+  options: InstalledRuntimeNodeCommandOptions = process.platform,
+) {
+  const { installDir, platform } =
+    normalizeInstalledRuntimeNodeCommandOptions(options);
+  if (installDir) {
+    const executable = managedNodeExecutablePath(installDir, platform);
+    if (fs.existsSync(executable)) return [executable];
+  }
   if (platform === "win32") return ["node"];
   return [fs.existsSync("/usr/bin/env") ? "/usr/bin/env" : "env", "node"];
 }
 
-export function launcherScript(candidates: string[]) {
-  const nodeCommand = installedRuntimeNodeCommandArgs()
+export function launcherScript(
+  candidates: string[],
+  nodeCommandArgs = installedRuntimeNodeCommandArgs(),
+) {
+  const nodeCommand = nodeCommandArgs
     .map((entry) => shellQuote(entry))
     .join(" ");
   const checks = candidates
@@ -287,9 +332,15 @@ function windowsCmdQuote(value: string) {
 export function windowsCmdLauncherScript(
   candidates: string[],
   args: string[] = [],
-  options: { detached?: boolean; missingMessage?: string } = {},
+  options: {
+    detached?: boolean;
+    missingMessage?: string;
+    nodeCommandArgs?: string[];
+  } = {},
 ) {
-  const nodeCommand = installedRuntimeNodeCommandArgs("win32")
+  const nodeCommand = (
+    options.nodeCommandArgs || installedRuntimeNodeCommandArgs("win32")
+  )
     .map(windowsCmdQuote)
     .join(" ");
   const fixedArgs = args.map((arg) => ` ${windowsCmdQuote(arg)}`).join("");
@@ -317,6 +368,10 @@ export function writeLaunchersForUser(
   const home = homeForUser(userName);
   const platform = options.platform || process.platform;
   const targets = launcherTargetsForInstallDir(installDir);
+  const nodeCommandArgs = installedRuntimeNodeCommandArgs({
+    installDir,
+    platform,
+  });
   const rinPath =
     platform === "win32"
       ? windowsLauncherPathForHome(home, "rin")
@@ -328,12 +383,20 @@ export function writeLaunchersForUser(
   const launcherSpecs =
     platform === "win32"
       ? [
-          [rinPath, windowsCmdLauncherScript(targets.rin)],
-          [rinInstallPath, windowsCmdLauncherScript(targets.rinInstall)],
+          [
+            rinPath,
+            windowsCmdLauncherScript(targets.rin, [], { nodeCommandArgs }),
+          ],
+          [
+            rinInstallPath,
+            windowsCmdLauncherScript(targets.rinInstall, [], {
+              nodeCommandArgs,
+            }),
+          ],
         ]
       : [
-          [rinPath, launcherScript(targets.rin)],
-          [rinInstallPath, launcherScript(targets.rinInstall)],
+          [rinPath, launcherScript(targets.rin, nodeCommandArgs)],
+          [rinInstallPath, launcherScript(targets.rinInstall, nodeCommandArgs)],
         ];
   for (const [filePath, script] of launcherSpecs) {
     writeLauncherExecutableForUser(userName, filePath, script, options);
@@ -800,6 +863,40 @@ export function installedRuntimeReleaseId(
 
 export function releaseIdNow() {
   return nowFileTimestamp();
+}
+
+export function publishManagedNodeRuntime(
+  sourceRoot: string,
+  installDir: string,
+  targetUser: string,
+  elevated = false,
+  deps: { findSystemUser: (user: string) => any },
+) {
+  const sourceNodeRoot = path.join(sourceRoot, "runtime", "node");
+  if (!fs.existsSync(sourceNodeRoot)) return null;
+  const targetNodeRoot = managedNodeRoot(installDir);
+  if (elevated && process.platform === "win32") {
+    throw new Error("rin_elevated_install_unsupported_on_windows");
+  }
+  if (elevated) {
+    const target = deps.findSystemUser(targetUser) as any;
+    const targetGroup = target?.name ? String(target?.gid ?? "") : "";
+    const owner = ownerSpec(target?.name, targetGroup);
+    ensurePrivilegedOwnedDir(
+      path.dirname(targetNodeRoot),
+      target?.name,
+      targetGroup,
+    );
+    runPrivileged("rm", ["-rf", targetNodeRoot]);
+    runPrivileged("cp", ["-a", sourceNodeRoot, targetNodeRoot]);
+    if (owner) runPrivileged("chown", ["-R", owner, targetNodeRoot]);
+  } else {
+    syncTree(sourceNodeRoot, targetNodeRoot);
+  }
+  return {
+    nodeRoot: targetNodeRoot,
+    nodeExecutable: managedNodeExecutablePath(installDir),
+  };
 }
 
 export function publishInstalledRuntime(

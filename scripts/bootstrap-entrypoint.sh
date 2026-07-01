@@ -44,6 +44,7 @@ ARCHIVE="$WORKDIR/rin.tar.gz"
 SRC_DIR="$WORKDIR/src"
 LOGFILE="$WORKDIR/$LOG_NAME"
 MANIFEST_PATH="$WORKDIR/release-manifest.json"
+ASSETS_ENV="$WORKDIR/release-assets.env"
 TTY=/dev/tty
 CHANNEL=stable
 BRANCH=
@@ -189,13 +190,17 @@ read_launcher_install_dir() {
   if [ ! -r "$launcher_path" ]; then
     return 0
   fi
-  node - "$launcher_path" 2>/dev/null <<'NODE' || true
+  if command -v node >/dev/null 2>&1; then
+    node - "$launcher_path" 2>/dev/null <<'NODE' || true
 const fs = require('node:fs');
 try {
   const record = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) || {};
   process.stdout.write(String(record.defaultInstallDir || record.installDir || '').trim());
 } catch {}
 NODE
+    return 0
+  fi
+  sed -n 's/.*"defaultInstallDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p; s/.*"installDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$launcher_path" | sed -n '1p'
 }
 
 resolve_update_install_dir() {
@@ -226,7 +231,8 @@ inherit_update_channel() {
     echo "rin update requires an existing installer.json release record; pass --stable/--beta/--nightly/--git to override" >&2
     exit 1
   fi
-  inherited=$(node - "$manifest_path" <<'NODE'
+  if command -v node >/dev/null 2>&1; then
+    inherited=$(node - "$manifest_path" <<'NODE'
 const fs = require('node:fs');
 try {
   const release = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))?.currentRelease?.release || {};
@@ -237,6 +243,11 @@ try {
 } catch {}
 NODE
 )
+  else
+    inherited_channel=$(sed -n 's/.*"channel"[[:space:]]*:[[:space:]]*"\(stable\|beta\|nightly\|git\)".*/\1/p' "$manifest_path" | sed -n '1p')
+    inherited_branch=$(sed -n 's/.*"branch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest_path" | sed -n '1p')
+    inherited=$(printf '%s\n%s\n' "$inherited_channel" "$inherited_branch")
+  fi
   inherited_channel=$(printf '%s\n' "$inherited" | sed -n '1p')
   inherited_branch=$(printf '%s\n' "$inherited" | sed -n '2p')
   case "$inherited_channel" in
@@ -393,6 +404,175 @@ fetch_manifest() {
     return 0
   fi
   echo "failed to fetch release manifest" >&2
+  exit 1
+}
+
+fetch_assets_env() {
+  RAW_BASE=$(printf '%s' "$REPO_URL" | sed -e 's#^https://github.com/#https://raw.githubusercontent.com/#' -e 's#\.git$##')
+  PRIMARY_URL="$RAW_BASE/$BOOTSTRAP_BRANCH/release-assets.env"
+  FALLBACK_URL="$RAW_BASE/main/release-assets.env"
+  if fetch "$PRIMARY_URL" "$ASSETS_ENV"; then
+    return 0
+  fi
+  if fetch "$FALLBACK_URL" "$ASSETS_ENV"; then
+    return 0
+  fi
+  if [ -r "$REPO_ROOT/release-assets.env" ]; then
+    cp "$REPO_ROOT/release-assets.env" "$ASSETS_ENV"
+    return 0
+  fi
+  : >"$ASSETS_ENV"
+}
+
+load_assets_env() {
+  if [ ! -r "$ASSETS_ENV" ]; then
+    return 0
+  fi
+  has_asset=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    if ! printf '%s\n' "$line" | grep -Eq "^RIN_ASSET_[A-Z0-9_]+='[^']*'$"; then
+      echo "ignoring invalid Rin release assets file" >&2
+      return 0
+    fi
+    has_asset=1
+  done <"$ASSETS_ENV"
+  if [ "$has_asset" -eq 1 ]; then
+    # release-assets.env is generated from release-manifest.json by Rin's release tooling.
+    . "$ASSETS_ENV"
+  fi
+}
+
+env_key() {
+  printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9]/_/g; s/^_*//; s/_*$//'
+}
+
+detect_platform_key() {
+  os_name=$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')
+  arch_name=$(uname -m 2>/dev/null | tr '[:upper:]' '[:lower:]')
+  case "$os_name" in
+    linux*) os_name=linux ;;
+    darwin*) os_name=darwin ;;
+    msys*|mingw*|cygwin*) os_name=win32 ;;
+  esac
+  case "$arch_name" in
+    x86_64|amd64) arch_name=x64 ;;
+    aarch64|arm64) arch_name=arm64 ;;
+  esac
+  printf '%s-%s' "$os_name" "$arch_name"
+}
+
+asset_value() {
+  eval "printf '%s' \"\${$1:-}\""
+}
+
+select_platform_asset_release() {
+  if [ "$CHANNEL" = git ] || [ -n "$BRANCH" ] || [ -n "$VERSION" ]; then
+    return 1
+  fi
+  platform_key=$(detect_platform_key)
+  prefix="RIN_ASSET_$(env_key "$CHANNEL")_$(env_key "$platform_key")"
+  asset_url=$(asset_value "${prefix}_URL")
+  if [ -z "$asset_url" ]; then
+    return 1
+  fi
+  CHANNEL=${CHANNEL:-stable}
+  ARCHIVE_URL=$asset_url
+  VERSION=$(asset_value "${prefix}_VERSION")
+  BRANCH=$(asset_value "${prefix}_BRANCH")
+  REF=$(asset_value "${prefix}_REF")
+  SOURCE_LABEL=$(asset_value "${prefix}_SOURCE_LABEL")
+  ASSET_SHA256=$(asset_value "${prefix}_SHA256")
+  VERSION=${VERSION:-unknown}
+  BRANCH=${BRANCH:-$CHANNEL}
+  SOURCE_LABEL=${SOURCE_LABEL:-$CHANNEL $VERSION}
+  return 0
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_release_file_shell() {
+  printf '{"channel":"%s","version":"%s","branch":"%s","ref":"%s","sourceLabel":"%s","archiveUrl":"%s"}\n' \
+    "$(json_escape "$CHANNEL")" \
+    "$(json_escape "$VERSION")" \
+    "$(json_escape "$BRANCH")" \
+    "$(json_escape "$REF")" \
+    "$(json_escape "$SOURCE_LABEL")" \
+    "$(json_escape "$ARCHIVE_URL")" >"$RELEASE_FILE"
+}
+
+archive_path_for_url() {
+  case "$1" in
+    *.zip|*.zip\?*|*.zip#*) printf '%s' "$WORKDIR/rin.zip" ;;
+    *) printf '%s' "$ARCHIVE" ;;
+  esac
+}
+
+verify_archive_sha256() {
+  expected=$1
+  file=$2
+  if [ -z "$expected" ]; then
+    return 0
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$file" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "$file" | awk '{print $1}')
+  else
+    echo "rin bootstrap requires sha256sum or shasum to verify platform bundle" >&2
+    exit 1
+  fi
+  if [ "$actual" != "$expected" ]; then
+    echo "rin bootstrap platform bundle checksum mismatch" >&2
+    exit 1
+  fi
+}
+
+extract_archive() {
+  archive=$1
+  dest=$2
+  case "$archive" in
+    *.zip)
+      if command -v unzip >/dev/null 2>&1; then
+        zip_root="$WORKDIR/zip-extract"
+        rm -rf "$zip_root"
+        mkdir -p "$zip_root" "$dest"
+        unzip -q "$archive" -d "$zip_root"
+        child_count=$(find "$zip_root" -mindepth 1 -maxdepth 1 -print | wc -l | tr -d ' ')
+        copy_root="$zip_root"
+        if [ "$child_count" = 1 ]; then
+          first_child=$(find "$zip_root" -mindepth 1 -maxdepth 1 -print | sed -n '1p')
+          if [ -d "$first_child" ]; then
+            copy_root="$first_child"
+          fi
+        fi
+        cp -R "$copy_root"/. "$dest"/
+      else
+        echo "rin bootstrap requires unzip for zip platform bundles" >&2
+        exit 1
+      fi
+      ;;
+    *)
+      tar -xzf "$archive" -C "$dest" --strip-components=1
+      ;;
+  esac
+}
+
+find_bundled_node() {
+  for candidate in \
+    "$SRC_DIR/runtime/node/current/bin/node" \
+    "$SRC_DIR/runtime/node/current/node.exe"
+  do
+    if [ -x "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  echo "rin platform bundle is missing runtime/node/current" >&2
   exit 1
 }
 
@@ -589,25 +769,47 @@ NODE
 }
 
 launch_installer_entry() {
+  node_command=${NODE_COMMAND:-node}
   if [ -n "$QUICK_RUN" ]; then
-    node "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --quick-run
+    "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --quick-run
     return $?
   fi
   if [ "$MODE" = update ]; then
-    node "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --update
+    "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --update
     return $?
   fi
 
-  node "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE"
+  "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE"
 }
 
 INSTALLER_ENTRY='dist/app/rin-install/main.js'
 PACKAGE_NAME='@hoshinorin/rin'
 parse_args "$@"
 adjust_quick_run_labels
-check_node_version
 : >"$LOGFILE"
 run_step "$MANIFEST_LABEL" fetch_manifest
+fetch_assets_env || true
+load_assets_env
+RELEASE_FILE="$WORKDIR/release.json"
+if select_platform_asset_release; then
+  write_release_file_shell
+  PLATFORM_ARCHIVE=$(archive_path_for_url "$ARCHIVE_URL")
+  run_step "$FETCH_LABEL" fetch "$ARCHIVE_URL" "$PLATFORM_ARCHIVE"
+  verify_archive_sha256 "${ASSET_SHA256:-}" "$PLATFORM_ARCHIVE"
+  mkdir -p "$SRC_DIR"
+  run_step "$PREP_LABEL" extract_archive "$PLATFORM_ARCHIVE" "$SRC_DIR"
+  NODE_COMMAND=$(find_bundled_node)
+  cd "$SRC_DIR"
+  say "$LAUNCH_LABEL"
+  if has_tty; then
+    launch_installer_entry </dev/tty >/dev/tty 2>&1
+    exit $?
+  fi
+  launch_installer_entry
+  exit $?
+fi
+
+check_node_version
 RELEASE_ENV="$WORKDIR/release.env"
 RELEASE_ERROR="$WORKDIR/release.err"
 set +e
@@ -625,7 +827,6 @@ if [ "$resolve_status" -ne 0 ]; then
 fi
 eval "$(cat "$RELEASE_ENV")"
 PACKAGE_NAME=${PACKAGE_NAME:-@hoshinorin/rin}
-RELEASE_FILE="$WORKDIR/release.json"
 node - "$RELEASE_FILE" "$CHANNEL" "$VERSION" "$BRANCH" "$REF" "$SOURCE_LABEL" "$ARCHIVE_URL" <<'NODE'
 const fs = require('node:fs');
 const [file, channel, version, branch, ref, sourceLabel, archiveUrl] = process.argv.slice(2);
@@ -634,7 +835,7 @@ NODE
 
 run_step "$FETCH_LABEL" fetch "$ARCHIVE_URL" "$ARCHIVE"
 mkdir -p "$SRC_DIR"
-run_step "$PREP_LABEL" tar -xzf "$ARCHIVE" -C "$SRC_DIR" --strip-components=1
+run_step "$PREP_LABEL" extract_archive "$ARCHIVE" "$SRC_DIR"
 
 cd "$SRC_DIR"
 if command -v npm >/dev/null 2>&1; then

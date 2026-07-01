@@ -85,6 +85,34 @@ export function installAppRoot(installDir: string) {
   return path.join(installDir, "app");
 }
 
+export function managedRuntimeRoot(installDir: string) {
+  return path.join(installDir, "runtime");
+}
+
+export function managedNodeRoot(installDir: string) {
+  return path.join(managedRuntimeRoot(installDir), "node");
+}
+
+export function managedNodeCurrentRoot(installDir: string) {
+  return path.join(managedNodeRoot(installDir), "current");
+}
+
+export function managedNodeBinDir(
+  installDir: string,
+  platform: NodeJS.Platform = process.platform,
+) {
+  const currentRoot = managedNodeCurrentRoot(installDir);
+  return platform === "win32" ? currentRoot : path.join(currentRoot, "bin");
+}
+
+export function managedNodeExecutablePath(
+  installDir: string,
+  platform: NodeJS.Platform = process.platform,
+) {
+  const executable = platform === "win32" ? "node.exe" : "node";
+  return path.join(managedNodeBinDir(installDir, platform), executable);
+}
+
 export function currentRuntimeRoot(installDir: string) {
   return path.join(installAppRoot(installDir), "current");
 }

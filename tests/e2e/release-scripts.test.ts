@@ -84,6 +84,14 @@ test("update-release-manifest script writes stable npm tarball metadata", () => 
         "deadbeef",
         "--from-beta-version",
         "1.2.3-beta.20260420",
+        "--asset-platform",
+        "linux-x64",
+        "--asset-url",
+        "https://github.com/rinchan-hoshino/rin/releases/download/v1.2.3/rin-1.2.3-linux-x64.tar.gz",
+        "--asset-sha256",
+        "abc123",
+        "--asset-node-version",
+        "24.18.0",
       ],
       { cwd: rootDir, stdio: "pipe" },
     );
@@ -100,6 +108,18 @@ test("update-release-manifest script writes stable npm tarball metadata", () => 
       next.stable.versions["1.2.3"].archiveUrl,
       "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-1.2.3.tgz",
     );
+    assert.deepEqual(next.stable.assets["linux-x64"], {
+      bundleUrl:
+        "https://github.com/rinchan-hoshino/rin/releases/download/v1.2.3/rin-1.2.3-linux-x64.tar.gz",
+      sha256: "abc123",
+      nodeVersion: "24.18.0",
+    });
+    assert.deepEqual(next.stable.versions["1.2.3"].assets["linux-x64"], {
+      bundleUrl:
+        "https://github.com/rinchan-hoshino/rin/releases/download/v1.2.3/rin-1.2.3-linux-x64.tar.gz",
+      sha256: "abc123",
+      nodeVersion: "24.18.0",
+    });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -464,7 +484,12 @@ test("verify-changelog script checks release-note commit coverage", () => {
 });
 
 test("release workflows retry main branch metadata pushes", () => {
-  for (const workflow of ["publish-nightly.yml", "publish-beta.yml"] as const) {
+  for (const workflow of [
+    "publish-nightly.yml",
+    "publish-beta.yml",
+    "publish-stable.yml",
+    "publish-hotfix.yml",
+  ] as const) {
     const content = readWorkflow(workflow);
     assert.ok(
       content.includes(
@@ -482,19 +507,15 @@ test("release workflows retry main branch metadata pushes", () => {
   ] as const) {
     const content = readWorkflow(workflow);
     const tagExpression = `\${{ ${tagRef} }}`;
-    assert.ok(
-      content.includes(
-        `git tag -a 'v${tagExpression}' -m 'Rin v${tagExpression}'`,
+    assert.match(
+      content,
+      new RegExp(
+        `tag='v${tagExpression.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`,
       ),
     );
-    assert.ok(
-      content.includes(
-        `if ! git push origin HEAD:main 'refs/tags/v${tagExpression}'; then\n` +
-          "            git fetch origin main\n" +
-          "            git rebase origin/main\n" +
-          `            git push origin HEAD:main 'refs/tags/v${tagExpression}'`,
-      ),
-    );
+    assert.match(content, /git tag -a "\$tag" -m "Rin \$tag"/);
+    assert.match(content, /git push origin "refs\/tags\/\$tag"/);
+    assert.match(content, /gh release upload "\$tag"/);
   }
 });
 
@@ -606,6 +627,91 @@ test("release workflows publish the public bootstrap branch", () => {
     assert.doesNotMatch(content, /stable-bootstrap/);
   }
 });
+
+test(
+  "build-platform-bundle script creates app and managed node layout",
+  { skip: process.platform === "win32" ? "POSIX fake node fixture" : false },
+  () => {
+    const tempDir = makeTempDir(".tmp-release-script-");
+    try {
+      const fakeRepo = path.join(tempDir, "repo");
+      const outputDir = path.join(tempDir, "out");
+      const nodeRuntime = path.join(tempDir, "node-runtime");
+      fs.mkdirSync(path.join(fakeRepo, "dist", "app", "rin-install"), {
+        recursive: true,
+      });
+      fs.mkdirSync(path.join(fakeRepo, "dist", "app", "rin"), {
+        recursive: true,
+      });
+      fs.mkdirSync(path.join(fakeRepo, "extensions"), { recursive: true });
+      fs.mkdirSync(path.join(fakeRepo, "node_modules"), { recursive: true });
+      fs.writeFileSync(
+        path.join(fakeRepo, "package.json"),
+        JSON.stringify({ name: "@hoshinorin/rin", version: "1.2.3" }),
+      );
+      fs.writeFileSync(
+        path.join(fakeRepo, "dist", "app", "rin-install", "main.js"),
+        "console.log('install')\n",
+      );
+      fs.writeFileSync(
+        path.join(fakeRepo, "dist", "app", "rin", "main.js"),
+        "console.log('rin')\n",
+      );
+      fs.writeFileSync(
+        path.join(fakeRepo, "extensions", "README.md"),
+        "extensions\n",
+      );
+      fs.mkdirSync(path.join(nodeRuntime, "bin"), { recursive: true });
+      const nodePath = path.join(nodeRuntime, "bin", "node");
+      fs.writeFileSync(
+        nodePath,
+        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo v24.18.0; exit 0; fi\nexit 0\n',
+      );
+      fs.chmodSync(nodePath, 0o755);
+
+      const output = runReleaseScript("build-platform-bundle.ts", [
+        "--repo-root",
+        fakeRepo,
+        "--output",
+        outputDir,
+        "--platform",
+        "linux-x64",
+        "--node-runtime",
+        nodeRuntime,
+        "--node-version",
+        "24.18.0",
+      ]);
+      const result = JSON.parse(output);
+      assert.equal(result.platform, "linux-x64");
+      assert.equal(result.nodeVersion, "24.18.0");
+      assert.match(result.sha256, /^[a-f0-9]{64}$/);
+      assert.equal(
+        path.basename(result.bundlePath),
+        "rin-1.2.3-linux-x64.tar.gz",
+      );
+      const extractDir = path.join(tempDir, "extract");
+      fs.mkdirSync(extractDir, { recursive: true });
+      execFileSync("tar", ["-xzf", result.bundlePath, "-C", extractDir]);
+      const bundleRoot = path.join(extractDir, "rin-1.2.3-linux-x64");
+      for (const relativePath of [
+        path.join("dist", "app", "rin-install", "main.js"),
+        path.join("dist", "app", "rin", "main.js"),
+        "extensions",
+        "node_modules",
+        "package.json",
+        path.join("runtime", "node", "current", "bin", "node"),
+      ]) {
+        assert.equal(
+          fs.existsSync(path.join(bundleRoot, relativePath)),
+          true,
+          relativePath,
+        );
+      }
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("export-bootstrap-branch script exports bootstrap payload", () => {
   const tempDir = makeTempDir(".tmp-bootstrap-export-");

@@ -60,6 +60,47 @@ async function createSourceArchive(tempDir) {
   return archivePath;
 }
 
+async function createPlatformBundleArchive(tempDir) {
+  const bundleRoot = path.join(tempDir, "rin-platform-bundle");
+  const nodePath = path.join(
+    bundleRoot,
+    "runtime",
+    "node",
+    "current",
+    "bin",
+    "node",
+  );
+  await fs.mkdir(path.dirname(nodePath), { recursive: true });
+  await fs.mkdir(path.join(bundleRoot, "dist", "app", "rin-install"), {
+    recursive: true,
+  });
+  await writeExecutable(
+    nodePath,
+    `#!/bin/sh
+echo "bundled-node:$PWD:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+if [ ! -f "$1" ]; then
+  echo "missing-entry:$PWD:$1" >>"$RIN_BOOTSTRAP_TEST_LOG"
+  exit 43
+fi
+exit 0
+`,
+  );
+  await fs.writeFile(
+    path.join(bundleRoot, "dist", "app", "rin-install", "main.js"),
+    "export {};\n",
+    "utf8",
+  );
+  const archivePath = path.join(tempDir, "rin-platform-bundle.tar.gz");
+  await execFileAsync("tar", [
+    "-czf",
+    archivePath,
+    "-C",
+    tempDir,
+    "rin-platform-bundle",
+  ]);
+  return archivePath;
+}
+
 async function createReleaseManifest(tempDir) {
   const manifestPath = path.join(tempDir, "release-manifest.json");
   await fs.writeFile(
@@ -266,6 +307,19 @@ exit 0
       path.join(fakeBin, "npm"),
       `#!/bin/sh
 exit 0
+`,
+    );
+    await writeExecutable(
+      path.join(fakeBin, "curl"),
+      `#!/bin/sh
+OUT=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '{"schemaVersion":2,"stable":{"version":"1.2.3"}}\n' >"$OUT"
 `,
     );
 
@@ -482,6 +536,100 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   assert.match(shell, /rin_git_ref_not_resolved/);
 });
 
+test("install wrapper can launch a platform bundle without system node or npm", async (t) => {
+  if (process.platform !== "linux" || process.arch !== "x64") {
+    t.skip("fixture targets linux-x64 bootstrap detection");
+    return;
+  }
+  await withTempDir(async (tempDir) => {
+    const archivePath = await createPlatformBundleArchive(tempDir);
+    const manifestPath = await createReleaseManifest(tempDir);
+    const assetsPath = path.join(tempDir, "release-assets.env");
+    const fakeBin = path.join(tempDir, "bin");
+    const logPath = path.join(tempDir, "invocations.log");
+    const workRoot = path.join(tempDir, "work");
+    await fs.mkdir(fakeBin, { recursive: true });
+    await fs.mkdir(workRoot, { recursive: true });
+    await fs.writeFile(logPath, "", "utf8");
+    await fs.writeFile(
+      assetsPath,
+      [
+        "RIN_ASSET_STABLE_LINUX_X64_URL='https://example.invalid/releases/rin-1.2.3-linux-x64.tar.gz'",
+        "RIN_ASSET_STABLE_LINUX_X64_VERSION='1.2.3'",
+        "RIN_ASSET_STABLE_LINUX_X64_BRANCH='stable'",
+        "RIN_ASSET_STABLE_LINUX_X64_REF='abc1234'",
+        "RIN_ASSET_STABLE_LINUX_X64_SOURCE_LABEL='stable 1.2.3'",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeExecutable(
+      path.join(fakeBin, "curl"),
+      `#!/bin/sh
+echo "curl:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+OUT=
+URL=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT=$2; shift 2 ;;
+    -*) shift ;;
+    *) URL=$1; shift ;;
+  esac
+done
+case "$URL" in
+  *scripts/bootstrap-entrypoint.sh) cp "$RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT" "$OUT" ;;
+  *release-manifest.json) cp "$RIN_BOOTSTRAP_TEST_MANIFEST" "$OUT" ;;
+  *release-assets.env) cp "$RIN_BOOTSTRAP_TEST_ASSETS" "$OUT" ;;
+  *) cp "$RIN_BOOTSTRAP_TEST_ARCHIVE" "$OUT" ;;
+esac
+`,
+    );
+    await writeExecutable(
+      path.join(fakeBin, "node"),
+      `#!/bin/sh
+echo "system-node:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+exit 42
+`,
+    );
+    await writeExecutable(
+      path.join(fakeBin, "npm"),
+      `#!/bin/sh
+echo "npm:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+exit 42
+`,
+    );
+
+    const env = {
+      ...process.env,
+      PATH: `${fakeBin}:/usr/bin:/bin`,
+      RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+      TMPDIR: workRoot,
+      RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
+      RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
+      RIN_BOOTSTRAP_TEST_ASSETS: assetsPath,
+      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+        rootDir,
+        "scripts",
+        "bootstrap-entrypoint.sh",
+      ),
+      RIN_BOOTSTRAP_TEST_LOG: logPath,
+    };
+
+    await runBootstrapWrapper("install.sh", [], env);
+
+    const log = await fs.readFile(logPath, "utf8");
+    assert.match(log, /release-assets\.env/);
+    assert.match(log, /rin-1\.2\.3-linux-x64\.tar\.gz/);
+    assert.match(
+      log,
+      /bundled-node:.*dist\/app\/rin-install\/main\.js --release-file /,
+    );
+    assert.doesNotMatch(log, /system-node:/);
+    assert.doesNotMatch(log, /npm:/);
+    assert.deepEqual(await fs.readdir(workRoot), []);
+  });
+});
+
 test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);
@@ -677,6 +825,12 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
     assert.equal(
       await fs
         .stat(path.join(bootstrapDir, "scripts", "bootstrap-entrypoint.sh"))
+        .then(() => true),
+      true,
+    );
+    assert.equal(
+      await fs
+        .stat(path.join(bootstrapDir, "release-assets.env"))
         .then(() => true),
       true,
     );

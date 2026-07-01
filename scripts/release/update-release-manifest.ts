@@ -22,6 +22,10 @@ function parseArgs(argv) {
     series: "",
     fromBetaVersion: "",
     promotionVersion: "",
+    assetPlatform: "",
+    assetUrl: "",
+    assetSha256: "",
+    assetNodeVersion: "",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -55,9 +59,21 @@ function parseArgs(argv) {
     } else if (arg === "--promotion-version") {
       args.promotionVersion = argValue(argv, index, arg);
       index += 1;
+    } else if (arg === "--asset-platform") {
+      args.assetPlatform = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--asset-url") {
+      args.assetUrl = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--asset-sha256") {
+      args.assetSha256 = argValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--asset-node-version") {
+      args.assetNodeVersion = argValue(argv, index, arg);
+      index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: npx tsx scripts/release/update-release-manifest.ts --channel stable|beta|nightly --version <value> [--ref <sha>] [--branch <name>] [--series <major.minor>] [--from-beta-version <value>] [--promotion-version <x.y.z>] [--package-name <name>] [--repo-url <url>] [--manifest <path>]",
+        "Usage: npx tsx scripts/release/update-release-manifest.ts --channel stable|beta|nightly --version <value> [--ref <sha>] [--branch <name>] [--series <major.minor>] [--from-beta-version <value>] [--promotion-version <x.y.z>] [--asset-platform <os-arch> --asset-url <url> --asset-sha256 <sha256>] [--asset-node-version <version>] [--package-name <name>] [--repo-url <url>] [--manifest <path>]",
       );
       process.exit(0);
     } else {
@@ -102,6 +118,22 @@ function githubCodeloadRepoPath(repoUrl) {
   } catch {
     return "";
   }
+}
+
+function applyPlatformAsset(entry, args) {
+  const platform = trim(args.assetPlatform);
+  const bundleUrl = trim(args.assetUrl);
+  if (!platform && !bundleUrl) return;
+  if (!platform || !bundleUrl)
+    throw new Error("asset_requires_platform_and_url");
+  entry.assets ||= {};
+  entry.assets[platform] = {
+    bundleUrl,
+    ...(trim(args.assetSha256) ? { sha256: trim(args.assetSha256) } : {}),
+    ...(trim(args.assetNodeVersion)
+      ? { nodeVersion: trim(args.assetNodeVersion) }
+      : {}),
+  };
 }
 
 function buildGitHubRefArchiveUrl(repoUrl, ref) {
@@ -174,6 +206,8 @@ if (channel === "stable") {
       ? { promotedFromBetaVersion: trim(args.fromBetaVersion) }
       : {}),
   };
+  applyPlatformAsset(manifest.stable, args);
+  applyPlatformAsset(manifest.stable.versions[version], args);
 } else if (channel === "beta") {
   manifest.beta.version = version;
   manifest.beta.ref = ref;
@@ -183,6 +217,7 @@ if (channel === "stable") {
     trim(manifest.beta.promotionVersion) ||
     version.replace(/-.*/, "") ||
     version;
+  applyPlatformAsset(manifest.beta, args);
 } else {
   manifest.nightly.version = version;
   manifest.nightly.ref = ref;
@@ -192,6 +227,7 @@ if (channel === "stable") {
     trim(manifest.train.nightlyBranch) ||
     "main";
   manifest.nightly.archiveUrl = buildGitHubRefArchiveUrl(repoUrl, ref);
+  applyPlatformAsset(manifest.nightly, args);
 }
 
 writeJson(manifestPath, manifest);

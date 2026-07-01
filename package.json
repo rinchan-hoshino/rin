@@ -27,6 +27,7 @@
     "release:manifest": "tsx scripts/release/update-release-manifest.ts",
     "release:changelog": "tsx scripts/release/verify-changelog.ts",
     "release:bootstrap": "tsx scripts/release/export-bootstrap-branch.ts",
+    "release:bundle": "tsx scripts/release/build-platform-bundle.ts",
     "prepare": "tsx scripts/install-git-hooks.ts",
     "test": "npm run test:unit && npm run test:e2e",
     "test:release": "node --import tsx --test --test-concurrency=4 tests/unit/installer-modules.test.ts tests/unit/rin-cli.test.ts tests/unit/rpc-and-shared.test.ts tests/e2e/bootstrap-entrypoint.test.ts tests/e2e/install-to-tui-user-flow.test.ts tests/unit/release.test.ts tests/e2e/release-scripts.test.ts",

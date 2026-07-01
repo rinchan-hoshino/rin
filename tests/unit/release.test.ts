@@ -245,6 +245,51 @@ test("resolveReleaseRequest resolves stable beta nightly and git sources", () =>
     },
   );
 
+  const assetManifest = {
+    ...manifest,
+    stable: {
+      ...manifest.stable,
+      assets: {
+        "linux-x64": {
+          bundleUrl: "https://example.com/stable-1.2.3-linux-x64.tar.gz",
+        },
+      },
+      versions: {
+        "1.2.2": {
+          archiveUrl: "https://example.com/stable-1.2.2.tgz",
+          ref: "oldstable",
+        },
+        "1.2.1": {
+          archiveUrl: "https://example.com/stable-1.2.1.tgz",
+          ref: "olderstable",
+          assets: {
+            "linux-x64": {
+              bundleUrl: "https://example.com/stable-1.2.1-linux-x64.tar.gz",
+            },
+          },
+        },
+      },
+    },
+  };
+  assert.deepEqual(
+    release.resolveReleaseRequest(assetManifest, { channel: "stable" }).assets,
+    assetManifest.stable.assets,
+  );
+  assert.equal(
+    release.resolveReleaseRequest(assetManifest, {
+      channel: "stable",
+      version: "1.2.2",
+    }).assets,
+    undefined,
+  );
+  assert.deepEqual(
+    release.resolveReleaseRequest(assetManifest, {
+      channel: "stable",
+      version: "1.2.1",
+    }).assets,
+    assetManifest.stable.versions["1.2.1"].assets,
+  );
+
   assert.deepEqual(
     release.resolveReleaseRequest(manifest, { channel: "beta" }),
     {

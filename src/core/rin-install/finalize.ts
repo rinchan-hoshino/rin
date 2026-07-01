@@ -7,6 +7,7 @@ import {
   currentInstalledReleaseName,
   ensureDir,
   publishInstalledRuntime,
+  publishManagedNodeRuntime,
   pruneInstalledReleases,
   readInstallerJson,
   readJsonFile,
@@ -184,6 +185,13 @@ async function applyInstalledRuntime(
         useElevatedWrite,
       )
     : [];
+  const managedNodeRuntime = publishManagedNodeRuntime(
+    sourceRoot,
+    installDir,
+    targetUser,
+    useElevatedWrite,
+    { findSystemUser },
+  );
   if (manageDaemon) {
     refreshManagedServiceFiles(
       targetUser,
@@ -380,6 +388,7 @@ async function applyInstalledRuntime(
     written,
     installerManifest,
     publishedRuntime,
+    managedNodeRuntime,
     installedDocs,
     installedDocsDir: installedDocs.rin,
     prunedReleases,

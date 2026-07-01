@@ -7,6 +7,7 @@ import {
   captureCommandAsUser,
   ensureDir,
   installedRuntimeNodeCommandArgs,
+  installedRuntimeNodePathDirs,
   installedRuntimePathValue,
   runCommandAsUser,
   runPrivileged,
@@ -149,8 +150,11 @@ function resolveDaemonLaunchContext(
   return {
     targetHome,
     daemonEntry: resolveDaemonEntryForInstall(installDir),
-    runtimePath: installedRuntimePathValue(targetHome),
-    nodeCommandArgs: installedRuntimeNodeCommandArgs(),
+    runtimePath: installedRuntimePathValue(
+      targetHome,
+      installedRuntimeNodePathDirs({ installDir }),
+    ),
+    nodeCommandArgs: installedRuntimeNodeCommandArgs({ installDir }),
   };
 }
 
