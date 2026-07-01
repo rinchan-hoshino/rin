@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
@@ -97,49 +96,6 @@ test("writeLaunchersForUser uses the managed node runtime when present", async (
   const rinScript = await fs.readFile(launchers.rinPath, "utf8");
   assert.ok(rinScript.includes(`'${nodePath}'`));
   assert.equal(rinScript.includes("'/usr/bin/env' 'node'"), false);
-
-  await fs.rm(home, { recursive: true, force: true });
-});
-
-test("writeLaunchersForUser writes a sourceable POSIX env file", async () => {
-  const home = await fs.mkdtemp(path.join(tempBaseDir, "rin-env-home-"));
-  const installDir = path.join(home, "runtime-rin");
-  const nodePath = path.join(
-    installDir,
-    "runtime",
-    "node",
-    "current",
-    "bin",
-    "node",
-  );
-  await fs.mkdir(path.dirname(nodePath), { recursive: true });
-  await fs.writeFile(nodePath, "#!/bin/sh\n", "utf8");
-  await fs.chmod(nodePath, 0o755);
-
-  const launchers = fsUtils.writeLaunchersForUser(
-    "demo",
-    installDir,
-    () => home,
-    { platform: "linux" },
-  );
-  assert.equal(launchers.envPath, path.join(home, ".rin", "env"));
-  const envFile = await fs.readFile(launchers.envPath, "utf8");
-  assert.match(envFile, /Rin environment/);
-  assert.match(envFile, /case ":\$\{PATH:-\}:" in/);
-  assert.doesNotMatch(envFile, /\.bashrc|\.profile|\.zshrc/);
-
-  const output = execFileSync(
-    "sh",
-    [
-      "-c",
-      `PATH=/usr/bin:/bin; . '${launchers.envPath}'; . '${launchers.envPath}'; printf '%s\\n' "$PATH"; command -v rin`,
-    ],
-    { encoding: "utf8" },
-  )
-    .trim()
-    .split("\n");
-  assert.equal(output[0], `${path.join(home, ".local", "bin")}:/usr/bin:/bin`);
-  assert.equal(output[1], launchers.rinPath);
 
   await fs.rm(home, { recursive: true, force: true });
 });

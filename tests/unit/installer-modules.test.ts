@@ -36,18 +36,6 @@ const finalize = await import(
   ).href
 );
 
-test("README POSIX install command sources Rin env to refresh current shell PATH once", async () => {
-  const readme = await fs.readFile(path.join(rootDir, "README.md"), "utf8");
-  const linuxSection = readme.slice(
-    readme.indexOf("### Linux and macOS"),
-    readme.indexOf("### Windows"),
-  );
-  assert.match(linuxSection, /curl -fsSL .+install\.sh \| sh/);
-  assert.match(linuxSection, /&& \. "\$HOME\/\.rin\/env"/);
-  assert.doesNotMatch(linuxSection, /&& export PATH=/);
-  assert.doesNotMatch(linuxSection, /\.bashrc|\.profile|\.zshrc/);
-});
-
 test("finalize uses a 30 second default daemon readiness timeout", () => {
   assert.equal(finalize.defaultDaemonReadyTimeoutMs(), 30_000);
 });
