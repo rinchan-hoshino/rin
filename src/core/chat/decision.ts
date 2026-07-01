@@ -71,7 +71,38 @@ async function adapterConfirmsOnlyOwnerUsers(
   return false;
 }
 
-async function getPrivateLikeGroupMemberCount(
+const PRIVATE_LIKE_GROUP_MEMBER_COUNT_CACHE_TTL_MS = 10 * 60 * 1000;
+const privateLikeGroupMemberCountCache = new Map<
+  string,
+  { value: number; expiresAt: number }
+>();
+
+function privateLikeGroupMemberCountCacheKey(
+  session: any,
+  platform: string,
+  chatId: string,
+) {
+  const botId = safeString(
+    session?.selfId || session?.bot?.selfId || "",
+  ).trim();
+  return [platform, botId, chatId].map((part) => safeString(part)).join("\0");
+}
+
+function hasPrivateLikeGroupMemberCountProvider(
+  session: any,
+  platform: string,
+) {
+  const internal = session?.bot?.internal;
+  return (
+    typeof session?.bot?.getGuildMemberCount === "function" ||
+    (platform === "telegram" &&
+      typeof internal?.getChatMemberCount === "function") ||
+    (platform === "onebot" && typeof internal?.getGroupInfo === "function") ||
+    (platform === "lark" && typeof internal?.getChat === "function")
+  );
+}
+
+async function fetchPrivateLikeGroupMemberCount(
   session: any,
   platform: string,
   chatId: string,
@@ -110,6 +141,31 @@ async function getPrivateLikeGroupMemberCount(
     }
   } catch {}
   return 0;
+}
+
+async function getPrivateLikeGroupMemberCount(
+  session: any,
+  platform: string,
+  chatId: string,
+) {
+  if (!hasPrivateLikeGroupMemberCountProvider(session, platform)) return 0;
+
+  const key = privateLikeGroupMemberCountCacheKey(session, platform, chatId);
+  const now = Date.now();
+  const cached = privateLikeGroupMemberCountCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.value;
+  if (cached) privateLikeGroupMemberCountCache.delete(key);
+
+  const value = Number(
+    await fetchPrivateLikeGroupMemberCount(session, platform, chatId),
+  );
+  if (Number.isFinite(value) && value > 0) {
+    privateLikeGroupMemberCountCache.set(key, {
+      value,
+      expiresAt: now + PRIVATE_LIKE_GROUP_MEMBER_COUNT_CACHE_TTL_MS,
+    });
+  }
+  return value;
 }
 
 function normalizeTrustForDecision(value: any) {

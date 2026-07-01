@@ -142,6 +142,34 @@ test("chat decision lets Feishu owner-only groups skip mention without changing 
   assert.equal(result.trust, "OWNER");
 });
 
+test("chat decision caches private-like group member counts by platform bot and chat", async () => {
+  const calls: string[] = [];
+  const session = {
+    platform: "lark",
+    guildId: "oc_member_cache",
+    channelId: "oc_member_cache",
+    selfId: "ou_bot_cache",
+    userId: "ou_owner",
+    bot: {
+      selfId: "ou_bot_cache",
+      async getGuildMemberCount(chatId) {
+        calls.push(chatId);
+        return 2;
+      },
+    },
+    stripped: { content: "private note" },
+    elements: [{ type: "text", attrs: { content: "private note" } }],
+  };
+  const elements = [{ type: "text", attrs: { content: "private note" } }];
+
+  const first = await decision.shouldProcessText(session, elements, identity);
+  const second = await decision.shouldProcessText(session, elements, identity);
+
+  assert.equal(first.allow, true);
+  assert.equal(second.allow, true);
+  assert.deepEqual(calls, ["oc_member_cache"]);
+});
+
 test("chat decision lets Discord owner-only channels skip mention when the adapter proves no other users", async () => {
   const calls: Array<{ chatId: string; ownerUserIds: string[] }> = [];
   const result = await decision.shouldProcessText(
