@@ -851,7 +851,7 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   );
   assert.equal(
     prompt,
-    "Use /tmp/rin-agent/docs/rin/docs/self-improve-distillation.md as the self-improve distillation contract. Review /tmp/rin-agent/self_improve with the conversation above as evidence for this scoped pass. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. For correction-based or repeated-failure evidence, run a conflict retrieval pass over prompt baselines, reusable skills, memory-index indexes and transactions, and matching short-term records using the owner's exact trigger wording, behavior keywords, old abstraction names, and likely synonyms; read every plausible active hit and remove or rewrite active conflicting guidance before adding anything. Before reporting unchanged or success, replay the future trigger and confirm the cleaned library routes to one owner and no active hit still recommends the rejected behavior. Merge, move, prune, rewrite, delete, or add self-improve guidance only when it improves future behavior, routing, decisions, execution, recall, or removes guidance that would cause future mistakes. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, conflict-search closure, future-trigger replay, routed candidates, or one concise unchanged reason.",
+    "Use /tmp/rin-agent/docs/rin/docs/self-improve-distillation.md as the self-improve distillation contract. Review /tmp/rin-agent/self_improve with the conversation above as evidence for this scoped pass. Summarize reusable lessons learned and the user's working style as compact future-triggered guidance when the evidence shows a durable pattern. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. For correction-based or repeated-failure evidence, run a conflict retrieval pass over prompt baselines, reusable skills, memory-index indexes and transactions, and matching short-term records using the owner's exact trigger wording, behavior keywords, old abstraction names, and likely synonyms; read every plausible active hit and remove or rewrite active conflicting guidance before adding anything. Before reporting unchanged or success, replay the future trigger and confirm the cleaned library routes to one owner and no active hit still recommends the rejected behavior. Merge, move, prune, rewrite, delete, or add self-improve guidance only when it improves future behavior, routing, decisions, execution, recall, or removes guidance that would cause future mistakes. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, conflict-search closure, future-trigger replay, routed candidates, or one concise unchanged reason.",
   );
   assert.doesNotMatch(prompt, /Trigger:/);
   assert.doesNotMatch(prompt, /self_improve:periodic_review/);
@@ -861,6 +861,8 @@ test("self-improve review prompt keeps a strong manual-backed wrapper", () => {
   assert.match(prompt, /prompt baselines, reusable skills/);
   assert.match(prompt, /as the self-improve distillation contract/);
   assert.match(prompt, /evidence for this scoped pass/);
+  assert.match(prompt, /reusable lessons learned and the user's working style/);
+  assert.match(prompt, /compact future-triggered guidance/);
   assert.match(prompt, /Maintain the clean target state/);
   assert.match(
     prompt,
@@ -914,8 +916,12 @@ test("self-improve distillation manual codifies review rules", async () => {
     /change future behavior, routing, decisions, execution, preference application, recall, or remove guidance/,
   );
   assert.match(manual, /read the whole conversation/);
-  assert.match(manual, /owner preferences, workflows, and key knowledge/);
+  assert.match(
+    manual,
+    /reusable lessons learned, the user's working style, owner preferences, workflows, and key knowledge/,
+  );
   assert.match(manual, /Read beyond the owner's explicit requests/);
+  assert.match(manual, /lesson learned, the user's working style/);
   assert.match(manual, /workflows that worked, workflows that failed/);
   assert.match(manual, /pending decision in memory-index/);
   assert.match(manual, /user_profile.*stable facts only/);
@@ -943,11 +949,13 @@ test("self-improve distillation manual codifies review rules", async () => {
     manual,
     /only useful for lookup, store it as memory-index evidence rather than executable guidance/,
   );
+  assert.match(manual, /reusable lessons learned, working-style patterns/);
   assert.match(manual, /verified workflow shapes/);
   assert.match(manual, /procedures recovered through history lookup/);
   assert.match(manual, /verified through a live\/manual operation/);
   assert.match(manual, /memory-index does not carry the executable procedure/);
   assert.match(manual, /reusable workflow shapes/);
+  assert.match(manual, /working-style patterns, preferences/);
   assert.match(
     manual,
     /Create a new ordinary skill when the trigger is reusable/,
