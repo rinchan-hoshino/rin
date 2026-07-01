@@ -18,6 +18,8 @@ import {
   buildChatInboxRouting,
   serializeChatInboxSession,
 } from "./inbound-normalization.js";
+import { hasInboundChatMessageReplyBoundary } from "./chat-helpers.js";
+import { listChatMessages, type StoredChatMessage } from "./message-store.js";
 import { parseChatKey, readJsonFile } from "./support.js";
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
@@ -72,6 +74,8 @@ function failedDir(agentDir: string) {
 function itemFileName(itemId: string) {
   return `${itemId}.json`;
 }
+
+const RECOVERABLE_ACCEPTED_INBOX_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 export function buildChatInboxItem(input: {
   chatKey: string;
@@ -325,6 +329,140 @@ export function restoreProcessingChatInboxFiles(
     }
     const next = restoreChatInboxFile(agentDir, filePath, item);
     restored.push({ itemId: item.itemId, filePath: next.filePath });
+  }
+  return restored;
+}
+
+function chatMessageReceivedAtMs(record: StoredChatMessage) {
+  const receivedAt = Date.parse(safeString(record.receivedAt || ""));
+  if (Number.isFinite(receivedAt)) return receivedAt;
+  const platformTimestamp = Number(record.platformTimestamp);
+  return Number.isFinite(platformTimestamp) ? platformTimestamp : 0;
+}
+
+function hasExistingInboxFile(agentDir: string, itemId: string) {
+  const fileName = itemFileName(itemId);
+  const matches = (filePath: string) => {
+    const baseName = path.basename(filePath);
+    return baseName === fileName || baseName.startsWith(`${itemId}.`);
+  };
+  return [
+    ...listPendingChatInboxFiles(agentDir),
+    ...listProcessingChatInboxFiles(agentDir),
+    ...listJsonFiles(failedDir(agentDir)),
+  ].some(matches);
+}
+
+function storedChatMessageToInboxSession(record: StoredChatMessage) {
+  const text = safeString(
+    record.strippedContent || record.text || record.rawContent || "",
+  ).trim();
+  const timestamp = chatMessageReceivedAtMs(record) || Date.now();
+  const session: Record<string, any> = {
+    platform: safeString(record.platform).trim(),
+    selfId: safeString(record.botId).trim(),
+    channelId: safeString(record.chatId).trim(),
+    userId: safeString(record.userId).trim(),
+    messageId: safeString(record.messageId).trim(),
+    timestamp,
+    content: safeString(record.rawContent || record.text || text),
+    stripped: { content: text },
+    isDirect: record.chatType === "private",
+  };
+  const nickname = safeString(record.nickname).trim();
+  if (nickname) session.author = { name: nickname };
+  const chatName = safeString(record.chatName).trim();
+  if (chatName) session.channelName = chatName;
+  if (record.quote && typeof record.quote === "object") {
+    session.quote = Object.fromEntries(
+      Object.entries(record.quote).filter(([, value]) =>
+        Boolean(safeString(value).trim()),
+      ),
+    );
+  }
+  return session;
+}
+
+function storedChatMessageToInboxElements(record: StoredChatMessage) {
+  if (Array.isArray(record.elements) && record.elements.length) {
+    return cloneJson(record.elements);
+  }
+  const text = safeString(record.strippedContent || record.text || "").trim();
+  return text ? [{ type: "text", attrs: { content: text } }] : [];
+}
+
+function hasLaterHandledUserMessage(
+  agentDir: string,
+  record: StoredChatMessage,
+  messages: StoredChatMessage[],
+) {
+  const recordTime = chatMessageReceivedAtMs(record);
+  if (!recordTime) return false;
+  return messages.some((item) => {
+    if (item.role !== "user") return false;
+    if (item.chatKey !== record.chatKey) return false;
+    if (item.messageId === record.messageId) return false;
+    if (chatMessageReceivedAtMs(item) <= recordTime) return false;
+    return Boolean(
+      safeString(item.processedAt || "").trim() ||
+      hasInboundChatMessageReplyBoundary(
+        agentDir,
+        item.chatKey,
+        item.messageId,
+      ),
+    );
+  });
+}
+
+export function restoreOrphanedAcceptedChatInboxItems(
+  agentDir: string,
+  options: { nowMs?: number; maxAgeMs?: number; limit?: number } = {},
+) {
+  const restored: Array<{
+    itemId: string;
+    filePath: string;
+    chatKey: string;
+    messageId: string;
+  }> = [];
+  const nowMs = Number(options.nowMs || Date.now());
+  const maxAgeMs = Math.max(
+    0,
+    Number(options.maxAgeMs ?? RECOVERABLE_ACCEPTED_INBOX_MAX_AGE_MS),
+  );
+  const limit = Math.max(0, Number(options.limit || 0));
+  const messages = listChatMessages(agentDir);
+  for (const record of messages) {
+    if (limit > 0 && restored.length >= limit) break;
+    if (record.role !== "user") continue;
+    const chatKey = safeString(record.chatKey).trim();
+    const messageId = safeString(record.messageId).trim();
+    if (!chatKey || !parseChatKey(chatKey) || !messageId) continue;
+    const acceptedAtMs = Date.parse(safeString(record.acceptedAt || ""));
+    if (!Number.isFinite(acceptedAtMs)) continue;
+    if (maxAgeMs > 0 && nowMs - acceptedAtMs > maxAgeMs) continue;
+    if (safeString(record.processedAt || "").trim()) continue;
+    if (hasInboundChatMessageReplyBoundary(agentDir, chatKey, messageId)) {
+      continue;
+    }
+    if (hasLaterHandledUserMessage(agentDir, record, messages)) continue;
+    const itemId = hashKey(`${chatKey}\n${messageId}`);
+    if (hasExistingInboxFile(agentDir, itemId)) continue;
+    const item = buildChatInboxItem({
+      chatKey,
+      messageId,
+      session: storedChatMessageToInboxSession(record),
+      elements: storedChatMessageToInboxElements(record),
+    });
+    const next = writeChatInboxItem(
+      path.join(pendingDir(agentDir), itemFileName(item.itemId)),
+      item,
+    );
+    restored.push({
+      itemId: item.itemId,
+      filePath: next.filePath,
+      chatKey,
+      messageId,
+    });
   }
   return restored;
 }

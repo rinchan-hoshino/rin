@@ -66,6 +66,7 @@ import { appendChatLog } from "./chat-log.js";
 import {
   type ChatInboxItem,
   restoreChatInboxSession,
+  restoreOrphanedAcceptedChatInboxItems,
   restoreProcessingChatInboxFiles,
   touchChatInboxFile,
 } from "./inbox.js";
@@ -1292,6 +1293,14 @@ export async function startChatBridge(
   if (restoredInboxItems.length) {
     logger.warn(
       `chat inbox restored stranded processing items count=${restoredInboxItems.length}`,
+    );
+  }
+  const restoredOrphanedInboxItems = restoreOrphanedAcceptedChatInboxItems(
+    runtime.agentDir,
+  );
+  if (restoredOrphanedInboxItems.length) {
+    logger.warn(
+      `chat inbox restored orphaned accepted items count=${restoredOrphanedInboxItems.length}`,
     );
   }
 

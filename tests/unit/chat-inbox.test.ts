@@ -254,6 +254,137 @@ test("chat inbox restores stranded processing envelopes back to pending on start
   assert.ok(claimedPath.endsWith(`${restoredItem.itemId}.json`));
 });
 
+test("chat inbox restores orphaned accepted messages without a reply boundary", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const chatKey = "discord/1:room";
+  const acceptedAt = new Date("2026-07-01T05:04:54.000Z").toISOString();
+
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "discord",
+    botId: "1",
+    chatId: "room",
+    chatType: "group",
+    messageId: "lost-after-update",
+    role: "user",
+    receivedAt: new Date("2026-07-01T05:04:30.000Z").toISOString(),
+    platformTimestamp: 1782882270000,
+    userId: "owner",
+    nickname: "owner-name",
+    chatName: "office",
+    trust: "OWNER",
+    text: "continue after update",
+    rawContent: "continue after update",
+    strippedContent: "continue after update",
+    elements: [{ type: "text", attrs: { content: "continue after update" } }],
+    acceptedAt,
+    sessionFile: "managed/chat/recover.jsonl",
+  });
+
+  const restored = inbox.restoreOrphanedAcceptedChatInboxItems(agentDir, {
+    nowMs: Date.parse("2026-07-01T05:05:10.000Z"),
+  });
+
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].messageId, "lost-after-update");
+  const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
+  const item = inbox.readChatInboxItem(pendingPath);
+  assert.equal(item.chatKey, chatKey);
+  assert.equal(item.messageId, "lost-after-update");
+  assert.equal(item.session.platform, "discord");
+  assert.equal(item.session.selfId, "1");
+  assert.equal(item.session.channelId, "room");
+  assert.equal(item.session.userId, "owner");
+  assert.equal(item.session.stripped.content, "continue after update");
+  assert.deepEqual(item.elements, [
+    { type: "text", attrs: { content: "continue after update" } },
+  ]);
+});
+
+test("chat inbox restores multiple accepted unprocessed orphaned messages", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const chatKey = "discord/1:room";
+
+  for (const [messageId, receivedAt, text] of [
+    ["first-orphan", "2026-07-01T05:04:30.000Z", "first orphan"],
+    ["second-orphan", "2026-07-01T05:05:30.000Z", "second orphan"],
+  ] as const) {
+    saveChatMessage(agentDir, {
+      chatKey,
+      platform: "discord",
+      botId: "1",
+      chatId: "room",
+      chatType: "group",
+      messageId,
+      role: "user",
+      receivedAt: new Date(receivedAt).toISOString(),
+      userId: "owner",
+      text,
+      strippedContent: text,
+      elements: [{ type: "text", attrs: { content: text } }],
+      acceptedAt: new Date("2026-07-01T05:06:00.000Z").toISOString(),
+    });
+  }
+
+  const restored = inbox.restoreOrphanedAcceptedChatInboxItems(agentDir, {
+    nowMs: Date.parse("2026-07-01T05:06:10.000Z"),
+  });
+
+  assert.equal(restored.length, 2);
+  assert.deepEqual(restored.map((item) => item.messageId).sort(), [
+    "first-orphan",
+    "second-orphan",
+  ]);
+  const pending = inbox
+    .listPendingChatInboxFiles(agentDir)
+    .map((filePath) => inbox.readChatInboxItem(filePath)?.messageId)
+    .sort();
+  assert.deepEqual(pending, ["first-orphan", "second-orphan"]);
+});
+
+test("chat inbox does not restore orphaned accepted messages after a later handled user turn", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const chatKey = "discord/1:room";
+
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "discord",
+    botId: "1",
+    chatId: "room",
+    chatType: "group",
+    messageId: "stale-lost-after-update",
+    role: "user",
+    receivedAt: new Date("2026-07-01T05:04:30.000Z").toISOString(),
+    userId: "owner",
+    text: "stale work",
+    strippedContent: "stale work",
+    elements: [{ type: "text", attrs: { content: "stale work" } }],
+    acceptedAt: new Date("2026-07-01T05:04:54.000Z").toISOString(),
+  });
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "discord",
+    botId: "1",
+    chatId: "room",
+    chatType: "group",
+    messageId: "later-owner-message",
+    role: "user",
+    receivedAt: new Date("2026-07-01T05:15:16.000Z").toISOString(),
+    userId: "owner",
+    text: "where are you",
+    strippedContent: "where are you",
+    elements: [{ type: "text", attrs: { content: "where are you" } }],
+    processedAt: new Date("2026-07-01T05:15:45.000Z").toISOString(),
+  });
+
+  const restored = inbox.restoreOrphanedAcceptedChatInboxItems(agentDir, {
+    nowMs: Date.parse("2026-07-01T05:16:00.000Z"),
+  });
+
+  assert.equal(restored.length, 0);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
+});
+
 test("chat inbox keeps fresh processing envelopes until they become stale", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const session = {
