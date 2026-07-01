@@ -1,8 +1,9 @@
 import { readChatCommandResponses } from "../chat/command-responses.js";
 import { asArray } from "../json-utils.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
+import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
-import { renderCompactUsageReportForChat } from "../rin/usage.js";
+import { renderUsageReportForChat } from "../rin/usage.js";
 import { listBoundSessions } from "../session/factory.js";
 
 export function writeJsonLine(value: unknown) {
@@ -252,7 +253,11 @@ export function splitCommandArgs(text: string) {
   return args;
 }
 
-type BuiltinCommandResult = { handled: boolean; text?: string };
+type BuiltinCommandResult = {
+  handled: boolean;
+  text?: string;
+  parts?: ChatMessagePart[];
+};
 
 type ParsedBuiltinCommand = {
   command: string;
@@ -260,8 +265,11 @@ type ParsedBuiltinCommand = {
   argsText: string;
 };
 
-function handledText(text: string): BuiltinCommandResult {
-  return { handled: true, text };
+function handledText(
+  text: string,
+  parts?: ChatMessagePart[],
+): BuiltinCommandResult {
+  return { handled: true, text, ...(parts?.length ? { parts } : {}) };
 }
 
 function formatLabelValueLine(label: string, value: string) {
@@ -372,7 +380,8 @@ export async function runBuiltinCommand(
       if (!agentDir) {
         return handledText("Usage unavailable: missing Rin data directory.");
       }
-      return handledText(await renderCompactUsageReportForChat(agentDir));
+      const report = await renderUsageReportForChat(agentDir);
+      return handledText(report.text, report.parts);
     }
     case "changelog": {
       const { getChangelogPath, parseChangelog }: any =

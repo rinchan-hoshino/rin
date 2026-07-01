@@ -390,9 +390,16 @@ test("runBuiltinCommand shows compact usage status", async () => {
       /Gemini CLI\s+gemini@example\.test/,
     );
     assert.match(String(result.text || ""), /quota\s+temporarily unavailable/);
-    assert.match(String(result.text || ""), /recent usage/);
-    assert.match(String(result.text || ""), /\b100\b/);
+    assert.match(String(result.text || ""), /attached image/);
+    assert.doesNotMatch(String(result.text || ""), /recent usage/);
     assert.doesNotMatch(String(result.text || ""), /overview/);
+    const imagePart = result.parts?.find((part: any) => part?.type === "image");
+    assert.equal(imagePart?.mimeType, "image/png");
+    const image = fs.readFileSync(String(imagePart?.path || ""));
+    assert.deepEqual(
+      [...image.subarray(0, 8)],
+      [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+    );
   } finally {
     fs.rmSync(agentDir, { recursive: true, force: true });
   }

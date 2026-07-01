@@ -803,6 +803,52 @@ test("chat controller does not send working notices before deterministic non-com
   }
 });
 
+test("chat controller can deliver builtin command image parts", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery);
+    this.stagedDelivery = null;
+  };
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "usage-command-parts.jsonl",
+  );
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-usage",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-usage",
+    }),
+    runCommand: async () => ({
+      handled: true,
+      text: "usage summary",
+      parts: [
+        { type: "text", text: "usage summary" },
+        { type: "image", path: "/tmp/usage.png", mimeType: "image/png" },
+      ],
+      sessionFile,
+    }),
+    switchSession: async () => {},
+  };
+
+  await controller.runCommand("/usage", "m-usage", "m-usage");
+
+  assert.equal(deliveries[0].type, "parts_delivery");
+  assert.deepEqual(deliveries[0].parts, [
+    { type: "quote", id: "m-usage" },
+    { type: "text", text: "usage summary" },
+    { type: "image", path: "/tmp/usage.png", mimeType: "image/png" },
+  ]);
+});
+
 test("chat controller starts command reactions from frontend working status", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];

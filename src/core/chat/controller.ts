@@ -54,6 +54,7 @@ import {
 import {
   enqueueChatOutboxPayload,
   readChatOutboxItemById,
+  type ChatMessagePart,
 } from "../rin-lib/chat-outbox.js";
 import { drainChatOutbox } from "./boot.js";
 import { listChatMessages } from "./message-store.js";
@@ -109,6 +110,17 @@ type ChatTextDelivery = {
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
+
+type ChatPartsDelivery = {
+  type: "parts_delivery";
+  chatKey: string;
+  deliveryKind?: "final" | "interim" | "passive_notice";
+  parts: ChatMessagePart[];
+  sessionFile?: string;
+  sessionBinding?: "conversation";
+};
+
+type ChatAssistantDelivery = ChatTextDelivery | ChatPartsDelivery;
 
 type TodoNoticeRenderMode = "native" | "markdown" | "characters";
 
@@ -259,7 +271,7 @@ export class ChatController {
   activeCommandTurnInput: ChatTurnTarget | null = null;
   pendingSteeredDeliveryTargets: ChatTurnTarget[] = [];
   backendAcceptedIncomingMessageId = "";
-  stagedDelivery: ChatTextDelivery | null = null;
+  stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
   awaitingTurnSettle = false;
   externalWorkingVisible = false;
@@ -1023,22 +1035,20 @@ export class ChatController {
 
   private buildAssistantDelivery(input: {
     text?: string;
+    parts?: ChatMessagePart[];
     replyToMessageId?: string;
     sessionFile?: string;
     bindSession?: boolean;
-  }): ChatTextDelivery {
+  }): ChatAssistantDelivery {
     const text = safeString(
       input.text ?? this.driver.latestAssistantText,
     ).trim();
-    if (!text) throw new Error("chat_final_assistant_text_missing");
-    return {
-      type: "text_delivery",
-      chatKey: this.chatKey,
-      deliveryKind: "final",
-      text,
-      replyToMessageId:
-        safeString(input.replyToMessageId || "").trim() || undefined,
-      ...(input.bindSession === false
+    const parts = Array.isArray(input.parts) ? input.parts.filter(Boolean) : [];
+    if (!text && !parts.length) {
+      throw new Error("chat_final_assistant_text_missing");
+    }
+    const sessionPayload =
+      input.bindSession === false
         ? {}
         : {
             sessionFile: toStoredSessionFile(
@@ -1046,12 +1056,35 @@ export class ChatController {
               input.sessionFile || this.currentSessionFile(),
             ),
             sessionBinding: "conversation" as const,
-          }),
+          };
+    const replyToMessageId = safeString(input.replyToMessageId || "").trim();
+    if (parts.length) {
+      return {
+        type: "parts_delivery",
+        chatKey: this.chatKey,
+        deliveryKind: "final",
+        parts: [
+          ...(replyToMessageId
+            ? [{ type: "quote" as const, id: replyToMessageId }]
+            : []),
+          ...parts,
+        ],
+        ...sessionPayload,
+      };
+    }
+    return {
+      type: "text_delivery",
+      chatKey: this.chatKey,
+      deliveryKind: "final",
+      text,
+      replyToMessageId: replyToMessageId || undefined,
+      ...sessionPayload,
     };
   }
 
   private stageAssistantDelivery(input: {
     text?: string;
+    parts?: ChatMessagePart[];
     replyToMessageId?: string;
     sessionFile?: string;
     bindSession?: boolean;
@@ -1059,7 +1092,6 @@ export class ChatController {
     const text = safeString(
       input.text ?? this.driver.latestAssistantText,
     ).trim();
-    if (!text) throw new Error("chat_final_assistant_text_missing");
     this.stagedDelivery = this.buildAssistantDelivery(input);
     return text;
   }
@@ -1222,6 +1254,7 @@ export class ChatController {
 
   private async deliverAssistantReply(input: {
     text?: string;
+    parts?: ChatMessagePart[];
     replyToMessageId?: string;
     incomingMessageId?: string;
     sessionFile?: string;
@@ -1240,7 +1273,7 @@ export class ChatController {
           this.chatKey,
           incomingMessageId,
           replyToMessageId,
-          sha256Hex(text),
+          sha256Hex(JSON.stringify({ text, parts: input.parts || [] })),
         ])
       : "";
     const id = idempotencyKey ? `final-${sha256Hex(idempotencyKey)}` : "";
@@ -1581,10 +1614,14 @@ export class ChatController {
       }
 
       const text = safeString(data?.text || "").trim();
-      if (!text) throw new Error("chat_command_text_missing");
-      data = { ...data, text };
+      const parts = Array.isArray(data?.parts)
+        ? (data.parts.filter(Boolean) as ChatMessagePart[])
+        : [];
+      if (!text && !parts.length) throw new Error("chat_command_text_missing");
+      data = { ...data, text, ...(parts.length ? { parts } : {}) };
       await this.deliverAssistantReply({
         text,
+        parts,
         replyToMessageId: replyToMessageId || undefined,
         incomingMessageId,
         sessionFile: data?.sessionFile,

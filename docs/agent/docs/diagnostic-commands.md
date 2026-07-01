@@ -13,7 +13,7 @@ These commands have two surfaces:
 | ------------------ | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | `rin doctor`       | Whole Rin health: daemon socket, managed service, chat bridge readiness, worker count, and service logs.    | `systemctl`-style health page plus recent logs.                                            | `rin doctor --json` returns the complete health snapshot.                                                             |
 | `rin status`       | Session work state: currently running daemon workers and scheduler activity.                                | Pi-resume-list-style live TUI; `--once` prints a static snapshot.                          | `rin status --json`, RPC `daemon_activity`, or SDK `rin.daemon.activity()` returns the full daemon activity snapshot. |
-| `rin usage`        | Subscription/API usage: provider quota, token/cost history, remaining windows, reset times, and aggregates. | Codex-like quota and recent 5h/1d/7d usage summary.                                        | Filterable reports through `--from`, `--to`, `--group-by`, `--filter`, `--events`, `--dimensions`, `--include-zero`.  |
+| `rin usage`        | Subscription/API usage: provider quota, token/cost history, remaining windows, reset times, and aggregates. | Codex-like quota plus a 7d 3h-bucket text line chart.                                      | Filterable reports through `--from`, `--to`, `--group-by`, `--filter`, `--events`, `--dimensions`, `--include-zero`.  |
 | `rin self-improve` | Self-evolution usage: distillation outcomes, changed artifacts, failures, and historical stats.             | Pi-resume-list-style TUI over recent self-improve runs; `--once`/`--id` print static text. | `rin self-improve --json` plus filters returns complete records and stats.                                            |
 
 `memory` is not the self-evolution command name. In Rin terminology, memory means original evidence and retrieval. Use `rin self-improve` for distilled self-improve activity.
@@ -87,7 +87,7 @@ Frontend:
 rin usage
 ```
 
-The default view shows configured accounts/quota and the recent 5h, 1d, and 7d token/cost summary.
+The default view shows configured accounts/quota and a recent 7d line chart using 3-hour buckets. Use backend filters when exact 5h/1d/7d tables or grouped totals are needed.
 
 Backend examples:
 

@@ -11,6 +11,7 @@ import {
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
 import { nowIso } from "../time-utils.js";
 import { formatReportTime, renderReportTable } from "./report-format.js";
+import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
 import type { TokenUsageQueryOptions } from "../token-usage/store.js";
 import {
   formatProviderModelLabel,
@@ -19,6 +20,17 @@ import {
   queryTokenUsageAggregate,
   queryTokenUsageEvents,
 } from "../token-usage/store.js";
+import {
+  buildUsageTrendSeries,
+  renderUsageTrendTextChart,
+  writeUsageTrendChartImage,
+} from "./usage-chart.js";
+
+export {
+  buildUsageTrendSeries,
+  renderUsageTrendTextChart,
+  writeUsageTrendChartImage,
+} from "./usage-chart.js";
 
 export type UsageCliOptions = {
   from?: string;
@@ -128,6 +140,8 @@ function printUsageHelp() {
       "  --dimensions          list supported dimensions",
       "  --json                print an agent backend JSON report with quota and queried data",
       "  --help                show this help",
+      "",
+      "Default view: quota plus a compact 7d line chart (3h buckets).",
       "",
       "Examples:",
       "  rin usage",
@@ -886,46 +900,22 @@ function queryRecentMessageEvents(
   }).filter((row) => Number(row.total_tokens || 0) > 0);
 }
 
-function usageWindowStart(amountMs: number) {
-  return new Date(Date.now() - amountMs).toISOString();
-}
-
-function queryUsageWindow(agentDir: string, label: string, amountMs: number) {
-  const overview = getTokenUsageOverview({
-    agentDir,
-    from: usageWindowStart(amountMs),
-    filters: [],
-  });
-  return {
-    window: label,
-    events: formatInt(overview.total_events),
-    sessions: formatInt(overview.session_count),
-    input: formatInt(overview.input_tokens),
-    output: formatInt(overview.output_tokens),
-    total: formatInt(overview.total_tokens),
-    cost: `$${formatCost(overview.cost_total)}`,
-  };
-}
-
 function renderUsageFrontendReport(
   agentDir: string,
   providerQuotas?: ProviderQuotaStatus[],
+  options: { includeTrendChart?: boolean } = {},
 ) {
-  return [
+  const sections = [
     `Rin usage @ ${formatReportTime(nowIso())}`,
     renderProviderQuotas(providerQuotas),
-    "",
-    "recent usage",
-    renderReportTable(
-      [
-        queryUsageWindow(agentDir, "5h", 5 * 3_600_000),
-        queryUsageWindow(agentDir, "1d", 24 * 3_600_000),
-        queryUsageWindow(agentDir, "7d", 7 * 24 * 3_600_000),
-      ],
-      ["window", "events", "sessions", "input", "output", "total", "cost"],
-      { indent: "  " },
-    ),
-  ].join("\n");
+  ];
+  if (options.includeTrendChart !== false) {
+    sections.push(
+      "",
+      renderUsageTrendTextChart(buildUsageTrendSeries(agentDir)),
+    );
+  }
+  return sections.join("\n");
 }
 
 function isUsageBackendRequest(options: UsageCliOptions) {
@@ -1063,9 +1053,25 @@ export function renderUsageReport(
 export async function renderCompactUsageReportForChat(
   agentDir: string,
 ): Promise<string> {
-  const options = createDefaultUsageOptions();
   const providerQuotas = await loadProviderQuotaStatuses(agentDir);
-  return renderUsageReport(agentDir, options, providerQuotas);
+  return renderUsageFrontendReport(agentDir, providerQuotas, {
+    includeTrendChart: false,
+  });
+}
+
+export async function renderUsageReportForChat(agentDir: string): Promise<{
+  text: string;
+  parts: ChatMessagePart[];
+}> {
+  const text = `${await renderCompactUsageReportForChat(agentDir)}\n\n7d usage trend: attached image (3h buckets).`;
+  const imagePath = writeUsageTrendChartImage(agentDir);
+  return {
+    text,
+    parts: [
+      { type: "text", text },
+      { type: "image", path: imagePath, mimeType: "image/png" },
+    ],
+  };
 }
 
 async function renderUsageReportForCli(

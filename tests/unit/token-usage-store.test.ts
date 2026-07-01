@@ -663,6 +663,164 @@ test("usage report keeps provider_model labels consistent in raw event tables", 
   });
 });
 
+test("usage trend series fills 7d 3h buckets for line charts", async () => {
+  await withTempRoot(async (root) => {
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-trend-outside-window",
+        timestamp: "2026-04-10T12:05:00.000Z",
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        totalTokens: 999,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-trend-first-partial",
+        timestamp: "2026-04-10T12:20:00.000Z",
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        totalTokens: 5,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-trend-a",
+        timestamp: "2026-04-10T15:20:00.000Z",
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        totalTokens: 10,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-trend-b",
+        timestamp: "2026-04-10T17:40:00.000Z",
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        totalTokens: 20,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-trend-c",
+        timestamp: "2026-04-11T00:00:00.000Z",
+        sessionId: "s2",
+        eventType: "message_end",
+        messageRole: "assistant",
+        totalTokens: 70,
+      },
+      root,
+    );
+
+    const series = usageCli.buildUsageTrendSeries(root, {
+      now: "2026-04-17T12:10:00.000Z",
+      days: 7,
+      bucketHours: 3,
+    });
+
+    assert.equal(series.bucketHours, 3);
+    assert.equal(series.points.length, 57);
+    assert.equal(series.points[0].timestamp, "2026-04-10T12:00:00.000Z");
+    assert.equal(series.points[0].total_tokens, 5);
+    assert.equal(
+      series.points.find(
+        (point) => point.timestamp === "2026-04-10T15:00:00.000Z",
+      )?.total_tokens,
+      30,
+    );
+    assert.equal(
+      series.points.find(
+        (point) => point.timestamp === "2026-04-11T00:00:00.000Z",
+      )?.total_tokens,
+      70,
+    );
+    assert.equal(series.points[2].total_tokens, 0);
+  });
+});
+
+test("usage report renders a compact 7d text line chart", async () => {
+  await withTempRoot(async (root) => {
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-text-trend-a",
+        timestamp: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        totalTokens: 10,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-text-trend-b",
+        timestamp: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        totalTokens: 80,
+      },
+      root,
+    );
+
+    const report = usageCli.renderUsageReport(root, {
+      groupBy: [],
+      filters: [],
+      limit: 20,
+      orderBy: "total_tokens",
+      direction: "desc",
+      events: false,
+      includeZero: false,
+      dimensions: false,
+      json: false,
+      help: false,
+    });
+
+    assert.match(report, /7d usage trend/);
+    assert.match(report, /3h buckets/);
+    assert.match(report, /[╱╲─•]/);
+    assert.doesNotMatch(report, /recent usage/);
+  });
+});
+
+test("usage trend image writer produces a PNG chart artifact", async () => {
+  await withTempRoot(async (root) => {
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-png-trend",
+        timestamp: "2026-04-16T12:00:00.000Z",
+        sessionId: "s1",
+        eventType: "message_end",
+        messageRole: "assistant",
+        totalTokens: 100,
+      },
+      root,
+    );
+
+    const imagePath = usageCli.writeUsageTrendChartImage(root, {
+      now: "2026-04-17T12:10:00.000Z",
+      days: 7,
+      bucketHours: 3,
+    });
+    const image = await fs.readFile(imagePath);
+
+    assert.match(path.basename(imagePath), /^usage-7d-.*\.png$/);
+    assert.deepEqual(
+      [...image.subarray(0, 8)],
+      [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+    );
+  });
+});
+
 test("usage dashboard renders Codex subscription quota and token charts", async () => {
   await withTempRoot(async (root) => {
     store.appendTokenTelemetryEvent(
@@ -733,10 +891,11 @@ test("usage dashboard renders Codex subscription quota and token charts", async 
     assert.match(report, /weekly\s+█+░+ 40% left · reset/);
     assert.match(report, /Gemini CLI\s+gemini@example\.test/);
     assert.match(report, /temporarily unavailable \(quota unavailable\)/);
-    assert.match(report, /recent usage/);
-    assert.match(report, /5h/);
-    assert.match(report, /1d/);
-    assert.match(report, /7d/);
+    assert.match(report, /7d usage trend/);
+    assert.match(report, /3h buckets/);
+    assert.doesNotMatch(report, /recent usage/);
+    assert.doesNotMatch(report, /\b5h\b/);
+    assert.doesNotMatch(report, /\b1d\b/);
 
     const backendJson = JSON.parse(
       usageCli.renderUsageReport(
