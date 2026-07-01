@@ -183,9 +183,11 @@ const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-platform-bundle-"));
 try {
   const bundleRoot = path.join(workDir, bundleName);
   fs.mkdirSync(bundleRoot, { recursive: true });
-  for (const name of ["dist", "extensions", "node_modules", "package.json"]) {
+  for (const name of ["dist", "node_modules", "package.json"]) {
     copyEntry(repoRoot, bundleRoot, name);
   }
+  copyEntry(repoRoot, bundleRoot, "extensions");
+  fs.mkdirSync(path.join(bundleRoot, "extensions"), { recursive: true });
   fs.writeFileSync(
     path.join(bundleRoot, "package.json"),
     `${JSON.stringify(packageJson, null, 2)}\n`,

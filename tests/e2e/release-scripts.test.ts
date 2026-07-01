@@ -694,7 +694,6 @@ test(
       fs.mkdirSync(path.join(fakeRepo, "dist", "app", "rin"), {
         recursive: true,
       });
-      fs.mkdirSync(path.join(fakeRepo, "extensions"), { recursive: true });
       fs.mkdirSync(path.join(fakeRepo, "node_modules"), { recursive: true });
       fs.writeFileSync(
         path.join(fakeRepo, "package.json"),
@@ -707,10 +706,6 @@ test(
       fs.writeFileSync(
         path.join(fakeRepo, "dist", "app", "rin", "main.js"),
         "console.log('rin')\n",
-      );
-      fs.writeFileSync(
-        path.join(fakeRepo, "extensions", "README.md"),
-        "extensions\n",
       );
       fs.mkdirSync(path.join(nodeRuntime, "bin"), { recursive: true });
       const nodePath = path.join(nodeRuntime, "bin", "node");
@@ -755,6 +750,7 @@ test(
         ).version,
         "1.2.4-beta.20260420",
       );
+      assert.deepEqual(fs.readdirSync(path.join(bundleRoot, "extensions")), []);
       for (const relativePath of [
         path.join("dist", "app", "rin-install", "main.js"),
         path.join("dist", "app", "rin", "main.js"),
