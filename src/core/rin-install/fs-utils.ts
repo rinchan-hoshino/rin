@@ -144,16 +144,16 @@ export function installedRuntimeNodePathDirs(
 }
 
 export function installedRuntimeNodeCommandArgs(
-  options: InstalledRuntimeNodeCommandOptions = process.platform,
+  options: InstalledRuntimeNodeCommandOptions = {},
 ) {
   const { installDir, platform } =
     normalizeInstalledRuntimeNodeCommandOptions(options);
-  if (installDir) {
-    const executable = managedNodeExecutablePath(installDir, platform);
-    if (fs.existsSync(executable)) return [executable];
+  if (!installDir) {
+    throw new Error("rin_managed_node_runtime_missing:install_dir");
   }
-  if (platform === "win32") return ["node"];
-  return [fs.existsSync("/usr/bin/env") ? "/usr/bin/env" : "env", "node"];
+  const executable = managedNodeExecutablePath(installDir, platform);
+  if (fs.existsSync(executable)) return [executable];
+  throw new Error(`rin_managed_node_runtime_missing:${executable}`);
 }
 
 export function launcherScript(

@@ -145,6 +145,7 @@ function resolveDaemonLaunchContext(
   targetUser: string,
   installDir: string,
   targetHomeForUser: (user: string) => string,
+  platform: NodeJS.Platform = process.platform,
 ) {
   const targetHome = targetHomeForUser(targetUser);
   return {
@@ -152,9 +153,9 @@ function resolveDaemonLaunchContext(
     daemonEntry: resolveDaemonEntryForInstall(installDir),
     runtimePath: installedRuntimePathValue(
       targetHome,
-      installedRuntimeNodePathDirs({ installDir }),
+      installedRuntimeNodePathDirs({ installDir, platform }),
     ),
-    nodeCommandArgs: installedRuntimeNodeCommandArgs({ installDir }),
+    nodeCommandArgs: installedRuntimeNodeCommandArgs({ installDir, platform }),
   };
 }
 
@@ -570,6 +571,7 @@ export function buildWindowsStartupLauncher(
     targetUser,
     installDir,
     targetHomeForUser,
+    "win32",
   );
   const launcherPath = windowsStartupLauncherPathForHome(context.targetHome);
   return {
@@ -579,7 +581,7 @@ export function buildWindowsStartupLauncher(
     stdoutPath: daemonStdoutLogPath(installDir),
     stderrPath: daemonStderrLogPath(installDir),
     service: buildWindowsStartupCommand({
-      nodePath: process.execPath,
+      nodePath: context.nodeCommandArgs[0] || "",
       daemonEntry: context.daemonEntry,
       installDir,
     }),
@@ -595,9 +597,10 @@ export function buildWindowsDaemonLaunchSpec(
     targetUser,
     installDir,
     targetHomeForUser,
+    "win32",
   );
   return {
-    command: process.execPath,
+    command: context.nodeCommandArgs[0] || "",
     args: [context.daemonEntry],
     cwd: context.targetHome,
     env: { RIN_DIR: installDir },

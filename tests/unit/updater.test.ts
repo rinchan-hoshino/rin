@@ -100,6 +100,26 @@ test("buildPreparedUpdaterCommand launches prepared managed node", async () => {
   }
 });
 
+test("buildPreparedUpdaterCommand requires prepared managed node", async () => {
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rin-updater-"));
+  try {
+    assert.throws(
+      () =>
+        updater.buildPreparedUpdaterCommand({
+          sourceRoot,
+          releaseFile: path.join(sourceRoot, "release.json"),
+          currentUser: "alice",
+          targetUser: "alice",
+          installDir: "/home/alice/.rin",
+          language: "zh_CN",
+        }),
+      /rin_managed_node_runtime_missing/,
+    );
+  } finally {
+    await fs.rm(sourceRoot, { recursive: true, force: true });
+  }
+});
+
 test("startUpdater does not write language during core updates", async () => {
   await withUpdaterStdout(async () => {
     let capturedOptions: any;

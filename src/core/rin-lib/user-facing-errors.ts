@@ -348,6 +348,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin install metadata points to a missing background service file.",
   rin_managed_service_unsupported: () =>
     "This Rin install does not support that lifecycle command on this platform.",
+  rin_managed_node_runtime_missing: () =>
+    "Rin could not find its managed Node runtime. Repair or reinstall Rin before starting managed services or updating.",
   rin_missing_required_tool: (detail) =>
     withDetail(
       "Rin is missing a required system tool",

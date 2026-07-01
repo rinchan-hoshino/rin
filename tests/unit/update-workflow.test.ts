@@ -49,7 +49,7 @@ async function writeExecutable(filePath: string, content: string) {
   await fs.writeFile(filePath, content, { mode: 0o755 });
 }
 
-test("preparedRuntimeNodeExecutable ignores non-executable managed node files", async () => {
+test("preparedRuntimeNodeExecutable rejects missing executable managed node", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-node-"));
   try {
     const nodePath = path.join(
@@ -62,9 +62,9 @@ test("preparedRuntimeNodeExecutable ignores non-executable managed node files", 
     await fs.mkdir(path.dirname(nodePath), { recursive: true });
     await fs.writeFile(nodePath, "not executable\n", { mode: 0o644 });
     if (process.platform !== "win32") {
-      assert.equal(
-        updateWorkflow.preparedRuntimeNodeExecutable(tempDir),
-        process.execPath,
+      assert.throws(
+        () => updateWorkflow.preparedRuntimeNodeExecutable(tempDir),
+        /rin_managed_node_runtime_missing/,
       );
     }
   } finally {

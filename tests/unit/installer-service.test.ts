@@ -56,8 +56,26 @@ test("installer service helpers prefer current daemon entry, quote systemd value
       "rin-daemon",
       "daemon.js",
     );
+    const managedNode = path.join(
+      installDir,
+      "runtime",
+      "node",
+      "current",
+      "bin",
+      "node",
+    );
+    const managedWindowsNode = path.join(
+      installDir,
+      "runtime",
+      "node",
+      "current",
+      "node.exe",
+    );
     await fs.mkdir(path.dirname(currentDaemon), { recursive: true });
+    await fs.mkdir(path.dirname(managedNode), { recursive: true });
     await fs.writeFile(currentDaemon, "export {};\n", "utf8");
+    await fs.writeFile(managedNode, "#!/bin/sh\n", { mode: 0o755 });
+    await fs.writeFile(managedWindowsNode, "", { mode: 0o755 });
 
     const oldPath = process.env.PATH;
     let spec;
@@ -114,10 +132,11 @@ test("installer service helpers prefer current daemon entry, quote systemd value
     assert.match(
       spec.service,
       new RegExp(
-        `^ExecStart="/usr/bin/env" "node" "${escapeRegex(currentDaemon)}"$`,
+        `^ExecStart="${escapeRegex(managedNode)}" "${escapeRegex(currentDaemon)}"$`,
         "m",
       ),
     );
+    assert.doesNotMatch(spec.service, /\/usr\/bin\/env|"node"/);
     assert.match(spec.service, /^Environment="PATH=.+"$/m);
     assert.ok(spec.service.includes(`${targetLinuxHome}/.local/bin`));
     assert.equal(spec.service.includes("/home/THE_cattail"), false);
@@ -133,8 +152,11 @@ test("installer service helpers prefer current daemon entry, quote systemd value
         ),
       ),
     );
-    assert.ok(plist.plist.includes(`<string>/usr/bin/env</string>`));
-    assert.ok(plist.plist.includes(`<string>node</string>`));
+    assert.ok(
+      plist.plist.includes(`<string>${escapeXml(managedNode)}</string>`),
+    );
+    assert.equal(plist.plist.includes(`<string>/usr/bin/env</string>`), false);
+    assert.equal(plist.plist.includes(`<string>node</string>`), false);
     assert.ok(
       plist.plist.includes(`<string>${escapeXml(currentDaemon)}</string>`),
     );
@@ -182,7 +204,7 @@ test("installer service helpers prefer current daemon entry, quote systemd value
       windowsStartup.service,
       new RegExp(escapeRegex(currentDaemon)),
     );
-    assert.equal(windowsDaemonLaunch.command, process.execPath);
+    assert.equal(windowsDaemonLaunch.command, managedWindowsNode);
     assert.deepEqual(windowsDaemonLaunch.args, [currentDaemon]);
     assert.equal(windowsDaemonLaunch.cwd, windowsHome);
     assert.deepEqual(windowsDaemonLaunch.env, { RIN_DIR: installDir });
@@ -289,13 +311,23 @@ test("refreshManagedServiceFiles updates existing managed units without creating
       "rin-daemon",
       "daemon.js",
     );
+    const managedNode = path.join(
+      installDir,
+      "runtime",
+      "node",
+      "current",
+      "bin",
+      "node",
+    );
     const targetHome = path.join(dir, "home");
     const unitDir = path.join(targetHome, ".config", "systemd", "user");
     const currentUnit = path.join(unitDir, "rin-daemon-demo.user-test.service");
     const bareUnit = path.join(unitDir, "rin-daemon.service");
 
     await fs.mkdir(path.dirname(currentDaemon), { recursive: true });
+    await fs.mkdir(path.dirname(managedNode), { recursive: true });
     await fs.writeFile(currentDaemon, "export {};\n", "utf8");
+    await fs.writeFile(managedNode, "#!/bin/sh\n", { mode: 0o755 });
     await fs.mkdir(unitDir, { recursive: true });
     await fs.writeFile(currentUnit, "stale\n", "utf8");
 

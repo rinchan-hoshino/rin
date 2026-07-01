@@ -393,7 +393,8 @@ export function readInstalledUpdateReleasePreference(
 
 export function rinInstallUpdateNodeCommand(installDir: string) {
   const managedNode = managedNodeExecutablePath(installDir);
-  return fs.existsSync(managedNode) ? managedNode : process.execPath;
+  if (fs.existsSync(managedNode)) return managedNode;
+  throw new Error(`rin_managed_node_runtime_missing:${managedNode}`);
 }
 
 function buildRinInstallUpdateArgs(parsed: ParsedArgs, installDir: string) {

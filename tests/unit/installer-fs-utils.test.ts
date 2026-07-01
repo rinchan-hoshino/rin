@@ -17,30 +17,23 @@ const fsUtils = await import(
 );
 const tempBaseDir = "/home/rin/tmp";
 
-test("installer fs utils compute launcher targets and script", () => {
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+test("installer fs utils compute launcher targets and require managed node", () => {
   const targets = fsUtils.launcherTargetsForInstallDir("/tmp/rin");
   assert.ok(
     targets.rin[0].endsWith(path.join("dist", "app", "rin", "main.js")),
   );
   assert.equal(targets.rinGui, undefined);
   assert.equal(targets.rinTui, undefined);
-  const oldPath = process.env.PATH;
-  let script;
-  try {
-    process.env.PATH =
-      "/home/THE_cattail/.local/bin:/tmp/installer-only-bin:/usr/bin";
-    script = fsUtils.launcherScript(["/tmp/a.js", "/tmp/b.js"]);
-  } finally {
-    process.env.PATH = oldPath;
-  }
-  assert.ok(script.includes("installed runtime entry not found"));
-  assert.ok(script.includes("/tmp/a.js"));
-  assert.equal(script.includes("PATH="), false);
-  assert.equal(script.includes("/home/THE_cattail"), false);
-  assert.equal(script.includes("/tmp/installer-only-bin"), false);
-  assert.ok(script.includes("'/usr/bin/env' 'node' '/tmp/a.js' \"$@\""));
-  assert.equal(script.includes(process.execPath), false);
+  assert.throws(
+    () => fsUtils.installedRuntimeNodeCommandArgs({ installDir: "/tmp/rin" }),
+    /rin_managed_node_runtime_missing/,
+  );
   const windowsScript = fsUtils.windowsCmdLauncherScript(targets.rin, [], {
+    nodeCommandArgs: ["C:\\Rin\\runtime\\node\\current\\node.exe"],
     detached: false,
     missingMessage: "rin: installed runtime entry not found",
   });
@@ -110,6 +103,15 @@ test("writeLaunchersForUser uses the managed node runtime when present", async (
 test("writeLaunchersForUser writes native Windows rin command launchers", async () => {
   const home = await fs.mkdtemp(path.join(tempBaseDir, "rin-win-home-"));
   const installDir = path.join(home, ".rin");
+  const managedNode = path.join(
+    installDir,
+    "runtime",
+    "node",
+    "current",
+    "node.exe",
+  );
+  await fs.mkdir(path.dirname(managedNode), { recursive: true });
+  await fs.writeFile(managedNode, "", { mode: 0o755 });
 
   const launchers = fsUtils.writeLaunchersForUser(
     "demo",
@@ -131,6 +133,7 @@ test("writeLaunchersForUser writes native Windows rin command launchers", async 
   assert.equal(launchers.windowsPathUpdate.skipped, true);
   const rinScript = await fs.readFile(launchers.rinPath, "utf8");
   assert.match(rinScript, /dist[\\/]app[\\/]rin[\\/]main\.js/);
+  assert.match(rinScript, new RegExp(escapeRegex(managedNode)));
   assert.match(rinScript, /%\*/);
   assert.doesNotMatch(rinScript, /env node/);
   assert.doesNotMatch(rinScript, /start ""/);

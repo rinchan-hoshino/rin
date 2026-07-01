@@ -94,6 +94,10 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin could not recover the remote turn result before the timeout.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("rin_managed_node_runtime_missing:/tmp/node"),
+    "Rin could not find its managed Node runtime. Repair or reinstall Rin before starting managed services or updating.",
+  );
+  assert.equal(
     formatRuntimeErrorForUser("rin_update_platform_bundle_checksum_missing"),
     "Rin update could not verify the platform bundle because its checksum is missing.",
   );

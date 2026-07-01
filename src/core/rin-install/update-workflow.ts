@@ -319,24 +319,37 @@ function isExecutableFile(filePath: string) {
   }
 }
 
-export function preparedRuntimeNodeExecutable(sourceRoot: string) {
+function findPreparedRuntimeNodeExecutable(sourceRoot: string) {
   for (const candidate of [
     path.join(sourceRoot, "runtime", "node", "current", "bin", "node"),
     path.join(sourceRoot, "runtime", "node", "current", "node.exe"),
   ]) {
     if (isExecutableFile(candidate)) return candidate;
   }
-  return process.execPath;
+  return null;
+}
+
+function preparedRuntimeNodeExecutablePath(sourceRoot: string) {
+  return process.platform === "win32"
+    ? path.join(sourceRoot, "runtime", "node", "current", "node.exe")
+    : path.join(sourceRoot, "runtime", "node", "current", "bin", "node");
+}
+
+export function preparedRuntimeNodeExecutable(sourceRoot: string) {
+  const executable = findPreparedRuntimeNodeExecutable(sourceRoot);
+  if (executable) return executable;
+  throw new Error(
+    `rin_managed_node_runtime_missing:${preparedRuntimeNodeExecutablePath(sourceRoot)}`,
+  );
 }
 
 export function provisionPreparedCurrentNodeRuntime(sourceRoot: string) {
-  const existing = preparedRuntimeNodeExecutable(sourceRoot);
-  if (existing !== process.execPath) return existing;
-  if (!process.execPath || !fs.existsSync(process.execPath)) return existing;
-  const targetExecutable =
-    process.platform === "win32"
-      ? path.join(sourceRoot, "runtime", "node", "current", "node.exe")
-      : path.join(sourceRoot, "runtime", "node", "current", "bin", "node");
+  const existing = findPreparedRuntimeNodeExecutable(sourceRoot);
+  if (existing) return existing;
+  const targetExecutable = preparedRuntimeNodeExecutablePath(sourceRoot);
+  if (!process.execPath || !fs.existsSync(process.execPath)) {
+    throw new Error(`rin_managed_node_runtime_missing:${targetExecutable}`);
+  }
   fs.mkdirSync(path.dirname(targetExecutable), { recursive: true });
   fs.copyFileSync(process.execPath, targetExecutable);
   try {
