@@ -128,8 +128,8 @@ test("installer interactive helpers describe dir state and plan text", () => {
     pathValue: "/usr/bin:/bin",
   });
   assert.ok(pathMissingInitExit.includes(`open Rin: ${launcherPath}`));
-  assert.ok(pathMissingInitExit.includes("PATH"));
-  assert.ok(pathMissingInitExit.includes("/home/alice/.local/bin"));
+  assert.equal(pathMissingInitExit.includes("PATH note"), false);
+  assert.equal(pathMissingInitExit.includes("export PATH"), false);
 
   const pathReadyInitExit = interactive.buildPostInstallInitExitText({
     currentUser: "alice",
@@ -139,6 +139,31 @@ test("installer interactive helpers describe dir state and plan text", () => {
   });
   assert.ok(pathReadyInitExit.includes("open Rin: rin"));
   assert.equal(pathReadyInitExit.includes("PATH note"), false);
+
+  const pathMissingOutro = interactive.buildInstallOutroText({
+    currentUser: "alice",
+    targetUser: "alice",
+    rinPath: launcherPath,
+    pathValue: "/usr/bin:/bin",
+  });
+  assert.ok(
+    pathMissingOutro.includes("Open Rin after reopening your shell: rin"),
+  );
+  assert.ok(pathMissingOutro.includes(`Use now: ${launcherPath}`));
+  assert.ok(
+    pathMissingOutro.includes(
+      "current shell PATH does not include /home/alice/.local/bin",
+    ),
+  );
+
+  const pathReadyOutro = interactive.buildInstallOutroText({
+    currentUser: "alice",
+    targetUser: "alice",
+    rinPath: launcherPath,
+    pathValue: "/home/alice/.local/bin:/usr/bin:/bin",
+  });
+  assert.ok(pathReadyOutro.includes("Open Rin: rin"));
+  assert.equal(pathReadyOutro.includes("reopening your shell"), false);
 });
 
 test("installer interactive helpers compute final requirements", () => {

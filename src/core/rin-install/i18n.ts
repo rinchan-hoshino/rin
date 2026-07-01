@@ -227,7 +227,16 @@ type InstallerDisplayCopy = {
   publishingRuntimeMessageElevated: string;
   publishingRuntimeMessage: string;
   launchingInitText: string;
-  outroInstalled: (targetUser: string, installedServiceKind?: string) => string;
+  outroInstalled: (
+    targetUser: string,
+    installedServiceKind?: string,
+    options?: {
+      openCommand?: string;
+      immediateCommand?: string;
+      launcherDir?: string;
+      launcherDirOnPath?: boolean;
+    },
+  ) => string;
   installStepFailed: string;
   installStepComplete: string;
   startingLogin: (providerName: string) => string;
@@ -496,15 +505,6 @@ const INSTALLER_DISPLAY_COPY = {
         options.currentUser === options.targetUser
           ? ""
           : ` -u ${options.targetUser}`;
-      const pathHint =
-        options.launcherDir && options.launcherDirOnPath === false
-          ? [
-              "",
-              "PATH note:",
-              `- the current shell PATH does not include ${options.launcherDir}; add it to PATH to use plain rin.`,
-              `- temporary fix: export PATH="${options.launcherDir}:$PATH"`,
-            ]
-          : [];
       return [
         "Initialization TUI exited.",
         "",
@@ -512,7 +512,6 @@ const INSTALLER_DISPLAY_COPY = {
         `- open Rin: ${rinCommand}${userSuffix}`,
         `- check daemon state if needed: ${rinCommand} doctor${userSuffix}`,
         "- restart initialization only after an agent resets the initialization completed state",
-        ...pathHint,
       ].join("\n");
     },
     buildFinalRequirements(options) {
@@ -565,8 +564,26 @@ const INSTALLER_DISPLAY_COPY = {
       "Installation is done. Rin will now open an initialization TUI.",
       "You can exit it anytime; the installer will print the next-step reminder afterwards.",
     ].join("\n"),
-    outroInstalled: (targetUser: string, installedServiceKind?: string) =>
-      `Installer wrote config for ${targetUser}.${installedServiceKind ? ` (${installedServiceKind} service installed).` : ""}`,
+    outroInstalled: (targetUser, installedServiceKind, options) => {
+      const serviceSuffix = installedServiceKind
+        ? ` (${installedServiceKind} service installed).`
+        : "";
+      const openCommand = options?.openCommand || "rin";
+      const pathHint =
+        options?.launcherDir && options.launcherDirOnPath === false
+          ? [
+              `Open Rin after reopening your shell: ${openCommand}`,
+              options.immediateCommand
+                ? `Use now: ${options.immediateCommand}`
+                : "",
+              `Note: the current shell PATH does not include ${options.launcherDir}; reopening the shell lets existing PATH startup rules see the new launcher directory.`,
+            ].filter(Boolean)
+          : [`Open Rin: ${openCommand}`];
+      return [
+        `Installer wrote config for ${targetUser}.${serviceSuffix}`,
+        ...pathHint,
+      ].join("\n");
+    },
     installStepFailed: "Install step failed.",
     installStepComplete: "Install step complete.",
     startingLogin: (providerName: string) =>
@@ -873,15 +890,6 @@ const INSTALLER_DISPLAY_COPY = {
         options.currentUser === options.targetUser
           ? ""
           : ` -u ${options.targetUser}`;
-      const pathHint =
-        options.launcherDir && options.launcherDirOnPath === false
-          ? [
-              "",
-              "PATH 提示：",
-              `- 当前 shell 的 PATH 尚未包含 ${options.launcherDir}；如需直接输入 rin，请将它加入 PATH。`,
-              `- 临时修复: export PATH="${options.launcherDir}:$PATH"`,
-            ]
-          : [];
       return [
         "初始化 TUI 已退出。",
         "",
@@ -889,7 +897,6 @@ const INSTALLER_DISPLAY_COPY = {
         `- 打开 Rin: ${rinCommand}${userSuffix}`,
         `- 如有需要，检查守护进程状态: ${rinCommand} doctor${userSuffix}`,
         "- 仅在 agent 重置初始化完成状态后才会重新进入初始化",
-        ...pathHint,
       ].join("\n");
     },
     buildFinalRequirements(options) {
@@ -938,8 +945,26 @@ const INSTALLER_DISPLAY_COPY = {
       "安装已完成。Rin 现在将打开初始化 TUI。",
       "你可以随时退出；安装器随后会打印下一步提示。",
     ].join("\n"),
-    outroInstalled: (targetUser: string, installedServiceKind?: string) =>
-      `已为 ${targetUser} 写入安装配置。${installedServiceKind ? `（已安装 ${installedServiceKind} 服务。）` : ""}`,
+    outroInstalled: (targetUser, installedServiceKind, options) => {
+      const serviceSuffix = installedServiceKind
+        ? `（已安装 ${installedServiceKind} 服务。）`
+        : "";
+      const openCommand = options?.openCommand || "rin";
+      const pathHint =
+        options?.launcherDir && options.launcherDirOnPath === false
+          ? [
+              `重开 shell 后打开 Rin: ${openCommand}`,
+              options.immediateCommand
+                ? `现在可先用: ${options.immediateCommand}`
+                : "",
+              `提示：当前 shell 的 PATH 尚未包含 ${options.launcherDir}；重开 shell 后，已有的 PATH 启动规则会看到新建的 launcher 目录。`,
+            ].filter(Boolean)
+          : [`打开 Rin: ${openCommand}`];
+      return [
+        `已为 ${targetUser} 写入安装配置。${serviceSuffix}`,
+        ...pathHint,
+      ].join("\n");
+    },
     installStepFailed: "安装步骤失败。",
     installStepComplete: "安装步骤完成。",
     startingLogin: (providerName: string) => `正在启动 ${providerName} 登录……`,

@@ -795,6 +795,43 @@ function pathListIncludesDir(pathList: string, dir: string) {
     .some((entry) => path.resolve(entry) === targetDir);
 }
 
+export function buildInstallOutroText(
+  options: {
+    currentUser: string;
+    targetUser: string;
+    rinPath?: string;
+    pathValue?: string;
+    installedServiceKind?: string;
+  },
+  i18n: InstallerI18n = createInstallerI18n(),
+) {
+  const rinPath = String(options.rinPath || "").trim();
+  const userSuffix =
+    options.currentUser === options.targetUser
+      ? ""
+      : ` -u ${options.targetUser}`;
+  if (!rinPath) {
+    return i18n.outroInstalled(
+      options.targetUser,
+      options.installedServiceKind,
+      {
+        openCommand: `rin${userSuffix}`,
+      },
+    );
+  }
+  const launcherDir = path.dirname(rinPath);
+  const launcherDirOnPath = pathListIncludesDir(
+    options.pathValue ?? process.env.PATH ?? "",
+    launcherDir,
+  );
+  return i18n.outroInstalled(options.targetUser, options.installedServiceKind, {
+    openCommand: `rin${userSuffix}`,
+    immediateCommand: `${rinPath}${userSuffix}`,
+    launcherDir,
+    launcherDirOnPath,
+  });
+}
+
 export function buildPostInstallInitExitText(
   options: {
     currentUser: string;

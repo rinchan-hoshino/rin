@@ -23,6 +23,7 @@ import {
   buildFinalRequirements,
   buildInstallPlanText,
   buildInstallSafetyBoundaryText,
+  buildInstallOutroText,
   buildPostInstallInitExitText,
   renderInstallerNote,
   wrapInstallerNoteText,
@@ -569,7 +570,17 @@ export async function startInstaller(argv = process.argv.slice(2)) {
   }
 
   registerLocalUserTarget(targetUser);
-  outro(i18n.outroInstalled(targetUser, installedService?.kind));
+  outro(
+    buildInstallOutroText(
+      {
+        currentUser,
+        targetUser,
+        rinPath: written.rinPath,
+        installedServiceKind: installedService?.kind,
+      },
+      i18n,
+    ),
+  );
 }
 
 async function main() {
