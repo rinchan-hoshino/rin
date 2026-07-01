@@ -392,6 +392,11 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.match(output, /--name <name>/);
   assert.match(output, /--tools <tools>/);
   assert.match(output, /--exclude-tools <tools>/);
+  assert.match(output, /--no-tools/);
+  assert.match(output, /--no-builtin-tools/);
+  assert.match(output, /--timeout <seconds>/);
+  assert.doesNotMatch(output, /--no-tools[^\n]*default: true/);
+  assert.doesNotMatch(output, /--no-builtin-tools[^\n]*default: true/);
   assert.match(output, /--yes/);
   assert.match(
     output,
@@ -424,6 +429,10 @@ test("print help shows the Pi-style non-interactive CLI contract", () => {
   assert.match(output, /--name <name>/);
   assert.match(output, /--tools, -t <tools>/);
   assert.match(output, /--exclude-tools, -xt <tools>/);
+  assert.match(output, /--no-tools, -nt\s+Disable all tools\n/);
+  assert.match(output, /--no-builtin-tools, -nbt\s+Disable built-in tools\n/);
+  assert.match(output, /--timeout <seconds>/);
+  assert.doesNotMatch(output, /Disable all tools by default/);
   assert.doesNotMatch(output, /--bind-chat-session/);
 });
 
@@ -491,6 +500,9 @@ test("run parser recognizes legacy chatKey but print mode rejects chat delivery"
     () => run.parseRunArgs(["-p", "hello", "--bind-chat-session"], ""),
     /unknown_run_option:--bind-chat-session/,
   );
+
+  const defaultTimeoutParsed = await run.parseRunArgs(["-p", "hello"], "");
+  assert.equal(defaultTimeoutParsed.timeoutMs, 30 * 60 * 1000);
 
   assert.equal(run.shouldRunNonInteractive(["-p"], true), true);
   assert.equal(run.shouldRunNonInteractive(["--mode", "json"], true), true);

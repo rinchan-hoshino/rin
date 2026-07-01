@@ -66,6 +66,22 @@ const INTERNAL_COMMANDS = [
   },
 ] as const;
 
+type CacOptionForHelp = {
+  rawName?: string;
+  config?: { default?: unknown };
+};
+
+type CacCliForHelp = {
+  globalCommand?: { options?: CacOptionForHelp[] };
+};
+
+function hideCacNegatedDefaultFromHelp(cli: CacCliForHelp, optionName: string) {
+  const option = cli.globalCommand?.options?.find((candidate) =>
+    safeString(candidate.rawName).includes(optionName),
+  );
+  if (option?.config) option.config.default = undefined;
+}
+
 async function createCli() {
   const { cac } = await import("cac");
   const cli = cac("rin");
@@ -102,7 +118,15 @@ async function createCli() {
       "-nbt, --no-builtin-tools",
       "Disable built-in tools in non-interactive mode",
     )
+    .option("--timeout <seconds>", "Maximum wait time for non-interactive mode")
     .help();
+
+  // CAC treats --no-* flags as negated positive booleans and injects
+  // default:true into help. Rin parses these tool flags from raw argv in
+  // run.ts/Pi, so the top-level help must not claim tools are disabled by
+  // default.
+  hideCacNegatedDefaultFromHelp(cli, "--no-tools");
+  hideCacNegatedDefaultFromHelp(cli, "--no-builtin-tools");
 
   for (const [name, description] of RIN_COMMANDS) {
     cli.command(name, description);

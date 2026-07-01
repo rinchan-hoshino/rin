@@ -17,8 +17,8 @@ Options:
   --name <name>                  Set the session display name
   --tools, -t <tools>            Comma-separated allowlist of tool names
   --exclude-tools, -xt <tools>   Comma-separated denylist of tool names
-  --no-tools, -nt                Disable all tools by default
-  --no-builtin-tools, -nbt       Disable built-in tools by default
+  --no-tools, -nt                Disable all tools
+  --no-builtin-tools, -nbt       Disable built-in tools
   --timeout <seconds>            Maximum wait time (default: 1800)
   --help, -h                     Show this help
 
