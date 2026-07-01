@@ -18,6 +18,10 @@ const listing = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "session", "listing.js"))
     .href
 );
+const catalog = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "session", "catalog.js"))
+    .href
+);
 async function pathExists(targetPath) {
   try {
     await fs.access(targetPath);
@@ -223,6 +227,86 @@ test("listBoundSessionPage returns a bounded recent page from root session recor
       ["old"],
     );
     assert.equal(secondPage.hasMore, false);
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("listBoundSessionPage uses a built catalog without reparsing session jsonl files", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-project";
+
+  try {
+    await writeSessionRecord(
+      sessionDir,
+      "old.jsonl",
+      sessionEntries({
+        id: "old",
+        cwd,
+        first: "2026-04-02T00:00:00.000Z",
+        last: "2026-04-02T00:05:00.000Z",
+      }),
+    );
+    await writeSessionRecord(
+      sessionDir,
+      "new.jsonl",
+      sessionEntries({
+        id: "new",
+        cwd,
+        first: "2026-04-03T00:00:00.000Z",
+        last: "2026-04-03T00:05:00.000Z",
+      }),
+    );
+
+    await catalog.rebuildSessionCatalog(sessionDir);
+    await fs.writeFile(path.join(sessionDir, "old.jsonl"), "not jsonl\n");
+    await fs.writeFile(path.join(sessionDir, "new.jsonl"), "not jsonl\n");
+
+    const page = await factory.listBoundSessionPage({
+      cwd,
+      sessionDir,
+      limit: 1,
+    });
+
+    assert.deepEqual(
+      page.sessions.map((session) => session.id),
+      ["new"],
+    );
+    assert.equal(page.hasMore, true);
+    assert.equal(page.nextOffset, 1);
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog updates from a session manager without deleting sessions", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-live-project";
+  const sessionFile = path.join(sessionDir, "live.jsonl");
+
+  try {
+    await fs.writeFile(sessionFile, "placeholder\n");
+    await catalog.updateSessionCatalogFromSessionManagerSync({
+      sessionFile,
+      fileEntries: sessionEntries({
+        id: "live",
+        cwd,
+        first: "2026-04-03T00:00:00.000Z",
+        last: "2026-04-03T00:05:00.000Z",
+        name: "Live indexed session",
+      }),
+      isPersisted: () => true,
+    });
+
+    const page = await catalog.tryListSessionCatalogPage({
+      cwd,
+      sessionDir,
+      offset: 0,
+      limit: 1,
+    });
+    assert.equal(page?.sessions[0]?.id, "live");
+    assert.equal(page.sessions[0]?.name, "Live indexed session");
+    assert.equal(await pathExists(sessionFile), true);
   } finally {
     await fs.rm(sessionDir, { recursive: true, force: true });
   }

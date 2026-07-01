@@ -87,11 +87,6 @@ export const LEGACY_DATA_LAYOUT_MOVES: Array<{
     to: path.join("core", "workers", "running-workers.json"),
   },
   {
-    id: "session-ttl-maintenance",
-    from: "session-ttl-maintenance.json",
-    to: path.join("core", "sessions", "ttl-maintenance.json"),
-  },
-  {
     id: "runtime-update",
     from: "runtime-update",
     to: path.join("core", "updates"),

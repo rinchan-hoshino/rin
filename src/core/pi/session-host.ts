@@ -1,5 +1,7 @@
 import fsSync from "node:fs";
 
+import { updateSessionCatalogFromSessionManagerSync } from "../session/catalog.js";
+
 // This file is Rin's controlled seam for Pi AgentSession/SessionManager
 // implementation details. Product code should call these semantic helpers
 // instead of reaching into Pi private fields directly.
@@ -279,7 +281,9 @@ export function patchPiSessionManagerConversationPersistence(
         sessionManager.flushed = false;
         return;
       }
-      return originalRewriteFile(...args);
+      const result = originalRewriteFile(...args);
+      updateSessionCatalogFromSessionManagerSync(sessionManager);
+      return result;
     };
   }
   if (originalPersist) {
@@ -294,6 +298,7 @@ export function patchPiSessionManagerConversationPersistence(
         originalRewriteFile?.();
         sessionManager.flushed = true;
       }
+      updateSessionCatalogFromSessionManagerSync(sessionManager);
       return result;
     };
   }

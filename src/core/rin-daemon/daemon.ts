@@ -46,7 +46,6 @@ import {
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
 import { RinBackgroundExtensionManager } from "./extensions.js";
-import { runDueSessionTtlMaintenance } from "../session/ttl.js";
 import { listRunningWorkerSessionFiles } from "./running-workers.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
@@ -164,14 +163,6 @@ export async function startDaemon(
       await workerPool.resumeInterruptedTurnSession(payload),
   });
   cronScheduler.start();
-
-  setTimeout(() => {
-    void runDueSessionTtlMaintenance(runtime.agentDir).catch((error: any) => {
-      console.warn(
-        `session TTL maintenance failed: ${safeString(error?.message || error)}`,
-      );
-    });
-  }, 0).unref?.();
 
   const backgroundExtensionManager =
     options.backgroundExtensionManager ||

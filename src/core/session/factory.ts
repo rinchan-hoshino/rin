@@ -3,6 +3,7 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
+import { updateSessionCatalogFromSessionManagerSync } from "./catalog.js";
 import { normalizeBoundSessionList } from "./listing.js";
 import {
   listBoundSessionPage as listFastBoundSessionPage,
@@ -102,4 +103,5 @@ export async function renameBoundSession(
     : await loadRinSessionManagerModule();
   const manager = SessionManager.open(sessionFile);
   manager.appendSessionInfo(nextName);
+  updateSessionCatalogFromSessionManagerSync(manager);
 }
