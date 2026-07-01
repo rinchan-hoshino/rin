@@ -6,8 +6,27 @@
 - Prompt and self-improvement guidance now state the web-source, distillation, and conflict-closure rules more directly.
 - Update notices and runtime usage diagnostics are clearer, including bare `rin update` wording and Pi-backed context token estimates.
 - Daemon and scheduler recovery is more resilient across restarts, with persisted turn recovery, decoupled restart recovery, and worker-pool session continuations.
-- Runtime and install paths are faster and safer, including CLI startup/dependency trimming, quieter Node 26 installs, and unresolved bootstrap git-ref handling.
+- Runtime and install paths are faster and safer, including CLI startup/dependency trimming, managed Node runtime bundles, managed-node update handoffs, launcher refreshes, PATH warnings, and unresolved bootstrap git-ref handling.
+- TUI and CLI session flows now handle resume listing, session rebind options, and non-interactive tool help more accurately.
+- Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, compact usage trend charts, and cached group member counts.
 <!-- rin-changelog-coverage
+6bf9b52 fix(tui): index resume session listing
+149fc38 fix(chat): cache group member counts
+a150cb6 docs(self-improve): capture lessons and working style
+befbab2 fix(cli): correct non-interactive tool help
+3e8b3a7 fix(install): warn when shell PATH misses rin launcher
+cbf3614 Revert "fix(install): source rin env after POSIX install"
+dd17e9c fix(install): source rin env after POSIX install
+3a29c5e fix(runtime): require managed node for handoffs
+0232aa7 fix(update): prefer installed managed node for handoff
+99aab35 refactor(chat): unify inbox recovery reconciliation
+dbc22e8 fix(chat): restore orphaned accepted inbox items
+7f97ced fix: refresh launchers during core updates
+91e0d2a fix: apply managed runtime consistently
+1b8e0f0 feat: ship managed Node runtime bundles
+589aa22 fix(tui): forward session rebind options
+5a91fbe feat(usage): render compact usage trend charts
+25c29a2 fix(chat): acknowledge Discord interactions directly
 370a0be fix(daemon): persist turn recovery in running workers
 8dc83ff fix(self-improve): require conflict closure in distillation
 389a47d fix(daemon): recover TUI turns after restart
