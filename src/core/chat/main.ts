@@ -65,9 +65,8 @@ import {
 import { appendChatLog } from "./chat-log.js";
 import {
   type ChatInboxItem,
+  reconcileChatInboxRecovery,
   restoreChatInboxSession,
-  restoreOrphanedAcceptedChatInboxItems,
-  restoreProcessingChatInboxFiles,
   touchChatInboxFile,
 } from "./inbox.js";
 import {
@@ -1289,18 +1288,13 @@ export async function startChatBridge(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );
 
-  const restoredInboxItems = restoreProcessingChatInboxFiles(runtime.agentDir);
-  if (restoredInboxItems.length) {
+  const inboxRecovery = reconcileChatInboxRecovery(runtime.agentDir);
+  if (
+    inboxRecovery.restoredProcessing.length ||
+    inboxRecovery.restoredOrphans.length
+  ) {
     logger.warn(
-      `chat inbox restored stranded processing items count=${restoredInboxItems.length}`,
-    );
-  }
-  const restoredOrphanedInboxItems = restoreOrphanedAcceptedChatInboxItems(
-    runtime.agentDir,
-  );
-  if (restoredOrphanedInboxItems.length) {
-    logger.warn(
-      `chat inbox restored orphaned accepted items count=${restoredOrphanedInboxItems.length}`,
+      `chat inbox recovery restored processing=${inboxRecovery.restoredProcessing.length} orphanedAccepted=${inboxRecovery.restoredOrphans.length}`,
     );
   }
 

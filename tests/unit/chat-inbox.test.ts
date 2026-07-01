@@ -342,6 +342,97 @@ test("chat inbox restores multiple accepted unprocessed orphaned messages", asyn
   assert.deepEqual(pending, ["first-orphan", "second-orphan"]);
 });
 
+test("chat inbox recovery reconciler restores processing and orphaned work together", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+
+  const { item: processingItem } = inbox.enqueueChatInboxItem(agentDir, {
+    chatKey: "telegram/1:2",
+    messageId: "processing-recovery",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      userId: "owner",
+      messageId: "processing-recovery",
+      timestamp: Date.now(),
+      content: "still pending",
+      stripped: { content: "still pending" },
+    },
+    elements: [{ type: "text", attrs: { content: "still pending" } }],
+  });
+  const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
+  inbox.claimChatInboxFile(agentDir, pendingPath);
+
+  saveChatMessage(agentDir, {
+    chatKey: "discord/1:room",
+    platform: "discord",
+    botId: "1",
+    chatId: "room",
+    chatType: "group",
+    messageId: "orphan-recovery",
+    role: "user",
+    receivedAt: new Date("2026-07-01T05:04:30.000Z").toISOString(),
+    userId: "owner",
+    text: "recover me",
+    strippedContent: "recover me",
+    elements: [{ type: "text", attrs: { content: "recover me" } }],
+    acceptedAt: new Date("2026-07-01T05:04:54.000Z").toISOString(),
+  });
+
+  const report = inbox.reconcileChatInboxRecovery(agentDir, {
+    nowMs: Date.parse("2026-07-01T05:05:10.000Z"),
+  });
+
+  assert.deepEqual(
+    report.restoredProcessing.map((item) => item.itemId),
+    [processingItem.itemId],
+  );
+  assert.equal(report.restoredOrphans.length, 1);
+  assert.equal(report.restoredOrphans[0].messageId, "orphan-recovery");
+  assert.equal(report.skippedOrphans.existingInbox, 0);
+  assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 0);
+  assert.deepEqual(
+    inbox
+      .listPendingChatInboxFiles(agentDir)
+      .map((filePath) => inbox.readChatInboxItem(filePath)?.messageId)
+      .sort(),
+    ["orphan-recovery", "processing-recovery"],
+  );
+});
+
+test("chat inbox recovery reconciler is idempotent for existing orphan envelopes", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+
+  saveChatMessage(agentDir, {
+    chatKey: "discord/1:room",
+    platform: "discord",
+    botId: "1",
+    chatId: "room",
+    chatType: "group",
+    messageId: "orphan-once",
+    role: "user",
+    receivedAt: new Date("2026-07-01T05:04:30.000Z").toISOString(),
+    userId: "owner",
+    text: "recover once",
+    strippedContent: "recover once",
+    elements: [{ type: "text", attrs: { content: "recover once" } }],
+    acceptedAt: new Date("2026-07-01T05:04:54.000Z").toISOString(),
+  });
+
+  const first = inbox.reconcileChatInboxRecovery(agentDir, {
+    nowMs: Date.parse("2026-07-01T05:05:10.000Z"),
+  });
+  const second = inbox.reconcileChatInboxRecovery(agentDir, {
+    nowMs: Date.parse("2026-07-01T05:05:11.000Z"),
+  });
+
+  assert.equal(first.restoredOrphans.length, 1);
+  assert.equal(second.restoredProcessing.length, 0);
+  assert.equal(second.restoredOrphans.length, 0);
+  assert.equal(second.skippedOrphans.existingInbox, 1);
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 1);
+});
+
 test("chat inbox does not restore orphaned accepted messages after a later handled user turn", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const chatKey = "discord/1:room";

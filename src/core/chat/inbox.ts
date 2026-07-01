@@ -55,6 +55,34 @@ export type ChatInboxItem = {
   elements: any[];
 };
 
+export type RestoredChatInboxProcessingItem = {
+  itemId: string;
+  filePath: string;
+};
+
+export type RestoredChatInboxOrphanedItem = {
+  itemId: string;
+  filePath: string;
+  chatKey: string;
+  messageId: string;
+};
+
+export type ChatInboxOrphanRecoverySkippedCounts = {
+  invalid: number;
+  notAccepted: number;
+  stale: number;
+  processed: number;
+  replyBoundary: number;
+  superseded: number;
+  existingInbox: number;
+};
+
+export type ChatInboxRecoveryReport = {
+  restoredProcessing: RestoredChatInboxProcessingItem[];
+  restoredOrphans: RestoredChatInboxOrphanedItem[];
+  skippedOrphans: ChatInboxOrphanRecoverySkippedCounts;
+};
+
 export function chatInboxDir(agentDir: string) {
   return chatDataPath(agentDir, "inbox");
 }
@@ -310,9 +338,9 @@ export function restoreProcessingChatInboxFiles(
   agentDir: string,
   options: { staleMs?: number; nowMs?: number; limit?: number } = {},
 ) {
-  const restored: Array<{ itemId: string; filePath: string }> = [];
+  const restored: RestoredChatInboxProcessingItem[] = [];
   const staleMs = Number(options.staleMs || 0);
-  const nowMs = Number(options.nowMs || Date.now());
+  const nowMs = Number(options.nowMs ?? Date.now());
   const limit = Math.max(0, Number(options.limit || 0));
   for (const filePath of listProcessingChatInboxFiles(agentDir)) {
     if (limit > 0 && restored.length >= limit) break;
@@ -414,17 +442,25 @@ function hasLaterHandledUserMessage(
   });
 }
 
-export function restoreOrphanedAcceptedChatInboxItems(
+function emptyChatInboxOrphanRecoverySkippedCounts(): ChatInboxOrphanRecoverySkippedCounts {
+  return {
+    invalid: 0,
+    notAccepted: 0,
+    stale: 0,
+    processed: 0,
+    replyBoundary: 0,
+    superseded: 0,
+    existingInbox: 0,
+  };
+}
+
+function restoreOrphanedAcceptedChatInboxItemsWithReport(
   agentDir: string,
   options: { nowMs?: number; maxAgeMs?: number; limit?: number } = {},
 ) {
-  const restored: Array<{
-    itemId: string;
-    filePath: string;
-    chatKey: string;
-    messageId: string;
-  }> = [];
-  const nowMs = Number(options.nowMs || Date.now());
+  const restored: RestoredChatInboxOrphanedItem[] = [];
+  const skipped = emptyChatInboxOrphanRecoverySkippedCounts();
+  const nowMs = Number(options.nowMs ?? Date.now());
   const maxAgeMs = Math.max(
     0,
     Number(options.maxAgeMs ?? RECOVERABLE_ACCEPTED_INBOX_MAX_AGE_MS),
@@ -436,17 +472,36 @@ export function restoreOrphanedAcceptedChatInboxItems(
     if (record.role !== "user") continue;
     const chatKey = safeString(record.chatKey).trim();
     const messageId = safeString(record.messageId).trim();
-    if (!chatKey || !parseChatKey(chatKey) || !messageId) continue;
-    const acceptedAtMs = Date.parse(safeString(record.acceptedAt || ""));
-    if (!Number.isFinite(acceptedAtMs)) continue;
-    if (maxAgeMs > 0 && nowMs - acceptedAtMs > maxAgeMs) continue;
-    if (safeString(record.processedAt || "").trim()) continue;
-    if (hasInboundChatMessageReplyBoundary(agentDir, chatKey, messageId)) {
+    if (!chatKey || !parseChatKey(chatKey) || !messageId) {
+      skipped.invalid += 1;
       continue;
     }
-    if (hasLaterHandledUserMessage(agentDir, record, messages)) continue;
+    const acceptedAtMs = Date.parse(safeString(record.acceptedAt || ""));
+    if (!Number.isFinite(acceptedAtMs)) {
+      skipped.notAccepted += 1;
+      continue;
+    }
+    if (maxAgeMs > 0 && nowMs - acceptedAtMs > maxAgeMs) {
+      skipped.stale += 1;
+      continue;
+    }
+    if (safeString(record.processedAt || "").trim()) {
+      skipped.processed += 1;
+      continue;
+    }
+    if (hasInboundChatMessageReplyBoundary(agentDir, chatKey, messageId)) {
+      skipped.replyBoundary += 1;
+      continue;
+    }
+    if (hasLaterHandledUserMessage(agentDir, record, messages)) {
+      skipped.superseded += 1;
+      continue;
+    }
     const itemId = hashKey(`${chatKey}\n${messageId}`);
-    if (hasExistingInboxFile(agentDir, itemId)) continue;
+    if (hasExistingInboxFile(agentDir, itemId)) {
+      skipped.existingInbox += 1;
+      continue;
+    }
     const item = buildChatInboxItem({
       chatKey,
       messageId,
@@ -464,5 +519,40 @@ export function restoreOrphanedAcceptedChatInboxItems(
       messageId,
     });
   }
-  return restored;
+  return { restored, skipped };
+}
+
+export function restoreOrphanedAcceptedChatInboxItems(
+  agentDir: string,
+  options: { nowMs?: number; maxAgeMs?: number; limit?: number } = {},
+) {
+  return restoreOrphanedAcceptedChatInboxItemsWithReport(agentDir, options)
+    .restored;
+}
+
+export function reconcileChatInboxRecovery(
+  agentDir: string,
+  options: {
+    nowMs?: number;
+    processing?: { staleMs?: number; limit?: number };
+    orphans?: { maxAgeMs?: number; limit?: number };
+  } = {},
+): ChatInboxRecoveryReport {
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const restoredProcessing = restoreProcessingChatInboxFiles(agentDir, {
+    ...(options.processing || {}),
+    nowMs,
+  });
+  const orphanReport = restoreOrphanedAcceptedChatInboxItemsWithReport(
+    agentDir,
+    {
+      ...(options.orphans || {}),
+      nowMs,
+    },
+  );
+  return {
+    restoredProcessing,
+    restoredOrphans: orphanReport.restored,
+    skippedOrphans: orphanReport.skipped,
+  };
 }
