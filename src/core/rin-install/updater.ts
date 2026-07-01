@@ -30,6 +30,7 @@ import {
   createUpdateRuntimeSourceWorkspace,
   isInstalledReleaseCurrent,
   prepareUpdateRuntimeSource,
+  preparedRuntimeNodeExecutable,
   resolveGitCommitForRelease,
   runUpdateCommand,
 } from "./update-workflow.js";
@@ -126,7 +127,7 @@ async function resolveUpdateRelease(options: {
   );
 }
 
-async function runPreparedUpdater(options: {
+export function buildPreparedUpdaterCommand(options: {
   sourceRoot: string;
   releaseFile: string;
   currentUser: string;
@@ -134,9 +135,9 @@ async function runPreparedUpdater(options: {
   installDir: string;
   language: string;
 }) {
-  await runUpdateCommand(
-    process.execPath,
-    [
+  return {
+    command: preparedRuntimeNodeExecutable(options.sourceRoot),
+    args: [
       path.join(options.sourceRoot, "dist", "app", "rin-install", "main.js"),
       "--update",
       "--target-user",
@@ -150,8 +151,20 @@ async function runPreparedUpdater(options: {
       "--release-file",
       options.releaseFile,
     ],
-    { cwd: options.sourceRoot, env: { ...process.env } },
-  );
+    options: { cwd: options.sourceRoot, env: { ...process.env } },
+  };
+}
+
+async function runPreparedUpdater(options: {
+  sourceRoot: string;
+  releaseFile: string;
+  currentUser: string;
+  targetUser: string;
+  installDir: string;
+  language: string;
+}) {
+  const command = buildPreparedUpdaterCommand(options);
+  await runUpdateCommand(command.command, command.args, command.options);
 }
 
 export async function startUpdater(deps: {

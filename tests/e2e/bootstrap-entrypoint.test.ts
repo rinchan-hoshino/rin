@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -543,6 +544,9 @@ test("install wrapper can launch a platform bundle without system node or npm", 
   }
   await withTempDir(async (tempDir) => {
     const archivePath = await createPlatformBundleArchive(tempDir);
+    const archiveSha256 = createHash("sha256")
+      .update(await fs.readFile(archivePath))
+      .digest("hex");
     const manifestPath = await createReleaseManifest(tempDir);
     const assetsPath = path.join(tempDir, "release-assets.env");
     const fakeBin = path.join(tempDir, "bin");
@@ -555,6 +559,7 @@ test("install wrapper can launch a platform bundle without system node or npm", 
       assetsPath,
       [
         "RIN_ASSET_STABLE_LINUX_X64_URL='https://example.invalid/releases/rin-1.2.3-linux-x64.tar.gz'",
+        `RIN_ASSET_STABLE_LINUX_X64_SHA256='${archiveSha256}'`,
         "RIN_ASSET_STABLE_LINUX_X64_VERSION='1.2.3'",
         "RIN_ASSET_STABLE_LINUX_X64_BRANCH='stable'",
         "RIN_ASSET_STABLE_LINUX_X64_REF='abc1234'",
@@ -627,6 +632,90 @@ exit 42
     assert.doesNotMatch(log, /system-node:/);
     assert.doesNotMatch(log, /npm:/);
     assert.deepEqual(await fs.readdir(workRoot), []);
+  });
+});
+
+test("platform bundle bootstrap rejects missing or mismatched checksums", async (t) => {
+  if (process.platform !== "linux" || process.arch !== "x64") {
+    t.skip("fixture targets linux-x64 bootstrap detection");
+    return;
+  }
+  await withTempDir(async (tempDir) => {
+    const archivePath = await createPlatformBundleArchive(tempDir);
+    const manifestPath = await createReleaseManifest(tempDir);
+    const fakeBin = path.join(tempDir, "bin");
+    const logPath = path.join(tempDir, "invocations.log");
+    const workRoot = path.join(tempDir, "work");
+    await fs.mkdir(fakeBin, { recursive: true });
+    await fs.mkdir(workRoot, { recursive: true });
+    await fs.writeFile(logPath, "", "utf8");
+    await writeExecutable(
+      path.join(fakeBin, "curl"),
+      `#!/bin/sh
+OUT=
+URL=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT=$2; shift 2 ;;
+    -*) shift ;;
+    *) URL=$1; shift ;;
+  esac
+done
+case "$URL" in
+  *release-manifest.json) cp "$RIN_BOOTSTRAP_TEST_MANIFEST" "$OUT" ;;
+  *release-assets.env) cp "$RIN_BOOTSTRAP_TEST_ASSETS" "$OUT" ;;
+  *) cp "$RIN_BOOTSTRAP_TEST_ARCHIVE" "$OUT" ;;
+esac
+`,
+    );
+
+    async function assertAssetsFail(lines, pattern) {
+      const assetsPath = path.join(
+        tempDir,
+        `release-assets-${Math.random().toString(16).slice(2)}.env`,
+      );
+      await fs.writeFile(assetsPath, `${lines.join("\n")}\n`, "utf8");
+      await assert.rejects(
+        execFileAsync(
+          "sh",
+          [path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"), "install"],
+          {
+            cwd: rootDir,
+            env: {
+              ...process.env,
+              PATH: `${fakeBin}:/usr/bin:/bin`,
+              RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+              TMPDIR: workRoot,
+              RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
+              RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
+              RIN_BOOTSTRAP_TEST_ASSETS: assetsPath,
+              RIN_BOOTSTRAP_TEST_LOG: logPath,
+            },
+          },
+        ),
+        { stderr: pattern },
+      );
+    }
+
+    const baseAssets = [
+      "RIN_ASSET_STABLE_LINUX_X64_URL='https://example.invalid/releases/rin-1.2.3-linux-x64.tar.gz'",
+      "RIN_ASSET_STABLE_LINUX_X64_VERSION='1.2.3'",
+      "RIN_ASSET_STABLE_LINUX_X64_BRANCH='stable'",
+      "RIN_ASSET_STABLE_LINUX_X64_REF='abc1234'",
+      "RIN_ASSET_STABLE_LINUX_X64_SOURCE_LABEL='stable 1.2.3'",
+    ];
+    await assertAssetsFail(
+      baseAssets,
+      /rin bootstrap platform bundle checksum is missing/,
+    );
+    await assertAssetsFail(
+      [
+        baseAssets[0],
+        "RIN_ASSET_STABLE_LINUX_X64_SHA256='0000000000000000000000000000000000000000000000000000000000000000'",
+        ...baseAssets.slice(1),
+      ],
+      /rin bootstrap platform bundle checksum mismatch/,
+    );
   });
 });
 

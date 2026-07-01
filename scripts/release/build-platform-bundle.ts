@@ -18,6 +18,7 @@ function parseArgs(argv: string[]) {
     output: "",
     platform: "",
     nodeRuntime: "",
+    version: "",
     nodeVersion: process.versions.node,
     format: process.platform === "win32" ? "zip" : "tar.gz",
     repoRoot: "",
@@ -33,6 +34,9 @@ function parseArgs(argv: string[]) {
     } else if (arg === "--node-runtime") {
       args.nodeRuntime = argValue(argv, index, arg);
       index += 1;
+    } else if (arg === "--version") {
+      args.version = argValue(argv, index, arg);
+      index += 1;
     } else if (arg === "--node-version") {
       args.nodeVersion = argValue(argv, index, arg).replace(/^v/, "");
       index += 1;
@@ -44,7 +48,7 @@ function parseArgs(argv: string[]) {
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: node scripts/release/build-platform-bundle.ts --output <dir> --platform <os-arch> [--node-runtime <dir>] [--node-version <version>] [--format tar.gz|zip] [--repo-root <dir>]",
+        "Usage: node scripts/release/build-platform-bundle.ts --output <dir> --platform <os-arch> [--version <version>] [--node-runtime <dir>] [--node-version <version>] [--format tar.gz|zip] [--repo-root <dir>]",
       );
       process.exit(0);
     } else {
@@ -172,7 +176,8 @@ const outputDir = path.resolve(process.cwd(), args.output);
 const packageJson = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
 );
-const version = String(packageJson.version || "0.0.0");
+const version = String(args.version || packageJson.version || "0.0.0");
+packageJson.version = version;
 const bundleName = `rin-${version}-${args.platform}`;
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-platform-bundle-"));
 try {
@@ -181,6 +186,10 @@ try {
   for (const name of ["dist", "extensions", "node_modules", "package.json"]) {
     copyEntry(repoRoot, bundleRoot, name);
   }
+  fs.writeFileSync(
+    path.join(bundleRoot, "package.json"),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+  );
   pruneBundleDependencies(repoRoot, bundleRoot);
   const nodeRuntimeRoot = path.resolve(
     args.nodeRuntime || inferNodeRuntimeRoot(),

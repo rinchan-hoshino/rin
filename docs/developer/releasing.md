@@ -39,9 +39,11 @@ It:
 1. resolves the nightly source ref, defaulting to `main` HEAD
 2. computes a nightly version as a prerelease of the next regular stable target
 3. validates the focused release test set
-4. updates `release-manifest.json -> nightly`
-5. commits the manifest update back to `main`
-6. refreshes `bootstrap`
+4. builds the nightly `linux-x64` platform bundle with the managed Node runtime
+5. tags the nightly source ref as `v<version>` and uploads the platform bundle to that prerelease GitHub release
+6. updates `release-manifest.json -> nightly` with platform bundle asset metadata
+7. commits the manifest update back to `main`
+8. refreshes `bootstrap`
 
 ### Beta
 
@@ -53,9 +55,11 @@ It:
 3. creates the weekly beta version for that promotion target
 4. verifies `docs/release/CHANGELOG.md` contains the target promotion heading, release-note bullets, and commit coverage from the current stable ref to the beta source ref
 5. validates the focused release test set
-6. updates `release-manifest.json -> beta`
-7. commits the manifest update back to `main`
-8. refreshes `bootstrap`
+6. builds the beta `linux-x64` platform bundle with the managed Node runtime
+7. tags the beta source ref as `v<version>` and uploads the platform bundle to that prerelease GitHub release
+8. updates `release-manifest.json -> beta` with platform bundle asset metadata
+9. commits the manifest update back to `main`
+10. refreshes `bootstrap`
 
 ### Stable
 
@@ -103,9 +107,9 @@ After a hotfix, merge or cherry-pick the fix back to `main` and into any still-r
 
 ## Platform runtime bundles
 
-Stable and hotfix releases publish a `linux-x64` platform bundle alongside the npm package. The bundle contains the built app runtime (`dist`, production `node_modules`, `extensions`, `package.json`) plus a managed Node runtime under `runtime/node/current`. Bootstrap scripts prefer matching platform bundle metadata from generated `release-assets.env`; when available, install/update can start the installer with the bundled Node instead of requiring system Node/npm.
+Stable, beta, nightly, and hotfix release executors publish a `linux-x64` platform bundle for their selected ref. The bundle contains the built app runtime (`dist`, production `node_modules`, `extensions`, `package.json`) plus a managed Node runtime under `runtime/node/current`. The POSIX bootstrap scripts and the installed updater prefer matching platform bundle metadata; when available, install/update can start the installer/updater with the bundled Node instead of requiring system Node/npm for the prepared runtime.
 
-`release-manifest.json` stores the durable asset URL/checksum metadata under `stable.assets[platform]`, and `release-assets.env` is a shell-friendly projection for the bootstrap branch. If no matching platform asset is present, bootstrap falls back to the legacy source/npm path.
+`release-manifest.json` stores the durable asset URL/checksum metadata under each channel's `assets[platform]`, and `release-assets.env` is a shell-friendly projection for the bootstrap branch. If no matching platform asset is present, bootstrap/update falls back to the legacy source/npm path. Source/git installs still publish a managed Node runtime for launcher and daemon consistency by preserving an existing managed runtime or provisioning the current installer Node into `runtime/node/current`. PowerShell bootstrap remains on the legacy source/npm preparation path until Windows platform bundles are added.
 
 ## Bootstrap branch
 

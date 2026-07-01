@@ -1,12 +1,15 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 
 import { safeString } from "../text-utils.js";
 import { shellQuote } from "../rin-lib/system.js";
 import {
   buildGitHubRefArchiveUrl,
+  platformReleaseAssetUrl,
+  selectPlatformReleaseAsset,
   type ResolvedRelease,
 } from "../rin-lib/release.js";
 import { type InstallerI18n } from "./i18n.js";
@@ -229,6 +232,119 @@ export function disablePackageRootPrepareScript(sourceRoot: string) {
   fs.writeFileSync(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
+function archivePathForUrl(tempRoot: string, url: string) {
+  return /\.zip(?:[?#].*)?$/i.test(url)
+    ? path.join(tempRoot, "rin.zip")
+    : path.join(tempRoot, "rin.tar.gz");
+}
+
+function verifyArchiveSha256(filePath: string, expected?: string) {
+  const normalizedExpected = safeString(expected).trim().toLowerCase();
+  if (!normalizedExpected) {
+    throw new Error("rin_update_platform_bundle_checksum_missing");
+  }
+  const actual = createHash("sha256")
+    .update(fs.readFileSync(filePath))
+    .digest("hex");
+  if (actual !== normalizedExpected) {
+    throw new Error("rin_update_platform_bundle_checksum_mismatch");
+  }
+}
+
+async function extractZipArchive(options: {
+  archivePath: string;
+  sourceRoot: string;
+  workspace: UpdateRuntimeSourceWorkspace;
+  i18n: InstallerI18n;
+}) {
+  const unzip = requireTool("unzip", ["/usr/bin/unzip", "/bin/unzip"]);
+  const zipRoot = path.join(options.workspace.tempRoot, "zip-extract");
+  fs.rmSync(zipRoot, { recursive: true, force: true });
+  fs.mkdirSync(zipRoot, { recursive: true });
+  await runLoggedUpdateCommandSync(
+    unzip,
+    ["-q", options.archivePath, "-d", zipRoot],
+    options.i18n.preparingUpdateSourceMessage,
+    options.workspace.logFile,
+    {},
+    options.i18n.buildUpdateCommandFailureHeader,
+  );
+  const children = fs.readdirSync(zipRoot);
+  const copyRoot =
+    children.length === 1 &&
+    fs.statSync(path.join(zipRoot, children[0] || "")).isDirectory()
+      ? path.join(zipRoot, children[0] || "")
+      : zipRoot;
+  fs.cpSync(copyRoot, options.sourceRoot, {
+    recursive: true,
+    force: true,
+    dereference: false,
+    verbatimSymlinks: true,
+  });
+}
+
+async function extractUpdateArchive(options: {
+  archivePath: string;
+  sourceRoot: string;
+  workspace: UpdateRuntimeSourceWorkspace;
+  i18n: InstallerI18n;
+}) {
+  if (/\.zip$/i.test(options.archivePath)) {
+    await extractZipArchive(options);
+    return;
+  }
+  const tar = requireTool("tar", ["/usr/bin/tar", "/bin/tar"]);
+  await runLoggedUpdateCommandSync(
+    tar,
+    [
+      "-xzf",
+      options.archivePath,
+      "-C",
+      options.sourceRoot,
+      "--strip-components=1",
+    ],
+    options.i18n.preparingUpdateSourceMessage,
+    options.workspace.logFile,
+    {},
+    options.i18n.buildUpdateCommandFailureHeader,
+  );
+}
+
+function isExecutableFile(filePath: string) {
+  try {
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function preparedRuntimeNodeExecutable(sourceRoot: string) {
+  for (const candidate of [
+    path.join(sourceRoot, "runtime", "node", "current", "bin", "node"),
+    path.join(sourceRoot, "runtime", "node", "current", "node.exe"),
+  ]) {
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return process.execPath;
+}
+
+export function provisionPreparedCurrentNodeRuntime(sourceRoot: string) {
+  const existing = preparedRuntimeNodeExecutable(sourceRoot);
+  if (existing !== process.execPath) return existing;
+  if (!process.execPath || !fs.existsSync(process.execPath)) return existing;
+  const targetExecutable =
+    process.platform === "win32"
+      ? path.join(sourceRoot, "runtime", "node", "current", "node.exe")
+      : path.join(sourceRoot, "runtime", "node", "current", "bin", "node");
+  fs.mkdirSync(path.dirname(targetExecutable), { recursive: true });
+  fs.copyFileSync(process.execPath, targetExecutable);
+  try {
+    fs.chmodSync(targetExecutable, 0o755);
+  } catch {}
+  return targetExecutable;
+}
+
 export function isInstalledReleaseCurrent(
   installedRelease: any,
   resolvedRelease: ResolvedRelease,
@@ -295,8 +411,8 @@ export async function prepareUpdateRuntimeSource(options: {
   const { release, workspace, i18n } = options;
   const curl = fs.existsSync("/usr/bin/curl") ? "/usr/bin/curl" : "";
   const wget = fs.existsSync("/usr/bin/wget") ? "/usr/bin/wget" : "";
-  const npm = requireTool("npm", ["/usr/bin/npm", "/bin/npm"]);
-  const tar = requireTool("tar", ["/usr/bin/tar", "/bin/tar"]);
+  const platformAsset = selectPlatformReleaseAsset(release);
+  const platformAssetUrl = platformReleaseAssetUrl(platformAsset);
   const buildEnv = {
     ...(options.env || process.env),
     TMPDIR: workspace.tmpDir,
@@ -304,11 +420,11 @@ export async function prepareUpdateRuntimeSource(options: {
     TMP: workspace.tmpDir,
   };
 
-  await runInstallerProgress(i18n.fetchingUpdateSourceMessage, async () => {
+  const downloadUpdateArchive = async (url: string, archivePath: string) => {
     if (curl) {
       await runLoggedUpdateCommandSync(
         curl,
-        ["-fsSL", release.archiveUrl, "-o", workspace.archivePath],
+        ["-fsSL", url, "-o", archivePath],
         i18n.fetchingUpdateSourceMessage,
         workspace.logFile,
         {},
@@ -317,33 +433,50 @@ export async function prepareUpdateRuntimeSource(options: {
     } else if (wget) {
       await runLoggedUpdateCommandSync(
         wget,
-        ["-qO", workspace.archivePath, release.archiveUrl],
+        ["-qO", archivePath, url],
         i18n.fetchingUpdateSourceMessage,
         workspace.logFile,
         {},
         i18n.buildUpdateCommandFailureHeader,
       );
     } else {
-      await downloadFile(release.archiveUrl, workspace.archivePath);
+      await downloadFile(url, archivePath);
     }
-  });
+  };
+
+  if (platformAssetUrl) {
+    workspace.archivePath = archivePathForUrl(
+      workspace.tempRoot,
+      platformAssetUrl,
+    );
+    await runInstallerProgress(i18n.fetchingUpdateSourceMessage, async () => {
+      await downloadUpdateArchive(platformAssetUrl, workspace.archivePath);
+      verifyArchiveSha256(workspace.archivePath, platformAsset?.sha256);
+    });
+    await runInstallerProgress(i18n.preparingUpdateSourceMessage, () =>
+      extractUpdateArchive({
+        archivePath: workspace.archivePath,
+        sourceRoot: workspace.sourceRoot,
+        workspace,
+        i18n,
+      }),
+    );
+    return workspace;
+  }
+
+  await runInstallerProgress(i18n.fetchingUpdateSourceMessage, () =>
+    downloadUpdateArchive(release.archiveUrl, workspace.archivePath),
+  );
   await runInstallerProgress(i18n.preparingUpdateSourceMessage, () =>
-    runLoggedUpdateCommandSync(
-      tar,
-      [
-        "-xzf",
-        workspace.archivePath,
-        "-C",
-        workspace.sourceRoot,
-        "--strip-components=1",
-      ],
-      i18n.preparingUpdateSourceMessage,
-      workspace.logFile,
-      {},
-      i18n.buildUpdateCommandFailureHeader,
-    ),
+    extractUpdateArchive({
+      archivePath: workspace.archivePath,
+      sourceRoot: workspace.sourceRoot,
+      workspace,
+      i18n,
+    }),
   );
 
+  const npm = requireTool("npm", ["/usr/bin/npm", "/bin/npm"]);
   await runInstallerProgress(
     i18n.installingUpdateDependenciesMessage,
     async () => {
@@ -413,6 +546,7 @@ export async function prepareUpdateRuntimeSource(options: {
     workspace.logFile,
     pruneDuplicatePiCodingAgentDependencies(workspace.sourceRoot),
   );
+  provisionPreparedCurrentNodeRuntime(workspace.sourceRoot);
 
   return workspace;
 }

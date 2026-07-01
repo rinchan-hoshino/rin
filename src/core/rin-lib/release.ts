@@ -22,6 +22,33 @@ export type PlatformReleaseAsset = {
 
 export type PlatformReleaseAssets = Record<string, PlatformReleaseAsset>;
 
+export function releasePlatformKey(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+) {
+  const normalizedPlatform = platform;
+  const normalizedArch =
+    arch === "x64" || arch === "amd64"
+      ? "x64"
+      : arch === "arm64" || arch === "aarch64"
+        ? "arm64"
+        : arch;
+  return `${normalizedPlatform}-${normalizedArch}`;
+}
+
+export function platformReleaseAssetUrl(asset?: PlatformReleaseAsset | null) {
+  return trimReleaseValue(asset?.bundleUrl || asset?.archiveUrl || "");
+}
+
+export function selectPlatformReleaseAsset(
+  release: { assets?: PlatformReleaseAssets } | null | undefined,
+  platformKey = releasePlatformKey(),
+) {
+  const key = trimReleaseValue(platformKey);
+  if (!key) return null;
+  return release?.assets?.[key] || null;
+}
+
 export type ReleaseManifest = {
   schemaVersion?: number;
   packageName?: string;

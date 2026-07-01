@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -64,6 +66,39 @@ const preparedRelease = {
   ref: "abc1234",
   sourceLabel: "stable 1.2.3",
 };
+
+test("buildPreparedUpdaterCommand launches prepared managed node", async () => {
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rin-updater-"));
+  try {
+    const managedNode = path.join(
+      sourceRoot,
+      "runtime",
+      "node",
+      "current",
+      process.platform === "win32" ? "node.exe" : "bin/node",
+    );
+    await fs.mkdir(path.dirname(managedNode), { recursive: true });
+    await fs.writeFile(managedNode, "#!/bin/sh\n", { mode: 0o755 });
+    const command = updater.buildPreparedUpdaterCommand({
+      sourceRoot,
+      releaseFile: path.join(sourceRoot, "release.json"),
+      currentUser: "alice",
+      targetUser: "alice",
+      installDir: "/home/alice/.rin",
+      language: "zh_CN",
+    });
+
+    assert.equal(command.command, managedNode);
+    assert.deepEqual(command.args.slice(0, 3), [
+      path.join(sourceRoot, "dist", "app", "rin-install", "main.js"),
+      "--update",
+      "--target-user",
+    ]);
+    assert.equal(command.options.cwd, sourceRoot);
+  } finally {
+    await fs.rm(sourceRoot, { recursive: true, force: true });
+  }
+});
 
 test("startUpdater does not write language during core updates", async () => {
   await withUpdaterStdout(async () => {

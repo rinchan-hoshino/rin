@@ -160,6 +160,14 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
         "deadbeef",
         "--promotion-version",
         "1.2.4",
+        "--asset-platform",
+        "linux-x64",
+        "--asset-url",
+        "https://github.com/rinchan-hoshino/rin/releases/download/v1.2.4-beta.20260420/rin-1.2.4-beta.20260420-linux-x64.tar.gz",
+        "--asset-sha256",
+        "beta123",
+        "--asset-node-version",
+        "24.18.0",
       ],
       { cwd: rootDir, stdio: "pipe" },
     );
@@ -177,6 +185,14 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
         "deadbeef",
         "--branch",
         "main",
+        "--asset-platform",
+        "linux-x64",
+        "--asset-url",
+        "https://github.com/rinchan-hoshino/rin/releases/download/v1.2.5-nightly.20260420+deadbee/rin-1.2.5-nightly.20260420+deadbee-linux-x64.tar.gz",
+        "--asset-sha256",
+        "nightly123",
+        "--asset-node-version",
+        "24.18.0",
       ],
       { cwd: rootDir, stdio: "pipe" },
     );
@@ -184,6 +200,12 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
     assert.equal(next.beta.version, "1.2.4-beta.20260420");
     assert.equal(next.beta.ref, "deadbeef");
     assert.equal(next.beta.promotionVersion, "1.2.4");
+    assert.deepEqual(next.beta.assets["linux-x64"], {
+      bundleUrl:
+        "https://github.com/rinchan-hoshino/rin/releases/download/v1.2.4-beta.20260420/rin-1.2.4-beta.20260420-linux-x64.tar.gz",
+      sha256: "beta123",
+      nodeVersion: "24.18.0",
+    });
     assert.equal(
       next.beta.archiveUrl,
       "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/deadbeef",
@@ -191,6 +213,12 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
     assert.equal(next.nightly.version, "1.2.5-nightly.20260420+deadbee");
     assert.equal(next.nightly.ref, "deadbeef");
     assert.equal(next.nightly.branch, "main");
+    assert.deepEqual(next.nightly.assets["linux-x64"], {
+      bundleUrl:
+        "https://github.com/rinchan-hoshino/rin/releases/download/v1.2.5-nightly.20260420+deadbee/rin-1.2.5-nightly.20260420+deadbee-linux-x64.tar.gz",
+      sha256: "nightly123",
+      nodeVersion: "24.18.0",
+    });
     assert.equal(
       next.nightly.archiveUrl,
       "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/deadbeef",
@@ -502,6 +530,8 @@ test("release workflows retry main branch metadata pushes", () => {
   }
 
   for (const [workflow, tagRef] of [
+    ["publish-nightly.yml", "steps.plan.outputs.version"],
+    ["publish-beta.yml", "steps.plan.outputs.version"],
     ["publish-stable.yml", "steps.plan.outputs.version"],
     ["publish-hotfix.yml", "inputs.version"],
   ] as const) {
@@ -586,6 +616,27 @@ test("candidate-only release workflows run main-tree release scripts without loc
       /npx --yes tsx scripts\/release\/export-bootstrap-branch\.ts/,
     );
     assert.doesNotMatch(content, /npm run release:(?:manifest|bootstrap)/);
+  }
+});
+
+test("release workflows publish linux platform bundle metadata for every channel", () => {
+  for (const workflow of [
+    "publish-nightly.yml",
+    "publish-beta.yml",
+    "publish-stable.yml",
+    "publish-hotfix.yml",
+  ]) {
+    const content = readWorkflow(workflow);
+    assert.match(content, /Build .* linux-x64 platform bundle/);
+    assert.match(content, /npm run --silent release:bundle/);
+    assert.match(content, /--asset-platform linux-x64/);
+    assert.match(
+      content,
+      /--asset-url 'https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/releases\/download\/v/,
+    );
+    assert.match(content, /--asset-sha256/);
+    assert.match(content, /--asset-node-version/);
+    assert.match(content, /gh release upload "\$tag"/);
   }
 });
 
@@ -676,6 +727,8 @@ test(
         outputDir,
         "--platform",
         "linux-x64",
+        "--version",
+        "1.2.4-beta.20260420",
         "--node-runtime",
         nodeRuntime,
         "--node-version",
@@ -687,12 +740,21 @@ test(
       assert.match(result.sha256, /^[a-f0-9]{64}$/);
       assert.equal(
         path.basename(result.bundlePath),
-        "rin-1.2.3-linux-x64.tar.gz",
+        "rin-1.2.4-beta.20260420-linux-x64.tar.gz",
       );
       const extractDir = path.join(tempDir, "extract");
       fs.mkdirSync(extractDir, { recursive: true });
       execFileSync("tar", ["-xzf", result.bundlePath, "-C", extractDir]);
-      const bundleRoot = path.join(extractDir, "rin-1.2.3-linux-x64");
+      const bundleRoot = path.join(
+        extractDir,
+        "rin-1.2.4-beta.20260420-linux-x64",
+      );
+      assert.equal(
+        JSON.parse(
+          fs.readFileSync(path.join(bundleRoot, "package.json"), "utf8"),
+        ).version,
+        "1.2.4-beta.20260420",
+      );
       for (const relativePath of [
         path.join("dist", "app", "rin-install", "main.js"),
         path.join("dist", "app", "rin", "main.js"),

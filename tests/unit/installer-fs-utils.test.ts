@@ -542,6 +542,87 @@ test("publishInstalledRuntime names releases from release version metadata", asy
   );
 });
 
+test("publishManagedNodeRuntime provisions current node for source installs", async () => {
+  const sourceRoot = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-source-no-node-"),
+  );
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-dst-"),
+  );
+
+  const published = fsUtils.publishManagedNodeRuntime(
+    sourceRoot,
+    installDir,
+    "rin",
+    false,
+    { findSystemUser: () => null },
+  );
+
+  assert.equal(
+    published.nodeExecutable,
+    path.join(installDir, "runtime", "node", "current", "bin", "node"),
+  );
+  const copied = await fs.readFile(published.nodeExecutable);
+  const current = await fs.readFile(process.execPath);
+  assert.deepEqual(copied, current);
+
+  await fs.writeFile(published.nodeExecutable, "existing-managed-node\n");
+  const preserved = fsUtils.publishManagedNodeRuntime(
+    sourceRoot,
+    installDir,
+    "rin",
+    false,
+    { findSystemUser: () => null },
+  );
+  assert.equal(preserved.nodeExecutable, published.nodeExecutable);
+  assert.equal(
+    await fs.readFile(published.nodeExecutable, "utf8"),
+    "existing-managed-node\n",
+  );
+
+  if (process.platform !== "win32") {
+    await fs.writeFile(published.nodeExecutable, "not-executable\n", {
+      mode: 0o644,
+    });
+    await fs.chmod(published.nodeExecutable, 0o644);
+    fsUtils.publishManagedNodeRuntime(sourceRoot, installDir, "rin", false, {
+      findSystemUser: () => null,
+    });
+    assert.deepEqual(
+      await fs.readFile(published.nodeExecutable),
+      await fs.readFile(process.execPath),
+    );
+
+    const badSourceRoot = await fs.mkdtemp(
+      path.join(tempBaseDir, "rin-source-bad-node-"),
+    );
+    const badInstallDir = await fs.mkdtemp(
+      path.join(tempBaseDir, "rin-install-bad-node-"),
+    );
+    const badSourceNode = path.join(
+      badSourceRoot,
+      "runtime",
+      "node",
+      "current",
+      "bin",
+      "node",
+    );
+    await fs.mkdir(path.dirname(badSourceNode), { recursive: true });
+    await fs.writeFile(badSourceNode, "bad-source-node\n", { mode: 0o644 });
+    const repaired = fsUtils.publishManagedNodeRuntime(
+      badSourceRoot,
+      badInstallDir,
+      "rin",
+      false,
+      { findSystemUser: () => null },
+    );
+    assert.deepEqual(
+      await fs.readFile(repaired.nodeExecutable),
+      await fs.readFile(process.execPath),
+    );
+  }
+});
+
 test("publishInstalledRuntime prunes exact duplicate Pi shrinkwrap dependencies", async () => {
   const tempRoot = await makeRuntimeSourceWithRealNodeModules();
   const installDir = await fs.mkdtemp(

@@ -516,7 +516,8 @@ verify_archive_sha256() {
   expected=$1
   file=$2
   if [ -z "$expected" ]; then
-    return 0
+    echo "rin bootstrap platform bundle checksum is missing" >&2
+    exit 1
   fi
   if command -v sha256sum >/dev/null 2>&1; then
     actual=$(sha256sum "$file" | awk '{print $1}')
@@ -574,6 +575,20 @@ find_bundled_node() {
   done
   echo "rin platform bundle is missing runtime/node/current" >&2
   exit 1
+}
+
+provision_source_managed_node() {
+  if [ -x "$SRC_DIR/runtime/node/current/bin/node" ] || [ -x "$SRC_DIR/runtime/node/current/node.exe" ]; then
+    return 0
+  fi
+  node_path=$(command -v node 2>/dev/null || true)
+  if [ -z "$node_path" ] || [ ! -x "$node_path" ]; then
+    echo "$NODE_ERROR" >&2
+    exit 1
+  fi
+  mkdir -p "$SRC_DIR/runtime/node/current/bin"
+  cp "$node_path" "$SRC_DIR/runtime/node/current/bin/node"
+  chmod 0755 "$SRC_DIR/runtime/node/current/bin/node"
 }
 
 resolve_release() {
@@ -866,6 +881,8 @@ if [ "$CHANNEL" != stable ]; then
   run_step "$BUILD_LABEL" npm run build
   run_step "Pruning dependencies" npm prune --omit=dev --no-fund --no-audit
 fi
+provision_source_managed_node
+NODE_COMMAND=$(find_bundled_node)
 say "$LAUNCH_LABEL"
 
 if has_tty; then

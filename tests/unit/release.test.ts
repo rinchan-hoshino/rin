@@ -203,6 +203,31 @@ test("resolveParsedArgs rejects conflicting release selectors", () => {
   );
 });
 
+test("release platform helpers select current bundle assets", () => {
+  assert.equal(release.releasePlatformKey("linux", "x64"), "linux-x64");
+  assert.equal(release.releasePlatformKey("darwin", "arm64"), "darwin-arm64");
+  assert.equal(release.releasePlatformKey("win32", "amd64"), "win32-x64");
+  const resolved = {
+    assets: {
+      "linux-x64": {
+        bundleUrl: "https://example.invalid/rin-linux-x64.tar.gz",
+      },
+    },
+  };
+  assert.deepEqual(
+    release.selectPlatformReleaseAsset(resolved, "linux-x64"),
+    resolved.assets["linux-x64"],
+  );
+  assert.equal(
+    release.platformReleaseAssetUrl(resolved.assets["linux-x64"]),
+    "https://example.invalid/rin-linux-x64.tar.gz",
+  );
+  assert.equal(
+    release.selectPlatformReleaseAsset(resolved, "darwin-arm64"),
+    null,
+  );
+});
+
 test("resolveReleaseRequest resolves stable beta nightly and git sources", () => {
   const manifest = {
     packageName: "@hoshinorin/rin",

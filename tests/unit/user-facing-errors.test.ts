@@ -94,6 +94,14 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin could not recover the remote turn result before the timeout.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("rin_update_platform_bundle_checksum_missing"),
+    "Rin update could not verify the platform bundle because its checksum is missing.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_update_platform_bundle_checksum_mismatch"),
+    "Rin update stopped because the platform bundle checksum did not match.",
+  );
+  assert.equal(
     /retry|restart|doctor|check the session output/i.test(
       formatRuntimeErrorForUser("rpc_turn_final_output_missing"),
     ),
