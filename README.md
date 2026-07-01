@@ -13,3 +13,4 @@ Included files:
 - scripts/bootstrap-entrypoint.ps1
 - release-manifest.json
 - docs/release/CHANGELOG.md
+- release-assets.env
