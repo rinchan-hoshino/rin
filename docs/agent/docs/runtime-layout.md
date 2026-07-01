@@ -118,6 +118,8 @@ Typical launcher paths:
 - `~/.local/bin/rin`
 - `~/.local/bin/rin-install`
 
+The installer also writes `~/.rin/env`, a small sourceable shell fragment that prepends the launcher directory to `PATH` for the current shell. Public POSIX install commands source this file after a successful install so a first-time shell can run `rin` immediately without editing shell startup files.
+
 The installer can write launchers for both the installer user and the daemon target user when those accounts differ. Launcher metadata records the current user's default `targetUser` and agent directory.
 
 For normal agent operation, call `rin`. For launcher repair or ownership audits, compare:

@@ -16,6 +16,7 @@ import { nowFileTimestamp } from "../time-utils.js";
 import {
   appConfigDirForHome,
   currentRuntimeRoot,
+  defaultInstallDirForHome,
   installedAppEntryCandidates,
   installedBuiltinSkillRoot,
   installedDocsRoot,
@@ -154,6 +155,21 @@ export function installedRuntimeNodeCommandArgs(
   const executable = managedNodeExecutablePath(installDir, platform);
   if (fs.existsSync(executable)) return [executable];
   throw new Error(`rin_managed_node_runtime_missing:${executable}`);
+}
+
+export function sourceableRinEnvFile(launcherDir: string) {
+  const quotedLauncherDir = shellQuote(launcherDir);
+  return [
+    "# Rin environment",
+    "# Source this file to add Rin launchers to PATH for the current shell.",
+    `_rin_bin_dir=${quotedLauncherDir}`,
+    'case ":${PATH:-}:" in',
+    '  *":$_rin_bin_dir:"*) ;;',
+    '  *) export PATH="$_rin_bin_dir${PATH:+:$PATH}" ;;',
+    "esac",
+    "unset _rin_bin_dir",
+    "",
+  ].join("\n");
 }
 
 export function launcherScript(
@@ -310,20 +326,30 @@ export function ensureWindowsUserPathIncludes(
   }
 }
 
+function writeFileForUser(
+  userName: string,
+  filePath: string,
+  content: string,
+  mode: number,
+  options: LauncherWriteOptions = {},
+) {
+  if (!options.elevated) {
+    writeTextFile(filePath, content, mode);
+    return;
+  }
+  const target = options.findSystemUser?.(userName) as any;
+  const ownerUser = target?.name || userName;
+  const ownerGroup = target?.name ? String(target?.gid ?? "") : "";
+  writeTextFileWithPrivilege(filePath, content, ownerUser, ownerGroup, mode);
+}
+
 function writeLauncherExecutableForUser(
   userName: string,
   filePath: string,
   content: string,
   options: LauncherWriteOptions = {},
 ) {
-  if (!options.elevated) {
-    writeExecutable(filePath, content);
-    return;
-  }
-  const target = options.findSystemUser?.(userName) as any;
-  const ownerUser = target?.name || userName;
-  const ownerGroup = target?.name ? String(target?.gid ?? "") : "";
-  writeTextFileWithPrivilege(filePath, content, ownerUser, ownerGroup, 0o755);
+  writeFileForUser(userName, filePath, content, 0o755, options);
 }
 
 function windowsCmdQuote(value: string) {
@@ -402,6 +428,16 @@ export function writeLaunchersForUser(
   for (const [filePath, script] of launcherSpecs) {
     writeLauncherExecutableForUser(userName, filePath, script, options);
   }
+  const envPath = path.join(defaultInstallDirForHome(home), "env");
+  if (platform !== "win32") {
+    writeFileForUser(
+      userName,
+      envPath,
+      sourceableRinEnvFile(localBinDirForHome(home)),
+      0o644,
+      options,
+    );
+  }
   const windowsPathUpdate =
     platform === "win32" && process.platform === "win32" && !options.elevated
       ? ensureWindowsUserPathIncludes(localBinDirForHome(home))
@@ -413,6 +449,7 @@ export function writeLaunchersForUser(
   return {
     rinPath,
     rinInstallPath,
+    envPath: platform === "win32" ? undefined : envPath,
     windowsPathUpdate,
   };
 }
