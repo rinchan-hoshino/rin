@@ -93,6 +93,8 @@ const SESSION_SCOPED_COMMAND_NAMES = [
   "abort_bash",
   "get_session_stats",
   "get_session_snapshot",
+  "get_entries",
+  "get_tree",
   "set_entry_label",
   "navigate_tree",
   "export_html",

@@ -30,6 +30,86 @@ function testSessionManager(getMessages = () => []) {
   };
 }
 
+test("rpc mode exposes Pi-compatible session entries and tree", async () => {
+  const stdinOn = process.stdin.on;
+  const stdoutWrite = process.stdout.write;
+  const handlers = new Map();
+  const lines: string[] = [];
+
+  process.stdin.on = function (event, handler) {
+    handlers.set(event, handler);
+    return this;
+  };
+  process.stdout.write = function (chunk) {
+    lines.push(String(chunk));
+    return true;
+  };
+
+  try {
+    const entries = [
+      { type: "message", id: "entry-1", parentId: null },
+      { type: "message", id: "entry-2", parentId: "entry-1" },
+    ];
+    const tree = [
+      { entry: entries[0], children: [{ entry: entries[1], children: [] }] },
+    ];
+    const session = {
+      isStreaming: false,
+      isCompacting: false,
+      agent: { waitForIdle: async () => {} },
+      bindExtensions: async () => {},
+      subscribe: () => () => {},
+      sessionManager: {
+        ...testSessionManager(),
+        getEntries: () => entries,
+        getTree: () => tree,
+        getLeafId: () => "entry-2",
+      },
+    };
+
+    void runCustomRpcMode(session, {
+      SessionManager: { listAll: async () => [], list: async () => [] },
+    });
+    await wait(0);
+    const onData = handlers.get("data");
+    assert.equal(typeof onData, "function");
+    onData(
+      Buffer.from(
+        `${JSON.stringify({ id: "1", type: "get_entries", since: "entry-1" })}\n`,
+      ),
+    );
+    onData(Buffer.from(`${JSON.stringify({ id: "2", type: "get_tree" })}\n`));
+    onData(
+      Buffer.from(
+        `${JSON.stringify({ id: "3", type: "get_entries", since: "missing" })}\n`,
+      ),
+    );
+    await wait(0);
+
+    const responses = lines
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter((line) => line?.type === "response");
+    assert.deepEqual(responses.find((line) => line.id === "1")?.data, {
+      entries: [entries[1]],
+      leafId: "entry-2",
+    });
+    assert.deepEqual(responses.find((line) => line.id === "2")?.data, {
+      tree,
+      leafId: "entry-2",
+    });
+    assert.equal(responses.find((line) => line.id === "3")?.success, false);
+  } finally {
+    process.stdin.on = stdinOn;
+    process.stdout.write = stdoutWrite;
+  }
+});
+
 test(
   "rpc mode sleep_session disposes the session without emitting runtime shutdown",
   { concurrency: false },

@@ -110,6 +110,24 @@ function getSessionEntries(session: any) {
     : [];
 }
 
+function getSessionEntriesSince(session: any, since: unknown) {
+  const entries = getSessionEntries(session);
+  const cursor = safeString(since).trim();
+  if (!cursor) return { entries };
+  const index = entries.findIndex((entry: any) => entry?.id === cursor);
+  if (index < 0) return { error: `Unknown session entry cursor: ${cursor}` };
+  return { entries: entries.slice(index + 1) };
+}
+
+function getSessionLeafId(session: any) {
+  return session?.sessionManager?.getLeafId?.() ?? null;
+}
+
+function getSessionTree(session: any) {
+  const tree = session?.sessionManager?.getTree?.();
+  return Array.isArray(tree) ? tree : [];
+}
+
 function lastPersistedMessage(session: any) {
   const entries = getSessionEntries(session);
   for (let index = entries.length - 1; index >= 0; index -= 1) {
@@ -1164,8 +1182,21 @@ export async function runCustomRpcMode(
         return done(id, type, session.getSessionStats());
       case "get_session_snapshot":
         return done(id, type, {
-          entries: session.sessionManager.getEntries(),
-          leafId: session.sessionManager.getLeafId(),
+          entries: getSessionEntries(session),
+          leafId: getSessionLeafId(session),
+        });
+      case "get_entries": {
+        const result = getSessionEntriesSince(session, command.since);
+        if (result.error) return fail(id, type, result.error);
+        return done(id, type, {
+          entries: result.entries,
+          leafId: getSessionLeafId(session),
+        });
+      }
+      case "get_tree":
+        return done(id, type, {
+          tree: getSessionTree(session),
+          leafId: getSessionLeafId(session),
         });
       case "set_entry_label":
         return run(id, type, () =>
