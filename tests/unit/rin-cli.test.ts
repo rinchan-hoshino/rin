@@ -92,6 +92,73 @@ test("light CLI commands do not load the Pi runtime", () => {
   );
 });
 
+function defaultTuiParsed(overrides: Record<string, unknown> = {}) {
+  return {
+    command: "",
+    targetUser: "demo",
+    targetName: "",
+    installDir: "/home/demo/.rin",
+    passthrough: [],
+    explicitUser: false,
+    explicitTarget: false,
+    hasSavedInstall: true,
+    releaseChannel: "stable",
+    releaseBranch: "",
+    releaseVersion: "",
+    explicitReleaseChannel: false,
+    updateAssumeYes: false,
+    ...overrides,
+  };
+}
+
+test("default TUI fast path is limited to same-user zero-arg interactive launches", () => {
+  assert.equal(
+    main.shouldStartDefaultTuiInCurrentProcess(
+      [],
+      defaultTuiParsed(),
+      "demo",
+      true,
+    ),
+    true,
+  );
+  assert.equal(
+    main.shouldStartDefaultTuiInCurrentProcess(
+      ["hello"],
+      defaultTuiParsed(),
+      "demo",
+      true,
+    ),
+    false,
+  );
+  assert.equal(
+    main.shouldStartDefaultTuiInCurrentProcess(
+      [],
+      defaultTuiParsed({ hasSavedInstall: false }),
+      "demo",
+      true,
+    ),
+    false,
+  );
+  assert.equal(
+    main.shouldStartDefaultTuiInCurrentProcess(
+      [],
+      defaultTuiParsed({ targetUser: "other" }),
+      "demo",
+      true,
+    ),
+    false,
+  );
+  assert.equal(
+    main.shouldStartDefaultTuiInCurrentProcess(
+      [],
+      defaultTuiParsed(),
+      "demo",
+      false,
+    ),
+    false,
+  );
+});
+
 test("version reader rejects git branch selectors as runtime identity", () => {
   const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-version-"));
   try {

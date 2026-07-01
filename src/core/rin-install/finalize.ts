@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 
 import { type FinalizeInstallOptions } from "./apply-plan.js";
@@ -171,6 +171,33 @@ export function refreshCoreUpdateLaunchers(
   return { targetLaunchers, currentLaunchers: null };
 }
 
+export function buildInstalledRuntimePrewarmArgs() {
+  return ["-e", "import('./dist/core/rin-tui/launcher.js')"];
+}
+
+export function prewarmInstalledRuntime(
+  releaseRoot: string,
+  deps: {
+    spawn?: typeof spawn;
+    env?: NodeJS.ProcessEnv;
+  } = {},
+) {
+  const normalizedRoot = String(releaseRoot || "").trim();
+  if (!normalizedRoot) return false;
+  const child = (deps.spawn || spawn)(
+    process.execPath,
+    buildInstalledRuntimePrewarmArgs(),
+    {
+      cwd: normalizedRoot,
+      detached: true,
+      stdio: "ignore",
+      env: deps.env || process.env,
+    },
+  );
+  child.unref();
+  return true;
+}
+
 async function applyInstalledRuntime(
   options: FinalizeInstallOptions & {
     persistInstallerState?: boolean;
@@ -268,6 +295,9 @@ async function applyInstalledRuntime(
           elevated: useElevatedWrite,
         })
       : null;
+  const prewarmedRuntime = publishRuntime
+    ? prewarmInstalledRuntime(publishedRuntime.releaseRoot)
+    : false;
   if (manageDaemon) {
     refreshManagedServiceFiles(
       targetUser,
@@ -469,6 +499,7 @@ async function applyInstalledRuntime(
     installedDocs,
     installedDocsDir: installedDocs.rin,
     prunedReleases,
+    prewarmedRuntime,
     installedService,
     daemonReady,
     ownership,

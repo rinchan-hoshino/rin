@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import os from "node:os";
+
 import { printRunHelp, shouldRunNonInteractive } from "./run-lite.js";
 import {
   hasSubcommandHelpFlag,
@@ -8,6 +10,7 @@ import {
   safeString,
   stripRinWrapperArgs,
 } from "./shared-lite.js";
+import { RIN_DIR_ENV } from "../rin-lib/profile.js";
 
 const RIN_COMMANDS = [
   [
@@ -156,6 +159,42 @@ function isLocalVersionFastPath(rawArgv: string[]) {
   return args.length === 1 && args[0] === "version";
 }
 
+export function shouldStartDefaultTuiInCurrentProcess(
+  rawArgv: string[],
+  parsed: ParsedArgs,
+  currentUser = os.userInfo().username,
+  stdinIsTTY = process.stdin.isTTY,
+) {
+  return (
+    rawArgv.length === 0 &&
+    stdinIsTTY === true &&
+    parsed.command === "" &&
+    parsed.hasSavedInstall &&
+    !parsed.explicitUser &&
+    !parsed.explicitTarget &&
+    parsed.targetUser === currentUser
+  );
+}
+
+export async function startDefaultTuiInCurrentProcess(parsed: ParsedArgs) {
+  if (parsed.installDir && !process.env[RIN_DIR_ENV]) {
+    process.env[RIN_DIR_ENV] = parsed.installDir;
+  }
+  const { startTuiStartupStatusAnimation } =
+    await import("../rin-tui/startup-status.js");
+  const startupStatus = startTuiStartupStatusAnimation();
+  try {
+    const [{ runFrontendEntrypoint }, { startTui }] = await Promise.all([
+      import("../rin-frontend-sdk/entrypoint.js"),
+      import("../rin-tui/launcher.js"),
+    ]);
+    return await runFrontendEntrypoint(() => startTui({ startupStatus }));
+  } catch (error) {
+    startupStatus.stop();
+    throw error;
+  }
+}
+
 export async function startRinCli() {
   const rawArgv = process.argv.slice(2);
   if (isLocalVersionFastPath(rawArgv)) {
@@ -175,6 +214,11 @@ export async function startRinCli() {
   ) {
     printRunHelp();
     return;
+  }
+
+  const defaultTuiParsed = resolveParsedArgs("", {}, rawArgv);
+  if (shouldStartDefaultTuiInCurrentProcess(rawArgv, defaultTuiParsed)) {
+    return await startDefaultTuiInCurrentProcess(defaultTuiParsed);
   }
 
   const cli = await createCli();

@@ -300,38 +300,15 @@ test("tui launch helpers target the direct TUI runner", () => {
   );
 });
 
-test("TUI launch environment reports maintenance notice when the daemon is unavailable", async () => {
-  const available = await launch.resolveTuiLaunchEnvironment(
-    {} as any,
-    { BASE: "1" } as any,
-    { ensureDaemonAvailable: async () => undefined },
+test("default TUI launch lets the TUI own daemon readiness", async () => {
+  const source = await fs.readFile(
+    path.join(rootDir, "src", "core", "rin", "launch.ts"),
+    "utf8",
   );
-  assert.equal(available.runtimeEnv.BASE, "1");
-  assert.equal("RIN_TUI_RUNTIME_ROLE" in available.runtimeEnv, false);
 
-  const unavailable = await launch.resolveTuiLaunchEnvironment(
-    {} as any,
-    { BASE: "1" } as any,
-    {
-      ensureDaemonAvailable: async () => {
-        throw new Error("daemon down");
-      },
-    },
-  );
-  assert.equal(unavailable.runtimeEnv.BASE, "1");
-  assert.equal("RIN_TUI_RUNTIME_ROLE" in unavailable.runtimeEnv, false);
-  assert.match(
-    unavailable.maintenanceModeNotice,
-    /Rin daemon is unavailable \(daemon down\)\./,
-  );
-  assert.match(
-    unavailable.maintenanceModeNotice,
-    /Entering temporary maintenance mode\./,
-  );
-  assert.match(
-    unavailable.maintenanceModeNotice,
-    /features may be unavailable/,
-  );
+  assert.doesNotMatch(source, /ensureDaemonAvailable/);
+  assert.doesNotMatch(source, /resolveTuiLaunchEnvironment/);
+  assert.match(source, /buildDirectTuiArgs/);
 });
 
 test("tui runtime env targets only the Rin runtime root", () => {

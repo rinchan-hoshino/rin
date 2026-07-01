@@ -40,6 +40,38 @@ test("finalize uses a 30 second default daemon readiness timeout", () => {
   assert.equal(finalize.defaultDaemonReadyTimeoutMs(), 30_000);
 });
 
+test("finalize prewarms the installed runtime TUI launcher in the background", () => {
+  const calls: any[] = [];
+  const child = {
+    unref() {
+      calls.push(["unref"]);
+    },
+  };
+
+  assert.equal(
+    finalize.prewarmInstalledRuntime("/release/root", {
+      spawn(command: string, args: string[], options: any) {
+        calls.push([command, args, options]);
+        return child;
+      },
+      env: { TEST_ENV: "1" },
+    }),
+    true,
+  );
+
+  assert.equal(calls[0][0], process.execPath);
+  assert.deepEqual(calls[0][1], [
+    "-e",
+    "import('./dist/core/rin-tui/launcher.js')",
+  ]);
+  assert.equal(calls[0][2].cwd, "/release/root");
+  assert.equal(calls[0][2].detached, true);
+  assert.equal(calls[0][2].stdio, "ignore");
+  assert.deepEqual(calls[0][2].env, { TEST_ENV: "1" });
+  assert.deepEqual(calls[1], ["unref"]);
+  assert.equal(finalize.prewarmInstalledRuntime(""), false);
+});
+
 function createNoopSpinner() {
   return {
     start() {},

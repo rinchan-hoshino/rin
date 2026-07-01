@@ -2,6 +2,13 @@ import {
   InteractiveMode,
   type InteractiveModeOptions,
 } from "@earendil-works/pi-coding-agent";
+import {
+  startTuiStartupStatusAnimation,
+  type TuiStartupStatusAnimation,
+  type TuiStartupTerminal,
+} from "./startup-status.js";
+
+export { startTuiStartupStatusAnimation } from "./startup-status.js";
 
 import {
   applyRuntimeProfileEnvironment,
@@ -44,62 +51,8 @@ type StartTuiOptions = {
   additionalExtensionPaths?: string[];
   resourceOptions?: Partial<TuiResourceOptions>;
   argv?: string[];
+  startupStatus?: TuiStartupStatusAnimation;
 };
-
-type TuiStartupTerminal = {
-  isTTY?: boolean;
-  write?(value: string): unknown;
-};
-
-type TuiStartupStatusAnimation = {
-  stop(): void;
-};
-
-const STARTING_STATUS_FRAMES = [
-  "⠋",
-  "⠙",
-  "⠹",
-  "⠸",
-  "⠼",
-  "⠴",
-  "⠦",
-  "⠧",
-  "⠇",
-  "⠏",
-];
-const STARTING_STATUS_INTERVAL_MS = 80;
-
-export function startTuiStartupStatusAnimation(
-  stdout: TuiStartupTerminal = process.stdout,
-  options: { intervalMs?: number } = {},
-): TuiStartupStatusAnimation {
-  if (!stdout.isTTY || typeof stdout.write !== "function") {
-    return { stop() {} };
-  }
-
-  let frameIndex = 0;
-  let stopped = false;
-  const intervalMs = Math.max(
-    1,
-    options.intervalMs ?? STARTING_STATUS_INTERVAL_MS,
-  );
-  const render = () => {
-    const frame =
-      STARTING_STATUS_FRAMES[frameIndex] ?? STARTING_STATUS_FRAMES[0];
-    frameIndex = (frameIndex + 1) % STARTING_STATUS_FRAMES.length;
-    stdout.write?.(`\r\x1b[K${frame} Starting...`);
-  };
-  render();
-  const timer = setInterval(render, intervalMs);
-  return {
-    stop() {
-      if (stopped) return;
-      stopped = true;
-      clearInterval(timer);
-      stdout.write?.("\r\x1b[K");
-    },
-  };
-}
 
 export function clearVisibleTerminalForTuiStartup(
   stdout: TuiStartupTerminal = process.stdout,
@@ -346,6 +299,7 @@ async function startStdTui(
   resourceOptions: Partial<TuiResourceOptions>,
   profile: ReturnType<typeof startupProfiler>,
   interactiveOptions: TuiInteractiveOptions,
+  startupStatus: TuiStartupStatusAnimation,
 ) {
   const { createConfiguredAgentSession } =
     await import("../rin-lib/runtime.js");
@@ -374,6 +328,7 @@ async function startStdTui(
     (sessionRuntime as any)?.session?.settingsManager,
     interactiveOptions,
   );
+  startupStatus.stop();
   clearVisibleTerminalForTuiStartup();
   await runInteractiveMode(
     createFrontendSdkRuntimeWrapper(sessionRuntime),
@@ -385,18 +340,25 @@ async function startMaintenanceTui(
   resourceOptions: Partial<TuiResourceOptions>,
   profile: ReturnType<typeof startupProfiler>,
   interactiveOptions: TuiInteractiveOptions,
+  startupStatus: TuiStartupStatusAnimation,
   startupWarning: string = formatTuiMaintenanceModeNotice(),
 ) {
-  await startStdTui(resourceOptions, profile, {
-    ...interactiveOptions,
-    rinStartupWarnings: [startupWarning],
-  });
+  await startStdTui(
+    resourceOptions,
+    profile,
+    {
+      ...interactiveOptions,
+      rinStartupWarnings: [startupWarning],
+    },
+    startupStatus,
+  );
 }
 
 async function startRpcTui(
   resourceOptions: Partial<TuiResourceOptions>,
   profile: ReturnType<typeof startupProfiler>,
   interactiveOptions: TuiInteractiveOptions,
+  startupStatus: TuiStartupStatusAnimation,
 ) {
   const client = new RinDaemonFrontendClient({
     frontendIdentity: TUI_FRONTEND_IDENTITY,
@@ -405,7 +367,6 @@ async function startRpcTui(
   let runtimeHost: { dispose(): Promise<void> } | undefined;
   let interactiveMode: InteractiveMode | undefined;
   try {
-    const startupStatus = startTuiStartupStatusAnimation();
     try {
       await prepareRpcSessionWorkerForInteractiveStartup(
         rpcSession,
@@ -446,56 +407,74 @@ async function startRpcTui(
 }
 
 export async function startTui(options: StartTuiOptions = {}) {
-  const profile = startupProfiler();
-  const runtime = resolveRuntimeProfile();
-  profile.mark("runtime-resolved");
-  applyRuntimeProfileEnvironment(runtime);
-  if (process.cwd() !== runtime.cwd) {
-    process.chdir(runtime.cwd);
-  }
-
-  const argv = options.argv ?? process.argv.slice(2);
-  const parsedTuiOptions = parseTuiCliOptions(argv, runtime.cwd);
-  const resourceOptions: Partial<TuiResourceOptions> = {
-    ...parsedTuiOptions.resources,
-    ...options.resourceOptions,
-    additionalExtensionPaths:
-      options.resourceOptions?.additionalExtensionPaths ??
-      options.additionalExtensionPaths ??
-      parsedTuiOptions.resources.additionalExtensionPaths,
-  };
-  const maintenanceMode = await shouldStartMaintenanceMode();
-  applyTuiRuntimeRole(maintenanceMode);
-  const interactiveOptions: TuiInteractiveOptions = {
-    initialMessage: parsedTuiOptions.initialMessage,
-    initialMessages: parsedTuiOptions.initialMessages,
-    verbose: parsedTuiOptions.verbose,
-  };
-  await applyTuiOnboardingStartupState(
-    runtime.agentDir,
-    resourceOptions,
-    interactiveOptions,
-  );
-  profile.mark(maintenanceMode ? "mode=maintenance" : "mode=rpc");
-
-  await applyRinTuiOverrides();
-
-  if (maintenanceMode) {
-    await startMaintenanceTui(resourceOptions, profile, interactiveOptions);
-    return;
-  }
-
+  const startupStatus =
+    options.startupStatus ?? startTuiStartupStatusAnimation();
   try {
-    await startRpcTui(resourceOptions, profile, interactiveOptions);
-  } catch (error) {
-    if (!isRecoverableRpcStartupError(error)) throw error;
-    applyTuiRuntimeRole(true);
-    profile.mark("mode=maintenance-after-rpc-startup-failure");
-    await startMaintenanceTui(
+    const profile = startupProfiler();
+    const runtime = resolveRuntimeProfile();
+    profile.mark("runtime-resolved");
+    applyRuntimeProfileEnvironment(runtime);
+    if (process.cwd() !== runtime.cwd) {
+      process.chdir(runtime.cwd);
+    }
+
+    const argv = options.argv ?? process.argv.slice(2);
+    const parsedTuiOptions = parseTuiCliOptions(argv, runtime.cwd);
+    const resourceOptions: Partial<TuiResourceOptions> = {
+      ...parsedTuiOptions.resources,
+      ...options.resourceOptions,
+      additionalExtensionPaths:
+        options.resourceOptions?.additionalExtensionPaths ??
+        options.additionalExtensionPaths ??
+        parsedTuiOptions.resources.additionalExtensionPaths,
+    };
+    const maintenanceMode = await shouldStartMaintenanceMode();
+    applyTuiRuntimeRole(maintenanceMode);
+    const interactiveOptions: TuiInteractiveOptions = {
+      initialMessage: parsedTuiOptions.initialMessage,
+      initialMessages: parsedTuiOptions.initialMessages,
+      verbose: parsedTuiOptions.verbose,
+    };
+    await applyTuiOnboardingStartupState(
+      runtime.agentDir,
       resourceOptions,
-      profile,
       interactiveOptions,
-      formatTuiMaintenanceFallbackNotice(error),
     );
+    profile.mark(maintenanceMode ? "mode=maintenance" : "mode=rpc");
+
+    await applyRinTuiOverrides();
+
+    if (maintenanceMode) {
+      await startMaintenanceTui(
+        resourceOptions,
+        profile,
+        interactiveOptions,
+        startupStatus,
+      );
+      return;
+    }
+
+    try {
+      await startRpcTui(
+        resourceOptions,
+        profile,
+        interactiveOptions,
+        startupStatus,
+      );
+    } catch (error) {
+      if (!isRecoverableRpcStartupError(error)) throw error;
+      applyTuiRuntimeRole(true);
+      profile.mark("mode=maintenance-after-rpc-startup-failure");
+      await startMaintenanceTui(
+        resourceOptions,
+        profile,
+        interactiveOptions,
+        startupStatus,
+        formatTuiMaintenanceFallbackNotice(error),
+      );
+    }
+  } catch (error) {
+    startupStatus.stop();
+    throw error;
   }
 }

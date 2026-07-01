@@ -4,23 +4,11 @@ import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import { buildUserShell, targetUserRuntimeEnv } from "../rin-lib/system.js";
 import {
   createTargetExecutionContext,
-  ensureDaemonAvailable,
   installConfigPath,
   ParsedArgs,
   resolveRuntimeAgentDirForTarget,
   runCommand,
-  safeString,
 } from "./shared.js";
-
-export function formatMaintenanceModeNotice(error: unknown) {
-  const detail = safeString((error as any)?.message || error).trim();
-  const suffix = detail ? ` (${detail})` : "";
-  return [
-    `Rin daemon is unavailable${suffix}.`,
-    "Entering temporary maintenance mode.",
-    "Some features may be unavailable or not match daemon/RPC behavior.",
-  ].join("\n");
-}
 
 export function buildTuiRuntimeEnv(
   targetUser: string,
@@ -61,24 +49,6 @@ async function runTargetCommand(
   });
 }
 
-export async function resolveTuiLaunchEnvironment(
-  context: ReturnType<typeof createTargetExecutionContext>,
-  runtimeEnv: NodeJS.ProcessEnv,
-  deps: {
-    ensureDaemonAvailable?: typeof ensureDaemonAvailable;
-  } = {},
-): Promise<{ runtimeEnv: NodeJS.ProcessEnv; maintenanceModeNotice?: string }> {
-  try {
-    await (deps.ensureDaemonAvailable || ensureDaemonAvailable)(context);
-    return { runtimeEnv };
-  } catch (error) {
-    return {
-      runtimeEnv,
-      maintenanceModeNotice: formatMaintenanceModeNotice(error),
-    };
-  }
-}
-
 async function resolveLaunchContext(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
   const currentUser = os.userInfo().username;
@@ -94,19 +64,14 @@ async function resolveLaunchContext(parsed: ParsedArgs) {
     "rin-tui",
     "main.js",
   );
-  const launchEnvironment = await resolveTuiLaunchEnvironment(
-    context,
-    runtimeEnv,
-  );
   const tuiArgv = buildDirectTuiArgs(tuiEntry, {
     passthrough: parsed.passthrough,
   });
   return {
     repoRoot: context.repoRoot,
     targetUser: context.targetUser,
-    runtimeEnv: launchEnvironment.runtimeEnv,
+    runtimeEnv,
     tuiArgv,
-    maintenanceModeNotice: launchEnvironment.maintenanceModeNotice,
   };
 }
 

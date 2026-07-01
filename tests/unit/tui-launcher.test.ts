@@ -263,6 +263,18 @@ test("rpc startup shows a Starting animation before the full TUI takes over", ()
   assert.deepEqual(nonTtyWrites, []);
 });
 
+test("app TUI bootstrap shows Starting before importing the full launcher", async () => {
+  const source = await fs.readFile(
+    path.join(rootDir, "src", "app", "rin-tui", "main.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /startTuiStartupStatusAnimation/);
+  assert.match(source, /import\("\.\.\/\.\.\/core\/rin-tui\/launcher\.js"\)/);
+  assert.match(source, /startTui\(\{ startupStatus \}\)/);
+  assert.doesNotMatch(source, /import \{ startTui \}/);
+});
+
 test("tui cli options stay lightweight without onboarding imports", async () => {
   const source = await fs.readFile(
     path.join(rootDir, "src", "core", "rin-tui", "cli-options.ts"),
