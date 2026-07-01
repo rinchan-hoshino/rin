@@ -28,6 +28,7 @@ import {
   defaultInstallDirForHome,
   installSettingsPath,
   installerManifestPath,
+  managedNodeExecutablePath,
   managedSystemdUnitCandidates,
 } from "../rin-install/paths.js";
 import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
@@ -390,6 +391,11 @@ export function readInstalledUpdateReleasePreference(
   return { channel, branch: safeString(release?.branch).trim() };
 }
 
+export function rinInstallUpdateNodeCommand(installDir: string) {
+  const managedNode = managedNodeExecutablePath(installDir);
+  return fs.existsSync(managedNode) ? managedNode : process.execPath;
+}
+
 function buildRinInstallUpdateArgs(parsed: ParsedArgs, installDir: string) {
   const args = [
     "--update",
@@ -409,7 +415,7 @@ export async function runUpdate(parsed: ParsedArgs) {
   const installDir = resolveInstallDirForTarget(parsed);
   const repoRoot = repoRootFromHere();
   await runInteractiveCommand(
-    process.execPath,
+    rinInstallUpdateNodeCommand(installDir),
     [
       path.join(repoRoot, "dist", "app", "rin-install", "main.js"),
       ...buildRinInstallUpdateArgs(parsed, installDir),

@@ -98,6 +98,25 @@ test("readInstalledUpdateReleasePreference reads cross-user channel with privile
   }
 });
 
+test("rin update handoff prefers installed managed Node over current process", async () => {
+  const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-release-"));
+  try {
+    const managedNode = path.join(
+      installDir,
+      "runtime",
+      "node",
+      "current",
+      process.platform === "win32" ? "node.exe" : path.join("bin", "node"),
+    );
+    await fs.mkdir(path.dirname(managedNode), { recursive: true });
+    await fs.writeFile(managedNode, "#!/bin/sh\n", { mode: 0o755 });
+
+    assert.equal(shared.rinInstallUpdateNodeCommand(installDir), managedNode);
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
 test("readInstalledUpdateReleasePreference requires an installed channel", async () => {
   const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-release-"));
   try {
