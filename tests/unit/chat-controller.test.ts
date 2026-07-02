@@ -2314,6 +2314,11 @@ test("chat controller polls typing and rotating reactions while a turn is active
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
   assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
 
+  assert.equal(await controller.pollTyping(), false);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
+
+  controller.lastWorkingIndicatorAt -= 4_000;
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [
     { chat_id: "2", action: "typing" },
@@ -2322,6 +2327,7 @@ test("chat controller polls typing and rotating reactions while a turn is active
   assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
 
   controller.lastWorkingReactionAt -= 30_000;
+  controller.lastWorkingIndicatorAt -= 4_000;
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [
     { chat_id: "2", action: "typing" },
@@ -2518,6 +2524,15 @@ test("chat controller uses adapter reaction capability for lark working indicato
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
+  assert.equal(await controller.pollTyping(), false);
+  assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
+  controller.lastWorkingIndicatorAt -= 30_000;
+  controller.lastWorkingReactionAt -= 30_000;
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(reactions, [
+    ["create", "chat-1", "m-lark", "🤔"],
+    ["create", "chat-1", "m-lark", "🔥"],
+  ]);
   assert.equal(noticeSent, false);
 });
 
@@ -2564,6 +2579,14 @@ test("chat controller uses discord typing and reaction capabilities together", a
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [["typing", "channel-1"]]);
   assert.deepEqual(reactions, [["create", "channel-1", "m-discord", "🤔"]]);
+  assert.equal(await controller.pollTyping(), false);
+  assert.deepEqual(actions, [["typing", "channel-1"]]);
+  controller.lastWorkingIndicatorAt -= 9_000;
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(actions, [
+    ["typing", "channel-1"],
+    ["typing", "channel-1"],
+  ]);
 });
 
 test("chat controller does not deliver text-only assistant messages as interim", async () => {

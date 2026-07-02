@@ -68,6 +68,14 @@ import { resolveChatQuietModeEnabled } from "./settings.js";
 const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
 const WORKING_REACTION_INTERVAL_MS = 30_000;
 
+const PLATFORM_TYPING_POLL_INTERVAL_MS: Record<string, number> = {
+  // Telegram Bot API sendChatAction expires after 5 seconds.
+  telegram: 4_000,
+  // Discord typing indicators expire after 10 seconds.
+  discord: 9_000,
+};
+const DEFAULT_TYPING_POLL_INTERVAL_MS = WORKING_REACTION_INTERVAL_MS;
+
 function detachedControllerStatePath(dataDir: string, chatKey: string) {
   return path.join(
     dataDir,
@@ -260,6 +268,7 @@ export class ChatController {
   workingReactionEmoji = "";
   workingReactionTick = 0;
   lastWorkingReactionAt = 0;
+  lastWorkingIndicatorAt = 0;
   activeWorkingIndicators: WorkingIndicator[] = [];
   workingIndicatorTick = 0;
   currentTurn: ChatTurnMeta | null = null;
@@ -267,6 +276,7 @@ export class ChatController {
   compactionWorkingIndicators: WorkingIndicator[] = [];
   compactionReactionTick = 0;
   lastCompactionReactionAt = 0;
+  lastCompactionIndicatorAt = 0;
   compactionIndicatorTick = 0;
   activeCommandTurnInput: ChatTurnTarget | null = null;
   pendingSteeredDeliveryTargets: ChatTurnTarget[] = [];
@@ -603,6 +613,20 @@ export class ChatController {
     return Boolean(findBot(this.app, parsed.platform, parsed.botId));
   }
 
+  private typingPollIntervalMs() {
+    const platform = parseChatKey(this.chatKey)?.platform.toLowerCase() || "";
+    return (
+      PLATFORM_TYPING_POLL_INTERVAL_MS[platform] ||
+      DEFAULT_TYPING_POLL_INTERVAL_MS
+    );
+  }
+
+  private isTypingPollDue(lastPolledAt: number, now = Date.now()) {
+    return (
+      lastPolledAt <= 0 || now - lastPolledAt >= this.typingPollIntervalMs()
+    );
+  }
+
   private isQuietModeEnabled() {
     if (this.quietModeOverride !== undefined) return this.quietModeOverride;
     return resolveChatQuietModeEnabled(
@@ -663,6 +687,7 @@ export class ChatController {
     this.workingReactionEmoji = "";
     this.workingReactionTick = 0;
     this.lastWorkingReactionAt = 0;
+    this.lastWorkingIndicatorAt = 0;
     this.workingIndicatorTick = 0;
     const context = this.workingIndicatorContext({ event: "end" });
     const results = await Promise.all(
@@ -709,6 +734,7 @@ export class ChatController {
     this.compactionWorkingIndicators = [];
     this.compactionReactionTick = 0;
     this.lastCompactionReactionAt = 0;
+    this.lastCompactionIndicatorAt = 0;
     this.compactionIndicatorTick = 0;
     const context = this.compactionWorkingIndicatorContext({ event: "end" });
     const results = await Promise.all(
@@ -743,6 +769,9 @@ export class ChatController {
       : this.getWorkingIndicators();
     this.compactionWorkingIndicators = indicators;
     const now = Date.now();
+    if (!this.isTypingPollDue(this.lastCompactionIndicatorAt, now)) {
+      return false;
+    }
     const messageId = safeString(
       this.compactionTurn.incomingMessageId || "",
     ).trim();
@@ -766,6 +795,7 @@ export class ChatController {
           ),
         ),
     );
+    this.lastCompactionIndicatorAt = now;
     this.compactionIndicatorTick += 1;
     if (reactionDue) {
       this.lastCompactionReactionAt = now;
@@ -867,6 +897,9 @@ export class ChatController {
       : this.getWorkingIndicators();
     this.activeWorkingIndicators = indicators;
     const now = Date.now();
+    if (!this.isTypingPollDue(this.lastWorkingIndicatorAt, now)) {
+      return false;
+    }
     const messageId = this.currentIncomingMessageId();
     const reactionDue =
       Boolean(messageId) &&
@@ -888,6 +921,7 @@ export class ChatController {
           ),
         ),
     );
+    this.lastWorkingIndicatorAt = now;
     this.workingIndicatorTick += 1;
     if (reactionDue) {
       this.lastWorkingReactionAt = now;
