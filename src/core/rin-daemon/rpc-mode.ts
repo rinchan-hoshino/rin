@@ -12,12 +12,6 @@ import {
   listBoundSessions,
   renameBoundSession,
 } from "../session/factory.js";
-import { getManagedSessionDir } from "../session/managed-paths.js";
-import { requireSessionFile } from "../session/ref.js";
-import {
-  getRuntimeSessionDir,
-  resolveRuntimeProfile,
-} from "../rin-lib/runtime.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
@@ -353,143 +347,10 @@ function isWorkerLocalSessionReplacementCommand(commandLine: string) {
   return Boolean(trimmed.slice("/resume ".length).trim());
 }
 
-function canReuseCurrentSessionForNewSessionCommand(
-  session: any,
-  command: any,
-) {
-  if (!session || session.isStreaming || session.isCompacting) return false;
-  if (String(command?.parentSession || "").trim()) return false;
-  if (String(command?.managedSessionLeaf || "").trim()) return false;
-  if (String(command?.sessionFile || command?.sessionPath || "").trim()) {
-    return false;
-  }
-  const entryCount = Array.isArray(session.sessionManager?.getEntries?.())
-    ? session.sessionManager.getEntries().length
-    : undefined;
-  if (typeof entryCount === "number") return entryCount === 0;
-  const messageCount = Array.isArray(session.messages)
-    ? session.messages.length
-    : undefined;
-  return typeof messageCount === "number" ? messageCount === 0 : false;
-}
-
-function canCreateReplacementSession(runtime: any) {
-  return (
-    typeof runtime.emitBeforeSwitch === "function" &&
-    typeof runtime.teardownCurrent === "function" &&
-    typeof runtime.apply === "function" &&
-    typeof runtime.createRuntime === "function"
-  );
-}
-
-async function createPersistedNewSession(
-  runtime: any,
-  SessionManager: any,
-  options: { parentSession?: unknown } = {},
-) {
-  if (!canCreateReplacementSession(runtime)) {
-    return await runtime.newSession(
-      options.parentSession
-        ? { parentSession: options.parentSession }
-        : undefined,
-    );
-  }
-
-  const beforeResult = await runtime.emitBeforeSwitch("new");
-  if (beforeResult?.cancelled) return beforeResult;
-
-  const currentSession = runtime.session;
-  const cwd =
-    safeString(
-      runtime.cwd || currentSession?.sessionManager?.getCwd?.(),
-    ).trim() || process.cwd();
-  const profile = resolveRuntimeProfile({
-    cwd,
-    agentDir: safeString(runtime.services?.agentDir).trim() || undefined,
-  });
-  const sessionManager = SessionManager.create(
-    cwd,
-    getRuntimeSessionDir(cwd, profile.agentDir),
-  );
-  if (options.parentSession) {
-    sessionManager.newSession({ parentSession: options.parentSession });
-  }
-  const previousSessionFile = currentSession?.sessionFile;
-  await runtime.teardownCurrent("new", sessionManager.getSessionFile());
-  runtime.apply(
-    await runtime.createRuntime({
-      cwd,
-      agentDir: profile.agentDir,
-      sessionManager,
-      sessionStartEvent: {
-        type: "session_start",
-        reason: "new",
-        previousSessionFile,
-      },
-    }),
-  );
-  await runtime.finishSessionReplacement?.();
-  return { cancelled: false };
-}
-
-async function createManagedNewSession(
-  runtime: any,
-  SessionManager: any,
-  options: { managedSessionLeaf: string; parentSession?: unknown },
-) {
-  const managedSessionLeaf = safeString(options.managedSessionLeaf).trim();
-  if (!managedSessionLeaf) {
-    return await runtime.newSession(
-      options.parentSession
-        ? { parentSession: options.parentSession }
-        : undefined,
-    );
-  }
-
-  if (!canCreateReplacementSession(runtime)) {
-    throw new Error("managed_new_session_unsupported");
-  }
-
-  const beforeResult = await runtime.emitBeforeSwitch("new");
-  if (beforeResult?.cancelled) return beforeResult;
-
-  const currentSession = runtime.session;
-  const cwd =
-    safeString(
-      runtime.cwd || currentSession?.sessionManager?.getCwd?.(),
-    ).trim() || process.cwd();
-  const profile = resolveRuntimeProfile({
-    cwd,
-    agentDir: safeString(runtime.services?.agentDir).trim() || undefined,
-  });
-  const sessionDir = getManagedSessionDir(profile.agentDir, managedSessionLeaf);
-  const sessionManager = SessionManager.create(cwd, sessionDir);
-  if (options.parentSession) {
-    sessionManager.newSession({ parentSession: options.parentSession });
-  }
-  const previousSessionFile = currentSession?.sessionFile;
-  await runtime.teardownCurrent("new", sessionManager.getSessionFile());
-  runtime.apply(
-    await runtime.createRuntime({
-      cwd,
-      agentDir: profile.agentDir,
-      sessionManager,
-      sessionStartEvent: {
-        type: "session_start",
-        reason: "new",
-        previousSessionFile,
-      },
-    }),
-  );
-  await runtime.finishSessionReplacement?.();
-  return { cancelled: false };
-}
-
 export async function runCustomRpcMode(
   runtimeOrSession: any,
   deps: {
     SessionManager: any;
-    reuseFreshSessionForInitialNewSession?: boolean;
   },
 ) {
   const { SessionManager } = deps;
@@ -722,9 +583,6 @@ export async function runCustomRpcMode(
   let latestAutoRetryFailureMessage = "";
   const isTurnActive = () => Boolean(activeTurnPromise);
   let interruptQueue = Promise.resolve();
-  let initialFreshSessionReusable =
-    deps.reuseFreshSessionForInitialNewSession === true &&
-    canReuseCurrentSessionForNewSessionCommand(getSession(), {});
   const emitTurnEvent = (
     event: string,
     requestTag: string,
@@ -738,14 +596,6 @@ export async function runCustomRpcMode(
       ...(requestTag ? { requestTag } : {}),
       ...payload,
     });
-  };
-  const abortCurrentSessionForReplacement = async () => {
-    const current = getSession();
-    if (!current) return;
-    if (!current.isStreaming && !current.isCompacting && !isTurnActive()) {
-      return;
-    }
-    await current.abort();
   };
   const startTurnTask = (
     requestTag: string,
@@ -921,12 +771,7 @@ export async function runCustomRpcMode(
       mode: "rpc",
       commandContextActions: {
         waitForIdle: () => getSession().agent.waitForIdle(),
-        newSession: async (options) => {
-          await abortCurrentSessionForReplacement();
-          const result = await runtime.newSession(options);
-          await bindCurrentSession();
-          return result;
-        },
+        newSession: async () => ({ cancelled: true }),
         fork: async (entryId, options) => {
           const result = await runtime.fork(entryId, options);
           await bindCurrentSession();
@@ -942,11 +787,7 @@ export async function runCustomRpcMode(
             })
           ).cancelled,
         }),
-        switchSession: async (sessionPath, options) => {
-          const result = await runtime.switchSession(sessionPath, options);
-          await bindCurrentSession();
-          return result;
-        },
+        switchSession: async () => ({ cancelled: true }),
         reload: async () => {
           await getSession().reload();
         },
@@ -989,8 +830,6 @@ export async function runCustomRpcMode(
     const session = getSession();
     const id = command?.id;
     const type = String(command?.type || "unknown");
-    const usingInitialFreshSession = initialFreshSessionReusable;
-    initialFreshSessionReusable = false;
     switch (type) {
       case "extension_ui_response":
         resolvePendingExtensionUiRequest(command);
@@ -1354,79 +1193,6 @@ export async function runCustomRpcMode(
               return { handled: true };
             }
             return builtinResult;
-          },
-          (value) => value,
-        );
-      }
-      case "new_session":
-        if (
-          usingInitialFreshSession &&
-          canReuseCurrentSessionForNewSessionCommand(session, command)
-        ) {
-          return done(id, type, {
-            cancelled: false,
-            sessionFile: session.sessionFile,
-            sessionId: session.sessionId,
-          });
-        }
-        return run(
-          id,
-          type,
-          async () => {
-            const frontendIdentity = normalizeFrontendIdentity(
-              command.frontendIdentity,
-            );
-            if (frontendIdentity && session.sessionManager) {
-              session.sessionManager.__rinFrontend = frontendIdentity;
-            }
-            await abortCurrentSessionForReplacement();
-            const managedSessionLeaf = safeString(
-              command.managedSessionLeaf || "",
-            ).trim();
-            if (safeString(command.sessionFile || command.sessionPath).trim()) {
-              throw new Error("new_session_session_file_unsupported");
-            }
-            const value = managedSessionLeaf
-              ? await createManagedNewSession(runtime, SessionManager, {
-                  managedSessionLeaf,
-                  parentSession: command.parentSession,
-                })
-              : await createPersistedNewSession(runtime, SessionManager, {
-                  parentSession: command.parentSession,
-                });
-            await bindCurrentSession();
-            const rebound = getSession();
-            return {
-              cancelled: Boolean(value?.cancelled),
-              sessionFile: rebound?.sessionFile,
-              sessionId: rebound?.sessionId,
-            };
-          },
-          (value) => value,
-        );
-      case "switch_session": {
-        const sessionFile = requireSessionFile(command);
-        return run(
-          id,
-          type,
-          () => {
-            const frontendIdentity = normalizeFrontendIdentity(
-              command.frontendIdentity,
-            );
-            if (frontendIdentity && session.sessionManager) {
-              session.sessionManager.__rinFrontend = frontendIdentity;
-            }
-            return runtime
-              .switchSession(sessionFile)
-              .then(async (value: any) => {
-                await bindCurrentSession();
-                const rebound = getSession();
-                return {
-                  cancelled: Boolean(value?.cancelled),
-                  sessionFile: rebound?.sessionFile,
-                  sessionId: rebound?.sessionId,
-                };
-              });
           },
           (value) => value,
         );

@@ -382,8 +382,8 @@ export async function startDaemon(
         connection,
         command,
       );
-      if (previousWorker) {
-        await workerPool.abortWorker(previousWorker);
+      if (previousWorker && previousWorker === connection.attachedWorker) {
+        workerPool.detachWorker(connection, { release: false });
       }
       const worker = workerPool.resolveWorkerForCommand(connection, command);
       if (!worker) {
@@ -393,7 +393,34 @@ export async function startDaemon(
         );
         return true;
       }
-      workerPool.forwardToWorker(connection, worker, command);
+      try {
+        const state = await workerPool.readWorkerState(worker);
+        workerPool.attachWorkerToConnection(connection, worker);
+        writeLine(
+          connection.socket,
+          response(id, type, true, {
+            cancelled: false,
+            sessionFile: state.sessionFile || worker.sessionFile,
+            sessionId: state.sessionId || worker.sessionId,
+          }),
+        );
+        if (previousWorker) {
+          void workerPool.terminateWorkerGracefullyIfUnattached(previousWorker);
+        }
+      } catch (error: any) {
+        workerPool.destroyWorker(worker);
+        if (previousWorker)
+          workerPool.attachWorkerToConnection(connection, previousWorker);
+        writeLine(
+          connection.socket,
+          response(
+            id,
+            type,
+            false,
+            String(error?.message || error || "rin_worker_state_unavailable"),
+          ),
+        );
+      }
       workerPool.evictDetachedWorkers();
       return true;
     }

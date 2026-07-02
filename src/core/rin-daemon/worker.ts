@@ -8,8 +8,14 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
+import { getManagedSessionDir } from "../session/managed-paths.js";
 import { runCustomRpcMode } from "./rpc-mode.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
+
+type InitialWorkerSession =
+  | { kind: "new"; parentSession?: unknown }
+  | { kind: "managed"; managedSessionLeaf: string; parentSession?: unknown }
+  | { kind: "open"; sessionFile: string };
 
 type WorkerResourceOptions = RinToolStartupOptions & {
   piStartupOptions?: Record<string, unknown>;
@@ -26,6 +32,7 @@ type WorkerResourceOptions = RinToolStartupOptions & {
   systemPrompt?: string;
   appendSystemPrompt?: string[];
   disabledRinCapabilities?: string[];
+  __rinInitialSession?: InitialWorkerSession;
 };
 
 function readValueArg(argv: string[], name: string) {
@@ -64,20 +71,48 @@ export function createTemporaryWorkerSessionManager(
   return sessionManager;
 }
 
+function createInitialWorkerSessionManager(
+  SessionManager: any,
+  options: {
+    cwd: string;
+    agentDir: string;
+    initialSession?: InitialWorkerSession;
+  },
+) {
+  const initial = options.initialSession;
+  const runtimeSessionDir = getRuntimeSessionDir(options.cwd, options.agentDir);
+  if (!initial) {
+    return createTemporaryWorkerSessionManager(SessionManager, {
+      cwd: options.cwd,
+      sessionDir: runtimeSessionDir,
+    });
+  }
+  if (initial.kind === "open") {
+    return SessionManager.open(initial.sessionFile, runtimeSessionDir);
+  }
+  const sessionDir =
+    initial.kind === "managed"
+      ? getManagedSessionDir(options.agentDir, initial.managedSessionLeaf)
+      : runtimeSessionDir;
+  const sessionManager = SessionManager.create(options.cwd, sessionDir);
+  if (initial.parentSession) {
+    sessionManager.newSession({ parentSession: initial.parentSession });
+  }
+  return sessionManager;
+}
+
 export async function startWorker(options: WorkerResourceOptions = {}) {
   const sessionManagerModule = await loadRinSessionManagerModule();
   const runtimeProfile = resolveRuntimeProfile();
-  const sessionManager = createTemporaryWorkerSessionManager(
+  const mergedOptions = { ...readWorkerResourceOptions(), ...options };
+  const sessionManager = createInitialWorkerSessionManager(
     sessionManagerModule.SessionManager,
     {
       cwd: runtimeProfile.cwd,
-      sessionDir: getRuntimeSessionDir(
-        runtimeProfile.cwd,
-        runtimeProfile.agentDir,
-      ),
+      agentDir: runtimeProfile.agentDir,
+      initialSession: mergedOptions.__rinInitialSession,
     },
   );
-  const mergedOptions = { ...readWorkerResourceOptions(), ...options };
   const { runtime } = await createConfiguredAgentSession({
     cwd: runtimeProfile.cwd,
     agentDir: runtimeProfile.agentDir,
@@ -102,7 +137,6 @@ export async function startWorker(options: WorkerResourceOptions = {}) {
   });
   await runCustomRpcMode(runtime, {
     SessionManager: sessionManagerModule.SessionManager,
-    reuseFreshSessionForInitialNewSession: false,
   });
 }
 

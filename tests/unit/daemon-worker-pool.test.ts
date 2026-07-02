@@ -37,10 +37,15 @@ function sleep(ms) {
 }
 
 async function readCommandLog(logPath: string) {
-  return (await fs.readFile(logPath, "utf8"))
-    .trim()
-    .split("\n")
-    .filter(Boolean);
+  try {
+    return (await fs.readFile(logPath, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
 }
 
 async function waitForCommandLogPrefix(
@@ -176,6 +181,7 @@ test("new session workers receive rpc resource options through a private file", 
         noContextFiles: true,
         systemPrompt: "system",
         appendSystemPrompt: ["append"],
+        __rinInitialSession: { kind: "new" },
       });
       return;
     } catch (error) {
@@ -286,9 +292,11 @@ setInterval(() => {}, 1000);
   pool.restoreSessionWorker({ sessionFile: "/tmp/session.jsonl" });
   await sleep(100);
 
-  assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
-    "switch_session",
-  ]);
+  assert.deepEqual(await readCommandLog(logPath), []);
+  assert.equal(
+    pool.getStatusSnapshot().workers[0]?.sessionFile,
+    "/tmp/session.jsonl",
+  );
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
@@ -330,8 +338,7 @@ setInterval(() => {}, 1000);
   });
   await sleep(150);
 
-  assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
-    "switch_session:",
+  assert.deepEqual(await readCommandLog(logPath), [
     "resume_interrupted_turn:daemon-restart",
   ]);
 
@@ -388,8 +395,7 @@ setInterval(() => {}, 1000);
     requestTag: "run-1",
   });
 
-  assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
-    "switch_session::",
+  assert.deepEqual(await readCommandLog(logPath), [
     "resume_interrupted_turn:scheduled-task:run-1",
   ]);
   assert.equal(result.finalText, "continued final");

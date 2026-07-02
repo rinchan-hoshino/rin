@@ -406,7 +406,7 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-test("daemon aborts the previous selected session when starting a new session before state sync", async () => {
+test("daemon shuts down the previous selected session when starting a new session before state sync", async () => {
   const agentDir = await makeTempDir("rin-daemon-new-abort-");
   const socketPath = path.join(agentDir, "daemon.sock");
   const workerPath = path.join(agentDir, "fake-worker.js");
@@ -431,17 +431,21 @@ process.stdin.on("data", (chunk) => {
     if (!line.trim()) continue;
     const command = JSON.parse(line);
     log(command.type);
-    if (command.type === "new_session") {
-      send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false, sessionFile: "/tmp/session-" + process.pid + ".jsonl", sessionId: "session-" + process.pid } });
+    if (command.type === "get_state") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile: "/tmp/session-" + process.pid + ".jsonl", sessionId: "session-" + process.pid, isStreaming: false, isCompacting: false } });
+      continue;
+    }
+    if (command.type === "new_session" || command.type === "switch_session") {
+      send({ type: "response", id: command.id, command: command.type, success: false, error: "unsupported_session_lifecycle_command" });
       continue;
     }
     if (command.type === "prompt") {
       send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
       continue;
     }
-    if (command.type === "abort") {
-      send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
-      continue;
+    if (command.type === "shutdown_session") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { shutdown: true } });
+      process.exit(0);
     }
     send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
   }
@@ -472,7 +476,7 @@ process.stdin.on("data", (chunk) => {
           .trim()
           .split("\n")
           .filter(Boolean);
-        if (lines.some((line) => line.endsWith(":abort"))) break;
+        if (lines.some((line) => line.endsWith(":shutdown_session"))) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
 
@@ -487,7 +491,7 @@ process.stdin.on("data", (chunk) => {
       assert.equal(commandGroups.length, 2);
       assert.equal(
         commandGroups.some((commands) =>
-          ["new_session", "prompt", "abort"].every((type) =>
+          ["get_state", "prompt", "shutdown_session"].every((type) =>
             commands.includes(type),
           ),
         ),
@@ -496,9 +500,11 @@ process.stdin.on("data", (chunk) => {
       assert.equal(
         commandGroups.some(
           (commands) =>
-            commands.includes("new_session") &&
+            commands.includes("get_state") &&
             !commands.includes("prompt") &&
-            !commands.includes("abort"),
+            !commands.includes("shutdown_session") &&
+            !commands.includes("new_session") &&
+            !commands.includes("switch_session"),
         ),
         true,
       );

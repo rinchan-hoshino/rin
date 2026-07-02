@@ -505,7 +505,7 @@ test(
 );
 
 test(
-  "rpc mode command context passes session replacement options through",
+  "rpc mode command context does not expose worker-local session replacement",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -601,22 +601,18 @@ test(
       const switchOptions = { withSession };
 
       assert.deepEqual(await actions.newSession(newSessionOptions), {
-        cancelled: false,
+        cancelled: true,
       });
       assert.deepEqual(await actions.fork("entry-1", forkOptions), {
         cancelled: false,
       });
       assert.deepEqual(
         await actions.switchSession("/tmp/next.jsonl", switchOptions),
-        { cancelled: false },
+        { cancelled: true },
       );
 
-      assert.deepEqual(calls, [
-        ["newSession", newSessionOptions],
-        ["fork", "entry-1", forkOptions],
-        ["switchSession", "/tmp/next.jsonl", switchOptions],
-      ]);
-      assert.equal(bindCount, 4);
+      assert.deepEqual(calls, [["fork", "entry-1", forkOptions]]);
+      assert.equal(bindCount, 2);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -3841,7 +3837,7 @@ test(
 );
 
 test(
-  "rpc mode reuses an already-fresh worker session for the first new_session command",
+  "rpc mode does not implement worker-local new_session commands",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3922,7 +3918,6 @@ test(
           open: () => ({ appendSessionInfo() {} }),
         },
         builtinSlashCommands: [],
-        reuseFreshSessionForInitialNewSession: true,
       });
       await wait(0);
 
@@ -3936,10 +3931,11 @@ test(
       await wait(20);
 
       assert.equal(newSessionCalls, 0);
-      assert.ok(lines.join("").includes('"id":"3"'));
-      assert.ok(
-        lines.join("").includes('"sessionFile":"/tmp/fresh-session.jsonl"'),
-      );
+      const responseLine = lines.find((line) => line.includes('"id":"3"'));
+      assert.ok(responseLine);
+      const response = JSON.parse(responseLine);
+      assert.equal(response.success, false);
+      assert.equal(response.error, "Unknown command: new_session");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -3948,7 +3944,7 @@ test(
 );
 
 test(
-  "rpc mode creates a persisted default session for new_session",
+  "rpc mode does not create persisted sessions from worker-local new_session",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4070,7 +4066,6 @@ test(
           open: () => ({ appendSessionInfo() {} }),
         },
         builtinSlashCommands: [],
-        reuseFreshSessionForInitialNewSession: false,
       });
       await wait(0);
 
@@ -4088,16 +4083,14 @@ test(
       await wait(20);
 
       assert.equal(defaultNewSessionCalls, 0);
-      assert.equal(createRuntimeCalls.length, 1);
-      assert.match(
-        createRuntimeCalls[0].sessionManager.getSessionDir(),
-        /\/sessions$/,
+      assert.equal(createRuntimeCalls.length, 0);
+      const responseLine = lines.find((line) =>
+        line.includes('"id":"default-new"'),
       );
-      assert.ok(lines.join("").includes('"id":"default-new"'));
-      assert.ok(
-        lines.join("").includes('"sessionFile":"') &&
-          lines.join("").includes("/sessions/created.jsonl"),
-      );
+      assert.ok(responseLine);
+      const response = JSON.parse(responseLine);
+      assert.equal(response.success, false);
+      assert.equal(response.error, "Unknown command: new_session");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -4106,7 +4099,7 @@ test(
 );
 
 test(
-  "rpc mode honors managed session leaf for new_session directories",
+  "rpc mode does not honor managed session leaf inside a worker",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4231,7 +4224,6 @@ test(
           open: () => ({ appendSessionInfo() {} }),
         },
         builtinSlashCommands: [],
-        reuseFreshSessionForInitialNewSession: true,
       });
       await wait(0);
 
@@ -4250,17 +4242,15 @@ test(
       await wait(20);
 
       assert.deepEqual(switchCalls, []);
-      assert.equal(createRuntimeCalls.length, 1);
-      assert.match(
-        createRuntimeCalls[0].sessionManager.getSessionDir(),
-        /\/sessions\/managed\/chat$/,
-      );
+      assert.equal(createRuntimeCalls.length, 0);
       assert.equal(newSessionCalls, 0);
-      assert.ok(lines.join("").includes('"id":"managed-new"'));
-      assert.ok(
-        lines.join("").includes('"sessionFile":"') &&
-          lines.join("").includes("/sessions/managed/chat/created.jsonl"),
+      const responseLine = lines.find((line) =>
+        line.includes('"id":"managed-new"'),
       );
+      assert.ok(responseLine);
+      const response = JSON.parse(responseLine);
+      assert.equal(response.success, false);
+      assert.equal(response.error, "Unknown command: new_session");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -4269,7 +4259,7 @@ test(
 );
 
 test(
-  "rpc mode new_session response includes the rebound session selector",
+  "rpc mode keeps session selector unchanged for worker-local new_session",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4379,11 +4369,10 @@ test(
       const responseLine = lines.find((line) => line.includes('"id":"resp-1"'));
       assert.ok(responseLine);
       const payload = JSON.parse(responseLine);
-      assert.equal(payload.success, true);
-      assert.equal(payload.data.cancelled, false);
-      assert.equal(payload.data.sessionFile, "/tmp/second.jsonl");
-      assert.equal(payload.data.sessionId, "second-id");
-      assert.equal(abortCalls, 1);
+      assert.equal(payload.success, false);
+      assert.equal(payload.error, "Unknown command: new_session");
+      assert.equal(currentSession.name, "first");
+      assert.equal(abortCalls, 0);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -4392,7 +4381,7 @@ test(
 );
 
 test(
-  "rpc mode rebinds to runtime.session after session replacement",
+  "rpc mode keeps the current session for worker-local new_session",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4505,11 +4494,11 @@ test(
       );
       await wait(20);
 
-      assert.deepEqual(bindCalls, ["first", "second"]);
-      assert.equal(unsubscribeCount, 1);
+      assert.deepEqual(bindCalls, ["first"]);
+      assert.equal(unsubscribeCount, 0);
       assert.deepEqual(prompts, [
         [
-          "second",
+          "first",
           "after swap",
           {
             images: undefined,
@@ -4519,7 +4508,11 @@ test(
           },
         ],
       ]);
-      assert.ok(lines.join("").includes('"id":"3"'));
+      const responseLine = lines.find((line) => line.includes('"id":"3"'));
+      assert.ok(responseLine);
+      const response = JSON.parse(responseLine);
+      assert.equal(response.success, false);
+      assert.equal(response.error, "Unknown command: new_session");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

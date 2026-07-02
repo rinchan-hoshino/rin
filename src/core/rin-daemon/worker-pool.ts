@@ -59,6 +59,11 @@ type InterruptedTurnRecoveryIntent = {
   promise?: Promise<void>;
 };
 
+type InitialWorkerSession =
+  | { kind: "new"; parentSession?: unknown }
+  | { kind: "managed"; managedSessionLeaf: string; parentSession?: unknown }
+  | { kind: "open"; sessionFile: string };
+
 export type WorkerHandle = {
   id: string;
   child: ReturnType<typeof spawn>;
@@ -91,13 +96,6 @@ function responseError(commandId: string, commandType: string, error: string) {
     command: commandType,
     success: false,
     error,
-  };
-}
-
-function createSwitchSessionCommand(sessionFile: string) {
-  return {
-    type: "switch_session",
-    sessionPath: sessionFile,
   };
 }
 
@@ -233,7 +231,7 @@ export class WorkerPool {
     void this.requestWorkerExitGracefully(worker, { type: "sleep_session" });
   }
 
-  private async terminateWorkerGracefullyIfUnattached(worker: WorkerHandle) {
+  async terminateWorkerGracefullyIfUnattached(worker: WorkerHandle) {
     if (worker.connections.size > 0) return;
     await this.terminateWorkerGracefullyAndFlush(worker);
   }
@@ -395,6 +393,20 @@ export class WorkerPool {
     this.requestWorker(worker, connection, command, true);
   }
 
+  attachWorkerToConnection(connection: ConnectionState, worker: WorkerHandle) {
+    this.attachWorker(connection, worker);
+  }
+
+  async readWorkerState(worker: WorkerHandle) {
+    const payload = await this.sendInternalCommand(worker, {
+      type: "get_state",
+    });
+    if (payload?.success !== true) {
+      throw new Error(String(payload?.error || "rin_worker_state_unavailable"));
+    }
+    return payload.data || {};
+  }
+
   hasSelectedSession(connection: ConnectionState) {
     return hasSessionSelector(this.getConnectionSelector(connection));
   }
@@ -456,23 +468,9 @@ export class WorkerPool {
     if (!wanted.sessionFile) return undefined;
 
     const claimed = await this.withSessionClaim(wanted, async () => {
-      const worker = this.createWorker(connection, connection.resourceOptions);
-      try {
-        await this.sendInternalCommand(
-          worker,
-          createSwitchSessionCommand(wanted.sessionFile),
-        );
-        const existing = this.findWorkerBySelector(wanted);
-        if (existing && existing !== worker) {
-          this.destroyWorker(worker);
-          return existing;
-        }
-        this.setWorkerSessionRefs(worker, wanted);
-        return worker;
-      } catch (error) {
-        this.destroyWorker(worker);
-        throw error;
-      }
+      const existing = this.findWorkerBySelector(wanted);
+      if (existing) return existing;
+      return this.createWorkerForSession(wanted, connection);
     });
     if (claimed) this.attachWorker(connection, claimed);
     return claimed;
@@ -499,7 +497,22 @@ export class WorkerPool {
     if (type === "new_session") {
       if (command.resourceOptions)
         connection.resourceOptions = command.resourceOptions;
-      return this.createWorker(connection, connection.resourceOptions);
+      const managedSessionLeaf = String(
+        command.managedSessionLeaf || "",
+      ).trim();
+      return this.createWorker(
+        connection,
+        this.resourceOptionsWithInitialSession(
+          connection.resourceOptions,
+          managedSessionLeaf
+            ? {
+                kind: "managed",
+                managedSessionLeaf,
+                parentSession: command.parentSession,
+              }
+            : { kind: "new", parentSession: command.parentSession },
+        ),
+      );
     }
 
     const currentWorker = this.resolveCurrentWorkerForCommand(
@@ -740,24 +753,14 @@ export class WorkerPool {
     const key = this.sessionClaimKey(selector);
     if (key && this.pendingSessionClaims.has(key)) return undefined;
 
-    const worker = this.createWorker();
+    const worker = this.createWorkerForSession(selector);
     void this.withSessionClaim(selector, async () => {
-      try {
-        await this.sendInternalCommand(
-          worker,
-          createSwitchSessionCommand(selector.sessionFile!),
-        );
-        const existingAfterSwitch = this.findWorkerBySelector(selector);
-        if (existingAfterSwitch && existingAfterSwitch !== worker) {
-          this.destroyWorker(worker);
-          return existingAfterSwitch;
-        }
-        this.setWorkerSessionRefs(worker, selector);
-        return worker;
-      } catch {
+      const existingAfterCreate = this.findWorkerBySelector(selector);
+      if (existingAfterCreate && existingAfterCreate !== worker) {
         this.destroyWorker(worker);
-        return undefined;
+        return existingAfterCreate;
       }
+      return worker;
     }).catch(() => {});
     return worker;
   }
@@ -900,6 +903,32 @@ export class WorkerPool {
       mode: 0o600,
     });
     return ["--resource-options-file", filePath];
+  }
+
+  private resourceOptionsWithInitialSession(
+    resourceOptions: Record<string, unknown> | undefined,
+    initialSession: InitialWorkerSession,
+  ) {
+    return {
+      ...(resourceOptions || this.options.resourceOptions || {}),
+      __rinInitialSession: initialSession,
+    };
+  }
+
+  private createWorkerForSession(
+    selector: SessionSelector,
+    requester?: ConnectionState,
+  ) {
+    if (!selector.sessionFile) throw new Error("rin_session_file_required");
+    const worker = this.createWorker(
+      requester,
+      this.resourceOptionsWithInitialSession(requester?.resourceOptions, {
+        kind: "open",
+        sessionFile: selector.sessionFile,
+      }),
+    );
+    this.setWorkerSessionRefs(worker, selector);
+    return worker;
   }
 
   private createWorker(
@@ -1206,23 +1235,7 @@ export class WorkerPool {
     const claimed = await this.withSessionClaim(wanted, async () => {
       const existing = this.findWorkerBySelector(wanted);
       if (existing) return existing;
-      const worker = this.createWorker();
-      try {
-        await this.sendInternalCommand(
-          worker,
-          createSwitchSessionCommand(wanted.sessionFile!),
-        );
-        const existingAfterSwitch = this.findWorkerBySelector(wanted);
-        if (existingAfterSwitch && existingAfterSwitch !== worker) {
-          this.destroyWorker(worker);
-          return existingAfterSwitch;
-        }
-        this.setWorkerSessionRefs(worker, wanted);
-        return worker;
-      } catch (error) {
-        this.destroyWorker(worker);
-        throw error;
-      }
+      return this.createWorkerForSession(wanted);
     });
     if (!claimed) throw new Error("rin_session_worker_unavailable");
     return claimed;
@@ -1458,24 +1471,7 @@ export class WorkerPool {
     void this.withSessionClaim(selector, async () => {
       const existing = this.findWorkerBySelector(selector);
       if (existing) return existing;
-
-      const replacement = this.createWorker();
-      try {
-        await this.sendInternalCommand(
-          replacement,
-          createSwitchSessionCommand(sessionFile),
-        );
-        const existingAfterSwitch = this.findWorkerBySelector(selector);
-        if (existingAfterSwitch && existingAfterSwitch !== replacement) {
-          this.destroyWorker(replacement);
-          return existingAfterSwitch;
-        }
-        this.setWorkerSessionRefs(replacement, selector);
-        return replacement;
-      } catch {
-        this.destroyWorker(replacement);
-        return undefined;
-      }
+      return this.createWorkerForSession({ ...selector, sessionFile });
     })
       .then(async (recovered) => {
         if (!recovered) return;
