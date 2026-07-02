@@ -1938,6 +1938,112 @@ test("chat controller suppresses /compact acknowledgement but keeps configured /
   }
 });
 
+test("chat controller marks /compact processed from compaction completion notice", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (chatId, content) => {
+    deliveries.push({ chatId, content });
+    return [`compact-${deliveries.length}`];
+  };
+
+  const acceptedAt = new Date().toISOString();
+  saveChatMessage(controller.agentDir, {
+    messageId: "m-compact",
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    chatId: "2",
+    chatType: "private",
+    role: "user",
+    receivedAt: acceptedAt,
+    acceptedAt,
+    text: "/compact",
+  });
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "compact-chat.jsonl",
+  );
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-compact",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-compact",
+    }),
+    compact: async () => {
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: { type: "compaction_start", reason: "manual" },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      return {
+        handled: true,
+        text: "Compacted session.",
+        sessionFile,
+      };
+    },
+    prompt: async (text, options = {}) => {
+      emitRpcTurnComplete(controller, options, "unexpected temp reply");
+    },
+    switchSession: async () => {},
+  };
+
+  await controller.runCommand("/compact", "m-compact", "m-compact");
+  let stored = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "m-compact",
+  );
+  assert.ok(stored?.acceptedAt);
+  assert.equal(stored?.processedAt, undefined);
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "manual",
+      aborted: false,
+      tokensBefore: 77625,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  stored = getChatMessage(controller.agentDir, controller.chatKey, "m-compact");
+  assert.ok(
+    stored?.processedAt,
+    "completion notice delivery should mark the original /compact processed",
+  );
+  assert.deepEqual(deliveries, [
+    {
+      chatId: "2",
+      content: [
+        {
+          type: "markdown",
+          attrs: {
+            content: "Compacting...",
+          },
+        },
+      ],
+    },
+    {
+      chatId: "2",
+      content: [
+        {
+          type: "markdown",
+          attrs: {
+            content: "Compacted from 77,625 tokens",
+          },
+        },
+      ],
+    },
+  ]);
+});
+
 test("chat controller keeps working reaction on current message while steer is queued", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];

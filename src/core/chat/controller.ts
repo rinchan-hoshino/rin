@@ -107,6 +107,8 @@ type ChatTurnTarget = {
 type ChatTurnMeta = ChatTurnTarget & {
   workingNoticeSent?: boolean;
   startedAt: number;
+  ackIncomingMessageId?: string;
+  ackReplyToMessageId?: string;
 };
 
 type ChatTextDelivery = {
@@ -1363,7 +1365,15 @@ export class ChatController {
     );
   }
 
-  private async sendPassiveNoticeNow(text: string) {
+  private async sendPassiveNoticeNow(
+    text: string,
+    options: {
+      postDelivery?: any;
+      id?: string;
+      idempotencyKey?: string;
+      waitForDeliveryMs?: number;
+    } = {},
+  ) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
     if (!this.canDeliverReplies()) return true;
@@ -1376,7 +1386,7 @@ export class ChatController {
           text: trimmed,
           ...this.currentConversationSessionPayload(),
         },
-        { deliveryKind: "passive_notice" },
+        { deliveryKind: "passive_notice", ...options },
       );
       return true;
     } catch {
@@ -1456,6 +1466,48 @@ export class ChatController {
     this.compactionTurn = null;
   }
 
+  private compactionAckTarget() {
+    const incomingMessageId = safeString(
+      this.compactionTurn?.ackIncomingMessageId || "",
+    ).trim();
+    if (!incomingMessageId) return null;
+    const replyToMessageId =
+      safeString(this.compactionTurn?.ackReplyToMessageId || "").trim() ||
+      incomingMessageId;
+    return { incomingMessageId, replyToMessageId };
+  }
+
+  private async deliverCompactionEndNotice(text: string) {
+    const ackTarget = this.compactionAckTarget();
+    const idempotencyKey = ackTarget
+      ? JSON.stringify([
+          "compaction_end_ack",
+          this.chatKey,
+          ackTarget.incomingMessageId,
+          ackTarget.replyToMessageId,
+          sha256Hex(safeString(text).trim()),
+        ])
+      : "";
+    const delivered = await this.sendPassiveNoticeNow(text, {
+      ...(ackTarget
+        ? {
+            postDelivery: {
+              markProcessed: {
+                chatKey: this.chatKey,
+                messageId: ackTarget.incomingMessageId,
+                bindSession: false,
+              },
+            },
+            id: `compaction-final-${sha256Hex(idempotencyKey)}`,
+            idempotencyKey,
+            waitForDeliveryMs: 1000,
+          }
+        : {}),
+    });
+    await this.finishCompactionNotice();
+    return delivered;
+  }
+
   private async deliverCompactionStartNotice(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
@@ -1473,11 +1525,20 @@ export class ChatController {
       );
       const messageId = safeString(messageIds?.[0]).trim();
       if (messageId) {
+        const ackIncomingMessageId = safeString(
+          this.activeCommandTurnInput?.incomingMessageId || "",
+        ).trim();
+        const ackReplyToMessageId =
+          safeString(
+            this.activeCommandTurnInput?.replyToMessageId || "",
+          ).trim() || ackIncomingMessageId;
         this.compactionTurn = {
           startedAt: Date.now(),
           incomingMessageId: messageId,
           replyToMessageId: messageId,
           workingNoticeSent: false,
+          ackIncomingMessageId: ackIncomingMessageId || undefined,
+          ackReplyToMessageId: ackReplyToMessageId || undefined,
         };
         const marker = this.startCompactionWorkingMarker().catch(() => false);
         const poll = this.pollCompactionTyping().catch(() => false);
@@ -2066,8 +2127,7 @@ export class ChatController {
         return;
       case "passive_notice":
         if (event.noticeKind === "compaction_end") {
-          await this.finishCompactionNotice();
-          await this.sendPassiveNoticeNow(event.text);
+          await this.deliverCompactionEndNotice(event.text);
           return;
         }
         if (event.noticeKind === "todo" && event.deferDuringTurn === false) {
