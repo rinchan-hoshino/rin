@@ -102,6 +102,18 @@ async function rpc(socketPath, command, timeoutMs = 5000) {
   );
 }
 
+async function readLogLines(logPath) {
+  try {
+    return (await fs.readFile(logPath, "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 function spawnDaemon(agentDir, socketPath, workerPath) {
   return spawn(
     process.execPath,
@@ -574,10 +586,7 @@ process.stdin.on("data", (chunk) => {
       assert.equal(selected.success, true);
       assert.equal(state.success, true);
       assert.equal(state.data?.sessionFile, sessionFile);
-      assert.deepEqual(
-        (await fs.readFile(logPath, "utf8")).trim().split("\n").filter(Boolean),
-        ["switch_session", "get_state"],
-      );
+      assert.deepEqual(await readLogLines(logPath), ["get_state"]);
     });
   } finally {
     try {
@@ -673,11 +682,9 @@ process.stdin.on("data", (chunk) => {
       id: "status-after-switch",
       type: "daemon_status",
     });
-    const commandLog = (await fs.readFile(logPath, "utf8"))
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
+    const commandLog = (await readLogLines(logPath)).map((line) =>
+      JSON.parse(line),
+    );
     const switchCommands = commandLog.filter(
       (entry) => entry.type === "switch_session",
     );
@@ -691,7 +698,7 @@ process.stdin.on("data", (chunk) => {
     assert.equal(
       switchCommands.filter((entry) => entry.sessionPath === firstSession)
         .length,
-      1,
+      0,
     );
   } finally {
     firstClient?.close();
@@ -743,7 +750,7 @@ async function handle(command) {
     return;
   }
   if (command.type === "resume_interrupted_turn") {
-    if (switched) send({ type: "agent_start" });
+    send({ type: "agent_start" });
     send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
     return;
   }
@@ -781,10 +788,7 @@ process.stdin.on("data", (chunk) => {
     assert.equal(workers[0].sessionFile, sessionFile);
     assert.equal(workers[0].attachedConnections, 0);
     assert.equal(workers[0].isStreaming, true);
-    assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), [
-      "switch_session",
-      "resume_interrupted_turn",
-    ]);
+    assert.deepEqual(await readLogLines(logPath), ["resume_interrupted_turn"]);
   } finally {
     try {
       daemon.kill("SIGKILL");

@@ -55,6 +55,20 @@ async function withTempDir(fn: (dir: string) => Promise<void>) {
   }
 }
 
+function showStatusIndicatorForTest(indicator) {
+  this.activeStatusIndicator?.dispose?.();
+  this.activeStatusIndicator = indicator;
+  this.statusContainer?.clear?.();
+  this.statusContainer?.addChild?.(indicator);
+}
+
+function clearStatusIndicatorForTest(kind) {
+  if (kind && this.activeStatusIndicator?.kind !== kind) return;
+  this.activeStatusIndicator?.dispose?.();
+  this.activeStatusIndicator = undefined;
+  this.statusContainer?.clear?.();
+}
+
 async function writeTuiSessionRecord(agentDir, options) {
   const sessionDir = path.join(agentDir, "sessions");
   await fs.mkdir(sessionDir, { recursive: true });
@@ -265,9 +279,11 @@ test("Rin update notice appends like the upstream Pi update notification", () =>
 
 function createResourceChromeInstance() {
   const chatContainer = new piTuiModule.Container();
+  const loadedResourcesContainer = new piTuiModule.Container();
   const proto = codingAgentModule.InteractiveMode.prototype;
   const instance = {
     chatContainer,
+    loadedResourcesContainer,
     options: { verbose: true },
     toolOutputExpanded: false,
     settingsManager: {
@@ -400,13 +416,18 @@ test("Rin update notice is transient when chat redraw clears startup chrome", ()
   assert.ok(rendered.includes("new session line"));
 });
 
-test("chat rebuild keeps Pi transient startup chrome behavior for Rin update notice", async () => {
+test("chat rebuild preserves loaded resources while clearing Rin update notice", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
   const instance = createResourceChromeInstance();
   const renderText = () =>
-    instance.chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
+    [
+      instance.loadedResourcesContainer.render(100).join("\n"),
+      instance.chatContainer.render(100).join("\n"),
+    ]
+      .join("\n")
+      .replace(/\s+$/gm, "");
 
   codingAgentModule.InteractiveMode.prototype.showLoadedResources.call(
     instance,
@@ -427,18 +448,23 @@ test("chat rebuild keeps Pi transient startup chrome behavior for Rin update not
   );
 
   const rendered = renderText();
-  assert.ok(!rendered.includes("sample-skill"));
+  assert.ok(rendered.includes("sample-skill"));
   assert.ok(!rendered.includes("Update Available"));
   assert.ok(rendered.includes("history line"));
 });
 
-test("direct initial-message redraw keeps Pi transient startup chrome behavior for Rin update notice", async () => {
+test("direct initial-message redraw preserves loaded resources while clearing Rin update notice", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
   const instance = createResourceChromeInstance();
   const renderText = () =>
-    instance.chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
+    [
+      instance.loadedResourcesContainer.render(100).join("\n"),
+      instance.chatContainer.render(100).join("\n"),
+    ]
+      .join("\n")
+      .replace(/\s+$/gm, "");
 
   codingAgentModule.InteractiveMode.prototype.showLoadedResources.call(
     instance,
@@ -457,7 +483,7 @@ test("direct initial-message redraw keeps Pi transient startup chrome behavior f
   );
 
   const rendered = renderText();
-  assert.ok(!rendered.includes("sample-skill"));
+  assert.ok(rendered.includes("sample-skill"));
   assert.ok(!rendered.includes("Update Available"));
   assert.ok(rendered.includes("history line"));
 });
@@ -1458,7 +1484,6 @@ test("rpc session resync rebinds runtime state and redraws history directly", as
     flushCompactionQueue() {},
     showError() {},
     showStatus() {},
-    autoCompactionLoader: { stop() {} },
   };
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
@@ -1714,7 +1739,7 @@ test("rpc session resync clears pending local user echo", async () => {
   assert.ok(renders >= 3);
 });
 
-test("rpc compaction start keeps the dedicated compaction loader", async () => {
+test("rpc compaction start keeps the dedicated compaction status indicator", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -1761,7 +1786,9 @@ test("rpc compaction start keeps the dedicated compaction loader", async () => {
     flushCompactionQueue() {},
     showError() {},
     showStatus() {},
-    autoCompactionLoader: undefined,
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    activeStatusIndicator: undefined,
   };
 
   try {
@@ -1770,12 +1797,11 @@ test("rpc compaction start keeps the dedicated compaction loader", async () => {
       { type: "compaction_start", reason: "threshold" },
     );
 
-    const compactionLoader = instance.autoCompactionLoader;
-    assert.ok(compactionLoader);
+    const compactionIndicator = instance.activeStatusIndicator;
+    assert.ok(compactionIndicator);
+    assert.equal(compactionIndicator.kind, "compaction");
     assert.equal(instance.loadingAnimation, undefined);
-    assert.equal(instance.statusContainer.child, compactionLoader);
-    assert.match(compactionLoader.message, /Auto-compacting/);
-    assert.doesNotMatch(compactionLoader.message, /Working/);
+    assert.equal(instance.statusContainer.child, compactionIndicator);
 
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
@@ -1788,7 +1814,7 @@ test("rpc compaction start keeps the dedicated compaction loader", async () => {
     );
 
     assert.equal(instance.loadingAnimation, undefined);
-    assert.equal(instance.statusContainer.child, compactionLoader);
+    assert.equal(instance.statusContainer.child, compactionIndicator);
 
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
@@ -1796,10 +1822,10 @@ test("rpc compaction start keeps the dedicated compaction loader", async () => {
     );
 
     assert.equal(instance.loadingAnimation, undefined);
-    assert.equal(instance.statusContainer.child, compactionLoader);
+    assert.equal(instance.statusContainer.child, compactionIndicator);
     assert.ok(renders >= 1);
   } finally {
-    instance.autoCompactionLoader?.stop();
+    instance.activeStatusIndicator?.dispose?.();
   }
 });
 
@@ -1853,7 +1879,9 @@ test("rpc compaction end reattaches the existing Pi-owned loader", async () => {
     flushCompactionQueue() {},
     showError() {},
     showStatus() {},
-    autoCompactionLoader: { stop() {} },
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    activeStatusIndicator: undefined,
   };
 
   try {
@@ -1915,7 +1943,9 @@ test("local compaction end restores the working loader while the turn is still s
     flushCompactionQueue() {},
     showError() {},
     showStatus() {},
-    autoCompactionLoader: { stop() {} },
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    activeStatusIndicator: undefined,
   };
 
   try {
@@ -1933,19 +1963,20 @@ test("local compaction end restores the working loader while the turn is still s
   }
 });
 
-test("rpc agent end does not leave a stale working loader after the turn is done", async () => {
+test("rpc agent end does not leave a stale working status indicator after the turn is done", async () => {
   await overrides.applyRinTuiOverrides();
 
   const ui = {
     requestRender() {},
     terminal: { setProgress() {} },
   };
-  const existingLoader = new loaderModule.Loader(
-    ui,
-    (x) => x,
-    (x) => x,
-    "Working...",
-  );
+  let disposed = false;
+  const existingIndicator = {
+    kind: "working",
+    dispose() {
+      disposed = true;
+    },
+  };
   const instance = {
     isInitialized: true,
     ui,
@@ -1963,19 +1994,17 @@ test("rpc agent end does not leave a stale working loader after the turn is done
     footer: { invalidate() {} },
     pendingTools: new Map(),
     checkShutdownRequested: async () => {},
-    loadingAnimation: existingLoader,
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    activeStatusIndicator: existingIndicator,
   };
 
-  try {
-    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
-      instance,
-      { type: "agent_end" },
-    );
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "agent_end",
+  });
 
-    assert.equal(instance.loadingAnimation, undefined);
-  } finally {
-    existingLoader.stop();
-  }
+  assert.equal(instance.activeStatusIndicator, undefined);
+  assert.equal(disposed, true);
 });
 
 test("signal handler override routes SIGINT through interactive Ctrl+C handling", async () => {

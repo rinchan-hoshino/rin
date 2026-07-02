@@ -316,6 +316,18 @@ function reattachExistingPiLoader(instance: any) {
   instance.ui.requestRender();
 }
 
+function reattachCompactionStatusIndicator(instance: any) {
+  const indicator = instance?.activeStatusIndicator;
+  if (indicator?.kind !== "compaction") return false;
+  stopRpcTransportStatusComponent(instance);
+  if (!statusContainerHasChild(instance, indicator)) {
+    instance.statusContainer.clear();
+    instance.statusContainer.addChild(indicator);
+  }
+  instance.ui.requestRender();
+  return true;
+}
+
 function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
   if (!isRpcTransportControlled(instance)) return;
   const status = statusOverride ?? instance.session.getFrontendStatusEvent?.();
@@ -324,13 +336,7 @@ function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
     reattachExistingPiLoader(instance);
     return;
   }
-  if (phase === "compacting" && instance?.autoCompactionLoader) {
-    stopRpcTransportStatusComponent(instance);
-    if (!statusContainerHasChild(instance, instance.autoCompactionLoader)) {
-      instance.statusContainer.clear();
-      instance.statusContainer.addChild(instance.autoCompactionLoader);
-    }
-    instance.ui.requestRender();
+  if (phase === "compacting" && reattachCompactionStatusIndicator(instance)) {
     return;
   }
   if (RPC_TRANSPORT_STATUS_PHASES.has(phase)) {

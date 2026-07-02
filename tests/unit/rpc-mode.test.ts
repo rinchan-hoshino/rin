@@ -4996,7 +4996,7 @@ test(
 );
 
 test(
-  "rpc mode switch_session binds without auto-resuming interrupted work",
+  "rpc mode does not implement worker-local switch_session commands",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -5108,7 +5108,8 @@ test(
 
       const output = lines.join("");
       assert.ok(output.includes('"id":"switch-1"'));
-      assert.ok(output.includes('"success":true'));
+      assert.ok(output.includes('"success":false'));
+      assert.ok(output.includes('"Unknown command: switch_session"'));
       assert.deepEqual(calls, []);
     } finally {
       process.stdin.on = stdinOn;
