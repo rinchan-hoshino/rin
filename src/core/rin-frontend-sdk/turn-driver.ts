@@ -706,7 +706,7 @@ export class RinFrontendTurnDriver {
           safeString(item?.path).trim() === resumeTarget,
       );
       if (!match) {
-        return { handled: true, text: `Session not found: ${resumeTarget}` };
+        throw new Error(`session not found: ${resumeTarget}`);
       }
       const targetSession =
         safeString((match as any)?.path).trim() || safeString(match.id).trim();

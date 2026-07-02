@@ -272,6 +272,14 @@ function handledText(
   return { handled: true, text, ...(parts?.length ? { parts } : {}) };
 }
 
+function runtimeServicesAgentDir(runtime: any) {
+  return String(runtime?.services?.agentDir || "").trim();
+}
+
+function throwCommandError(message: string): never {
+  throw new Error(message);
+}
+
 function formatLabelValueLine(label: string, value: string) {
   return `${label}: ${value}`;
 }
@@ -354,9 +362,8 @@ export async function runBuiltinCommand(
   if (!parsedCommand) return { handled: false };
 
   const { command, args, argsText } = parsedCommand;
-  const commandResponses = readChatCommandResponses(
-    String(runtime?.agentDir || ""),
-  );
+  const agentDir = runtimeServicesAgentDir(runtime);
+  const commandResponses = readChatCommandResponses(agentDir);
   switch (command) {
     case "abort":
       session.abortCompaction?.();
@@ -376,9 +383,8 @@ export async function runBuiltinCommand(
     case "session":
       return handledText(formatSessionStats(session.getSessionStats()));
     case "usage": {
-      const agentDir = String(runtime?.agentDir || "").trim();
       if (!agentDir) {
-        return handledText("Usage unavailable: missing Rin data directory.");
+        throwCommandError("usage unavailable: missing Rin data directory");
       }
       const report = await renderUsageReportForChat(agentDir);
       return handledText(report.text, report.parts);
@@ -417,7 +423,7 @@ export async function runBuiltinCommand(
       }
       const match = findSessionById(sessions, argsText);
       if (!match) {
-        return handledText(`Session not found: ${argsText}`);
+        throwCommandError(`session not found: ${argsText}`);
       }
       await runtime.switchSession(String(match.path || ""));
       return handledText(`Resumed session: ${String(match.id || "").trim()}`);
@@ -430,11 +436,11 @@ export async function runBuiltinCommand(
       const [targetRef = "", thinkingLevel = ""] = args;
       const nextTargetRef = String(targetRef || "").trim();
       if (!nextTargetRef.includes("/")) {
-        return handledText("Usage: /model <provider/model> [thinking-level]");
+        throwCommandError("usage: /model <provider/model> [thinking-level]");
       }
       const match = findModelByRef(models, nextTargetRef);
       if (!match) {
-        return handledText(`Model not found: ${nextTargetRef}`);
+        throwCommandError(`model not found: ${nextTargetRef}`);
       }
       await session.setModel(match);
       if (thinkingLevel) await session.setThinkingLevel(thinkingLevel);

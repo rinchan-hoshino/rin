@@ -1396,23 +1396,17 @@ test(
         })
         .filter((line) => line?.type === "response");
       assert.deepEqual(
-        responses.map((line) => [line.id, line.success, line.data]),
+        responses.map((line) => [line.id, line.success, line.error]),
         [
           [
             "1",
-            true,
-            {
-              handled: true,
-              text: "Session replacement commands must be routed through the frontend.",
-            },
+            false,
+            "session replacement commands must be routed through the frontend",
           ],
           [
             "2",
-            true,
-            {
-              handled: true,
-              text: "Session replacement commands must be routed through the frontend.",
-            },
+            false,
+            "session replacement commands must be routed through the frontend",
           ],
         ],
       );
@@ -1486,37 +1480,61 @@ test(
         setSessionName: () => {},
       };
 
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "1", type: "run_command", commandLine: "/usage" })}\n`,
-        ),
+      const agentDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), "rin-rpc-usage-"),
       );
-      await wait(20);
+      try {
+        await fs.writeFile(
+          path.join(agentDir, "auth.json"),
+          `${JSON.stringify({
+            "google-gemini-cli": {
+              type: "api_key",
+              email: "gemini@example.test",
+            },
+          })}\n`,
+          "utf8",
+        );
+        void runCustomRpcMode(
+          { session, services: { agentDir } },
+          {
+            SessionManager: {
+              listAll: async () => [],
+              list: async () => [],
+              open: () => ({ appendSessionInfo() {} }),
+            },
+          },
+        );
+        await wait(0);
 
-      const response = lines
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean)
-        .find((line) => line.type === "response" && line.id === "1");
-      assert.equal(response.success, true);
-      assert.equal(response.data?.handled, true);
-      assert.match(String(response.data?.text || ""), /Usage unavailable/);
+        const onData = handlers.get("data");
+        assert.equal(typeof onData, "function");
+        onData(
+          Buffer.from(
+            `${JSON.stringify({ id: "1", type: "run_command", commandLine: "/usage" })}\n`,
+          ),
+        );
+        await wait(20);
+
+        const response = lines
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean)
+          .find((line) => line.type === "response" && line.id === "1");
+        assert.equal(response.success, true);
+        assert.equal(response.data?.handled, true);
+        assert.match(String(response.data?.text || ""), /Rin usage @/);
+        assert.doesNotMatch(
+          String(response.data?.text || ""),
+          /missing Rin data directory/,
+        );
+      } finally {
+        await fs.rm(agentDir, { recursive: true, force: true });
+      }
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

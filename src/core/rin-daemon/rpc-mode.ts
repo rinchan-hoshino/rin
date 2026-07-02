@@ -1171,10 +1171,9 @@ export async function runCustomRpcMode(
           type,
           async () => {
             if (isWorkerLocalSessionReplacementCommand(commandLine)) {
-              return {
-                handled: true,
-                text: "Session replacement commands must be routed through the frontend.",
-              };
+              throw new Error(
+                "session replacement commands must be routed through the frontend",
+              );
             }
             const builtinResult = await runBuiltinCommand(
               runtime,

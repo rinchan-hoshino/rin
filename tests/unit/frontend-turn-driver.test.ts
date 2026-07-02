@@ -415,6 +415,18 @@ test("frontend SDK turn driver handles /resume without worker run_command", asyn
   );
 });
 
+test("frontend SDK turn driver reports missing /resume targets as errors", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.listSessions = async () => [
+    { id: "abc", title: "Previous", path: "/tmp/resume-target.jsonl" },
+  ];
+
+  await assert.rejects(() => driver.runCommand("/resume missing"), {
+    message: "session not found: missing",
+  });
+});
+
 test("frontend SDK turn driver uses configured built-in command responses", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({

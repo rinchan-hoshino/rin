@@ -308,16 +308,15 @@ test("runBuiltinCommand lists available sessions and reports missing session ids
   });
   assert.equal(empty.text, "No sessions available.");
 
-  const missing = await workerHelpers.runBuiltinCommand(
-    runtime,
-    "/resume missing",
-    {
-      SessionManager: {
-        list: async () => [{ id: "abc", path: "/tmp/sessions/abc.jsonl" }],
-      },
-    },
+  await assert.rejects(
+    () =>
+      workerHelpers.runBuiltinCommand(runtime, "/resume missing", {
+        SessionManager: {
+          list: async () => [{ id: "abc", path: "/tmp/sessions/abc.jsonl" }],
+        },
+      }),
+    /session not found: missing/,
   );
-  assert.equal(missing.text, "Session not found: missing");
 });
 
 test("runBuiltinCommand lists available models before selection", async () => {
@@ -377,7 +376,7 @@ test("runBuiltinCommand shows compact usage status", async () => {
     );
 
     const result = await workerHelpers.runBuiltinCommand(
-      { agentDir, session: {} },
+      { services: { agentDir }, session: {} },
       "/usage",
       { SessionManager: { list: async () => [] } },
     );
@@ -403,6 +402,38 @@ test("runBuiltinCommand shows compact usage status", async () => {
   } finally {
     fs.rmSync(agentDir, { recursive: true, force: true });
   }
+});
+
+test("runBuiltinCommand reports command errors by throwing", async () => {
+  await assert.rejects(
+    () =>
+      workerHelpers.runBuiltinCommand({ session: {} }, "/usage", {
+        SessionManager: { list: async () => [] },
+      }),
+    /usage unavailable: missing Rin data directory/,
+  );
+
+  const runtime = {
+    session: {
+      modelRegistry: {
+        getAvailable: async () => [{ provider: "openai", id: "gpt-5" }],
+      },
+    },
+  };
+  await assert.rejects(
+    () =>
+      workerHelpers.runBuiltinCommand(runtime, "/model openai/missing", {
+        SessionManager: { list: async () => [] },
+      }),
+    /model not found: openai\/missing/,
+  );
+  await assert.rejects(
+    () =>
+      workerHelpers.runBuiltinCommand(runtime, "/model missing", {
+        SessionManager: { list: async () => [] },
+      }),
+    /usage: \/model <provider\/model> \[thinking-level\]/,
+  );
 });
 
 test("runBuiltinCommand no longer handles the removed todos slash command", async () => {
@@ -497,12 +528,13 @@ test("runBuiltinCommand uses runtime for session replacement commands", async ()
     /Model set to: openai\/gpt-5 \(high\)/,
   );
 
-  const resultMissingModel = await workerHelpers.runBuiltinCommand(
-    runtime,
-    "/model missing",
-    { SessionManager: { list: async () => [] } },
+  await assert.rejects(
+    () =>
+      workerHelpers.runBuiltinCommand(runtime, "/model missing", {
+        SessionManager: { list: async () => [] },
+      }),
+    /usage: \/model/,
   );
-  assert.match(String(resultMissingModel.text || ""), /Usage: \/model/);
 
   assert.deepEqual(calls, [
     ["abort"],
