@@ -41,7 +41,7 @@ Rin core always provides todo support. It registers:
 - `todo`: current-branch execution checklist tool.
 - `/todos`: interactive TUI command for the current checklist.
 
-Todo state is reconstructed from session tool-result details, so forks and session branches can recover the matching checklist. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
+Todo state is checkpointed in Pi session custom entries and reconstructed from the current session branch, so forks and session branches can recover the matching checklist without relying on context-visible tool-result details or compaction summaries. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
 
 ## Bundled foreground extensions
 

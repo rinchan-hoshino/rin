@@ -13,6 +13,8 @@ export type RinTodoSnapshot = {
   signature: string;
 };
 
+export const RIN_TODO_CUSTOM_ENTRY_TYPE = "rin.todo";
+
 export function normalizeRinTodoItem(value: unknown): RinTodoItem | undefined {
   const item = value && typeof value === "object" ? (value as any) : null;
   if (!item) return undefined;
@@ -89,28 +91,19 @@ function todoSnapshot(todos: RinTodoItem[] = [], nextId?: number) {
   } satisfies RinTodoSnapshot;
 }
 
-function messageFromEntry(entry: unknown) {
+function todoSnapshotFromCustomEntry(
+  entry: unknown,
+): RinTodoSnapshot | undefined {
   const value = entry && typeof entry === "object" ? (entry as any) : null;
   if (!value) return undefined;
-  if (value.type === "message") return value.message;
-  return value;
-}
-
-function todoSnapshotFromMessage(
-  message: unknown,
-): RinTodoSnapshot | undefined {
-  const value =
-    message && typeof message === "object" ? (message as any) : null;
-  if (!value) return undefined;
-  if (safeString(value.role).trim() !== "toolResult") return undefined;
-  if (safeString(value.toolName).trim() !== "todo") return undefined;
-  const details =
-    value.details && typeof value.details === "object"
-      ? value.details
-      : undefined;
-  const todos = normalizeRinTodoItems((details as any)?.todos);
+  if (value.type !== "custom") return undefined;
+  if (safeString(value.customType).trim() !== RIN_TODO_CUSTOM_ENTRY_TYPE) {
+    return undefined;
+  }
+  const data = value.data && typeof value.data === "object" ? value.data : {};
+  const todos = normalizeRinTodoItems((data as any).todos);
   if (!todos) return undefined;
-  const rawNextId = Number((details as any)?.nextId);
+  const rawNextId = Number((data as any).nextId);
   return todoSnapshot(
     todos,
     Number.isSafeInteger(rawNextId) && rawNextId > 0 ? rawNextId : undefined,
@@ -128,7 +121,7 @@ function branchEntriesFromSession(session: any) {
 export function readTodoSnapshotFromSession(session: any): RinTodoSnapshot {
   let latest: RinTodoSnapshot = todoSnapshot();
   for (const entry of branchEntriesFromSession(session)) {
-    const next = todoSnapshotFromMessage(messageFromEntry(entry));
+    const next = todoSnapshotFromCustomEntry(entry);
     if (next) latest = next;
   }
   return latest;

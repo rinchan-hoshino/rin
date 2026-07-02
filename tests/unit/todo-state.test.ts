@@ -13,6 +13,14 @@ const todoState = await import(
     .href
 );
 
+function todoEntry(todos: any[], nextId = 1) {
+  return {
+    type: "custom",
+    customType: todoState.RIN_TODO_CUSTOM_ENTRY_TYPE,
+    data: { todos, nextId },
+  };
+}
+
 function todoResult(todos: any[], nextId = 1) {
   return {
     type: "message",
@@ -24,13 +32,13 @@ function todoResult(todos: any[], nextId = 1) {
   };
 }
 
-test("todo state reads the latest branch-aware todo result", () => {
+test("todo state reads the latest branch-aware custom entry", () => {
   const session = {
     sessionManager: {
       getBranch: () => [
-        todoResult([{ id: 1, text: "first", done: false }], 2),
+        todoEntry([{ id: 1, text: "first", done: false }], 2),
         { type: "message", message: { role: "assistant", content: [] } },
-        todoResult(
+        todoEntry(
           [
             { id: 1, text: "first", done: true },
             { id: 2, text: "second", done: false },
@@ -48,6 +56,24 @@ test("todo state reads the latest branch-aware todo result", () => {
     { id: 1, text: "first", done: true },
     { id: 2, text: "second", done: false },
   ]);
+});
+
+test("todo state ignores context-visible todo tool-result details", () => {
+  const session = {
+    sessionManager: {
+      getBranch: () => [
+        todoResult(
+          [{ id: 1, text: "tool result should not persist", done: false }],
+          2,
+        ),
+      ],
+    },
+  };
+
+  const snapshot = todoState.readTodoSnapshotFromSession(session);
+
+  assert.deepEqual(snapshot.todos, []);
+  assert.equal(snapshot.pendingCount, 0);
 });
 
 test("todo state formats checklist content without markdown list markers", () => {

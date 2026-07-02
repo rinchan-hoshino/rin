@@ -1,8 +1,9 @@
 /**
  * Rin core todo capability.
  *
- * State is stored in tool result details instead of an external file, so session
- * branches reconstruct the todo list that belongs to that branch.
+ * State is checkpointed in Pi session custom entries, so session branches
+ * reconstruct the todo list that belongs to that branch without relying on LLM
+ * context-visible tool results.
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -11,6 +12,8 @@ import { Type } from "typebox";
 import {
   formatRinTodoChecklistContent,
   formatRinTodoItemText,
+  readTodoSnapshotFromSession,
+  RIN_TODO_CUSTOM_ENTRY_TYPE,
 } from "./todo-state.js";
 import type {
   RinCapabilityDefinition,
@@ -160,6 +163,7 @@ function renderTodoText(text: string) {
 export default function todoCapability(): RinCapabilityDefinition {
   let todos: Todo[] = [];
   let nextId = 1;
+  let activeSessionManager: any;
 
   const snapshot = (
     action: TodoDetailsAction,
@@ -171,20 +175,25 @@ export default function todoCapability(): RinCapabilityDefinition {
     ...(error ? { error } : {}),
   });
 
-  const reconstructState = (ctx: RinCapabilityContext) => {
-    todos = [];
-    nextId = 1;
-
-    for (const entry of ctx.sessionManager.getBranch()) {
-      if (entry.type !== "message") continue;
-      const msg = entry.message;
-      if (msg.role !== "toolResult" || msg.toolName !== "todo") continue;
-
-      const details = readTodoDetails(msg.details);
-      if (!details) continue;
-      todos = details.todos.map((todo) => ({ ...todo }));
-      nextId = details.nextId;
+  const appendTodoStateEntry = (todoList: Todo[], nextTodoId: number) => {
+    if (!activeSessionManager) return;
+    const appendCustomEntry = activeSessionManager.appendCustomEntry;
+    if (typeof appendCustomEntry !== "function") {
+      throw new Error("session custom entries are not available");
     }
+    appendCustomEntry.call(activeSessionManager, RIN_TODO_CUSTOM_ENTRY_TYPE, {
+      todos: todoList.map((todo) => ({ ...todo })),
+      nextId: nextTodoId,
+    });
+  };
+
+  const reconstructState = (ctx: RinCapabilityContext) => {
+    activeSessionManager = ctx.sessionManager;
+    const state = readTodoSnapshotFromSession({
+      sessionManager: activeSessionManager,
+    });
+    todos = state.todos.map((todo) => ({ ...todo }));
+    nextId = normalizeNextTodoId(todos, state.nextId);
   };
 
   const todoToolDefinition: any = {
@@ -228,8 +237,26 @@ export default function todoCapability(): RinCapabilityDefinition {
         };
       }
 
+      const nextTodoId = normalizeNextTodoId(nextTodos, undefined);
+      try {
+        appendTodoStateEntry(nextTodos, nextTodoId);
+      } catch (error: any) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error: failed to persist todo state: ${String(error?.message || error)}`,
+            },
+          ],
+          details: snapshot(
+            "write",
+            `failed to persist todo state: ${String(error?.message || error)}`,
+          ),
+        };
+      }
+
       todos = nextTodos;
-      nextId = normalizeNextTodoId(todos, undefined);
+      nextId = nextTodoId;
       return {
         content: [
           {

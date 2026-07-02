@@ -215,7 +215,7 @@ test("core todo loads from configured runtime without extension paths", async ()
   }
 });
 
-test("core todo reconstructs around interrupted todo tool results", async () => {
+test("core todo reconstructs from custom entries around interrupted tool results", async () => {
   const capability = todoModule.default();
   const todoTool = capability.tools[0];
   const interruptedTodoResult = {
@@ -241,15 +241,11 @@ test("core todo reconstructs around interrupted todo tool results", async () => 
       getBranch: () => [
         interruptedTodoResult,
         {
-          type: "message",
-          message: {
-            role: "toolResult",
-            toolName: "todo",
-            details: {
-              action: "add",
-              todos: [{ id: 1, text: "Preserve todo state", done: false }],
-              nextId: 2,
-            },
+          type: "custom",
+          customType: "rin.todo",
+          data: {
+            todos: [{ id: 1, text: "Preserve todo state", done: false }],
+            nextId: 2,
           },
         },
         interruptedTodoResult,
