@@ -229,6 +229,84 @@ test("chat chat helpers treat any delivered assistant text as a replay boundary"
   });
 });
 
+test("chat chat helpers persist duplicate inbound messages without rewriting first-seen state", async () => {
+  await withTempDir(async (agentDir) => {
+    const chatKey = "lark/bot-1:oc-demo";
+    const base = {
+      chatKey,
+      platform: "lark",
+      botId: "bot-1",
+      chatId: "oc-demo",
+      chatType: "group",
+    };
+    messageStore.saveChatMessage(agentDir, {
+      ...base,
+      messageId: "m-user",
+      role: "user",
+      receivedAt: "2026-07-02T11:23:00.000Z",
+      acceptedAt: "2026-07-02T11:23:01.000Z",
+      processedAt: "2026-07-02T11:23:04.000Z",
+      sessionFile: "sessions/rin-session.jsonl",
+      text: "please check",
+      rawContent: "please check",
+      strippedContent: "please check",
+    });
+    messageStore.saveChatMessage(agentDir, {
+      ...base,
+      messageId: "m-assistant",
+      role: "assistant",
+      replyToMessageId: "m-user",
+      receivedAt: "2026-07-02T11:23:05.000Z",
+      processedAt: "2026-07-02T11:23:05.000Z",
+      text: "checked",
+      rawContent: "checked",
+      strippedContent: "checked",
+    });
+
+    helpers.persistInboundMessage(
+      agentDir,
+      {
+        platform: "lark",
+        selfId: "bot-1",
+        channelId: "oc-demo",
+        messageId: "m-user",
+        timestamp: 1783000000000,
+        content: "please check",
+        stripped: { content: "please check" },
+        author: { name: "Owner" },
+        user: { id: "owner-1" },
+      },
+      [{ type: "text", attrs: { content: "please check" } }],
+      {},
+      () => "OWNER",
+      { chatKey },
+    );
+
+    const user = messageStore.findChatMessageByChatAndId(
+      agentDir,
+      chatKey,
+      "m-user",
+    );
+    assert.equal(user.receivedAt, "2026-07-02T11:23:00.000Z");
+    assert.equal(user.acceptedAt, "2026-07-02T11:23:01.000Z");
+    assert.equal(user.processedAt, "2026-07-02T11:23:04.000Z");
+    assert.equal(user.sessionFile, "sessions/rin-session.jsonl");
+    assert.equal(user.duplicateCount, 1);
+    assert.ok(
+      Date.parse(user.lastReceivedAt) > Date.parse(user.receivedAt),
+      "lastReceivedAt should record the duplicate delivery time",
+    );
+
+    const assistant = messageStore.findChatMessageByChatAndId(
+      agentDir,
+      chatKey,
+      "m-assistant",
+    );
+    assert.equal(assistant.replyToMessageId, "m-user");
+    assert.ok(Date.parse(assistant.receivedAt) > Date.parse(user.receivedAt));
+  });
+});
+
 test("chat chat helpers persist outbound image parts", async () => {
   await withTempDir(async (dir) => {
     const images = [

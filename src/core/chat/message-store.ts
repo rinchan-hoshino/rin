@@ -24,6 +24,9 @@ export type StoredChatMessage = {
   sessionFile?: string;
   acceptedAt?: string;
   processedAt?: string;
+  lastReceivedAt?: string;
+  duplicateCount?: number;
+  updatedAt?: string;
   chatKey: string;
   platform: string;
   botId?: string;
@@ -470,6 +473,89 @@ function definedStoredChatMessagePatch(
   ) as Partial<StoredChatMessage>;
 }
 
+function parseStoredTimestamp(value: unknown) {
+  const parsed = Date.parse(safeString(value).trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pickLaterStoredTimestamp(left: unknown, right: unknown) {
+  const leftText = safeString(left).trim();
+  const rightText = safeString(right).trim();
+  if (!leftText) return rightText;
+  if (!rightText) return leftText;
+  const leftTime = parseStoredTimestamp(leftText);
+  const rightTime = parseStoredTimestamp(rightText);
+  if (leftTime === null) return rightText;
+  if (rightTime === null) return leftText;
+  return rightTime > leftTime ? rightText : leftText;
+}
+
+function preferRicherStoredString(current: unknown, incoming: unknown) {
+  const currentText = safeString(current);
+  const incomingText = safeString(incoming);
+  if (!currentText.trim())
+    return incomingText.trim() ? incomingText : undefined;
+  if (!incomingText.trim()) return currentText;
+  return incomingText.length > currentText.length ? incomingText : currentText;
+}
+
+function preferRicherStoredElements(
+  current: StoredChatMessage["elements"],
+  incoming: StoredChatMessage["elements"],
+) {
+  const currentElements = Array.isArray(current) ? current : [];
+  const incomingElements = Array.isArray(incoming) ? incoming : [];
+  if (!currentElements.length)
+    return incomingElements.length ? incoming : current;
+  if (!incomingElements.length) return current;
+  return incomingElements.length > currentElements.length ? incoming : current;
+}
+
+function mergeDuplicateInboundChatMessage(
+  existing: StoredChatMessage,
+  incoming: StoredChatMessage,
+): StoredChatMessage {
+  const patch = definedStoredChatMessagePatch(
+    toStoredChatMessageInput(incoming),
+  );
+  const next: StoredChatMessage = {
+    ...existing,
+    ...patch,
+    version: 1,
+    recordKey: existing.recordKey,
+    chatKey: existing.chatKey,
+    messageId: existing.messageId,
+    role: existing.role || "user",
+    platform: existing.platform || incoming.platform,
+    chatId: existing.chatId || incoming.chatId,
+    receivedAt: existing.receivedAt || incoming.receivedAt,
+    acceptedAt: existing.acceptedAt || incoming.acceptedAt,
+    processedAt: existing.processedAt || incoming.processedAt,
+    sessionFile: existing.sessionFile || incoming.sessionFile,
+    duplicateCount: Math.max(0, Number(existing.duplicateCount || 0)) + 1,
+    lastReceivedAt: pickLaterStoredTimestamp(
+      existing.lastReceivedAt || existing.receivedAt,
+      incoming.receivedAt,
+    ),
+    updatedAt: new Date().toISOString(),
+  };
+  next.text = preferRicherStoredString(existing.text, incoming.text);
+  next.rawContent = preferRicherStoredString(
+    existing.rawContent,
+    incoming.rawContent,
+  );
+  next.strippedContent = preferRicherStoredString(
+    existing.strippedContent,
+    incoming.strippedContent,
+  );
+  next.elements = preferRicherStoredElements(
+    existing.elements,
+    incoming.elements,
+  );
+  next.quote = existing.quote || incoming.quote;
+  return next;
+}
+
 function normalizeStoredSessionFields<T extends Record<string, any>>(
   agentDir: string,
   input: T,
@@ -619,6 +705,34 @@ export function saveChatMessage(
     messageStoreLayout(agentDir),
     normalizeStoredSessionFields(agentDir, input),
   );
+}
+
+export function saveInboundChatMessage(
+  agentDir: string,
+  input: Omit<StoredChatMessage, "version" | "recordKey">,
+) {
+  const layout = messageStoreLayout(agentDir);
+  const normalized = buildStoredChatMessage(
+    normalizeStoredSessionFields(agentDir, input),
+  );
+  const existing = findChatMessageByChatAndIdWithLayout(
+    layout,
+    normalized.chatKey,
+    normalized.messageId,
+  );
+  if (!existing) {
+    return saveChatMessageWithLayout(
+      layout,
+      toStoredChatMessageInput(normalized),
+    );
+  }
+  const next = mergeDuplicateInboundChatMessage(existing, normalized);
+  const filePath = persistChatMessageRecord(
+    layout,
+    next,
+    storedMessageDate(existing),
+  );
+  return { record: next, filePath };
 }
 
 export function upsertChatMessage(

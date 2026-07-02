@@ -47,6 +47,8 @@ export type ChatInboxItem = {
   messageId: string;
   createdAt: string;
   updatedAt: string;
+  lastReceivedAt?: string;
+  duplicateCount?: number;
   attemptCount: number;
   nextAttemptAt?: string;
   lastError?: string;
@@ -131,11 +133,51 @@ export function buildChatInboxItem(input: {
   } satisfies ChatInboxItem;
 }
 
+function findExistingChatInboxItem(agentDir: string, itemId: string) {
+  const fileName = itemFileName(itemId);
+  for (const dir of [processingDir(agentDir), pendingDir(agentDir)]) {
+    const filePath = path.join(dir, fileName);
+    const item = readChatInboxItem(filePath);
+    if (item) return { item, filePath };
+  }
+  return null;
+}
+
+function isChatInboxFileInDir(filePath: string, dir: string) {
+  return path.resolve(path.dirname(filePath)) === path.resolve(dir);
+}
+
+function mergeDuplicatePendingChatInboxItem(
+  current: ChatInboxItem,
+  incoming: ChatInboxItem,
+): ChatInboxItem {
+  const now = nowIso();
+  return {
+    ...current,
+    routing: incoming.routing || current.routing,
+    session: incoming.session || current.session,
+    elements: incoming.elements?.length ? incoming.elements : current.elements,
+    updatedAt: now,
+    lastReceivedAt: now,
+    duplicateCount: Math.max(0, Number(current.duplicateCount || 0)) + 1,
+  };
+}
+
 export function enqueueChatInboxItem(
   agentDir: string,
   input: { chatKey: string; messageId: string; session: any; elements: any[] },
 ) {
   const item = buildChatInboxItem(input);
+  const existing = findExistingChatInboxItem(agentDir, item.itemId);
+  if (existing) {
+    if (isChatInboxFileInDir(existing.filePath, processingDir(agentDir))) {
+      return existing;
+    }
+    return writeChatInboxItem(
+      existing.filePath,
+      mergeDuplicatePendingChatInboxItem(existing.item, item),
+    );
+  }
   return writeChatInboxItem(
     path.join(pendingDir(agentDir), itemFileName(item.itemId)),
     item,

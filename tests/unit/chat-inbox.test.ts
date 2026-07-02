@@ -54,6 +54,51 @@ test("chat inbox enqueues a durable inbound envelope keyed by chat and message i
   assert.deepEqual(loaded.elements, elements);
 });
 
+test("chat inbox duplicate enqueue preserves pending progress timestamps", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const input = {
+    chatKey: "onebot/1:private:2",
+    messageId: "m1",
+    session: {
+      platform: "onebot",
+      selfId: "1",
+      channelId: "private:2",
+      userId: "2",
+      messageId: "m1",
+      timestamp: Date.now(),
+      content: "hello",
+      stripped: { content: "hello" },
+      author: { name: "tester" },
+    },
+    elements: [{ type: "text", attrs: { content: "hello" } }],
+  };
+
+  const first = inbox.enqueueChatInboxItem(agentDir, input);
+  const pendingWithProgress = {
+    ...first.item,
+    createdAt: "2026-07-02T11:23:00.000Z",
+    updatedAt: "2026-07-02T11:23:10.000Z",
+    attemptCount: 2,
+    nextAttemptAt: "2026-07-02T11:24:00.000Z",
+    lastError: "temporary_tool_gap",
+  };
+  await fs.writeFile(
+    first.filePath,
+    JSON.stringify(pendingWithProgress, null, 2),
+  );
+
+  const duplicate = inbox.enqueueChatInboxItem(agentDir, input);
+  const loaded = inbox.readChatInboxItem(duplicate.filePath);
+
+  assert.equal(duplicate.filePath, first.filePath);
+  assert.equal(loaded.createdAt, "2026-07-02T11:23:00.000Z");
+  assert.equal(loaded.attemptCount, 2);
+  assert.equal(loaded.nextAttemptAt, "2026-07-02T11:24:00.000Z");
+  assert.equal(loaded.lastError, "temporary_tool_gap");
+  assert.equal(loaded.duplicateCount, 1);
+  assert.ok(Date.parse(loaded.lastReceivedAt) > Date.parse(loaded.createdAt));
+});
+
 test("chat inbox rejects legacy unqualified keys before controller selection", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");

@@ -300,6 +300,47 @@ test("message store upsert keeps existing metadata while moving a record to a ne
   });
 });
 
+test("message store inbound duplicate keeps the existing first-seen timestamp even if incoming is earlier", async () => {
+  await withTempRoot(async (root) => {
+    const chatKey = "lark/bot-1:oc-demo";
+    const base = {
+      messageId: "m1",
+      role: "user",
+      chatKey,
+      platform: "lark",
+      botId: "bot-1",
+      chatId: "oc-demo",
+      chatType: "group",
+      text: "first",
+      rawContent: "first",
+      strippedContent: "first",
+    };
+    messageStore.saveChatMessage(root, {
+      ...base,
+      receivedAt: "2026-07-02T11:23:00.000Z",
+      processedAt: "2026-07-02T11:23:02.000Z",
+    });
+
+    const updated = messageStore.saveInboundChatMessage(root, {
+      ...base,
+      receivedAt: "2026-07-02T11:22:00.000Z",
+      text: "first duplicate",
+      rawContent: "first duplicate",
+      strippedContent: "first duplicate",
+    }).record;
+
+    assert.equal(updated.receivedAt, "2026-07-02T11:23:00.000Z");
+    assert.equal(updated.processedAt, "2026-07-02T11:23:02.000Z");
+    assert.equal(updated.duplicateCount, 1);
+    assert.deepEqual(
+      messageStore
+        .listChatMessagesByChatAndDate(root, chatKey, "2026-07-02")
+        .map((item) => item.messageId),
+      ["m1"],
+    );
+  });
+});
+
 test("message store always uses the preferred root even if a previous root still exists", async () => {
   await withTempRoot(async (root) => {
     await fs.mkdir(path.join(root, "data", "koishi-message-store"), {

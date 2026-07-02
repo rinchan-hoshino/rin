@@ -7,7 +7,7 @@ import {
   findChatMessageByChatAndId,
   listChatMessages,
   listChatMessagesByReplyTo,
-  saveChatMessage,
+  saveInboundChatMessage,
   updateChatMessage,
 } from "./message-store.js";
 import {
@@ -147,7 +147,7 @@ export function persistInboundMessage(
     trust: trustOf(identity, platform, userId),
     chatKey: options.chatKey,
   });
-  return normalized ? saveChatMessage(agentDir, normalized) : null;
+  return normalized ? saveInboundChatMessage(agentDir, normalized) : null;
 }
 
 export function lookupReplyMessage(
