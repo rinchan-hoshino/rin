@@ -10,6 +10,15 @@
 - TUI and CLI session flows now handle resume listing, session rebind options, and non-interactive tool help more accurately.
 - Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, compact usage trend charts, and cached group member counts.
 <!-- rin-changelog-coverage
+febf4c8 fix(chat): mark compact command processed on completion notice
+34f67f3 fix(chat): preserve inbound message first-seen state
+d2a6453 fix(chat): route command failures through error formatter
+f33b5a7 fix(todo): persist state in session custom entries
+0ae61d4 test: align daemon tests with initial session workers
+58b29a9 fix(chat): await Discord interaction acknowledgement
+5b90339 fix(daemon): enforce one session per worker
+70b828c fix(chat): use platform typing poll intervals
+b067eb9 chore: sync Pi 0.80.3 upstreams
 ea07040 fix(release): tolerate absent bundled extensions
 6bf9b52 fix(tui): index resume session listing
 149fc38 fix(chat): cache group member counts
