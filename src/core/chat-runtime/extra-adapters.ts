@@ -911,7 +911,7 @@ export class DiscordAdapter {
     if (Boolean(interaction?.user?.bot)) return;
     const commandLine = this.discordInteractionCommandLine(interaction);
     if (!commandLine) return;
-    void this.acknowledgeInteraction(interaction);
+    await this.acknowledgeInteraction(interaction);
     const channelId = safeString(interaction?.channelId).trim();
     const guildId = safeString(interaction?.guildId || "").trim();
     const rawChannelName = safeString(interaction?.channel?.name || "").trim();

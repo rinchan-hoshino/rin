@@ -156,7 +156,7 @@ test("discord runtime persists guild channel paths as chat names", async () => {
   }
 });
 
-test("discord slash interactions emit without waiting for acknowledgement", async () => {
+test("discord slash interactions emit after acknowledgement", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
   );
@@ -199,20 +199,14 @@ test("discord slash interactions emit without waiting for acknowledgement", asyn
   });
 
   await new Promise((resolve) => setImmediate(resolve));
-
-  let assertionError: unknown;
-  try {
-    assert.equal(replyStarted, true);
-    assert.equal(seen.length, 1);
-    assert.equal(seen[0].messageId, "interaction-1");
-    assert.equal(seen[0].content, "/new");
-  } catch (error) {
-    assertionError = error;
-  }
+  assert.equal(replyStarted, true);
+  assert.equal(seen.length, 0);
 
   resolveReply();
   await handled;
-  if (assertionError) throw assertionError;
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].messageId, "interaction-1");
+  assert.equal(seen[0].content, "/new");
 });
 
 test("chat runtime derives the durable chat key from normalized chat identity", async () => {

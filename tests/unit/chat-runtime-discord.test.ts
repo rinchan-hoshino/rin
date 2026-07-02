@@ -279,7 +279,7 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
       } as any;
     }) as any;
 
-    await (adapter as any).handleInteraction({
+    const handled = (adapter as any).handleInteraction({
       id: "interaction-1",
       token: "interaction-token",
       commandName: "new",
@@ -304,6 +304,12 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
       },
     });
 
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ["fetch"]);
+    assert.equal(emitted.length, 0);
+    resolveFetch();
+    await handled;
+
     assert.deepEqual(events, ["fetch", "emit"]);
     assert.equal(fetchCalls.length, 1);
     assert.match(
@@ -321,8 +327,6 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
     });
     assert.equal(emitted.length, 1);
     assert.equal(emitted[0].payload.content, "/new");
-    resolveFetch();
-    await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(warnings, []);
   } finally {
     globalThis.fetch = originalFetch;
