@@ -9,7 +9,10 @@
 - Runtime and install paths are faster and safer, including CLI startup/dependency trimming, managed Node runtime bundles, managed-node update handoffs, launcher refreshes, PATH warnings, platform bundles without optional bundled extensions, and unresolved bootstrap git-ref handling.
 - TUI and CLI session flows now handle resume listing, session rebind options, and non-interactive tool help more accurately.
 - Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, compact usage trend charts, and cached group member counts.
+- Project licensing metadata now uses the GPL-3.0-or-later SPDX identifier with the standard GPL license text.
 <!-- rin-changelog-coverage
+4c94743 Use standard GPL license text
+f38735c Add GPL-3.0-or-later license
 febf4c8 fix(chat): mark compact command processed on completion notice
 34f67f3 fix(chat): preserve inbound message first-seen state
 d2a6453 fix(chat): route command failures through error formatter
