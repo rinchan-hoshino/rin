@@ -1140,7 +1140,7 @@ test("chat controller renders todo notices as markdown for markdown chats", asyn
     {
       type: "markdown",
       attrs: {
-        content: "☐ Keep working\n☑ ~~Ship renderer~~",
+        content: "⏹️ Keep working\n✅ ~~Ship renderer~~",
       },
     },
   ]);
@@ -1177,7 +1177,7 @@ test("chat controller renders todo notices as character fallback for plain chats
     {
       type: "markdown",
       attrs: {
-        content: "☐ Keep working\n☑ Ship renderer",
+        content: "⏹️ Keep working\n✅ Ship renderer",
       },
     },
   ]);

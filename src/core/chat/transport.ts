@@ -734,6 +734,9 @@ export function sendOutboxPayload(
       const deliveryKind = safeString(payload.deliveryKind).trim() || "final";
       const delivery = sendText(app, chatKey, text, h, replyToMessageId, {
         deliveryKind,
+        ...(payload.coalesceWithWorkingMessage
+          ? { coalesceWithWorkingMessage: true }
+          : {}),
         ...(outboxId ? { outboxId } : {}),
       });
       return attachChatDeliveryDispatch(
@@ -783,6 +786,9 @@ export function sendOutboxPayload(
 
       const chatDelivery = sendChatNodes(app, chatKey, nodes, {
         deliveryKind: safeString(payload.deliveryKind).trim() || "final",
+        ...(payload.coalesceWithWorkingMessage
+          ? { coalesceWithWorkingMessage: true }
+          : {}),
         ...(outboxId ? { outboxId } : {}),
       });
       resolveDispatched();

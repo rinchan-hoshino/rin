@@ -14,6 +14,8 @@ import {
   type ChatBridgeBuiltInAdapterKey,
 } from "../chat-bridge/adapters.js";
 import { composeChatKeyForBot } from "../chat/support.js";
+import { createRinI18n, readRinI18nCatalog } from "../i18n.js";
+import { readConfiguredLanguageFromSettings } from "../language.js";
 import {
   compactObject,
   createPrefixedLogger,
@@ -95,6 +97,77 @@ function parseTelegramReplyQuote(message: any) {
   const messageId = safeString(reply?.message_id || "").trim() || undefined;
   if (!messageId && !userId && !nickname && !content) return undefined;
   return { messageId, userId, nickname, content };
+}
+
+const TELEGRAM_WORKING_PROMPT_I18N_IDS = [
+  "chat.runtime.telegram.working.prompt1",
+  "chat.runtime.telegram.working.prompt2",
+  "chat.runtime.telegram.working.prompt3",
+  "chat.runtime.telegram.working.prompt4",
+  "chat.runtime.telegram.working.prompt5",
+  "chat.runtime.telegram.working.prompt6",
+] as const;
+
+type TelegramWorkingCopy = {
+  thinkingInitial: string;
+  thinkingSuffix: string;
+  separator: string;
+  truncatedSuffix: string;
+  prompts: string[];
+};
+
+function resolveTelegramWorkingCopy(agentDir?: string): TelegramWorkingCopy {
+  const root = safeString(agentDir).trim();
+  const base =
+    (createRinI18n(readConfiguredLanguageFromSettings(root)) as any).chatRuntime
+      ?.telegramWorking || {};
+  const catalog = readRinI18nCatalog(root);
+  const text = (id: string, fallback: string) =>
+    safeString(catalog[id]).trim() || safeString(fallback).trim();
+  const textAny = (ids: string[], fallback: string) => {
+    for (const id of ids) {
+      const value = safeString(catalog[id]).trim();
+      if (value) return value;
+    }
+    return safeString(fallback).trim();
+  };
+  const prompts = TELEGRAM_WORKING_PROMPT_I18N_IDS.map((id, index) =>
+    text(id, base.prompts?.[index] || ""),
+  ).filter(Boolean);
+  return {
+    thinkingInitial: textAny(
+      [
+        "chat.runtime.telegram.working.workingInitial",
+        "chat.runtime.telegram.working.thinkingInitial",
+      ],
+      base.workingInitial || base.thinkingInitial || "Working...",
+    ),
+    thinkingSuffix: textAny(
+      [
+        "chat.runtime.telegram.working.workingSuffix",
+        "chat.runtime.telegram.working.thinkingSuffix",
+      ],
+      base.workingSuffix || base.thinkingSuffix || "Working",
+    ),
+    separator: text(
+      "chat.runtime.telegram.working.separator",
+      base.separator || "-----------",
+    ),
+    truncatedSuffix: text(
+      "chat.runtime.telegram.working.truncatedSuffix",
+      base.truncatedSuffix || "\n\n[…truncated to keep this as one message]",
+    ),
+    prompts: prompts.length
+      ? prompts
+      : [
+          "Working on it (๑•̀ㅂ•́)و✧",
+          "Organizing things (｡･ω･｡)",
+          "Processing details (つω`｡)",
+          "Sorting information (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧",
+          "Almost there, still working (ง •̀_•́)ง",
+          "Working, please wait (｀・ω・´)",
+        ],
+  };
 }
 
 function parseOneBotReplyQuote(data: Record<string, any>) {
@@ -349,6 +422,7 @@ class TelegramAdapter {
   private readonly app: ChatRuntimeApp;
   private readonly config: Record<string, any>;
   private readonly logger: any;
+  private readonly workingCopy: TelegramWorkingCopy;
   private readonly cacheDir: string;
   private readonly cursorPath: string;
   private pollAbort: AbortController | null = null;
@@ -360,6 +434,15 @@ class TelegramAdapter {
   private readonly pollApi: GrammyApi;
   private readonly api: GrammyApi;
   private readonly workingReactions = new Map<string, string>();
+  private readonly workingMessages = new Map<string, string>();
+  private readonly workingMessageTexts = new Map<string, string>();
+  private readonly workingMessageKinds = new Map<string, string>();
+  private readonly workingMessagePromises = new Map<string, Promise<string>>();
+  private readonly workingMessageOperations = new Map<
+    string,
+    Promise<string>
+  >();
+  private readonly workingMessageFinalizing = new Set<string>();
   readonly bot: any;
 
   constructor(
@@ -371,6 +454,7 @@ class TelegramAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:telegram", logger);
+    this.workingCopy = resolveTelegramWorkingCopy(app?.agentDir);
     this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "telegram");
     const cursorKey =
       safeString(config?.token)
@@ -416,8 +500,8 @@ class TelegramAdapter {
           },
         },
       ),
-      sendMessage: async (chatId: string, content: any) =>
-        await this.sendMessage(chatId, content),
+      sendMessage: async (chatId: string, content: any, options?: any) =>
+        await this.sendMessage(chatId, content, options),
       createReaction: async (
         chatId: string,
         messageId: string,
@@ -820,6 +904,44 @@ class TelegramAdapter {
     }
   }
 
+  private async editText(
+    chatId: string,
+    messageId: string,
+    text: string,
+    parseMode?: string,
+  ) {
+    const payload = compactObject({
+      chat_id: chatId,
+      message_id: Number(messageId),
+      text,
+      parse_mode: safeString(parseMode).trim() || undefined,
+    });
+    try {
+      await this.callApi("editMessageText", payload);
+      return safeString(messageId).trim();
+    } catch (error) {
+      if (
+        /message is not modified/i.test(
+          safeString((error as any)?.message || error),
+        )
+      ) {
+        return safeString(messageId).trim();
+      }
+      if (!payload.parse_mode) throw error;
+      await this.callApi(
+        "editMessageText",
+        compactObject({
+          chat_id: chatId,
+          message_id: Number(messageId),
+          text: renderPlainTextFromNodes([
+            { type: "html", attrs: { content: text } },
+          ]),
+        }),
+      );
+      return safeString(messageId).trim();
+    }
+  }
+
   private async sendBinaryMessage(
     method:
       | "sendPhoto"
@@ -894,7 +1016,321 @@ class TelegramAdapter {
     }
   }
 
-  async sendMessage(chatId: string, content: any) {
+  private telegramSingleMessageText(text: string) {
+    const chunks = splitPlainText(text, TELEGRAM_MAX_TEXT_LENGTH);
+    if (chunks.length <= 1) return chunks[0] || "";
+    const copy =
+      this.workingCopy || resolveTelegramWorkingCopy(this.app?.agentDir);
+    const suffix =
+      safeString(copy.truncatedSuffix) ||
+      "\n\n[…truncated to keep this as one message]";
+    return `${chunks[0].slice(0, Math.max(0, TELEGRAM_MAX_TEXT_LENGTH - suffix.length))}${suffix}`;
+  }
+
+  private async withWorkingMessageOperation(
+    key: string,
+    operation: () => Promise<string>,
+  ) {
+    const previous =
+      this.workingMessageOperations.get(key) || Promise.resolve("");
+    const run = previous.catch(() => "").then(operation);
+    this.workingMessageOperations.set(key, run);
+    try {
+      return await run;
+    } finally {
+      if (this.workingMessageOperations.get(key) === run) {
+        this.workingMessageOperations.delete(key);
+      }
+    }
+  }
+
+  private workingMessageKey(chatId: string, messageId: string) {
+    return `${chatId}:${safeString(messageId).trim() || "chat"}`;
+  }
+
+  private workingMessageStatePath(key: string) {
+    const fileName = ensureFileName(
+      `${safeString(key).trim()}.json`,
+      "working-message.json",
+    );
+    return path.join(this.cacheDir, "working-messages", fileName);
+  }
+
+  private readPersistedWorkingMessage(key: string): {
+    messageId: string;
+    text: string;
+    kind: string;
+  } | null {
+    const nextKey = safeString(key).trim();
+    if (!nextKey) return null;
+    try {
+      const record = JSON.parse(
+        fs.readFileSync(this.workingMessageStatePath(nextKey), "utf8"),
+      );
+      const messageId = safeString(record?.messageId).trim();
+      if (!messageId) return null;
+      return {
+        messageId,
+        text: safeString(record?.text),
+        kind: safeString(record?.kind).trim(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private writePersistedWorkingMessage(
+    key: string,
+    messageId: string,
+    text: string,
+    kind = "",
+  ) {
+    const nextKey = safeString(key).trim();
+    const nextMessageId = safeString(messageId).trim();
+    if (!nextKey || !nextMessageId) return;
+    const statePath = this.workingMessageStatePath(nextKey);
+    ensureDir(path.dirname(statePath));
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify(
+        {
+          key: nextKey,
+          messageId: nextMessageId,
+          text: safeString(text),
+          kind: safeString(kind).trim(),
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
+  private deletePersistedWorkingMessage(key: string) {
+    const nextKey = safeString(key).trim();
+    if (!nextKey) return;
+    try {
+      fs.rmSync(this.workingMessageStatePath(nextKey), { force: true });
+    } catch {}
+  }
+
+  private rememberWorkingMessage(
+    key: string,
+    messageId: string,
+    text: string,
+    kind = "",
+  ) {
+    const nextMessageId = safeString(messageId).trim();
+    if (!nextMessageId) {
+      this.clearWorkingMessage(key);
+      return;
+    }
+    const nextKind = safeString(kind).trim();
+    this.workingMessages.set(key, nextMessageId);
+    this.workingMessageTexts.set(key, safeString(text));
+    this.workingMessageKinds.set(key, nextKind);
+    this.workingMessagePromises.delete(key);
+    this.writePersistedWorkingMessage(key, nextMessageId, text, nextKind);
+  }
+
+  private clearWorkingMessage(key: string) {
+    this.workingMessages.delete(key);
+    this.workingMessageTexts.delete(key);
+    this.workingMessageKinds.delete(key);
+    this.workingMessagePromises.delete(key);
+    this.deletePersistedWorkingMessage(key);
+  }
+
+  private markWorkingMessageFinalizing(key: string) {
+    this.workingMessageFinalizing.add(key);
+    setTimeout(
+      () => this.workingMessageFinalizing.delete(key),
+      30_000,
+    ).unref?.();
+  }
+
+  private isRecoverableWorkingMessageEditError(error: unknown) {
+    const message = safeString((error as any)?.message || error).trim();
+    return /message to edit not found|message can't be edited|message identifier is not specified/i.test(
+      message,
+    );
+  }
+
+  private isWorkingIndicatorText(text: string) {
+    const value = safeString(text).trim();
+    if (!value) return false;
+    const copy =
+      this.workingCopy || resolveTelegramWorkingCopy(this.app?.agentDir);
+    const candidates = [
+      copy.thinkingInitial,
+      ...(Array.isArray(copy.prompts) ? copy.prompts : []),
+    ]
+      .map((item) => safeString(item).trim())
+      .filter(Boolean);
+    return candidates.includes(value);
+  }
+
+  private async deleteVisibleWorkingMessage(chatId: string) {
+    const key = this.workingMessageKey(chatId, "chat");
+    const persisted = this.readPersistedWorkingMessage(key);
+    const messageId = safeString(
+      this.workingMessages.get(key) || persisted?.messageId || "",
+    ).trim();
+    const kind = safeString(
+      persisted?.kind || this.workingMessageKinds.get(key) || "",
+    ).trim();
+    const text = safeString(
+      persisted?.text || this.workingMessageTexts.get(key) || "",
+    );
+    if (
+      !messageId ||
+      (kind && kind !== "working") ||
+      !this.isWorkingIndicatorText(text)
+    ) {
+      return false;
+    }
+    try {
+      await this.callApi("deleteMessage", {
+        chat_id: chatId,
+        message_id: Number(messageId),
+      });
+    } catch {}
+    this.clearWorkingMessage(key);
+    return true;
+  }
+
+  private async resolveWorkingMessageId(
+    chatId: string,
+    preferredMessageId?: string,
+    keyOverride = "",
+  ) {
+    const overrideKey = safeString(keyOverride).trim();
+    const defaultKey = this.workingMessageKey(chatId, "chat");
+    const keys = (
+      overrideKey && overrideKey !== defaultKey
+        ? [overrideKey]
+        : [
+            defaultKey,
+            preferredMessageId
+              ? this.workingMessageKey(chatId, preferredMessageId)
+              : "",
+          ]
+    ).filter(Boolean);
+    for (const key of keys) {
+      const direct = this.workingMessages.get(key) || "";
+      if (direct) return safeString(direct).trim();
+      const pending = this.workingMessagePromises.get(key);
+      if (pending) {
+        const sentId = safeString(await pending).trim();
+        if (sentId) return sentId;
+      }
+      const persisted = this.readPersistedWorkingMessage(key);
+      if (persisted?.messageId) {
+        this.workingMessages.set(key, persisted.messageId);
+        this.workingMessageTexts.set(key, persisted.text);
+        this.workingMessageKinds.set(key, persisted.kind);
+        return persisted.messageId;
+      }
+    }
+    return "";
+  }
+
+  private async updateWorkingMessage(input: {
+    chatId?: string;
+    text?: string;
+    replyToMessageId?: string;
+    preferredMessageId?: string;
+    messageId?: string;
+    parseMode?: string;
+    finalize?: boolean;
+    key?: string;
+    kind?: string;
+  }) {
+    const chatId = safeString(input?.chatId).trim();
+    const text = safeString(input?.text);
+    if (!chatId || !text) return "";
+    const key =
+      safeString(input?.key).trim() || this.workingMessageKey(chatId, "chat");
+    const parseMode = safeString(input?.parseMode).trim() || undefined;
+    const replyToMessageId =
+      safeString(input?.replyToMessageId).trim() || undefined;
+    const preferredMessageId = safeString(input?.preferredMessageId).trim();
+    const finalize = Boolean(input?.finalize);
+    const kind =
+      safeString(input?.kind).trim() || (finalize ? "final" : "working");
+    return await this.withWorkingMessageOperation(key, async () => {
+      if (!finalize && this.workingMessageFinalizing.has(key)) {
+        return this.workingMessages.get(key) || "";
+      }
+      if (!finalize && kind === "working") {
+        const persisted = this.readPersistedWorkingMessage(key);
+        const currentMessageId = safeString(
+          this.workingMessages.get(key) || persisted?.messageId || "",
+        ).trim();
+        const currentKind = safeString(
+          this.workingMessageKinds.get(key) || persisted?.kind || "",
+        ).trim();
+        const currentText = safeString(
+          this.workingMessageTexts.get(key) || persisted?.text || "",
+        );
+        if (currentMessageId && currentKind && currentKind !== "working") {
+          return currentMessageId;
+        }
+        if (
+          currentMessageId &&
+          currentText &&
+          !this.isWorkingIndicatorText(currentText)
+        ) {
+          return currentMessageId;
+        }
+      }
+      const sendFresh = async (markFinalizing = false) => {
+        const sentId = safeString(
+          await this.sendText(chatId, text, replyToMessageId, parseMode),
+        ).trim();
+        if (finalize) {
+          this.clearWorkingMessage(key);
+          if (markFinalizing) this.markWorkingMessageFinalizing(key);
+        } else {
+          this.rememberWorkingMessage(key, sentId, text, kind);
+        }
+        return sentId;
+      };
+      const existingMessageId = safeString(
+        input?.messageId ||
+          (await this.resolveWorkingMessageId(chatId, preferredMessageId, key)),
+      ).trim();
+      if (!existingMessageId) return await sendFresh(false);
+      if (!finalize && (this.workingMessageTexts.get(key) || "") === text) {
+        return existingMessageId;
+      }
+      try {
+        const editedId =
+          safeString(
+            await this.editText(chatId, existingMessageId, text, parseMode),
+          ).trim() || existingMessageId;
+        if (finalize) {
+          this.clearWorkingMessage(key);
+          this.markWorkingMessageFinalizing(key);
+        } else {
+          this.rememberWorkingMessage(key, editedId, text, kind);
+        }
+        return editedId;
+      } catch (error) {
+        if (!this.isRecoverableWorkingMessageEditError(error)) throw error;
+        this.clearWorkingMessage(key);
+        return await sendFresh(finalize);
+      }
+    });
+  }
+
+  async sendMessage(
+    chatId: string,
+    content: any,
+    options: Record<string, any> = {},
+  ) {
+    const deliveryKind = safeString(options?.deliveryKind).trim() || "final";
+    const isFinalDelivery = deliveryKind === "final";
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     const delivered: string[] = [];
     const failures: unknown[] = [];
@@ -953,14 +1389,36 @@ class TelegramAdapter {
       } catch (error) {
         await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
       }
-      for (const textChunk of splitPlainText(text, TELEGRAM_MAX_TEXT_LENGTH)) {
+      const textChunks = [this.telegramSingleMessageText(text)].filter(Boolean);
+      for (const textChunk of textChunks) {
+        if (!textChunk) continue;
         try {
-          const messageId = await this.sendText(
-            chatId,
-            textChunk,
-            firstReply,
-            "HTML",
+          const coalesceWithWorkingMessage = Boolean(
+            options?.coalesceWithWorkingMessage,
           );
+          const deliveryKey =
+            deliveryKind === "passive_notice"
+              ? this.workingMessageKey(
+                  chatId,
+                  coalesceWithWorkingMessage ? "chat" : "passive_notice",
+                )
+              : this.workingMessageKey(chatId, "chat");
+          const shouldEditWorkingMessage = delivered.length === 0;
+          const messageId = shouldEditWorkingMessage
+            ? await this.updateWorkingMessage({
+                chatId,
+                text: textChunk,
+                replyToMessageId: firstReply,
+                preferredMessageId: firstReply,
+                parseMode: "HTML",
+                finalize: isFinalDelivery,
+                // Working indicators, coalesced todo notices, and final replies share
+                // the chat key so a turn progresses by editing one Telegram message.
+                // Non-coalesced passive notices stay isolated on the passive_notice key.
+                key: deliveryKey,
+                kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+              })
+            : await this.sendText(chatId, textChunk, firstReply, "HTML");
           if (messageId) delivered.push(messageId);
           firstReply = undefined;
         } catch (error) {
@@ -974,52 +1432,52 @@ class TelegramAdapter {
     throw new Error("telegram_send_message_empty");
   }
 
+  private workingMessageText(context: any) {
+    const copy =
+      this.workingCopy || resolveTelegramWorkingCopy(this.app?.agentDir);
+    const prompts = copy.prompts;
+    const tick = Math.abs(Number(context?.tick) || 0);
+    const promptSlot = Math.floor(tick / 6);
+    if (promptSlot === 0) return copy.thinkingInitial;
+    const index = (promptSlot - 1) % prompts.length;
+    return prompts[index];
+  }
+
   async tickWorkingIndicator(context: any) {
     const chatId = safeString(context?.chatId).trim();
     if (!chatId) return false;
     await this.callApi("sendChatAction", { chat_id: chatId, action: "typing" });
-    const messageId = safeString(context?.messageId).trim();
-    if (!messageId) return true;
-    if (context?.reactionDue === false) return true;
-    const key = `${chatId}:${messageId}`;
-    const previousEmoji = this.workingReactions.get(key) || "";
-    const nextEmoji = getWorkingReactionFrame(
-      "telegram",
-      Number(context?.reactionTick ?? context?.tick ?? 0),
+    if (safeString(context?.todoNoticeText).trim()) return true;
+    const sourceMessageId = safeString(context?.messageId).trim();
+    const replyToMessageId = safeString(
+      context?.replyToMessageId || sourceMessageId,
+    ).trim();
+    const key = this.workingMessageKey(chatId, "chat");
+    const persisted = this.readPersistedWorkingMessage(key);
+    const currentKind = safeString(
+      persisted?.kind || this.workingMessageKinds.get(key) || "",
+    ).trim();
+    if (currentKind && currentKind !== "working") return true;
+    const currentText = safeString(
+      persisted?.text || this.workingMessageTexts.get(key) || "",
     );
-    if (!nextEmoji || previousEmoji === nextEmoji) return true;
-    await this.createReaction(chatId, messageId, nextEmoji);
-    this.workingReactions.set(key, nextEmoji);
+    if (currentText && !this.isWorkingIndicatorText(currentText)) return true;
+    await this.updateWorkingMessage({
+      chatId,
+      text: this.workingMessageText(context),
+      replyToMessageId: replyToMessageId || undefined,
+      // This is the same key used by coalesced todo notices and final replies.
+      key,
+      kind: "working",
+    });
     return true;
   }
 
   async endWorkingIndicator(context: any) {
+    if (!safeString(context?.todoNoticeText).trim()) return false;
     const chatId = safeString(context?.chatId).trim();
-    const messageId = safeString(context?.messageId).trim();
     if (!chatId) return false;
-    const prefix = `${chatId}:`;
-    const entries = messageId
-      ? [
-          [
-            `${chatId}:${messageId}`,
-            this.workingReactions.get(`${chatId}:${messageId}`) || "",
-          ],
-        ]
-      : [...this.workingReactions.entries()].filter(([key]) =>
-          key.startsWith(prefix),
-        );
-    let deletedAny = false;
-    for (const [key, emoji] of entries) {
-      const targetMessageId = key.slice(prefix.length);
-      if (!targetMessageId || !emoji) {
-        this.workingReactions.delete(key);
-        continue;
-      }
-      await this.deleteReaction(chatId, targetMessageId, emoji);
-      this.workingReactions.delete(key);
-      deletedAny = true;
-    }
-    return deletedAny;
+    return await this.deleteVisibleWorkingMessage(chatId);
   }
 
   async createReaction(chatId: string, messageId: string, emoji: string) {

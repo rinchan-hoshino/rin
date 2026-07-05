@@ -92,8 +92,7 @@ test("todo state formats markdown chat fallback with markdown strikethrough", ()
     { text: "Done item", done: true },
   ]);
 
-  assert.equal(content, "☐ Open item\n☑ ~~Done item~~");
-  assert.doesNotMatch(content, /\p{Mark}/u);
+  assert.equal(content, "⏹️ Open item\n✅ ~~Done item~~");
 });
 
 test("todo state formats character-only chat fallback without strikethrough", () => {
@@ -102,8 +101,7 @@ test("todo state formats character-only chat fallback without strikethrough", ()
     { text: "Done item", done: true },
   ]);
 
-  assert.equal(content, "☐ Open item\n☑ Done item");
-  assert.doesNotMatch(content, /\p{Mark}/u);
+  assert.equal(content, "⏹️ Open item\n✅ Done item");
 });
 
 test("todo state does not expose hidden final-continuation helpers", () => {

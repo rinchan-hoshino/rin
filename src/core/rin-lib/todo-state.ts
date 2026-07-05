@@ -61,7 +61,7 @@ export function formatRinTodoChecklistMarkdownContent(
   return todos
     .map((todo) => {
       const text = formatRinTodoLineText(todo);
-      return `${todo.done ? "☑" : "☐"} ${todo.done ? `~~${text}~~` : text}`;
+      return `${todo.done ? "✅" : "⏹️"} ${todo.done ? `~~${text}~~` : text}`;
     })
     .join("\n");
 }
@@ -74,7 +74,7 @@ export function formatRinTodoChecklistCharacterContent(
   return todos
     .map((todo) => {
       const text = formatRinTodoLineText(todo);
-      return `${todo.done ? "☑" : "☐"} ${text}`;
+      return `${todo.done ? "✅" : "⏹️"} ${text}`;
     })
     .join("\n");
 }

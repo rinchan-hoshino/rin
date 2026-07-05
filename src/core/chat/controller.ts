@@ -117,6 +117,7 @@ type ChatTextDelivery = {
   deliveryKind?: "final" | "interim" | "passive_notice";
   text: string;
   replyToMessageId?: string;
+  coalesceWithWorkingMessage?: boolean;
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
@@ -126,6 +127,7 @@ type ChatPartsDelivery = {
   chatKey: string;
   deliveryKind?: "final" | "interim" | "passive_notice";
   parts: ChatMessagePart[];
+  coalesceWithWorkingMessage?: boolean;
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
@@ -285,6 +287,7 @@ export class ChatController {
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
+  latestTodoNoticeText = "";
   awaitingTurnSettle = false;
   externalWorkingVisible = false;
   turnAbortRequested = false;
@@ -596,6 +599,7 @@ export class ChatController {
       messageId: this.currentIncomingMessageId() || undefined,
       replyToMessageId: this.currentReplyToMessageId() || undefined,
       tick: this.workingIndicatorTick,
+      todoNoticeText: this.latestTodoNoticeText || undefined,
       ...extra,
     };
   }
@@ -681,17 +685,22 @@ export class ChatController {
     return Promise.resolve(handler.call(indicator, context));
   }
 
-  async clearWorkingReaction() {
+  async clearWorkingReaction(options: { preserveTodoNotice?: boolean } = {}) {
     const indicators = this.activeWorkingIndicators.length
       ? this.activeWorkingIndicators
       : this.getWorkingIndicators();
+    const todoNoticeText = this.latestTodoNoticeText;
     this.activeWorkingIndicators = [];
     this.workingReactionEmoji = "";
     this.workingReactionTick = 0;
     this.lastWorkingReactionAt = 0;
     this.lastWorkingIndicatorAt = 0;
     this.workingIndicatorTick = 0;
-    const context = this.workingIndicatorContext({ event: "end" });
+    if (!options.preserveTodoNotice) this.latestTodoNoticeText = "";
+    const context = this.workingIndicatorContext({
+      event: "end",
+      todoNoticeText: todoNoticeText || undefined,
+    });
     const results = await Promise.all(
       indicators.map((indicator) =>
         this.callWorkingIndicator(indicator, "end", context).catch(() => false),
@@ -822,6 +831,7 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
     }
     this.setCurrentTurn(input);
+    this.latestTodoNoticeText = "";
     this.awaitingTurnSettle = true;
     const marker = this.startWorkingMarker().catch(() => false);
     const poll = this.pollTyping().catch(() => false);
@@ -1372,6 +1382,9 @@ export class ChatController {
       id?: string;
       idempotencyKey?: string;
       waitForDeliveryMs?: number;
+      waitUntilDeliverySettled?: boolean;
+      requireDelivery?: boolean;
+      coalesceWithWorkingMessage?: boolean;
     } = {},
   ) {
     const trimmed = safeString(text).trim();
@@ -1384,6 +1397,9 @@ export class ChatController {
           createdAt: nowIso(),
           chatKey: this.chatKey,
           text: trimmed,
+          ...(options.coalesceWithWorkingMessage
+            ? { coalesceWithWorkingMessage: true }
+            : {}),
           ...this.currentConversationSessionPayload(),
         },
         { deliveryKind: "passive_notice", ...options },
@@ -1396,15 +1412,27 @@ export class ChatController {
 
   private async sendTodoPassiveNoticeNow(event: any) {
     const todos = normalizeRinTodoItems(event?.todoItems);
-    if (!todos?.length) return await this.sendPassiveNoticeNow(event?.text);
+    if (!todos?.length) {
+      this.latestTodoNoticeText = safeString(event?.text).trim();
+      return await this.sendPassiveNoticeNow(event?.text);
+    }
     if (!this.canDeliverReplies()) return true;
 
     const error = safeString(event?.todoError).trim();
     const mode = todoNoticeRenderModeForChatKey(this.chatKey);
+    const noticeText = formatTodoNoticeText(
+      todos,
+      error,
+      mode === "native" ? "characters" : mode,
+    );
+    this.latestTodoNoticeText = noticeText;
+    const todoDeliveryOptions = {
+      waitUntilDeliverySettled: true,
+      requireDelivery: true,
+      coalesceWithWorkingMessage: true,
+    };
     if (mode !== "native") {
-      return await this.sendPassiveNoticeNow(
-        formatTodoNoticeText(todos, error, mode),
-      );
+      return await this.sendPassiveNoticeNow(noticeText, todoDeliveryOptions);
     }
 
     try {
@@ -1414,6 +1442,7 @@ export class ChatController {
           createdAt: nowIso(),
           chatKey: this.chatKey,
           deliveryKind: "passive_notice",
+          coalesceWithWorkingMessage: true,
           parts: [
             ...(error
               ? [{ type: "text" as const, text: `Error: ${error}` }]
@@ -1429,7 +1458,7 @@ export class ChatController {
           ],
           ...this.currentConversationSessionPayload(),
         },
-        { deliveryKind: "passive_notice" },
+        { deliveryKind: "passive_notice", ...todoDeliveryOptions },
       );
       return true;
     } catch {
