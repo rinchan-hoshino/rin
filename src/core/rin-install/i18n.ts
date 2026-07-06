@@ -51,7 +51,6 @@ type ChatRuntimeCopy = {
     thinkingInitial: string;
     thinkingSuffix: string;
     separator: string;
-    truncatedSuffix: string;
     prompts: string[];
   };
 };
@@ -290,7 +289,6 @@ const INSTALLER_DISPLAY_COPY = {
         thinkingInitial: "Working...",
         thinkingSuffix: "Working",
         separator: "-----------",
-        truncatedSuffix: "\n\n[…truncated to keep this as one message]",
         prompts: [
           "Working on it (๑•̀ㅂ•́)و✧",
           "Organizing things (｡･ω･｡)",
@@ -661,7 +659,6 @@ const INSTALLER_DISPLAY_COPY = {
         thinkingInitial: "工作中...",
         thinkingSuffix: "工作中",
         separator: "-----------",
-        truncatedSuffix: "\n\n[…内容过长，已截断以保持单条消息]",
         prompts: [
           "工作中 (๑•̀ㅂ•́)و✧",
           "正在整理内容 (｡･ω･｡)",

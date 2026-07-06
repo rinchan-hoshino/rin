@@ -72,12 +72,10 @@ async function adapterConfirmsOnlyOwnerUsers(
 }
 
 const PRIVATE_LIKE_GROUP_MEMBER_COUNT_CACHE_TTL_MS = 10 * 60 * 1000;
-const GROUP_MEMBER_MISSING_CACHE_TTL_MS = 10 * 60 * 1000;
 const privateLikeGroupMemberCountCache = new Map<
   string,
   { value: number; expiresAt: number }
 >();
-const groupMemberMissingCache = new Map<string, number>();
 
 function privateLikeGroupMemberCountCacheKey(
   session: any,
@@ -226,18 +224,6 @@ async function isGroupMember(
   userId: string,
 ) {
   const internal = session?.bot?.internal;
-  const cacheKey = [
-    platform,
-    safeString(session?.selfId || session?.bot?.selfId || "").trim(),
-    chatId,
-    userId,
-  ]
-    .map((part) => safeString(part))
-    .join("\0");
-  const cachedMissing = groupMemberMissingCache.get(cacheKey);
-  const now = Date.now();
-  if (cachedMissing && cachedMissing > now) return false;
-  if (cachedMissing) groupMemberMissingCache.delete(cacheKey);
   try {
     if (
       platform === "telegram" &&
@@ -260,12 +246,7 @@ async function isGroupMember(
         await session.bot.getGuildMember(chatId, userId),
       );
     }
-  } catch {
-    groupMemberMissingCache.set(
-      cacheKey,
-      now + GROUP_MEMBER_MISSING_CACHE_TTL_MS,
-    );
-  }
+  } catch {}
   return false;
 }
 
@@ -347,24 +328,19 @@ export async function shouldProcessText(
 
   const context = normalizeDecisionSessionContext(session, identity, options);
   const chatType = directLike(session) ? "private" : "group";
-  const privateLikeGroup =
-    chatType === "group" &&
-    (await isPrivateLikeGroupSession(session, identity, context));
-  if (
-    chatType === "group" &&
-    !privateLikeGroup &&
-    context.trust === "OTHER" &&
-    !mentionLike(session)
-  ) {
+  if (context.trust === "OTHER") {
     return {
       allow: false,
       text,
       chatKey: context.chatKey,
       chatType,
       trust: context.trust,
-      requiresMentionToStartTurn: true,
+      requiresMentionToStartTurn: chatType === "group",
     };
   }
+  const privateLikeGroup =
+    chatType === "group" &&
+    (await isPrivateLikeGroupSession(session, identity, context));
   const ownerPresent =
     chatType === "private" ||
     (await isOwnerPresentInGroupSession(session, identity, context));

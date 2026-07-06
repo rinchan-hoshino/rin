@@ -173,11 +173,20 @@ function formatPromptForChatContext(
 }
 
 type WorkingIndicatorKind = "polling" | "marker";
+type WorkingIndicatorPresentation =
+  | "typing"
+  | "editable-message"
+  | "reaction"
+  | "message"
+  | "legacy";
 
 type WorkingIndicator = {
   type?: string;
   kind?: string;
   name?: string;
+  presentation?: string;
+  capability?: string;
+  priority?: number;
   tick?: (context: Record<string, any>) => Promise<unknown> | unknown;
   end?: (context: Record<string, any>) => Promise<unknown> | unknown;
   start?: (context: Record<string, any>) => Promise<unknown> | unknown;
@@ -186,9 +195,78 @@ type WorkingIndicator = {
   onStart?: (context: Record<string, any>) => Promise<unknown> | unknown;
 };
 
+const WORKING_PRESENTATION_PRIORITY: Record<
+  WorkingIndicatorPresentation,
+  number
+> = {
+  typing: -1,
+  "editable-message": 300,
+  reaction: 200,
+  message: 100,
+  legacy: 0,
+};
+
 function workingIndicatorKind(indicator: WorkingIndicator) {
   const kind = safeString(indicator?.type || indicator?.kind).trim();
   return kind === "polling" || kind === "marker" ? kind : "";
+}
+
+function workingIndicatorPresentation(
+  indicator: WorkingIndicator,
+): WorkingIndicatorPresentation {
+  const value = safeString(
+    indicator?.presentation || indicator?.capability,
+  ).trim();
+  if (
+    value === "typing" ||
+    value === "editable-message" ||
+    value === "reaction" ||
+    value === "message"
+  ) {
+    return value;
+  }
+  return "legacy";
+}
+
+function workingIndicatorPriority(indicator: WorkingIndicator) {
+  const explicit = Number(indicator?.priority);
+  if (Number.isFinite(explicit)) return explicit;
+  return WORKING_PRESENTATION_PRIORITY[workingIndicatorPresentation(indicator)];
+}
+
+function pickVisibleWorkingIndicator(indicators: WorkingIndicator[]) {
+  const visible = indicators.filter(
+    (indicator) => workingIndicatorPresentation(indicator) !== "typing",
+  );
+  if (!visible.length) return null;
+  const typed = visible.filter(
+    (indicator) => workingIndicatorPresentation(indicator) !== "legacy",
+  );
+  const candidates = typed.length ? typed : visible;
+  return candidates.reduce((best, indicator) =>
+    workingIndicatorPriority(indicator) > workingIndicatorPriority(best)
+      ? indicator
+      : best,
+  );
+}
+
+function selectWorkingIndicatorsForKind(
+  indicators: WorkingIndicator[],
+  kind: WorkingIndicatorKind,
+) {
+  const selected: WorkingIndicator[] = indicators.filter(
+    (indicator) =>
+      workingIndicatorKind(indicator) === kind &&
+      workingIndicatorPresentation(indicator) === "typing",
+  );
+  const visible = pickVisibleWorkingIndicator(indicators);
+  if (visible && workingIndicatorKind(visible) === kind) selected.push(visible);
+  return selected;
+}
+
+function selectWorkingIndicatorsForEnd(indicators: WorkingIndicator[]) {
+  const visible = pickVisibleWorkingIndicator(indicators);
+  return visible ? [visible] : [];
 }
 
 function normalizeWorkingIndicators(value: unknown): WorkingIndicator[] {
@@ -702,7 +780,7 @@ export class ChatController {
       todoNoticeText: todoNoticeText || undefined,
     });
     const results = await Promise.all(
-      indicators.map((indicator) =>
+      selectWorkingIndicatorsForEnd(indicators).map((indicator) =>
         this.callWorkingIndicator(indicator, "end", context).catch(() => false),
       ),
     );
@@ -712,28 +790,23 @@ export class ChatController {
   private getWorkingIndicatorPolicy() {
     const indicators = this.getWorkingIndicators();
     return {
-      polling: indicators.some(
-        (indicator) => workingIndicatorKind(indicator) === "polling",
-      ),
-      marker: indicators.some(
-        (indicator) => workingIndicatorKind(indicator) === "marker",
-      ),
+      polling: selectWorkingIndicatorsForKind(indicators, "polling").length > 0,
+      marker: selectWorkingIndicatorsForKind(indicators, "marker").length > 0,
     };
   }
 
   private async startWorkingMarker() {
     if (!this.canDeliverReplies()) return false;
     const indicators = this.getWorkingIndicators();
-    this.activeWorkingIndicators = indicators;
+    const selected = selectWorkingIndicatorsForKind(indicators, "marker");
+    this.activeWorkingIndicators = selected;
     const context = this.workingIndicatorContext({ event: "start" });
     const results = await Promise.all(
-      indicators
-        .filter((indicator) => workingIndicatorKind(indicator) === "marker")
-        .map((indicator) =>
-          this.callWorkingIndicator(indicator, "start", context).catch(
-            () => false,
-          ),
+      selected.map((indicator) =>
+        this.callWorkingIndicator(indicator, "start", context).catch(
+          () => false,
         ),
+      ),
     );
     return results.some(Boolean);
   }
@@ -749,7 +822,7 @@ export class ChatController {
     this.compactionIndicatorTick = 0;
     const context = this.compactionWorkingIndicatorContext({ event: "end" });
     const results = await Promise.all(
-      indicators.map((indicator) =>
+      selectWorkingIndicatorsForEnd(indicators).map((indicator) =>
         this.callWorkingIndicator(indicator, "end", context).catch(() => false),
       ),
     );
@@ -759,26 +832,22 @@ export class ChatController {
   private async startCompactionWorkingMarker() {
     if (!this.canDeliverReplies()) return false;
     const indicators = this.getWorkingIndicators();
-    this.compactionWorkingIndicators = indicators;
+    const selected = selectWorkingIndicatorsForKind(indicators, "marker");
+    this.compactionWorkingIndicators = selected;
     const context = this.compactionWorkingIndicatorContext({ event: "start" });
     const results = await Promise.all(
-      indicators
-        .filter((indicator) => workingIndicatorKind(indicator) === "marker")
-        .map((indicator) =>
-          this.callWorkingIndicator(indicator, "start", context).catch(
-            () => false,
-          ),
+      selected.map((indicator) =>
+        this.callWorkingIndicator(indicator, "start", context).catch(
+          () => false,
         ),
+      ),
     );
     return results.some(Boolean);
   }
 
   private async pollCompactionTyping() {
     if (!this.canDeliverReplies() || !this.compactionTurn) return false;
-    const indicators = this.compactionWorkingIndicators.length
-      ? this.compactionWorkingIndicators
-      : this.getWorkingIndicators();
-    this.compactionWorkingIndicators = indicators;
+    const indicators = this.getWorkingIndicators();
     const now = Date.now();
     if (!this.isTypingPollDue(this.lastCompactionIndicatorAt, now)) {
       return false;
@@ -797,14 +866,21 @@ export class ChatController {
       reactionTick: this.compactionReactionTick,
       reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
     });
+    const selected = selectWorkingIndicatorsForKind(indicators, "polling");
+    if (
+      selected.some(
+        (indicator) => workingIndicatorPresentation(indicator) !== "typing",
+      ) ||
+      !this.compactionWorkingIndicators.length
+    ) {
+      this.compactionWorkingIndicators = selected;
+    }
     const results = await Promise.all(
-      indicators
-        .filter((indicator) => workingIndicatorKind(indicator) === "polling")
-        .map((indicator) =>
-          this.callWorkingIndicator(indicator, "tick", context).catch(
-            () => false,
-          ),
+      selected.map((indicator) =>
+        this.callWorkingIndicator(indicator, "tick", context).catch(
+          () => false,
         ),
+      ),
     );
     this.lastCompactionIndicatorAt = now;
     this.compactionIndicatorTick += 1;
@@ -904,10 +980,7 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
       return false;
     }
-    const indicators = this.activeWorkingIndicators.length
-      ? this.activeWorkingIndicators
-      : this.getWorkingIndicators();
-    this.activeWorkingIndicators = indicators;
+    const indicators = this.getWorkingIndicators();
     const now = Date.now();
     if (!this.isTypingPollDue(this.lastWorkingIndicatorAt, now)) {
       return false;
@@ -924,14 +997,21 @@ export class ChatController {
       reactionTick: this.workingReactionTick,
       reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
     });
+    const selected = selectWorkingIndicatorsForKind(indicators, "polling");
+    if (
+      selected.some(
+        (indicator) => workingIndicatorPresentation(indicator) !== "typing",
+      ) ||
+      !this.activeWorkingIndicators.length
+    ) {
+      this.activeWorkingIndicators = selected;
+    }
     const results = await Promise.all(
-      indicators
-        .filter((indicator) => workingIndicatorKind(indicator) === "polling")
-        .map((indicator) =>
-          this.callWorkingIndicator(indicator, "tick", context).catch(
-            () => false,
-          ),
+      selected.map((indicator) =>
+        this.callWorkingIndicator(indicator, "tick", context).catch(
+          () => false,
         ),
+      ),
     );
     this.lastWorkingIndicatorAt = now;
     this.workingIndicatorTick += 1;

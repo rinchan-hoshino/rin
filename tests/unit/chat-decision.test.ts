@@ -283,6 +283,44 @@ test("chat decision allows owner group messages that explicitly at the bot even 
   assert.equal(result.text, "ping");
 });
 
+test("chat decision rejects other group mentions before owner membership lookup", async () => {
+  const queried: Array<{ chatId: string; userId: string }> = [];
+  const result = await decision.shouldProcessText(
+    {
+      platform: "telegram",
+      guildId: "group-1",
+      channelId: "-1001447529496",
+      selfId: "8623230033",
+      userId: "stranger-1",
+      bot: {
+        selfId: "8623230033",
+        username: "THE_cattail_rin_chan_bot",
+        internal: {
+          async getChatMember({ chat_id, user_id }) {
+            queried.push({ chatId: chat_id, userId: user_id });
+            return { status: "administrator" };
+          },
+        },
+      },
+      stripped: { content: "ping" },
+      elements: [
+        { type: "at", attrs: { name: "THE_cattail_rin_chan_bot" } },
+        { type: "text", attrs: { content: " ping" } },
+      ],
+    },
+    [
+      { type: "at", attrs: { name: "THE_cattail_rin_chan_bot" } },
+      { type: "text", attrs: { content: " ping" } },
+    ],
+    identity,
+  );
+
+  assert.equal(result.allow, false);
+  assert.equal(result.trust, "OTHER");
+  assert.equal(result.requiresMentionToStartTurn, true);
+  assert.deepEqual(queried, []);
+});
+
 test("chat decision requires owner presence before trusted group mentions can trigger", async () => {
   const queried: Array<{ chatId: string; userId: string }> = [];
   const result = await decision.shouldProcessText(

@@ -93,12 +93,14 @@ test("telegram adapter coalesces working, todo, and final text into one edited m
       return { message_id: payload?.message_id };
     };
 
+    await app.bots[0].workingIndicators[1].tick({ chatId: "456", tick: 0 });
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 0 });
     const todoResult = await app.bots[0].sendMessage(
       "456",
       [h.text("[ ] first task")],
       { deliveryKind: "passive_notice", coalesceWithWorkingMessage: true },
     );
+    await app.bots[0].workingIndicators[1].tick({ chatId: "456", tick: 6 });
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 6 });
     const finalResult = await app.bots[0].sendMessage("456", [h.text("done")]);
 
@@ -122,7 +124,7 @@ test("telegram adapter coalesces working, todo, and final text into one edited m
   });
 });
 
-test("telegram adapter truncates oversized final text to keep one edited message", async () => {
+test("telegram adapter preserves oversized final text as an edited message group", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -138,26 +140,28 @@ test("telegram adapter truncates oversized final text to keep one edited message
       return { message_id: payload?.message_id };
     };
 
+    await app.bots[0].workingIndicators[1].tick({ chatId: "456", tick: 0 });
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 0 });
     const result = await app.bots[0].sendMessage("456", [
       h.text("a".repeat(4100)),
     ]);
 
-    assert.deepEqual(result, ["2"]);
+    assert.deepEqual(result, ["2", "4"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendChatAction", "sendMessage", "editMessageText"],
+      ["sendChatAction", "sendMessage", "editMessageText", "sendMessage"],
     );
     assert.equal(calls[2].payload.message_id, 2);
     assert.equal(calls[2].payload.text.length, 4096);
-    assert.match(
-      calls[2].payload.text,
-      /truncated to keep this as one message/,
+    assert.equal(calls[3].payload.text.length, 4);
+    assert.equal(
+      `${calls[2].payload.text}${calls[3].payload.text}`.length,
+      4100,
     );
   });
 });
 
-test("telegram adapter truncates oversized direct text and keeps the reply on the single send", async () => {
+test("telegram adapter splits oversized direct text and keeps the reply on the first send", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -177,19 +181,17 @@ test("telegram adapter truncates oversized direct text and keeps the reply on th
       h.text("a".repeat(4100)),
     ]);
 
-    assert.deepEqual(result, ["1"]);
-    assert.equal(calls.length, 1);
+    assert.deepEqual(result, ["1", "2"]);
+    assert.equal(calls.length, 2);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendMessage"],
+      ["sendMessage", "sendMessage"],
     );
     assert.equal(calls[0].payload.chat_id, "456");
     assert.equal(calls[0].payload.reply_to_message_id, "99");
     assert.equal(calls[0].payload.text.length, 4096);
-    assert.match(
-      calls[0].payload.text,
-      /truncated to keep this as one message/,
-    );
+    assert.equal(calls[1].payload.reply_to_message_id, undefined);
+    assert.equal(calls[1].payload.text.length, 4);
   });
 });
 
@@ -362,6 +364,35 @@ test("telegram adapter sends media before following text", async () => {
     assert.equal(calls[1].method, "sendMessage");
     assert.equal(calls[1].payload.reply_to_message_id, undefined);
     assert.equal(calls[1].payload.text, "b".repeat(1030));
+  });
+});
+
+test("telegram adapter clears stale working text after media-only final replies", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+
+    await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 0 });
+    const result = await app.bots[0].sendMessage("456", [
+      h.image("https://example.com/demo.png"),
+    ]);
+
+    assert.deepEqual(result, ["2"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["sendMessage", "sendPhoto", "deleteMessage"],
+    );
+    assert.equal(calls[2].payload.message_id, 1);
   });
 });
 
@@ -1032,13 +1063,17 @@ test("telegram working indicator sends typing and visible working text without r
       return { message_id: "201" };
     };
 
-    const [indicator] = app.bots[0].workingIndicators;
+    const [workingIndicator, typingIndicator] = app.bots[0].workingIndicators;
     assert.equal(
-      await indicator.tick({ chatId: "456", messageId: "101", tick: 0 }),
+      await typingIndicator.tick({ chatId: "456", messageId: "101", tick: 0 }),
       true,
     );
     assert.equal(
-      await indicator.end({ chatId: "456", messageId: "101" }),
+      await workingIndicator.tick({ chatId: "456", messageId: "101", tick: 0 }),
+      true,
+    );
+    assert.equal(
+      await workingIndicator.end({ chatId: "456", messageId: "101" }),
       false,
     );
 

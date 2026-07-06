@@ -2695,6 +2695,63 @@ test("chat controller uses discord typing and reaction capabilities together", a
   ]);
 });
 
+test("chat controller prioritizes reaction over marker while keeping typing independent", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  const calls: string[] = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "discord",
+        selfId: "bot-1",
+        workingIndicators: [
+          {
+            type: "marker",
+            presentation: "message",
+            async start() {
+              calls.push("marker:start");
+              return true;
+            },
+          },
+          {
+            type: "polling",
+            presentation: "reaction",
+            async tick() {
+              calls.push("reaction:tick");
+              return true;
+            },
+            async end() {
+              calls.push("reaction:end");
+              return true;
+            },
+          },
+          {
+            type: "polling",
+            presentation: "typing",
+            async tick() {
+              calls.push("typing:tick");
+              return true;
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-discord",
+    workingNoticeSent: false,
+  };
+  const liveTurn = controller.startLiveTurn();
+  liveTurn.promise.catch(() => {});
+  controller.driver.frontendState.turnActive = true;
+
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(calls, ["typing:tick", "reaction:tick"]);
+  assert.equal(await controller.clearWorkingReaction(), true);
+  assert.deepEqual(calls, ["typing:tick", "reaction:tick", "reaction:end"]);
+});
+
 test("chat controller does not deliver text-only assistant messages as interim", async () => {
   const controller = await createController("telegram/1:2");
   const chatKey = "telegram/1:2";

@@ -112,7 +112,6 @@ type TelegramWorkingCopy = {
   thinkingInitial: string;
   thinkingSuffix: string;
   separator: string;
-  truncatedSuffix: string;
   prompts: string[];
 };
 
@@ -152,10 +151,6 @@ function resolveTelegramWorkingCopy(agentDir?: string): TelegramWorkingCopy {
     separator: text(
       "chat.runtime.telegram.working.separator",
       base.separator || "-----------",
-    ),
-    truncatedSuffix: text(
-      "chat.runtime.telegram.working.truncatedSuffix",
-      base.truncatedSuffix || "\n\n[…truncated to keep this as one message]",
     ),
     prompts: prompts.length
       ? prompts
@@ -437,12 +432,12 @@ class TelegramAdapter {
   private readonly workingMessages = new Map<string, string>();
   private readonly workingMessageTexts = new Map<string, string>();
   private readonly workingMessageKinds = new Map<string, string>();
-  private readonly workingMessagePromises = new Map<string, Promise<string>>();
   private readonly workingMessageOperations = new Map<
     string,
-    Promise<string>
+    Promise<unknown>
   >();
   private readonly workingMessageFinalizing = new Set<string>();
+  private readonly botCacheKey: string;
   readonly bot: any;
 
   constructor(
@@ -456,7 +451,7 @@ class TelegramAdapter {
     this.logger = createPrefixedLogger("chat-runtime:telegram", logger);
     this.workingCopy = resolveTelegramWorkingCopy(app?.agentDir);
     this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "telegram");
-    const cursorKey =
+    this.botCacheKey =
       safeString(config?.token)
         .trim()
         .split(":")[0]
@@ -466,7 +461,7 @@ class TelegramAdapter {
       "chat",
       "runtime-state",
       "telegram",
-      cursorKey,
+      this.botCacheKey,
       "cursor.json",
     );
     ensureDir(this.cacheDir);
@@ -482,9 +477,15 @@ class TelegramAdapter {
       workingIndicators: [
         {
           type: "polling",
+          presentation: "editable-message",
           tick: async (context: any) =>
             await this.tickWorkingIndicator(context),
           end: async (context: any) => await this.endWorkingIndicator(context),
+        },
+        {
+          type: "polling",
+          presentation: "typing",
+          tick: async (context: any) => await this.tickTypingIndicator(context),
         },
       ],
       internal: new Proxy(
@@ -1016,24 +1017,17 @@ class TelegramAdapter {
     }
   }
 
-  private telegramSingleMessageText(text: string) {
-    const chunks = splitPlainText(text, TELEGRAM_MAX_TEXT_LENGTH);
-    if (chunks.length <= 1) return chunks[0] || "";
-    const copy =
-      this.workingCopy || resolveTelegramWorkingCopy(this.app?.agentDir);
-    const suffix =
-      safeString(copy.truncatedSuffix) ||
-      "\n\n[…truncated to keep this as one message]";
-    return `${chunks[0].slice(0, Math.max(0, TELEGRAM_MAX_TEXT_LENGTH - suffix.length))}${suffix}`;
+  private telegramTextChunks(text: string) {
+    return splitPlainText(text, TELEGRAM_MAX_TEXT_LENGTH).filter(Boolean);
   }
 
-  private async withWorkingMessageOperation(
+  private async withWorkingMessageOperation<T>(
     key: string,
-    operation: () => Promise<string>,
+    operation: () => Promise<T>,
   ) {
     const previous =
-      this.workingMessageOperations.get(key) || Promise.resolve("");
-    const run = previous.catch(() => "").then(operation);
+      this.workingMessageOperations.get(key) || Promise.resolve();
+    const run = previous.catch(() => undefined).then(operation);
     this.workingMessageOperations.set(key, run);
     try {
       return await run;
@@ -1053,12 +1047,19 @@ class TelegramAdapter {
       `${safeString(key).trim()}.json`,
       "working-message.json",
     );
-    return path.join(this.cacheDir, "working-messages", fileName);
+    return path.join(
+      this.cacheDir,
+      "working-messages",
+      this.botCacheKey,
+      fileName,
+    );
   }
 
   private readPersistedWorkingMessage(key: string): {
     messageId: string;
+    messageIds: string[];
     text: string;
+    textChunks: string[];
     kind: string;
   } | null {
     const nextKey = safeString(key).trim();
@@ -1067,11 +1068,25 @@ class TelegramAdapter {
       const record = JSON.parse(
         fs.readFileSync(this.workingMessageStatePath(nextKey), "utf8"),
       );
-      const messageId = safeString(record?.messageId).trim();
-      if (!messageId) return null;
+      const messageIds = (
+        Array.isArray(record?.messageIds)
+          ? record.messageIds
+          : [record?.messageId]
+      )
+        .map((item: unknown) => safeString(item).trim())
+        .filter(Boolean);
+      if (!messageIds.length) return null;
+      const textChunks = (
+        Array.isArray(record?.textChunks) ? record.textChunks : [record?.text]
+      ).map((item: unknown) => safeString(item));
+      const text = textChunks.length
+        ? textChunks.join("")
+        : safeString(record?.text);
       return {
-        messageId,
-        text: safeString(record?.text),
+        messageId: messageIds[0] || "",
+        messageIds,
+        text,
+        textChunks: textChunks.length ? textChunks : [text],
         kind: safeString(record?.kind).trim(),
       };
     } catch {
@@ -1081,13 +1096,16 @@ class TelegramAdapter {
 
   private writePersistedWorkingMessage(
     key: string,
-    messageId: string,
-    text: string,
+    messageIds: string[],
+    textChunks: string[],
     kind = "",
   ) {
     const nextKey = safeString(key).trim();
-    const nextMessageId = safeString(messageId).trim();
-    if (!nextKey || !nextMessageId) return;
+    const nextMessageIds = messageIds
+      .map((item) => safeString(item).trim())
+      .filter(Boolean);
+    if (!nextKey || !nextMessageIds.length) return;
+    const nextTextChunks = textChunks.map((item) => safeString(item));
     const statePath = this.workingMessageStatePath(nextKey);
     ensureDir(path.dirname(statePath));
     fs.writeFileSync(
@@ -1095,8 +1113,10 @@ class TelegramAdapter {
       JSON.stringify(
         {
           key: nextKey,
-          messageId: nextMessageId,
-          text: safeString(text),
+          messageId: nextMessageIds[0],
+          messageIds: nextMessageIds,
+          text: nextTextChunks.join(""),
+          textChunks: nextTextChunks,
           kind: safeString(kind).trim(),
           updatedAt: new Date().toISOString(),
         },
@@ -1114,30 +1134,45 @@ class TelegramAdapter {
     } catch {}
   }
 
+  private rememberWorkingMessageGroup(
+    key: string,
+    messageIds: string[],
+    textChunks: string[],
+    kind = "",
+  ) {
+    const nextMessageIds = messageIds
+      .map((item) => safeString(item).trim())
+      .filter(Boolean);
+    if (!nextMessageIds.length) {
+      this.clearWorkingMessage(key);
+      return;
+    }
+    const nextKind = safeString(kind).trim();
+    const text = textChunks.map((item) => safeString(item)).join("");
+    this.workingMessages.set(key, nextMessageIds[0] || "");
+    this.workingMessageTexts.set(key, text);
+    this.workingMessageKinds.set(key, nextKind);
+    this.writePersistedWorkingMessage(
+      key,
+      nextMessageIds,
+      textChunks,
+      nextKind,
+    );
+  }
+
   private rememberWorkingMessage(
     key: string,
     messageId: string,
     text: string,
     kind = "",
   ) {
-    const nextMessageId = safeString(messageId).trim();
-    if (!nextMessageId) {
-      this.clearWorkingMessage(key);
-      return;
-    }
-    const nextKind = safeString(kind).trim();
-    this.workingMessages.set(key, nextMessageId);
-    this.workingMessageTexts.set(key, safeString(text));
-    this.workingMessageKinds.set(key, nextKind);
-    this.workingMessagePromises.delete(key);
-    this.writePersistedWorkingMessage(key, nextMessageId, text, nextKind);
+    this.rememberWorkingMessageGroup(key, [messageId], [text], kind);
   }
 
   private clearWorkingMessage(key: string) {
     this.workingMessages.delete(key);
     this.workingMessageTexts.delete(key);
     this.workingMessageKinds.delete(key);
-    this.workingMessagePromises.delete(key);
     this.deletePersistedWorkingMessage(key);
   }
 
@@ -1173,9 +1208,9 @@ class TelegramAdapter {
   private async deleteVisibleWorkingMessage(chatId: string) {
     const key = this.workingMessageKey(chatId, "chat");
     const persisted = this.readPersistedWorkingMessage(key);
-    const messageId = safeString(
-      this.workingMessages.get(key) || persisted?.messageId || "",
-    ).trim();
+    const messageIds = persisted?.messageIds?.length
+      ? persisted.messageIds
+      : [this.workingMessages.get(key) || ""].filter(Boolean);
     const kind = safeString(
       persisted?.kind || this.workingMessageKinds.get(key) || "",
     ).trim();
@@ -1183,23 +1218,25 @@ class TelegramAdapter {
       persisted?.text || this.workingMessageTexts.get(key) || "",
     );
     if (
-      !messageId ||
+      !messageIds.length ||
       (kind && kind !== "working") ||
       !this.isWorkingIndicatorText(text)
     ) {
       return false;
     }
-    try {
-      await this.callApi("deleteMessage", {
-        chat_id: chatId,
-        message_id: Number(messageId),
-      });
-    } catch {}
+    for (const messageId of messageIds) {
+      try {
+        await this.callApi("deleteMessage", {
+          chat_id: chatId,
+          message_id: Number(messageId),
+        });
+      } catch {}
+    }
     this.clearWorkingMessage(key);
     return true;
   }
 
-  private async resolveWorkingMessageId(
+  private resolveWorkingMessageIds(
     chatId: string,
     preferredMessageId?: string,
     keyOverride = "",
@@ -1217,22 +1254,17 @@ class TelegramAdapter {
           ]
     ).filter(Boolean);
     for (const key of keys) {
-      const direct = this.workingMessages.get(key) || "";
-      if (direct) return safeString(direct).trim();
-      const pending = this.workingMessagePromises.get(key);
-      if (pending) {
-        const sentId = safeString(await pending).trim();
-        if (sentId) return sentId;
-      }
       const persisted = this.readPersistedWorkingMessage(key);
-      if (persisted?.messageId) {
+      if (persisted?.messageIds?.length) {
         this.workingMessages.set(key, persisted.messageId);
         this.workingMessageTexts.set(key, persisted.text);
         this.workingMessageKinds.set(key, persisted.kind);
-        return persisted.messageId;
+        return persisted.messageIds;
       }
+      const direct = this.workingMessages.get(key) || "";
+      if (direct) return [safeString(direct).trim()].filter(Boolean);
     }
-    return "";
+    return [];
   }
 
   private async updateWorkingMessage(input: {
@@ -1246,9 +1278,29 @@ class TelegramAdapter {
     key?: string;
     kind?: string;
   }) {
+    const ids = await this.updateWorkingMessageGroup({
+      ...input,
+      textChunks: [safeString(input?.text)],
+    });
+    return ids[0] || "";
+  }
+
+  private async updateWorkingMessageGroup(input: {
+    chatId?: string;
+    textChunks?: string[];
+    replyToMessageId?: string;
+    preferredMessageId?: string;
+    messageIds?: string[];
+    parseMode?: string;
+    finalize?: boolean;
+    key?: string;
+    kind?: string;
+  }) {
     const chatId = safeString(input?.chatId).trim();
-    const text = safeString(input?.text);
-    if (!chatId || !text) return "";
+    const textChunks = (input?.textChunks || [])
+      .map((item) => safeString(item))
+      .filter(Boolean);
+    if (!chatId || !textChunks.length) return [] as string[];
     const key =
       safeString(input?.key).trim() || this.workingMessageKey(chatId, "chat");
     const parseMode = safeString(input?.parseMode).trim() || undefined;
@@ -1260,10 +1312,10 @@ class TelegramAdapter {
       safeString(input?.kind).trim() || (finalize ? "final" : "working");
     return await this.withWorkingMessageOperation(key, async () => {
       if (!finalize && this.workingMessageFinalizing.has(key)) {
-        return this.workingMessages.get(key) || "";
+        return [this.workingMessages.get(key) || ""].filter(Boolean);
       }
+      const persisted = this.readPersistedWorkingMessage(key);
       if (!finalize && kind === "working") {
-        const persisted = this.readPersistedWorkingMessage(key);
         const currentMessageId = safeString(
           this.workingMessages.get(key) || persisted?.messageId || "",
         ).trim();
@@ -1274,53 +1326,76 @@ class TelegramAdapter {
           this.workingMessageTexts.get(key) || persisted?.text || "",
         );
         if (currentMessageId && currentKind && currentKind !== "working") {
-          return currentMessageId;
+          return [currentMessageId];
         }
         if (
           currentMessageId &&
           currentText &&
           !this.isWorkingIndicatorText(currentText)
         ) {
-          return currentMessageId;
+          return [currentMessageId];
         }
       }
-      const sendFresh = async (markFinalizing = false) => {
+      const existingMessageIds = (
+        input?.messageIds?.length
+          ? input.messageIds
+          : this.resolveWorkingMessageIds(chatId, preferredMessageId, key)
+      )
+        .map((item) => safeString(item).trim())
+        .filter(Boolean);
+      if (
+        !finalize &&
+        existingMessageIds.length &&
+        (this.workingMessageTexts.get(key) || persisted?.text || "") ===
+          textChunks.join("")
+      ) {
+        return existingMessageIds;
+      }
+      const delivered: string[] = [];
+      let firstReply = replyToMessageId;
+      let editFailed = false;
+      let editedExistingCount = 0;
+      for (let index = 0; index < textChunks.length; index += 1) {
+        const text = textChunks[index] || "";
+        const existingMessageId = existingMessageIds[index] || "";
+        if (existingMessageId && !editFailed) {
+          try {
+            const editedId =
+              safeString(
+                await this.editText(chatId, existingMessageId, text, parseMode),
+              ).trim() || existingMessageId;
+            delivered.push(editedId);
+            editedExistingCount += 1;
+            firstReply = undefined;
+            continue;
+          } catch (error) {
+            if (!this.isRecoverableWorkingMessageEditError(error)) throw error;
+            editFailed = true;
+          }
+        }
         const sentId = safeString(
-          await this.sendText(chatId, text, replyToMessageId, parseMode),
+          await this.sendText(chatId, text, firstReply, parseMode),
         ).trim();
-        if (finalize) {
-          this.clearWorkingMessage(key);
-          if (markFinalizing) this.markWorkingMessageFinalizing(key);
-        } else {
-          this.rememberWorkingMessage(key, sentId, text, kind);
-        }
-        return sentId;
-      };
-      const existingMessageId = safeString(
-        input?.messageId ||
-          (await this.resolveWorkingMessageId(chatId, preferredMessageId, key)),
-      ).trim();
-      if (!existingMessageId) return await sendFresh(false);
-      if (!finalize && (this.workingMessageTexts.get(key) || "") === text) {
-        return existingMessageId;
+        if (sentId) delivered.push(sentId);
+        firstReply = undefined;
       }
-      try {
-        const editedId =
-          safeString(
-            await this.editText(chatId, existingMessageId, text, parseMode),
-          ).trim() || existingMessageId;
-        if (finalize) {
-          this.clearWorkingMessage(key);
-          this.markWorkingMessageFinalizing(key);
-        } else {
-          this.rememberWorkingMessage(key, editedId, text, kind);
-        }
-        return editedId;
-      } catch (error) {
-        if (!this.isRecoverableWorkingMessageEditError(error)) throw error;
+      const surplusStart = editFailed ? editedExistingCount : delivered.length;
+      for (const surplusId of existingMessageIds.slice(surplusStart)) {
+        try {
+          await this.callApi("deleteMessage", {
+            chat_id: chatId,
+            message_id: Number(surplusId),
+          });
+        } catch {}
+      }
+      if (!delivered.length) return [] as string[];
+      if (finalize) {
         this.clearWorkingMessage(key);
-        return await sendFresh(finalize);
+        this.markWorkingMessageFinalizing(key);
+      } else {
+        this.rememberWorkingMessageGroup(key, delivered, textChunks, kind);
       }
+      return delivered;
     });
   }
 
@@ -1336,6 +1411,7 @@ class TelegramAdapter {
     const failures: unknown[] = [];
     let cursor = 0;
     let firstReply = replyToMessageId;
+    let finalizedWorkingMessage = false;
     const recordFailure = async (error: unknown, placeholder: string) => {
       failures.push(error);
       this.logger.warn(
@@ -1389,9 +1465,8 @@ class TelegramAdapter {
       } catch (error) {
         await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
       }
-      const textChunks = [this.telegramSingleMessageText(text)].filter(Boolean);
-      for (const textChunk of textChunks) {
-        if (!textChunk) continue;
+      const textChunks = this.telegramTextChunks(text);
+      if (textChunks.length) {
         try {
           const coalesceWithWorkingMessage = Boolean(
             options?.coalesceWithWorkingMessage,
@@ -1404,28 +1479,45 @@ class TelegramAdapter {
                 )
               : this.workingMessageKey(chatId, "chat");
           const shouldEditWorkingMessage = delivered.length === 0;
-          const messageId = shouldEditWorkingMessage
-            ? await this.updateWorkingMessage({
+          const messageIds = shouldEditWorkingMessage
+            ? await this.updateWorkingMessageGroup({
                 chatId,
-                text: textChunk,
+                textChunks,
                 replyToMessageId: firstReply,
                 preferredMessageId: firstReply,
                 parseMode: "HTML",
                 finalize: isFinalDelivery,
                 // Working indicators, coalesced todo notices, and final replies share
-                // the chat key so a turn progresses by editing one Telegram message.
+                // the chat key so a turn progresses by editing one Telegram message group.
                 // Non-coalesced passive notices stay isolated on the passive_notice key.
                 key: deliveryKey,
                 kind: deliveryKind === "passive_notice" ? "todo" : undefined,
               })
-            : await this.sendText(chatId, textChunk, firstReply, "HTML");
-          if (messageId) delivered.push(messageId);
+            : [];
+          if (shouldEditWorkingMessage) {
+            delivered.push(...messageIds);
+            finalizedWorkingMessage = isFinalDelivery && messageIds.length > 0;
+          } else {
+            for (const textChunk of textChunks) {
+              const messageId = await this.sendText(
+                chatId,
+                textChunk,
+                firstReply,
+                "HTML",
+              );
+              if (messageId) delivered.push(messageId);
+              firstReply = undefined;
+            }
+          }
           firstReply = undefined;
         } catch (error) {
           await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
         }
       }
       cursor = nextCursor;
+    }
+    if (isFinalDelivery && !finalizedWorkingMessage) {
+      await this.deleteVisibleWorkingMessage(chatId);
     }
     if (delivered.length) return delivered;
     if (failures.length) throw failures[0];
@@ -1443,10 +1535,16 @@ class TelegramAdapter {
     return prompts[index];
   }
 
-  async tickWorkingIndicator(context: any) {
+  async tickTypingIndicator(context: any) {
     const chatId = safeString(context?.chatId).trim();
     if (!chatId) return false;
     await this.callApi("sendChatAction", { chat_id: chatId, action: "typing" });
+    return true;
+  }
+
+  async tickWorkingIndicator(context: any) {
+    const chatId = safeString(context?.chatId).trim();
+    if (!chatId) return false;
     if (safeString(context?.todoNoticeText).trim()) return true;
     const sourceMessageId = safeString(context?.messageId).trim();
     const replyToMessageId = safeString(
@@ -2149,6 +2247,7 @@ class OneBotAdapter {
       return [
         {
           type: "marker",
+          presentation: "message",
           start: async (startContext: any) =>
             await this.startPrivateWorkingNotice(startContext),
         },
@@ -2157,6 +2256,7 @@ class OneBotAdapter {
     return [
       {
         type: "polling",
+        presentation: "reaction",
         tick: async (tickContext: any) =>
           await this.tickGroupWorkingReaction(tickContext),
         end: async (endContext: any) =>
