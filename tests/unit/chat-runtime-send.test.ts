@@ -226,7 +226,7 @@ test("lark adapter edits the visible working message for final text", async () =
   });
 });
 
-test("telegram adapter coalesces working, todo, and final text into one edited message", async () => {
+test("telegram adapter edits progress updates then deletes them before sending final text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -238,7 +238,7 @@ test("telegram adapter coalesces working, todo, and final text into one edited m
     const calls: Array<{ method: string; payload: any }> = [];
     adapter.callApi = async (method: string, payload: any) => {
       calls.push({ method, payload });
-      if (method === "sendMessage") return { message_id: "1" };
+      if (method === "sendMessage") return { message_id: String(calls.length) };
       return { message_id: payload?.message_id };
     };
 
@@ -253,8 +253,8 @@ test("telegram adapter coalesces working, todo, and final text into one edited m
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 6 });
     const finalResult = await app.bots[0].sendMessage("456", [h.text("done")]);
 
-    assert.deepEqual(todoResult, ["1"]);
-    assert.deepEqual(finalResult, ["1"]);
+    assert.deepEqual(todoResult, ["2"]);
+    assert.deepEqual(finalResult, ["6"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
       [
@@ -262,14 +262,15 @@ test("telegram adapter coalesces working, todo, and final text into one edited m
         "sendMessage",
         "editMessageText",
         "sendChatAction",
-        "editMessageText",
+        "deleteMessage",
+        "sendMessage",
       ],
     );
     assert.equal(calls[1].payload.text, "Working...");
-    assert.equal(calls[2].payload.message_id, 1);
+    assert.equal(calls[2].payload.message_id, 2);
     assert.equal(calls[2].payload.text, "[ ] first task");
-    assert.equal(calls[4].payload.message_id, 1);
-    assert.equal(calls[4].payload.text, "done");
+    assert.equal(calls[4].payload.message_id, 2);
+    assert.equal(calls[5].payload.text, "done");
   });
 });
 
@@ -342,7 +343,7 @@ test("telegram adapter end handler clears visible working text without todo cont
   });
 });
 
-test("telegram adapter preserves oversized final text as an edited message group", async () => {
+test("telegram adapter deletes progress before sending oversized final text chunks", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -364,16 +365,22 @@ test("telegram adapter preserves oversized final text as an edited message group
       h.text("a".repeat(4100)),
     ]);
 
-    assert.deepEqual(result, ["2", "4"]);
+    assert.deepEqual(result, ["4", "5"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendChatAction", "sendMessage", "editMessageText", "sendMessage"],
+      [
+        "sendChatAction",
+        "sendMessage",
+        "deleteMessage",
+        "sendMessage",
+        "sendMessage",
+      ],
     );
     assert.equal(calls[2].payload.message_id, 2);
-    assert.equal(calls[2].payload.text.length, 4096);
-    assert.equal(calls[3].payload.text.length, 4);
+    assert.equal(calls[3].payload.text.length, 4096);
+    assert.equal(calls[4].payload.text.length, 4);
     assert.equal(
-      `${calls[2].payload.text}${calls[3].payload.text}`.length,
+      `${calls[3].payload.text}${calls[4].payload.text}`.length,
       4100,
     );
   });

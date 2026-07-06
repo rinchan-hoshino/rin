@@ -1477,7 +1477,8 @@ class TelegramAdapter {
                   coalesceWithWorkingMessage ? "chat" : "passive_notice",
                 )
               : this.workingMessageKey(chatId, "chat");
-          const shouldEditWorkingMessage = delivered.length === 0;
+          const shouldEditWorkingMessage =
+            delivered.length === 0 && !isFinalDelivery;
           const messageIds = shouldEditWorkingMessage
             ? await this.updateWorkingMessageGroup({
                 chatId,
@@ -1485,9 +1486,10 @@ class TelegramAdapter {
                 replyToMessageId: firstReply,
                 preferredMessageId: firstReply,
                 parseMode: "HTML",
-                finalize: isFinalDelivery,
-                // Working indicators, coalesced todo notices, and final replies share
-                // the chat key so a turn progresses by editing one Telegram message group.
+                finalize: false,
+                // Working indicators and coalesced todo notices share the chat key
+                // so in-progress updates still edit one Telegram message group.
+                // Final replies delete that progress artifact and send fresh messages.
                 // Non-coalesced passive notices stay isolated on the passive_notice key.
                 key: deliveryKey,
                 kind: deliveryKind === "passive_notice" ? "todo" : undefined,
@@ -1495,8 +1497,15 @@ class TelegramAdapter {
             : [];
           if (shouldEditWorkingMessage) {
             delivered.push(...messageIds);
-            finalizedWorkingMessage = isFinalDelivery && messageIds.length > 0;
           } else {
+            if (
+              isFinalDelivery &&
+              delivered.length === 0 &&
+              !finalizedWorkingMessage
+            ) {
+              await this.deleteVisibleWorkingMessage(chatId);
+              finalizedWorkingMessage = true;
+            }
             for (const textChunk of textChunks) {
               const messageId = await this.sendText(
                 chatId,
