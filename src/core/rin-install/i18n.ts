@@ -44,9 +44,21 @@ type ChatCommandDescriptions = Record<
   string
 >;
 
+type ChatRuntimeCopy = {
+  telegramWorking: {
+    workingInitial: string;
+    workingSuffix: string;
+    thinkingInitial: string;
+    thinkingSuffix: string;
+    separator: string;
+    prompts: string[];
+  };
+};
+
 type InstallerDisplayCopy = {
   languagePrompt: InstallerLanguagePromptCopy;
   chatCommandDescriptions: ChatCommandDescriptions;
+  chatRuntime: ChatRuntimeCopy;
   installerCancelled: string;
   introTitle: string;
   safetyBoundaryTitle: string;
@@ -269,6 +281,23 @@ const INSTALLER_DISPLAY_COPY = {
       compact: "Compact the current session",
       reload: "Reload extensions, prompts, skills, and themes",
       usage: "Show usage and quota status",
+    },
+    chatRuntime: {
+      telegramWorking: {
+        workingInitial: "Working...",
+        workingSuffix: "Working",
+        thinkingInitial: "Working...",
+        thinkingSuffix: "Working",
+        separator: "-----------",
+        prompts: [
+          "Working on it (๑•̀ㅂ•́)و✧",
+          "Organizing things (｡･ω･｡)",
+          "Processing details (つω`｡)",
+          "Sorting information (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧",
+          "Almost there, still working (ง •̀_•́)ง",
+          "Working, please wait (｀・ω・´)",
+        ],
+      },
     },
     installerCancelled: "Installer cancelled.",
     introTitle: "Rin Installer",
@@ -622,6 +651,23 @@ const INSTALLER_DISPLAY_COPY = {
       compact: "压缩当前会话",
       reload: "重新加载扩展、提示词、技能和主题",
       usage: "显示用量和配额状态",
+    },
+    chatRuntime: {
+      telegramWorking: {
+        workingInitial: "工作中...",
+        workingSuffix: "工作中",
+        thinkingInitial: "工作中...",
+        thinkingSuffix: "工作中",
+        separator: "-----------",
+        prompts: [
+          "工作中 (๑•̀ㅂ•́)و✧",
+          "正在整理内容 (｡･ω･｡)",
+          "正在处理细节 (つω`｡)",
+          "信息梳理中 (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧",
+          "马上就好，继续工作中 (ง •̀_•́)ง",
+          "工作中，请稍等 (｀・ω・´)",
+        ],
+      },
     },
     installerCancelled: "安装器已取消。",
     introTitle: "Rin 安装器",

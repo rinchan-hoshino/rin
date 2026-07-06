@@ -328,6 +328,16 @@ export async function shouldProcessText(
 
   const context = normalizeDecisionSessionContext(session, identity, options);
   const chatType = directLike(session) ? "private" : "group";
+  if (context.trust === "OTHER") {
+    return {
+      allow: false,
+      text,
+      chatKey: context.chatKey,
+      chatType,
+      trust: context.trust,
+      requiresMentionToStartTurn: chatType === "group",
+    };
+  }
   const privateLikeGroup =
     chatType === "group" &&
     (await isPrivateLikeGroupSession(session, identity, context));

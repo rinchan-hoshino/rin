@@ -42,25 +42,40 @@ const SLACK_REACTION_NAMES: Record<string, string> = {
   "🔥": "fire",
 };
 
-function createPollingWorkingIndicator(platform: string, getBot: () => any) {
-  const reactions = new Map<string, string>();
+function createTypingWorkingIndicator(getBot: () => any) {
   return {
     type: "polling",
+    presentation: "typing",
     async tick(context: any) {
       const bot = getBot();
       const chatId = safeString(context?.chatId).trim();
       if (!chatId) return false;
-      let sent = false;
       if (typeof bot?.internal?.sendChatAction === "function") {
         const result = await bot.internal.sendChatAction({
           chat_id: chatId,
           action: "typing",
         });
-        sent = result !== false;
-      } else if (typeof bot?.internal?.sendTyping === "function") {
-        const result = await bot.internal.sendTyping(chatId);
-        sent = result !== false;
+        return result !== false;
       }
+      if (typeof bot?.internal?.sendTyping === "function") {
+        const result = await bot.internal.sendTyping(chatId);
+        return result !== false;
+      }
+      return false;
+    },
+  };
+}
+
+function createReactionWorkingIndicator(platform: string, getBot: () => any) {
+  const reactions = new Map<string, string>();
+  return {
+    type: "polling",
+    presentation: "reaction",
+    async tick(context: any) {
+      const bot = getBot();
+      const chatId = safeString(context?.chatId).trim();
+      if (!chatId) return false;
+      let sent = false;
       const messageId = safeString(context?.messageId).trim();
       const createReaction =
         typeof bot?.createReaction === "function"
@@ -469,7 +484,8 @@ export class DiscordAdapter {
       selfId: "",
       status: 0,
       workingIndicators: [
-        createPollingWorkingIndicator("discord", () => this.bot),
+        createReactionWorkingIndicator("discord", () => this.bot),
+        createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
       internal,
@@ -1114,7 +1130,8 @@ export class SlackAdapter {
       selfId: "",
       status: 0,
       workingIndicators: [
-        createPollingWorkingIndicator("slack", () => this.bot),
+        createReactionWorkingIndicator("slack", () => this.bot),
+        createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
       internal,
@@ -1603,7 +1620,10 @@ export class QQAdapter {
       platform: "qq",
       selfId: "",
       status: 0,
-      workingIndicators: [createPollingWorkingIndicator("qq", () => this.bot)],
+      workingIndicators: [
+        createReactionWorkingIndicator("qq", () => this.bot),
+        createTypingWorkingIndicator(() => this.bot),
+      ],
       user: {},
       internal,
       sendMessage: async (chatId: string, content: any) =>
@@ -1943,7 +1963,8 @@ export class LarkAdapter {
       selfId: "",
       status: 0,
       workingIndicators: [
-        createPollingWorkingIndicator("lark", () => this.bot),
+        createReactionWorkingIndicator("lark", () => this.bot),
+        createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
       internal,
@@ -2536,7 +2557,8 @@ export class MinecraftAdapter {
       selfId: safeString(config?.selfId).trim() || "minecraft",
       status: 0,
       workingIndicators: [
-        createPollingWorkingIndicator("minecraft", () => this.bot),
+        createReactionWorkingIndicator("minecraft", () => this.bot),
+        createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
       internal,

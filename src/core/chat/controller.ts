@@ -117,6 +117,7 @@ type ChatTextDelivery = {
   deliveryKind?: "final" | "interim" | "passive_notice";
   text: string;
   replyToMessageId?: string;
+  coalesceWithWorkingMessage?: boolean;
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
@@ -126,6 +127,7 @@ type ChatPartsDelivery = {
   chatKey: string;
   deliveryKind?: "final" | "interim" | "passive_notice";
   parts: ChatMessagePart[];
+  coalesceWithWorkingMessage?: boolean;
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
@@ -171,11 +173,20 @@ function formatPromptForChatContext(
 }
 
 type WorkingIndicatorKind = "polling" | "marker";
+type WorkingIndicatorPresentation =
+  | "typing"
+  | "editable-message"
+  | "reaction"
+  | "message"
+  | "legacy";
 
 type WorkingIndicator = {
   type?: string;
   kind?: string;
   name?: string;
+  presentation?: string;
+  capability?: string;
+  priority?: number;
   tick?: (context: Record<string, any>) => Promise<unknown> | unknown;
   end?: (context: Record<string, any>) => Promise<unknown> | unknown;
   start?: (context: Record<string, any>) => Promise<unknown> | unknown;
@@ -184,9 +195,78 @@ type WorkingIndicator = {
   onStart?: (context: Record<string, any>) => Promise<unknown> | unknown;
 };
 
+const WORKING_PRESENTATION_PRIORITY: Record<
+  WorkingIndicatorPresentation,
+  number
+> = {
+  typing: -1,
+  "editable-message": 300,
+  reaction: 200,
+  message: 100,
+  legacy: 0,
+};
+
 function workingIndicatorKind(indicator: WorkingIndicator) {
   const kind = safeString(indicator?.type || indicator?.kind).trim();
   return kind === "polling" || kind === "marker" ? kind : "";
+}
+
+function workingIndicatorPresentation(
+  indicator: WorkingIndicator,
+): WorkingIndicatorPresentation {
+  const value = safeString(
+    indicator?.presentation || indicator?.capability,
+  ).trim();
+  if (
+    value === "typing" ||
+    value === "editable-message" ||
+    value === "reaction" ||
+    value === "message"
+  ) {
+    return value;
+  }
+  return "legacy";
+}
+
+function workingIndicatorPriority(indicator: WorkingIndicator) {
+  const explicit = Number(indicator?.priority);
+  if (Number.isFinite(explicit)) return explicit;
+  return WORKING_PRESENTATION_PRIORITY[workingIndicatorPresentation(indicator)];
+}
+
+function pickVisibleWorkingIndicator(indicators: WorkingIndicator[]) {
+  const visible = indicators.filter(
+    (indicator) => workingIndicatorPresentation(indicator) !== "typing",
+  );
+  if (!visible.length) return null;
+  const typed = visible.filter(
+    (indicator) => workingIndicatorPresentation(indicator) !== "legacy",
+  );
+  const candidates = typed.length ? typed : visible;
+  return candidates.reduce((best, indicator) =>
+    workingIndicatorPriority(indicator) > workingIndicatorPriority(best)
+      ? indicator
+      : best,
+  );
+}
+
+function selectWorkingIndicatorsForKind(
+  indicators: WorkingIndicator[],
+  kind: WorkingIndicatorKind,
+) {
+  const selected: WorkingIndicator[] = indicators.filter(
+    (indicator) =>
+      workingIndicatorKind(indicator) === kind &&
+      workingIndicatorPresentation(indicator) === "typing",
+  );
+  const visible = pickVisibleWorkingIndicator(indicators);
+  if (visible && workingIndicatorKind(visible) === kind) selected.push(visible);
+  return selected;
+}
+
+function selectWorkingIndicatorsForEnd(indicators: WorkingIndicator[]) {
+  const visible = pickVisibleWorkingIndicator(indicators);
+  return visible ? [visible] : [];
 }
 
 function normalizeWorkingIndicators(value: unknown): WorkingIndicator[] {
@@ -285,6 +365,7 @@ export class ChatController {
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
+  latestTodoNoticeText = "";
   awaitingTurnSettle = false;
   externalWorkingVisible = false;
   turnAbortRequested = false;
@@ -596,6 +677,7 @@ export class ChatController {
       messageId: this.currentIncomingMessageId() || undefined,
       replyToMessageId: this.currentReplyToMessageId() || undefined,
       tick: this.workingIndicatorTick,
+      todoNoticeText: this.latestTodoNoticeText || undefined,
       ...extra,
     };
   }
@@ -681,19 +763,24 @@ export class ChatController {
     return Promise.resolve(handler.call(indicator, context));
   }
 
-  async clearWorkingReaction() {
+  async clearWorkingReaction(options: { preserveTodoNotice?: boolean } = {}) {
     const indicators = this.activeWorkingIndicators.length
       ? this.activeWorkingIndicators
       : this.getWorkingIndicators();
+    const todoNoticeText = this.latestTodoNoticeText;
     this.activeWorkingIndicators = [];
     this.workingReactionEmoji = "";
     this.workingReactionTick = 0;
     this.lastWorkingReactionAt = 0;
     this.lastWorkingIndicatorAt = 0;
     this.workingIndicatorTick = 0;
-    const context = this.workingIndicatorContext({ event: "end" });
+    if (!options.preserveTodoNotice) this.latestTodoNoticeText = "";
+    const context = this.workingIndicatorContext({
+      event: "end",
+      todoNoticeText: todoNoticeText || undefined,
+    });
     const results = await Promise.all(
-      indicators.map((indicator) =>
+      selectWorkingIndicatorsForEnd(indicators).map((indicator) =>
         this.callWorkingIndicator(indicator, "end", context).catch(() => false),
       ),
     );
@@ -703,28 +790,23 @@ export class ChatController {
   private getWorkingIndicatorPolicy() {
     const indicators = this.getWorkingIndicators();
     return {
-      polling: indicators.some(
-        (indicator) => workingIndicatorKind(indicator) === "polling",
-      ),
-      marker: indicators.some(
-        (indicator) => workingIndicatorKind(indicator) === "marker",
-      ),
+      polling: selectWorkingIndicatorsForKind(indicators, "polling").length > 0,
+      marker: selectWorkingIndicatorsForKind(indicators, "marker").length > 0,
     };
   }
 
   private async startWorkingMarker() {
     if (!this.canDeliverReplies()) return false;
     const indicators = this.getWorkingIndicators();
-    this.activeWorkingIndicators = indicators;
+    const selected = selectWorkingIndicatorsForKind(indicators, "marker");
+    this.activeWorkingIndicators = selected;
     const context = this.workingIndicatorContext({ event: "start" });
     const results = await Promise.all(
-      indicators
-        .filter((indicator) => workingIndicatorKind(indicator) === "marker")
-        .map((indicator) =>
-          this.callWorkingIndicator(indicator, "start", context).catch(
-            () => false,
-          ),
+      selected.map((indicator) =>
+        this.callWorkingIndicator(indicator, "start", context).catch(
+          () => false,
         ),
+      ),
     );
     return results.some(Boolean);
   }
@@ -740,7 +822,7 @@ export class ChatController {
     this.compactionIndicatorTick = 0;
     const context = this.compactionWorkingIndicatorContext({ event: "end" });
     const results = await Promise.all(
-      indicators.map((indicator) =>
+      selectWorkingIndicatorsForEnd(indicators).map((indicator) =>
         this.callWorkingIndicator(indicator, "end", context).catch(() => false),
       ),
     );
@@ -750,26 +832,22 @@ export class ChatController {
   private async startCompactionWorkingMarker() {
     if (!this.canDeliverReplies()) return false;
     const indicators = this.getWorkingIndicators();
-    this.compactionWorkingIndicators = indicators;
+    const selected = selectWorkingIndicatorsForKind(indicators, "marker");
+    this.compactionWorkingIndicators = selected;
     const context = this.compactionWorkingIndicatorContext({ event: "start" });
     const results = await Promise.all(
-      indicators
-        .filter((indicator) => workingIndicatorKind(indicator) === "marker")
-        .map((indicator) =>
-          this.callWorkingIndicator(indicator, "start", context).catch(
-            () => false,
-          ),
+      selected.map((indicator) =>
+        this.callWorkingIndicator(indicator, "start", context).catch(
+          () => false,
         ),
+      ),
     );
     return results.some(Boolean);
   }
 
   private async pollCompactionTyping() {
     if (!this.canDeliverReplies() || !this.compactionTurn) return false;
-    const indicators = this.compactionWorkingIndicators.length
-      ? this.compactionWorkingIndicators
-      : this.getWorkingIndicators();
-    this.compactionWorkingIndicators = indicators;
+    const indicators = this.getWorkingIndicators();
     const now = Date.now();
     if (!this.isTypingPollDue(this.lastCompactionIndicatorAt, now)) {
       return false;
@@ -788,14 +866,21 @@ export class ChatController {
       reactionTick: this.compactionReactionTick,
       reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
     });
+    const selected = selectWorkingIndicatorsForKind(indicators, "polling");
+    if (
+      selected.some(
+        (indicator) => workingIndicatorPresentation(indicator) !== "typing",
+      ) ||
+      !this.compactionWorkingIndicators.length
+    ) {
+      this.compactionWorkingIndicators = selected;
+    }
     const results = await Promise.all(
-      indicators
-        .filter((indicator) => workingIndicatorKind(indicator) === "polling")
-        .map((indicator) =>
-          this.callWorkingIndicator(indicator, "tick", context).catch(
-            () => false,
-          ),
+      selected.map((indicator) =>
+        this.callWorkingIndicator(indicator, "tick", context).catch(
+          () => false,
         ),
+      ),
     );
     this.lastCompactionIndicatorAt = now;
     this.compactionIndicatorTick += 1;
@@ -822,6 +907,7 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
     }
     this.setCurrentTurn(input);
+    this.latestTodoNoticeText = "";
     this.awaitingTurnSettle = true;
     const marker = this.startWorkingMarker().catch(() => false);
     const poll = this.pollTyping().catch(() => false);
@@ -894,10 +980,7 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
       return false;
     }
-    const indicators = this.activeWorkingIndicators.length
-      ? this.activeWorkingIndicators
-      : this.getWorkingIndicators();
-    this.activeWorkingIndicators = indicators;
+    const indicators = this.getWorkingIndicators();
     const now = Date.now();
     if (!this.isTypingPollDue(this.lastWorkingIndicatorAt, now)) {
       return false;
@@ -914,14 +997,21 @@ export class ChatController {
       reactionTick: this.workingReactionTick,
       reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
     });
+    const selected = selectWorkingIndicatorsForKind(indicators, "polling");
+    if (
+      selected.some(
+        (indicator) => workingIndicatorPresentation(indicator) !== "typing",
+      ) ||
+      !this.activeWorkingIndicators.length
+    ) {
+      this.activeWorkingIndicators = selected;
+    }
     const results = await Promise.all(
-      indicators
-        .filter((indicator) => workingIndicatorKind(indicator) === "polling")
-        .map((indicator) =>
-          this.callWorkingIndicator(indicator, "tick", context).catch(
-            () => false,
-          ),
+      selected.map((indicator) =>
+        this.callWorkingIndicator(indicator, "tick", context).catch(
+          () => false,
         ),
+      ),
     );
     this.lastWorkingIndicatorAt = now;
     this.workingIndicatorTick += 1;
@@ -1372,6 +1462,9 @@ export class ChatController {
       id?: string;
       idempotencyKey?: string;
       waitForDeliveryMs?: number;
+      waitUntilDeliverySettled?: boolean;
+      requireDelivery?: boolean;
+      coalesceWithWorkingMessage?: boolean;
     } = {},
   ) {
     const trimmed = safeString(text).trim();
@@ -1384,6 +1477,9 @@ export class ChatController {
           createdAt: nowIso(),
           chatKey: this.chatKey,
           text: trimmed,
+          ...(options.coalesceWithWorkingMessage
+            ? { coalesceWithWorkingMessage: true }
+            : {}),
           ...this.currentConversationSessionPayload(),
         },
         { deliveryKind: "passive_notice", ...options },
@@ -1396,15 +1492,27 @@ export class ChatController {
 
   private async sendTodoPassiveNoticeNow(event: any) {
     const todos = normalizeRinTodoItems(event?.todoItems);
-    if (!todos?.length) return await this.sendPassiveNoticeNow(event?.text);
+    if (!todos?.length) {
+      this.latestTodoNoticeText = safeString(event?.text).trim();
+      return await this.sendPassiveNoticeNow(event?.text);
+    }
     if (!this.canDeliverReplies()) return true;
 
     const error = safeString(event?.todoError).trim();
     const mode = todoNoticeRenderModeForChatKey(this.chatKey);
+    const noticeText = formatTodoNoticeText(
+      todos,
+      error,
+      mode === "native" ? "characters" : mode,
+    );
+    this.latestTodoNoticeText = noticeText;
+    const todoDeliveryOptions = {
+      waitUntilDeliverySettled: true,
+      requireDelivery: true,
+      coalesceWithWorkingMessage: true,
+    };
     if (mode !== "native") {
-      return await this.sendPassiveNoticeNow(
-        formatTodoNoticeText(todos, error, mode),
-      );
+      return await this.sendPassiveNoticeNow(noticeText, todoDeliveryOptions);
     }
 
     try {
@@ -1414,6 +1522,7 @@ export class ChatController {
           createdAt: nowIso(),
           chatKey: this.chatKey,
           deliveryKind: "passive_notice",
+          coalesceWithWorkingMessage: true,
           parts: [
             ...(error
               ? [{ type: "text" as const, text: `Error: ${error}` }]
@@ -1429,7 +1538,7 @@ export class ChatController {
           ],
           ...this.currentConversationSessionPayload(),
         },
-        { deliveryKind: "passive_notice" },
+        { deliveryKind: "passive_notice", ...todoDeliveryOptions },
       );
       return true;
     } catch {

@@ -67,6 +67,7 @@ export type ChatOutboxPayload =
       deliveryKind?: ChatDeliveryKind;
       text: string;
       replyToMessageId?: string;
+      coalesceWithWorkingMessage?: boolean;
       sessionId?: string;
       sessionFile?: string;
       sessionBinding?: "conversation";
@@ -79,6 +80,7 @@ export type ChatOutboxPayload =
       runId?: string;
       chatKey: string;
       deliveryKind?: ChatDeliveryKind;
+      coalesceWithWorkingMessage?: boolean;
       sessionId?: string;
       sessionFile?: string;
       sessionBinding?: "conversation";
@@ -97,6 +99,7 @@ export type ChatOutboxPayloadInput =
       deliveryKind?: ChatDeliveryKind;
       text?: string;
       replyToMessageId?: string;
+      coalesceWithWorkingMessage?: boolean;
       sessionId?: string;
       sessionFile?: string;
       sessionBinding?: "conversation";
