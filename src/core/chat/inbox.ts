@@ -37,6 +37,7 @@ export type ChatInboxItemRouting = {
   userId?: string;
   nickname?: string;
   chatName?: string;
+  messageThreadId?: string;
   replyToMessageId?: string;
 };
 

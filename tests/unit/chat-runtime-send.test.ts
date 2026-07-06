@@ -274,6 +274,81 @@ test("telegram adapter edits progress updates then deletes them before sending f
   });
 });
 
+test("telegram adapter scopes forum topic sessions and outbound payloads", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "8301813220:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    app.bots[0].selfId = "8301813220";
+
+    await adapter.handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 7,
+        date: 1783321200,
+        message_thread_id: 184,
+        is_topic_message: true,
+        chat: {
+          id: -1003852739541,
+          type: "supergroup",
+          title: "Committee",
+        },
+        from: { id: 663068439, username: "meoooqwq" },
+        text: "hello topic",
+      },
+    });
+
+    const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+    const [fileName] = await fs.readdir(pendingDir);
+    const inboxItem = JSON.parse(
+      await fs.readFile(path.join(pendingDir, fileName), "utf8"),
+    );
+    assert.equal(
+      inboxItem.chatKey,
+      "telegram/8301813220:-1003852739541?thread=184",
+    );
+    assert.equal(inboxItem.routing.messageThreadId, "184");
+    assert.equal(inboxItem.session.messageThreadId, "184");
+    assert.equal(inboxItem.session.chatThreadId, "184");
+    assert.equal(inboxItem.session.isTopicMessage, true);
+
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+
+    await app.bots[0].workingIndicators[1].tick({
+      chatId: "-1003852739541?thread=184",
+    });
+    await app.bots[0].workingIndicators[0].tick({
+      chatId: "-1003852739541?thread=184",
+      tick: 0,
+    });
+    const result = await app.bots[0].sendMessage("-1003852739541?thread=184", [
+      h.text("topic reply"),
+    ]);
+
+    assert.deepEqual(result, ["4"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["sendChatAction", "sendMessage", "deleteMessage", "sendMessage"],
+    );
+    assert.equal(calls[0].payload.chat_id, "-1003852739541");
+    assert.equal(calls[0].payload.message_thread_id, 184);
+    assert.equal(calls[1].payload.chat_id, "-1003852739541");
+    assert.equal(calls[1].payload.message_thread_id, 184);
+    assert.equal(calls[2].payload.chat_id, "-1003852739541");
+    assert.equal(calls[3].payload.chat_id, "-1003852739541");
+    assert.equal(calls[3].payload.message_thread_id, 184);
+    assert.equal(calls[3].payload.text, "topic reply");
+  });
+});
+
 test("telegram adapter clears coalesced todo when final reply is media-only", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
