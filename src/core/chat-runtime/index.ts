@@ -1217,11 +1217,10 @@ class TelegramAdapter {
     const text = safeString(
       persisted?.text || this.workingMessageTexts.get(key) || "",
     );
-    if (
-      !messageIds.length ||
-      (kind && kind !== "working") ||
-      !this.isWorkingIndicatorText(text)
-    ) {
+    const isProgressArtifact =
+      kind === "todo" ||
+      ((!kind || kind === "working") && this.isWorkingIndicatorText(text));
+    if (!messageIds.length || !isProgressArtifact) {
       return false;
     }
     for (const messageId of messageIds) {
@@ -1572,7 +1571,6 @@ class TelegramAdapter {
   }
 
   async endWorkingIndicator(context: any) {
-    if (!safeString(context?.todoNoticeText).trim()) return false;
     const chatId = safeString(context?.chatId).trim();
     if (!chatId) return false;
     return await this.deleteVisibleWorkingMessage(chatId);
