@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import WebSocket from "ws";
@@ -156,6 +157,338 @@ function createReactionWorkingIndicator(platform: string, getBot: () => any) {
       return deletedAny;
     },
   };
+}
+
+type EditableTextMessageGroupOptions = {
+  cacheDir: string;
+  cacheScope: string;
+  maxTextLength: number;
+  workingText?: string;
+  sendText: (input: {
+    chatId: string;
+    text: string;
+    replyToMessageId?: string;
+  }) => Promise<string | string[]>;
+  editText: (input: {
+    chatId: string;
+    messageId: string;
+    text: string;
+  }) => Promise<string | string[]>;
+  deleteMessage: (input: {
+    chatId: string;
+    messageId: string;
+  }) => Promise<unknown>;
+  isRecoverableEditError?: (error: unknown) => boolean;
+  repeatReplyToMessageId?: boolean;
+};
+
+function sanitizeCacheScope(value: unknown, fallback: string) {
+  return (
+    safeString(value)
+      .trim()
+      .replace(/[^A-Za-z0-9._-]+/g, "_") || fallback
+  );
+}
+
+function normalizeDeliveredIds(value: unknown) {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => safeString(item).trim()).filter(Boolean);
+}
+
+class EditableTextMessageGroup {
+  private readonly messages = new Map<string, string>();
+  private readonly texts = new Map<string, string>();
+  private readonly kinds = new Map<string, string>();
+  private readonly operations = new Map<string, Promise<unknown>>();
+  private readonly finalizing = new Set<string>();
+  private readonly workingText: string;
+
+  constructor(private readonly options: EditableTextMessageGroupOptions) {
+    this.workingText = safeString(options.workingText).trim() || "Working...";
+    ensureDir(this.options.cacheDir);
+  }
+
+  indicator() {
+    return {
+      type: "polling",
+      presentation: "editable-message",
+      tick: async (context: any) => {
+        const chatId = safeString(context?.chatId).trim();
+        if (!chatId) return false;
+        const ids = await this.updateText({
+          chatId,
+          text: this.workingText,
+          kind: "working",
+        });
+        return ids.length > 0;
+      },
+      end: async (context: any) => {
+        const chatId = safeString(context?.chatId).trim();
+        if (!chatId) return false;
+        return await this.deleteProgress(chatId);
+      },
+    };
+  }
+
+  private key(chatId: string) {
+    return `${chatId}:chat`;
+  }
+
+  private statePath(key: string) {
+    const fileName = ensureFileName(
+      `${safeString(key).trim()}.json`,
+      "working-message.json",
+    );
+    return path.join(
+      this.options.cacheDir,
+      "working-messages",
+      sanitizeCacheScope(this.options.cacheScope, "default"),
+      fileName,
+    );
+  }
+
+  private read(key: string) {
+    try {
+      const record = JSON.parse(fs.readFileSync(this.statePath(key), "utf8"));
+      const messageIds = (
+        Array.isArray(record?.messageIds)
+          ? record.messageIds
+          : [record?.messageId]
+      )
+        .map((item: unknown) => safeString(item).trim())
+        .filter(Boolean);
+      if (!messageIds.length) return null;
+      const textChunks = (
+        Array.isArray(record?.textChunks) ? record.textChunks : [record?.text]
+      ).map((item: unknown) => safeString(item));
+      const text = textChunks.length
+        ? textChunks.join("")
+        : safeString(record?.text);
+      return {
+        messageIds,
+        text,
+        textChunks: textChunks.length ? textChunks : [text],
+        kind: safeString(record?.kind).trim(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private write(
+    key: string,
+    messageIds: string[],
+    textChunks: string[],
+    kind: string,
+  ) {
+    const nextMessageIds = normalizeDeliveredIds(messageIds);
+    if (!nextMessageIds.length) return;
+    const statePath = this.statePath(key);
+    ensureDir(path.dirname(statePath));
+    const nextTextChunks = textChunks.map((item) => safeString(item));
+    fs.writeFileSync(
+      statePath,
+      `${JSON.stringify(
+        {
+          key,
+          messageId: nextMessageIds[0],
+          messageIds: nextMessageIds,
+          text: nextTextChunks.join(""),
+          textChunks: nextTextChunks,
+          kind: safeString(kind).trim(),
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+  }
+
+  private clear(key: string) {
+    this.messages.delete(key);
+    this.texts.delete(key);
+    this.kinds.delete(key);
+    try {
+      fs.rmSync(this.statePath(key), { force: true });
+    } catch {}
+  }
+
+  private remember(
+    key: string,
+    messageIds: string[],
+    textChunks: string[],
+    kind: string,
+  ) {
+    const nextMessageIds = normalizeDeliveredIds(messageIds);
+    if (!nextMessageIds.length) {
+      this.clear(key);
+      return;
+    }
+    const text = textChunks.map((item) => safeString(item)).join("");
+    const nextKind = safeString(kind).trim();
+    this.messages.set(key, nextMessageIds[0] || "");
+    this.texts.set(key, text);
+    this.kinds.set(key, nextKind);
+    this.write(key, nextMessageIds, textChunks, nextKind);
+  }
+
+  private markFinalizing(key: string) {
+    this.finalizing.add(key);
+    setTimeout(() => this.finalizing.delete(key), 30_000).unref?.();
+  }
+
+  private recoverable(error: unknown) {
+    if (this.options.isRecoverableEditError?.(error)) return true;
+    const message = safeString((error as any)?.message || error).trim();
+    return /not found|unknown message|can't be edited|cannot edit|message_not_found|invalid_ts|message_not_found/i.test(
+      message,
+    );
+  }
+
+  private async withOperation<T>(key: string, operation: () => Promise<T>) {
+    const previous = this.operations.get(key) || Promise.resolve();
+    const run = previous.catch(() => undefined).then(operation);
+    this.operations.set(key, run);
+    try {
+      return await run;
+    } finally {
+      if (this.operations.get(key) === run) this.operations.delete(key);
+    }
+  }
+
+  private existingIds(key: string) {
+    const persisted = this.read(key);
+    if (persisted?.messageIds?.length) {
+      this.messages.set(key, persisted.messageIds[0] || "");
+      this.texts.set(key, persisted.text);
+      this.kinds.set(key, persisted.kind);
+      return persisted.messageIds;
+    }
+    return normalizeDeliveredIds(this.messages.get(key));
+  }
+
+  async updateText(input: {
+    chatId: string;
+    text: string;
+    replyToMessageId?: string;
+    finalize?: boolean;
+    kind?: string;
+  }) {
+    const chatId = safeString(input.chatId).trim();
+    const text = safeString(input.text);
+    if (!chatId || !text) return [] as string[];
+    const key = this.key(chatId);
+    const chunks = splitPlainText(text, this.options.maxTextLength).filter(
+      Boolean,
+    );
+    if (!chunks.length) return [] as string[];
+    const finalize = Boolean(input.finalize);
+    const kind =
+      safeString(input.kind).trim() || (finalize ? "final" : "working");
+    return await this.withOperation(key, async () => {
+      if (!finalize && this.finalizing.has(key)) {
+        return normalizeDeliveredIds(this.messages.get(key));
+      }
+      const persisted = this.read(key);
+      if (!finalize && kind === "working") {
+        const currentId = safeString(
+          this.messages.get(key) || persisted?.messageIds?.[0] || "",
+        ).trim();
+        const currentKind = safeString(
+          this.kinds.get(key) || persisted?.kind || "",
+        ).trim();
+        const currentText = safeString(this.texts.get(key) || persisted?.text);
+        if (currentId && currentKind && currentKind !== "working") {
+          return [currentId];
+        }
+        if (currentId && currentText && currentText !== this.workingText) {
+          return [currentId];
+        }
+      }
+      const existing = this.existingIds(key);
+      if (
+        !finalize &&
+        existing.length &&
+        (this.texts.get(key) || persisted?.text || "") === chunks.join("")
+      ) {
+        return existing;
+      }
+      const delivered: string[] = [];
+      let firstReply = safeString(input.replyToMessageId).trim() || undefined;
+      let editFailed = false;
+      let editedExistingCount = 0;
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index] || "";
+        const existingId = existing[index] || "";
+        if (existingId && !editFailed) {
+          try {
+            const edited = await this.options.editText({
+              chatId,
+              messageId: existingId,
+              text: chunk,
+            });
+            const editedIds = normalizeDeliveredIds(edited);
+            delivered.push(...(editedIds.length ? editedIds : [existingId]));
+            editedExistingCount += 1;
+            firstReply = undefined;
+            continue;
+          } catch (error) {
+            if (!this.recoverable(error)) throw error;
+            editFailed = true;
+          }
+        }
+        const sent = await this.options.sendText({
+          chatId,
+          text: chunk,
+          replyToMessageId: firstReply,
+        });
+        const sentIds = normalizeDeliveredIds(sent);
+        delivered.push(...sentIds);
+        if (sentIds.length && !this.options.repeatReplyToMessageId) {
+          firstReply = undefined;
+        }
+      }
+      const surplusStart = editFailed ? editedExistingCount : delivered.length;
+      for (const surplusId of existing.slice(surplusStart)) {
+        try {
+          await this.options.deleteMessage({ chatId, messageId: surplusId });
+        } catch {}
+      }
+      if (!delivered.length) return [] as string[];
+      if (finalize) {
+        this.clear(key);
+        this.markFinalizing(key);
+      } else {
+        this.remember(key, delivered, chunks, kind);
+      }
+      return delivered;
+    });
+  }
+
+  async deleteProgress(chatId: string) {
+    const key = this.key(chatId);
+    const persisted = this.read(key);
+    const messageIds = persisted?.messageIds?.length
+      ? persisted.messageIds
+      : normalizeDeliveredIds(this.messages.get(key));
+    const kind = safeString(
+      this.kinds.get(key) || persisted?.kind || "",
+    ).trim();
+    const text = safeString(this.texts.get(key) || persisted?.text || "");
+    const isProgressArtifact =
+      kind === "todo" ||
+      kind === "working" ||
+      (!kind && text === this.workingText);
+    if (!messageIds.length || !isProgressArtifact) return false;
+    for (const messageId of messageIds) {
+      try {
+        await this.options.deleteMessage({ chatId, messageId });
+      } catch {}
+    }
+    this.clear(key);
+    return true;
+  }
 }
 
 const LARK_REACTION_TYPES: Record<string, string> = {
@@ -420,6 +753,7 @@ export class DiscordAdapter {
   private readonly config: Record<string, any>;
   private readonly logger: any;
   private readonly cacheDir: string;
+  private readonly editableWorking: EditableTextMessageGroup;
   private client: any = null;
   readonly bot: any;
 
@@ -470,6 +804,14 @@ export class DiscordAdapter {
           safeString(this.bot?.selfId).trim(),
         );
       },
+      editMessage: async (
+        channelId: string,
+        messageId: string,
+        payload: any,
+      ) => {
+        const message = await this.fetchMessage(channelId, messageId);
+        return await message?.edit?.(payload);
+      },
       deleteMessage: async (channelId: string, messageId: string) => {
         const channel = await this.fetchChannel(channelId);
         return await channel?.messages?.delete?.(messageId);
@@ -479,18 +821,38 @@ export class DiscordAdapter {
       hasOnlyOwnerUsers: async (channelId: string, ownerUserIds: string[]) =>
         await this.hasOnlyOwnerUsers(channelId, ownerUserIds),
     };
+    this.editableWorking = new EditableTextMessageGroup({
+      cacheDir: this.cacheDir,
+      cacheScope: sanitizeCacheScope(config?.token, "default"),
+      maxTextLength: DISCORD_MAX_TEXT_LENGTH,
+      sendText: async ({ chatId, text, replyToMessageId }) => {
+        const channel = await this.fetchChannel(chatId);
+        if (!channel?.send)
+          throw new Error(`discord_channel_not_sendable:${chatId}`);
+        return await this.sendTextChunk(channel, { text, replyToMessageId });
+      },
+      editText: async ({ chatId, messageId, text }) => {
+        const edited = await internal.editMessage(chatId, messageId, {
+          content: text,
+        });
+        return safeString(edited?.id || messageId).trim();
+      },
+      deleteMessage: async ({ chatId, messageId }) =>
+        await internal.deleteMessage(chatId, messageId),
+    });
     this.bot = {
       platform: "discord",
       selfId: "",
       status: 0,
       workingIndicators: [
+        this.editableWorking.indicator(),
         createReactionWorkingIndicator("discord", () => this.bot),
         createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
       internal,
-      sendMessage: async (chatId: string, content: any) =>
-        await this.sendMessage(chatId, content),
+      sendMessage: async (chatId: string, content: any, options?: any) =>
+        await this.sendMessage(chatId, content, options),
       createReaction: async (
         chatId: string,
         messageId: string,
@@ -785,15 +1147,22 @@ export class DiscordAdapter {
     return [safeString(sent?.id).trim()].filter(Boolean);
   }
 
-  private async sendMessage(chatId: string, content: any) {
+  private async sendMessage(
+    chatId: string,
+    content: any,
+    options: Record<string, any> = {},
+  ) {
     const channel = await this.fetchChannel(chatId);
     if (!channel?.send)
       throw new Error(`discord_channel_not_sendable:${chatId}`);
+    const deliveryKind = safeString(options?.deliveryKind).trim() || "final";
+    const isFinalDelivery = deliveryKind === "final";
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     const delivered: string[] = [];
     const failures: unknown[] = [];
     let cursor = 0;
     let firstReply = replyToMessageId;
+    let finalizedWorkingMessage = false;
     const recordFailure = async (error: unknown, placeholder: string) => {
       failures.push(error);
       this.logger.warn(
@@ -840,24 +1209,40 @@ export class DiscordAdapter {
         } catch (error) {
           await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
         }
-        for (const textChunk of splitPlainText(text, DISCORD_MAX_TEXT_LENGTH)) {
-          try {
-            const textChunkIds = await this.sendTextChunk(channel, {
-              text: textChunk,
-              replyToMessageId: firstReply,
-            });
-            delivered.push(...textChunkIds);
-            if (textChunkIds.length) firstReply = undefined;
-          } catch (error) {
-            await recordFailure(
-              error,
-              renderRichDeliveryErrorPlaceholder(error),
-            );
+        try {
+          const coalesceWithWorkingMessage = Boolean(
+            options?.coalesceWithWorkingMessage,
+          );
+          const shouldEditWorkingMessage =
+            delivered.length === 0 &&
+            (isFinalDelivery || coalesceWithWorkingMessage);
+          const textChunkIds = shouldEditWorkingMessage
+            ? await this.editableWorking.updateText({
+                chatId,
+                text,
+                replyToMessageId: firstReply,
+                finalize: isFinalDelivery,
+                kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+              })
+            : await this.sendTextChunk(channel, {
+                text,
+                replyToMessageId: firstReply,
+              });
+          delivered.push(...textChunkIds);
+          if (textChunkIds.length) firstReply = undefined;
+          if (shouldEditWorkingMessage) {
+            finalizedWorkingMessage =
+              isFinalDelivery && textChunkIds.length > 0;
           }
+        } catch (error) {
+          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
         }
       }
       delivered.push(...chunkIds);
       if (chunkIds.length) firstReply = undefined;
+    }
+    if (isFinalDelivery && !finalizedWorkingMessage) {
+      await this.editableWorking.deleteProgress(chatId);
     }
     if (delivered.length) return delivered;
     if (failures.length) throw failures[0];
@@ -1090,6 +1475,7 @@ export class SlackAdapter {
   private readonly config: Record<string, any>;
   private readonly logger: any;
   private readonly cacheDir: string;
+  private readonly editableWorking: EditableTextMessageGroup;
   private web: any = null;
   private socket: any = null;
   readonly bot: any;
@@ -1112,6 +1498,8 @@ export class SlackAdapter {
         await this.web?.apiCall?.(method, options || {}),
       postMessage: async (options: any) =>
         await this.web?.chat?.postMessage?.(options),
+      updateMessage: async (options: any) =>
+        await this.web?.chat?.update?.(options),
       deleteMessage: async (options: any) =>
         await this.web?.chat?.delete?.(options),
       conversationsInfo: async (options: any) =>
@@ -1125,18 +1513,40 @@ export class SlackAdapter {
       filesUploadV2: async (options: any) =>
         await this.web?.files?.uploadV2?.(options),
     };
+    this.editableWorking = new EditableTextMessageGroup({
+      cacheDir: this.cacheDir,
+      cacheScope: sanitizeCacheScope(
+        config?.botToken || config?.token,
+        "default",
+      ),
+      maxTextLength: SLACK_MAX_TEXT_LENGTH,
+      repeatReplyToMessageId: true,
+      sendText: async ({ chatId, text, replyToMessageId }) =>
+        await this.postText(chatId, text, replyToMessageId),
+      editText: async ({ chatId, messageId, text }) => {
+        const updated = await internal.updateMessage({
+          channel: chatId,
+          ts: messageId,
+          text,
+        });
+        return safeString(updated?.ts || messageId).trim();
+      },
+      deleteMessage: async ({ chatId, messageId }) =>
+        await internal.deleteMessage({ channel: chatId, ts: messageId }),
+    });
     this.bot = {
       platform: "slack",
       selfId: "",
       status: 0,
       workingIndicators: [
+        this.editableWorking.indicator(),
         createReactionWorkingIndicator("slack", () => this.bot),
         createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
       internal,
-      sendMessage: async (chatId: string, content: any) =>
-        await this.sendMessage(chatId, content),
+      sendMessage: async (chatId: string, content: any, options?: any) =>
+        await this.sendMessage(chatId, content, options),
       createReaction: async (
         chatId: string,
         messageId: string,
@@ -1370,11 +1780,18 @@ export class SlackAdapter {
     return fileId ? [fileId] : [];
   }
 
-  private async sendMessage(chatId: string, content: any) {
+  private async sendMessage(
+    chatId: string,
+    content: any,
+    options: Record<string, any> = {},
+  ) {
+    const deliveryKind = safeString(options?.deliveryKind).trim() || "final";
+    const isFinalDelivery = deliveryKind === "final";
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     const delivered: string[] = [];
     const failures: unknown[] = [];
     let cursor = 0;
+    let finalizedWorkingMessage = false;
     const recordFailure = async (error: unknown, placeholder: string) => {
       failures.push(error);
       this.logger.warn(
@@ -1396,11 +1813,25 @@ export class SlackAdapter {
       let messageIds: string[] = [];
       if (type === "todo" || type === "checklist") {
         try {
-          messageIds = await this.postTodo(
-            chatId,
-            work[cursor],
-            replyToMessageId,
+          const coalesceWithWorkingMessage = Boolean(
+            options?.coalesceWithWorkingMessage,
           );
+          if (coalesceWithWorkingMessage && delivered.length === 0) {
+            messageIds = await this.editableWorking.updateText({
+              chatId,
+              text: renderPlainTextFromNodes([work[cursor]]),
+              replyToMessageId,
+              finalize: isFinalDelivery,
+              kind: "todo",
+            });
+            finalizedWorkingMessage = isFinalDelivery && messageIds.length > 0;
+          } else {
+            messageIds = await this.postTodo(
+              chatId,
+              work[cursor],
+              replyToMessageId,
+            );
+          }
         } catch (error) {
           await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
         }
@@ -1431,12 +1862,32 @@ export class SlackAdapter {
         }
         try {
           const text = this.renderOutboundText(textNodes);
-          messageIds = await this.postText(chatId, text, replyToMessageId);
+          const coalesceWithWorkingMessage = Boolean(
+            options?.coalesceWithWorkingMessage,
+          );
+          const shouldEditWorkingMessage =
+            delivered.length === 0 &&
+            (isFinalDelivery || coalesceWithWorkingMessage);
+          messageIds = shouldEditWorkingMessage
+            ? await this.editableWorking.updateText({
+                chatId,
+                text,
+                replyToMessageId,
+                finalize: isFinalDelivery,
+                kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+              })
+            : await this.postText(chatId, text, replyToMessageId);
+          if (shouldEditWorkingMessage) {
+            finalizedWorkingMessage = isFinalDelivery && messageIds.length > 0;
+          }
         } catch (error) {
           await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
         }
       }
       delivered.push(...messageIds);
+    }
+    if (isFinalDelivery && !finalizedWorkingMessage) {
+      await this.editableWorking.deleteProgress(chatId);
     }
     if (delivered.length) return delivered;
     if (failures.length) throw failures[0];
@@ -1921,6 +2372,7 @@ export class LarkAdapter {
   private readonly config: Record<string, any>;
   private readonly logger: any;
   private readonly cacheDir: string;
+  private readonly editableWorking: EditableTextMessageGroup;
   private client: any = null;
   private wsClient: any = null;
   readonly bot: any;
@@ -1941,6 +2393,8 @@ export class LarkAdapter {
       wsClient: null,
       createMessage: async (options: any) =>
         await this.client?.im?.message?.create?.(options),
+      updateMessage: async (options: any) =>
+        await this.client?.im?.message?.update?.(options),
       getMessage: async (options: any) =>
         await this.client?.im?.message?.get?.(options),
       getChat: async (options: any) =>
@@ -1958,18 +2412,39 @@ export class LarkAdapter {
       getUser: async (options: any) =>
         await this.client?.contact?.user?.get?.(options),
     };
+    this.editableWorking = new EditableTextMessageGroup({
+      cacheDir: this.cacheDir,
+      cacheScope: sanitizeCacheScope(config?.appId, "default"),
+      maxTextLength: 30_000,
+      sendText: async ({ chatId, text, replyToMessageId }) =>
+        await this.sendPostText(chatId, text, replyToMessageId),
+      editText: async ({ messageId, text }) => {
+        const result = await internal.updateMessage({
+          path: { message_id: messageId },
+          data: this.buildPostData(text),
+        });
+        return safeString(
+          result?.data?.message_id || result?.message_id || messageId,
+        ).trim();
+      },
+      deleteMessage: async ({ messageId }) =>
+        await this.client?.im?.message?.delete?.({
+          path: { message_id: messageId },
+        }),
+    });
     this.bot = {
       platform: "lark",
       selfId: "",
       status: 0,
       workingIndicators: [
+        this.editableWorking.indicator(),
         createReactionWorkingIndicator("lark", () => this.bot),
         createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
       internal,
-      sendMessage: async (chatId: string, content: any) =>
-        await this.sendMessage(chatId, content),
+      sendMessage: async (chatId: string, content: any, options?: any) =>
+        await this.sendMessage(chatId, content, options),
       getGuildMemberCount: async (chatId: string) =>
         await this.getGuildMemberCount(chatId),
       createReaction: async (
@@ -2368,10 +2843,9 @@ export class LarkAdapter {
     return true;
   }
 
-  private async sendMessage(chatId: string, content: any) {
-    const { work, replyToMessageId } = prepareOutboundNodes(content);
-    const text = normalizeLarkMarkdownListBlocks(
-      renderMarkdownFromNodes(work, {
+  private renderOutboundText(nodes: any[]) {
+    return normalizeLarkMarkdownListBlocks(
+      renderMarkdownFromNodes(nodes, {
         preserveLineIndentation: true,
         renderAt(attrs) {
           const id = safeString(attrs.id).trim();
@@ -2382,8 +2856,10 @@ export class LarkAdapter {
         },
       }),
     );
-    if (!text) throw new Error("lark_send_message_empty");
-    const data = {
+  }
+
+  private buildPostData(text: string) {
+    return {
       msg_type: "post",
       content: JSON.stringify({
         zh_cn: {
@@ -2391,6 +2867,15 @@ export class LarkAdapter {
         },
       }),
     };
+  }
+
+  private async sendPostText(
+    chatId: string,
+    text: string,
+    replyToMessageId?: string,
+  ) {
+    if (!text) throw new Error("lark_send_message_empty");
+    const data = this.buildPostData(text);
     const result = replyToMessageId
       ? await this.client.im.message.reply({
           path: { message_id: replyToMessageId },
@@ -2408,6 +2893,31 @@ export class LarkAdapter {
     return [
       safeString(result?.data?.message_id || result?.message_id || "").trim(),
     ].filter(Boolean);
+  }
+
+  private async sendMessage(
+    chatId: string,
+    content: any,
+    options: Record<string, any> = {},
+  ) {
+    const deliveryKind = safeString(options?.deliveryKind).trim() || "final";
+    const isFinalDelivery = deliveryKind === "final";
+    const { work, replyToMessageId } = prepareOutboundNodes(content);
+    const text = this.renderOutboundText(work);
+    if (!text) throw new Error("lark_send_message_empty");
+    const coalesceWithWorkingMessage = Boolean(
+      options?.coalesceWithWorkingMessage,
+    );
+    if (isFinalDelivery || coalesceWithWorkingMessage) {
+      return await this.editableWorking.updateText({
+        chatId,
+        text,
+        replyToMessageId,
+        finalize: isFinalDelivery,
+        kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+      });
+    }
+    return await this.sendPostText(chatId, text, replyToMessageId);
   }
 
   private async handleMessage(data: any) {

@@ -77,6 +77,155 @@ function safeTelegramMethod(url: string) {
   return String(url).split("/").pop() || "";
 }
 
+function requireEditableIndicator(bot: any) {
+  const indicator = bot.workingIndicators.find(
+    (item: any) => item?.presentation === "editable-message",
+  );
+  assert.ok(indicator, "expected an editable-message working indicator");
+  return indicator;
+}
+
+function requireReactionIndicator(bot: any) {
+  const indicator = bot.workingIndicators.find(
+    (item: any) => item?.presentation === "reaction",
+  );
+  assert.ok(indicator, "expected a reaction working indicator");
+  return indicator;
+}
+
+test("discord adapter edits the visible working message for final text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    const channel = {
+      sendTyping: async () => calls.push({ method: "sendTyping" }),
+      send: async (payload: any) => {
+        const id = String(messages.size + 1);
+        const message = {
+          id,
+          payload,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            message.payload = nextPayload;
+            return message;
+          },
+        };
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => calls.push({ method: "delete", id }),
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C1", tick: 0 });
+    const result = await app.bots[0].sendMessage("C1", [h.text("done")]);
+
+    assert.deepEqual(result, ["1"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "edit"],
+    );
+    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[1].payload.content, "done");
+  });
+});
+
+test("slack adapter edits the visible working message for final text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { token: "xapp", botToken: "xoxb" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.web = {
+      chat: {
+        postMessage: async (payload: any) => {
+          calls.push({ method: "postMessage", payload });
+          return { ts: String(calls.length) };
+        },
+        update: async (payload: any) => {
+          calls.push({ method: "update", payload });
+          return { ts: payload.ts };
+        },
+        delete: async (payload: any) => {
+          calls.push({ method: "delete", payload });
+          return { ok: true };
+        },
+      },
+      files: { uploadV2: async () => ({ files: [{ id: "F1" }] }) },
+    };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C123", tick: 0 });
+    const result = await app.bots[0].sendMessage("C123", [h.text("done")]);
+
+    assert.deepEqual(result, ["1"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["postMessage", "update"],
+    );
+    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[1].payload.channel, "C123");
+    assert.equal(calls[1].payload.ts, "1");
+    assert.equal(calls[1].payload.text, "done");
+  });
+});
+
+test("lark adapter edits the visible working message for final text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push({ method: "create", payload });
+            return { data: { message_id: "m1" } };
+          },
+          update: async (payload: any) => {
+            calls.push({ method: "update", payload });
+            return { data: { message_id: payload.path.message_id } };
+          },
+        },
+      },
+    };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "oc_1", tick: 0 });
+    const result = await app.bots[0].sendMessage("oc_1", [h.text("done")]);
+
+    assert.deepEqual(result, ["m1"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["create", "update"],
+    );
+    assert.equal(calls[0].payload.data.receive_id, "oc_1");
+    assert.equal(calls[1].payload.path.message_id, "m1");
+    assert.match(calls[1].payload.data.content, /done/);
+  });
+});
+
 test("telegram adapter coalesces working, todo, and final text into one edited message", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -1267,7 +1416,7 @@ test("discord working indicator replaces the previous reaction frame", async () 
       },
     });
 
-    const [indicator] = app.bots[0].workingIndicators;
+    const indicator = requireReactionIndicator(app.bots[0]);
     await indicator.tick({ chatId: "C1", messageId: "m1", tick: 0 });
     await indicator.tick({ chatId: "C1", messageId: "m1", tick: 1 });
 
@@ -1299,7 +1448,7 @@ test("slack working indicator replaces the previous reaction frame", async () =>
       },
     };
 
-    const [indicator] = app.bots[0].workingIndicators;
+    const indicator = requireReactionIndicator(app.bots[0]);
     await indicator.tick({ chatId: "C1", messageId: "1.1", tick: 0 });
     await indicator.tick({ chatId: "C1", messageId: "1.1", tick: 1 });
 
@@ -1349,7 +1498,7 @@ test("lark working indicator replaces the previous reaction frame", async () => 
       },
     };
 
-    const [indicator] = app.bots[0].workingIndicators;
+    const indicator = requireReactionIndicator(app.bots[0]);
     await indicator.tick({ chatId: "oc_1", messageId: "om_1", tick: 0 });
     await indicator.tick({ chatId: "oc_1", messageId: "om_1", tick: 1 });
 
