@@ -8,9 +8,11 @@
 - Daemon and scheduler recovery is more resilient across restarts, with persisted turn recovery, decoupled restart recovery, and worker-pool session continuations.
 - Runtime and install paths are faster and safer, including CLI startup/dependency trimming, managed Node runtime bundles, managed-node update handoffs, launcher refreshes, PATH warnings, platform bundles without optional bundled extensions, and unresolved bootstrap git-ref handling.
 - TUI and CLI session flows now handle resume listing, session rebind options, and non-interactive tool help more accurately.
-- Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, compact usage trend charts, and cached group member counts.
+- Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, Telegram message coalescing, editable working messages for edit-capable adapters, compact usage trend charts, and cached group member counts.
 - Project licensing metadata now uses the GPL-3.0-or-later SPDX identifier with the standard GPL license text.
 <!-- rin-changelog-coverage
+c3dd90c Fix chat bridge Telegram message coalescing
+aa6b45b fix(chat): add editable working messages for edit-capable adapters
 4c94743 Use standard GPL license text
 f38735c Add GPL-3.0-or-later license
 febf4c8 fix(chat): mark compact command processed on completion notice
