@@ -14,8 +14,6 @@ import {
   type ChatBridgeBuiltInAdapterKey,
 } from "../chat-bridge/adapters.js";
 import { composeChatKeyForBot } from "../chat/support.js";
-import { createRinI18n, readRinI18nCatalog } from "../i18n.js";
-import { readConfiguredLanguageFromSettings } from "../language.js";
 import {
   compactObject,
   createPrefixedLogger,
@@ -27,11 +25,13 @@ import {
   fileUrl,
   normalizeNode,
   prepareOutboundNodes,
+  randomWorkingText,
   readBinaryFromNode,
   renderMarkdownFromNodes,
   renderPlainTextFromNodes,
   renderRichDeliveryErrorPlaceholder,
   renderTelegramHtmlFromNodes,
+  resolveChatRuntimeWorkingCopy,
   safeString,
   sleep,
   splitPlainText,
@@ -144,72 +144,6 @@ function parseTelegramReplyQuote(message: any) {
   const messageId = safeString(reply?.message_id || "").trim() || undefined;
   if (!messageId && !userId && !nickname && !content) return undefined;
   return { messageId, userId, nickname, content };
-}
-
-const TELEGRAM_WORKING_PROMPT_I18N_IDS = [
-  "chat.runtime.telegram.working.prompt1",
-  "chat.runtime.telegram.working.prompt2",
-  "chat.runtime.telegram.working.prompt3",
-  "chat.runtime.telegram.working.prompt4",
-  "chat.runtime.telegram.working.prompt5",
-  "chat.runtime.telegram.working.prompt6",
-] as const;
-
-type TelegramWorkingCopy = {
-  thinkingInitial: string;
-  thinkingSuffix: string;
-  separator: string;
-  prompts: string[];
-};
-
-function resolveTelegramWorkingCopy(agentDir?: string): TelegramWorkingCopy {
-  const root = safeString(agentDir).trim();
-  const base =
-    (createRinI18n(readConfiguredLanguageFromSettings(root)) as any).chatRuntime
-      ?.telegramWorking || {};
-  const catalog = readRinI18nCatalog(root);
-  const text = (id: string, fallback: string) =>
-    safeString(catalog[id]).trim() || safeString(fallback).trim();
-  const textAny = (ids: string[], fallback: string) => {
-    for (const id of ids) {
-      const value = safeString(catalog[id]).trim();
-      if (value) return value;
-    }
-    return safeString(fallback).trim();
-  };
-  const prompts = TELEGRAM_WORKING_PROMPT_I18N_IDS.map((id, index) =>
-    text(id, base.prompts?.[index] || ""),
-  ).filter(Boolean);
-  return {
-    thinkingInitial: textAny(
-      [
-        "chat.runtime.telegram.working.workingInitial",
-        "chat.runtime.telegram.working.thinkingInitial",
-      ],
-      base.workingInitial || base.thinkingInitial || "Working...",
-    ),
-    thinkingSuffix: textAny(
-      [
-        "chat.runtime.telegram.working.workingSuffix",
-        "chat.runtime.telegram.working.thinkingSuffix",
-      ],
-      base.workingSuffix || base.thinkingSuffix || "Working",
-    ),
-    separator: text(
-      "chat.runtime.telegram.working.separator",
-      base.separator || "-----------",
-    ),
-    prompts: prompts.length
-      ? prompts
-      : [
-          "Working on it (๑•̀ㅂ•́)و✧",
-          "Organizing things (｡･ω･｡)",
-          "Processing details (つω`｡)",
-          "Sorting information (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧",
-          "Almost there, still working (ง •̀_•́)ง",
-          "Working, please wait (｀・ω・´)",
-        ],
-  };
 }
 
 function parseOneBotReplyQuote(data: Record<string, any>) {
@@ -476,7 +410,9 @@ class TelegramAdapter {
   private readonly app: ChatRuntimeApp;
   private readonly config: Record<string, any>;
   private readonly logger: any;
-  private readonly workingCopy: TelegramWorkingCopy;
+  private readonly workingCopy: ReturnType<
+    typeof resolveChatRuntimeWorkingCopy
+  >;
   private readonly cacheDir: string;
   private readonly cursorPath: string;
   private pollAbort: AbortController | null = null;
@@ -508,7 +444,7 @@ class TelegramAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:telegram", logger);
-    this.workingCopy = resolveTelegramWorkingCopy(app?.agentDir);
+    this.workingCopy = resolveChatRuntimeWorkingCopy(app?.agentDir);
     this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "telegram");
     this.botCacheKey =
       safeString(config?.token)
@@ -1273,14 +1209,8 @@ class TelegramAdapter {
     const value = safeString(text).trim();
     if (!value) return false;
     const copy =
-      this.workingCopy || resolveTelegramWorkingCopy(this.app?.agentDir);
-    const candidates = [
-      copy.thinkingInitial,
-      ...(Array.isArray(copy.prompts) ? copy.prompts : []),
-    ]
-      .map((item) => safeString(item).trim())
-      .filter(Boolean);
-    return candidates.includes(value) || isEditableWorkingText(value);
+      this.workingCopy || resolveChatRuntimeWorkingCopy(this.app?.agentDir);
+    return copy.progressTexts.includes(value) || isEditableWorkingText(value);
   }
 
   private async deleteVisibleWorkingMessage(chatId: string) {
@@ -1619,7 +1549,7 @@ class TelegramAdapter {
   }
 
   private workingMessageText(context: any) {
-    return editableWorkingText(context?.tick);
+    return editableWorkingText(context?.tick, this.workingCopy.frames);
   }
 
   async tickTypingIndicator(context: any) {
@@ -2380,7 +2310,11 @@ class OneBotAdapter {
       : "";
     await this.callAction("send_private_msg", {
       user_id: targetId,
-      message: `${reply}${escapeOneBotText("Working...")}`,
+      message: `${reply}${escapeOneBotText(
+        randomWorkingText(
+          resolveChatRuntimeWorkingCopy(this.app?.agentDir).frames,
+        ),
+      )}`,
       auto_escape: false,
     });
     return true;

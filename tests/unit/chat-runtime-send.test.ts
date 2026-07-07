@@ -202,6 +202,62 @@ test("discord adapter edits one progress message from Working through interim th
   });
 });
 
+test("discord adapter uses configured language working frames", async () => {
+  await withTempDir(async (agentDir) => {
+    await fs.writeFile(
+      path.join(agentDir, "settings.json"),
+      JSON.stringify({ language: "zh_CN" }),
+    );
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    const channel = {
+      send: async (payload: any) => {
+        const id = String(messages.size + 1);
+        const message = {
+          id,
+          payload,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            message.payload = nextPayload;
+            return message;
+          },
+        };
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => calls.push({ method: "delete", id }),
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C1", tick: 0 });
+    await editable.tick({ chatId: "C1", tick: 1 });
+    const final = await app.bots[0].sendMessage("C1", [h.text("done")]);
+
+    assert.deepEqual(final, ["2"]);
+    assert.equal(
+      calls[0].payload.content,
+      "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
+    );
+    assert.equal(
+      calls[1].payload.content,
+      "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
+    );
+    assert.equal(calls[3].payload.content, "done");
+  });
+});
+
 test("discord adapter sends a new Working message when the cached progress is no longer editable", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -530,6 +586,40 @@ test("telegram adapter edits one progress message from Working through interim t
     assert.equal(calls[2].payload.text, "… checking");
     assert.equal(calls[3].payload.message_id, 1);
     assert.equal(calls[4].payload.text, "done");
+  });
+});
+
+test("telegram adapter uses custom working frame list from i18n", async () => {
+  await withTempDir(async (agentDir) => {
+    await fs.writeFile(
+      path.join(agentDir, "i18n.json"),
+      JSON.stringify({
+        chat: { runtime: { working: { frames: ["Loop A", "Loop B"] } } },
+      }),
+    );
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      if (method === "sendMessage") return { message_id: String(calls.length) };
+      return { message_id: payload?.message_id };
+    };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "456", tick: 0 });
+    await editable.tick({ chatId: "456", tick: 1 });
+    const final = await app.bots[0].sendMessage("456", [h.text("done")]);
+
+    assert.deepEqual(final, ["4"]);
+    assert.equal(calls[0].payload.text, "Loop A");
+    assert.equal(calls[1].payload.text, "Loop B");
+    assert.equal(calls[3].payload.text, "done");
   });
 });
 
@@ -1715,16 +1805,56 @@ test("onebot private working indicator is a one-shot marker", async () => {
       true,
     );
 
-    assert.deepEqual(calls, [
-      {
-        action: "send_private_msg",
-        params: {
-          user_id: 2,
-          message: "[CQ:reply,id=m1]Working...",
-          auto_escape: false,
-        },
-      },
-    ]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].action, "send_private_msg");
+    assert.equal(calls[0].params.user_id, 2);
+    assert.equal(calls[0].params.auto_escape, false);
+    assert.ok(
+      ["Working...", "Working", "Working.", "Working.."].some(
+        (text) => calls[0].params.message === `[CQ:reply,id=m1]${text}`,
+      ),
+    );
+  });
+});
+
+test("onebot private marker picks a localized working frame", async () => {
+  await withTempDir(async (agentDir) => {
+    await fs.writeFile(
+      path.join(agentDir, "settings.json"),
+      JSON.stringify({ language: "zh_CN" }),
+    );
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { endpoint: "ws://127.0.0.1:1" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      return { message_id: "notice-1" };
+    };
+
+    const [indicator] = app.bots[0].getWorkingIndicators({
+      chatId: "private:2",
+    });
+
+    assert.equal(
+      await indicator.start({ chatId: "private:2", messageId: "m1" }),
+      true,
+    );
+
+    assert.equal(calls.length, 1);
+    assert.ok(
+      [
+        "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
+        "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
+        "\u7ec6\u8282\u5904\u7406\u4e2d... (\u3064\u03c9`\uff61)",
+        "\u4fe1\u606f\u68b3\u7406\u4e2d (\uff89\u25d5\u30ee\u25d5)\uff89*:\uff65\uff9f\u2727",
+        "\u9a6c\u4e0a\u5c31\u597d... (\u0e07 \u2022\u0300_\u2022\u0301)\u0e07",
+        "\u7ee7\u7eed\u5de5\u4f5c\u4e2d (\uff40\u30fb\u03c9\u30fb\u00b4)",
+      ].some((text) => calls[0].params.message === `[CQ:reply,id=m1]${text}`),
+    );
   });
 });
 

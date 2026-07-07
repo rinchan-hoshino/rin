@@ -1300,6 +1300,7 @@ export class ChatController {
         | "command_ack"
         | "generic";
       postDelivery?: any;
+      coalesceWithWorkingMessage?: boolean;
       requireDelivery?: boolean;
       waitForDeliveryMs?: number;
       waitUntilDeliverySettled?: boolean;
@@ -1666,10 +1667,16 @@ export class ChatController {
           type: "text_delivery",
           createdAt: nowIso(),
           chatKey: this.chatKey,
+          deliveryKind: "passive_notice",
+          coalesceWithWorkingMessage: true,
           text: trimmed,
           ...this.currentConversationSessionPayload(),
         },
-        { deliveryKind: "passive_notice", waitForDeliveryMs: 1000 },
+        {
+          deliveryKind: "passive_notice",
+          coalesceWithWorkingMessage: true,
+          waitForDeliveryMs: 1000,
+        },
       );
       const messageId = safeString(messageIds?.[0]).trim();
       if (messageId) {

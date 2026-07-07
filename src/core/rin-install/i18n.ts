@@ -45,6 +45,9 @@ type ChatCommandDescriptions = Record<
 >;
 
 type ChatRuntimeCopy = {
+  working: {
+    frames: string[];
+  };
   telegramWorking: {
     workingInitial: string;
     workingSuffix: string;
@@ -283,6 +286,9 @@ const INSTALLER_DISPLAY_COPY = {
       usage: "Show usage and quota status",
     },
     chatRuntime: {
+      working: {
+        frames: ["Working...", "Working", "Working.", "Working.."],
+      },
       telegramWorking: {
         workingInitial: "Working...",
         workingSuffix: "Working",
@@ -653,6 +659,16 @@ const INSTALLER_DISPLAY_COPY = {
       usage: "显示用量和配额状态",
     },
     chatRuntime: {
+      working: {
+        frames: [
+          "工作中... (๑•̀ㅂ•́)و✧",
+          "整理中～ (｡･ω･｡)",
+          "细节处理中... (つω`｡)",
+          "信息梳理中 (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧",
+          "马上就好... (ง •̀_•́)ง",
+          "继续工作中 (｀・ω・´)",
+        ],
+      },
       telegramWorking: {
         workingInitial: "工作中...",
         workingSuffix: "工作中",

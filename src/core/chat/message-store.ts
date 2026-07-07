@@ -24,6 +24,13 @@ export type StoredChatMessage = {
   sessionFile?: string;
   acceptedAt?: string;
   processedAt?: string;
+  deliveryKind?:
+    | "final"
+    | "interim"
+    | "passive_notice"
+    | "command_ack"
+    | "error"
+    | "generic";
   lastReceivedAt?: string;
   duplicateCount?: number;
   updatedAt?: string;

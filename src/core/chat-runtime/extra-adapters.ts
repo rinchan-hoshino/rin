@@ -21,8 +21,10 @@ import {
   prepareOutboundNodes,
   readBinaryFromNode,
   renderMarkdownFromNodes,
+  randomWorkingText,
   renderPlainTextFromNodes,
   renderRichDeliveryErrorPlaceholder,
+  resolveChatRuntimeWorkingCopy,
   safeString,
   sleep,
   splitPlainText,
@@ -166,6 +168,9 @@ type EditableTextMessageGroupOptions = {
   cacheScope: string;
   maxTextLength: number;
   workingText?: string;
+  agentDir?: string;
+  workingFrames?: string[];
+  progressTexts?: string[];
   sendText: (input: {
     chatId: string;
     text: string;
@@ -204,9 +209,25 @@ class EditableTextMessageGroup {
   private readonly operations = new Map<string, Promise<unknown>>();
   private readonly finalizing = new Set<string>();
   private readonly workingText: string;
+  private readonly workingFrames: string[];
+  private readonly progressTexts: string[];
 
   constructor(private readonly options: EditableTextMessageGroupOptions) {
-    this.workingText = safeString(options.workingText).trim() || "Working...";
+    const copy = resolveChatRuntimeWorkingCopy(options.agentDir);
+    this.workingFrames = normalizeDeliveredIds(
+      options.workingFrames?.length ? options.workingFrames : copy.frames,
+    );
+    this.workingText =
+      safeString(options.workingText).trim() ||
+      this.workingFrames[0] ||
+      "Working...";
+    this.progressTexts = normalizeDeliveredIds([
+      this.workingText,
+      ...this.workingFrames,
+      ...(options.progressTexts?.length
+        ? options.progressTexts
+        : copy.progressTexts),
+    ]);
     ensureDir(this.options.cacheDir);
   }
 
@@ -219,7 +240,7 @@ class EditableTextMessageGroup {
         if (!chatId) return false;
         const ids = await this.updateText({
           chatId,
-          text: editableWorkingText(context?.tick),
+          text: editableWorkingText(context?.tick, this.workingFrames),
           kind: "working",
         });
         return ids.length > 0;
@@ -408,7 +429,7 @@ class EditableTextMessageGroup {
           currentId &&
           currentText &&
           currentText !== this.workingText &&
-          !isEditableWorkingText(currentText)
+          !isEditableWorkingText(currentText, this.progressTexts)
         ) {
           return [currentId];
         }
@@ -487,7 +508,9 @@ class EditableTextMessageGroup {
       kind === "todo" ||
       kind === "working" ||
       kind === "interim" ||
-      (!kind && (text === this.workingText || isEditableWorkingText(text)));
+      (!kind &&
+        (text === this.workingText ||
+          isEditableWorkingText(text, this.progressTexts)));
     if (!messageIds.length || !isProgressArtifact) return false;
     for (const messageId of messageIds) {
       try {
@@ -833,6 +856,7 @@ export class DiscordAdapter {
       cacheDir: this.cacheDir,
       cacheScope: sanitizeCacheScope(config?.token, "default"),
       maxTextLength: DISCORD_MAX_TEXT_LENGTH,
+      agentDir: app?.agentDir,
       sendText: async ({ chatId, text, replyToMessageId }) => {
         const channel = await this.fetchChannel(chatId);
         if (!channel?.send)
@@ -1277,7 +1301,9 @@ export class DiscordAdapter {
     const responseBody = {
       type: DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE_WITH_SOURCE,
       data: {
-        content: "Working...",
+        content: randomWorkingText(
+          resolveChatRuntimeWorkingCopy(this.app?.agentDir).frames,
+        ),
         flags: DISCORD_MESSAGE_FLAG_EPHEMERAL,
       },
     };
@@ -1541,6 +1567,7 @@ export class SlackAdapter {
         "default",
       ),
       maxTextLength: SLACK_MAX_TEXT_LENGTH,
+      agentDir: app?.agentDir,
       repeatReplyToMessageId: true,
       sendText: async ({ chatId, text, replyToMessageId }) =>
         await this.postText(chatId, text, replyToMessageId),
@@ -2454,6 +2481,7 @@ export class LarkAdapter {
       cacheDir: this.cacheDir,
       cacheScope: sanitizeCacheScope(config?.appId, "default"),
       maxTextLength: 30_000,
+      agentDir: app?.agentDir,
       sendText: async ({ chatId, text, replyToMessageId }) =>
         await this.sendPostText(chatId, text, replyToMessageId),
       editText: async ({ messageId, text }) => {

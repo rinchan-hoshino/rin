@@ -622,6 +622,186 @@ function migrateInstalledChatSessionFilesToManaged(
   };
 }
 
+function normalizeStringList(value: unknown) {
+  return Array.isArray(value)
+    ? [...new Set(value.map((item) => safeString(item).trim()).filter(Boolean))]
+    : [];
+}
+
+function getObjectAtPath(root: any, keys: string[]) {
+  let current = root;
+  for (const key of keys) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return undefined;
+    }
+    current = current[key];
+  }
+  return current;
+}
+
+function ensureObjectAtPath(root: Record<string, unknown>, keys: string[]) {
+  let current: Record<string, unknown> = root;
+  for (const key of keys) {
+    const next = current[key];
+    if (!next || typeof next !== "object" || Array.isArray(next)) {
+      current[key] = {};
+    }
+    current = current[key] as Record<string, unknown>;
+  }
+  return current;
+}
+
+function removeKeyAtPath(root: any, keys: string[]) {
+  const parent = getObjectAtPath(root, keys.slice(0, -1));
+  if (!parent || typeof parent !== "object" || Array.isArray(parent)) return;
+  delete parent[keys[keys.length - 1]];
+}
+
+function legacyTelegramFramesFromI18n(value: any) {
+  const initial = safeString(
+    value?.workingInitial || value?.thinkingInitial,
+  ).trim();
+  const suffix = safeString(
+    value?.workingSuffix || value?.thinkingSuffix,
+  ).trim();
+  return normalizeStringList([
+    initial,
+    suffix,
+    suffix ? `${suffix}.` : "",
+    suffix ? `${suffix}..` : "",
+  ]);
+}
+
+function migrateInstalledChatWorkingFramesI18n(
+  installDir: string,
+  fileOps: InstallMigrationFileOps,
+) {
+  const root = path.resolve(String(installDir || "").trim() || ".");
+  const i18nPath = path.join(root, "i18n.json");
+  const markerPath = path.join(
+    root,
+    "data",
+    "migrations",
+    "chat-working-frames-i18n-v1.json",
+  );
+  const marker = fileOps.readJsonObject(markerPath);
+  if (marker) return null;
+  const raw = fileOps.readJsonObject(i18nPath);
+  const scanned = raw ? 1 : 0;
+  if (!raw) return null;
+  const existing = normalizeStringList(
+    getObjectAtPath(raw, ["chat", "runtime", "working", "frames"]),
+  );
+  const legacyFrames = normalizeStringList(
+    getObjectAtPath(raw, ["chatRuntime", "working", "frames"]),
+  );
+  const telegramFrames = legacyTelegramFramesFromI18n(
+    getObjectAtPath(raw, ["chatRuntime", "telegramWorking"]),
+  );
+  const frames = existing.length
+    ? existing
+    : legacyFrames.length
+      ? legacyFrames
+      : telegramFrames;
+  removeKeyAtPath(raw, ["chatRuntime"]);
+  if (!frames.length) return null;
+  const working = ensureObjectAtPath(raw, ["chat", "runtime", "working"]);
+  working.frames = frames;
+  fileOps.writeJsonObject(i18nPath, raw);
+  fileOps.writeJsonObject(markerPath, {
+    id: "chat-working-frames-i18n-v1",
+    appliedAt: nowIso(),
+    scanned,
+    migrated: 1,
+  });
+  return {
+    id: "chat-working-frames-i18n-v1",
+    markerPath,
+    alreadyApplied: false,
+    skipped: false,
+    scanned,
+    migrated: 1,
+    migratedFiles: [i18nPath],
+  };
+}
+
+function listJsonFilesRecursive(root: string) {
+  const output: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      const current = path.join(root, entry.name);
+      if (entry.isDirectory()) output.push(...listJsonFilesRecursive(current));
+      else if (entry.isFile() && entry.name.endsWith(".json"))
+        output.push(current);
+    }
+  } catch {}
+  return output;
+}
+
+function migrateAssistantDeliveryKindsFromOutboxHistory(
+  installDir: string,
+  fileOps: InstallMigrationFileOps,
+) {
+  const root = path.resolve(String(installDir || "").trim() || ".");
+  const markerPath = path.join(
+    root,
+    "data",
+    "migrations",
+    "assistant-delivery-kind-v1.json",
+  );
+  const marker = fileOps.readJsonObject(markerPath);
+  if (marker) return null;
+  const recordsDir = chatDataPath(root, "message-store", "records");
+  const outboxDir = path.join(
+    root,
+    "data",
+    "chat",
+    "outbox",
+    "history",
+    "delivered",
+  );
+  const deliveryById = new Map<string, string>();
+  let scanned = 0;
+  for (const filePath of listJsonFilesRecursive(outboxDir)) {
+    const item = fileOps.readJsonObject(filePath);
+    scanned += 1;
+    const deliveryKind = safeString(
+      item?.deliveryKind || (item?.payload as any)?.deliveryKind,
+    ).trim();
+    if (!deliveryKind) continue;
+    for (const id of normalizeStringList((item as any)?.deliveryResult)) {
+      deliveryById.set(id, deliveryKind);
+    }
+  }
+  const migratedFiles: string[] = [];
+  for (const filePath of listJsonFilesRecursive(recordsDir)) {
+    const record = fileOps.readJsonObject(filePath);
+    if (!record || record.role !== "assistant") continue;
+    if (safeString(record.deliveryKind).trim()) continue;
+    const deliveryKind = deliveryById.get(safeString(record.messageId).trim());
+    if (!deliveryKind) continue;
+    record.deliveryKind = deliveryKind;
+    fileOps.writeJsonObject(filePath, record);
+    migratedFiles.push(filePath);
+  }
+  if (migratedFiles.length === 0) return null;
+  fileOps.writeJsonObject(markerPath, {
+    id: "assistant-delivery-kind-v1",
+    appliedAt: nowIso(),
+    scanned,
+    migrated: migratedFiles.length,
+  });
+  return {
+    id: "assistant-delivery-kind-v1",
+    markerPath,
+    alreadyApplied: false,
+    skipped: migratedFiles.length === 0,
+    scanned,
+    migrated: migratedFiles.length,
+    migratedFiles,
+  };
+}
+
 function removeInstalledBrowseRuntime(
   installDir: string,
   fileOps: InstallMigrationFileOps,
@@ -655,9 +835,11 @@ export function applyInstallUpgradeMigrations(
   return [
     migrateInstalledDataLayout(options.installDir, fileOps),
     removeInstalledBrowseRuntime(options.installDir, fileOps),
+    migrateInstalledChatWorkingFramesI18n(options.installDir, fileOps),
+    migrateAssistantDeliveryKindsFromOutboxHistory(options.installDir, fileOps),
     rewriteInstalledChatStateSessionFileKeys(options.installDir, fileOps),
     migrateInstalledChatSessionFilesToManaged(options.installDir, fileOps),
-  ];
+  ].filter(Boolean);
 }
 
 function normalizeInstallerRecord(value: unknown) {

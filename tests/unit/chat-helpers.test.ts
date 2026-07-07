@@ -196,7 +196,7 @@ test("chat chat helpers synthesize text elements only when upstream omitted elem
   );
 });
 
-test("chat chat helpers treat any delivered assistant text as a replay boundary", async () => {
+test("chat chat helpers treat final assistant delivery as a replay boundary", async () => {
   await withTempDir(async (agentDir) => {
     const chatKey = "telegram/1:2";
     const base = {
@@ -219,6 +219,7 @@ test("chat chat helpers treat any delivered assistant text as a replay boundary"
       role: "assistant",
       replyToMessageId: "m-user",
       text: "I will check",
+      deliveryKind: "final",
       processedAt: new Date().toISOString(),
     });
 
@@ -261,6 +262,7 @@ test("chat chat helpers persist duplicate inbound messages without rewriting fir
       text: "checked",
       rawContent: "checked",
       strippedContent: "checked",
+      deliveryKind: "final",
     });
 
     helpers.persistInboundMessage(

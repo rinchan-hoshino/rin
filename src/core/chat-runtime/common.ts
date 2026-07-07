@@ -15,6 +15,8 @@ import {
   renderChatNodesTelegramHtml,
   type RenderChatNodesOptions,
 } from "../chat/rich-text.js";
+import { createRinI18n, rinI18nPath } from "../i18n.js";
+import { readConfiguredLanguageFromSettings } from "../language.js";
 import { ensureDir } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
@@ -32,22 +34,104 @@ export {
   sleep,
 };
 
-const EDITABLE_WORKING_FRAMES = [
+const DEFAULT_EDITABLE_WORKING_FRAMES = [
   "Working...",
   "Working",
   "Working.",
   "Working..",
 ];
 
-export function editableWorkingText(tick: unknown) {
-  const index =
-    Math.abs(Math.floor(Number(tick) || 0)) % EDITABLE_WORKING_FRAMES.length;
-  return EDITABLE_WORKING_FRAMES[index] || "Working...";
+type ChatRuntimeWorkingCopy = {
+  frames: string[];
+  progressTexts: string[];
+};
+
+function uniqueStrings(values: unknown[]) {
+  const output: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const text = safeString(value).trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    output.push(text);
+  }
+  return output;
 }
 
-export function isEditableWorkingText(text: unknown) {
+function normalizeWorkingFrames(value: unknown) {
+  return uniqueStrings(Array.isArray(value) ? value : [value]);
+}
+
+function readRawRinI18n(agentDir: string) {
+  const root = safeString(agentDir).trim();
+  if (!root) return {};
+  try {
+    return JSON.parse(fs.readFileSync(rinI18nPath(root), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function valueAtPath(source: any, path: string[]) {
+  let current = source;
+  for (const key of path) {
+    if (!current || typeof current !== "object") return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+export function resolveChatRuntimeWorkingCopy(
+  agentDir?: string,
+): ChatRuntimeWorkingCopy {
+  const root = safeString(agentDir).trim();
+  const baseRuntime =
+    (createRinI18n(readConfiguredLanguageFromSettings(root)) as any)
+      .chatRuntime || {};
+  const raw = readRawRinI18n(root);
+  const configuredFrames = normalizeWorkingFrames(
+    valueAtPath(raw, ["chat", "runtime", "working", "frames"]),
+  );
+  const baseFrames = normalizeWorkingFrames(baseRuntime?.working?.frames);
+  const frames = configuredFrames.length
+    ? configuredFrames
+    : baseFrames.length
+      ? baseFrames
+      : DEFAULT_EDITABLE_WORKING_FRAMES;
+  return {
+    frames,
+    progressTexts: uniqueStrings([
+      ...frames,
+      ...DEFAULT_EDITABLE_WORKING_FRAMES,
+    ]),
+  };
+}
+
+export function editableWorkingText(tick: unknown, frames?: unknown) {
+  const options = normalizeWorkingFrames(frames);
+  const resolvedFrames = options.length
+    ? options
+    : DEFAULT_EDITABLE_WORKING_FRAMES;
+  const index = Math.abs(Math.floor(Number(tick) || 0)) % resolvedFrames.length;
+  return resolvedFrames[index] || DEFAULT_EDITABLE_WORKING_FRAMES[0];
+}
+
+export function randomWorkingText(frames?: unknown) {
+  const options = normalizeWorkingFrames(frames);
+  const resolvedFrames = options.length
+    ? options
+    : DEFAULT_EDITABLE_WORKING_FRAMES;
+  const index = Math.floor(Math.random() * resolvedFrames.length);
+  return resolvedFrames[index] || DEFAULT_EDITABLE_WORKING_FRAMES[0];
+}
+
+export function isEditableWorkingText(text: unknown, frames?: unknown) {
   const value = safeString(text).trim();
-  return Boolean(value && EDITABLE_WORKING_FRAMES.includes(value));
+  const options = normalizeWorkingFrames(frames);
+  const resolvedFrames = options.length
+    ? options
+    : DEFAULT_EDITABLE_WORKING_FRAMES;
+  return Boolean(value && resolvedFrames.includes(value));
 }
 
 export function extensionFromMimeType(mimeType: string) {

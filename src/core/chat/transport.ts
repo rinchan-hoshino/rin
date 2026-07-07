@@ -441,6 +441,7 @@ function resolveSessionContext(
 type DeliveredAssistantRecordInput = {
   chatKey: string;
   deliveryResult: string[];
+  deliveryKind?: string;
   text?: string;
   rawContent?: string;
   replyToMessageId?: string;
@@ -478,6 +479,7 @@ export function recordDeliveredAssistantMessages(
         )
       : {};
   const now = nowIso();
+  const deliveryKind = safeString(input.deliveryKind).trim() || "final";
 
   for (const messageId of messageIds) {
     saveChatMessage(agentDir, {
@@ -486,6 +488,7 @@ export function recordDeliveredAssistantMessages(
       replyToMessageId: safeString(input.replyToMessageId).trim() || undefined,
       sessionFile: session.sessionFile,
       processedAt: now,
+      deliveryKind: deliveryKind as any,
       chatKey,
       platform: parsed.platform,
       botId: parsed.botId || undefined,
@@ -540,6 +543,7 @@ function finalizeDeliveredAssistantOutput(
     replyToMessageId,
     sessionFile: session.sessionFile,
     sessionBinding: input.sessionBinding,
+    deliveryKind: input.deliveryKind,
   });
 }
 
@@ -750,6 +754,7 @@ export function sendOutboxPayload(
             replyToMessageId,
             sessionFile: session.sessionFile,
             sessionBinding: payload.sessionBinding,
+            deliveryKind,
           }),
         ),
         chatOutboxPayloadUsesAsyncDispatch(payload)
@@ -784,8 +789,9 @@ export function sendOutboxPayload(
       ).filter(Boolean);
       if (!nodes.length) throw new Error("chat_outbox_empty_message");
 
+      const deliveryKind = safeString(payload.deliveryKind).trim() || "final";
       const chatDelivery = sendChatNodes(app, chatKey, nodes, {
-        deliveryKind: safeString(payload.deliveryKind).trim() || "final",
+        deliveryKind,
         ...(payload.coalesceWithWorkingMessage
           ? { coalesceWithWorkingMessage: true }
           : {}),
@@ -799,6 +805,7 @@ export function sendOutboxPayload(
         deliveryResult,
         sessionFile: session.sessionFile,
         sessionBinding: payload.sessionBinding,
+        deliveryKind,
         ...buildPartsDeliveryRecord(rawParts),
       });
     } catch (error) {

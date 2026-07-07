@@ -2498,6 +2498,7 @@ test("chat main omits reply metadata when quoting the latest assistant message",
         messageId: "m-latest-assistant",
         role: "assistant",
         receivedAt: new Date().toISOString(),
+        deliveryKind: "final",
         text: "latest assistant reply",
         sessionFile: replySessionFile,
       });

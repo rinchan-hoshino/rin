@@ -346,6 +346,54 @@ test("chat inbox restores orphaned accepted messages without a reply boundary", 
   ]);
 });
 
+test("chat inbox restores orphaned accepted messages after legacy interim replies", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const chatKey = "discord/1:room";
+  const acceptedAt = new Date("2026-07-01T05:04:54.000Z").toISOString();
+
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "discord",
+    botId: "1",
+    chatId: "room",
+    chatType: "group",
+    messageId: "lost-after-legacy-interim",
+    role: "user",
+    receivedAt: new Date("2026-07-01T05:04:30.000Z").toISOString(),
+    userId: "owner",
+    text: "push and update",
+    strippedContent: "push and update",
+    elements: [{ type: "text", attrs: { content: "push and update" } }],
+    acceptedAt,
+    sessionFile: "managed/chat/recover.jsonl",
+  });
+  saveChatMessage(agentDir, {
+    chatKey,
+    platform: "discord",
+    botId: "1",
+    chatId: "room",
+    chatType: "group",
+    messageId: "assistant-legacy-interim",
+    role: "assistant",
+    replyToMessageId: "lost-after-legacy-interim",
+    receivedAt: new Date("2026-07-01T05:04:50.000Z").toISOString(),
+    processedAt: new Date("2026-07-01T05:04:50.000Z").toISOString(),
+    text: "\u00b7\u00b7\u00b7 \u4e3b\u4eba\uff0c\u6b63\u5728\u66f4\u65b0 runtime\u3002",
+    rawContent:
+      "\u00b7\u00b7\u00b7 \u4e3b\u4eba\uff0c\u6b63\u5728\u66f4\u65b0 runtime\u3002",
+  });
+
+  const restored = inbox.restoreOrphanedAcceptedChatInboxItems(agentDir, {
+    nowMs: Date.parse("2026-07-01T05:05:10.000Z"),
+  });
+
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].messageId, "lost-after-legacy-interim");
+  const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);
+  const item = inbox.readChatInboxItem(pendingPath);
+  assert.equal(item.messageId, "lost-after-legacy-interim");
+});
+
 test("chat inbox restores multiple accepted unprocessed orphaned messages", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const chatKey = "discord/1:room";

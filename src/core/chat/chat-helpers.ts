@@ -238,10 +238,7 @@ function compareChatMessageOrder(left: any, right: any) {
 }
 
 function isSubstantiveAssistantChatMessage(record: any) {
-  return (
-    record?.role === "assistant" &&
-    isSubstantiveAssistantChatText(record.text || record.rawContent)
-  );
+  return record?.role === "assistant" && isSubstantiveAssistantDelivery(record);
 }
 
 export function isReplyToLatestAssistantMessage(
@@ -264,14 +261,9 @@ export function isReplyToLatestAssistantMessage(
   );
 }
 
-function isSubstantiveAssistantChatText(text: unknown) {
-  const value = safeString(text).trim();
-  return Boolean(
-    value &&
-    value !== CHAT_WORKING_NOTICE_TEXT &&
-    value !== CHAT_INTERIM_REPLY_PREFIX.trim() &&
-    !value.startsWith(CHAT_INTERIM_REPLY_PREFIX),
-  );
+function isSubstantiveAssistantDelivery(item: { deliveryKind?: string }) {
+  const deliveryKind = safeString(item.deliveryKind).trim();
+  return deliveryKind === "final" || deliveryKind === "generic";
 }
 
 export function hasDeliveredAssistantReplyForMessage(
@@ -282,7 +274,7 @@ export function hasDeliveredAssistantReplyForMessage(
   return listChatMessagesByReplyTo(agentDir, chatKey, messageId).some(
     (item) =>
       item.role === "assistant" &&
-      isSubstantiveAssistantChatText(item.text || item.rawContent) &&
+      isSubstantiveAssistantDelivery(item) &&
       Boolean(safeString(item.processedAt).trim()),
   );
 }

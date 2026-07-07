@@ -959,7 +959,11 @@ test("chat controller sends compaction start notice and reacts on that notice", 
       .map((node) => node?.attrs?.content || node?.attrs?.id || "")
       .filter(Boolean)
       .join(" ");
-    deliveries.push({ text, kind: options?.deliveryKind });
+    deliveries.push({
+      text,
+      kind: options?.deliveryKind,
+      coalesce: Boolean(options?.coalesceWithWorkingMessage),
+    });
     return [`m-out-${nextMessageId++}`];
   };
 
@@ -972,7 +976,7 @@ test("chat controller sends compaction start notice and reacts on that notice", 
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.compactionTurn?.incomingMessageId, "m-out-1");
   assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "passive_notice" },
+    { text: "Compacting...", kind: "passive_notice", coalesce: true },
   ]);
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
   assert.deepEqual(reactions, [["create", "2", "m-out-1", "🤔"]]);
@@ -995,8 +999,12 @@ test("chat controller sends compaction start notice and reacts on that notice", 
     ["delete", "2", "m-out-1", "🤔", "1"],
   ]);
   assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "passive_notice" },
-    { text: "Compacted from 108,642 tokens", kind: "passive_notice" },
+    { text: "Compacting...", kind: "passive_notice", coalesce: true },
+    {
+      text: "Compacted from 108,642 tokens",
+      kind: "passive_notice",
+      coalesce: false,
+    },
   ]);
   assert.equal(
     getChatMessage(controller.agentDir, "telegram/1:2", "m-out-1")?.sessionFile,
