@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -109,6 +110,105 @@ test("chat main consumes inbound localized help messages through the inbox path 
         timeout: 15000,
       },
     );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("telegram topic commands use the thread-scoped chat key", async () => {
+  const tempRoot = os.tmpdir();
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-topic-command-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = String.raw`
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const seen = [];
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      controllerMod.ChatController.prototype.runCommand = async function (commandLine, replyToMessageId, incomingMessageId, sessionFile, promptMeta) {
+        seen.push({ commandLine, chatKey: this.chatKey, promptMeta });
+        return { handled: true, text: "ok" };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-1"];
+        },
+      });
+
+      app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "-100123",
+        guildId: "-100123",
+        userId: "owner-1",
+        messageId: "m-topic-command",
+        messageThreadId: "193",
+        chatThreadId: "193",
+        isTopicMessage: true,
+        isDirect: false,
+        content: "/usage",
+        stripped: { content: "/usage" },
+        elements: [h.createChatRuntimeH().text("/usage")],
+      });
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && seen.length < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const rows = storeMod
+        .listChatMessages(agentDir)
+        .filter((item) => item.messageId === "m-topic-command");
+      console.log(JSON.stringify({ seen, rows }));
+      process.exit(0);
+    `;
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+    const records = stdout
+      .trim()
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("{"));
+    const result = JSON.parse(records.at(-1) || "{}");
+    assert.equal(result.seen?.length, 1);
+    assert.equal(result.seen[0].chatKey, "telegram/1:-100123?thread=193");
+    assert.equal(
+      result.seen[0].promptMeta?.chatKey,
+      "telegram/1:-100123?thread=193",
+    );
+    assert.equal(result.rows?.[0]?.chatKey, "telegram/1:-100123?thread=193");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

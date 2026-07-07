@@ -1414,6 +1414,11 @@ class TelegramAdapter {
     content: any,
     options: Record<string, any> = {},
   ) {
+    const target = splitTelegramChatThread(
+      chatId,
+      options?.messageThreadId || options?.threadId,
+    );
+    const deliveryChatId = target.scopedChatId || chatId;
     const deliveryKind = safeString(options?.deliveryKind).trim() || "final";
     const isFinalDelivery = deliveryKind === "final";
     const { work, replyToMessageId } = prepareOutboundNodes(content);
@@ -1424,7 +1429,7 @@ class TelegramAdapter {
     let finalizedWorkingMessage = false;
     const ensureFinalProgressCleared = async () => {
       if (!isFinalDelivery || finalizedWorkingMessage) return;
-      await this.deleteVisibleWorkingMessage(chatId);
+      await this.deleteVisibleWorkingMessage(deliveryChatId);
       finalizedWorkingMessage = true;
     };
     const recordFailure = async (error: unknown, placeholder: string) => {
@@ -1434,7 +1439,7 @@ class TelegramAdapter {
       );
       await ensureFinalProgressCleared();
       const placeholderId = await this.sendFailurePlaceholder(
-        chatId,
+        deliveryChatId,
         placeholder,
         firstReply,
       );
@@ -1454,7 +1459,7 @@ class TelegramAdapter {
           const messageId = await this.sendBinaryMessage(
             media.method as any,
             media.field as any,
-            chatId,
+            deliveryChatId,
             node,
             "",
             firstReply,
@@ -1491,15 +1496,15 @@ class TelegramAdapter {
           const deliveryKey =
             deliveryKind === "passive_notice"
               ? this.workingMessageKey(
-                  chatId,
+                  deliveryChatId,
                   coalesceWithWorkingMessage ? "chat" : "passive_notice",
                 )
-              : this.workingMessageKey(chatId, "chat");
+              : this.workingMessageKey(deliveryChatId, "chat");
           const shouldEditWorkingMessage =
             delivered.length === 0 && !isFinalDelivery;
           const messageIds = shouldEditWorkingMessage
             ? await this.updateWorkingMessageGroup({
-                chatId,
+                chatId: deliveryChatId,
                 textChunks,
                 replyToMessageId: firstReply,
                 preferredMessageId: firstReply,
@@ -1524,7 +1529,7 @@ class TelegramAdapter {
             await ensureFinalProgressCleared();
             for (const textChunk of textChunks) {
               const messageId = await this.sendText(
-                chatId,
+                deliveryChatId,
                 textChunk,
                 firstReply,
                 "HTML",
@@ -1541,7 +1546,7 @@ class TelegramAdapter {
       cursor = nextCursor;
     }
     if (isFinalDelivery && !finalizedWorkingMessage) {
-      await this.deleteVisibleWorkingMessage(chatId);
+      await this.deleteVisibleWorkingMessage(deliveryChatId);
     }
     if (delivered.length) return delivered;
     if (failures.length) throw failures[0];
