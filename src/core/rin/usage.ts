@@ -737,34 +737,69 @@ export async function loadCodexSubscriptionStatus(
   return { configured, accountName, accountId, plan, windows, credits, error };
 }
 
-function renderProviderQuotas(statuses?: ProviderQuotaStatus[]) {
-  if (!statuses) return "accounts & quota\n  not checked";
-  if (!statuses.length) return "accounts & quota\n  no configured providers";
-  const lines = [`accounts & quota`];
+function renderProviderQuotaImageLines(statuses?: ProviderQuotaStatus[]) {
+  if (!statuses) return ["ACCOUNTS QUOTA", "NOT CHECKED"];
+  if (!statuses.length) return ["ACCOUNTS QUOTA", "NO CONFIGURED PROVIDERS"];
+  const lines = ["ACCOUNTS QUOTA"];
   for (const status of statuses) {
-    const account = status.accountName || status.accountId || "-";
-    const plan = status.plan ? ` (${status.plan})` : "";
-    lines.push(`  ${status.label}  ${account}${plan}`);
+    const plan = status.plan ? ` ${status.plan}` : "";
+    lines.push(`${status.label}${plan}`);
     if (status.windows.length) {
       for (const window of status.windows) {
         const label =
           window.name === "five_hour"
-            ? "5-hour"
+            ? "5-HOUR"
             : window.name === "seven_day"
-              ? "7-day"
-              : window.name;
+              ? "7-DAY"
+              : window.name.replace(/_/g, "-").toUpperCase();
+        const percent = Number.isFinite(window.percentLeft)
+          ? `${Math.round(Number(window.percentLeft))}%`
+          : "--%";
         lines.push(
-          `    ${label.padEnd(8)} ${renderBar(window.percentLeft)} left · reset ${formatReportTime(window.resetAt)}`,
+          `${label} ${percent} LEFT RESET ${formatReportTime(window.resetAt)}`,
         );
       }
     } else {
+      lines.push(`QUOTA UNAVAILABLE${status.error ? ` ${status.error}` : ""}`);
+    }
+    if (status.credits) lines.push(`CREDITS ${status.credits}`);
+  }
+  return lines;
+}
+
+function formatQuotaWindowLabel(name: string) {
+  if (name === "five_hour") return "5-hour";
+  if (name === "seven_day") return "7-day";
+  return name;
+}
+
+function renderProviderQuotas(statuses?: ProviderQuotaStatus[]) {
+  if (!statuses) return "Accounts & quota\nNot checked";
+  if (!statuses.length) return "Accounts & quota\nNo configured providers";
+  const blocks: string[] = [];
+  for (const status of statuses) {
+    const lines = [status.label];
+    const account = status.accountName || status.accountId || "-";
+    const plan = status.plan ? ` (${status.plan})` : "";
+    lines.push(`${account}${plan}`);
+    if (status.windows.length) {
+      lines.push("");
+      for (const window of status.windows) {
+        lines.push(
+          `[${formatQuotaWindowLabel(window.name)}] ${renderBar(window.percentLeft, 9)} left`,
+        );
+        lines.push(`— reset ${formatReportTime(window.resetAt)}`);
+      }
+    } else {
       lines.push(
-        `    quota    temporarily unavailable${status.error ? ` (${status.error})` : ""}`,
+        "",
+        `Quota temporarily unavailable${status.error ? ` (${status.error})` : ""}`,
       );
     }
-    if (status.credits) lines.push(`    credits  ${status.credits}`);
+    if (status.credits) lines.push("", `Credits ${status.credits}`);
+    blocks.push(lines.join("\n"));
   }
-  return lines.join("\n");
+  return ["Accounts & quota", blocks.join("\n\n")].join("\n");
 }
 
 function summarizeOverview(overview: any) {
@@ -1063,8 +1098,14 @@ export async function renderUsageReportForChat(agentDir: string): Promise<{
   text: string;
   parts: ChatMessagePart[];
 }> {
-  const text = `${await renderCompactUsageReportForChat(agentDir)}\n\n7d usage trend: attached image (3h buckets).`;
-  const imagePath = writeUsageTrendChartImage(agentDir);
+  const providerQuotas = await loadProviderQuotaStatuses(agentDir);
+  const text = [
+    `Rin usage @ ${formatReportTime(nowIso())}`,
+    "Usage dashboard attached: 7d trend (3h buckets) with account quota details when available.",
+  ].join("\n");
+  const imagePath = writeUsageTrendChartImage(agentDir, {
+    quotaLines: renderProviderQuotaImageLines(providerQuotas),
+  });
   return {
     text,
     parts: [

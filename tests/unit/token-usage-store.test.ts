@@ -885,12 +885,12 @@ test("usage dashboard renders Codex subscription quota and token charts", async 
       ],
     );
 
-    assert.match(report, /accounts & quota/);
-    assert.match(report, /ChatGPT Codex\s+rin@example\.test \(pro\)/);
-    assert.match(report, /5-hour\s+█+░+ 75% left · reset/);
-    assert.match(report, /weekly\s+█+░+ 40% left · reset/);
-    assert.match(report, /Gemini CLI\s+gemini@example\.test/);
-    assert.match(report, /temporarily unavailable \(quota unavailable\)/);
+    assert.match(report, /Accounts & quota/);
+    assert.match(report, /ChatGPT Codex\nrin@example\.test \(pro\)/);
+    assert.match(report, /\[5-hour\] █+░+ 75% left\n— reset/);
+    assert.match(report, /\[weekly\] █+░+ 40% left\n— reset/);
+    assert.match(report, /Gemini CLI\ngemini@example\.test/);
+    assert.match(report, /Quota temporarily unavailable \(quota unavailable\)/);
     assert.match(report, /7d usage trend/);
     assert.match(report, /3h buckets/);
     assert.doesNotMatch(report, /recent usage/);
