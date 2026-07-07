@@ -202,7 +202,7 @@ test("discord adapter edits one progress message from Working through interim th
   });
 });
 
-test("discord adapter uses configured language working frames", async () => {
+test("discord adapter uses neutral working frames without custom config", async () => {
   await withTempDir(async (agentDir) => {
     await fs.writeFile(
       path.join(agentDir, "settings.json"),
@@ -246,8 +246,8 @@ test("discord adapter uses configured language working frames", async () => {
     const final = await app.bots[0].sendMessage("C1", [h.text("done")]);
 
     assert.deepEqual(final, ["2"]);
-    assert.equal(calls[0].payload.content, "\u5de5\u4f5c\u4e2d...");
-    assert.equal(calls[1].payload.content, "\u5de5\u4f5c\u4e2d");
+    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[1].payload.content, "Working");
     assert.equal(calls[3].payload.content, "done");
   });
 });

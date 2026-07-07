@@ -15,8 +15,7 @@ import {
   renderChatNodesTelegramHtml,
   type RenderChatNodesOptions,
 } from "../chat/rich-text.js";
-import { createRinI18n, rinI18nPath } from "../i18n.js";
-import { readConfiguredLanguageFromSettings } from "../language.js";
+import { rinI18nPath } from "../i18n.js";
 import { ensureDir } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
@@ -85,19 +84,13 @@ export function resolveChatRuntimeWorkingCopy(
   agentDir?: string,
 ): ChatRuntimeWorkingCopy {
   const root = safeString(agentDir).trim();
-  const baseRuntime =
-    (createRinI18n(readConfiguredLanguageFromSettings(root)) as any)
-      .chatRuntime || {};
   const raw = readRawRinI18n(root);
   const configuredFrames = normalizeWorkingFrames(
     valueAtPath(raw, ["chat", "runtime", "working", "frames"]),
   );
-  const baseFrames = normalizeWorkingFrames(baseRuntime?.working?.frames);
   const frames = configuredFrames.length
     ? configuredFrames
-    : baseFrames.length
-      ? baseFrames
-      : DEFAULT_EDITABLE_WORKING_FRAMES;
+    : DEFAULT_EDITABLE_WORKING_FRAMES;
   return {
     frames,
     progressTexts: uniqueStrings([
