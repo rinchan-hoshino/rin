@@ -277,21 +277,6 @@ function normalizeWorkingIndicators(value: unknown): WorkingIndicator[] {
   );
 }
 
-function shouldResetDriverOnTransientTurnError(
-  error: unknown,
-  options: {
-    wantedSessionFile?: string;
-    restoreSessionFile?: string;
-  },
-) {
-  if (safeString(options.wantedSessionFile).trim()) return false;
-  if (!safeString(options.restoreSessionFile).trim()) return false;
-  const message = safeString((error as any)?.message || error).trim();
-  return /rin_timeout:(?:prompt|get_session_snapshot|select_session)\b|rin_no_attached_session\b/.test(
-    message,
-  );
-}
-
 function resolveComparableSessionFile(agentDir: string, sessionFile: unknown) {
   const value = safeString(sessionFile).trim();
   if (!value) return "";
@@ -2173,16 +2158,7 @@ export class ChatController {
           };
         }
         const errorSession = normalizeSessionRef(error as any);
-        const transientSessionFailure = shouldResetDriverOnTransientTurnError(
-          error,
-          {
-            wantedSessionFile,
-            restoreSessionFile,
-          },
-        );
-        if (transientSessionFailure) {
-          this.driver.dispose();
-        } else if (errorMessage !== "chat_restored_session_mismatch") {
+        if (errorMessage !== "chat_restored_session_mismatch") {
           const errorSessionFile = this.updateStoredSessionFile(
             errorSession.sessionFile,
             this.driver.currentSessionFile(),

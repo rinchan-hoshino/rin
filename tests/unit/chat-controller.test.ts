@@ -4474,7 +4474,7 @@ test("chat controller fails fast when prompt submission is queued offline instea
   );
 });
 
-test("chat controller preserves a bound session after transient prompt timeout", async () => {
+test("chat controller reports prompt timeout without transient retry classification", async () => {
   const controller = await createController("telegram/1:2");
   await fs.mkdir(path.join(controller.agentDir, "sessions"), {
     recursive: true,
@@ -4530,7 +4530,7 @@ test("chat controller preserves a bound session after transient prompt timeout",
     await fs.readFile(controller.statePath, "utf8"),
   );
   assert.equal(persistedState.sessionFile, "stale-chat.jsonl");
-  assert.equal(disposed, 1);
+  assert.equal(disposed, 0);
 });
 
 test("chat controller clears a stale bound session so ordinary chat can start fresh", async () => {

@@ -110,12 +110,6 @@ export function shouldDeferPassiveNoticeForTurnState(state: {
   return Boolean(state.liveTurn || state.isStreaming || state.turnActive);
 }
 
-function isAgentAlreadyProcessingError(error: unknown) {
-  return safeString((error as any)?.message || error).includes(
-    "Agent is already processing.",
-  );
-}
-
 function sameFrontendSessionFile(left: unknown, right: unknown) {
   const leftText = safeString(left).trim();
   const rightText = safeString(right).trim();
@@ -1281,36 +1275,6 @@ export class RinFrontendTurnDriver {
 
       if (firstResult.type === "prompt_error") {
         const error = firstResult.error;
-        if (isAgentAlreadyProcessingError(error)) {
-          if (input.streamingBehavior !== "steer") {
-            return await this.followActiveTurn(ready);
-          }
-          if (this.liveTurn === liveTurn) this.liveTurn = null;
-          this.liveTurnRecoveryContext = null;
-          this.clearAssistantInterimState();
-          const steerRequestTag = this.createTurnRequestTag();
-          await submitNativeFrontendPromptTurn(this.client, {
-            text,
-            images,
-            source: promptSource,
-            streamingBehavior: "steer",
-            requestTag: steerRequestTag,
-            promptContext: input.promptContext,
-            sessionFile: targetSessionFile,
-            gate: inputGate,
-          });
-          this.throwIfQueuedOffline(steerRequestTag);
-          return {
-            steered: true,
-            sessionId:
-              safeString(ready?.sessionId || this.currentSessionId()).trim() ||
-              undefined,
-            sessionFile:
-              safeString(
-                ready?.sessionFile || this.currentSessionFile(),
-              ).trim() || undefined,
-          };
-        }
         this.failLiveTurn(
           error instanceof Error
             ? error
