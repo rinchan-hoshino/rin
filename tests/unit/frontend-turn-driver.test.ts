@@ -473,7 +473,7 @@ test("frontend SDK dispose settles an active turn with internal lifecycle cancel
   await assert.rejects(activeTurn, (error: any) => {
     assert.equal(error?.message, "rin_frontend_turn_cancelled");
     assert.notEqual(error?.message, "frontend_turn_driver_disposed");
-    assert.equal(error?.silentChatRetry, true);
+    assert.equal(error?.silentChatRetry, undefined);
     return true;
   });
 });
@@ -1931,7 +1931,7 @@ test(
 );
 
 test(
-  "frontend SDK turn driver does not recover disconnected turns from session-message fallback",
+  "frontend SDK turn driver rejects disconnected prompt errors without frontend recovery",
   { concurrency: false },
   async () => {
     const originalNow = Date.now;
@@ -1992,7 +1992,7 @@ test(
         client.calls.filter((call: any) => call.type === "prompt").length,
         1,
       );
-      assert.equal(recoveryStateCount, 2);
+      assert.equal(recoveryStateCount, 0);
     } finally {
       (Date as any).now = originalNow;
     }
@@ -2050,7 +2050,7 @@ test("frontend SDK turn driver does not reuse an older final when the current tu
   );
 });
 
-test("frontend SDK turn driver does not resolve interrupted prompts from session state", async () => {
+test("frontend SDK turn driver does not recover interrupted prompt errors from session state", async () => {
   const originalNow = Date.now;
   let now = 0;
   (Date as any).now = () => now;
@@ -2094,7 +2094,7 @@ test("frontend SDK turn driver does not resolve interrupted prompts from session
       () => driver.runTurn({ text: "hello" }),
       /rin_disconnected:req_1/,
     );
-    assert.equal(connectCount, 2);
+    assert.equal(connectCount, 1);
     assert.equal(
       client.calls.filter((call: any) => call.type === "prompt").length,
       1,

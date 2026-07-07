@@ -3,7 +3,6 @@ export const RIN_FRONTEND_TURN_CANCELLED = "rin_frontend_turn_cancelled";
 export function createRinFrontendTurnCancelledError() {
   const error = new Error(RIN_FRONTEND_TURN_CANCELLED);
   (error as any).code = RIN_FRONTEND_TURN_CANCELLED;
-  (error as any).silentChatRetry = true;
   return error;
 }
 

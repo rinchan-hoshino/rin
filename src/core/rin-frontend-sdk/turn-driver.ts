@@ -116,14 +116,6 @@ function isAgentAlreadyProcessingError(error: unknown) {
   );
 }
 
-function isRecoverableConnectionError(error: unknown) {
-  const message = safeString((error as any)?.message || error);
-  if (message.includes("rpc_turn_queued_offline")) return false;
-  return /rin_tui_not_connected|rin_disconnected|rin_session_recovering/.test(
-    message,
-  );
-}
-
 function sameFrontendSessionFile(left: unknown, right: unknown) {
   const leftText = safeString(left).trim();
   const rightText = safeString(right).trim();
@@ -486,7 +478,7 @@ export class RinFrontendTurnDriver {
     this.backendEventTranslator.resetAssistantSegments();
   }
 
-  private async recoverLiveTurnAfterDisconnect(error?: unknown) {
+  private async recoverLiveTurnAfterDisconnect() {
     if (!this.liveTurn || this.reconnectingTurnPromise) {
       return await this.reconnectingTurnPromise;
     }
@@ -518,11 +510,7 @@ export class RinFrontendTurnDriver {
         }
       }
       if (this.liveTurn) {
-        this.failLiveTurn(
-          error instanceof Error
-            ? error
-            : new Error(String(error || "frontend_turn_recovery_failed")),
-        );
+        this.failLiveTurn(new Error("frontend_turn_recovery_failed"));
       }
     })().finally(() => {
       this.reconnectingTurnPromise = null;
@@ -1013,20 +1001,10 @@ export class RinFrontendTurnDriver {
       () => false,
     );
     while (this.liveTurn === liveTurn) {
-      let state: any = {};
-      try {
-        state = await this.refreshFrontendState(targetSessionFile);
-      } catch (error) {
-        if (!isRecoverableConnectionError(error)) throw error;
-        await this.recoverLiveTurnAfterDisconnect(error);
-        if (this.liveTurn === liveTurn) continue;
-        break;
-      }
+      const state: any = await this.refreshFrontendState(targetSessionFile);
       if (!Boolean(state?.turnActive || state?.isStreaming)) {
         if (this.isSessionRecovering() || state?.sessionRecovering) {
-          await this.recoverLiveTurnAfterDisconnect(
-            new Error("rin_session_recovering"),
-          );
+          await this.recoverLiveTurnAfterDisconnect();
           if (this.liveTurn === liveTurn) continue;
           break;
         }
@@ -1303,10 +1281,6 @@ export class RinFrontendTurnDriver {
 
       if (firstResult.type === "prompt_error") {
         const error = firstResult.error;
-        if (isRecoverableConnectionError(error)) {
-          await this.recoverLiveTurnAfterDisconnect(error);
-          return await liveTurn.promise;
-        }
         if (isAgentAlreadyProcessingError(error)) {
           if (input.streamingBehavior !== "steer") {
             return await this.followActiveTurn(ready);
@@ -1346,10 +1320,6 @@ export class RinFrontendTurnDriver {
         throw error;
       }
       if (firstResult.type === "turn_error") {
-        if (isRecoverableConnectionError(firstResult.error)) {
-          await this.recoverLiveTurnAfterDisconnect(firstResult.error);
-          return await liveTurn.promise;
-        }
         this.liveTurnRecoveryContext = null;
         throw firstResult.error;
       }
@@ -1384,7 +1354,7 @@ export class RinFrontendTurnDriver {
   async handleClientEvent(event: any) {
     if (!event || typeof event !== "object") return;
     if (event.type === "ui" && event.name === "connection_lost") {
-      if (this.liveTurn) void this.recoverLiveTurnAfterDisconnect(event.name);
+      if (this.liveTurn) void this.recoverLiveTurnAfterDisconnect();
       return;
     }
     if (event.type === "ui") {
@@ -1422,9 +1392,7 @@ export class RinFrontendTurnDriver {
             this.frontendState.sessionRecovering = true;
             this.setFrontendPhase("connecting");
             if (this.liveTurn) {
-              void this.recoverLiveTurnAfterDisconnect(
-                new Error("rin_session_recovering"),
-              );
+              void this.recoverLiveTurnAfterDisconnect();
             }
           },
           handleSessionRecovered: () => {

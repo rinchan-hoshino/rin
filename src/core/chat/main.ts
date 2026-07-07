@@ -851,9 +851,8 @@ export async function startChatBridge(
           CHAT_STEERED_INBOX_INACTIVE_GRACE_MS
         ) {
           return {
-            retry: true,
+            retry: false,
             errorMessage: "chat_steered_turn_unprocessed",
-            suppressRetryNotice: true,
           };
         }
       }
