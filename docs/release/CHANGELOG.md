@@ -9,6 +9,8 @@
 - Runtime and install paths are faster and safer, including CLI startup/dependency trimming, managed Node runtime bundles, managed-node update handoffs, launcher refreshes, PATH warnings, platform bundles without optional bundled extensions, and unresolved bootstrap git-ref handling.
 - TUI and CLI session flows now handle resume listing, session rebind options, and non-interactive tool help more accurately.
 - Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, Telegram message coalescing, editable working messages for edit-capable adapters, compact usage trend charts, and cached group member counts.
+- Chat delivery, progress, and frontend turn recovery now avoid error-string retry coupling, keep pending outbox/progress state quieter and more deterministic, preserve Telegram topic scope, and treat pending final delivery as accepted output.
+- Installer, TUI startup, and usage diagnostics are clearer, including readable system errors, loaded startup resources, and quota details in usage trend charts.
 - Project licensing metadata now uses the GPL-3.0-or-later SPDX identifier with the standard GPL license text.
 <!-- rin-changelog-coverage
 c3dd90c Fix chat bridge Telegram message coalescing
@@ -69,6 +71,23 @@ bd8ffc8 fix(prompt): shorten web source requirement
 5f1388e fix(chat): reject legacy inbox chat keys
 a2b1748 fix(chat): canonicalize legacy inbox keys
 6a6ee87 fix(chat): require bot-qualified chat keys
+cf41fd2 feat(usage): include quota details in trend chart
+0fad213 fix(chat): treat pending final delivery as output acceptance
+1698ce6 fix(frontend): remove remaining error-string recovery
+f5a26eb fix(frontend): stop recovering turns by error strings
+1eae247 fix(chat): stop retrying turns by frontend error type
+5237a6d fix(chat): keep Telegram topic scope in delivery
+b0bb35d fix(chat): verify pending outbox delivery state
+380306b fix(chat): coalesce automatic compaction completion
+cc6cc6c fix(chat): keep pending outbox delivery silent
+629d32d fix(chat): keep working frames user-configured
+176a453 fix(chat): keep custom working copy out of defaults
+5057944 fix(chat): unify progress delivery semantics
+a33c9e7 fix(chat): stabilize editable progress replies
+d538ff4 fix(installer): make system errors readable
+bbf6402 fix(tui): mount loaded resources on startup
+1d99d58 fix(chat-runtime): clean up progress before final replies
+13332bd fix(installer): preserve init completion state
 -->
 
 ## 0.6.0
