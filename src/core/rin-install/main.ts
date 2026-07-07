@@ -513,6 +513,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     installedDocsDir,
     installedService,
     daemonReady,
+    initializationRequired,
     serviceHint,
   } = result;
 
@@ -554,7 +555,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     i18n.writtenPathsTitle,
   );
 
-  if (daemonReady) {
+  if (daemonReady && initializationRequired) {
     note(i18n.launchingInitText, i18n.launchingInitTitle);
     await launchInstallerTui({
       rinPath: written.rinPath,

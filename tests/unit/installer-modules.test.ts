@@ -40,6 +40,44 @@ test("finalize uses a 30 second default daemon readiness timeout", () => {
   assert.equal(finalize.defaultDaemonReadyTimeoutMs(), 30_000);
 });
 
+test("finalize does not treat a non-empty install dir as initialized without init state", async () => {
+  await withTempDir(async (dir) => {
+    await fs.writeFile(path.join(dir, "settings.json"), "{}", "utf8");
+
+    assert.equal(finalize.readExistingInitializationComplete(dir), false);
+  });
+});
+
+test("finalize preserves completed initialization state on reinstall", async () => {
+  await withTempDir(async (dir) => {
+    await fs.mkdir(path.join(dir, "self_improve", "state"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(dir, "self_improve", "state", "init-state.json"),
+      JSON.stringify({ version: 2, initialized: true }),
+      "utf8",
+    );
+
+    assert.equal(finalize.readExistingInitializationComplete(dir), true);
+  });
+});
+
+test("finalize treats legacy completedAt initialization state as complete", async () => {
+  await withTempDir(async (dir) => {
+    await fs.mkdir(path.join(dir, "self_improve", "state"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(dir, "self_improve", "state", "init-state.json"),
+      JSON.stringify({ version: 2, completedAt: "2026-07-04T00:00:00.000Z" }),
+      "utf8",
+    );
+
+    assert.equal(finalize.readExistingInitializationComplete(dir), true);
+  });
+});
+
 function createNoopSpinner() {
   return {
     start() {},

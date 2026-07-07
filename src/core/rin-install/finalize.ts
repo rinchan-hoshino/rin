@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 
 import { type FinalizeInstallOptions } from "./apply-plan.js";
 import {
@@ -51,11 +52,17 @@ export function defaultDaemonReadyTimeoutMs() {
   return 30_000;
 }
 
-function isFreshInstallDirectory(installDir: string) {
+export function readExistingInitializationComplete(installDir: string) {
   try {
-    return fs.readdirSync(installDir).length === 0;
+    const parsed = JSON.parse(
+      fs.readFileSync(
+        path.join(installDir, "self_improve", "state", "init-state.json"),
+        "utf8",
+      ),
+    ) as Record<string, any>;
+    return Boolean(parsed?.initialized || parsed?.completedAt);
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -205,7 +212,8 @@ async function applyInstalledRuntime(
     options.release,
     sourceRoot,
   );
-  const freshInstallDirectory = isFreshInstallDirectory(installDir);
+  const existingInitializationComplete =
+    readExistingInitializationComplete(installDir);
 
   const ownership = describeOwnership(targetUser, installDir);
   const installServiceNow =
@@ -317,7 +325,7 @@ async function applyInstalledRuntime(
             ? installedReleaseRoot(installDir, previousReleaseName)
             : undefined,
           elevated: useElevatedWrite,
-          initializationComplete: !freshInstallDirectory,
+          initializationComplete: existingInitializationComplete,
           writeLaunchers,
         },
         {
@@ -471,6 +479,7 @@ async function applyInstalledRuntime(
     prunedReleases,
     installedService,
     daemonReady,
+    initializationRequired: !existingInitializationComplete,
     ownership,
     serviceHint:
       process.platform === "darwin"
