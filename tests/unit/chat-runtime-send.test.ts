@@ -246,14 +246,8 @@ test("discord adapter uses configured language working frames", async () => {
     const final = await app.bots[0].sendMessage("C1", [h.text("done")]);
 
     assert.deepEqual(final, ["2"]);
-    assert.equal(
-      calls[0].payload.content,
-      "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
-    );
-    assert.equal(
-      calls[1].payload.content,
-      "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
-    );
+    assert.equal(calls[0].payload.content, "\u5de5\u4f5c\u4e2d...");
+    assert.equal(calls[1].payload.content, "\u5de5\u4f5c\u4e2d");
     assert.equal(calls[3].payload.content, "done");
   });
 });
@@ -1817,11 +1811,22 @@ test("onebot private working indicator is a one-shot marker", async () => {
   });
 });
 
-test("onebot private marker picks a localized working frame", async () => {
+test("onebot private marker picks a custom working frame", async () => {
   await withTempDir(async (agentDir) => {
     await fs.writeFile(
-      path.join(agentDir, "settings.json"),
-      JSON.stringify({ language: "zh_CN" }),
+      path.join(agentDir, "i18n.json"),
+      JSON.stringify({
+        chat: {
+          runtime: {
+            working: {
+              frames: [
+                "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
+                "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
+              ],
+            },
+          },
+        },
+      }),
     );
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
@@ -1849,10 +1854,6 @@ test("onebot private marker picks a localized working frame", async () => {
       [
         "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
         "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
-        "\u7ec6\u8282\u5904\u7406\u4e2d... (\u3064\u03c9`\uff61)",
-        "\u4fe1\u606f\u68b3\u7406\u4e2d (\uff89\u25d5\u30ee\u25d5)\uff89*:\uff65\uff9f\u2727",
-        "\u9a6c\u4e0a\u5c31\u597d... (\u0e07 \u2022\u0300_\u2022\u0301)\u0e07",
-        "\u7ee7\u7eed\u5de5\u4f5c\u4e2d (\uff40\u30fb\u03c9\u30fb\u00b4)",
       ].some((text) => calls[0].params.message === `[CQ:reply,id=m1]${text}`),
     );
   });

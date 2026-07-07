@@ -660,14 +660,7 @@ const INSTALLER_DISPLAY_COPY = {
     },
     chatRuntime: {
       working: {
-        frames: [
-          "工作中... (๑•̀ㅂ•́)و✧",
-          "整理中～ (｡･ω･｡)",
-          "细节处理中... (つω`｡)",
-          "信息梳理中 (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧",
-          "马上就好... (ง •̀_•́)ง",
-          "继续工作中 (｀・ω・´)",
-        ],
+        frames: ["工作中...", "工作中", "工作中.", "工作中.."],
       },
       telegramWorking: {
         workingInitial: "工作中...",
