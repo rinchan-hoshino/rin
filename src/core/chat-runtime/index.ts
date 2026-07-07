@@ -1489,11 +1489,17 @@ class TelegramAdapter {
     let cursor = 0;
     let firstReply = replyToMessageId;
     let finalizedWorkingMessage = false;
+    const ensureFinalProgressCleared = async () => {
+      if (!isFinalDelivery || finalizedWorkingMessage) return;
+      await this.deleteVisibleWorkingMessage(chatId);
+      finalizedWorkingMessage = true;
+    };
     const recordFailure = async (error: unknown, placeholder: string) => {
       failures.push(error);
       this.logger.warn(
         `rich message segment failed err=${safeString((error as any)?.message || error)}`,
       );
+      await ensureFinalProgressCleared();
       const placeholderId = await this.sendFailurePlaceholder(
         chatId,
         placeholder,
@@ -1511,6 +1517,7 @@ class TelegramAdapter {
       if (isTelegramMediaNodeType(type)) {
         const media = telegramMediaMethod(type);
         try {
+          await ensureFinalProgressCleared();
           const messageId = await this.sendBinaryMessage(
             media.method as any,
             media.field as any,
@@ -1576,14 +1583,7 @@ class TelegramAdapter {
           if (shouldEditWorkingMessage) {
             delivered.push(...messageIds);
           } else {
-            if (
-              isFinalDelivery &&
-              delivered.length === 0 &&
-              !finalizedWorkingMessage
-            ) {
-              await this.deleteVisibleWorkingMessage(chatId);
-              finalizedWorkingMessage = true;
-            }
+            await ensureFinalProgressCleared();
             for (const textChunk of textChunks) {
               const messageId = await this.sendText(
                 chatId,

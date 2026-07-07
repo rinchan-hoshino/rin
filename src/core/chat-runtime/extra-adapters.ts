@@ -1163,6 +1163,11 @@ export class DiscordAdapter {
     let cursor = 0;
     let firstReply = replyToMessageId;
     let finalizedWorkingMessage = false;
+    const ensureFinalProgressCleared = async () => {
+      if (!isFinalDelivery || finalizedWorkingMessage) return;
+      await this.editableWorking.deleteProgress(chatId);
+      finalizedWorkingMessage = true;
+    };
     const recordFailure = async (error: unknown, placeholder: string) => {
       failures.push(error);
       this.logger.warn(
@@ -1170,6 +1175,7 @@ export class DiscordAdapter {
       );
       if (!placeholder) return;
       try {
+        await ensureFinalProgressCleared();
         const placeholderIds = await this.sendTextChunk(channel, {
           text: placeholder,
           replyToMessageId: firstReply,
@@ -1187,6 +1193,7 @@ export class DiscordAdapter {
       let chunkIds: string[] = [];
       if (isOutboundMediaNodeType(type)) {
         try {
+          await ensureFinalProgressCleared();
           chunkIds = await this.sendMediaChunk(channel, {
             node: work[cursor],
             replyToMessageId: firstReply,
@@ -1215,25 +1222,26 @@ export class DiscordAdapter {
           );
           const shouldEditWorkingMessage =
             delivered.length === 0 &&
-            (isFinalDelivery || coalesceWithWorkingMessage);
-          const textChunkIds = shouldEditWorkingMessage
-            ? await this.editableWorking.updateText({
-                chatId,
-                text,
-                replyToMessageId: firstReply,
-                finalize: isFinalDelivery,
-                kind: deliveryKind === "passive_notice" ? "todo" : undefined,
-              })
-            : await this.sendTextChunk(channel, {
-                text,
-                replyToMessageId: firstReply,
-              });
+            coalesceWithWorkingMessage &&
+            !isFinalDelivery;
+          let textChunkIds: string[] = [];
+          if (shouldEditWorkingMessage) {
+            textChunkIds = await this.editableWorking.updateText({
+              chatId,
+              text,
+              replyToMessageId: firstReply,
+              finalize: false,
+              kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+            });
+          } else {
+            await ensureFinalProgressCleared();
+            textChunkIds = await this.sendTextChunk(channel, {
+              text,
+              replyToMessageId: firstReply,
+            });
+          }
           delivered.push(...textChunkIds);
           if (textChunkIds.length) firstReply = undefined;
-          if (shouldEditWorkingMessage) {
-            finalizedWorkingMessage =
-              isFinalDelivery && textChunkIds.length > 0;
-          }
         } catch (error) {
           await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
         }
@@ -1792,6 +1800,11 @@ export class SlackAdapter {
     const failures: unknown[] = [];
     let cursor = 0;
     let finalizedWorkingMessage = false;
+    const ensureFinalProgressCleared = async () => {
+      if (!isFinalDelivery || finalizedWorkingMessage) return;
+      await this.editableWorking.deleteProgress(chatId);
+      finalizedWorkingMessage = true;
+    };
     const recordFailure = async (error: unknown, placeholder: string) => {
       failures.push(error);
       this.logger.warn(
@@ -1799,6 +1812,7 @@ export class SlackAdapter {
       );
       if (!placeholder) return;
       try {
+        await ensureFinalProgressCleared();
         delivered.push(
           ...(await this.postText(chatId, placeholder, replyToMessageId)),
         );
@@ -1816,16 +1830,20 @@ export class SlackAdapter {
           const coalesceWithWorkingMessage = Boolean(
             options?.coalesceWithWorkingMessage,
           );
-          if (coalesceWithWorkingMessage && delivered.length === 0) {
+          if (
+            coalesceWithWorkingMessage &&
+            delivered.length === 0 &&
+            !isFinalDelivery
+          ) {
             messageIds = await this.editableWorking.updateText({
               chatId,
               text: renderPlainTextFromNodes([work[cursor]]),
               replyToMessageId,
-              finalize: isFinalDelivery,
+              finalize: false,
               kind: "todo",
             });
-            finalizedWorkingMessage = isFinalDelivery && messageIds.length > 0;
           } else {
+            await ensureFinalProgressCleared();
             messageIds = await this.postTodo(
               chatId,
               work[cursor],
@@ -1838,6 +1856,7 @@ export class SlackAdapter {
         cursor += 1;
       } else if (isOutboundMediaNodeType(type)) {
         try {
+          await ensureFinalProgressCleared();
           messageIds = await this.sendMedia(
             chatId,
             work[cursor],
@@ -1867,18 +1886,19 @@ export class SlackAdapter {
           );
           const shouldEditWorkingMessage =
             delivered.length === 0 &&
-            (isFinalDelivery || coalesceWithWorkingMessage);
-          messageIds = shouldEditWorkingMessage
-            ? await this.editableWorking.updateText({
-                chatId,
-                text,
-                replyToMessageId,
-                finalize: isFinalDelivery,
-                kind: deliveryKind === "passive_notice" ? "todo" : undefined,
-              })
-            : await this.postText(chatId, text, replyToMessageId);
+            coalesceWithWorkingMessage &&
+            !isFinalDelivery;
           if (shouldEditWorkingMessage) {
-            finalizedWorkingMessage = isFinalDelivery && messageIds.length > 0;
+            messageIds = await this.editableWorking.updateText({
+              chatId,
+              text,
+              replyToMessageId,
+              finalize: false,
+              kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+            });
+          } else {
+            await ensureFinalProgressCleared();
+            messageIds = await this.postText(chatId, text, replyToMessageId);
           }
         } catch (error) {
           await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
@@ -2908,12 +2928,16 @@ export class LarkAdapter {
     const coalesceWithWorkingMessage = Boolean(
       options?.coalesceWithWorkingMessage,
     );
-    if (isFinalDelivery || coalesceWithWorkingMessage) {
+    if (isFinalDelivery) {
+      await this.editableWorking.deleteProgress(chatId);
+      return await this.sendPostText(chatId, text, replyToMessageId);
+    }
+    if (coalesceWithWorkingMessage) {
       return await this.editableWorking.updateText({
         chatId,
         text,
         replyToMessageId,
-        finalize: isFinalDelivery,
+        finalize: false,
         kind: deliveryKind === "passive_notice" ? "todo" : undefined,
       });
     }
