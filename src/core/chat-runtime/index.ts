@@ -19,6 +19,7 @@ import { readConfiguredLanguageFromSettings } from "../language.js";
 import {
   compactObject,
   createPrefixedLogger,
+  editableWorkingText,
   emitBotStatus,
   ensureDir,
   ensureExtension,
@@ -35,6 +36,7 @@ import {
   sleep,
   splitPlainText,
   stageChatMediaFromNode,
+  isEditableWorkingText,
 } from "./common.js";
 import {
   DiscordAdapter,
@@ -1278,7 +1280,7 @@ class TelegramAdapter {
     ]
       .map((item) => safeString(item).trim())
       .filter(Boolean);
-    return candidates.includes(value);
+    return candidates.includes(value) || isEditableWorkingText(value);
   }
 
   private async deleteVisibleWorkingMessage(chatId: string) {
@@ -1296,6 +1298,7 @@ class TelegramAdapter {
     );
     const isProgressArtifact =
       kind === "todo" ||
+      kind === "interim" ||
       ((!kind || kind === "working") && this.isWorkingIndicatorText(text));
     if (!messageIds.length || !isProgressArtifact) {
       return false;
@@ -1577,7 +1580,12 @@ class TelegramAdapter {
                 // Final replies delete that progress artifact and send fresh messages.
                 // Non-coalesced passive notices stay isolated on the passive_notice key.
                 key: deliveryKey,
-                kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+                kind:
+                  deliveryKind === "passive_notice"
+                    ? "todo"
+                    : deliveryKind === "interim"
+                      ? "interim"
+                      : undefined,
               })
             : [];
           if (shouldEditWorkingMessage) {
@@ -1611,14 +1619,7 @@ class TelegramAdapter {
   }
 
   private workingMessageText(context: any) {
-    const copy =
-      this.workingCopy || resolveTelegramWorkingCopy(this.app?.agentDir);
-    const prompts = copy.prompts;
-    const tick = Math.abs(Number(context?.tick) || 0);
-    const promptSlot = Math.floor(tick / 6);
-    if (promptSlot === 0) return copy.thinkingInitial;
-    const index = (promptSlot - 1) % prompts.length;
-    return prompts[index];
+    return editableWorkingText(context?.tick);
   }
 
   async tickTypingIndicator(context: any) {

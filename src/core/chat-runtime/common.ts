@@ -32,6 +32,24 @@ export {
   sleep,
 };
 
+const EDITABLE_WORKING_FRAMES = [
+  "Working...",
+  "Working",
+  "Working.",
+  "Working..",
+];
+
+export function editableWorkingText(tick: unknown) {
+  const index =
+    Math.abs(Math.floor(Number(tick) || 0)) % EDITABLE_WORKING_FRAMES.length;
+  return EDITABLE_WORKING_FRAMES[index] || "Working...";
+}
+
+export function isEditableWorkingText(text: unknown) {
+  const value = safeString(text).trim();
+  return Boolean(value && EDITABLE_WORKING_FRAMES.includes(value));
+}
+
 export function extensionFromMimeType(mimeType: string) {
   return extensionFromSharedMimeType(mimeType, ALL_TEXT_MIME_EXTENSION_OPTIONS);
 }

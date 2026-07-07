@@ -9,6 +9,7 @@ import {
   compactObject,
   createPrefixedLogger,
   downloadToFile,
+  editableWorkingText,
   emitBotStatus,
   ensureDir,
   ensureExtension,
@@ -25,6 +26,7 @@ import {
   safeString,
   sleep,
   splitPlainText,
+  isEditableWorkingText,
   stripMentionTokens,
 } from "./common.js";
 
@@ -217,7 +219,7 @@ class EditableTextMessageGroup {
         if (!chatId) return false;
         const ids = await this.updateText({
           chatId,
-          text: this.workingText,
+          text: editableWorkingText(context?.tick),
           kind: "working",
         });
         return ids.length > 0;
@@ -402,7 +404,12 @@ class EditableTextMessageGroup {
         if (currentId && currentKind && currentKind !== "working") {
           return [currentId];
         }
-        if (currentId && currentText && currentText !== this.workingText) {
+        if (
+          currentId &&
+          currentText &&
+          currentText !== this.workingText &&
+          !isEditableWorkingText(currentText)
+        ) {
           return [currentId];
         }
       }
@@ -479,7 +486,8 @@ class EditableTextMessageGroup {
     const isProgressArtifact =
       kind === "todo" ||
       kind === "working" ||
-      (!kind && text === this.workingText);
+      kind === "interim" ||
+      (!kind && (text === this.workingText || isEditableWorkingText(text)));
     if (!messageIds.length || !isProgressArtifact) return false;
     for (const messageId of messageIds) {
       try {
@@ -1231,7 +1239,12 @@ export class DiscordAdapter {
               text,
               replyToMessageId: firstReply,
               finalize: false,
-              kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+              kind:
+                deliveryKind === "passive_notice"
+                  ? "todo"
+                  : deliveryKind === "interim"
+                    ? "interim"
+                    : undefined,
             });
           } else {
             await ensureFinalProgressCleared();
@@ -1894,7 +1907,12 @@ export class SlackAdapter {
               text,
               replyToMessageId,
               finalize: false,
-              kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+              kind:
+                deliveryKind === "passive_notice"
+                  ? "todo"
+                  : deliveryKind === "interim"
+                    ? "interim"
+                    : undefined,
             });
           } else {
             await ensureFinalProgressCleared();
@@ -2938,7 +2956,12 @@ export class LarkAdapter {
         text,
         replyToMessageId,
         finalize: false,
-        kind: deliveryKind === "passive_notice" ? "todo" : undefined,
+        kind:
+          deliveryKind === "passive_notice"
+            ? "todo"
+            : deliveryKind === "interim"
+              ? "interim"
+              : undefined,
       });
     }
     return await this.sendPostText(chatId, text, replyToMessageId);

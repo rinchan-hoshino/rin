@@ -795,9 +795,8 @@ export class ChatController {
     };
   }
 
-  private async startWorkingMarker() {
+  private async startWorkingMarker(indicators = this.getWorkingIndicators()) {
     if (!this.canDeliverReplies()) return false;
-    const indicators = this.getWorkingIndicators();
     const selected = selectWorkingIndicatorsForKind(indicators, "marker");
     this.activeWorkingIndicators = selected;
     const context = this.workingIndicatorContext({ event: "start" });
@@ -891,6 +890,35 @@ export class ChatController {
     return results.some(Boolean);
   }
 
+  private async startEditableWorkingNotice(
+    indicators = this.getWorkingIndicators(),
+  ) {
+    if (!this.canDeliverReplies()) return false;
+    const selected = selectWorkingIndicatorsForKind(indicators, "polling");
+    const editable = selected.find(
+      (indicator) =>
+        workingIndicatorPresentation(indicator) === "editable-message",
+    );
+    if (!editable) return false;
+    this.activeWorkingIndicators = selected;
+    const messageId = this.currentIncomingMessageId();
+    const context = this.workingIndicatorContext({
+      event: "tick",
+      tick: 0,
+      reactionDue: Boolean(messageId),
+      reactionTick: this.workingReactionTick,
+      reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
+    });
+    const result = await this.callWorkingIndicator(editable, "tick", context);
+    this.lastWorkingIndicatorAt = Date.now();
+    this.workingIndicatorTick += 1;
+    if (messageId) {
+      this.lastWorkingReactionAt = this.lastWorkingIndicatorAt;
+      this.workingReactionTick += 1;
+    }
+    return Boolean(result);
+  }
+
   private async beginVisibleProcessingTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
@@ -909,7 +937,17 @@ export class ChatController {
     this.setCurrentTurn(input);
     this.latestTodoNoticeText = "";
     this.awaitingTurnSettle = true;
-    const marker = this.startWorkingMarker().catch(() => false);
+    const indicators = this.getWorkingIndicators();
+    const editableStarted = await this.startEditableWorkingNotice(
+      indicators,
+    ).catch(() => false);
+    if (editableStarted) {
+      // Subsequent animation ticks still use the normal chat polling path.
+      // Do not poll synchronously here: before the driver marks the turn active,
+      // pollTyping can classify the just-created Working notice as stale.
+      return;
+    }
+    const marker = this.startWorkingMarker(indicators).catch(() => false);
     const poll = this.pollTyping().catch(() => false);
     await Promise.race([
       Promise.all([marker, poll]),
@@ -1436,6 +1474,7 @@ export class ChatController {
           deliveryKind: "interim",
           text: `${INTERIM_PREFIX}${trimmed}`,
           replyToMessageId: replyToMessageId || undefined,
+          coalesceWithWorkingMessage: true,
           ...this.currentConversationSessionPayload(),
         },
         { deliveryKind: "interim" },

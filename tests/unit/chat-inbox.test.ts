@@ -666,7 +666,7 @@ test("chat inbox restores processing envelopes without inspecting interim replie
     replyToMessageId: "m-interim",
     receivedAt: new Date().toISOString(),
     processedAt: new Date().toISOString(),
-    text: "··· visible interim",
+    text: "… visible interim",
     sessionFile,
   });
   const [pendingPath] = inbox.listPendingChatInboxFiles(agentDir);

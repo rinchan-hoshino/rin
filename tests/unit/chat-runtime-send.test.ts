@@ -143,6 +143,119 @@ test("discord adapter deletes visible progress before final text", async () => {
   });
 });
 
+test("discord adapter edits one progress message from Working through interim then deletes it for final", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    const channel = {
+      send: async (payload: any) => {
+        const id = String(messages.size + 1);
+        const message = {
+          id,
+          payload,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            message.payload = nextPayload;
+            return message;
+          },
+        };
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => calls.push({ method: "delete", id }),
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C1", tick: 0 });
+    await editable.tick({ chatId: "C1", tick: 1 });
+    const interim = await app.bots[0].sendMessage(
+      "C1",
+      [h.text("… checking")],
+      { deliveryKind: "interim", coalesceWithWorkingMessage: true },
+    );
+    await editable.tick({ chatId: "C1", tick: 2 });
+    const final = await app.bots[0].sendMessage("C1", [h.text("done")]);
+
+    assert.deepEqual(interim, ["1"]);
+    assert.deepEqual(final, ["2"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "edit", "edit", "delete", "send"],
+    );
+    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[1].payload.content, "Working");
+    assert.equal(calls[2].payload.content, "… checking");
+    assert.equal(calls[3].id, "1");
+    assert.equal(calls[4].payload.content, "done");
+  });
+});
+
+test("discord adapter sends a new Working message when the cached progress is no longer editable", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    const channel = {
+      send: async (payload: any) => {
+        const id = String(messages.size + 1);
+        const message = {
+          id,
+          payload,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            throw new Error("message not found");
+          },
+        };
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => calls.push({ method: "delete", id }),
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C1", tick: 0 });
+    await editable.tick({ chatId: "C1", tick: 1 });
+    const final = await app.bots[0].sendMessage("C1", [h.text("done")]);
+
+    assert.deepEqual(final, ["3"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "edit", "send", "delete", "delete", "send"],
+    );
+    assert.equal(calls[0].id, "1");
+    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[1].id, "1");
+    assert.equal(calls[2].id, "2");
+    assert.equal(calls[2].payload.content, "Working");
+    assert.equal(calls[3].id, "1");
+    assert.equal(calls[4].id, "2");
+    assert.equal(calls[5].payload.content, "done");
+  });
+});
+
 test("discord adapter deletes visible progress before final media", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -369,6 +482,54 @@ test("telegram adapter edits progress updates then deletes them before sending f
     assert.equal(calls[2].payload.text, "[ ] first task");
     assert.equal(calls[4].payload.message_id, 2);
     assert.equal(calls[5].payload.text, "done");
+  });
+});
+
+test("telegram adapter edits one progress message from Working through interim then deletes it for final", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      if (method === "sendMessage") return { message_id: String(calls.length) };
+      return { message_id: payload?.message_id };
+    };
+
+    await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 0 });
+    await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 1 });
+    const interim = await app.bots[0].sendMessage(
+      "456",
+      [h.text("… checking")],
+      { deliveryKind: "interim", coalesceWithWorkingMessage: true },
+    );
+    await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 2 });
+    const final = await app.bots[0].sendMessage("456", [h.text("done")]);
+
+    assert.deepEqual(interim, ["1"]);
+    assert.deepEqual(final, ["5"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      [
+        "sendMessage",
+        "editMessageText",
+        "editMessageText",
+        "deleteMessage",
+        "sendMessage",
+      ],
+    );
+    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[1].payload.message_id, 1);
+    assert.equal(calls[1].payload.text, "Working");
+    assert.equal(calls[2].payload.message_id, 1);
+    assert.equal(calls[2].payload.text, "… checking");
+    assert.equal(calls[3].payload.message_id, 1);
+    assert.equal(calls[4].payload.text, "done");
   });
 });
 

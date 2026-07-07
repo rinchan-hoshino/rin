@@ -1451,7 +1451,7 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
     quietMode: false,
   });
   assert.deepEqual(loudDeliveries, [
-    { text: "··· visible interim", kind: "interim" },
+    { text: "… visible interim", kind: "interim" },
     { text: "- [ ] visible todo", kind: "passive_notice" },
   ]);
 });
@@ -2758,7 +2758,7 @@ test("chat controller does not deliver text-only assistant messages as interim",
   const deliveries = [];
   controller.deliverAssistantInterim = async function (text) {
     deliveries.push({
-      text: `··· ${text}`,
+      text: `… ${text}`,
       replyToMessageId: this.currentReplyToMessageId(),
     });
     return true;
@@ -2834,7 +2834,7 @@ test("chat controller delivers leading tool-call text as the only interim source
   const deliveries = [];
   controller.deliverAssistantInterim = async function (text) {
     deliveries.push({
-      text: `··· ${text}`,
+      text: `… ${text}`,
       replyToMessageId: this.currentReplyToMessageId(),
     });
     return true;
@@ -2891,7 +2891,7 @@ test("chat controller delivers leading tool-call text as the only interim source
         },
       });
       assert.deepEqual(deliveries, [
-        { text: "··· I will check this", replyToMessageId: "m-tool-interim" },
+        { text: "… I will check this", replyToMessageId: "m-tool-interim" },
       ]);
       await controller.handleSessionEvent({
         type: "tool_execution_start",
@@ -2912,7 +2912,7 @@ test("chat controller delivers leading tool-call text as the only interim source
 
   assert.equal(result.finalText, "Final answer");
   assert.deepEqual(deliveries, [
-    { text: "··· I will check this", replyToMessageId: "m-tool-interim" },
+    { text: "… I will check this", replyToMessageId: "m-tool-interim" },
     { text: "Final answer", replyToMessageId: "m-tool-interim" },
   ]);
 });
@@ -3014,7 +3014,7 @@ test("chat controller treats delivered interim assistant text as an inbound repl
   assert.equal(inbound?.sessionFile, "interim-boundary-chat.jsonl");
   assert.equal(assistant?.role, "assistant");
   assert.equal(assistant?.replyToMessageId, "m-interim-boundary");
-  assert.equal(assistant?.text, "··· I will check this");
+  assert.equal(assistant?.text, "… I will check this");
   assert.equal(assistant?.sessionFile, "interim-boundary-chat.jsonl");
 });
 
@@ -3024,7 +3024,7 @@ test("chat controller does not treat assistant message updates as interim when a
   const deliveries = [];
   controller.deliverAssistantInterim = async function (text) {
     deliveries.push({
-      text: `··· ${text}`,
+      text: `… ${text}`,
       replyToMessageId: this.currentReplyToMessageId(),
     });
     return true;
@@ -3104,7 +3104,7 @@ test("chat controller does not leak a buffered preview as interim before the fin
   const deliveries = [];
   controller.deliverAssistantInterim = async function (text) {
     deliveries.push({
-      text: `··· ${text}`,
+      text: `… ${text}`,
       replyToMessageId: this.currentReplyToMessageId(),
     });
     return true;
@@ -3180,7 +3180,7 @@ test("chat controller does not emit growing final-answer prefixes as interim rep
   const deliveries = [];
   controller.deliverAssistantInterim = async function (text) {
     deliveries.push({
-      text: `··· ${text}`,
+      text: `… ${text}`,
       replyToMessageId: this.currentReplyToMessageId(),
     });
     return true;
@@ -4574,6 +4574,78 @@ test("chat controller terminate does not clear an existing durable chat binding"
     await fs.readFile(controller.statePath, "utf8"),
   );
   assert.equal(persistedState.sessionFile, "terminating-chat.jsonl");
+});
+
+test("chat controller waits for editable Working before prompt submission and keeps polling", async () => {
+  const controller = await createController("discord/1:C1");
+  controller.app.bots[0].platform = "discord";
+  controller.app.bots[0].selfId = "1";
+  const calls = [];
+  const ticks: number[] = [];
+  let releaseWorking!: () => void;
+  const workingSent = new Promise<void>((resolve) => {
+    releaseWorking = resolve;
+  });
+  let markWorkingStarted!: () => void;
+  const workingStarted = new Promise<void>((resolve) => {
+    markWorkingStarted = resolve;
+  });
+  let releasePrompt!: () => void;
+  const promptMayFinish = new Promise<void>((resolve) => {
+    releasePrompt = resolve;
+  });
+  controller.app.bots[0].workingIndicators = [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        ticks.push(Number(context?.tick));
+        calls.push(`working:${context?.tick}`);
+        if (ticks.length === 1) {
+          markWorkingStarted();
+          await workingSent;
+        }
+        return true;
+      },
+      async end() {
+        calls.push("working:end");
+        return true;
+      },
+    },
+  ];
+  controller.driver.runTurn = async () => {
+    calls.push("prompt");
+    await promptMayFinish;
+    return { finalText: "ok" };
+  };
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    calls.push("final");
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+  };
+
+  const turn = controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-editable-start",
+  });
+  await workingStarted;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["working:0"]);
+  releaseWorking();
+  while (!calls.includes("prompt")) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  controller.driver.frontendPhase = "working";
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+  controller.lastWorkingIndicatorAt = 0;
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(ticks, [0, 1]);
+  releasePrompt();
+
+  const result = await turn;
+  assert.equal(result.finalText, "ok");
+  assert.deepEqual(calls, ["working:0", "prompt", "working:1", "final"]);
 });
 
 test("chat controller does not let presentation polling block prompt submission", async () => {

@@ -57,7 +57,7 @@ export type ChatState = {
 };
 
 export const CHAT_WORKING_NOTICE_TEXT = "Working...";
-export const CHAT_INTERIM_REPLY_PREFIX = "··· ";
+export const CHAT_INTERIM_REPLY_PREFIX = "… ";
 
 export type ChatPromptRestoreInput = {
   text: string;
