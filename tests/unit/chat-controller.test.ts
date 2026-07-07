@@ -1022,7 +1022,7 @@ test("chat controller sends compaction start notice and reacts on that notice", 
   );
 });
 
-test("chat controller keeps compaction notice independent from the underlying chat turn", async () => {
+test("chat controller coalesces automatic compaction completion into the active chat turn", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -1036,7 +1036,11 @@ test("chat controller keeps compaction notice independent from the underlying ch
       .map((node) => node?.attrs?.content || node?.attrs?.id || "")
       .filter(Boolean)
       .join(" ");
-    deliveries.push({ text, kind: options?.deliveryKind });
+    deliveries.push({
+      text,
+      kind: options?.deliveryKind,
+      coalesce: Boolean(options?.coalesceWithWorkingMessage),
+    });
     return [`m-out-${nextMessageId++}`];
   };
   controller.driver.frontendPhase = "working";
@@ -1076,8 +1080,12 @@ test("chat controller keeps compaction notice independent from the underlying ch
     ["delete", "2", "m-out-1", "🤔", "1"],
   ]);
   assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "passive_notice" },
-    { text: "Compacted from 108,642 tokens", kind: "passive_notice" },
+    { text: "Compacting...", kind: "passive_notice", coalesce: true },
+    {
+      text: "Compacted from 108,642 tokens",
+      kind: "passive_notice",
+      coalesce: true,
+    },
   ]);
 });
 

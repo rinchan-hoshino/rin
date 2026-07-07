@@ -1628,6 +1628,7 @@ export class ChatController {
 
   private async deliverCompactionEndNotice(text: string) {
     const ackTarget = this.compactionAckTarget();
+    const coalesceWithActiveTurn = !ackTarget && Boolean(this.currentTurn);
     const idempotencyKey = ackTarget
       ? JSON.stringify([
           "compaction_end_ack",
@@ -1638,6 +1639,7 @@ export class ChatController {
         ])
       : "";
     const delivered = await this.sendPassiveNoticeNow(text, {
+      ...(coalesceWithActiveTurn ? { coalesceWithWorkingMessage: true } : {}),
       ...(ackTarget
         ? {
             postDelivery: {
