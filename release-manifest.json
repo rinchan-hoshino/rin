@@ -71,10 +71,17 @@
     "promotedFromBetaVersion": "0.6.0-beta.20260629"
   },
   "beta": {
-    "version": "0.6.0-beta.20260629",
-    "archiveUrl": "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/0a1ee07932a42e3090a4b9556acc4ab39fd13bf1",
-    "ref": "0a1ee07932a42e3090a4b9556acc4ab39fd13bf1",
-    "promotionVersion": "0.6.0"
+    "version": "0.7.0-beta.20260707",
+    "archiveUrl": "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/6e04a097b4788ab281f273ffd20ab5737241004f",
+    "ref": "6e04a097b4788ab281f273ffd20ab5737241004f",
+    "promotionVersion": "0.7.0",
+    "assets": {
+      "linux-x64": {
+        "bundleUrl": "https://github.com/rinchan-hoshino/rin/releases/download/v0.7.0-beta.20260707/rin-0.7.0-beta.20260707-linux-x64.tar.gz",
+        "sha256": "936e166035d77f29d8a0fe45cddbd5e64d471b926b80a8952703c9b812679b7f",
+        "nodeVersion": "24.18.0"
+      }
+    }
   },
   "nightly": {
     "version": "0.7.0-nightly.20260706+8a66a31",
