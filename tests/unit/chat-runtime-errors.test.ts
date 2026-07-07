@@ -38,6 +38,21 @@ test("chat runtime treats worker exits without detail as silent lifecycle transi
   assert.equal(isSilentChatRuntimeRetryError("rin_worker_exit"), true);
 });
 
+test("chat runtime treats pending outbox delivery as a silent transient", () => {
+  assert.equal(
+    isTransientChatRuntimeError("chat_outbox_delivery_pending"),
+    true,
+  );
+  assert.equal(
+    isChatLifecycleRuntimeError("chat_outbox_delivery_pending"),
+    true,
+  );
+  assert.equal(
+    isSilentChatRuntimeRetryError("chat_outbox_delivery_pending"),
+    true,
+  );
+});
+
 /* Recovery timeout is not auto-retried, but chat should not expose the raw marker. */
 test("chat runtime formats recovery lifecycle errors as user-facing text", () => {
   assert.equal(
