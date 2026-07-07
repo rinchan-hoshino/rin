@@ -31,6 +31,8 @@ export type StoredChatMessage = {
   platform: string;
   botId?: string;
   chatId: string;
+  chatThreadId?: string;
+  messageThreadId?: string;
   chatType?: "private" | "group";
   receivedAt: string;
   platformTimestamp?: number;

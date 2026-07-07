@@ -93,7 +93,7 @@ function requireReactionIndicator(bot: any) {
   return indicator;
 }
 
-test("discord adapter edits the visible working message for final text", async () => {
+test("discord adapter deletes visible progress before final text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "discord",
@@ -132,17 +132,61 @@ test("discord adapter edits the visible working message for final text", async (
     await editable.tick({ chatId: "C1", tick: 0 });
     const result = await app.bots[0].sendMessage("C1", [h.text("done")]);
 
-    assert.deepEqual(result, ["1"]);
+    assert.deepEqual(result, ["2"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "edit"],
+      ["send", "delete", "send"],
     );
     assert.equal(calls[0].payload.content, "Working...");
-    assert.equal(calls[1].payload.content, "done");
+    assert.equal(calls[1].id, "1");
+    assert.equal(calls[2].payload.content, "done");
   });
 });
 
-test("slack adapter edits the visible working message for final text", async () => {
+test("discord adapter deletes visible progress before final media", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    const channel = {
+      send: async (payload: any) => {
+        const id = String(messages.size + 1);
+        const message = { id, payload };
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => calls.push({ method: "delete", id }),
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C1", tick: 0 });
+    const result = await app.bots[0].sendMessage("C1", [
+      h.image("https://example.com/demo.png"),
+    ]);
+
+    assert.deepEqual(result, ["2"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "delete", "send"],
+    );
+    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[1].id, "1");
+    assert.deepEqual(calls[2].payload.files, ["https://example.com/demo.png"]);
+  });
+});
+
+test("slack adapter deletes visible progress before final text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "slack",
@@ -174,19 +218,65 @@ test("slack adapter edits the visible working message for final text", async () 
     await editable.tick({ chatId: "C123", tick: 0 });
     const result = await app.bots[0].sendMessage("C123", [h.text("done")]);
 
-    assert.deepEqual(result, ["1"]);
+    assert.deepEqual(result, ["3"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["postMessage", "update"],
+      ["postMessage", "delete", "postMessage"],
     );
     assert.equal(calls[0].payload.text, "Working...");
     assert.equal(calls[1].payload.channel, "C123");
     assert.equal(calls[1].payload.ts, "1");
-    assert.equal(calls[1].payload.text, "done");
+    assert.equal(calls[2].payload.channel, "C123");
+    assert.equal(calls[2].payload.text, "done");
   });
 });
 
-test("lark adapter edits the visible working message for final text", async () => {
+test("slack adapter deletes visible progress before final media", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { token: "xapp", botToken: "xoxb" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.web = {
+      chat: {
+        postMessage: async (payload: any) => {
+          calls.push({ method: "postMessage", payload });
+          return { ts: String(calls.length) };
+        },
+        update: async (payload: any) => {
+          calls.push({ method: "update", payload });
+          return { ts: payload.ts };
+        },
+        delete: async (payload: any) => {
+          calls.push({ method: "delete", payload });
+          return { ok: true };
+        },
+      },
+      files: { uploadV2: async () => ({ files: [{ id: "F1" }] }) },
+    };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C123", tick: 0 });
+    const result = await app.bots[0].sendMessage("C123", [
+      h.image("https://example.com/demo.png"),
+    ]);
+
+    assert.deepEqual(result, ["3"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["postMessage", "delete", "postMessage"],
+    );
+    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[1].payload.ts, "1");
+    assert.equal(calls[2].payload.text, "https://example.com/demo.png");
+  });
+});
+
+test("lark adapter deletes visible progress before final text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -201,11 +291,18 @@ test("lark adapter edits the visible working message for final text", async () =
         message: {
           create: async (payload: any) => {
             calls.push({ method: "create", payload });
-            return { data: { message_id: "m1" } };
+            const count = calls.filter(
+              (entry) => entry.method === "create",
+            ).length;
+            return { data: { message_id: `m${count}` } };
           },
           update: async (payload: any) => {
             calls.push({ method: "update", payload });
             return { data: { message_id: payload.path.message_id } };
+          },
+          delete: async (payload: any) => {
+            calls.push({ method: "delete", payload });
+            return { ok: true };
           },
         },
       },
@@ -215,18 +312,19 @@ test("lark adapter edits the visible working message for final text", async () =
     await editable.tick({ chatId: "oc_1", tick: 0 });
     const result = await app.bots[0].sendMessage("oc_1", [h.text("done")]);
 
-    assert.deepEqual(result, ["m1"]);
+    assert.deepEqual(result, ["m2"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["create", "update"],
+      ["create", "delete", "create"],
     );
     assert.equal(calls[0].payload.data.receive_id, "oc_1");
     assert.equal(calls[1].payload.path.message_id, "m1");
-    assert.match(calls[1].payload.data.content, /done/);
+    assert.equal(calls[2].payload.data.receive_id, "oc_1");
+    assert.match(calls[2].payload.data.content, /done/);
   });
 });
 
-test("telegram adapter coalesces working, todo, and final text into one edited message", async () => {
+test("telegram adapter edits progress updates then deletes them before sending final text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -238,7 +336,7 @@ test("telegram adapter coalesces working, todo, and final text into one edited m
     const calls: Array<{ method: string; payload: any }> = [];
     adapter.callApi = async (method: string, payload: any) => {
       calls.push({ method, payload });
-      if (method === "sendMessage") return { message_id: "1" };
+      if (method === "sendMessage") return { message_id: String(calls.length) };
       return { message_id: payload?.message_id };
     };
 
@@ -253,8 +351,8 @@ test("telegram adapter coalesces working, todo, and final text into one edited m
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 6 });
     const finalResult = await app.bots[0].sendMessage("456", [h.text("done")]);
 
-    assert.deepEqual(todoResult, ["1"]);
-    assert.deepEqual(finalResult, ["1"]);
+    assert.deepEqual(todoResult, ["2"]);
+    assert.deepEqual(finalResult, ["6"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
       [
@@ -262,14 +360,90 @@ test("telegram adapter coalesces working, todo, and final text into one edited m
         "sendMessage",
         "editMessageText",
         "sendChatAction",
-        "editMessageText",
+        "deleteMessage",
+        "sendMessage",
       ],
     );
     assert.equal(calls[1].payload.text, "Working...");
-    assert.equal(calls[2].payload.message_id, 1);
+    assert.equal(calls[2].payload.message_id, 2);
     assert.equal(calls[2].payload.text, "[ ] first task");
-    assert.equal(calls[4].payload.message_id, 1);
-    assert.equal(calls[4].payload.text, "done");
+    assert.equal(calls[4].payload.message_id, 2);
+    assert.equal(calls[5].payload.text, "done");
+  });
+});
+
+test("telegram adapter scopes forum topic sessions and outbound payloads", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "8301813220:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    app.bots[0].selfId = "8301813220";
+
+    await adapter.handleUpdate({
+      update_id: 1,
+      message: {
+        message_id: 7,
+        date: 1783321200,
+        message_thread_id: 184,
+        is_topic_message: true,
+        chat: {
+          id: -1003852739541,
+          type: "supergroup",
+          title: "Committee",
+        },
+        from: { id: 663068439, username: "meoooqwq" },
+        text: "hello topic",
+      },
+    });
+
+    const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+    const [fileName] = await fs.readdir(pendingDir);
+    const inboxItem = JSON.parse(
+      await fs.readFile(path.join(pendingDir, fileName), "utf8"),
+    );
+    assert.equal(
+      inboxItem.chatKey,
+      "telegram/8301813220:-1003852739541?thread=184",
+    );
+    assert.equal(inboxItem.routing.messageThreadId, "184");
+    assert.equal(inboxItem.session.messageThreadId, "184");
+    assert.equal(inboxItem.session.chatThreadId, "184");
+    assert.equal(inboxItem.session.isTopicMessage, true);
+
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+
+    await app.bots[0].workingIndicators[1].tick({
+      chatId: "-1003852739541?thread=184",
+    });
+    await app.bots[0].workingIndicators[0].tick({
+      chatId: "-1003852739541?thread=184",
+      tick: 0,
+    });
+    const result = await app.bots[0].sendMessage("-1003852739541?thread=184", [
+      h.text("topic reply"),
+    ]);
+
+    assert.deepEqual(result, ["4"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["sendChatAction", "sendMessage", "deleteMessage", "sendMessage"],
+    );
+    assert.equal(calls[0].payload.chat_id, "-1003852739541");
+    assert.equal(calls[0].payload.message_thread_id, 184);
+    assert.equal(calls[1].payload.chat_id, "-1003852739541");
+    assert.equal(calls[1].payload.message_thread_id, 184);
+    assert.equal(calls[2].payload.chat_id, "-1003852739541");
+    assert.equal(calls[3].payload.chat_id, "-1003852739541");
+    assert.equal(calls[3].payload.message_thread_id, 184);
+    assert.equal(calls[3].payload.text, "topic reply");
   });
 });
 
@@ -302,14 +476,14 @@ test("telegram adapter clears coalesced todo when final reply is media-only", as
     ]);
 
     assert.deepEqual(todoResult, ["1"]);
-    assert.deepEqual(finalResult, ["3"]);
+    assert.deepEqual(finalResult, ["4"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendMessage", "editMessageText", "sendPhoto", "deleteMessage"],
+      ["sendMessage", "editMessageText", "deleteMessage", "sendPhoto"],
     );
     assert.equal(calls[1].payload.message_id, 1);
     assert.equal(calls[1].payload.text, "[ ] first task");
-    assert.equal(calls[3].payload.message_id, 1);
+    assert.equal(calls[2].payload.message_id, 1);
   });
 });
 
@@ -342,7 +516,7 @@ test("telegram adapter end handler clears visible working text without todo cont
   });
 });
 
-test("telegram adapter preserves oversized final text as an edited message group", async () => {
+test("telegram adapter deletes progress before sending oversized final text chunks", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -364,16 +538,22 @@ test("telegram adapter preserves oversized final text as an edited message group
       h.text("a".repeat(4100)),
     ]);
 
-    assert.deepEqual(result, ["2", "4"]);
+    assert.deepEqual(result, ["4", "5"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendChatAction", "sendMessage", "editMessageText", "sendMessage"],
+      [
+        "sendChatAction",
+        "sendMessage",
+        "deleteMessage",
+        "sendMessage",
+        "sendMessage",
+      ],
     );
     assert.equal(calls[2].payload.message_id, 2);
-    assert.equal(calls[2].payload.text.length, 4096);
-    assert.equal(calls[3].payload.text.length, 4);
+    assert.equal(calls[3].payload.text.length, 4096);
+    assert.equal(calls[4].payload.text.length, 4);
     assert.equal(
-      `${calls[2].payload.text}${calls[3].payload.text}`.length,
+      `${calls[3].payload.text}${calls[4].payload.text}`.length,
       4100,
     );
   });
@@ -605,12 +785,12 @@ test("telegram adapter clears stale working text after media-only final replies"
       h.image("https://example.com/demo.png"),
     ]);
 
-    assert.deepEqual(result, ["2"]);
+    assert.deepEqual(result, ["3"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendMessage", "sendPhoto", "deleteMessage"],
+      ["sendMessage", "deleteMessage", "sendPhoto"],
     );
-    assert.equal(calls[2].payload.message_id, 1);
+    assert.equal(calls[1].payload.message_id, 1);
   });
 });
 

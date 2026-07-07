@@ -18,6 +18,7 @@ export type ChatInboxRouting = {
   userId?: string;
   nickname?: string;
   chatName?: string;
+  messageThreadId?: string;
   replyToMessageId?: string;
 };
 
@@ -247,6 +248,16 @@ export function serializeChatInboxSession(session: any) {
       safeString(session?.selfId || session?.bot?.selfId).trim() || undefined,
     channelId: safeString(session?.channelId).trim() || undefined,
     guildId: safeString(session?.guildId).trim() || undefined,
+    messageThreadId:
+      safeString(session?.messageThreadId || session?.chatThreadId).trim() ||
+      undefined,
+    chatThreadId:
+      safeString(session?.chatThreadId || session?.messageThreadId).trim() ||
+      undefined,
+    isTopicMessage:
+      typeof session?.isTopicMessage === "boolean"
+        ? session.isTopicMessage
+        : undefined,
     userId: pickUserId(session) || undefined,
     messageId: pickMessageId(session) || undefined,
     timestamp: normalizePlatformTimestamp(session?.timestamp),
@@ -278,6 +289,9 @@ export function buildChatInboxRouting(
     userId: pickUserId(session) || undefined,
     nickname: pickSenderNickname(session) || undefined,
     chatName: pickChatName(session) || undefined,
+    messageThreadId:
+      safeString(session?.messageThreadId || session?.chatThreadId).trim() ||
+      undefined,
     replyToMessageId: pickReplyToMessageId(session) || undefined,
   };
 }
@@ -308,6 +322,12 @@ export function buildInboundStoredChatMessageInput(
     platform,
     botId: botId || undefined,
     chatId,
+    chatThreadId:
+      safeString(session?.chatThreadId || session?.messageThreadId).trim() ||
+      undefined,
+    messageThreadId:
+      safeString(session?.messageThreadId || session?.chatThreadId).trim() ||
+      undefined,
     chatType: getChatType(session),
     receivedAt,
     platformTimestamp: normalizePlatformTimestamp(session?.timestamp),

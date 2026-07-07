@@ -63,6 +63,51 @@ function telegramMediaMethod(type: string) {
   return { method: "sendDocument", field: "document" };
 }
 
+const TELEGRAM_CHAT_THREAD_MARKER = "?thread=";
+
+function encodeTelegramThreadId(threadId: unknown) {
+  return encodeURIComponent(safeString(threadId).trim());
+}
+
+function decodeTelegramThreadId(threadId: unknown) {
+  try {
+    return decodeURIComponent(safeString(threadId).trim());
+  } catch {
+    return safeString(threadId).trim();
+  }
+}
+
+function splitTelegramChatThread(
+  chatId: unknown,
+  explicitThreadId: unknown = "",
+) {
+  let nextChatId = safeString(chatId).trim();
+  let messageThreadId = safeString(explicitThreadId).trim();
+  const markerIndex = nextChatId.lastIndexOf(TELEGRAM_CHAT_THREAD_MARKER);
+  if (markerIndex >= 0) {
+    if (!messageThreadId) {
+      messageThreadId = decodeTelegramThreadId(
+        nextChatId.slice(markerIndex + TELEGRAM_CHAT_THREAD_MARKER.length),
+      );
+    }
+    nextChatId = nextChatId.slice(0, markerIndex);
+  }
+  return {
+    chatId: nextChatId,
+    messageThreadId,
+    scopedChatId: messageThreadId
+      ? `${nextChatId}${TELEGRAM_CHAT_THREAD_MARKER}${encodeTelegramThreadId(messageThreadId)}`
+      : nextChatId,
+  };
+}
+
+function telegramThreadPayload(messageThreadId: unknown) {
+  const text = safeString(messageThreadId).trim();
+  if (!text) return {};
+  const numeric = Number(text);
+  return { message_thread_id: Number.isFinite(numeric) ? numeric : text };
+}
+
 function isTextLikeNode(node: any) {
   const type = safeString(node?.type).toLowerCase();
   return (
@@ -348,8 +393,20 @@ export class ChatRuntimeApp extends EventEmitter {
     if (!nextAgentDir || !platform || !botId || !chatId || !messageId) {
       return;
     }
-    const chatKey = composeChatKeyForBot(this, platform, chatId, botId);
-    if (!chatKey) return;
+    const baseChatKey = composeChatKeyForBot(this, platform, chatId, botId);
+    if (!baseChatKey) return;
+    const messageThreadId =
+      platform === "telegram"
+        ? safeString(
+            session?.messageThreadId ||
+              session?.chatThreadId ||
+              session?.telegram?.message?.message_thread_id ||
+              "",
+          ).trim()
+        : "";
+    const chatKey = messageThreadId
+      ? `${baseChatKey}${TELEGRAM_CHAT_THREAD_MARKER}${encodeTelegramThreadId(messageThreadId)}`
+      : baseChatKey;
     const elements = Array.isArray(session?.elements) ? session.elements : [];
     enqueueChatInboxItem(nextAgentDir, {
       chatKey,
@@ -820,6 +877,7 @@ class TelegramAdapter {
     const userId = safeString(author?.id).trim();
     const name = displayNameFromTelegramUser(author);
     const chatId = safeString(chat?.id).trim();
+    const messageThreadId = safeString(message?.message_thread_id).trim();
     return {
       platform: "telegram",
       selfId: safeString(this.bot?.selfId).trim(),
@@ -843,6 +901,9 @@ class TelegramAdapter {
         username: safeString(author?.username).trim() || undefined,
       },
       channelId: chatId,
+      messageThreadId: messageThreadId || undefined,
+      chatThreadId: messageThreadId || undefined,
+      isTopicMessage: Boolean(message?.is_topic_message),
       channelName: !isDirect
         ? safeString(chat?.title).trim() || undefined
         : undefined,
@@ -879,9 +940,15 @@ class TelegramAdapter {
     text: string,
     replyToMessageId?: string,
     parseMode?: string,
+    options: { messageThreadId?: unknown; threadId?: unknown } = {},
   ) {
+    const target = splitTelegramChatThread(
+      chatId,
+      options?.messageThreadId || options?.threadId,
+    );
     const payload = compactObject({
-      chat_id: chatId,
+      chat_id: target.chatId,
+      ...telegramThreadPayload(target.messageThreadId),
       text,
       parse_mode: safeString(parseMode).trim() || undefined,
       reply_to_message_id: replyToMessageId,
@@ -894,7 +961,8 @@ class TelegramAdapter {
       const result = await this.callApi(
         "sendMessage",
         compactObject({
-          chat_id: chatId,
+          chat_id: target.chatId,
+          ...telegramThreadPayload(target.messageThreadId),
           text: renderPlainTextFromNodes([
             { type: "html", attrs: { content: text } },
           ]),
@@ -911,8 +979,9 @@ class TelegramAdapter {
     text: string,
     parseMode?: string,
   ) {
+    const target = splitTelegramChatThread(chatId);
     const payload = compactObject({
-      chat_id: chatId,
+      chat_id: target.chatId,
       message_id: Number(messageId),
       text,
       parse_mode: safeString(parseMode).trim() || undefined,
@@ -932,7 +1001,7 @@ class TelegramAdapter {
       await this.callApi(
         "editMessageText",
         compactObject({
-          chat_id: chatId,
+          chat_id: target.chatId,
           message_id: Number(messageId),
           text: renderPlainTextFromNodes([
             { type: "html", attrs: { content: text } },
@@ -956,7 +1025,12 @@ class TelegramAdapter {
     caption: string,
     replyToMessageId?: string,
     parseMode?: string,
+    options: { messageThreadId?: unknown; threadId?: unknown } = {},
   ) {
+    const target = splitTelegramChatThread(
+      chatId,
+      options?.messageThreadId || options?.threadId,
+    );
     const payload = await readBinaryFromNode(node);
     if (!payload) {
       throw new Error(`telegram_media_source_missing:${field}`);
@@ -969,7 +1043,8 @@ class TelegramAdapter {
         const result = await this.callApi(
           nextMethod,
           compactObject({
-            chat_id: chatId,
+            chat_id: target.chatId,
+            ...telegramThreadPayload(target.messageThreadId),
             [nextField]: payload.url,
             caption: caption || undefined,
             parse_mode: safeString(parseMode).trim() || undefined,
@@ -981,7 +1056,8 @@ class TelegramAdapter {
       const result = await this.callApi(
         nextMethod,
         compactObject({
-          chat_id: chatId,
+          chat_id: target.chatId,
+          ...telegramThreadPayload(target.messageThreadId),
           [nextField]: new InputFile(payload.data, payload.name),
           caption: caption || undefined,
           parse_mode: safeString(parseMode).trim() || undefined,
@@ -1206,7 +1282,8 @@ class TelegramAdapter {
   }
 
   private async deleteVisibleWorkingMessage(chatId: string) {
-    const key = this.workingMessageKey(chatId, "chat");
+    const target = splitTelegramChatThread(chatId);
+    const key = this.workingMessageKey(target.scopedChatId, "chat");
     const persisted = this.readPersistedWorkingMessage(key);
     const messageIds = persisted?.messageIds?.length
       ? persisted.messageIds
@@ -1226,7 +1303,7 @@ class TelegramAdapter {
     for (const messageId of messageIds) {
       try {
         await this.callApi("deleteMessage", {
-          chat_id: chatId,
+          chat_id: target.chatId,
           message_id: Number(messageId),
         });
       } catch {}
@@ -1381,8 +1458,9 @@ class TelegramAdapter {
       const surplusStart = editFailed ? editedExistingCount : delivered.length;
       for (const surplusId of existingMessageIds.slice(surplusStart)) {
         try {
+          const target = splitTelegramChatThread(chatId);
           await this.callApi("deleteMessage", {
-            chat_id: chatId,
+            chat_id: target.chatId,
             message_id: Number(surplusId),
           });
         } catch {}
@@ -1411,11 +1489,17 @@ class TelegramAdapter {
     let cursor = 0;
     let firstReply = replyToMessageId;
     let finalizedWorkingMessage = false;
+    const ensureFinalProgressCleared = async () => {
+      if (!isFinalDelivery || finalizedWorkingMessage) return;
+      await this.deleteVisibleWorkingMessage(chatId);
+      finalizedWorkingMessage = true;
+    };
     const recordFailure = async (error: unknown, placeholder: string) => {
       failures.push(error);
       this.logger.warn(
         `rich message segment failed err=${safeString((error as any)?.message || error)}`,
       );
+      await ensureFinalProgressCleared();
       const placeholderId = await this.sendFailurePlaceholder(
         chatId,
         placeholder,
@@ -1433,6 +1517,7 @@ class TelegramAdapter {
       if (isTelegramMediaNodeType(type)) {
         const media = telegramMediaMethod(type);
         try {
+          await ensureFinalProgressCleared();
           const messageId = await this.sendBinaryMessage(
             media.method as any,
             media.field as any,
@@ -1477,7 +1562,8 @@ class TelegramAdapter {
                   coalesceWithWorkingMessage ? "chat" : "passive_notice",
                 )
               : this.workingMessageKey(chatId, "chat");
-          const shouldEditWorkingMessage = delivered.length === 0;
+          const shouldEditWorkingMessage =
+            delivered.length === 0 && !isFinalDelivery;
           const messageIds = shouldEditWorkingMessage
             ? await this.updateWorkingMessageGroup({
                 chatId,
@@ -1485,9 +1571,10 @@ class TelegramAdapter {
                 replyToMessageId: firstReply,
                 preferredMessageId: firstReply,
                 parseMode: "HTML",
-                finalize: isFinalDelivery,
-                // Working indicators, coalesced todo notices, and final replies share
-                // the chat key so a turn progresses by editing one Telegram message group.
+                finalize: false,
+                // Working indicators and coalesced todo notices share the chat key
+                // so in-progress updates still edit one Telegram message group.
+                // Final replies delete that progress artifact and send fresh messages.
                 // Non-coalesced passive notices stay isolated on the passive_notice key.
                 key: deliveryKey,
                 kind: deliveryKind === "passive_notice" ? "todo" : undefined,
@@ -1495,8 +1582,8 @@ class TelegramAdapter {
             : [];
           if (shouldEditWorkingMessage) {
             delivered.push(...messageIds);
-            finalizedWorkingMessage = isFinalDelivery && messageIds.length > 0;
           } else {
+            await ensureFinalProgressCleared();
             for (const textChunk of textChunks) {
               const messageId = await this.sendText(
                 chatId,
@@ -1535,15 +1622,26 @@ class TelegramAdapter {
   }
 
   async tickTypingIndicator(context: any) {
-    const chatId = safeString(context?.chatId).trim();
-    if (!chatId) return false;
-    await this.callApi("sendChatAction", { chat_id: chatId, action: "typing" });
+    const target = splitTelegramChatThread(
+      context?.chatId,
+      context?.messageThreadId || context?.threadId,
+    );
+    if (!target.chatId) return false;
+    await this.callApi("sendChatAction", {
+      chat_id: target.chatId,
+      ...telegramThreadPayload(target.messageThreadId),
+      action: "typing",
+    });
     return true;
   }
 
   async tickWorkingIndicator(context: any) {
-    const chatId = safeString(context?.chatId).trim();
-    if (!chatId) return false;
+    const target = splitTelegramChatThread(
+      context?.chatId,
+      context?.messageThreadId || context?.threadId,
+    );
+    const chatId = target.scopedChatId;
+    if (!target.chatId) return false;
     if (safeString(context?.todoNoticeText).trim()) return true;
     const sourceMessageId = safeString(context?.messageId).trim();
     const replyToMessageId = safeString(
@@ -1571,14 +1669,18 @@ class TelegramAdapter {
   }
 
   async endWorkingIndicator(context: any) {
-    const chatId = safeString(context?.chatId).trim();
-    if (!chatId) return false;
-    return await this.deleteVisibleWorkingMessage(chatId);
+    const target = splitTelegramChatThread(
+      context?.chatId,
+      context?.messageThreadId || context?.threadId,
+    );
+    if (!target.chatId) return false;
+    return await this.deleteVisibleWorkingMessage(target.scopedChatId);
   }
 
   async createReaction(chatId: string, messageId: string, emoji: string) {
+    const target = splitTelegramChatThread(chatId);
     await this.callApi("setMessageReaction", {
-      chat_id: chatId,
+      chat_id: target.chatId,
       message_id: Number(messageId),
       reaction: [{ type: "emoji", emoji }],
     });
@@ -1591,8 +1693,9 @@ class TelegramAdapter {
     _emoji?: string,
     _userId?: string,
   ) {
+    const target = splitTelegramChatThread(chatId);
     await this.callApi("setMessageReaction", {
-      chat_id: chatId,
+      chat_id: target.chatId,
       message_id: Number(messageId),
       reaction: [],
     });
