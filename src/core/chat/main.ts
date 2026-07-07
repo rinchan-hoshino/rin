@@ -137,6 +137,21 @@ const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
 const CHAT_STEERED_INBOX_WAIT_INTERVAL_MS = 1000;
 const CHAT_STEERED_INBOX_INACTIVE_GRACE_MS = 5000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
+const TELEGRAM_CHAT_THREAD_MARKER = "?thread=";
+
+function appendTelegramThreadToChatKey(chatKey: string, session: any) {
+  const nextChatKey = safeString(chatKey).trim();
+  if (!nextChatKey) return "";
+  const platform = safeString(session?.platform || "").trim();
+  if (platform !== "telegram") return nextChatKey;
+  const messageThreadId = safeString(
+    session?.messageThreadId || session?.chatThreadId || "",
+  ).trim();
+  if (!messageThreadId || nextChatKey.includes(TELEGRAM_CHAT_THREAD_MARKER)) {
+    return nextChatKey;
+  }
+  return `${nextChatKey}${TELEGRAM_CHAT_THREAD_MARKER}${encodeURIComponent(messageThreadId)}`;
+}
 
 async function buildTelegramInboundMediaDebug(session: any) {
   const update = session?.telegram;
@@ -531,11 +546,14 @@ export async function startChatBridge(
         safeString(bot?.selfId).trim() === safeString(selfId).trim(),
     );
   const sessionChatKey = (session: any) =>
-    composeChatKeyForBot(
-      app,
-      safeString(session?.platform || "").trim(),
-      getChatId(session),
-      safeString(session?.selfId || session?.bot?.selfId || "").trim(),
+    appendTelegramThreadToChatKey(
+      composeChatKeyForBot(
+        app,
+        safeString(session?.platform || "").trim(),
+        getChatId(session),
+        safeString(session?.selfId || session?.bot?.selfId || "").trim(),
+      ),
+      session,
     );
   const isRecordOnlyChatKey = (chatKey: string) =>
     resolveChatTurnPolicyMode(settings, chatKey) === "record_only";

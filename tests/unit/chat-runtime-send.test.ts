@@ -73,6 +73,35 @@ test("telegram adapter separates long-poll and outbound API fetch dispatchers", 
   });
 });
 
+test("telegram adapter includes explicit topic thread id when sending media", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: "media-1" };
+    };
+
+    const result = await app.bots[0].sendMessage(
+      "-100123",
+      [h.image("https://example.com/demo.png")],
+      { messageThreadId: "193" },
+    );
+
+    assert.deepEqual(result, ["media-1"]);
+    assert.equal(calls[0].method, "sendPhoto");
+    assert.equal(calls[0].payload.chat_id, "-100123");
+    assert.equal(calls[0].payload.message_thread_id, 193);
+    assert.equal(calls[0].payload.photo, "https://example.com/demo.png");
+  });
+});
+
 function safeTelegramMethod(url: string) {
   return String(url).split("/").pop() || "";
 }
