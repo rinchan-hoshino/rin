@@ -797,6 +797,7 @@ export async function initializePiInteractiveModeWithoutManagedToolEnsure(
   }
 
   instance.ui.addChild(instance.headerContainer);
+  instance.ui.addChild(instance.loadedResourcesContainer);
   if (instance.options.verbose || !instance.settingsManager.getQuietStartup()) {
     const logo =
       theme.bold(theme.fg("accent", APP_NAME)) +

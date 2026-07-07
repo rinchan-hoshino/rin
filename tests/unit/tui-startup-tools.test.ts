@@ -21,6 +21,7 @@ test("Rin TUI startup override does not call Pi managed-tool ensure", async () =
       requestRender: () => {},
     },
     headerContainer: { addChild: () => calls.push("header") },
+    loadedResourcesContainer: "resources",
     chatContainer: "chat",
     pendingMessagesContainer: "pending",
     statusContainer: "status",
@@ -45,6 +46,7 @@ test("Rin TUI startup override does not call Pi managed-tool ensure", async () =
   assert.deepEqual(calls, [
     "signals",
     "add:[object Object]",
+    "add:resources",
     "header",
     "add:chat",
     "add:pending",
