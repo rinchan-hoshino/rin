@@ -38,18 +38,18 @@ test("chat runtime treats worker exits without detail as silent lifecycle transi
   assert.equal(isSilentChatRuntimeRetryError("rin_worker_exit"), true);
 });
 
-test("chat runtime treats pending outbox delivery as a silent transient", () => {
+test("chat runtime does not classify bare pending outbox markers as retry state", () => {
   assert.equal(
     isTransientChatRuntimeError("chat_outbox_delivery_pending"),
-    true,
+    false,
   );
   assert.equal(
     isChatLifecycleRuntimeError("chat_outbox_delivery_pending"),
-    true,
+    false,
   );
   assert.equal(
     isSilentChatRuntimeRetryError("chat_outbox_delivery_pending"),
-    true,
+    false,
   );
 });
 

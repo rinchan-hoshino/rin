@@ -8,22 +8,50 @@ import {
 } from "../rin-lib/user-facing-errors.js";
 import { safeString } from "./chat-helpers.js";
 
-const TRANSIENT_CHAT_RUNTIME_ERROR_RE =
-  /rin_timeout:|rin_disconnected:|rin_tui_not_connected|chat_controller_disposed|rin_worker_exit(?::|\b)|chat_turn_stale|chat_outbox_delivery_pending|WebSocket (?:closed|error)\b|connect (?:ENOENT|ECONNREFUSED|ECONNRESET|EPIPE)\b|socket hang up|write EPIPE/;
-
-const CHAT_LIFECYCLE_RUNTIME_ERROR_RE =
-  /rin_worker_exit(?::|\b)|rin_turn_result_recovery_timeout(?::|\b)|rpc_turn_final_output_missing(?::|\b)|rin_turn_result_invariant_failed(?::|\b)|chat_outbox_delivery_pending/;
-
-export function isTransientChatRuntimeError(error: unknown) {
-  if (isRinFrontendTurnCancelledError(error)) return true;
-  return TRANSIENT_CHAT_RUNTIME_ERROR_RE.test(
-    safeString((error as any)?.message || error),
+function isRetryableRuntimeMarker(message: string) {
+  return (
+    message.startsWith("rin_timeout:") ||
+    message.startsWith("rin_disconnected:") ||
+    message === "rin_tui_not_connected" ||
+    message === "chat_controller_disposed" ||
+    message === "chat_turn_stale" ||
+    message === "rin_worker_exit" ||
+    message.startsWith("rin_worker_exit:")
   );
 }
 
+function isRetryableTransportError(message: string) {
+  return (
+    message.startsWith("WebSocket closed") ||
+    message === "WebSocket error" ||
+    message.startsWith("connect ENOENT") ||
+    message.startsWith("connect ECONNREFUSED") ||
+    message.startsWith("connect ECONNRESET") ||
+    message.startsWith("connect EPIPE") ||
+    message.includes("socket hang up") ||
+    message.includes("write EPIPE")
+  );
+}
+
+export function isTransientChatRuntimeError(error: unknown) {
+  if (isRinFrontendTurnCancelledError(error)) return true;
+  const message = safeString((error as any)?.message || error);
+  return (
+    isRetryableRuntimeMarker(message) || isRetryableTransportError(message)
+  );
+}
+
+function isMarkerOrMarkerDetail(message: string, marker: string) {
+  return message === marker || message.startsWith(`${marker}:`);
+}
+
 export function isChatLifecycleRuntimeError(error: unknown) {
-  return CHAT_LIFECYCLE_RUNTIME_ERROR_RE.test(
-    safeString((error as any)?.message || error),
+  const message = safeString((error as any)?.message || error);
+  return (
+    isMarkerOrMarkerDetail(message, "rin_worker_exit") ||
+    isMarkerOrMarkerDetail(message, "rin_turn_result_recovery_timeout") ||
+    isMarkerOrMarkerDetail(message, "rpc_turn_final_output_missing") ||
+    isMarkerOrMarkerDetail(message, "rin_turn_result_invariant_failed")
   );
 }
 

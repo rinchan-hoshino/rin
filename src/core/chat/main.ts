@@ -116,6 +116,7 @@ import {
   isSilentChatRuntimeRetryError,
   isTransientChatRuntimeError,
 } from "./runtime-errors.js";
+import { resolveChatOutboxDeliveryPendingState } from "./delivery-errors.js";
 
 function createLogger(name: string) {
   const prefix = `[${name}]`;
@@ -540,6 +541,18 @@ export async function startChatBridge(
     resolveChatTurnPolicyMode(settings, chatKey) === "record_only";
   const isInboundMessageProcessed = (chatKey: string, messageId: string) =>
     hasInboundChatMessageReplyBoundary(runtime.agentDir, chatKey, messageId);
+  const pendingOutboxDeliveryResult = (error: unknown) => {
+    const pendingState = resolveChatOutboxDeliveryPendingState(
+      runtime.agentDir,
+      error,
+    );
+    if (!pendingState) return null;
+    return {
+      retry: pendingState === "pending",
+      errorMessage: "chat_outbox_delivery_pending",
+      suppressRetryNotice: true,
+    };
+  };
   const handleUnmatchedCommandSession = async (
     session: any,
     identity: any,
@@ -631,6 +644,8 @@ export async function startChatBridge(
       logger.warn(
         `chat command failed chatKey=${chatKey} command=${command.name} err=${safeString((error as any)?.message || error)}`,
       );
+      const pendingDelivery = pendingOutboxDeliveryResult(error);
+      if (pendingDelivery) return pendingDelivery;
       return {
         retry: isTransientChatRuntimeError(error),
         errorMessage: safeString((error as any)?.message || error),
@@ -730,10 +745,14 @@ export async function startChatBridge(
     };
     const handleTurnFailure = async (error: any) => {
       const errorMessage = safeString((error as any)?.message || error);
-      const transientFailure = isTransientChatRuntimeError(errorMessage);
+      const pendingDelivery = pendingOutboxDeliveryResult(error);
+      const transientFailure = pendingDelivery
+        ? pendingDelivery.retry
+        : isTransientChatRuntimeError(error);
       logger.warn(
         `chat turn failed chatKey=${decision.chatKey} transient=${transientFailure} err=${errorMessage}`,
       );
+      if (pendingDelivery) return pendingDelivery;
       if (
         !transientFailure &&
         errorMessage &&

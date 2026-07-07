@@ -57,6 +57,7 @@ import {
   type ChatMessagePart,
 } from "../rin-lib/chat-outbox.js";
 import { drainChatOutbox } from "./boot.js";
+import { createChatOutboxDeliveryPendingError } from "./delivery-errors.js";
 import { listChatMessages } from "./message-store.js";
 import { restorePromptParts } from "./transport.js";
 import {
@@ -1353,12 +1354,12 @@ export class ChatController {
         if (options.requireDelivery) {
           const current = readChatOutboxItemById(this.agentDir, id)?.item;
           if (
-            current?.status === "sending" &&
+            (current?.status === "queued" || current?.status === "sending") &&
             /^chat_outbox_delivery_pending$/.test(
               safeString(current.lastError).trim(),
             )
           ) {
-            return [];
+            throw createChatOutboxDeliveryPendingError(id);
           }
           throw new Error("chat_outbox_delivery_pending");
         }
@@ -1378,7 +1379,7 @@ export class ChatController {
         throw new Error(current.lastError || "chat_outbox_delivery_failed");
       }
       if (current?.status === "queued" || current?.status === "sending") {
-        throw new Error("chat_outbox_delivery_pending");
+        throw createChatOutboxDeliveryPendingError(id);
       }
     }
     return (own as any)?.deliveryResult || [];
