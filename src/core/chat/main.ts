@@ -111,11 +111,7 @@ import {
 import { sendReaction, sendTyping } from "./transport.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
-import {
-  formatChatRuntimeErrorForUser,
-  isSilentChatRuntimeRetryError,
-  isTransientChatRuntimeError,
-} from "./runtime-errors.js";
+import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
 import { resolveChatOutboxDeliveryPendingState } from "./delivery-errors.js";
 
 function createLogger(name: string) {
@@ -665,7 +661,7 @@ export async function startChatBridge(
       const pendingDelivery = pendingOutboxDeliveryResult(error);
       if (pendingDelivery) return pendingDelivery;
       return {
-        retry: isTransientChatRuntimeError(error),
+        retry: false,
         errorMessage: safeString((error as any)?.message || error),
       };
     }
@@ -764,15 +760,11 @@ export async function startChatBridge(
     const handleTurnFailure = async (error: any) => {
       const errorMessage = safeString((error as any)?.message || error);
       const pendingDelivery = pendingOutboxDeliveryResult(error);
-      const transientFailure = pendingDelivery
-        ? pendingDelivery.retry
-        : isTransientChatRuntimeError(error);
       logger.warn(
-        `chat turn failed chatKey=${decision.chatKey} transient=${transientFailure} err=${errorMessage}`,
+        `chat turn failed chatKey=${decision.chatKey} err=${errorMessage}`,
       );
       if (pendingDelivery) return pendingDelivery;
       if (
-        !transientFailure &&
         errorMessage &&
         messageId &&
         !isInboundChatMessageProcessed(
@@ -786,7 +778,7 @@ export async function startChatBridge(
             type: "text_delivery",
             createdAt: nowIso(),
             chatKey: decision.chatKey,
-            text: formatChatRuntimeErrorForUser(errorMessage),
+            text: formatRuntimeErrorForChat(errorMessage),
             replyToMessageId: messageId || undefined,
             sessionFile: linkedSessionFile || undefined,
           },
@@ -795,9 +787,8 @@ export async function startChatBridge(
         void controller.clearProcessingState().catch(() => {});
       }
       return {
-        retry: transientFailure,
+        retry: false,
         errorMessage,
-        suppressRetryNotice: isSilentChatRuntimeRetryError(error),
       };
     };
     try {
@@ -834,31 +825,6 @@ export async function startChatBridge(
       identity,
       decision,
     );
-  };
-
-  const deliverTransientRetryNotice = async (
-    job: ClaimedChatInboxJob,
-    result: ChatInboxJobResult | undefined,
-  ) => {
-    if (!result?.retry || result.suppressRetryNotice) return;
-    const chatKey = safeString(job.envelope.chatKey).trim();
-    if (!chatKey) return;
-    const errorMessage = safeString(
-      result.errorMessage || "chat_inbound_retry_needed",
-    );
-    await enqueueAndDrainOutbox(
-      {
-        type: "text_delivery",
-        createdAt: nowIso(),
-        chatKey,
-        text: formatChatRuntimeErrorForUser(errorMessage),
-      },
-      "error",
-    ).catch((error) => {
-      logger.warn(
-        `chat retry notice delivery failed chatKey=${chatKey} err=${safeString((error as any)?.message || error)}`,
-      );
-    });
   };
 
   const waitForSteeredInboxCompletion = async (
@@ -912,7 +878,6 @@ export async function startChatBridge(
     }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
       const result = await waitForSteeredInboxCompletion(job, await run());
-      await deliverTransientRetryNotice(job, result);
       finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
     } catch (error) {
       logger.warn(

@@ -2032,7 +2032,7 @@ test("chat main completes a steered inbox item after the inbound message is proc
   }
 });
 
-test("chat main reports a transient daemon startup failure before retrying", async () => {
+test("chat main reports daemon startup failure without retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2138,10 +2138,10 @@ test("chat main reports a transient daemon startup failure before retrying", asy
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const retryNotice = rows.find((item) => String(item.text || "").includes("connect ENOENT") && !String(item.text || "").includes("retrying"));
+      const errorNotice = rows.find((item) => String(item.text || "").includes("connect ENOENT"));
       const succeeded = rows.some((item) => item.text === "retry reply");
-      if (!succeeded || !retryNotice || connectCalls < 2) {
-        throw new Error(JSON.stringify({ connectCalls, retryNotice, rows }));
+      if (succeeded || !errorNotice || connectCalls !== 1) {
+        throw new Error(JSON.stringify({ connectCalls, errorNotice, rows }));
       }
       process.exit(0);
     `;
@@ -2164,7 +2164,7 @@ test("chat main reports a transient daemon startup failure before retrying", asy
   }
 });
 
-test("chat main silently retries frontend lifecycle cancellation", async () => {
+test("chat main reports frontend lifecycle cancellation without retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2276,10 +2276,10 @@ test("chat main silently retries frontend lifecycle cancellation", async () => {
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const leakedRetryNotice = rows.find((item) => String(item.text || "").includes("rin_frontend_turn_cancelled"));
+      const errorNotice = rows.find((item) => String(item.text || "").includes("frontend turn cancelled"));
       const succeeded = rows.some((item) => item.text === "retry after dispose");
-      if (!succeeded || leakedRetryNotice || runTurnCalls < 2 || connectCalls < 1) {
-        throw new Error(JSON.stringify({ runTurnCalls, connectCalls, leakedRetryNotice, rows }));
+      if (succeeded || !errorNotice || runTurnCalls !== 1 || connectCalls !== 0) {
+        throw new Error(JSON.stringify({ runTurnCalls, connectCalls, errorNotice, rows }));
       }
       process.exit(0);
     `;
@@ -2302,7 +2302,7 @@ test("chat main silently retries frontend lifecycle cancellation", async () => {
   }
 });
 
-test("chat main reports an offline-queued frontend turn before retrying", async () => {
+test("chat main reports an offline-queued frontend turn without retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2412,10 +2412,10 @@ test("chat main reports an offline-queued frontend turn before retrying", async 
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const retryNotice = rows.find((item) => String(item.text || "").includes("queued_offline") && !String(item.text || "").includes("retrying"));
+      const errorNotice = rows.find((item) => String(item.text || "").includes("queued_offline"));
       const succeeded = rows.some((item) => item.text === "retry after queued offline");
-      if (!succeeded || !retryNotice || runTurnCalls < 2) {
-        throw new Error(JSON.stringify({ runTurnCalls, retryNotice, rows }));
+      if (succeeded || !errorNotice || runTurnCalls !== 1) {
+        throw new Error(JSON.stringify({ runTurnCalls, errorNotice, rows }));
       }
       process.exit(0);
     `;

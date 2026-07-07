@@ -2340,7 +2340,7 @@ test("chat controller delivers visible non-transient command errors", async () =
   assert.deepEqual(deliveries, ["rin error: boom"]);
 });
 
-test("chat controller keeps transient daemon command errors out of chat replies", async () => {
+test("chat controller reports daemon command errors without frontend retry classification", async () => {
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -2364,7 +2364,9 @@ test("chat controller keeps transient daemon command errors out of chat replies"
     controller.runCommand("/reload"),
     /connect ENOENT \/run\/user\/1001\/rin-daemon\/daemon.sock/,
   );
-  assert.deepEqual(deliveries, []);
+  assert.deepEqual(deliveries, [
+    "rin error: connect ENOENT /run/user/1001/rin-daemon/daemon.sock",
+  ]);
 });
 
 test("chat controller can expose external working indicators", async () => {

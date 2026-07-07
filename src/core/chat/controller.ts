@@ -60,10 +60,7 @@ import { drainChatOutbox } from "./boot.js";
 import { createChatOutboxDeliveryPendingError } from "./delivery-errors.js";
 import { listChatMessages } from "./message-store.js";
 import { restorePromptParts } from "./transport.js";
-import {
-  formatChatRuntimeErrorForUser,
-  isTransientChatRuntimeError,
-} from "./runtime-errors.js";
+import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
 import { resolveChatQuietModeEnabled } from "./settings.js";
 
 const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
@@ -1883,17 +1880,15 @@ export class ChatController {
       });
       return data;
     } catch (error: any) {
-      if (!isTransientChatRuntimeError(error)) {
-        const errorMessage =
-          safeString(error?.message || error).trim() || "chat_command_failed";
-        await this.deliverAssistantReply({
-          text: formatChatRuntimeErrorForUser(errorMessage),
-          replyToMessageId: replyToMessageId || undefined,
-          incomingMessageId,
-          clearProcessing: true,
-          bindSession: false,
-        });
-      }
+      const errorMessage =
+        safeString(error?.message || error).trim() || "chat_command_failed";
+      await this.deliverAssistantReply({
+        text: formatRuntimeErrorForChat(errorMessage),
+        replyToMessageId: replyToMessageId || undefined,
+        incomingMessageId,
+        clearProcessing: true,
+        bindSession: false,
+      });
       throw error;
     } finally {
       this.awaitingTurnSettle = false;
@@ -2192,14 +2187,10 @@ export class ChatController {
             errorSession.sessionFile,
             this.driver.currentSessionFile(),
           );
-          if (
-            errorSession.sessionFile &&
-            errorMessage &&
-            !isTransientChatRuntimeError(error)
-          ) {
+          if (errorSession.sessionFile && errorMessage) {
             const deliveryTarget = this.currentDeliveryTarget(input);
             await this.deliverAssistantReply({
-              text: formatChatRuntimeErrorForUser(errorMessage),
+              text: formatRuntimeErrorForChat(errorMessage),
               replyToMessageId: deliveryTarget.replyToMessageId,
               incomingMessageId: deliveryTarget.incomingMessageId,
               sessionFile: errorSessionFile || this.currentSessionFile(),
