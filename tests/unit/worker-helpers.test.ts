@@ -383,13 +383,16 @@ test("runBuiltinCommand shows compact usage status", async () => {
 
     assert.equal(result.handled, true);
     assert.match(String(result.text || ""), /Rin usage @/);
-    assert.match(String(result.text || ""), /accounts & quota/);
     assert.match(
       String(result.text || ""),
-      /Gemini CLI\s+gemini@example\.test/,
+      /Usage dashboard attached: 7d trend \(3h buckets\) with account quota details when available\./,
     );
-    assert.match(String(result.text || ""), /quota\s+temporarily unavailable/);
-    assert.match(String(result.text || ""), /attached image/);
+    assert.doesNotMatch(String(result.text || ""), /Gemini CLI/);
+    assert.doesNotMatch(String(result.text || ""), /gemini@example\.test/);
+    assert.doesNotMatch(
+      String(result.text || ""),
+      /quota\s+temporarily unavailable/i,
+    );
     assert.doesNotMatch(String(result.text || ""), /recent usage/);
     assert.doesNotMatch(String(result.text || ""), /overview/);
     const imagePart = result.parts?.find((part: any) => part?.type === "image");

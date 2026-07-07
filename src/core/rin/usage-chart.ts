@@ -39,6 +39,10 @@ export type UsageTrendOptions = {
   bucketHours?: number;
 };
 
+export type UsageTrendImageOptions = UsageTrendOptions & {
+  quotaLines?: string[];
+};
+
 type Rgba = readonly [number, number, number, number];
 
 const DEFAULT_USAGE_TREND_DAYS = 7;
@@ -308,6 +312,11 @@ const FONT_5X7: Record<string, string[]> = {
   ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
   "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
   "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
+  "%": ["11001", "11010", "00100", "01000", "10110", "00110", "00000"],
+  "@": ["01110", "10001", "10111", "10101", "10111", "10000", "01110"],
+  _: ["00000", "00000", "00000", "00000", "00000", "00000", "11111"],
+  "+": ["00000", "00100", "00100", "11111", "00100", "00100", "00000"],
+  ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
   "(": ["00010", "00100", "01000", "01000", "01000", "00100", "00010"],
   ")": ["01000", "00100", "00010", "00010", "00010", "00100", "01000"],
 };
@@ -421,6 +430,20 @@ function drawCircle(
   }
 }
 
+function normalizeBitmapText(text: string) {
+  return safeString(text)
+    .replace(/[·•]/g, "-")
+    .replace(/[–—]/g, "-")
+    .replace(/…/g, "...")
+    .toUpperCase();
+}
+
+function truncateBitmapText(text: string, maxChars: number) {
+  const normalized = normalizeBitmapText(text).trimEnd();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
 function drawText(
   raw: Uint8Array,
   width: number,
@@ -432,7 +455,7 @@ function drawText(
   color: Rgba,
 ) {
   let cursor = x;
-  for (const char of text.toUpperCase()) {
+  for (const char of normalizeBitmapText(text)) {
     const glyph = FONT_5X7[char] || FONT_5X7[" "];
     for (let row = 0; row < glyph.length; row += 1) {
       for (let column = 0; column < glyph[row].length; column += 1) {
@@ -468,9 +491,94 @@ function drawDottedVerticalLine(
   }
 }
 
-function renderUsageTrendPng(series: UsageTrendSeries) {
+function quotaProgressColor(percentLeft: number): Rgba {
+  if (percentLeft >= 50) return [74, 222, 128, 255];
+  if (percentLeft >= 20) return [255, 196, 87, 255];
+  return [248, 113, 113, 255];
+}
+
+function drawProgressBar(
+  raw: Uint8Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  barWidth: number,
+  barHeight: number,
+  percentLeft: number,
+  fill: Rgba,
+  border: Rgba,
+  background: Rgba,
+) {
+  const clamped = Math.max(0, Math.min(100, percentLeft));
+  drawRect(raw, width, height, x, y, barWidth, barHeight, background);
+  const filledWidth = Math.round(((barWidth - 4) * clamped) / 100);
+  if (filledWidth > 0) {
+    drawRect(
+      raw,
+      width,
+      height,
+      x + 2,
+      y + 2,
+      filledWidth,
+      barHeight - 4,
+      fill,
+    );
+  }
+  drawLine(raw, width, height, x, y, x + barWidth, y, border, 1);
+  drawLine(
+    raw,
+    width,
+    height,
+    x,
+    y + barHeight,
+    x + barWidth,
+    y + barHeight,
+    border,
+    1,
+  );
+  drawLine(raw, width, height, x, y, x, y + barHeight, border, 1);
+  drawLine(
+    raw,
+    width,
+    height,
+    x + barWidth,
+    y,
+    x + barWidth,
+    y + barHeight,
+    border,
+    1,
+  );
+}
+
+function parseQuotaProgressLine(line: string) {
+  const match = /^(.+?)\s+(\d+(?:\.\d+)?)%\s+LEFT\s+RESET\s+(.+)$/i.exec(line);
+  if (!match) return undefined;
+  const percentLeft = Number(match[2]);
+  if (!Number.isFinite(percentLeft)) return undefined;
+  return {
+    label: match[1].trim(),
+    percentLeft,
+    reset: match[3].trim(),
+  };
+}
+
+function normalizeQuotaImageLines(lines: unknown) {
+  if (!Array.isArray(lines)) return [];
+  return lines
+    .map((line) => safeString(line).replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function renderUsageTrendPng(
+  series: UsageTrendSeries,
+  options: UsageTrendImageOptions = {},
+) {
+  const quotaLines = normalizeQuotaImageLines(options.quotaLines);
+  const quotaBlockHeight = quotaLines.length ? quotaLines.length * 22 + 20 : 0;
   const width = 1000;
-  const height = 520;
+  const height = 520 + quotaBlockHeight;
   const raw = makeCanvas(width, height, [9, 14, 29, 255]);
   const text = [226, 232, 240, 255] as const;
   const muted = [148, 163, 184, 255] as const;
@@ -493,8 +601,84 @@ function renderUsageTrendPng(series: UsageTrendSeries) {
     muted,
   );
 
+  if (quotaLines.length) {
+    const quotaY = 112;
+    drawLine(
+      raw,
+      width,
+      height,
+      44,
+      quotaY - 12,
+      width - 44,
+      quotaY - 12,
+      grid,
+      1,
+    );
+    for (const [index, line] of quotaLines.entries()) {
+      const y = quotaY + index * 22;
+      const progress = parseQuotaProgressLine(line);
+      if (progress) {
+        const progressColor = quotaProgressColor(progress.percentLeft);
+        drawText(
+          raw,
+          width,
+          height,
+          truncateBitmapText(progress.label, 10),
+          46,
+          y,
+          2,
+          muted,
+        );
+        drawProgressBar(
+          raw,
+          width,
+          height,
+          150,
+          y + 2,
+          250,
+          14,
+          progress.percentLeft,
+          progressColor,
+          grid,
+          [30, 41, 59, 255],
+        );
+        drawText(
+          raw,
+          width,
+          height,
+          `${Math.round(progress.percentLeft)}%`,
+          416,
+          y,
+          2,
+          progressColor,
+        );
+        drawText(
+          raw,
+          width,
+          height,
+          truncateBitmapText(`RESET ${progress.reset}`, 35),
+          476,
+          y,
+          2,
+          muted,
+        );
+        continue;
+      }
+      drawText(
+        raw,
+        width,
+        height,
+        truncateBitmapText(line, 76),
+        46,
+        y,
+        2,
+        index === 0 ? text : muted,
+      );
+    }
+  }
+
   const chartX = 88;
-  const chartY = 120;
+  const chartY = 120 + quotaBlockHeight;
   const chartW = 850;
   const chartH = 300;
   const max = Math.max(0, series.peak_total_tokens);
@@ -605,7 +789,7 @@ function renderUsageTrendPng(series: UsageTrendSeries) {
     height,
     formatTrendTick(series.start),
     chartX,
-    446,
+    chartY + chartH + 26,
     2,
     muted,
   );
@@ -615,7 +799,7 @@ function renderUsageTrendPng(series: UsageTrendSeries) {
     height,
     formatTrendTick(series.end),
     chartX + chartW - 120,
-    446,
+    chartY + chartH + 26,
     2,
     muted,
   );
@@ -674,7 +858,7 @@ function pruneUsageTrendCharts(directory: string, nowMs: number) {
 
 export function writeUsageTrendChartImage(
   agentDir: string,
-  options: UsageTrendOptions = {},
+  options: UsageTrendImageOptions = {},
 ) {
   const series = buildUsageTrendSeries(agentDir, options);
   const chartsDir = path.join(resolveTokenUsageRoot(agentDir), "charts");
@@ -683,7 +867,7 @@ export function writeUsageTrendChartImage(
     chartsDir,
     `usage-7d-${safeChartTimestamp(series.generatedAt)}.png`,
   );
-  fs.writeFileSync(filePath, renderUsageTrendPng(series));
+  fs.writeFileSync(filePath, renderUsageTrendPng(series, options));
   pruneUsageTrendCharts(chartsDir, normalizeNowMs(options.now));
   return filePath;
 }
