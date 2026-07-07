@@ -112,7 +112,6 @@ import { sendReaction, sendTyping } from "./transport.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
 import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
-import { resolveChatOutboxDeliveryPendingState } from "./delivery-errors.js";
 
 function createLogger(name: string) {
   const prefix = `[${name}]`;
@@ -555,18 +554,6 @@ export async function startChatBridge(
     resolveChatTurnPolicyMode(settings, chatKey) === "record_only";
   const isInboundMessageProcessed = (chatKey: string, messageId: string) =>
     hasInboundChatMessageReplyBoundary(runtime.agentDir, chatKey, messageId);
-  const pendingOutboxDeliveryResult = (error: unknown) => {
-    const pendingState = resolveChatOutboxDeliveryPendingState(
-      runtime.agentDir,
-      error,
-    );
-    if (!pendingState) return null;
-    return {
-      retry: pendingState === "pending",
-      errorMessage: "chat_outbox_delivery_pending",
-      suppressRetryNotice: true,
-    };
-  };
   const handleUnmatchedCommandSession = async (
     session: any,
     identity: any,
@@ -658,8 +645,6 @@ export async function startChatBridge(
       logger.warn(
         `chat command failed chatKey=${chatKey} command=${command.name} err=${safeString((error as any)?.message || error)}`,
       );
-      const pendingDelivery = pendingOutboxDeliveryResult(error);
-      if (pendingDelivery) return pendingDelivery;
       return {
         retry: false,
         errorMessage: safeString((error as any)?.message || error),
@@ -759,11 +744,9 @@ export async function startChatBridge(
     };
     const handleTurnFailure = async (error: any) => {
       const errorMessage = safeString((error as any)?.message || error);
-      const pendingDelivery = pendingOutboxDeliveryResult(error);
       logger.warn(
         `chat turn failed chatKey=${decision.chatKey} err=${errorMessage}`,
       );
-      if (pendingDelivery) return pendingDelivery;
       if (
         errorMessage &&
         messageId &&

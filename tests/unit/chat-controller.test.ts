@@ -33,12 +33,6 @@ const {
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
     .href
 );
-const { isChatOutboxDeliveryPendingError } = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat", "delivery-errors.js"),
-  ).href
-);
-
 async function readOnlyChatOutboxHistoryItem(agentDir, status) {
   const dir = chatOutboxHistoryItemsDir(agentDir, status);
   const names = await fs.readdir(dir);
@@ -4896,10 +4890,7 @@ test("chat controller leaves an in-flight final outbox item pending on restart r
     return [`sent-${sendCount}`];
   };
 
-  await assert.rejects(
-    () => recoveredController.deliverAssistantReply(input),
-    (error) => isChatOutboxDeliveryPendingError(error),
-  );
+  await recoveredController.deliverAssistantReply(input);
 
   const items = listChatOutboxItems(controller.agentDir).map(
     ({ item }) => item,

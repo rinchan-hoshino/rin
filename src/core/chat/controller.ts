@@ -57,7 +57,6 @@ import {
   type ChatMessagePart,
 } from "../rin-lib/chat-outbox.js";
 import { drainChatOutbox } from "./boot.js";
-import { createChatOutboxDeliveryPendingError } from "./delivery-errors.js";
 import { listChatMessages } from "./message-store.js";
 import { restorePromptParts } from "./transport.js";
 import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
@@ -65,6 +64,23 @@ import { resolveChatQuietModeEnabled } from "./settings.js";
 
 const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
 const WORKING_REACTION_INTERVAL_MS = 30_000;
+
+type ChatDeliveryOutcome = {
+  messageIds: string[];
+  accepted: boolean;
+  settled: boolean;
+};
+
+function chatDeliveryOutcome(
+  messageIds: string[] = [],
+  options: { accepted?: boolean; settled?: boolean } = {},
+): ChatDeliveryOutcome {
+  return {
+    messageIds,
+    accepted: options.accepted !== false,
+    settled: options.settled !== false,
+  };
+}
 
 const PLATFORM_TYPING_POLL_INTERVAL_MS: Record<string, number> = {
   // Telegram Bot API sendChatAction expires after 5 seconds.
@@ -1307,7 +1323,9 @@ export class ChatController {
     const effectiveDeliveryKind = safeString(
       normalizedPayload?.deliveryKind || deliveryKind,
     ).trim();
-    if (this.shouldSuppressQuietDelivery(effectiveDeliveryKind)) return [];
+    if (this.shouldSuppressQuietDelivery(effectiveDeliveryKind)) {
+      return chatDeliveryOutcome([], { accepted: false });
+    }
     enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
       ...options,
       id,
@@ -1332,39 +1350,40 @@ export class ChatController {
           : Number.isFinite(options.waitForDeliveryMs)
             ? await this.waitForOutboxDelivery(id, options.waitForDeliveryMs)
             : null;
-        if (deliveryResult) return deliveryResult;
-        if (options.requireDelivery) {
-          const current = readChatOutboxItemById(this.agentDir, id)?.item;
-          if (
-            (current?.status === "queued" || current?.status === "sending") &&
-            /^chat_outbox_delivery_pending$/.test(
-              safeString(current.lastError).trim(),
-            )
-          ) {
-            throw createChatOutboxDeliveryPendingError(id);
-          }
-          throw new Error("chat_outbox_delivery_pending");
+        if (deliveryResult) return chatDeliveryOutcome(deliveryResult);
+        const current = readChatOutboxItemById(this.agentDir, id)?.item;
+        if (
+          (current?.status === "queued" || current?.status === "sending") &&
+          /^chat_outbox_delivery_pending$/.test(
+            safeString(current.lastError).trim(),
+          )
+        ) {
+          return chatDeliveryOutcome([], { settled: false });
         }
-        return [];
+        if (options.requireDelivery)
+          throw new Error("chat_outbox_delivery_pending");
+        return chatDeliveryOutcome([]);
       }
       const errorMessage =
         safeString((own as any).error).trim() || "chat_outbox_delivery_pending";
       if (/^chat_outbox_delivery_timeout:/.test(errorMessage)) {
-        return (own as any)?.deliveryResult || [];
+        return chatDeliveryOutcome((own as any)?.deliveryResult || []);
       }
       throw new Error(errorMessage);
     }
     if (!own && idempotencyKey) {
       const current = readChatOutboxItemById(this.agentDir, id)?.item;
-      if (current?.status === "delivered") return current.deliveryResult || [];
+      if (current?.status === "delivered") {
+        return chatDeliveryOutcome(current.deliveryResult || []);
+      }
       if (current?.status === "failed") {
         throw new Error(current.lastError || "chat_outbox_delivery_failed");
       }
       if (current?.status === "queued" || current?.status === "sending") {
-        throw createChatOutboxDeliveryPendingError(id);
+        return chatDeliveryOutcome([], { settled: false });
       }
     }
-    return (own as any)?.deliveryResult || [];
+    return chatDeliveryOutcome((own as any)?.deliveryResult || []);
   }
 
   private async commitPendingDelivery(
@@ -1373,20 +1392,20 @@ export class ChatController {
     deliveryOptions: { id?: string; idempotencyKey?: string } = {},
   ) {
     const pending = this.stagedDelivery;
-    if (!pending) return;
+    if (!pending) return chatDeliveryOutcome([], { accepted: false });
     if (!this.canDeliverReplies()) {
       this.stagedDelivery = null;
       if (clearProcessing) {
         await this.clearWorkingReaction().catch(() => {});
         this.currentTurn = null;
       }
-      return;
+      return chatDeliveryOutcome([], { accepted: false });
     }
     const deliveryPayload = {
       ...pending,
       createdAt: nowIso(),
     };
-    await this.enqueueAndDrainDelivery(deliveryPayload, {
+    const outcome = await this.enqueueAndDrainDelivery(deliveryPayload, {
       deliveryKind: "final",
       postDelivery,
       requireDelivery: true,
@@ -1398,6 +1417,7 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
       this.currentTurn = null;
     }
+    return outcome;
   }
 
   private async deliverAssistantReply(input: {
@@ -1425,7 +1445,7 @@ export class ChatController {
         ])
       : "";
     const id = idempotencyKey ? `final-${sha256Hex(idempotencyKey)}` : "";
-    await this.commitPendingDelivery(
+    const delivery = await this.commitPendingDelivery(
       input.clearProcessing,
       {
         markProcessed: {
@@ -1439,7 +1459,9 @@ export class ChatController {
       },
       { id, idempotencyKey },
     );
-    this.markProcessedMessage(input.incomingMessageId, bindSession);
+    if (delivery?.settled !== false) {
+      this.markProcessedMessage(input.incomingMessageId, bindSession);
+    }
     return text;
   }
 
@@ -1647,7 +1669,7 @@ export class ChatController {
     if (!trimmed) return false;
     if (!this.canDeliverReplies()) return true;
     try {
-      const messageIds = await this.enqueueAndDrainDelivery(
+      const delivery = await this.enqueueAndDrainDelivery(
         {
           type: "text_delivery",
           createdAt: nowIso(),
@@ -1663,7 +1685,7 @@ export class ChatController {
           waitForDeliveryMs: 1000,
         },
       );
-      const messageId = safeString(messageIds?.[0]).trim();
+      const messageId = safeString(delivery.messageIds[0]).trim();
       if (messageId) {
         const ackIncomingMessageId = safeString(
           this.activeCommandTurnInput?.incomingMessageId || "",
