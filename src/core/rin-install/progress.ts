@@ -7,6 +7,26 @@ export function restoreTerminalCursor() {
   } catch {}
 }
 
+function trimProgressMessage(message: string) {
+  return message.trim().replace(/[。．.…\s]+$/u, "");
+}
+
+function isGenericInstallStepFailure(message: string) {
+  return /^(?:Install step failed\.|安装步骤失败。)$/.test(message.trim());
+}
+
+export function formatInstallerProgressFailureMessage(
+  message: string,
+  failureMessage = "",
+) {
+  if (failureMessage && !isGenericInstallStepFailure(failureMessage)) {
+    return failureMessage;
+  }
+  const step = trimProgressMessage(message).replace(/^正在/u, "");
+  if (!step) return failureMessage || message;
+  return /[\u3400-\u9fff]/u.test(step) ? `${step}失败。` : `${step} failed.`;
+}
+
 export async function runInstallerProgress<T>(
   message: string,
   action: () => T | Promise<T>,
@@ -21,7 +41,9 @@ export async function runInstallerProgress<T>(
     progress.stop(options.successMessage || message);
     return result;
   } catch (error) {
-    progress.stop(options.failureMessage || message);
+    progress.stop(
+      formatInstallerProgressFailureMessage(message, options.failureMessage),
+    );
     throw error;
   } finally {
     restoreTerminalCursor();

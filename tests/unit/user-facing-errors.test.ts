@@ -19,6 +19,25 @@ test("runtime error formatter keeps human messages", () => {
   );
 });
 
+test("runtime error formatter maps system errno messages through platform descriptions", () => {
+  assert.equal(
+    formatRuntimeErrorForUser(
+      "Unknown system error -122: Unknown system error -122, write",
+    ),
+    "write failed: EDQUOT: disk quota exceeded",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser(
+      Object.assign(new Error("Unknown system error -122"), {
+        errno: -122,
+        syscall: "write",
+        path: "/tmp/rin-install/result.json",
+      }),
+    ),
+    "write failed: EDQUOT: disk quota exceeded (/tmp/rin-install/result.json)",
+  );
+});
+
 test("frontend display error formatter keeps terse marker-derived errors", () => {
   assert.equal(
     formatRuntimeErrorForFrontendDisplay("fetch failed"),
@@ -119,14 +138,9 @@ test("runtime error formatter maps known internal markers to actionable messages
   );
 });
 
-test("runtime error formatter hides unmapped internal markers from user-facing text", () => {
+test("runtime error formatter keeps unmapped internal marker detail readable", () => {
   const text = formatRuntimeErrorForUser("some_new_internal_marker:debug_code");
-  assert.equal(
-    text,
-    "Rin hit an internal runtime problem before it could finish.",
-  );
-  assert.equal(text.includes("some_new_internal_marker"), false);
-  assert.equal(text.includes("debug_code"), false);
+  assert.equal(text, "some new internal marker: debug_code");
 
   const embedded = formatRuntimeErrorForUser("Browse failed: fetch_failed");
   assert.match(embedded, /network request failed/i);

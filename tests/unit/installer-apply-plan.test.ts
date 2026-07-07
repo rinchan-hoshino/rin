@@ -126,3 +126,30 @@ test("runFinalizeInstallPlanInChild surfaces child error output on failure", asy
     /sudo interaction failed/,
   );
 });
+
+test("runFinalizeInstallPlanInChild suppresses parent duplicate when child cannot write error handoff", async () => {
+  let error: any;
+  try {
+    await applyPlan.runFinalizeInstallPlanInChild(
+      {
+        currentUser: "alice",
+        targetUser: "bob",
+        installDir: "/srv/rin",
+      },
+      "Publishing runtime...",
+      {
+        writeStatus() {},
+        spawnImpl() {
+          const child = new EventEmitter();
+          setImmediate(() => child.emit("exit", 1, null));
+          return child;
+        },
+      },
+    );
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.equal(error?.message, "rin_installer_apply_handoff_missing");
+  assert.equal(error?.suppressUserFacingPrint, true);
+});

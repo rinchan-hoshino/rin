@@ -44,6 +44,7 @@ import {
   releaseInfoFromFile,
   type ReleaseChannel,
 } from "../rin-lib/release.js";
+import { formatRuntimeErrorForUser } from "../rin-lib/user-facing-errors.js";
 import {
   describeOwnership,
   isSameSystemUser,
@@ -217,12 +218,16 @@ export async function startInstaller(argv = process.argv.slice(2)) {
         fs.writeFileSync(resultPath, `${JSON.stringify(result)}\n`, "utf8");
       return;
     } catch (error: any) {
-      if (errorPath)
-        fs.writeFileSync(
-          errorPath,
-          String(error?.message || error || "rin_installer_apply_failed"),
-          "utf8",
-        );
+      if (errorPath) {
+        try {
+          fs.writeFileSync(
+            errorPath,
+            String(error?.message || error || "rin_installer_apply_failed"),
+            "utf8",
+          );
+          error.rinApplyPlanErrorHandoffWritten = true;
+        } catch {}
+      }
       throw error;
     }
   }
@@ -592,12 +597,13 @@ const isDirectEntry =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectEntry) {
-  main().catch((error) => {
-    const message =
-      error instanceof Error
-        ? error.message
-        : String(error || "rin_installer_failed");
-    console.error(message);
+  main().catch((error: any) => {
+    if (
+      !error?.rinApplyPlanErrorHandoffWritten &&
+      !error?.suppressUserFacingPrint
+    ) {
+      console.error(formatRuntimeErrorForUser(error || "rin_installer_failed"));
+    }
     process.exit(1);
   });
 }

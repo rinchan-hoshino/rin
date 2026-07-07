@@ -127,12 +127,14 @@ export async function runFinalizeInstallPlanInChild(
     });
 
     if (exitCode !== 0) {
-      let errorMessage = "rin_installer_apply_failed";
+      let errorMessage = "";
       try {
-        errorMessage =
-          fs.readFileSync(errorPath, "utf8").trim() || errorMessage;
+        errorMessage = fs.readFileSync(errorPath, "utf8").trim();
       } catch {}
-      throw new Error(errorMessage);
+      if (errorMessage) throw new Error(errorMessage);
+      const handoffError = new Error("rin_installer_apply_handoff_missing");
+      (handoffError as any).suppressUserFacingPrint = true;
+      throw handoffError;
     }
 
     let parsed: any = null;

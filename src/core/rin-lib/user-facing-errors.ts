@@ -1,8 +1,14 @@
+import os from "node:os";
+import * as nodeUtil from "node:util";
+
+import { Errno, strerror } from "kerium";
+
 const INTERNAL_RUNTIME_ERROR_RE =
   /^([a-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+)(?::\s*(.*))?$/;
 
-const UNKNOWN_INTERNAL_ERROR_MESSAGE =
-  "Rin hit an internal runtime problem before it could finish.";
+const UNKNOWN_SYSTEM_ERROR_RE = /\bUnknown system error\s+(-?\d+)\b/i;
+const UNKNOWN_SYSTEM_ERROR_SYSCALL_RE =
+  /\bUnknown system error\s+-?\d+(?::[^,\n]*)?,\s*([A-Za-z][A-Za-z0-9_]*)\b/i;
 const CHAT_RUNTIME_ERROR_PREFIX = "rin error:";
 const LEADING_RUNTIME_MARKER_RE =
   /^([a-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+)(?:(:)\s*|\s+)?(.*)$/;
@@ -512,6 +518,84 @@ export function rawErrorMessage(error: unknown) {
   return String((error as any)?.message || error || "").trim();
 }
 
+function positiveErrno(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.abs(Math.trunc(value));
+}
+
+function errnoFromError(error: unknown, message: string) {
+  const direct = positiveErrno((error as any)?.errno);
+  if (direct) return direct;
+  const matched = UNKNOWN_SYSTEM_ERROR_RE.exec(message);
+  return matched ? positiveErrno(Number(matched[1])) : 0;
+}
+
+function errnoCodeFromPlatform(errno: number) {
+  for (const [code, value] of Object.entries(os.constants.errno || {})) {
+    if (value === errno) return code;
+  }
+  const keriumCode = (Errno as any)[errno];
+  return typeof keriumCode === "string" ? keriumCode : "";
+}
+
+function nodeSystemErrorName(errno: number) {
+  try {
+    const name = nodeUtil.getSystemErrorName(-errno);
+    return /^Unknown system error\b/i.test(name) ? "" : name;
+  } catch {
+    return "";
+  }
+}
+
+function nodeSystemErrorMessage(errno: number) {
+  try {
+    const getMessage = (nodeUtil as any).getSystemErrorMessage;
+    if (typeof getMessage !== "function") return "";
+    const message = String(getMessage(-errno) || "").trim();
+    return /^Unknown system error\b/i.test(message) ? "" : message;
+  } catch {
+    return "";
+  }
+}
+
+function posixSystemErrorMessage(errno: number) {
+  try {
+    return String(strerror(errno) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeSystemErrorMessage(message: string) {
+  return message.replace(/^[A-Z](?=[a-z])/, (letter) => letter.toLowerCase());
+}
+
+function formatSystemErrno(errno: number) {
+  if (!errno) return "";
+  const code = nodeSystemErrorName(errno) || errnoCodeFromPlatform(errno);
+  const message =
+    nodeSystemErrorMessage(errno) || posixSystemErrorMessage(errno);
+  if (code && message)
+    return `${code}: ${normalizeSystemErrorMessage(message)}`;
+  return code || message || "";
+}
+
+function formatSystemErrorForUser(error: unknown, message: string) {
+  const errno = errnoFromError(error, message);
+  const formattedErrno = formatSystemErrno(errno);
+  if (!formattedErrno) return "";
+  const syscall = String(
+    (error as any)?.syscall ||
+      UNKNOWN_SYSTEM_ERROR_SYSCALL_RE.exec(message)?.[1] ||
+      "",
+  ).trim();
+  const path = String((error as any)?.path || "").trim();
+  const dest = String((error as any)?.dest || "").trim();
+  const operation = syscall ? `${syscall} failed: ` : "";
+  const pathSuffix = path ? ` (${path}${dest ? ` -> ${dest}` : ""})` : "";
+  return `${operation}${formattedErrno}${pathSuffix}`;
+}
+
 function markerToTerseRuntimeText(marker: string) {
   return marker.replace(/_/g, " ").replace(/^rin\s+(?:app\s+)?/, "");
 }
@@ -557,13 +641,15 @@ function findMappedMarker(message: string) {
 export function formatRuntimeErrorForUser(error: unknown) {
   const message = rawErrorMessage(error);
   if (!message) return "unknown error";
+  const systemError = formatSystemErrorForUser(error, message);
+  if (systemError) return systemError;
   const internalError = INTERNAL_RUNTIME_ERROR_RE.exec(message);
   if (internalError) {
     const marker = internalError[1];
     const detail = internalError[2] || "";
     const formatKnownError = USER_FACING_RUNTIME_ERRORS[marker];
     if (formatKnownError) return formatKnownError(detail);
-    return UNKNOWN_INTERNAL_ERROR_MESSAGE;
+    return formatRuntimeMarkerForFrontendDisplay(message);
   }
   const embeddedMarker = findMappedMarker(message);
   if (embeddedMarker) {
