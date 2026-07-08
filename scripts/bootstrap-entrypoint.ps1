@@ -184,6 +184,7 @@ if ($mode -eq "update") {
   $prepLabel = "Preparing updater source"
   $buildLabel = "Building updater"
   $launchLabel = "Launching updater..."
+  $logName = "update.log"
   $nodeError = "rin updater requires Node.js >= 22.19.0"
 } else {
   $workPrefix = "rin-install"
@@ -191,6 +192,7 @@ if ($mode -eq "update") {
   $prepLabel = "Preparing installer source"
   $buildLabel = "Building installer"
   $launchLabel = "Launching installer..."
+  $logName = "install.log"
   $nodeError = "rin installer requires Node.js >= 22.19.0"
 }
 if ($quickRun) { $launchLabel = "Launching Rin quick run..." }
@@ -206,10 +208,31 @@ $archive = Join-Path $workDir "rin.tar.gz"
 $srcDir = Join-Path $workDir "src"
 $manifestPath = Join-Path $workDir "release-manifest.json"
 $releaseFile = Join-Path $workDir "release.json"
+$logFile = Join-Path $workDir $logName
+$bootstrapFailed = $false
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+New-Item -ItemType File -Force -Path $logFile | Out-Null
 
 function Say([string]$Message) {
   Write-Host $Message
+}
+
+function Add-BootstrapLog($Items) {
+  foreach ($item in @($Items)) {
+    if ($null -eq $item) { continue }
+    $text = ($item | Out-String -Width 240).TrimEnd()
+    if ($text) { Add-Content -LiteralPath $script:logFile -Encoding UTF8 -Value $text }
+  }
+}
+
+function Show-RecentBootstrapLog {
+  if ((Test-Path -LiteralPath $script:logFile) -and ((Get-Item -LiteralPath $script:logFile).Length -gt 0)) {
+    Say "Command failed; recent log:"
+    Get-Content -LiteralPath $script:logFile -Tail 80 | ForEach-Object { Write-Host $_ }
+  } else {
+    Say "Command failed; no step output captured."
+  }
+  Say "Full bootstrap log: $script:logFile"
 }
 
 function Assert-NodeVersion {
@@ -233,6 +256,7 @@ function Invoke-WithSpinner([string]$Label, [scriptblock]$Action) {
   $frames = @("-", "|", "/", "|")
   $job = Start-Job -ScriptBlock $Action
   $index = 0
+  $reportedFailure = $false
   try {
     while ($job.State -eq "Running") {
       if (-not [Console]::IsOutputRedirected) {
@@ -241,21 +265,32 @@ function Invoke-WithSpinner([string]$Label, [scriptblock]$Action) {
       $index = ($index + 1) % $frames.Count
       Start-Sleep -Milliseconds 100
     }
-    Receive-Job -Job $job -Wait -ErrorAction SilentlyContinue | Out-Null
+    $jobOutput = @()
+    try {
+      $jobOutput = @(Receive-Job -Job $job -Wait *>&1)
+    } catch {
+      $jobOutput = @($_)
+    }
+    Add-BootstrapLog $jobOutput
     if ($job.State -eq "Failed") {
+      if (-not [Console]::IsOutputRedirected) {
+        Write-Host ("`rERR {0}        " -f $Label)
+      }
+      $reportedFailure = $true
+      Show-RecentBootstrapLog
       $reason = @(
         $job.ChildJobs |
           ForEach-Object { $_.JobStateInfo.Reason } |
           Where-Object { $_ }
       )[0]
-      if ($reason) { throw $reason }
+      if ($reason) { throw ([string]$reason) }
       throw "background job failed"
     }
     if (-not [Console]::IsOutputRedirected) {
       Write-Host ("`rOK {0}        " -f $Label)
     }
   } catch {
-    if (-not [Console]::IsOutputRedirected) {
+    if ((-not $reportedFailure) -and (-not [Console]::IsOutputRedirected)) {
       Write-Host ("`rERR {0}        " -f $Label)
     }
     throw
@@ -483,6 +518,19 @@ try {
   } finally {
     Pop-Location
   }
+} catch {
+  $script:bootstrapFailed = $true
+  $message = ($_.Exception.Message | Out-String -Width 240).Trim()
+  if ($message) {
+    Say "ERROR: $message"
+  } else {
+    Say "ERROR: Rin bootstrap failed"
+  }
+  exit 1
 } finally {
-  Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+  if ($script:bootstrapFailed) {
+    Say "Rin bootstrap debug directory preserved: $workDir"
+  } else {
+    Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }
