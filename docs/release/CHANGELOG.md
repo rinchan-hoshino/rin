@@ -10,9 +10,27 @@
 - TUI and CLI session flows now handle resume listing, session rebind options, and non-interactive tool help more accurately.
 - Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, Telegram message coalescing, editable working messages for edit-capable adapters, compact usage trend charts, and cached group member counts.
 - Chat delivery, progress, and frontend turn recovery now avoid error-string retry coupling, keep pending outbox/progress state quieter and more deterministic, preserve Telegram topic scope, and treat pending final delivery as accepted output.
-- Installer, TUI startup, and usage diagnostics are clearer, including readable system errors, loaded startup resources, and quota details in usage trend charts.
+- Installer, TUI startup, and usage diagnostics are clearer, including readable system errors, loaded startup resources, quota details in usage trend charts, preserved PowerShell bootstrap failure logs, and cross-user helper runtime selection.
+- Chat delivery and shutdown handling are more robust, including stricter outbound delivery, stale outbox expiry, lifecycle-cancel retry/suppression, active-turn preservation during daemon or bridge shutdown, hosted bridge frontend shutdown, and quieter shutdown failures before error delivery.
+- Scheduler and update flows now create dedicated first-run task sessions and wait for real daemon turns while ignoring display-only working state during restart drain.
 - Project licensing metadata now uses the GPL-3.0-or-later SPDX identifier with the standard GPL license text.
 <!-- rin-changelog-coverage
+b2b3251 fix(installer): preserve PowerShell bootstrap failure logs
+ff00278 fix(chat): simplify outbound message delivery
+a31c3e7 fix(chat): make usage image delivery strict
+3188a1d fix(chat): expire stale outbox deliveries
+00d2902 fix(chat): suppress lifecycle cancellation errors
+cfde2db fix(chat): retry lifecycle-cancelled inbox turns
+6ad99d7 fix(chat): preserve active turns during daemon shutdown
+ed7b718 fix(chat): use frontend shutdown for hosted bridge stop
+848b9bf fix(scheduler): create dedicated task sessions on first run
+a837296 fix(chat): restore active inbox jobs during bridge shutdown
+ba6c9ba fix(chat): suppress shutdown failures before error delivery
+c2e6874 fix(update): wait for daemon turns before restart
+c70d306 chore(chat): add ingress timeline diagnostic
+e986492 Revert "chore(chat): add ingress timeline diagnostic"
+eb54160 fix(installer): use target runtime for cross-user helpers
+e33c1d0 fix(update): ignore display-only working state during daemon drain
 c3dd90c Fix chat bridge Telegram message coalescing
 aa6b45b fix(chat): add editable working messages for edit-capable adapters
 4c94743 Use standard GPL license text
