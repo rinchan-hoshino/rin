@@ -414,6 +414,36 @@ test("rin updater waits longer for daemon readiness than first install", () => {
   assert.doesNotMatch(finalizeSource, /allowDaemonNotReady/);
 });
 
+test("installer target-user helpers do not execute the staging process Node across users", () => {
+  const finalizeSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "finalize.ts"),
+    "utf8",
+  );
+  const piToolsSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "pi-tools.ts"),
+    "utf8",
+  );
+  const serviceSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "service.ts"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    finalizeSource,
+    /captureCommandAsUser\([^)]*process\.execPath/s,
+  );
+  assert.doesNotMatch(
+    piToolsSource,
+    /runCommandAsUser\([^)]*process\.execPath/s,
+  );
+  assert.doesNotMatch(
+    serviceSource,
+    /captureCommandAsUser\([^)]*process\.execPath/s,
+  );
+  assert.match(finalizeSource, /createInstallExecutionContext/);
+  assert.match(finalizeSource, /targetNodePath/);
+});
+
 test("cli help omits removed run command and exposes Pi-style non-interactive flags", () => {
   const output = execFileSync(
     process.execPath,

@@ -21,6 +21,11 @@ import {
   writeJsonFileWithPrivilege,
   writeLaunchersForUser,
 } from "./fs-utils.js";
+import {
+  createInstallExecutionContext,
+  captureInstallTargetCommand,
+  type InstallExecutionContext,
+} from "./execution-context.js";
 import { defaultInstallDirForHome, installedReleaseRoot } from "./paths.js";
 import {
   normalizeInstalledChatSettings,
@@ -70,28 +75,33 @@ export function defaultDaemonReadyTimeoutMs() {
 }
 
 async function sendInstalledDaemonCommand(options: {
-  currentUser: string;
-  targetUser: string;
+  executionContext: InstallExecutionContext;
   socketPath: string;
   type: string;
   requestId: string;
 }) {
   const command = { id: options.requestId, type: options.type };
-  if (isSameSystemUser(options.currentUser, options.targetUser)) {
+  if (options.executionContext.sameUser) {
     return await requestDaemonCommand(command, {
       socketPath: options.socketPath,
       timeoutMs: 5000,
     });
   }
-  const raw = captureCommandAsUser(options.targetUser, process.execPath, [
-    "-e",
-    buildDaemonCommandScript(
-      command,
-      options.socketPath,
-      5000,
-      options.requestId,
-    ),
-  ]);
+  const raw = captureInstallTargetCommand(
+    options.executionContext,
+    options.executionContext.targetNodePath,
+    [
+      "-e",
+      buildDaemonCommandScript(
+        command,
+        options.socketPath,
+        5000,
+        options.requestId,
+      ),
+    ],
+    {},
+    { runCommandAsUser, captureCommandAsUser },
+  );
   return JSON.parse(String(raw || "null"));
 }
 
@@ -102,18 +112,20 @@ function isLegacyPrepareUnsupportedError(error: unknown) {
 }
 
 async function canConnectInstalledDaemon(options: {
-  currentUser: string;
-  targetUser: string;
+  executionContext: InstallExecutionContext;
   socketPath: string;
 }) {
-  if (isSameSystemUser(options.currentUser, options.targetUser)) {
+  if (options.executionContext.sameUser) {
     return await canConnectDaemonSocket(options.socketPath, 500);
   }
   try {
-    captureCommandAsUser(options.targetUser, process.execPath, [
-      "-e",
-      buildDaemonSocketProbeScript(options.socketPath, 500),
-    ]);
+    captureInstallTargetCommand(
+      options.executionContext,
+      options.executionContext.targetNodePath,
+      ["-e", buildDaemonSocketProbeScript(options.socketPath, 500)],
+      {},
+      { runCommandAsUser, captureCommandAsUser },
+    );
     return true;
   } catch {
     return false;
@@ -121,8 +133,7 @@ async function canConnectInstalledDaemon(options: {
 }
 
 async function prepareInstalledDaemonRestart(options: {
-  currentUser: string;
-  targetUser: string;
+  executionContext: InstallExecutionContext;
   socketPath: string;
 }) {
   return await sendInstalledDaemonCommand({
@@ -133,8 +144,7 @@ async function prepareInstalledDaemonRestart(options: {
 }
 
 async function cancelInstalledDaemonRestart(options: {
-  currentUser: string;
-  targetUser: string;
+  executionContext: InstallExecutionContext;
   socketPath: string;
 }) {
   return await sendInstalledDaemonCommand({
@@ -173,8 +183,7 @@ function buildInstallStageManagedRuntimeService(
 }
 
 async function waitForInstalledDaemonDrain(options: {
-  currentUser: string;
-  targetUser: string;
+  executionContext: InstallExecutionContext;
   socketPath: string;
   timeoutMs?: number;
 }) {
@@ -193,7 +202,7 @@ async function waitForInstalledDaemonDrain(options: {
       throw new Error(`Update restart prepare failed: ${message}`);
     }
     const queryStatus = async () => {
-      if (isSameSystemUser(options.currentUser, options.targetUser)) {
+      if (options.executionContext.sameUser) {
         try {
           return await requestDaemonCommand(
             { id: "install_drain_1", type: "daemon_status" },
@@ -204,10 +213,20 @@ async function waitForInstalledDaemonDrain(options: {
         }
       }
       try {
-        const raw = captureCommandAsUser(options.targetUser, process.execPath, [
-          "-e",
-          buildDaemonStatusScript(options.socketPath, 1500, "install_drain_1"),
-        ]);
+        const raw = captureInstallTargetCommand(
+          options.executionContext,
+          options.executionContext.targetNodePath,
+          [
+            "-e",
+            buildDaemonStatusScript(
+              options.socketPath,
+              1500,
+              "install_drain_1",
+            ),
+          ],
+          {},
+          { runCommandAsUser, captureCommandAsUser },
+        );
         return JSON.parse(String(raw || "null")) || undefined;
       } catch {
         return undefined;
@@ -405,6 +424,7 @@ async function applyInstalledRuntime(
   const useElevatedService =
     installServiceNow && !isSameSystemUser(targetUser, currentUser);
   const serviceDeps = { findSystemUser, targetHomeForUser };
+  const targetHome = targetHomeForUser(targetUser);
 
   const previousReleaseName = publishRuntime
     ? currentInstalledReleaseName(installDir, useElevatedWrite)
@@ -446,6 +466,16 @@ async function applyInstalledRuntime(
     useElevatedWrite,
     { findSystemUser },
   );
+  const executionContext = createInstallExecutionContext(
+    {
+      currentUser,
+      targetUser,
+      targetHome,
+      installDir,
+      targetNodePath: managedNodeRuntime?.nodeExecutable,
+    },
+    serviceDeps,
+  );
   const coreUpdateLaunchers =
     !persistInstallerState && writeLaunchers
       ? refreshCoreUpdateLaunchers({
@@ -467,8 +497,9 @@ async function applyInstalledRuntime(
     await preparePiManagedToolsForInstall({
       currentUser,
       targetUser,
-      targetHome: targetHomeForUser(targetUser),
+      targetHome,
       installDir,
+      targetNodePath: executionContext.targetNodePath,
     });
   }
   const shouldRestartBeforePersist =
@@ -476,8 +507,7 @@ async function applyInstalledRuntime(
   if (shouldRestartBeforePersist) {
     const socketPath = daemonSocketPathForUser(targetUser, serviceDeps);
     await waitForInstalledDaemonDrain({
-      currentUser,
-      targetUser,
+      executionContext,
       socketPath,
     });
     try {
@@ -492,8 +522,7 @@ async function applyInstalledRuntime(
       );
     } catch (error) {
       await cancelInstalledDaemonRestart({
-        currentUser,
-        targetUser,
+        executionContext,
         socketPath,
       }).catch(() => {});
       throw error;
@@ -638,8 +667,7 @@ async function applyInstalledRuntime(
     }
     const socketPath = daemonSocketPathForUser(targetUser, serviceDeps);
     await waitForInstalledDaemonDrain({
-      currentUser,
-      targetUser,
+      executionContext,
       socketPath,
     });
     try {
@@ -655,8 +683,7 @@ async function applyInstalledRuntime(
       );
     } catch (error) {
       await cancelInstalledDaemonRestart({
-        currentUser,
-        targetUser,
+        executionContext,
         socketPath,
       }).catch(() => {});
       throw error;
@@ -671,6 +698,10 @@ async function applyInstalledRuntime(
         daemonSocketPathForUser(targetUser, serviceDeps),
         daemonReadyTimeoutMs,
         targetUser,
+        {
+          currentUser,
+          targetNodePath: executionContext.targetNodePath,
+        },
       )
     : false;
   if (!daemonReady && installServiceNow && installedService) {

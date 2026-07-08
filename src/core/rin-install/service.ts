@@ -693,15 +693,29 @@ export async function waitForSocket(
   socketPath: string,
   timeoutMs = 5000,
   targetUser?: string,
+  options: {
+    currentUser?: string;
+    targetNodePath?: string;
+    captureCommandAsUser?: typeof captureCommandAsUser;
+    canConnectDaemonSocket?: typeof canConnectDaemonSocket;
+  } = {},
 ) {
   const startedAt = Date.now();
-  const currentUser = currentSystemUser();
+  const currentUser = options.currentUser || currentSystemUser();
   const isCurrentUser = isCurrentSystemUser(targetUser, currentUser);
+  const captureAsUser = options.captureCommandAsUser ?? captureCommandAsUser;
+  const connectSocket =
+    options.canConnectDaemonSocket ?? canConnectDaemonSocket;
   while (Date.now() - startedAt < timeoutMs) {
     const ok = await new Promise<boolean>((resolve) => {
       if (!isCurrentUser) {
+        const targetNodePath = String(options.targetNodePath || "").trim();
+        if (!targetNodePath) {
+          resolve(false);
+          return;
+        }
         try {
-          const probe = captureCommandAsUser(targetUser, process.execPath, [
+          const probe = captureAsUser(targetUser || "", targetNodePath, [
             "-e",
             buildDaemonSocketProbeScript(socketPath, 300),
           ]);
@@ -713,7 +727,7 @@ export async function waitForSocket(
           return;
         }
       }
-      void canConnectDaemonSocket(socketPath, 300).then(resolve);
+      void connectSocket(socketPath, 300).then(resolve);
     });
     if (ok) return true;
     await sleep(150);

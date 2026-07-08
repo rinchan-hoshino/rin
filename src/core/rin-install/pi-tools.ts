@@ -13,6 +13,7 @@ export type PreparePiManagedToolsOptions = {
   targetUser: string;
   targetHome: string;
   installDir: string;
+  targetNodePath?: string;
 };
 
 type EnsureTool = PiEnsureTool;
@@ -162,10 +163,19 @@ export async function preparePiManagedToolsForInstall(
     );
     return { warnings };
   }
+  const nodePath = String(options.targetNodePath || deps.nodePath || "").trim();
+  if (!nodePath) {
+    warnOptionalToolFailure(
+      warnings,
+      deps.warn,
+      "Rin installer skipped fd/rg preparation because the target Node runtime is unavailable.",
+    );
+    return { warnings };
+  }
   try {
     runCommandAsUser(
       targetUser,
-      deps.nodePath ?? process.execPath,
+      nodePath,
       ["--input-type=module", "-e", script],
       envValues,
     );

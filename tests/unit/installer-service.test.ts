@@ -42,6 +42,33 @@ function escapeXml(value) {
     .replace(/'/g, "&apos;");
 }
 
+test("waitForSocket probes a cross-user daemon with the target runtime node", async () => {
+  const invocations = [];
+  const ok = await service.waitForSocket(
+    "/run/user/1001/rin-daemon/daemon.sock",
+    100,
+    "rin",
+    {
+      currentUser: "THE_cattail",
+      targetNodePath: "/home/rin/.rin/runtime/node/current/bin/node",
+      captureCommandAsUser: (targetUser, command, args) => {
+        invocations.push({ targetUser, command, args });
+        return "";
+      },
+    },
+  );
+
+  assert.equal(ok, true);
+  assert.deepEqual(invocations, [
+    {
+      targetUser: "rin",
+      command: "/home/rin/.rin/runtime/node/current/bin/node",
+      args: ["-e", invocations[0].args[1]],
+    },
+  ]);
+  assert.match(invocations[0].args[1], /net\.createConnection/);
+});
+
 test("installer service helpers prefer current daemon entry, quote systemd values, and escape plist XML", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "install & data");

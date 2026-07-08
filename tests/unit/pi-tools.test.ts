@@ -49,9 +49,9 @@ test("preparePiManagedToolsForInstall runs managed-tool preparation as the targe
       targetUser: "rin",
       targetHome: "/home/rin",
       installDir: "/home/rin/.rin",
+      targetNodePath: "/home/rin/.rin/runtime/node/current/bin/node",
     },
     {
-      nodePath: "/usr/bin/node",
       toolsManagerModuleUrl: "file:///runtime/tools-manager.js",
       runCommandAsUser: (targetUser, command, args, extraEnv) => {
         invocations.push({ targetUser, command, args, extraEnv });
@@ -61,7 +61,10 @@ test("preparePiManagedToolsForInstall runs managed-tool preparation as the targe
 
   assert.equal(invocations.length, 1);
   assert.equal(invocations[0].targetUser, "rin");
-  assert.equal(invocations[0].command, "/usr/bin/node");
+  assert.equal(
+    invocations[0].command,
+    "/home/rin/.rin/runtime/node/current/bin/node",
+  );
   assert.deepEqual(invocations[0].args.slice(0, 2), [
     "--input-type=module",
     "-e",
@@ -74,6 +77,31 @@ test("preparePiManagedToolsForInstall runs managed-tool preparation as the targe
     RIN_DIR: "/home/rin/.rin",
     PI_CODING_AGENT_DIR: "/home/rin/.rin",
   });
+});
+
+test("preparePiManagedToolsForInstall refuses ambient process.execPath for cross-user preparation", async () => {
+  const invocations: any[] = [];
+  const warnings: string[] = [];
+  const result = await preparePiManagedToolsForInstall(
+    {
+      currentUser: "THE_cattail",
+      targetUser: "rin",
+      targetHome: "/home/rin",
+      installDir: "/home/rin/.rin",
+    },
+    {
+      toolsManagerModuleUrl: "file:///runtime/tools-manager.js",
+      warn: (message) => warnings.push(message),
+      runCommandAsUser: (targetUser, command, args, extraEnv) => {
+        invocations.push({ targetUser, command, args, extraEnv });
+      },
+    },
+  );
+
+  assert.equal(invocations.length, 0);
+  assert.equal(result.warnings.length, 1);
+  assert.deepEqual(warnings, result.warnings);
+  assert.match(result.warnings[0], /target Node runtime is unavailable/);
 });
 
 test("preparePiManagedToolsForInstall does not fail install when managed tools cannot be prepared", async () => {
