@@ -324,6 +324,9 @@ export async function executeCronAgentTask(
     shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(sessionMode),
     text: prompt,
     sessionFile: sessionFile || dedicatedSessionFile,
+    ...(sessionMode === "dedicated" && dedicatedSessionFile && !sessionFile
+      ? { createSessionFileIfMissing: true }
+      : {}),
     ...(sessionMode === "none"
       ? { managedSessionLeaf: MANAGED_TASK_SESSION_LEAF }
       : {}),

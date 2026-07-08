@@ -722,6 +722,25 @@ test("frontend SDK turn driver reports an explicit missing session target", asyn
   );
 });
 
+test("frontend SDK turn driver can create an explicit missing session target", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  const sessionFile = "/tmp/new-explicit-frontend-session.jsonl";
+
+  const result = await driver.runTurn({
+    text: "hello",
+    sessionFile,
+    createSessionFileIfMissing: true,
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  assert.equal(result.sessionFile, sessionFile);
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "resumeSession"),
+    [{ type: "resumeSession", sessionFile }],
+  );
+});
+
 test("frontend SDK turn driver terminates the attached daemon session", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;

@@ -1144,6 +1144,7 @@ export class RinFrontendTurnDriver {
       sessionFile?: string;
       restoreSessionFile?: string;
       managedSessionLeaf?: string;
+      createSessionFileIfMissing?: boolean;
       sessionName?: string;
       model?: string;
       thinkingLevel?: string;
@@ -1168,7 +1169,11 @@ export class RinFrontendTurnDriver {
       ).trim();
       await this.connect();
       if (!this.client) throw new Error("frontend_session_not_connected");
-      if (sessionFile && !sessionFileExists(sessionFile)) {
+      if (
+        sessionFile &&
+        !input.createSessionFileIfMissing &&
+        !sessionFileExists(sessionFile)
+      ) {
         throw missingSessionFileError(sessionFile);
       }
       const ready = await this.ensureSessionReady(

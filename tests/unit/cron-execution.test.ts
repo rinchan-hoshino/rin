@@ -480,6 +480,7 @@ test("cron dedicated agent task creates and then preserves its bound session", a
         disposeAfterTurn: item.disposeAfterTurn,
         text: item.text,
         sessionFile: item.sessionFile,
+        createSessionFileIfMissing: item.createSessionFileIfMissing,
       })),
       [
         {
@@ -490,6 +491,7 @@ test("cron dedicated agent task creates and then preserves its bound session", a
           disposeAfterTurn: false,
           text: "hello",
           sessionFile: dedicatedSessionFile,
+          createSessionFileIfMissing: true,
         },
         {
           chatKey: "telegram/demo:1",
@@ -499,6 +501,7 @@ test("cron dedicated agent task creates and then preserves its bound session", a
           disposeAfterTurn: false,
           text: "hello again",
           sessionFile: dedicatedSessionFile,
+          createSessionFileIfMissing: undefined,
         },
       ],
     );

@@ -1927,6 +1927,7 @@ export class ChatController {
         model?: string;
         thinkingLevel?: string;
         managedSessionLeaf?: string;
+        createSessionFileIfMissing?: boolean;
         deliverFinal?: boolean;
         disabledRinCapabilities?: string[];
         quietMode?: boolean;
@@ -1940,7 +1941,11 @@ export class ChatController {
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
         this.resolveSessionFileForUse(rawWantedSessionFile);
-      if (wantedSessionFile && !sessionFileExists(wantedSessionFile)) {
+      if (
+        wantedSessionFile &&
+        !input.createSessionFileIfMissing &&
+        !sessionFileExists(wantedSessionFile)
+      ) {
         throw missingSessionFileError(wantedSessionFile);
       }
       const restoreSessionFile =
@@ -1963,6 +1968,7 @@ export class ChatController {
         sessionFile: wantedSessionFile,
         restoreSessionFile,
         managedSessionLeaf,
+        createSessionFileIfMissing: input.createSessionFileIfMissing,
         sessionName: input.sessionName,
         tools: input.tools,
         excludeTools: input.excludeTools,
@@ -2041,7 +2047,11 @@ export class ChatController {
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
         this.resolveSessionFileForUse(rawWantedSessionFile);
-      if (wantedSessionFile && !sessionFileExists(wantedSessionFile)) {
+      if (
+        wantedSessionFile &&
+        !input.createSessionFileIfMissing &&
+        !sessionFileExists(wantedSessionFile)
+      ) {
         throw missingSessionFileError(wantedSessionFile);
       }
       const restoreSessionFile =
@@ -2077,6 +2087,7 @@ export class ChatController {
           sessionFile: wantedSessionFile,
           restoreSessionFile,
           managedSessionLeaf,
+          createSessionFileIfMissing: input.createSessionFileIfMissing,
           sessionName: input.sessionName,
           tools: input.tools,
           excludeTools: input.excludeTools,

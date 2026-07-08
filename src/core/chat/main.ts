@@ -314,6 +314,7 @@ export type ChatBridgeTurnPayload = RinToolStartupOptions &
     sessionFile?: string;
     sessionName?: string;
     managedSessionLeaf?: string;
+    createSessionFileIfMissing?: boolean;
     model?: string;
     thinkingLevel?: string;
     promptMeta?: PromptContextMeta;
@@ -1114,6 +1115,7 @@ export async function startChatBridge(
         sessionFile,
         sessionName: payload?.sessionName,
         managedSessionLeaf: payload?.managedSessionLeaf,
+        createSessionFileIfMissing: payload?.createSessionFileIfMissing,
         tools: payload?.tools,
         excludeTools: payload?.excludeTools,
         noTools: payload?.noTools,
