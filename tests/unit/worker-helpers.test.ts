@@ -382,19 +382,11 @@ test("runBuiltinCommand shows compact usage status", async () => {
     );
 
     assert.equal(result.handled, true);
-    assert.match(String(result.text || ""), /Rin usage @/);
-    assert.match(
-      String(result.text || ""),
-      /Usage dashboard attached: 7d trend \(3h buckets\) with account quota details when available\./,
+    assert.equal(result.text, "");
+    assert.equal(
+      result.parts?.some((part: any) => part?.type === "text"),
+      false,
     );
-    assert.doesNotMatch(String(result.text || ""), /Gemini CLI/);
-    assert.doesNotMatch(String(result.text || ""), /gemini@example\.test/);
-    assert.doesNotMatch(
-      String(result.text || ""),
-      /quota\s+temporarily unavailable/i,
-    );
-    assert.doesNotMatch(String(result.text || ""), /recent usage/);
-    assert.doesNotMatch(String(result.text || ""), /overview/);
     const imagePart = result.parts?.find((part: any) => part?.type === "image");
     assert.equal(imagePart?.mimeType, "image/png");
     const image = fs.readFileSync(String(imagePart?.path || ""));
@@ -403,6 +395,42 @@ test("runBuiltinCommand shows compact usage status", async () => {
       [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
     );
   } finally {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("runBuiltinCommand reports Codex usage fetch failures instead of sending partial image", async () => {
+  const agentDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-chat-usage-codex-error-"),
+  );
+  const originalFetch = globalThis.fetch;
+  try {
+    fs.writeFileSync(
+      path.join(agentDir, "auth.json"),
+      `${JSON.stringify({
+        "openai-codex": {
+          type: "oauth",
+          access: "test-access-token",
+          accountId: "acct-test",
+        },
+      })}\n`,
+      "utf8",
+    );
+    globalThis.fetch = (async () => {
+      throw new Error("quota timeout");
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () =>
+        workerHelpers.runBuiltinCommand(
+          { services: { agentDir }, session: {} },
+          "/usage",
+          { SessionManager: { list: async () => [] } },
+        ),
+      /Codex usage unavailable: quota timeout/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
     fs.rmSync(agentDir, { recursive: true, force: true });
   }
 });

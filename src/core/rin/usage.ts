@@ -737,6 +737,23 @@ export async function loadCodexSubscriptionStatus(
   return { configured, accountName, accountId, plan, windows, credits, error };
 }
 
+function providerQuotaHasUsagePercent(status: ProviderQuotaStatus) {
+  return status.windows.some((window) => Number.isFinite(window.percentLeft));
+}
+
+function assertChatUsageQuotaReady(statuses: ProviderQuotaStatus[]) {
+  const codexStatus = statuses.find(
+    (status) => status.provider === OPENAI_CODEX_PROVIDER && status.configured,
+  );
+  if (!codexStatus) return;
+  if (codexStatus.error) {
+    throw new Error(`Codex usage unavailable: ${codexStatus.error}`);
+  }
+  if (!providerQuotaHasUsagePercent(codexStatus)) {
+    throw new Error("Codex usage unavailable: usage percentage missing");
+  }
+}
+
 function renderProviderQuotaImageLines(statuses?: ProviderQuotaStatus[]) {
   if (!statuses) return ["ACCOUNTS QUOTA", "NOT CHECKED"];
   if (!statuses.length) return ["ACCOUNTS QUOTA", "NO CONFIGURED PROVIDERS"];
@@ -1099,19 +1116,13 @@ export async function renderUsageReportForChat(agentDir: string): Promise<{
   parts: ChatMessagePart[];
 }> {
   const providerQuotas = await loadProviderQuotaStatuses(agentDir);
-  const text = [
-    `Rin usage @ ${formatReportTime(nowIso())}`,
-    "Usage dashboard attached: 7d trend (3h buckets) with account quota details when available.",
-  ].join("\n");
+  assertChatUsageQuotaReady(providerQuotas);
   const imagePath = writeUsageTrendChartImage(agentDir, {
     quotaLines: renderProviderQuotaImageLines(providerQuotas),
   });
   return {
-    text,
-    parts: [
-      { type: "text", text },
-      { type: "image", path: imagePath, mimeType: "image/png" },
-    ],
+    text: "",
+    parts: [{ type: "image", path: imagePath, mimeType: "image/png" }],
   };
 }
 

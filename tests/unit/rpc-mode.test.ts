@@ -1527,11 +1527,15 @@ test(
           .find((line) => line.type === "response" && line.id === "1");
         assert.equal(response.success, true);
         assert.equal(response.data?.handled, true);
-        assert.match(String(response.data?.text || ""), /Rin usage @/);
-        assert.doesNotMatch(
-          String(response.data?.text || ""),
-          /missing Rin data directory/,
+        assert.equal(response.data?.text, "");
+        assert.equal(
+          response.data?.parts?.some((part: any) => part?.type === "text"),
+          false,
         );
+        const imagePart = response.data?.parts?.find(
+          (part: any) => part?.type === "image",
+        );
+        assert.equal(imagePart?.mimeType, "image/png");
       } finally {
         await fs.rm(agentDir, { recursive: true, force: true });
       }

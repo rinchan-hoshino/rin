@@ -811,7 +811,7 @@ test("chat controller does not send working notices before deterministic non-com
   }
 });
 
-test("chat controller can deliver builtin command image parts", async () => {
+test("chat controller can deliver image-only builtin command parts", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -837,11 +837,8 @@ test("chat controller can deliver builtin command image parts", async () => {
     }),
     runCommand: async () => ({
       handled: true,
-      text: "usage summary",
-      parts: [
-        { type: "text", text: "usage summary" },
-        { type: "image", path: "/tmp/usage.png", mimeType: "image/png" },
-      ],
+      text: "",
+      parts: [{ type: "image", path: "/tmp/usage.png", mimeType: "image/png" }],
       sessionFile,
     }),
     switchSession: async () => {},
@@ -851,7 +848,6 @@ test("chat controller can deliver builtin command image parts", async () => {
 
   assert.deepEqual(deliveries[0].parts, [
     { type: "quote", id: "m-usage" },
-    { type: "text", text: "usage summary" },
     { type: "image", path: "/tmp/usage.png", mimeType: "image/png" },
   ]);
 });
