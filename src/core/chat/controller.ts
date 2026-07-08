@@ -442,7 +442,7 @@ export class ChatController {
     }
   }
 
-  dispose(options: { cancelLiveTurn?: boolean } = {}) {
+  dispose() {
     this.lastActivityAt = Date.now();
     void this.clearWorkingReaction().catch(() => {});
     void this.clearCompactionWorkingReaction().catch(() => {});
@@ -457,7 +457,7 @@ export class ChatController {
     this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration = 0;
-    this.driver.dispose(options);
+    this.driver.dispose();
   }
 
   private saveState() {
@@ -1687,6 +1687,24 @@ export class ChatController {
     } catch {
       return false;
     }
+  }
+
+  async shutdownSession() {
+    this.lastActivityAt = Date.now();
+    const wanted = this.getRecoverableSessionFile();
+    if (wanted) await this.connect({ restoreSession: true });
+    await this.driver.shutdownSession();
+    this.currentTurn = null;
+    this.compactionTurn = null;
+    this.compactionWorkingIndicators = [];
+    this.activeCommandTurnInput = null;
+    this.pendingSteeredDeliveryTargets = [];
+    this.backendAcceptedIncomingMessageId = "";
+    this.stagedDelivery = null;
+    this.awaitingTurnSettle = false;
+    this.externalWorkingVisible = false;
+    this.turnAbortRequested = false;
+    this.turnAbortGeneration = 0;
   }
 
   async terminateSession() {

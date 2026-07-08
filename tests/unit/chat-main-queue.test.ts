@@ -2164,7 +2164,7 @@ test("chat main reports daemon startup failure without retrying", async () => {
   }
 });
 
-test("chat main treats frontend lifecycle cancellation as retryable shutdown, not a delivered error", async () => {
+test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controller dispose", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2181,10 +2181,7 @@ test("chat main treats frontend lifecycle cancellation as retryable shutdown, no
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
-      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.ts")).href);
-      installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -2193,93 +2190,51 @@ test("chat main treats frontend lifecycle cancellation as retryable shutdown, no
         trusted: [],
       });
 
-      const originalRunTurn = controllerMod.ChatController.prototype.runTurn;
       let runTurnCalls = 0;
-      let connectCalls = 0;
-      controllerMod.ChatController.prototype.connect = async function () {
-        connectCalls += 1;
-        if (this.session && this.client) return;
-        const controller = this;
-        this.client = { subscribe() {} };
-        this.session = {
-          isStreaming: false,
-          messages: [],
-          sessionManager: {
-            getSessionFile: () => "/tmp/dispose-retry-chat.jsonl",
-            getSessionId: () => "dispose-retry-session",
-            getSessionName: () => controller.chatKey,
-          },
-          ensureSessionReady: async () => ({
-            sessionFile: "/tmp/dispose-retry-chat.jsonl",
-            sessionId: "dispose-retry-session",
-          }),
-          prompt: async (_message, options = {}) => {
-            controller.handleClientEvent({
-              type: "ui",
-              payload: {
-                type: "rpc_turn_event",
-                event: "complete",
-                requestTag: options.requestTag,
-                finalText: "retry after dispose",
-                result: { messages: [{ type: "text", text: "retry after dispose" }] },
-                sessionId: "dispose-retry-session",
-                sessionFile: "/tmp/dispose-retry-chat.jsonl",
-              },
-            });
-          },
-          switchSession: async () => {},
-        };
-      };
-      controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
+      let shutdownCalls = 0;
+      let disposeCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function () {
         runTurnCalls += 1;
-        if (runTurnCalls === 1) {
-          throw new Error("rin_frontend_turn_cancelled");
-        }
-        return await originalRunTurn.call(this, input, mode);
+        await new Promise(() => {});
+      };
+      controllerMod.ChatController.prototype.shutdownSession = async function () {
+        shutdownCalls += 1;
+      };
+      controllerMod.ChatController.prototype.dispose = function () {
+        disposeCalls += 1;
       };
 
-      const { app } = await mainMod.startChatBridge();
-      let sentCount = 0;
-      app.bots.push({
+      const bridge = await mainMod.startChatBridge({ hosted: true });
+      bridge.app.bots.push({
         platform: "telegram",
         selfId: "1",
         async sendMessage() {
-          sentCount += 1;
-          return ["assistant-" + sentCount];
+          return ["assistant-1"];
         },
         internal: {
           async sendChatAction() {},
         },
       });
 
-      app.emit("message", {
+      bridge.app.emit("message", {
         platform: "telegram",
         selfId: "1",
         channelId: "2",
         userId: "owner-1",
-        messageId: "m-dispose-retry",
+        messageId: "m-hosted-shutdown",
         isDirect: true,
-        content: "hello dispose retry",
-        stripped: { content: "hello dispose retry" },
-        elements: [h.createChatRuntimeH().text("hello dispose retry")],
+        content: "hello shutdown",
+        stripped: { content: "hello shutdown" },
+        elements: [h.createChatRuntimeH().text("hello shutdown")],
       });
 
       const deadline = Date.now() + 8000;
-      while (Date.now() < deadline) {
-        const rows = storeMod
-          .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-        if (rows.some((item) => item.text === "retry after dispose")) break;
+      while (Date.now() < deadline && runTurnCalls < 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-
-      const rows = storeMod
-        .listChatMessages(agentDir)
-        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const errorNotice = rows.find((item) => String(item.text || "").includes("frontend turn cancelled"));
-      const succeeded = rows.some((item) => item.text === "retry after dispose");
-      if (!succeeded || errorNotice || runTurnCalls !== 2 || connectCalls !== 1) {
-        throw new Error(JSON.stringify({ runTurnCalls, connectCalls, errorNotice, rows }));
+      await bridge.stop();
+      if (runTurnCalls !== 1 || shutdownCalls !== 1 || disposeCalls !== 0) {
+        throw new Error(JSON.stringify({ runTurnCalls, shutdownCalls, disposeCalls }));
       }
       process.exit(0);
     `;

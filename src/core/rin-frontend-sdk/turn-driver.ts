@@ -98,6 +98,7 @@ export type RinFrontendTurnClient = RinFrontendClient & {
     toolOptions?: RinToolStartupOptions &
       Pick<RinPiPassthroughOptions, "piStartupOptions">,
   ) => Promise<Record<string, unknown>>;
+  shutdownSession?: () => Promise<unknown>;
   terminateSession?: () => Promise<unknown>;
   consumeQueuedOfflineOperation?: (requestTag?: string) => boolean;
 };
@@ -199,10 +200,8 @@ export class RinFrontendTurnDriver {
     await this.refreshFrontendState().catch(() => {});
   }
 
-  dispose(options: { cancelLiveTurn?: boolean } = {}) {
-    if (options.cancelLiveTurn !== false) {
-      this.failLiveTurn(createRinFrontendTurnCancelledError());
-    }
+  dispose() {
+    this.failLiveTurn(createRinFrontendTurnCancelledError());
     this.resetAssistantSegmentTracking();
     this.frontendPhase = "idle";
     const client = this.client;
@@ -210,6 +209,23 @@ export class RinFrontendTurnDriver {
     this.frontendState = {};
     if (client?.disconnect) {
       void client.disconnect().catch(() => {});
+    }
+  }
+
+  async shutdownSession() {
+    if (!this.client?.isConnected()) return;
+    if (typeof this.client.shutdownSession === "function") {
+      await this.client.shutdownSession();
+    } else {
+      await this.client.request({ type: "shutdown_session" });
+    }
+    this.resetAssistantSegmentTracking();
+    this.frontendPhase = "idle";
+    const client = this.client;
+    this.client = null;
+    this.frontendState = {};
+    if (client?.disconnect) {
+      await client.disconnect().catch(() => {});
     }
   }
 

@@ -24,7 +24,6 @@ export type ClaimedChatInboxJob = {
 export type ChatInboxJobResult = {
   retry?: boolean;
   errorMessage?: string;
-  suppressRetryNotice?: boolean;
 };
 
 export function computeChatInboxRetryDelay(attemptCount: number) {

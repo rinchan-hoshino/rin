@@ -101,7 +101,6 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "../rin-frontend-sdk/frontend-identity.js";
-import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
@@ -748,17 +747,6 @@ export async function startChatBridge(
     };
     const handleTurnFailure = async (error: any) => {
       const errorMessage = safeString((error as any)?.message || error);
-      if (isRinFrontendTurnCancelledError(error)) {
-        logger.info(
-          `chat turn cancelled chatKey=${decision.chatKey} err=${errorMessage}`,
-        );
-        void controller.clearProcessingState().catch(() => {});
-        return {
-          retry: true,
-          errorMessage,
-          suppressRetryNotice: true,
-        };
-      }
       logger.warn(
         `chat turn failed chatKey=${decision.chatKey} err=${errorMessage}`,
       );
@@ -1318,11 +1306,20 @@ export async function startChatBridge(
       if (inboxPollTimer) clearInterval(inboxPollTimer);
       if (outboxPollTimer) clearInterval(outboxPollTimer);
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
-      const disposeOptions = { cancelLiveTurn: options.hosted !== true };
-      for (const controller of controllers.values())
-        controller.dispose(disposeOptions);
-      for (const controller of detachedControllers.values())
-        controller.dispose(disposeOptions);
+      for (const controller of controllers.values()) {
+        if (options.hosted === true) {
+          await controller.shutdownSession().catch(() => {});
+        } else {
+          controller.dispose();
+        }
+      }
+      for (const controller of detachedControllers.values()) {
+        if (options.hosted === true) {
+          await controller.shutdownSession().catch(() => {});
+        } else {
+          controller.dispose();
+        }
+      }
       try {
         await app.stop();
       } catch {}

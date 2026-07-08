@@ -478,12 +478,15 @@ test("frontend SDK dispose settles an active turn with internal lifecycle cancel
   });
 });
 
-test("frontend SDK shutdown dispose can detach an active turn without lifecycle cancellation", async () => {
+test("frontend SDK shutdown session follows TUI shutdown without lifecycle cancellation", async () => {
   const client = createFrontendClient();
   let promptStarted = false;
   client.prompt = async () => {
     promptStarted = true;
     await new Promise(() => {});
+  };
+  (client as any).shutdownSession = async () => {
+    client.calls.push({ type: "shutdownSession" });
   };
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -497,9 +500,13 @@ test("frontend SDK shutdown dispose can detach an active turn without lifecycle 
   activeTurn.catch(() => {});
   await waitUntil(() => promptStarted, "active turn did not start");
 
-  driver.dispose({ cancelLiveTurn: false });
+  await driver.shutdownSession();
   await new Promise((resolve) => setTimeout(resolve, 50));
 
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "shutdownSession"),
+    [{ type: "shutdownSession" }],
+  );
   assert.equal(client.isConnected(), false);
   assert.equal(settled, false);
 });
