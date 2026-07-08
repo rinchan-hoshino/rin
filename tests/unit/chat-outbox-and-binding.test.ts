@@ -54,22 +54,25 @@ async function waitFor(assertion, timeoutMs = 1000) {
 test("chat outbox enqueues payload on disk", async () => {
   await withTempDir(async (dir) => {
     const filePath = outbox.enqueueChatOutboxPayload(dir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/777:1",
-      text: "hello",
+      parts: [{ type: "text", text: "hello" }],
     });
     const stat = await fs.stat(filePath);
     assert.ok(stat.isFile());
   });
 });
 
-test("chat outbox accepts SDK-style text and parts payloads", async () => {
+test("chat outbox rejects SDK-style text and accepts only parts payloads", async () => {
   await withTempDir(async (dir) => {
-    outbox.enqueueChatOutboxPayload(dir, {
-      chatKey: "telegram/777:1",
-      text: "plain sdk text",
-    });
+    assert.throws(
+      () =>
+        outbox.enqueueChatOutboxPayload(dir, {
+          chatKey: "telegram/777:1",
+          text: "plain sdk text",
+        }),
+      /chat_outbox_invalid_payload/,
+    );
     outbox.enqueueChatOutboxPayload(dir, {
       chatKey: "telegram/777:1",
       parts: [
@@ -79,10 +82,10 @@ test("chat outbox accepts SDK-style text and parts payloads", async () => {
     });
 
     const queued = outbox.listChatOutboxItems(dir).map(({ item }) => item);
-    assert.equal(queued[0].payload.type, "text_delivery");
-    assert.equal(queued[0].payload.text, "plain sdk text");
-    assert.equal(queued[1].payload.type, "parts_delivery");
-    assert.equal(queued[1].payload.parts.length, 2);
+    assert.deepEqual(queued[0].payload.parts, [
+      { type: "text", text: "sdk parts text" },
+      { type: "image", path: "/tmp/example.png", mimeType: "image/png" },
+    ]);
 
     const sent = [];
     function h(type, attrs) {
@@ -111,20 +114,19 @@ test("chat outbox accepts SDK-style text and parts payloads", async () => {
     const results = await boot.drainChatOutbox(app, dir, h, { warn() {} });
     assert.deepEqual(
       results.map((result) => result.status),
-      ["dispatched", "dispatched"],
+      ["dispatched"],
     );
     await waitFor(() => {
       assert.deepEqual(
         queued.map(
           (item) => outbox.readChatOutboxItemById(dir, item.id).item.status,
         ),
-        ["delivered", "delivered"],
+        ["delivered"],
       );
     });
-    assert.equal(sent.length, 2);
-    assert.equal(sent[0].content[0].attrs.content, "plain sdk text");
-    assert.equal(sent[1].content[0].attrs.content, "sdk parts text");
-    assert.equal(sent[1].content[1].type, "image");
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].content[0].attrs.content, "sdk parts text");
+    assert.equal(sent[0].content[1].type, "image");
   });
 });
 
@@ -156,10 +158,9 @@ test("chat outbox rejects SDK-style empty payloads before enqueue", async () => 
 test("chat outbox archives legacy completed items out of the active queue", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/777:1",
-      text: "already sent",
+      parts: [{ type: "text", text: "already sent" }],
     });
     const queued = outbox.listChatOutboxItems(dir)[0].item;
     await fs.writeFile(
@@ -186,10 +187,9 @@ test("chat outbox archives legacy completed items out of the active queue", asyn
 test("chat outbox retries queued payloads after send failure", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/777:1",
-      text: "retry me",
+      parts: [{ type: "text", text: "retry me" }],
     });
     const deliveries = [];
     const app = {
@@ -247,10 +247,9 @@ test("chat outbox retries queued payloads after send failure", async () => {
 test("chat outbox fails partial delivery errors without retrying", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/777:1",
-      text: "partial send",
+      parts: [{ type: "text", text: "partial send" }],
     });
     const app = {
       bots: [
@@ -296,10 +295,9 @@ test("chat outbox fails partial delivery errors without retrying", async () => {
 test("chat outbox stops retrying after repeated transient failures", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/777:1",
-      text: "stop retrying",
+      parts: [{ type: "text", text: "stop retrying" }],
     });
     const stored = outbox.listChatOutboxItems(dir)[0].item;
     outbox.writeChatOutboxItem(dir, { ...stored, attempts: 3 });
@@ -339,10 +337,9 @@ test("chat outbox stops retrying after repeated transient failures", async () =>
 test("chat outbox fails permanent delivery errors without retrying", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/777:1",
-      text: "no bot",
+      parts: [{ type: "text", text: "no bot" }],
     });
     const h = {
       text(content) {
@@ -367,10 +364,9 @@ test("chat outbox fails permanent delivery errors without retrying", async () =>
 test("chat outbox treats platform permission errors as permanent", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/777:1",
-      text: "blocked",
+      parts: [{ type: "text", text: "blocked" }],
     });
     const app = {
       bots: [
@@ -487,7 +483,6 @@ test("chat outbox history cleanup applies 7 day delivered and 14 day failed rete
     const daysAgo = (days) =>
       new Date(nowMs - days * 24 * 60 * 60 * 1000).toISOString();
     const makePayload = (text) => ({
-      type: "text_delivery",
       createdAt: daysAgo(20),
       chatKey: "telegram/777:1",
       text,

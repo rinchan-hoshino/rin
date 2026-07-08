@@ -253,10 +253,9 @@ test("chat boot clears common telegram scopes before syncing default commands", 
 test("chat boot claims outbox files before sending so concurrent drains do not duplicate delivery", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/1:2",
-      text: "hello",
+      parts: [{ type: "text", text: "hello" }],
     });
 
     const sends = [];
@@ -294,16 +293,14 @@ test("chat boot claims outbox files before sending so concurrent drains do not d
 test("chat boot drains a target chat without waiting for a slow different chat", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/1:slow",
-      text: "slow image batch",
+      parts: [{ type: "text", text: "slow image batch" }],
     });
     outbox.enqueueChatOutboxPayload(agentDir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/1:fast",
-      text: "fast reply",
+      parts: [{ type: "text", text: "fast reply" }],
     });
     const fastId = outbox
       .listChatOutboxItems(agentDir)
@@ -366,10 +363,9 @@ test("chat boot drains a target chat without waiting for a slow different chat",
 test("chat boot releases a timed out outbox send without retrying before its lease", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/1:2",
-      text: "stuck send",
+      parts: [{ type: "text", text: "stuck send" }],
     });
     const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
     let sends = 0;
@@ -430,10 +426,9 @@ test("chat boot releases a timed out outbox send without retrying before its lea
 test("chat boot keeps retryable outbox delivery failures queued", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/1:2",
-      text: "hello",
+      parts: [{ type: "text", text: "hello" }],
     });
 
     const warnings = [];
@@ -477,10 +472,9 @@ test("chat boot gives OneBot media outbox items the extended send timeout", () =
   assert.equal(
     boot.getChatOutboxSendTimeoutMs({
       payload: {
-        type: "text_delivery",
         createdAt: new Date().toISOString(),
         chatKey: "onebot/1:2",
-        text: "[file: pack.mrpack](/tmp/pack.mrpack)",
+        parts: [{ type: "file", path: "/tmp/pack.mrpack" }],
       },
     }),
     boot.DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS,
@@ -488,10 +482,9 @@ test("chat boot gives OneBot media outbox items the extended send timeout", () =
   assert.equal(
     boot.getChatOutboxSendTimeoutMs({
       payload: {
-        type: "text_delivery",
         createdAt: new Date().toISOString(),
         chatKey: "onebot/1:2",
-        text: "plain text",
+        parts: [{ type: "text", text: "plain text" }],
       },
     }),
     boot.DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
@@ -500,10 +493,9 @@ test("chat boot gives OneBot media outbox items the extended send timeout", () =
     boot.getChatOutboxSendTimeoutMs(
       {
         payload: {
-          type: "text_delivery",
           createdAt: new Date().toISOString(),
           chatKey: "onebot/1:2",
-          text: "[file: pack.mrpack](/tmp/pack.mrpack)",
+          parts: [{ type: "file", path: "/tmp/pack.mrpack" }],
         },
       },
       { sendTimeoutMs: 42 },
@@ -517,7 +509,6 @@ test("chat boot dispatches media outbox items asynchronously after starting deli
     const filePath = path.join(agentDir, "pack.mrpack");
     await fs.writeFile(filePath, Buffer.from("pack"));
     outbox.enqueueChatOutboxPayload(agentDir, {
-      type: "parts_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "telegram/1:2",
       parts: [
@@ -574,10 +565,9 @@ test("chat boot dispatches media outbox items asynchronously after starting deli
 test("chat boot dispatches non-media outbox items asynchronously by platform list", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "onebot/1:2",
-      text: "plain text",
+      parts: [{ type: "text", text: "plain text" }],
     });
     const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
     let resolveDelivery;
@@ -626,10 +616,9 @@ test("chat boot dispatches non-media outbox items asynchronously by platform lis
 test("chat boot does not retry ambiguous timeout after dispatch", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
-      type: "text_delivery",
       createdAt: new Date().toISOString(),
       chatKey: "onebot/1:2",
-      text: "plain text",
+      parts: [{ type: "text", text: "plain text" }],
     });
     const itemId = outbox.listChatOutboxItems(agentDir)[0].item.id;
     const app = {

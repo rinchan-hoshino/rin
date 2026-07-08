@@ -848,10 +848,7 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       /\$nodeVersionOutput = & node -p "process\.versions\.node"/,
     );
     assert.match(bootstrapPowerShell, /\$nodeExitCode = \$LASTEXITCODE/);
-    assert.match(
-      bootstrapPowerShell,
-      /Receive-Job -Job \$job -Wait -ErrorAction SilentlyContinue/,
-    );
+    assert.match(bootstrapPowerShell, /Receive-Job -Job \$job -Wait \*>&1/);
     assert.match(bootstrapPowerShell, /if \(\$job\.State -eq "Failed"\)/);
     assert.doesNotMatch(
       bootstrapPowerShell,

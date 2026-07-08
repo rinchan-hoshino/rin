@@ -145,7 +145,6 @@ test("chat transport forwards mixed parts as a single native chat send", async (
       },
       dir,
       {
-        type: "parts_delivery",
         chatKey: "telegram/1:2",
         parts: [
           { type: "quote", id: "42" },
@@ -177,6 +176,50 @@ test("chat transport forwards mixed parts as a single native chat send", async (
   });
 });
 
+test("chat transport prepends payload reply quote for parts deliveries", async () => {
+  await withTempDir(async (dir) => {
+    const sends = [];
+    await transport.sendOutboxPayload(
+      {
+        bots: [
+          {
+            platform: "telegram",
+            selfId: "1",
+            async sendMessage(chatId, content) {
+              sends.push({ chatId, content });
+              return ["m-reply-parts"];
+            },
+          },
+        ],
+      },
+      dir,
+      {
+        chatKey: "telegram/1:2",
+        replyToMessageId: "42",
+        parts: [{ type: "text", text: "intro" }],
+      },
+      Object.assign((type, attrs) => ({ type, attrs }), {
+        text(content) {
+          return { type: "text", attrs: { content } };
+        },
+        quote(id) {
+          return { type: "quote", attrs: { id } };
+        },
+      }),
+    );
+
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0].content[0].type, "quote");
+    assert.equal(sends[0].content[0].attrs.id, "42");
+    const stored = messageStore.getChatMessage(
+      dir,
+      "telegram/1:2",
+      "m-reply-parts",
+    );
+    assert.equal(stored?.replyToMessageId, "42");
+  });
+});
+
 test("chat transport stores summarized content for non-text part deliveries", async () => {
   await withTempDir(async (dir) => {
     const imagePath = path.join(dir, "demo.png");
@@ -198,7 +241,6 @@ test("chat transport stores summarized content for non-text part deliveries", as
       },
       dir,
       {
-        type: "parts_delivery",
         chatKey: "telegram/1:2",
         parts: [
           { type: "image", path: imagePath, mimeType: "image/png" },
@@ -229,7 +271,7 @@ test("chat transport stores summarized content for non-text part deliveries", as
   });
 });
 
-test("chat transport forwards text delivery kind to adapters", async () => {
+test("chat transport forwards outbound message delivery kind to adapters", async () => {
   await withTempDir(async (dir) => {
     const sends = [];
     await transport.sendOutboxPayload(
@@ -247,10 +289,9 @@ test("chat transport forwards text delivery kind to adapters", async () => {
       },
       dir,
       {
-        type: "text_delivery",
         chatKey: "telegram/1:2",
         deliveryKind: "passive_notice",
-        text: "notice",
+        parts: [{ type: "text", text: "notice" }],
       },
       Object.assign((type, attrs) => ({ type, attrs }), {
         text(content) {
@@ -286,9 +327,8 @@ test("chat transport treats task-list todo deliveries as markdown", async () => 
       },
       dir,
       {
-        type: "text_delivery",
         chatKey: "telegram/1:2",
-        text: "- [x] done",
+        parts: [{ type: "text", text: "- [x] done" }],
       },
       Object.assign((type, attrs) => ({ type, attrs }), {
         text(content) {
@@ -309,7 +349,7 @@ test("chat transport treats task-list todo deliveries as markdown", async () => 
   });
 });
 
-test("chat transport defaults text delivery kind to final", async () => {
+test("chat transport defaults outbound message delivery kind to final", async () => {
   await withTempDir(async (dir) => {
     const sends = [];
     await transport.sendOutboxPayload(
@@ -327,9 +367,8 @@ test("chat transport defaults text delivery kind to final", async () => {
       },
       dir,
       {
-        type: "text_delivery",
         chatKey: "telegram/1:2",
-        text: "final",
+        parts: [{ type: "text", text: "final" }],
       },
       Object.assign((type, attrs) => ({ type, attrs }), {
         text(content) {
@@ -362,9 +401,8 @@ test("chat transport keeps tool and task text deliveries sessionless", async () 
       },
       dir,
       {
-        type: "text_delivery",
         chatKey: "telegram/1:2",
-        text: "scheduled hello",
+        parts: [{ type: "text", text: "scheduled hello" }],
         sessionFile: ` ${path.join(dir, "sessions", "scheduled", "task-session.jsonl")} `,
       },
       Object.assign((type, attrs) => ({ type, attrs }), {
@@ -518,9 +556,8 @@ test("chat transport rejects invalid parts and empty deliveries early", async ()
         },
         dir,
         {
-          type: "text_delivery",
           chatKey: "telegram/1:2",
-          text: "   ",
+          parts: [{ type: "text", text: "   " }],
         },
         {
           text(content) {
@@ -549,7 +586,6 @@ test("chat transport rejects invalid parts and empty deliveries early", async ()
         },
         dir,
         {
-          type: "parts_delivery",
           chatKey: "telegram/1:2",
           parts: [{ type: "text", text: "hello" }],
         },

@@ -512,7 +512,7 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   assert.match(entrypoint, /\$logFile = Join-Path \$workDir \$logName/);
   assert.match(entrypoint, /Add-BootstrapLog \$jobOutput/);
   assert.match(entrypoint, /Show-RecentBootstrapLog/);
-  assert.match(entrypoint, /Receive-Job -Job \$job -Wait \*>\&1/);
+  assert.match(entrypoint, /Receive-Job -Job \$job -Wait \*>&1/);
   assert.match(entrypoint, /if \(\$job\.State -eq "Failed"\)/);
   assert.match(entrypoint, /Rin bootstrap debug directory preserved:/);
   assert.match(entrypoint, /ERROR: \$message/);

@@ -125,28 +125,15 @@ type ChatTurnMeta = ChatTurnTarget & {
   ackReplyToMessageId?: string;
 };
 
-type ChatTextDelivery = {
-  type: "text_delivery";
+type ChatAssistantDelivery = {
   chatKey: string;
   deliveryKind?: "final" | "interim" | "passive_notice";
-  text: string;
+  parts: ChatMessagePart[];
   replyToMessageId?: string;
   coalesceWithWorkingMessage?: boolean;
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
-
-type ChatPartsDelivery = {
-  type: "parts_delivery";
-  chatKey: string;
-  deliveryKind?: "final" | "interim" | "passive_notice";
-  parts: ChatMessagePart[];
-  coalesceWithWorkingMessage?: boolean;
-  sessionFile?: string;
-  sessionBinding?: "conversation";
-};
-
-type ChatAssistantDelivery = ChatTextDelivery | ChatPartsDelivery;
 
 type TodoNoticeRenderMode = "native" | "markdown" | "characters";
 
@@ -1221,26 +1208,16 @@ export class ChatController {
             sessionBinding: "conversation" as const,
           };
     const replyToMessageId = safeString(input.replyToMessageId || "").trim();
-    if (parts.length) {
-      return {
-        type: "parts_delivery",
-        chatKey: this.chatKey,
-        deliveryKind: "final",
-        parts: [
-          ...(replyToMessageId
-            ? [{ type: "quote" as const, id: replyToMessageId }]
-            : []),
-          ...parts,
-        ],
-        ...sessionPayload,
-      };
-    }
     return {
-      type: "text_delivery",
       chatKey: this.chatKey,
       deliveryKind: "final",
-      text,
       replyToMessageId: replyToMessageId || undefined,
+      parts: [
+        ...(replyToMessageId
+          ? [{ type: "quote" as const, id: replyToMessageId }]
+          : []),
+        ...(parts.length ? parts : [{ type: "text" as const, text }]),
+      ],
       ...sessionPayload,
     };
   }
@@ -1313,7 +1290,6 @@ export class ChatController {
         : `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`);
     const deliveryKind = safeString(options.deliveryKind).trim();
     const normalizedPayload =
-      payload?.type === "text_delivery" &&
       (deliveryKind === "final" ||
         deliveryKind === "interim" ||
         deliveryKind === "passive_notice") &&
@@ -1474,12 +1450,11 @@ export class ChatController {
     try {
       await this.enqueueAndDrainDelivery(
         {
-          type: "text_delivery",
           createdAt: nowIso(),
           chatKey: this.chatKey,
           deliveryKind: "interim",
-          text: `${INTERIM_PREFIX}${trimmed}`,
           replyToMessageId: replyToMessageId || undefined,
+          parts: [{ type: "text", text: `${INTERIM_PREFIX}${trimmed}` }],
           coalesceWithWorkingMessage: true,
           ...this.currentConversationSessionPayload(),
         },
@@ -1518,10 +1493,10 @@ export class ChatController {
     try {
       await this.enqueueAndDrainDelivery(
         {
-          type: "text_delivery",
           createdAt: nowIso(),
           chatKey: this.chatKey,
-          text: trimmed,
+          replyToMessageId: this.currentReplyToMessageId() || undefined,
+          parts: [{ type: "text", text: trimmed }],
           ...(options.coalesceWithWorkingMessage
             ? { coalesceWithWorkingMessage: true }
             : {}),
@@ -1563,10 +1538,10 @@ export class ChatController {
     try {
       await this.enqueueAndDrainDelivery(
         {
-          type: "parts_delivery",
           createdAt: nowIso(),
           chatKey: this.chatKey,
           deliveryKind: "passive_notice",
+          replyToMessageId: this.currentReplyToMessageId() || undefined,
           coalesceWithWorkingMessage: true,
           parts: [
             ...(error
@@ -1671,12 +1646,11 @@ export class ChatController {
     try {
       const delivery = await this.enqueueAndDrainDelivery(
         {
-          type: "text_delivery",
           createdAt: nowIso(),
           chatKey: this.chatKey,
           deliveryKind: "passive_notice",
           coalesceWithWorkingMessage: true,
-          text: trimmed,
+          parts: [{ type: "text", text: trimmed }],
           ...this.currentConversationSessionPayload(),
         },
         {

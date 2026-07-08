@@ -40,6 +40,15 @@ async function readOnlyChatOutboxHistoryItem(agentDir, status) {
   return readChatOutboxItem(agentDir, path.join(dir, names[0]));
 }
 
+function deliveryText(delivery) {
+  return (delivery?.parts || [])
+    .map((part) =>
+      part?.type === "text" || part?.type === "markdown" ? part.text : "",
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
 function attachTestChatApp(controller) {
   controller.app = {
     bots: [
@@ -271,7 +280,7 @@ test("chat controller bootstraps a fresh session before the first command", asyn
   const calls = [];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -328,7 +337,7 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
   const calls = [];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -408,7 +417,7 @@ test("chat controller delivers Pi-native overflow recovery finals", async () => 
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -496,7 +505,7 @@ test("chat controller resets chat prompt sessions through the session settings r
   const calls = [];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -566,7 +575,7 @@ test("chat controller applies turn model options after settings reload", async (
   const calls = [];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -680,7 +689,7 @@ test("chat controller skips recovery bootstrap and uses configured copy for /new
   const prompts = [];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -747,7 +756,7 @@ test("chat controller does not send working notices before deterministic non-com
     ];
     const deliveries = [];
     controller.commitPendingDelivery = async function () {
-      deliveries.push(this.stagedDelivery?.text || "");
+      deliveries.push(deliveryText(this.stagedDelivery));
       this.stagedDelivery = null;
     };
 
@@ -840,7 +849,6 @@ test("chat controller can deliver builtin command image parts", async () => {
 
   await controller.runCommand("/usage", "m-usage", "m-usage");
 
-  assert.equal(deliveries[0].type, "parts_delivery");
   assert.deepEqual(deliveries[0].parts, [
     { type: "quote", id: "m-usage" },
     { type: "text", text: "usage summary" },
@@ -857,7 +865,7 @@ test("chat controller starts command reactions from frontend working status", as
   ];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -955,7 +963,7 @@ test("chat controller sends compaction start notice and reacts on that notice", 
   ];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
-      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .map((node) => node?.attrs?.content || "")
       .filter(Boolean)
       .join(" ");
     deliveries.push({
@@ -1032,7 +1040,7 @@ test("chat controller coalesces automatic compaction completion into the active 
   ];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
-      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .map((node) => node?.attrs?.content || "")
       .filter(Boolean)
       .join(" ");
     deliveries.push({
@@ -1093,7 +1101,7 @@ test("chat controller delivers non-deferred passive notices during active turns"
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
-      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .map((node) => node?.attrs?.content || "")
       .filter(Boolean)
       .join(" ");
     deliveries.push({ text, kind: options?.deliveryKind });
@@ -1303,7 +1311,7 @@ test("chat controller quiet mode suppresses non-final visible messages", async (
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
-      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .map((node) => node?.attrs?.content || "")
       .filter(Boolean)
       .join(" ");
     deliveries.push({ text, kind: options?.deliveryKind });
@@ -1355,7 +1363,7 @@ test("chat controller quiet mode still sends final replies by delivery kind", as
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
-      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .map((node) => node?.attrs?.content || "")
       .filter(Boolean)
       .join(" ");
     deliveries.push({ text, kind: options?.deliveryKind });
@@ -1380,7 +1388,7 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
   const quietDeliveries = [];
   quietController.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
-      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .map((node) => node?.attrs?.content || "")
       .filter(Boolean)
       .join(" ");
     quietDeliveries.push({ text, kind: options?.deliveryKind });
@@ -1440,7 +1448,7 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
   const loudDeliveries = [];
   loudController.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
-      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .map((node) => node?.attrs?.content || "")
       .filter(Boolean)
       .join(" ");
     loudDeliveries.push({ text, kind: options?.deliveryKind });
@@ -1483,7 +1491,7 @@ test("chat controller runTurn quiet false allows deferred todo notices", async (
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
-      .map((node) => node?.attrs?.content || node?.attrs?.id || "")
+      .map((node) => node?.attrs?.content || "")
       .filter(Boolean)
       .join(" ");
     deliveries.push({ text, kind: options?.deliveryKind });
@@ -1519,7 +1527,7 @@ test("chat controller does not create processing turns for slash commands", asyn
   ];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -1573,7 +1581,7 @@ test("chat controller ignores replied session files for /new", async () => {
   const calls = [];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -1690,7 +1698,7 @@ test("chat controller uses configured command response overrides", async () => {
   };
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -1729,7 +1737,7 @@ test("chat controller starts /new immediately through the TUI new-session path",
   const deliveries = [];
   let backendAbortCalled = false;
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -1823,7 +1831,7 @@ test("chat controller /new aborts a visible turn before driver live turn exists"
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -1902,7 +1910,7 @@ test("chat controller suppresses /compact acknowledgement but keeps configured /
     const prompts = [];
     const deliveries = [];
     controller.commitPendingDelivery = async function () {
-      deliveries.push(this.stagedDelivery?.text || "");
+      deliveries.push(deliveryText(this.stagedDelivery));
       this.stagedDelivery = null;
     };
 
@@ -2311,7 +2319,7 @@ test("chat controller delivers visible non-transient command errors", async () =
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -2338,7 +2346,7 @@ test("chat controller reports daemon command errors without frontend retry class
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -2782,7 +2790,7 @@ test("chat controller does not deliver text-only assistant messages as interim",
   };
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId,
     });
     this.stagedDelivery = null;
@@ -2858,7 +2866,7 @@ test("chat controller delivers leading tool-call text as the only interim source
   };
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId,
     });
     this.stagedDelivery = null;
@@ -3048,7 +3056,7 @@ test("chat controller does not treat assistant message updates as interim when a
   };
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId,
     });
     this.stagedDelivery = null;
@@ -3128,7 +3136,7 @@ test("chat controller does not leak a buffered preview as interim before the fin
   };
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId,
     });
     this.stagedDelivery = null;
@@ -3204,7 +3212,7 @@ test("chat controller does not emit growing final-answer prefixes as interim rep
   };
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId,
     });
     this.stagedDelivery = null;
@@ -3575,9 +3583,8 @@ test("chat controller clears the working reaction before dropping processing sta
   controller.lastWorkingReactionAt = Date.now();
   controller.awaitingTurnSettle = true;
   controller.stagedDelivery = {
-    type: "text_delivery",
     chatKey: controller.chatKey,
-    text: "pending",
+    parts: [{ type: "text", text: "pending" }],
   };
 
   await controller.clearProcessingState();
@@ -3597,7 +3604,7 @@ test("chat controller treats rpc completion as the canonical final reply for pro
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId,
     });
     this.stagedDelivery = null;
@@ -3984,7 +3991,7 @@ test("chat controller rejects rpc completion without finalText instead of reusin
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId,
     });
     this.stagedDelivery = null;
@@ -4039,7 +4046,7 @@ test("chat controller rejects rpc completion without finalText instead of scanni
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId,
     });
     this.stagedDelivery = null;
@@ -4202,7 +4209,7 @@ test("chat controller lets steer bypass the owned turn queue while the current t
     postDelivery = undefined,
   ) {
     deliveries.push({
-      text: this.stagedDelivery?.text || "",
+      text: deliveryText(this.stagedDelivery),
       replyToMessageId: this.stagedDelivery?.replyToMessageId || null,
       markProcessedMessageId: postDelivery?.markProcessed?.messageId || null,
     });
@@ -4291,7 +4298,7 @@ test("chat controller marks superseded restored inbox turns processed without du
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
   controller.driver.runTurn = async () => ({
@@ -4716,9 +4723,8 @@ test("chat controller does not persist transient processing state to chat state.
     workingNoticeSent: false,
   };
   controller.stagedDelivery = {
-    type: "text_delivery",
     chatKey: controller.chatKey,
-    text: "hello",
+    parts: [{ type: "text", text: "hello" }],
     replyToMessageId: "m1",
     sessionFile: "/tmp/demo.jsonl",
   };
@@ -4732,7 +4738,7 @@ test("chat controller does not persist transient processing state to chat state.
     sessionFile: "/tmp/demo.jsonl",
   });
   assert.equal(controller.currentTurn?.incomingMessageId, "m1");
-  assert.equal(controller.stagedDelivery?.text, "hello");
+  assert.equal(deliveryText(controller.stagedDelivery), "hello");
 });
 
 test("chat controller does not resend an already delivered final after restart recovery", async () => {

@@ -103,11 +103,20 @@ async function withTimeout<T>(
   }
 }
 
+function deliveryText(delivery: any) {
+  return (delivery?.parts || [])
+    .map((part: any) =>
+      part?.type === "text" || part?.type === "markdown" ? part.text : "",
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
 test("chat controller settles an abort while prompt submission is still pending", async () => {
   const controller = await createController();
   const deliveries: string[] = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 
@@ -165,7 +174,7 @@ test("chat controller treats /new as a reset barrier for an active turn", async 
   const controller = await createController();
   const deliveries: string[] = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
   };
@@ -240,7 +249,7 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
   const controller = await createController();
   const deliveries: string[] = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(this.stagedDelivery?.text || "");
+    deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
 

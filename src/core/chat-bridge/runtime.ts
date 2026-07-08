@@ -242,7 +242,6 @@ export function createChatBridgeRuntime(options: {
       enqueueChatOutboxPayload(
         options.agentDir,
         {
-          type: "parts_delivery",
           createdAt: nowIso(),
           requestId,
           chatKey,

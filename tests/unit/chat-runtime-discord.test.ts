@@ -237,6 +237,119 @@ test("discord adapter maps chat input interactions to Rin slash messages", async
   }
 });
 
+test("discord adapter edits one quoted non-final message and deletes it only on matching final", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-"),
+  );
+  try {
+    let bot: any = null;
+    const adapter = new extraAdapters.DiscordAdapter(
+      {
+        register(_adapter: unknown, registeredBot: any) {
+          bot = registeredBot;
+        },
+      },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    assert.ok(bot);
+
+    const sends: any[] = [];
+    const edits: any[] = [];
+    const deletes: any[] = [];
+    const messages = new Map<string, any>();
+    let nextId = 1;
+    const channel = {
+      async send(payload: any) {
+        sends.push(payload);
+        const id = `sent-${nextId++}`;
+        const message = {
+          id,
+          content: payload.content,
+          async edit(editPayload: any) {
+            edits.push({ id, payload: editPayload });
+            this.content = editPayload.content;
+            return { id };
+          },
+        };
+        messages.set(id, message);
+        return { id };
+      },
+      messages: {
+        async fetch(id: string) {
+          return messages.get(id);
+        },
+        async delete(id: string) {
+          deletes.push(id);
+          messages.delete(id);
+        },
+      },
+    };
+    (adapter as any).client = {
+      channels: {
+        async fetch(channelId: string) {
+          assert.equal(channelId, "channel-1");
+          return channel;
+        },
+      },
+    };
+
+    const quotedFirst = [
+      { type: "quote", attrs: { id: "incoming-1" }, children: [] },
+      { type: "markdown", attrs: { content: "first" }, children: [] },
+    ];
+    const quotedSecond = [
+      { type: "quote", attrs: { id: "incoming-1" }, children: [] },
+      { type: "markdown", attrs: { content: "second" }, children: [] },
+    ];
+    const quotedFinal = [
+      { type: "quote", attrs: { id: "incoming-1" }, children: [] },
+      { type: "markdown", attrs: { content: "done" }, children: [] },
+    ];
+
+    assert.deepEqual(
+      await bot.sendMessage("channel-1", quotedFirst, {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
+      }),
+      ["sent-1"],
+    );
+    assert.equal(sends.length, 1);
+    assert.deepEqual(sends[0].reply, {
+      messageReference: "incoming-1",
+      failIfNotExists: false,
+    });
+
+    assert.deepEqual(
+      await bot.sendMessage("channel-1", quotedSecond, {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
+      }),
+      ["sent-1"],
+    );
+    assert.equal(sends.length, 1);
+    assert.deepEqual(edits, [{ id: "sent-1", payload: { content: "second" } }]);
+
+    await bot.workingIndicators[0].end({ chatId: "channel-1" });
+    assert.deepEqual(deletes, []);
+
+    assert.deepEqual(
+      await bot.sendMessage("channel-1", quotedFinal, {
+        deliveryKind: "final",
+      }),
+      ["sent-2"],
+    );
+    assert.deepEqual(deletes, ["sent-1"]);
+    assert.deepEqual(sends[1].reply, {
+      messageReference: "incoming-1",
+      failIfNotExists: false,
+    });
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("discord adapter acknowledges chat input interactions with callback endpoint before emitting", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-discord-"),

@@ -52,9 +52,11 @@ export async function sendChatText(
     throw new Error("cron_chat_unavailable");
   }
   await options.chat.send({
-    type: "text_delivery",
     createdAt: nowIso(),
-    ...payload,
+    chatKey: payload.chatKey,
+    taskId: payload.taskId,
+    runId: payload.runId,
+    parts: [{ type: "text", text: payload.text }],
     ...(payload.sessionFile
       ? {
           sessionFile: payload.sessionFile,

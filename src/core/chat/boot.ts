@@ -273,16 +273,10 @@ function normalizePositiveMilliseconds(value: unknown, fallback: number) {
 }
 
 function chatOutboxPayloadContainsMedia(payload: ChatOutboxItem["payload"]) {
-  if (payload?.type === "parts_delivery") {
-    return (payload.parts || []).some((part: any) =>
-      ["image", "file", "video", "audio", "sticker"].includes(
-        safeString(part?.type).trim().toLowerCase(),
-      ),
-    );
-  }
-  const text = safeString((payload as any)?.text);
-  return /!\[[^\]]*\]\([^)]+\)|\[(?:image|file|video|audio|sticker):[^\]]*\]\([^)]+\)/i.test(
-    text,
+  return (payload?.parts || []).some((part: any) =>
+    ["image", "file", "video", "audio", "sticker"].includes(
+      safeString(part?.type).trim().toLowerCase(),
+    ),
   );
 }
 

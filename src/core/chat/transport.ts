@@ -352,12 +352,6 @@ function normalizeOutboxChatKey(chatKey: string) {
   return nextChatKey;
 }
 
-function normalizeOutboxText(text: string) {
-  const nextText = safeString(text).trim();
-  if (!nextText) throw new Error("chat_outbox_empty_message");
-  return nextText;
-}
-
 function normalizeDeliveredMessageIds(result: unknown) {
   if (!Array.isArray(result) || !result.length) {
     throw new Error("chat_send_message_empty_result");
@@ -633,8 +627,11 @@ export async function sendGenericFile(
 }
 
 export async function messagePartToNode(part: ChatMessagePart, h: any) {
-  if (part.type === "text") return markdownNode(h, safeString(part.text));
-  if (part.type === "markdown") return markdownNode(h, part.text);
+  if (part.type === "text" || part.type === "markdown") {
+    const text = safeString(part.text).trim();
+    if (!text) return null;
+    return markdownNode(h, text);
+  }
   if (part.type === "at") {
     const id = safeString(part.id).trim();
     if (!id) throw new Error("chat_outbox_invalid_part:at");
@@ -687,7 +684,7 @@ export async function messagePartToNode(part: ChatMessagePart, h: any) {
   );
 }
 
-function buildPartsDeliveryRecord(rawParts: ChatMessagePart[]) {
+function buildOutboundMessageRecord(rawParts: ChatMessagePart[]) {
   const quotePart = rawParts.find((part) => part.type === "quote") as
     | { type: "quote"; id: string }
     | undefined;
@@ -726,47 +723,6 @@ export function sendOutboxPayload(
   h: any,
   outboxId = "",
 ) {
-  if (payload?.type === "text_delivery") {
-    try {
-      const chatKey = normalizeOutboxChatKey(payload.chatKey);
-      const text = normalizeOutboxText(payload.text);
-      const replyToMessageId = safeString(payload.replyToMessageId).trim();
-      const session =
-        payload.sessionBinding === "conversation"
-          ? normalizeSessionRef(payload)
-          : { sessionFile: undefined };
-      const deliveryKind = safeString(payload.deliveryKind).trim() || "final";
-      const delivery = sendText(app, chatKey, text, h, replyToMessageId, {
-        deliveryKind,
-        ...(payload.coalesceWithWorkingMessage
-          ? { coalesceWithWorkingMessage: true }
-          : {}),
-        ...(outboxId ? { outboxId } : {}),
-      });
-      return attachChatDeliveryDispatch(
-        delivery.then((deliveryResult) =>
-          finalizeDeliveredAssistantOutput(agentDir, {
-            chatKey,
-            deliveryResult,
-            logText: text,
-            text,
-            rawContent: text,
-            replyToMessageId,
-            sessionFile: session.sessionFile,
-            sessionBinding: payload.sessionBinding,
-            deliveryKind,
-          }),
-        ),
-        chatOutboxPayloadUsesAsyncDispatch(payload)
-          ? Promise.resolve()
-          : undefined,
-      );
-    } catch (error) {
-      return Promise.reject(error) as ChatDeliveryPromise<string[]>;
-    }
-  }
-  if (payload?.type !== "parts_delivery")
-    return Promise.resolve([] as string[]);
   const chatKey = normalizeOutboxChatKey(payload.chatKey);
   const session =
     payload.sessionBinding === "conversation"
@@ -775,6 +731,14 @@ export function sendOutboxPayload(
   const rawParts = Array.isArray(payload.parts)
     ? payload.parts.filter(Boolean)
     : [];
+  const payloadReplyToMessageId = safeString(payload.replyToMessageId).trim();
+  const deliveryParts =
+    payloadReplyToMessageId && !rawParts.some((part) => part.type === "quote")
+      ? ([
+          { type: "quote", id: payloadReplyToMessageId },
+          ...rawParts,
+        ] as ChatMessagePart[])
+      : rawParts;
   let resolveDispatched: () => void = () => {};
   let rejectDispatched: (error: unknown) => void = () => {};
   const dispatched = new Promise<void>((resolve, reject) => {
@@ -783,9 +747,11 @@ export function sendOutboxPayload(
   });
   const delivery = (async () => {
     try {
-      if (!rawParts.length) throw new Error("chat_outbox_empty_message");
+      if (!deliveryParts.length) throw new Error("chat_outbox_empty_message");
       const nodes = (
-        await Promise.all(rawParts.map((part) => messagePartToNode(part, h)))
+        await Promise.all(
+          deliveryParts.map((part) => messagePartToNode(part, h)),
+        )
       ).filter(Boolean);
       if (!nodes.length) throw new Error("chat_outbox_empty_message");
 
@@ -806,7 +772,7 @@ export function sendOutboxPayload(
         sessionFile: session.sessionFile,
         sessionBinding: payload.sessionBinding,
         deliveryKind,
-        ...buildPartsDeliveryRecord(rawParts),
+        ...buildOutboundMessageRecord(deliveryParts),
       });
     } catch (error) {
       rejectDispatched(error);

@@ -572,11 +572,15 @@ export async function startChatBridge(
     if (!chatKey) return { retry: false };
     await enqueueAndDrainOutbox(
       {
-        type: "text_delivery",
         createdAt: nowIso(),
         chatKey,
-        text: "Unknown command. Send /help to see available commands.",
         replyToMessageId: messageId || undefined,
+        parts: [
+          {
+            type: "text",
+            text: "Unknown command. Send /help to see available commands.",
+          },
+        ],
       },
       "error",
     ).catch(() => {});
@@ -624,11 +628,10 @@ export async function startChatBridge(
       );
       await enqueueAndDrainOutbox(
         {
-          type: "text_delivery",
           createdAt: nowIso(),
           chatKey,
-          text: lines.join("\n"),
           replyToMessageId: messageId || undefined,
+          parts: [{ type: "text", text: lines.join("\n") }],
         },
         "command_ack",
       ).catch(() => {});
@@ -758,11 +761,12 @@ export async function startChatBridge(
       ) {
         void enqueueAndDrainOutbox(
           {
-            type: "text_delivery",
             createdAt: nowIso(),
             chatKey: decision.chatKey,
-            text: formatRuntimeErrorForChat(errorMessage),
             replyToMessageId: messageId || undefined,
+            parts: [
+              { type: "text", text: formatRuntimeErrorForChat(errorMessage) },
+            ],
             sessionFile: linkedSessionFile || undefined,
           },
           "error",

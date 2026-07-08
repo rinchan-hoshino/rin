@@ -241,20 +241,19 @@ class EditableTextMessageGroup {
         const ids = await this.updateText({
           chatId,
           text: editableWorkingText(context?.tick, this.workingFrames),
+          replyToMessageId:
+            safeString(context?.replyToMessageId).trim() || undefined,
           kind: "working",
         });
         return ids.length > 0;
       },
-      end: async (context: any) => {
-        const chatId = safeString(context?.chatId).trim();
-        if (!chatId) return false;
-        return await this.deleteProgress(chatId);
-      },
+      end: async (_context: any) => false,
     };
   }
 
-  private key(chatId: string) {
-    return `${chatId}:chat`;
+  private key(chatId: string, replyToMessageId?: string) {
+    const replyKey = safeString(replyToMessageId).trim();
+    return replyKey ? `${chatId}:quote:${replyKey}` : `${chatId}:chat`;
   }
 
   private statePath(key: string) {
@@ -401,7 +400,7 @@ class EditableTextMessageGroup {
     const chatId = safeString(input.chatId).trim();
     const text = safeString(input.text);
     if (!chatId || !text) return [] as string[];
-    const key = this.key(chatId);
+    const key = this.key(chatId, input.replyToMessageId);
     const chunks = splitPlainText(text, this.options.maxTextLength).filter(
       Boolean,
     );
@@ -494,8 +493,8 @@ class EditableTextMessageGroup {
     });
   }
 
-  async deleteProgress(chatId: string) {
-    const key = this.key(chatId);
+  async deleteProgress(chatId: string, replyToMessageId?: string) {
+    const key = this.key(chatId, replyToMessageId);
     const persisted = this.read(key);
     const messageIds = persisted?.messageIds?.length
       ? persisted.messageIds
@@ -1197,7 +1196,7 @@ export class DiscordAdapter {
     let finalizedWorkingMessage = false;
     const ensureFinalProgressCleared = async () => {
       if (!isFinalDelivery || finalizedWorkingMessage) return;
-      await this.editableWorking.deleteProgress(chatId);
+      await this.editableWorking.deleteProgress(chatId, replyToMessageId);
       finalizedWorkingMessage = true;
     };
     const recordFailure = async (error: unknown, placeholder: string) => {
@@ -1287,7 +1286,7 @@ export class DiscordAdapter {
       if (chunkIds.length) firstReply = undefined;
     }
     if (isFinalDelivery && !finalizedWorkingMessage) {
-      await this.editableWorking.deleteProgress(chatId);
+      await this.editableWorking.deleteProgress(chatId, replyToMessageId);
     }
     if (delivered.length) return delivered;
     if (failures.length) throw failures[0];
@@ -1842,7 +1841,7 @@ export class SlackAdapter {
     let finalizedWorkingMessage = false;
     const ensureFinalProgressCleared = async () => {
       if (!isFinalDelivery || finalizedWorkingMessage) return;
-      await this.editableWorking.deleteProgress(chatId);
+      await this.editableWorking.deleteProgress(chatId, replyToMessageId);
       finalizedWorkingMessage = true;
     };
     const recordFailure = async (error: unknown, placeholder: string) => {
@@ -1952,7 +1951,7 @@ export class SlackAdapter {
       delivered.push(...messageIds);
     }
     if (isFinalDelivery && !finalizedWorkingMessage) {
-      await this.editableWorking.deleteProgress(chatId);
+      await this.editableWorking.deleteProgress(chatId, replyToMessageId);
     }
     if (delivered.length) return delivered;
     if (failures.length) throw failures[0];
@@ -2975,7 +2974,7 @@ export class LarkAdapter {
       options?.coalesceWithWorkingMessage,
     );
     if (isFinalDelivery) {
-      await this.editableWorking.deleteProgress(chatId);
+      await this.editableWorking.deleteProgress(chatId, replyToMessageId);
       return await this.sendPostText(chatId, text, replyToMessageId);
     }
     if (coalesceWithWorkingMessage) {

@@ -56,48 +56,30 @@ export type ChatMessagePart =
 
 export type ChatDeliveryKind = "final" | "interim" | "passive_notice";
 
-export type ChatOutboxPayload =
-  | {
-      type: "text_delivery";
-      createdAt: string;
-      chatKey: string;
-      taskId?: string;
-      runId?: string;
-      requestId?: string;
-      deliveryKind?: ChatDeliveryKind;
-      text: string;
-      replyToMessageId?: string;
-      coalesceWithWorkingMessage?: boolean;
-      sessionId?: string;
-      sessionFile?: string;
-      sessionBinding?: "conversation";
-    }
-  | {
-      type: "parts_delivery";
-      createdAt: string;
-      requestId?: string;
-      taskId?: string;
-      runId?: string;
-      chatKey: string;
-      deliveryKind?: ChatDeliveryKind;
-      coalesceWithWorkingMessage?: boolean;
-      sessionId?: string;
-      sessionFile?: string;
-      sessionBinding?: "conversation";
-      parts: ChatMessagePart[];
-    };
+export type ChatOutboxPayload = {
+  createdAt: string;
+  requestId?: string;
+  taskId?: string;
+  runId?: string;
+  chatKey: string;
+  deliveryKind?: ChatDeliveryKind;
+  replyToMessageId?: string;
+  coalesceWithWorkingMessage?: boolean;
+  sessionId?: string;
+  sessionFile?: string;
+  sessionBinding?: "conversation";
+  parts: ChatMessagePart[];
+};
 
 export type ChatOutboxPayloadInput =
   | ChatOutboxPayload
   | {
-      type?: "text_delivery" | "parts_delivery";
       createdAt?: string;
       chatKey: string;
       taskId?: string;
       runId?: string;
       requestId?: string;
       deliveryKind?: ChatDeliveryKind;
-      text?: string;
       replyToMessageId?: string;
       coalesceWithWorkingMessage?: boolean;
       sessionId?: string;
@@ -237,40 +219,17 @@ export function normalizeChatOutboxPayload(
   const payload = raw as Record<string, unknown>;
   const chatKey = safeString(payload.chatKey).trim();
   if (!chatKey) return null;
-  const explicitType = safeString(payload.type).trim();
-  const type =
-    explicitType === "text_delivery" || explicitType === "parts_delivery"
-      ? explicitType
-      : Array.isArray(payload.parts)
-        ? "parts_delivery"
-        : safeString(payload.text).trim()
-          ? "text_delivery"
-          : "";
-  if (type === "text_delivery") {
-    const text = safeString(payload.text).trim();
-    if (!text) return null;
-    return {
-      ...payload,
-      type,
-      chatKey,
-      text,
-      createdAt: safeString(payload.createdAt).trim() || nowIso(),
-    } as ChatOutboxPayload;
-  }
-  if (type === "parts_delivery") {
-    const parts = Array.isArray(payload.parts)
-      ? payload.parts.filter(Boolean)
-      : [];
-    if (!parts.length) return null;
-    return {
-      ...payload,
-      type,
-      chatKey,
-      parts,
-      createdAt: safeString(payload.createdAt).trim() || nowIso(),
-    } as ChatOutboxPayload;
-  }
-  return null;
+  if ("type" in payload) return null;
+  const parts = Array.isArray(payload.parts)
+    ? payload.parts.filter(Boolean)
+    : [];
+  if (!parts.length) return null;
+  return {
+    ...payload,
+    chatKey,
+    parts,
+    createdAt: safeString(payload.createdAt).trim() || nowIso(),
+  } as ChatOutboxPayload;
 }
 
 function normalizeOutboxItem(
@@ -280,8 +239,7 @@ function normalizeOutboxItem(
   const payload =
     raw?.payload && typeof raw.payload === "object" ? raw.payload : raw;
   const chatKey = safeString(payload?.chatKey).trim();
-  const type = safeString(payload?.type).trim();
-  if (!chatKey || (type !== "text_delivery" && type !== "parts_delivery")) {
+  if (!chatKey || "type" in payload) {
     return null;
   }
   const id = safeString(raw?.id).trim() || createOutboxId();
