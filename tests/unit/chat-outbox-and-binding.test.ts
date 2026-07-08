@@ -244,6 +244,54 @@ test("chat outbox retries queued payloads after send failure", async () => {
   });
 });
 
+test("chat outbox expires stale queued payloads instead of delivering old messages", async () => {
+  await withTempDir(async (dir) => {
+    outbox.enqueueChatOutboxPayload(dir, {
+      createdAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+      chatKey: "telegram/777:1",
+      parts: [{ type: "text", text: "old message" }],
+    });
+    const queued = outbox.listChatOutboxItems(dir)[0].item;
+    let delivered = false;
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "777",
+          async sendMessage() {
+            delivered = true;
+            return ["m-old"];
+          },
+        },
+      ],
+    };
+    const h = {
+      text(content) {
+        return { type: "text", attrs: { content } };
+      },
+    };
+    const warnings = [];
+    const logger = { warn: (...args) => warnings.push(args.join(" ")) };
+
+    const results = await boot.drainChatOutbox(app, dir, h, logger);
+
+    assert.equal(delivered, false);
+    assert.equal(results[0].status, "failed");
+    assert.equal(results[0].error, "chat_outbox_expired");
+    assert.deepEqual(outbox.listChatOutboxItems(dir), []);
+    const failed = outbox.readChatOutboxItem(
+      dir,
+      outbox.chatOutboxHistoryItemPath(dir, queued.id, "failed"),
+    );
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.failureKind, "expired");
+    assert.equal(failed.lastError, "chat_outbox_expired");
+    assert.ok(
+      warnings.some((message) => message.includes("chat outbox failed")),
+    );
+  });
+});
+
 test("chat outbox fails partial delivery errors without retrying", async () => {
   await withTempDir(async (dir) => {
     outbox.enqueueChatOutboxPayload(dir, {

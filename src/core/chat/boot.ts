@@ -206,6 +206,7 @@ const CHAT_OUTBOX_RETRY_DELAYS_MS = [1000, 3000, 10_000] as const;
 export const DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS = 120_000;
 export const DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS = 10 * 60_000;
 export const DEFAULT_CHAT_OUTBOX_DISPATCH_TIMEOUT_MS = 30_000;
+export const DEFAULT_CHAT_OUTBOX_MAX_AGE_MS = 60 * 60_000;
 const DEFAULT_CHAT_OUTBOX_RETRY_LEASE_MS = 5 * 60_000;
 
 export type ChatOutboxDrainOptions = {
@@ -213,6 +214,7 @@ export type ChatOutboxDrainOptions = {
   itemId?: string;
   sendTimeoutMs?: number;
   retryLeaseMs?: number;
+  maxAgeMs?: number;
 };
 
 function chatOutboxErrorMessage(error: unknown) {
@@ -311,8 +313,30 @@ function retryLeaseMs(options: ChatOutboxDrainOptions = {}) {
   );
 }
 
-function isOutboxItemDrainable(item: ChatOutboxItem, nowMs = Date.now()) {
+function chatOutboxMaxAgeMs(options: ChatOutboxDrainOptions = {}) {
+  return normalizePositiveMilliseconds(
+    options.maxAgeMs ?? process.env.RIN_CHAT_OUTBOX_MAX_AGE_MS,
+    DEFAULT_CHAT_OUTBOX_MAX_AGE_MS,
+  );
+}
+
+function isOutboxItemExpired(
+  item: ChatOutboxItem,
+  options: ChatOutboxDrainOptions = {},
+  nowMs = Date.now(),
+) {
+  const createdAtMs = Date.parse(safeString(item.createdAt).trim());
+  if (!Number.isFinite(createdAtMs)) return false;
+  return nowMs - createdAtMs > chatOutboxMaxAgeMs(options);
+}
+
+function isOutboxItemDrainable(
+  item: ChatOutboxItem,
+  nowMs = Date.now(),
+  options: ChatOutboxDrainOptions = {},
+) {
   if (item.status === "delivered" || item.status === "failed") return false;
+  if (isOutboxItemExpired(item, options, nowMs)) return true;
   if (item.status === "sending" && !isRetryDue(item, nowMs)) return false;
   return isRetryDue(item, nowMs);
 }
@@ -461,6 +485,18 @@ function failedChatOutboxItem(
   };
 }
 
+function expiredChatOutboxItem(item: ChatOutboxItem): ChatOutboxItem {
+  return {
+    ...item,
+    status: "failed",
+    updatedAt: new Date().toISOString(),
+    failedAt: new Date().toISOString(),
+    lastError: "chat_outbox_expired",
+    nextAttemptAt: undefined,
+    failureKind: "expired",
+  };
+}
+
 function queuedChatOutboxItem(
   sending: ChatOutboxItem,
   error: unknown,
@@ -553,8 +589,22 @@ async function drainChatOutboxItem(
   if (item.status === "delivered" || item.status === "failed") {
     return { status: item.status };
   }
-  if (!isOutboxItemDrainable(item)) {
+  if (!isOutboxItemDrainable(item, Date.now(), options)) {
     return null;
+  }
+  if (isOutboxItemExpired(item, options)) {
+    const failed = expiredChatOutboxItem(item);
+    writeChatOutboxItem(agentDir, failed);
+    warnChatOutboxFailure(
+      logger,
+      failed,
+      new Error("chat_outbox_expired"),
+      "failed",
+    );
+    return {
+      status: "failed" as const,
+      error: "chat_outbox_expired",
+    };
   }
   const timeoutMs = getChatOutboxSendTimeoutMs(item, options);
   const sending: ChatOutboxItem = {
@@ -660,7 +710,7 @@ function filterDrainableChatOutboxItems(
         (!chatKey || item.payload.chatKey === chatKey) &&
         (!itemId || item.id === itemId || !chatKey),
     )
-    .filter((item) => isOutboxItemDrainable(item));
+    .filter((item) => isOutboxItemDrainable(item, Date.now(), options));
 }
 
 async function drainChatOutboxNowForChat(

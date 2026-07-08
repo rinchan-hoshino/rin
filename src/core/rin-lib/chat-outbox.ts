@@ -124,7 +124,7 @@ export type ChatOutboxItem = {
   lastError?: string;
   nextAttemptAt?: string;
   failedAt?: string;
-  failureKind?: "retryable" | "permanent" | "attempts_exhausted";
+  failureKind?: "retryable" | "permanent" | "attempts_exhausted" | "expired";
   deliveredAt?: string;
   deliveryResult?: string[];
   deliveryUnconfirmed?: boolean;
@@ -270,7 +270,8 @@ function normalizeOutboxItem(
     failureKind:
       raw?.failureKind === "retryable" ||
       raw?.failureKind === "permanent" ||
-      raw?.failureKind === "attempts_exhausted"
+      raw?.failureKind === "attempts_exhausted" ||
+      raw?.failureKind === "expired"
         ? raw.failureKind
         : undefined,
     deliveredAt: safeString(raw?.deliveredAt).trim() || undefined,
