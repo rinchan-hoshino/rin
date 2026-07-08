@@ -23,18 +23,15 @@ export function isDaemonChatQuiescing(status: any) {
 
 export function listActiveDaemonWorkers(status: any): any[] {
   if (!isDaemonStatusAvailable(status)) return [];
-  return asArray(status?.workers).filter((worker) => {
-    const state = String(worker?.state || "")
-      .trim()
-      .toLowerCase();
-    return Boolean(
+  return asArray(status?.workers).filter((worker) =>
+    Boolean(
       worker?.turnActive ||
+      worker?.turnRecoveryPending ||
       worker?.isStreaming ||
-      Number(worker?.pendingResponses || 0) > 0 ||
-      state === "working" ||
-      state === "busy",
-    );
-  });
+      worker?.isCompacting ||
+      Number(worker?.pendingResponses || 0) > 0,
+    ),
+  );
 }
 
 export function formatActiveDaemonWorkers(workers: any[]) {

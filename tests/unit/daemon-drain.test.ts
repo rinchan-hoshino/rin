@@ -19,6 +19,17 @@ test("daemon drain treats active turn workers as not drainable", async () => {
   assert.equal(formatActiveDaemonWorkers(workers), "active(working)");
 });
 
+test("daemon drain ignores display-only working state without explicit active work", async () => {
+  const workers = listActiveDaemonWorkers({
+    workers: [
+      { sessionId: "summary", state: "working" },
+      { sessionId: "rin", state: "working", rinWorking: true },
+    ],
+  });
+
+  assert.deepEqual(workers, []);
+});
+
 test("daemon drain requires quiescing status when requested", async () => {
   const result = await waitForDaemonDrain({
     pollIntervalMs: 100,
@@ -56,7 +67,11 @@ test("daemon drain waits until active workers become idle", async () => {
     queryStatus: async () => {
       calls += 1;
       return calls < 3
-        ? { workers: [{ sessionId: "active", state: "working" }] }
+        ? {
+            workers: [
+              { sessionId: "active", state: "working", turnActive: true },
+            ],
+          }
         : { workers: [{ sessionId: "active", state: "idle" }] };
     },
   });
@@ -94,7 +109,7 @@ test("daemon drain times out instead of killing active workers", async () => {
     pollIntervalMs: 100,
     timeoutMs: 150,
     queryStatus: async () => ({
-      workers: [{ sessionId: "active", state: "working" }],
+      workers: [{ sessionId: "active", state: "working", turnActive: true }],
     }),
   });
 
