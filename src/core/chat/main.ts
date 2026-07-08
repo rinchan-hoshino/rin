@@ -66,6 +66,7 @@ import { appendChatLog } from "./chat-log.js";
 import {
   type ChatInboxItem,
   reconcileChatInboxRecovery,
+  restoreChatInboxFile,
   restoreChatInboxSession,
   touchChatInboxFile,
 } from "./inbox.js";
@@ -850,6 +851,21 @@ export async function startChatBridge(
     }
   };
 
+  let chatBridgeStopping = false;
+  const finishClaimedInboxJob = (
+    job: ClaimedChatInboxJob,
+    result?: ChatInboxJobResult,
+  ) => {
+    if (
+      chatBridgeStopping &&
+      !isInboundMessageProcessed(job.envelope.chatKey, job.envelope.messageId)
+    ) {
+      restoreChatInboxFile(runtime.agentDir, job.claimedPath, job.envelope);
+      return;
+    }
+    finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
+  };
+
   const runClaimedInboxJob = async (
     job: ClaimedChatInboxJob,
     run: () => Promise<ChatInboxJobResult | undefined>,
@@ -865,8 +881,15 @@ export async function startChatBridge(
     }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
       const result = await waitForSteeredInboxCompletion(job, await run());
-      finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
+      finishClaimedInboxJob(job, result);
     } catch (error) {
+      if (
+        chatBridgeStopping &&
+        !isInboundMessageProcessed(job.envelope.chatKey, job.envelope.messageId)
+      ) {
+        restoreChatInboxFile(runtime.agentDir, job.claimedPath, job.envelope);
+        return;
+      }
       logger.warn(
         `chat inbox worker failed chatKey=${job.envelope.chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,
       );
@@ -1304,6 +1327,7 @@ export async function startChatBridge(
   const stop = async () => {
     if (stoppingPromise) return await stoppingPromise;
     stoppingPromise = (async () => {
+      chatBridgeStopping = true;
       clearInterval(typingPollTimer);
       if (inboxPollTimer) clearInterval(inboxPollTimer);
       if (outboxPollTimer) clearInterval(outboxPollTimer);

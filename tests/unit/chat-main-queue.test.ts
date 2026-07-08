@@ -2174,6 +2174,7 @@ test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controll
     await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
 
     const script = `
+      import fs from "node:fs";
       import path from "node:path";
       import { pathToFileURL } from "node:url";
 
@@ -2193,12 +2194,16 @@ test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controll
       let runTurnCalls = 0;
       let shutdownCalls = 0;
       let disposeCalls = 0;
+      let activeReject;
       controllerMod.ChatController.prototype.runTurn = async function () {
         runTurnCalls += 1;
-        await new Promise(() => {});
+        await new Promise((_resolve, reject) => {
+          activeReject = reject;
+        });
       };
       controllerMod.ChatController.prototype.shutdownSession = async function () {
         shutdownCalls += 1;
+        activeReject?.(new Error("Request was aborted"));
       };
       controllerMod.ChatController.prototype.dispose = function () {
         disposeCalls += 1;
@@ -2233,8 +2238,18 @@ test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controll
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       await bridge.stop();
-      if (runTurnCalls !== 1 || shutdownCalls !== 1 || disposeCalls !== 0) {
-        throw new Error(JSON.stringify({ runTurnCalls, shutdownCalls, disposeCalls }));
+      const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+      const failedDir = path.join(agentDir, "data", "chat", "inbox", "failed");
+      const waitDeadline = Date.now() + 2000;
+      while (Date.now() < waitDeadline) {
+        const pendingFiles = fs.existsSync(pendingDir) ? fs.readdirSync(pendingDir).filter((name) => name.endsWith(".json")) : [];
+        if (pendingFiles.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const pendingFiles = fs.existsSync(pendingDir) ? fs.readdirSync(pendingDir).filter((name) => name.endsWith(".json")) : [];
+      const failedFiles = fs.existsSync(failedDir) ? fs.readdirSync(failedDir).filter((name) => name.endsWith(".json")) : [];
+      if (runTurnCalls !== 1 || shutdownCalls !== 1 || disposeCalls !== 0 || pendingFiles.length !== 1 || failedFiles.length !== 0) {
+        throw new Error(JSON.stringify({ runTurnCalls, shutdownCalls, disposeCalls, pendingFiles, failedFiles }));
       }
       process.exit(0);
     `;
