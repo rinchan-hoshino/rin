@@ -2164,7 +2164,7 @@ test("chat main reports daemon startup failure without retrying", async () => {
   }
 });
 
-test("chat main treats frontend lifecycle cancellation as silent shutdown without retrying", async () => {
+test("chat main treats frontend lifecycle cancellation as retryable shutdown, not a delivered error", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2278,7 +2278,7 @@ test("chat main treats frontend lifecycle cancellation as silent shutdown withou
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
       const errorNotice = rows.find((item) => String(item.text || "").includes("frontend turn cancelled"));
       const succeeded = rows.some((item) => item.text === "retry after dispose");
-      if (succeeded || errorNotice || rows.length || runTurnCalls !== 1 || connectCalls !== 0) {
+      if (!succeeded || errorNotice || runTurnCalls !== 2 || connectCalls !== 1) {
         throw new Error(JSON.stringify({ runTurnCalls, connectCalls, errorNotice, rows }));
       }
       process.exit(0);

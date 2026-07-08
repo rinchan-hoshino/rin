@@ -754,7 +754,7 @@ export async function startChatBridge(
         );
         void controller.clearProcessingState().catch(() => {});
         return {
-          retry: false,
+          retry: true,
           errorMessage,
           suppressRetryNotice: true,
         };
