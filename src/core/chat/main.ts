@@ -101,6 +101,7 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "../rin-frontend-sdk/frontend-identity.js";
+import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
@@ -747,6 +748,17 @@ export async function startChatBridge(
     };
     const handleTurnFailure = async (error: any) => {
       const errorMessage = safeString((error as any)?.message || error);
+      if (isRinFrontendTurnCancelledError(error)) {
+        logger.info(
+          `chat turn cancelled chatKey=${decision.chatKey} err=${errorMessage}`,
+        );
+        void controller.clearProcessingState().catch(() => {});
+        return {
+          retry: false,
+          errorMessage,
+          suppressRetryNotice: true,
+        };
+      }
       logger.warn(
         `chat turn failed chatKey=${decision.chatKey} err=${errorMessage}`,
       );
