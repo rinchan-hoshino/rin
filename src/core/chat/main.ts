@@ -1318,9 +1318,11 @@ export async function startChatBridge(
       if (inboxPollTimer) clearInterval(inboxPollTimer);
       if (outboxPollTimer) clearInterval(outboxPollTimer);
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
-      for (const controller of controllers.values()) controller.dispose();
+      const disposeOptions = { cancelLiveTurn: options.hosted !== true };
+      for (const controller of controllers.values())
+        controller.dispose(disposeOptions);
       for (const controller of detachedControllers.values())
-        controller.dispose();
+        controller.dispose(disposeOptions);
       try {
         await app.stop();
       } catch {}

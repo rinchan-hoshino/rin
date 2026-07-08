@@ -199,8 +199,10 @@ export class RinFrontendTurnDriver {
     await this.refreshFrontendState().catch(() => {});
   }
 
-  dispose() {
-    this.failLiveTurn(createRinFrontendTurnCancelledError());
+  dispose(options: { cancelLiveTurn?: boolean } = {}) {
+    if (options.cancelLiveTurn !== false) {
+      this.failLiveTurn(createRinFrontendTurnCancelledError());
+    }
     this.resetAssistantSegmentTracking();
     this.frontendPhase = "idle";
     const client = this.client;

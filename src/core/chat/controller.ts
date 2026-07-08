@@ -442,7 +442,7 @@ export class ChatController {
     }
   }
 
-  dispose() {
+  dispose(options: { cancelLiveTurn?: boolean } = {}) {
     this.lastActivityAt = Date.now();
     void this.clearWorkingReaction().catch(() => {});
     void this.clearCompactionWorkingReaction().catch(() => {});
@@ -457,7 +457,7 @@ export class ChatController {
     this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration = 0;
-    this.driver.dispose();
+    this.driver.dispose(options);
   }
 
   private saveState() {
