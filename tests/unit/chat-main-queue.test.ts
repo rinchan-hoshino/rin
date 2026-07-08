@@ -2183,6 +2183,7 @@ test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controll
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -2248,8 +2249,11 @@ test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controll
       }
       const pendingFiles = fs.existsSync(pendingDir) ? fs.readdirSync(pendingDir).filter((name) => name.endsWith(".json")) : [];
       const failedFiles = fs.existsSync(failedDir) ? fs.readdirSync(failedDir).filter((name) => name.endsWith(".json")) : [];
-      if (runTurnCalls !== 1 || shutdownCalls !== 1 || disposeCalls !== 0 || pendingFiles.length !== 1 || failedFiles.length !== 0) {
-        throw new Error(JSON.stringify({ runTurnCalls, shutdownCalls, disposeCalls, pendingFiles, failedFiles }));
+      const assistantRows = storeMod
+        .listChatMessages(agentDir)
+        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+      if (runTurnCalls !== 1 || shutdownCalls !== 1 || disposeCalls !== 0 || pendingFiles.length !== 1 || failedFiles.length !== 0 || assistantRows.length !== 0) {
+        throw new Error(JSON.stringify({ runTurnCalls, shutdownCalls, disposeCalls, pendingFiles, failedFiles, assistantRows }));
       }
       process.exit(0);
     `;

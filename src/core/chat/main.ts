@@ -749,18 +749,26 @@ export async function startChatBridge(
     };
     const handleTurnFailure = async (error: any) => {
       const errorMessage = safeString((error as any)?.message || error);
+      const messageProcessed = messageId
+        ? isInboundChatMessageProcessed(
+            runtime.agentDir,
+            decision.chatKey,
+            messageId,
+          )
+        : false;
+      if (chatBridgeStopping && messageId && !messageProcessed) {
+        logger.info(
+          `chat turn interrupted by bridge shutdown chatKey=${decision.chatKey} err=${errorMessage}`,
+        );
+        return {
+          retry: true,
+          errorMessage,
+        };
+      }
       logger.warn(
         `chat turn failed chatKey=${decision.chatKey} err=${errorMessage}`,
       );
-      if (
-        errorMessage &&
-        messageId &&
-        !isInboundChatMessageProcessed(
-          runtime.agentDir,
-          decision.chatKey,
-          messageId,
-        )
-      ) {
+      if (errorMessage && messageId && !messageProcessed) {
         void enqueueAndDrainOutbox(
           {
             createdAt: nowIso(),
