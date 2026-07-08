@@ -155,6 +155,18 @@ async function main() {
             },
           };
         }
+        if (type === "daemon_prepare_restart") {
+          return {
+            success: true,
+            data: await (await getHostedChatBridge()).quiesce(),
+          };
+        }
+        if (type === "daemon_cancel_restart") {
+          return {
+            success: true,
+            data: await (await getHostedChatBridge()).unquiesce(),
+          };
+        }
         if (type === "chat_send") {
           return {
             success: true,

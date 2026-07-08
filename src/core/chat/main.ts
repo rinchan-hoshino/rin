@@ -341,6 +341,8 @@ export type ChatBridgeStatus = {
   botCount: number;
   controllerCount: number;
   detachedControllerCount: number;
+  quiescing?: boolean;
+  stopping?: boolean;
 };
 
 export type ChatBridgeHandle = {
@@ -352,6 +354,8 @@ export type ChatBridgeHandle = {
     chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
   };
   stop: () => Promise<void>;
+  quiesce: () => Promise<ChatBridgeStatus>;
+  unquiesce: () => Promise<ChatBridgeStatus>;
   getStatus: () => ChatBridgeStatus;
   send: (payload: ChatOutboxPayloadInput) => Promise<{ delivered: true }>;
   typing: (payload: { chatKey?: string }) => Promise<{ sent: boolean }>;
@@ -448,6 +452,7 @@ export async function startChatBridge(
   ];
   const controllers = new Map<string, ChatController>();
   const detachedControllers = new Map<string, ChatController>();
+  let chatBridgeQuiescing = false;
   let inboxPollTimer: NodeJS.Timeout | null = null;
   let outboxPollTimer: NodeJS.Timeout | null = null;
   let outboxHistoryCleanupTimer: NodeJS.Timeout | null = null;
@@ -1008,7 +1013,7 @@ export async function startChatBridge(
     logger,
   });
 
-  const { requestDrainChatInbox } = createChatInboxDrain({
+  const inboxDrain = createChatInboxDrain({
     agentDir: runtime.agentDir,
     getController,
     isInboundMessageProcessed,
@@ -1048,6 +1053,11 @@ export async function startChatBridge(
     logger,
   });
 
+  const requestDrainChatInbox = () => {
+    if (chatBridgeQuiescing || chatBridgeStopping) return;
+    inboxDrain.requestDrainChatInbox();
+  };
+
   app.on("message", (session: any) => {
     void (async () => {
       const identity = getIdentity();
@@ -1075,6 +1085,12 @@ export async function startChatBridge(
         );
       }
 
+      if (chatBridgeQuiescing || chatBridgeStopping) {
+        logger.info(
+          `chat inbound accepted while bridge ${chatBridgeStopping ? "stopping" : "quiescing"}; leaving pending until restart completes`,
+        );
+        return;
+      }
       requestDrainChatInbox();
     })().catch((error: any) => {
       logger.warn(
@@ -1332,6 +1348,24 @@ export async function startChatBridge(
   );
 
   let stoppingPromise: Promise<void> | null = null;
+  const quiesce = async () => {
+    chatBridgeQuiescing = true;
+    if (inboxPollTimer) clearInterval(inboxPollTimer);
+    inboxPollTimer = null;
+    return getStatus();
+  };
+  const unquiesce = async () => {
+    if (chatBridgeStopping) return getStatus();
+    chatBridgeQuiescing = false;
+    if (!inboxPollTimer) {
+      inboxPollTimer = setInterval(() => {
+        requestDrainChatInbox();
+      }, CHAT_INBOX_POLL_INTERVAL_MS);
+    }
+    requestDrainChatInbox();
+    return getStatus();
+  };
+
   const stop = async () => {
     if (stoppingPromise) return await stoppingPromise;
     stoppingPromise = (async () => {
@@ -1368,6 +1402,8 @@ export async function startChatBridge(
     botCount: Array.isArray(app.bots) ? app.bots.length : 0,
     controllerCount: controllers.size,
     detachedControllerCount: detachedControllers.size,
+    quiescing: chatBridgeQuiescing,
+    stopping: chatBridgeStopping,
   });
 
   if (!options.hosted) {
@@ -1384,6 +1420,8 @@ export async function startChatBridge(
     app,
     options,
     stop,
+    quiesce,
+    unquiesce,
     getStatus,
     send,
     typing,

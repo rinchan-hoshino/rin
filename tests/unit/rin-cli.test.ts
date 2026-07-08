@@ -313,25 +313,61 @@ test("rin-install update release comparison supports current-version fast path",
   );
 });
 
-test("rin lifecycle control uses the recorded managed service boundary", () => {
-  const source = fs.readFileSync(
+test("rin lifecycle control uses the shared recorded managed service boundary", () => {
+  const controlSource = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin", "control.ts"),
     "utf8",
   );
+  const managedServiceSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin", "managed-runtime-service.ts"),
+    "utf8",
+  );
+  const finalizeSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "finalize.ts"),
+    "utf8",
+  );
 
-  assert.match(source, /readManagedRuntimeService/);
+  assert.match(controlSource, /tryManagedServiceAction\(context, "restart"\)/);
+  assert.match(controlSource, /prepared && !restartActionStarted/);
+  assert.match(controlSource, /cancelDaemonRestart\(\)/);
   assert.match(
-    source,
+    controlSource,
+    /const daemonRunning = await context\.canConnectSocket\(\)/,
+  );
+  assert.match(controlSource, /if \(prepared\) \{/);
+  assert.match(finalizeSource, /tryManagedServiceAction\(/);
+  assert.match(
+    finalizeSource,
+    /if \(!\(await canConnectInstalledDaemon\(options\)\)\) return/,
+  );
+  assert.match(
+    finalizeSource,
+    /isLegacyPrepareUnsupportedError\(error\)\) return/,
+  );
+  assert.match(
+    finalizeSource,
+    /if \(prepared\) await cancelInstalledDaemonRestart/,
+  );
+  assert.doesNotMatch(
+    finalizeSource,
+    /reconcileSystemdUserService\([\s\S]*"restart"/,
+  );
+  assert.match(managedServiceSource, /readManagedRuntimeService/);
+  assert.match(
+    managedServiceSource,
     /installer\.json does not record a managed runtime service/,
   );
-  assert.match(source, /tryManagedSystemdAction\(\[service\.label\]/);
-  assert.match(source, /launchctl/);
-  assert.match(source, /windows-startup/);
-  assert.match(source, /startWindowsDaemonProcess/);
-  assert.doesNotMatch(source, /stopManagedBrowseSidecars/);
-  assert.match(source, /waitForDaemonUnavailable\(context\)/);
-  assert.match(source, /rin_stop_incomplete/);
-  assert.doesNotMatch(source, /pkill/);
+  assert.match(
+    managedServiceSource,
+    /tryManagedSystemdAction\(\[service\.label\]/,
+  );
+  assert.match(managedServiceSource, /launchctl/);
+  assert.match(managedServiceSource, /windows-startup/);
+  assert.match(managedServiceSource, /startWindowsDaemonProcess/);
+  assert.doesNotMatch(managedServiceSource, /stopManagedBrowseSidecars/);
+  assert.match(managedServiceSource, /waitForDaemonUnavailable\(context\)/);
+  assert.match(controlSource, /rin_stop_incomplete/);
+  assert.doesNotMatch(managedServiceSource, /pkill/);
 });
 
 for (const [kind, label, servicePath] of [

@@ -104,6 +104,62 @@ setTimeout(() => finish(false), timeoutMs);
   );
 }
 
+export function buildDaemonCommandScript(
+  command: Record<string, any>,
+  socketPath?: string,
+  timeoutMs = 1500,
+  requestId = "command_1",
+) {
+  const id = resolveDaemonRequestId(requestId, "command");
+  const commandType = safeString(command?.type).trim();
+  const requestPayload = JSON.stringify({ ...command, id });
+  return buildDaemonSocketScript(
+    String.raw`
+const requestJson = ${JSON.stringify(requestPayload)};
+const socket = net.createConnection({ path: socketPath });
+let buffer = "";
+let settled = false;
+const finish = (value) => {
+  if (settled) return;
+  settled = true;
+  clearTimeout(timer);
+  try { socket.destroy(); } catch {}
+  process.stdout.write(JSON.stringify(value === undefined ? null : value));
+};
+const timer = setTimeout(() => finish(undefined), timeoutMs);
+socket.once("error", () => finish(undefined));
+socket.on("data", (chunk) => {
+  buffer += String(chunk);
+  while (true) {
+    const idx = buffer.indexOf("\n");
+    if (idx < 0) break;
+    let line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (line.endsWith("\r")) line = line.slice(0, -1);
+    if (!line.trim()) continue;
+    try {
+      const payload = JSON.parse(line);
+      if (
+        payload?.type === "response" &&
+        payload?.command === ${JSON.stringify(commandType)} &&
+        payload?.id === ${JSON.stringify(id)}
+      ) {
+        finish(payload.success === true ? payload.data : undefined);
+        return;
+      }
+    } catch {
+      finish(undefined);
+      return;
+    }
+  }
+});
+socket.once("connect", () => socket.write(requestJson + "\n"));
+`.trim(),
+    socketPath,
+    timeoutMs,
+  );
+}
+
 export function buildDaemonStatusScript(
   socketPath?: string,
   timeoutMs = 1500,

@@ -32,13 +32,30 @@ import {
   daemonSocketPathForUser,
   buildSystemdUserService,
   installDaemonService,
-  reconcileSystemdUserService,
   refreshManagedServiceFiles,
   waitForSocket,
 } from "./service.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { preparePiManagedToolsForInstall } from "./pi-tools.js";
+import {
+  buildDaemonCommandScript,
+  buildDaemonSocketProbeScript,
+  buildDaemonStatusScript,
+  canConnectDaemonSocket,
+  requestDaemonCommand,
+} from "../rin-daemon/client.js";
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
+import {
+  DEFAULT_DAEMON_DRAIN_TIMEOUT_MS,
+  formatActiveDaemonWorkers,
+  isDaemonChatQuiescing,
+  waitForDaemonDrain,
+} from "../rin/daemon-drain.js";
+import {
+  createManagedRuntimeServiceActionContext,
+  tryManagedServiceAction,
+  type ManagedRuntimeService,
+} from "../rin/managed-runtime-service.js";
 import {
   describeOwnership,
   findSystemUser,
@@ -50,6 +67,168 @@ import {
 
 export function defaultDaemonReadyTimeoutMs() {
   return 30_000;
+}
+
+async function sendInstalledDaemonCommand(options: {
+  currentUser: string;
+  targetUser: string;
+  socketPath: string;
+  type: string;
+  requestId: string;
+}) {
+  const command = { id: options.requestId, type: options.type };
+  if (isSameSystemUser(options.currentUser, options.targetUser)) {
+    return await requestDaemonCommand(command, {
+      socketPath: options.socketPath,
+      timeoutMs: 5000,
+    });
+  }
+  const raw = captureCommandAsUser(options.targetUser, process.execPath, [
+    "-e",
+    buildDaemonCommandScript(
+      command,
+      options.socketPath,
+      5000,
+      options.requestId,
+    ),
+  ]);
+  return JSON.parse(String(raw || "null"));
+}
+
+function isLegacyPrepareUnsupportedError(error: unknown) {
+  return String((error as any)?.message || error || "").includes(
+    "rin_no_attached_session",
+  );
+}
+
+async function canConnectInstalledDaemon(options: {
+  currentUser: string;
+  targetUser: string;
+  socketPath: string;
+}) {
+  if (isSameSystemUser(options.currentUser, options.targetUser)) {
+    return await canConnectDaemonSocket(options.socketPath, 500);
+  }
+  try {
+    captureCommandAsUser(options.targetUser, process.execPath, [
+      "-e",
+      buildDaemonSocketProbeScript(options.socketPath, 500),
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function prepareInstalledDaemonRestart(options: {
+  currentUser: string;
+  targetUser: string;
+  socketPath: string;
+}) {
+  return await sendInstalledDaemonCommand({
+    ...options,
+    type: "daemon_prepare_restart",
+    requestId: "install_prepare_restart_1",
+  });
+}
+
+async function cancelInstalledDaemonRestart(options: {
+  currentUser: string;
+  targetUser: string;
+  socketPath: string;
+}) {
+  return await sendInstalledDaemonCommand({
+    ...options,
+    type: "daemon_cancel_restart",
+    requestId: "install_cancel_restart_1",
+  });
+}
+
+function managedRuntimeServiceFromInstallSpec(
+  service: null | {
+    kind: "launchd" | "systemd" | "windows-startup";
+    label: string;
+    servicePath: string;
+  },
+): ManagedRuntimeService | undefined {
+  if (!service?.kind || !service.label) return undefined;
+  return {
+    kind: service.kind,
+    label: service.label,
+    path: service.servicePath || undefined,
+  };
+}
+
+function buildInstallStageManagedRuntimeService(
+  targetUser: string,
+  installDir: string,
+): ManagedRuntimeService | undefined {
+  if (process.platform !== "linux") return undefined;
+  const service = buildSystemdUserService(
+    targetUser,
+    installDir,
+    targetHomeForUser,
+  );
+  return managedRuntimeServiceFromInstallSpec(service);
+}
+
+async function waitForInstalledDaemonDrain(options: {
+  currentUser: string;
+  targetUser: string;
+  socketPath: string;
+  timeoutMs?: number;
+}) {
+  let prepared = false;
+  try {
+    if (!(await canConnectInstalledDaemon(options))) return;
+    try {
+      const preparedStatus = await prepareInstalledDaemonRestart(options);
+      if (!isDaemonChatQuiescing(preparedStatus)) return;
+      prepared = true;
+    } catch (error: any) {
+      const message = String(
+        error?.message || error || "prepare did not complete",
+      );
+      if (isLegacyPrepareUnsupportedError(error)) return;
+      throw new Error(`Update restart prepare failed: ${message}`);
+    }
+    const queryStatus = async () => {
+      if (isSameSystemUser(options.currentUser, options.targetUser)) {
+        try {
+          return await requestDaemonCommand(
+            { id: "install_drain_1", type: "daemon_status" },
+            { socketPath: options.socketPath, timeoutMs: 1500 },
+          );
+        } catch {
+          return undefined;
+        }
+      }
+      try {
+        const raw = captureCommandAsUser(options.targetUser, process.execPath, [
+          "-e",
+          buildDaemonStatusScript(options.socketPath, 1500, "install_drain_1"),
+        ]);
+        return JSON.parse(String(raw || "null")) || undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const drain = await waitForDaemonDrain({
+      queryStatus,
+      timeoutMs: options.timeoutMs ?? DEFAULT_DAEMON_DRAIN_TIMEOUT_MS,
+      requireQuiescing: true,
+    });
+    if (!drain.drained) {
+      throw new Error(
+        drain.statusUnavailable || drain.quiesceUnavailable
+          ? "Cannot restart after update yet: daemon status did not prove the daemon is quiesced and idle"
+          : `Cannot restart after update yet: daemon still has active turns after ${options.timeoutMs ?? DEFAULT_DAEMON_DRAIN_TIMEOUT_MS}ms: ${formatActiveDaemonWorkers(drain.activeWorkers)}`,
+      );
+    }
+  } catch (error) {
+    if (prepared) await cancelInstalledDaemonRestart(options).catch(() => {});
+    throw error;
+  }
 }
 
 export function readExistingInitializationComplete(installDir: string) {
@@ -295,13 +474,30 @@ async function applyInstalledRuntime(
   const shouldRestartBeforePersist =
     manageDaemon && !options.stopRuntimeBeforePublish;
   if (shouldRestartBeforePersist) {
-    reconcileSystemdUserService(
+    const socketPath = daemonSocketPathForUser(targetUser, serviceDeps);
+    await waitForInstalledDaemonDrain({
+      currentUser,
       targetUser,
-      installDir,
-      "restart",
-      useElevatedWrite,
-      { findSystemUser },
-    );
+      socketPath,
+    });
+    try {
+      await tryManagedServiceAction(
+        createManagedRuntimeServiceActionContext({
+          currentUser,
+          targetUser,
+          installDir,
+        }),
+        "restart",
+        buildInstallStageManagedRuntimeService(targetUser, installDir),
+      );
+    } catch (error) {
+      await cancelInstalledDaemonRestart({
+        currentUser,
+        targetUser,
+        socketPath,
+      }).catch(() => {});
+      throw error;
+    }
   }
 
   const written = persistInstallerState
@@ -440,13 +636,31 @@ async function applyInstalledRuntime(
         installedService = null;
       }
     }
-    reconcileSystemdUserService(
+    const socketPath = daemonSocketPathForUser(targetUser, serviceDeps);
+    await waitForInstalledDaemonDrain({
+      currentUser,
       targetUser,
-      installDir,
-      "restart",
-      useElevatedWrite,
-      { findSystemUser },
-    );
+      socketPath,
+    });
+    try {
+      await tryManagedServiceAction(
+        createManagedRuntimeServiceActionContext({
+          currentUser,
+          targetUser,
+          installDir,
+        }),
+        "restart",
+        managedRuntimeServiceFromInstallSpec(installedService) ||
+          buildInstallStageManagedRuntimeService(targetUser, installDir),
+      );
+    } catch (error) {
+      await cancelInstalledDaemonRestart({
+        currentUser,
+        targetUser,
+        socketPath,
+      }).catch(() => {});
+      throw error;
+    }
   }
 
   const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
