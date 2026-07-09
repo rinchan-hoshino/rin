@@ -1485,17 +1485,22 @@ export class ChatController {
       waitUntilDeliverySettled?: boolean;
       requireDelivery?: boolean;
       coalesceWithWorkingMessage?: boolean;
+      replyToMessageId?: string;
     } = {},
   ) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
     if (!this.canDeliverReplies()) return true;
+    const replyToMessageId =
+      safeString(options.replyToMessageId).trim() ||
+      this.currentReplyToMessageId() ||
+      undefined;
     try {
       await this.enqueueAndDrainDelivery(
         {
           createdAt: nowIso(),
           chatKey: this.chatKey,
-          replyToMessageId: this.currentReplyToMessageId() || undefined,
+          replyToMessageId,
           parts: [{ type: "text", text: trimmed }],
           ...(options.coalesceWithWorkingMessage
             ? { coalesceWithWorkingMessage: true }
@@ -1577,17 +1582,12 @@ export class ChatController {
     return await this.sendPassiveNoticeNow(trimmed);
   }
 
-  private async flushPendingPassiveNotices(quietMode?: unknown) {
-    const previousQuietModeOverride = this.quietModeOverride;
-    if (quietMode !== undefined) this.quietModeOverride = Boolean(quietMode);
-    try {
-      const notices = this.pendingPassiveNotices.splice(0);
-      for (const notice of notices) {
-        await this.sendPassiveNoticeNow(notice);
-      }
-    } finally {
-      this.quietModeOverride = previousQuietModeOverride;
-    }
+  private flushPendingPassiveNotices(_quietMode?: unknown) {
+    // Passive notices are progress/status artifacts for the active turn. Once the
+    // canonical final is ready, they must not appear as fresh chat messages after
+    // the final; any visible progress has already been coalesced into the
+    // editable working message and will be cleared by final delivery.
+    this.pendingPassiveNotices = [];
   }
 
   private async finishCompactionNotice() {
@@ -1608,7 +1608,10 @@ export class ChatController {
 
   private async deliverCompactionEndNotice(text: string) {
     const ackTarget = this.compactionAckTarget();
-    const coalesceWithActiveTurn = !ackTarget && Boolean(this.currentTurn);
+    const coalesceReplyToMessageId = safeString(
+      this.compactionTurn?.replyToMessageId || "",
+    ).trim();
+    const shouldCoalesce = Boolean(this.compactionTurn || this.currentTurn);
     const idempotencyKey = ackTarget
       ? JSON.stringify([
           "compaction_end_ack",
@@ -1619,7 +1622,14 @@ export class ChatController {
         ])
       : "";
     const delivered = await this.sendPassiveNoticeNow(text, {
-      ...(coalesceWithActiveTurn ? { coalesceWithWorkingMessage: true } : {}),
+      ...(shouldCoalesce
+        ? {
+            coalesceWithWorkingMessage: true,
+            ...(coalesceReplyToMessageId
+              ? { replyToMessageId: coalesceReplyToMessageId }
+              : {}),
+          }
+        : {}),
       ...(ackTarget
         ? {
             postDelivery: {
@@ -1643,6 +1653,14 @@ export class ChatController {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
     if (!this.canDeliverReplies()) return true;
+    const ackIncomingMessageId = safeString(
+      this.activeCommandTurnInput?.incomingMessageId || "",
+    ).trim();
+    const ackReplyToMessageId =
+      safeString(this.activeCommandTurnInput?.replyToMessageId || "").trim() ||
+      ackIncomingMessageId;
+    const coalesceReplyToMessageId =
+      this.currentReplyToMessageId() || ackReplyToMessageId || undefined;
     try {
       const delivery = await this.enqueueAndDrainDelivery(
         {
@@ -1650,6 +1668,7 @@ export class ChatController {
           chatKey: this.chatKey,
           deliveryKind: "passive_notice",
           coalesceWithWorkingMessage: true,
+          replyToMessageId: coalesceReplyToMessageId,
           parts: [{ type: "text", text: trimmed }],
           ...this.currentConversationSessionPayload(),
         },
@@ -1661,17 +1680,10 @@ export class ChatController {
       );
       const messageId = safeString(delivery.messageIds[0]).trim();
       if (messageId) {
-        const ackIncomingMessageId = safeString(
-          this.activeCommandTurnInput?.incomingMessageId || "",
-        ).trim();
-        const ackReplyToMessageId =
-          safeString(
-            this.activeCommandTurnInput?.replyToMessageId || "",
-          ).trim() || ackIncomingMessageId;
         this.compactionTurn = {
           startedAt: Date.now(),
           incomingMessageId: messageId,
-          replyToMessageId: messageId,
+          replyToMessageId: coalesceReplyToMessageId || messageId,
           workingNoticeSent: false,
           ackIncomingMessageId: ackIncomingMessageId || undefined,
           ackReplyToMessageId: ackReplyToMessageId || undefined,

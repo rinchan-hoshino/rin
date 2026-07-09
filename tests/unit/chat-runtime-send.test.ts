@@ -172,6 +172,80 @@ test("discord adapter deletes visible progress before final text", async () => {
   });
 });
 
+test("discord adapter waits for in-flight editable progress before final cleanup", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    let nextId = 1;
+    let releaseWorking!: () => void;
+    const workingBlocked = new Promise<void>((resolve) => {
+      releaseWorking = resolve;
+    });
+    let workingSendStarted!: () => void;
+    const workingSendStartedPromise = new Promise<void>((resolve) => {
+      workingSendStarted = resolve;
+    });
+    const channel = {
+      send: async (payload: any) => {
+        const id = String(nextId++);
+        const message = {
+          id,
+          payload,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            message.payload = nextPayload;
+            return message;
+          },
+        };
+        calls.push({ method: "send", id, payload });
+        if (payload?.content === "Working...") {
+          workingSendStarted();
+          await workingBlocked;
+        }
+        messages.set(id, message);
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => calls.push({ method: "delete", id }),
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    const working = editable.tick({
+      chatId: "C1",
+      tick: 0,
+      replyToMessageId: "m-owner",
+    });
+    await workingSendStartedPromise;
+    const final = app.bots[0].sendMessage("C1", [
+      h.quote("m-owner"),
+      h.text("done"),
+    ]);
+    await new Promise((resolve) => setImmediate(resolve));
+    releaseWorking();
+
+    assert.deepEqual(await final, ["2"]);
+    await working;
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "delete", "send"],
+    );
+    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[1].id, "1");
+    assert.equal(calls[2].payload.content, "done");
+    assert.equal(calls[2].payload.reply?.messageReference, "m-owner");
+  });
+});
+
 test("discord adapter edits one progress message from Working through interim then deletes it for final", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {

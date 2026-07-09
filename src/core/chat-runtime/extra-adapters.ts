@@ -495,29 +495,32 @@ class EditableTextMessageGroup {
 
   async deleteProgress(chatId: string, replyToMessageId?: string) {
     const key = this.key(chatId, replyToMessageId);
-    const persisted = this.read(key);
-    const messageIds = persisted?.messageIds?.length
-      ? persisted.messageIds
-      : normalizeDeliveredIds(this.messages.get(key));
-    const kind = safeString(
-      this.kinds.get(key) || persisted?.kind || "",
-    ).trim();
-    const text = safeString(this.texts.get(key) || persisted?.text || "");
-    const isProgressArtifact =
-      kind === "todo" ||
-      kind === "working" ||
-      kind === "interim" ||
-      (!kind &&
-        (text === this.workingText ||
-          isEditableWorkingText(text, this.progressTexts)));
-    if (!messageIds.length || !isProgressArtifact) return false;
-    for (const messageId of messageIds) {
-      try {
-        await this.options.deleteMessage({ chatId, messageId });
-      } catch {}
-    }
-    this.clear(key);
-    return true;
+    return await this.withOperation(key, async () => {
+      const persisted = this.read(key);
+      const messageIds = persisted?.messageIds?.length
+        ? persisted.messageIds
+        : normalizeDeliveredIds(this.messages.get(key));
+      const kind = safeString(
+        this.kinds.get(key) || persisted?.kind || "",
+      ).trim();
+      const text = safeString(this.texts.get(key) || persisted?.text || "");
+      const isProgressArtifact =
+        kind === "todo" ||
+        kind === "working" ||
+        kind === "interim" ||
+        (!kind &&
+          (text === this.workingText ||
+            isEditableWorkingText(text, this.progressTexts)));
+      if (!messageIds.length || !isProgressArtifact) return false;
+      this.markFinalizing(key);
+      for (const messageId of messageIds) {
+        try {
+          await this.options.deleteMessage({ chatId, messageId });
+        } catch {}
+      }
+      this.clear(key);
+      return true;
+    });
   }
 }
 

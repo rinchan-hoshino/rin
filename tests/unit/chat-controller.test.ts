@@ -1006,7 +1006,7 @@ test("chat controller sends compaction start notice and reacts on that notice", 
     {
       text: "Compacted from 108,642 tokens",
       kind: "passive_notice",
-      coalesce: false,
+      coalesce: true,
     },
   ]);
   assert.equal(
@@ -1041,6 +1041,7 @@ test("chat controller coalesces automatic compaction completion into the active 
       .join(" ");
     deliveries.push({
       text,
+      quote: nodes.find((node) => node?.type === "quote")?.attrs?.id,
       kind: options?.deliveryKind,
       coalesce: Boolean(options?.coalesceWithWorkingMessage),
     });
@@ -1083,9 +1084,15 @@ test("chat controller coalesces automatic compaction completion into the active 
     ["delete", "2", "m-out-1", "🤔", "1"],
   ]);
   assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "passive_notice", coalesce: true },
+    {
+      text: "Compacting...",
+      quote: "m-owner",
+      kind: "passive_notice",
+      coalesce: true,
+    },
     {
       text: "Compacted from 108,642 tokens",
+      quote: "m-owner",
       kind: "passive_notice",
       coalesce: true,
     },
@@ -1475,7 +1482,7 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
   ]);
 });
 
-test("chat controller runTurn quiet false allows deferred todo notices", async () => {
+test("chat controller drops deferred passive notices at the final boundary", async () => {
   const controller = await createController("telegram/1:2");
   await fs.writeFile(
     path.join(controller.agentDir, "settings.json"),
@@ -1508,10 +1515,8 @@ test("chat controller runTurn quiet false allows deferred todo notices", async (
     quietMode: false,
   });
 
-  assert.deepEqual(deliveries, [
-    { text: "final", kind: "final" },
-    { text: "- [ ] visible deferred todo", kind: "passive_notice" },
-  ]);
+  assert.deepEqual(deliveries, [{ text: "final", kind: "final" }]);
+  assert.deepEqual(controller.pendingPassiveNotices, []);
 });
 
 test("chat controller does not create processing turns for slash commands", async () => {
@@ -2042,6 +2047,12 @@ test("chat controller marks /compact processed from compaction completion notice
       chatId: "2",
       content: [
         {
+          type: "quote",
+          attrs: {
+            id: "m-compact",
+          },
+        },
+        {
           type: "markdown",
           attrs: {
             content: "Compacting...",
@@ -2052,6 +2063,12 @@ test("chat controller marks /compact processed from compaction completion notice
     {
       chatId: "2",
       content: [
+        {
+          type: "quote",
+          attrs: {
+            id: "m-compact",
+          },
+        },
         {
           type: "markdown",
           attrs: {
