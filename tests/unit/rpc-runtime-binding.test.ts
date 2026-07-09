@@ -979,7 +979,7 @@ test("rpc runtime routes run-command builtin slash commands from prompt to daemo
   assert.equal(session.pendingMessageCount, 0);
 });
 
-test("rpc runtime forwards prompt streamingBehavior through prompt mode", async () => {
+test("rpc runtime lets daemon admission decide ordinary steer prompt mode", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -1022,7 +1022,7 @@ test("rpc runtime forwards prompt streamingBehavior through prompt mode", async 
       type: "prompt",
       message: "hello",
       images: undefined,
-      streamingBehavior: "steer",
+      streamingBehavior: undefined,
       source: undefined,
       requestTag: "<auto>",
       sessionFile: "/tmp/rpc-session.jsonl",
@@ -1561,7 +1561,7 @@ test("rpc runtime promotes a temporary worker session before the first prompt", 
   );
 });
 
-test("rpc runtime lets native queue updates own steer prompt state", async () => {
+test("rpc runtime keeps local steer prompt state while daemon admits the message", async () => {
   const sent = [];
   let releaseEnsureRemoteSession;
   const session = new RpcInteractiveSession({
@@ -1613,7 +1613,7 @@ test("rpc runtime lets native queue updates own steer prompt state", async () =>
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0]?.type, "prompt");
-  assert.equal(sent[0]?.streamingBehavior, "steer");
+  assert.equal(sent[0]?.streamingBehavior, undefined);
 });
 
 test("rpc runtime defers prompt submission until compaction ends", async () => {

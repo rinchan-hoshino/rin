@@ -24,7 +24,7 @@ function createSessionFrontendClient(controller) {
       return () => {};
     },
     async prompt(text, options = {}) {
-      await controller.session?.prompt?.(text, options);
+      return await controller.session?.prompt?.(text, options);
     },
     async getState() {
       return state();
@@ -79,7 +79,7 @@ function createSessionFrontendClient(controller) {
       return { type: "response", command: command?.type, success: true };
     },
     async submit(text) {
-      await this.prompt(text);
+      return await this.prompt(text);
     },
     async getMessages() {
       return Array.isArray(controller.session?.messages)

@@ -2128,7 +2128,7 @@ test("chat controller keeps working reaction on current message while steer is q
       sessionId: "session-live",
     }),
     prompt: async (_text, options = {}) => {
-      if (controller.session.isStreaming) return;
+      if (controller.session.isStreaming) return { acceptedAs: "steer" };
       controller.session.isStreaming = true;
       await controller.handleClientEvent({
         type: "ui",
@@ -2278,7 +2278,7 @@ test("chat controller keeps steering open after assistant tool-call interim", as
     }),
     prompt: async (text, options = {}) => {
       promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
-      if (controller.session.isStreaming) return;
+      if (controller.session.isStreaming) return { acceptedAs: "steer" };
       firstRequestTag = String(options.requestTag || "");
       controller.session.isStreaming = true;
       resolveFirstPromptStarted();
@@ -2321,7 +2321,7 @@ test("chat controller keeps steering open after assistant tool-call interim", as
   assert.equal(steerResult.steered, true);
   assert.deepEqual(promptCalls, [
     { text: "first", streamingBehavior: undefined },
-    { text: "steer now", streamingBehavior: "steer" },
+    { text: "steer now", streamingBehavior: undefined },
   ]);
 
   releaseFirstPrompt();
@@ -4187,6 +4187,7 @@ test("chat controller steers an already streaming session instead of waiting for
     }),
     prompt: async (text, options = {}) => {
       promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
+      return { acceptedAs: "steer" };
     },
     switchSession: async () => {},
   };
@@ -4201,7 +4202,7 @@ test("chat controller steers an already streaming session instead of waiting for
   );
 
   assert.deepEqual(promptCalls, [
-    { text: "follow up", streamingBehavior: "steer" },
+    { text: "follow up", streamingBehavior: undefined },
   ]);
   assert.equal(result.steered, true);
 });
@@ -4244,7 +4245,7 @@ test("chat controller lets steer bypass the owned turn queue while the current t
     }),
     prompt: async (text, options = {}) => {
       promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
-      if (controller.session.isStreaming) return;
+      if (controller.session.isStreaming) return { acceptedAs: "steer" };
       firstRequestTag = String(options.requestTag || "");
       controller.session.isStreaming = true;
       resolveFirstPromptStarted();
@@ -4279,7 +4280,7 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
   assert.deepEqual(promptCalls, [
     { text: "first", streamingBehavior: undefined },
-    { text: "steer now", streamingBehavior: "steer" },
+    { text: "steer now", streamingBehavior: undefined },
   ]);
 
   await controller.handleClientEvent({

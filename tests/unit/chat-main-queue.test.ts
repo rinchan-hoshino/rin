@@ -1797,7 +1797,7 @@ test("chat main submits /abort without waiting for a same-chat prompt to finish"
   }
 });
 
-test("chat main submits same-chat follow-up as steer before the current turn is accepted", async () => {
+test("chat main submits same-chat follow-up plainly before backend steer admission", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1845,7 +1845,7 @@ test("chat main submits same-chat follow-up as steer before the current turn is 
           }),
           prompt: async (_message, options = {}) => {
             promptModes.push(options.streamingBehavior || "prompt");
-            if (controller.session.isStreaming) return;
+            if (controller.session.isStreaming) return { acceptedAs: "steer" };
             controller.session.isStreaming = true;
             await new Promise(() => {});
           },
@@ -1900,7 +1900,7 @@ test("chat main submits same-chat follow-up as steer before the current turn is 
       const pendingItems = listInbox("pending");
       const processingItems = listInbox("processing");
       const failedItems = listInbox("failed");
-      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "steer" || pendingItems.length || failedItems.length || processingItems.length < 1) {
+      if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "prompt" || pendingItems.length || failedItems.length || processingItems.length < 1) {
         throw new Error(JSON.stringify({ promptModes, pendingItems, processingItems, failedItems }));
       }
       process.exit(0);

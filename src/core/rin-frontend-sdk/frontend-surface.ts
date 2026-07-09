@@ -11,6 +11,7 @@ import type {
   RinFrontendSessionItem,
   RinNewSessionOptions,
   RinNewSessionResult,
+  RinPromptAdmission,
   RinRpcCommand,
   RinRpcResponse,
 } from "./types.js";
@@ -89,7 +90,7 @@ export interface FrontendDialogSpec {
 }
 
 export interface InteractiveFrontendSurface {
-  submit(text: string): Promise<void>;
+  submit(text: string): Promise<RinPromptAdmission | void>;
   abort(): Promise<void>;
   subscribe(listener: (event: InteractiveFrontendEvent) => void): () => void;
   getAutocompleteItems(input: string): Promise<FrontendAutocompleteItem[]>;
@@ -110,7 +111,10 @@ export interface RpcFrontendClient extends InteractiveFrontendSurface {
   isConnected(): boolean;
   request<T = unknown>(command: RinRpcCommand): Promise<T>;
   send(command: RinRpcCommand): Promise<RinRpcResponse>;
-  prompt(text: string, options?: Record<string, unknown>): Promise<void>;
+  prompt(
+    text: string,
+    options?: Record<string, unknown>,
+  ): Promise<RinPromptAdmission | void>;
   getState(): Promise<Record<string, unknown>>;
   runCommand(commandLine: string): Promise<unknown>;
   compact(

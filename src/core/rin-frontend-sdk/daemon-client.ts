@@ -224,11 +224,11 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   }
 
   async submit(text: string) {
-    await this.prompt(text);
+    return await this.prompt(text);
   }
 
   async prompt(text: string, options: Record<string, unknown> = {}) {
-    await this.request({
+    return await this.request({
       type: "prompt",
       message: text,
       ...(this.frontendIdentity

@@ -1466,7 +1466,10 @@ export class RpcInteractiveSession {
           {
             text: operation.message,
             images: operation.images,
-            streamingBehavior: operation.streamingBehavior,
+            streamingBehavior:
+              operation.streamingBehavior === "followUp"
+                ? "followUp"
+                : undefined,
             source: operation.source,
             requestTag: operation.requestTag,
             sessionFile: this.sessionFile,

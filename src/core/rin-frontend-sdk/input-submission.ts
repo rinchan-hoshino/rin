@@ -7,6 +7,7 @@ import {
 import { injectPromptContextHeader } from "./prompt-context.js";
 import type {
   RinFrontendClient,
+  RinPromptAdmission,
   RinPromptContext,
   RinPromptOptions,
 } from "./types.js";
@@ -61,7 +62,7 @@ export async function waitForFrontendInputSubmissionReady(
 export async function submitNativeFrontendPromptTurn(
   client: Pick<RinFrontendClient, "prompt">,
   input: RinFrontendPromptTurnInput,
-): Promise<void> {
+): Promise<RinPromptAdmission | void> {
   await waitForFrontendInputSubmissionReady(input.gate);
   throwIfInputSubmissionAborted(input.gate);
   const promptOptions: RinPromptOptions = {
@@ -77,7 +78,7 @@ export async function submitNativeFrontendPromptTurn(
   if (sessionFile) promptOptions.sessionFile = sessionFile;
   const sessionId = safeString(input.sessionId || "").trim();
   if (sessionId) promptOptions.sessionId = sessionId;
-  await client.prompt(
+  return await client.prompt(
     injectPromptContextHeader(input.promptContext, input.text),
     promptOptions,
   );

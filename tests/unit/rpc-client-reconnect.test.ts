@@ -842,7 +842,7 @@ test("rpc interactive session recovers steer prompt timeout without surfacing an
         type: "prompt",
         message: "steer",
         images: undefined,
-        streamingBehavior: "steer",
+        streamingBehavior: undefined,
         source: undefined,
         requestTag: calls[0]?.requestTag,
       },

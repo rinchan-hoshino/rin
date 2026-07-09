@@ -3739,6 +3739,144 @@ test(
 );
 
 test(
+  "rpc mode prompt admission steers plain messages during tracked non-streaming gaps",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const calls = [];
+    const agentState = { isStreaming: false };
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        get isStreaming() {
+          return this.agent.state.isStreaming;
+        },
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { state: agentState, waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        async prompt(message, options) {
+          calls.push(["prompt", message, options, this.isStreaming]);
+          if (!options?.streamingBehavior) {
+            await new Promise(() => {});
+          }
+        },
+        steer: async (message, images) => {
+          calls.push(["steer", message, images]);
+        },
+        followUp: async (message, images) => {
+          calls.push(["followUp", message, images]);
+        },
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => session.messages || []),
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-1", type: "prompt", message: "first" })}\n`,
+        ),
+      );
+      await wait(10);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "queue-1", type: "prompt", message: "plain follow-in", requestTag: "tag-2" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      assert.deepEqual(calls, [
+        [
+          "prompt",
+          "first",
+          {
+            images: undefined,
+            streamingBehavior: undefined,
+            source: "rpc",
+          },
+          false,
+        ],
+        [
+          "prompt",
+          "plain follow-in",
+          {
+            images: undefined,
+            streamingBehavior: "steer",
+            source: "rpc",
+            requestTag: "tag-2",
+          },
+          true,
+        ],
+      ]);
+      assert.equal(agentState.isStreaming, false);
+      const response = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .find((line) => line?.id === "queue-1");
+      assert.equal(response?.data?.acceptedAs, "steer");
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode prompt streamingBehavior uses native queue without starting a second tracked turn",
   { concurrency: false },
   async () => {

@@ -45,6 +45,7 @@ import type {
   RinFrontendClient,
   RinFrontendEvent,
   RinNewSessionResult,
+  RinPromptAdmission,
   RinPromptContext,
   RinSessionState,
 } from "./types.js";
@@ -121,6 +122,15 @@ function parseResumeCommandTarget(commandLine: string) {
   const trimmed = safeString(commandLine).trim();
   if (!trimmed.startsWith("/resume ")) return "";
   return trimmed.slice("/resume ".length).trim();
+}
+
+function promptAdmissionAcceptedAs(admission: unknown) {
+  const acceptedAs = safeString((admission as RinPromptAdmission)?.acceptedAs);
+  return acceptedAs === "steer" || acceptedAs === "followUp"
+    ? acceptedAs
+    : acceptedAs === "prompt"
+      ? "prompt"
+      : "";
 }
 
 export class RinFrontendTurnDriver {
@@ -1213,33 +1223,33 @@ export class RinFrontendTurnDriver {
       this.throwIfTurnInterrupted(turnInterruptionSeq);
 
       if (this.hasRemoteOrLiveTurnActive()) {
-        if (input.streamingBehavior !== "steer") {
-          return await this.followActiveTurn(ready);
-        }
         this.clearAssistantInterimState();
         const requestTag = this.createTurnRequestTag();
-        await submitNativeFrontendPromptTurn(this.client, {
+        const admission = await submitNativeFrontendPromptTurn(this.client, {
           text,
           images,
           source: promptSource,
           frontendIdentity: this.frontendIdentity,
-          streamingBehavior: "steer",
           requestTag,
           promptContext: input.promptContext,
           sessionFile: targetSessionFile,
           gate: inputGate,
         });
         this.throwIfQueuedOffline(requestTag);
-        return {
-          steered: true,
-          sessionId:
-            safeString(ready?.sessionId || this.currentSessionId()).trim() ||
-            undefined,
-          sessionFile:
-            safeString(
-              ready?.sessionFile || this.currentSessionFile(),
-            ).trim() || undefined,
-        };
+        const acceptedAs = promptAdmissionAcceptedAs(admission);
+        if (acceptedAs === "steer" || acceptedAs === "followUp") {
+          return {
+            steered: true,
+            sessionId:
+              safeString(ready?.sessionId || this.currentSessionId()).trim() ||
+              undefined,
+            sessionFile:
+              safeString(
+                ready?.sessionFile || this.currentSessionFile(),
+              ).trim() || undefined,
+          };
+        }
+        return await this.followActiveTurn(ready);
       }
 
       if (input.streamingBehavior !== "steer") {
@@ -1272,7 +1282,7 @@ export class RinFrontendTurnDriver {
       };
       const promptSubmission = (async () => {
         this.throwIfTurnInterrupted(turnInterruptionSeq);
-        await submitNativeFrontendPromptTurn(this.client!, {
+        const admission = await submitNativeFrontendPromptTurn(this.client!, {
           text,
           images,
           source: promptSource,
@@ -1282,12 +1292,13 @@ export class RinFrontendTurnDriver {
           gate: inputGate,
         });
         this.throwIfQueuedOffline(requestTag);
+        return admission;
       })();
       promptSubmission.catch(() => {});
 
       const firstResult = await Promise.race([
         promptSubmission.then(
-          () => ({ type: "prompt_submitted" as const }),
+          (admission) => ({ type: "prompt_submitted" as const, admission }),
           (error: unknown) => ({ type: "prompt_error" as const, error }),
         ),
         liveTurn.promise.then(
@@ -1309,6 +1320,23 @@ export class RinFrontendTurnDriver {
       if (firstResult.type === "turn_error") {
         this.liveTurnRecoveryContext = null;
         throw firstResult.error;
+      }
+      if (firstResult.type === "prompt_submitted") {
+        const acceptedAs = promptAdmissionAcceptedAs(firstResult.admission);
+        if (acceptedAs === "steer" || acceptedAs === "followUp") {
+          liveTurn.resolve({ steered: true });
+          this.liveTurnRecoveryContext = null;
+          return {
+            steered: true,
+            sessionId:
+              safeString(ready?.sessionId || this.currentSessionId()).trim() ||
+              undefined,
+            sessionFile:
+              safeString(
+                ready?.sessionFile || this.currentSessionFile(),
+              ).trim() || undefined,
+          };
+        }
       }
 
       const completion =

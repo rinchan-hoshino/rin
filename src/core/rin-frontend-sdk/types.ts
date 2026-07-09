@@ -202,6 +202,15 @@ export type RinNewSessionResult = RinSessionState & {
 
 export type RinPromptContext = PromptContextMeta;
 
+export type RinPromptAdmission = {
+  acceptedAs?: "prompt" | "steer" | "followUp";
+  requestTag?: string;
+  sessionFile?: string;
+  sessionId?: string;
+  turnActive?: boolean;
+  isStreaming?: boolean;
+};
+
 export type RinPromptOptions = {
   images?: unknown[];
   streamingBehavior?: "steer" | "followUp";
@@ -220,8 +229,11 @@ export interface RinFrontendClient {
   subscribe(listener: (event: RinFrontendEvent) => void): () => void;
   request<T = unknown>(command: RinRpcCommand): Promise<T>;
   send(command: RinRpcCommand): Promise<RinRpcResponse>;
-  submit(text: string): Promise<void>;
-  prompt(text: string, options?: RinPromptOptions): Promise<void>;
+  submit(text: string): Promise<RinPromptAdmission | void>;
+  prompt(
+    text: string,
+    options?: RinPromptOptions,
+  ): Promise<RinPromptAdmission | void>;
   abort(): Promise<void>;
   getState(): Promise<RinSessionState>;
   getMessages(): Promise<unknown[]>;

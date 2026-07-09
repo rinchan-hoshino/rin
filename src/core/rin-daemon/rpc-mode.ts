@@ -98,6 +98,29 @@ async function promptWithQueueableTurnReceiver(
   return await session.prompt.call(receiver, message, options);
 }
 
+function promptAdmission(
+  session: any,
+  acceptedAs: "prompt" | "steer" | "followUp",
+  requestTag: unknown,
+  options: { turnActive: boolean },
+) {
+  return {
+    acceptedAs,
+    ...(safeString(requestTag).trim()
+      ? { requestTag: safeString(requestTag).trim() }
+      : {}),
+    sessionFile: session?.sessionFile,
+    sessionId: session?.sessionId,
+    turnActive: options.turnActive,
+    isStreaming: Boolean(session?.isStreaming),
+  };
+}
+
+function normalizePromptQueueBehavior(value: unknown) {
+  const behavior = safeString(value).trim();
+  return behavior === "followUp" ? "followUp" : "steer";
+}
+
 function getSessionEntries(session: any) {
   return Array.isArray(session?.sessionManager?.getEntries?.())
     ? session.sessionManager.getEntries()
@@ -835,10 +858,15 @@ export async function runCustomRpcMode(
         resolvePendingExtensionUiRequest(command);
         return done(id, type);
       case "prompt": {
-        const streamingBehavior = command.streamingBehavior;
+        const queueableTurnActive =
+          isTurnActive() || Boolean(session.isStreaming);
+        const requestedQueueBehavior = command.streamingBehavior;
+        const acceptedQueueBehavior = queueableTurnActive
+          ? normalizePromptQueueBehavior(requestedQueueBehavior)
+          : undefined;
         const promptOptions: Record<string, unknown> = {
           images: command.images,
-          streamingBehavior,
+          streamingBehavior: acceptedQueueBehavior,
           source: command.source || "rpc",
         };
         if (command.requestTag !== undefined) {
@@ -853,7 +881,7 @@ export async function runCustomRpcMode(
         if (frontendIdentity !== undefined) {
           promptOptions.frontendIdentity = frontendIdentity;
         }
-        if (streamingBehavior) {
+        if (acceptedQueueBehavior) {
           if (isTurnActive() && !session.isStreaming) {
             await promptWithQueueableTurnReceiver(
               session,
@@ -863,7 +891,18 @@ export async function runCustomRpcMode(
           } else {
             await session.prompt(command.message, promptOptions);
           }
-          return done(id, "prompt");
+          return done(
+            id,
+            "prompt",
+            promptAdmission(
+              session,
+              acceptedQueueBehavior,
+              command.requestTag,
+              {
+                turnActive: true,
+              },
+            ),
+          );
         }
         startTurnTask(String(command.requestTag || ""), async (baseline) => {
           return await runSessionTurnProducer(
@@ -876,7 +915,13 @@ export async function runCustomRpcMode(
             { retryFailureMessage: () => latestAutoRetryFailureMessage },
           );
         });
-        return done(id, "prompt");
+        return done(
+          id,
+          "prompt",
+          promptAdmission(session, "prompt", command.requestTag, {
+            turnActive: true,
+          }),
+        );
       }
       case "resume_interrupted_turn":
         startInterruptTurnTask(

@@ -1992,7 +1992,6 @@ export class ChatController {
         thinkingLevel: input.thinkingLevel,
         promptContext: input.promptMeta,
         source: "chat-bridge",
-        streamingBehavior: "steer",
       });
       this.assertRestoredTurnStayedOnSession(
         restoreSessionFile,
