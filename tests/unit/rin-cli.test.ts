@@ -334,19 +334,20 @@ test("rin lifecycle control uses the shared recorded managed service boundary", 
     controlSource,
     /const daemonRunning = await context\.canConnectSocket\(\)/,
   );
-  assert.match(controlSource, /if \(prepared\) \{/);
+  assert.doesNotMatch(controlSource, /waitForDaemonDrain/);
+  assert.doesNotMatch(controlSource, /daemon still has active turns/);
   assert.match(finalizeSource, /tryManagedServiceAction\(/);
   assert.match(
     finalizeSource,
-    /if \(!\(await canConnectInstalledDaemon\(options\)\)\) return/,
+    /if \(!\(await canConnectInstalledDaemon\(options\)\)\) return false/,
   );
   assert.match(
     finalizeSource,
-    /isLegacyPrepareUnsupportedError\(error\)\) return/,
+    /isLegacyPrepareUnsupportedError\(error\)\) return false/,
   );
   assert.match(
     finalizeSource,
-    /if \(prepared\) await cancelInstalledDaemonRestart/,
+    /if \(preparedRestart\) \{[\s\S]*cancelInstalledDaemonRestart/,
   );
   assert.doesNotMatch(
     finalizeSource,

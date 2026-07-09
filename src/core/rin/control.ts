@@ -1,10 +1,5 @@
 import { sleep } from "../platform/process.js";
-import {
-  DEFAULT_DAEMON_DRAIN_TIMEOUT_MS,
-  formatActiveDaemonWorkers,
-  isDaemonChatQuiescing,
-  waitForDaemonDrain,
-} from "./daemon-drain.js";
+import { isDaemonChatQuiescing } from "./daemon-drain.js";
 import { tryManagedServiceAction } from "./managed-runtime-service.js";
 export { readManagedRuntimeService } from "./managed-runtime-service.js";
 import {
@@ -86,20 +81,6 @@ export async function runRestart(parsed: ParsedArgs) {
         if (!isLegacyPrepareUnsupportedError(error)) {
           throw new Error(`Restart prepare failed: ${message}`);
         }
-      }
-    }
-    if (prepared) {
-      const drain = await waitForDaemonDrain({
-        queryStatus: context.queryDaemonStatus,
-        timeoutMs: DEFAULT_DAEMON_DRAIN_TIMEOUT_MS,
-        requireQuiescing: true,
-      });
-      if (!drain.drained) {
-        throw new Error(
-          drain.statusUnavailable || drain.quiesceUnavailable
-            ? "Cannot restart yet: daemon status did not prove the daemon is quiesced and idle"
-            : `Cannot restart yet: daemon still has active turns after ${DEFAULT_DAEMON_DRAIN_TIMEOUT_MS}ms: ${formatActiveDaemonWorkers(drain.activeWorkers)}`,
-        );
       }
     }
     unit = await tryManagedServiceAction(context, "restart");
