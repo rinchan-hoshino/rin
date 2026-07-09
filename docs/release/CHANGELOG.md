@@ -9,7 +9,7 @@
 - Runtime and install paths are faster and safer, including CLI startup/dependency trimming, managed Node runtime bundles, managed-node update handoffs, launcher refreshes, PATH warnings, platform bundles without optional bundled extensions, and unresolved bootstrap git-ref handling.
 - TUI and CLI session flows now handle resume listing, session rebind options, and non-interactive tool help more accurately.
 - Chat recovery and Discord/QQ-style group handling are more reliable, including orphaned inbox reconciliation, accepted-inbox recovery, Telegram message coalescing, editable working messages for edit-capable adapters, compact usage trend charts, and cached group member counts.
-- Chat delivery, progress, and frontend turn recovery now avoid error-string retry coupling, keep pending outbox/progress state quieter and more deterministic, preserve Telegram topic scope, and treat pending final delivery as accepted output.
+- Chat delivery, progress, and frontend turn recovery now avoid error-string retry coupling, keep pending outbox/progress state quieter and more deterministic, preserve Telegram topic scope, treat pending final delivery as accepted output, retry externally aborted turns, and recover finals across editable progress or compaction updates.
 - Installer, TUI startup, and usage diagnostics are clearer, including readable system errors, loaded startup resources, quota details in usage trend charts, preserved PowerShell bootstrap failure logs, and cross-user helper runtime selection.
 - Chat delivery and shutdown handling are more robust, including stricter outbound delivery, stale outbox expiry, lifecycle-cancel retry/suppression, active-turn preservation during daemon or bridge shutdown, hosted bridge frontend shutdown, and quieter shutdown failures before error delivery.
 - Scheduler and update flows now create dedicated first-run task sessions and wait for real daemon turns while ignoring display-only working state during restart drain.
@@ -106,6 +106,17 @@ d538ff4 fix(installer): make system errors readable
 bbf6402 fix(tui): mount loaded resources on startup
 1d99d58 fix(chat-runtime): clean up progress before final replies
 13332bd fix(installer): preserve init completion state
+442c264 fix(chat): decouple inbox admission waits
+d8bb2bc fix(chat): coalesce editable progress messages
+be0faca feat(chat): share editable progress sections
+c32b578 fix(frontend): centralize prompt steering admission
+26ca49e fix(rin): let restart activation interrupt active turns
+5ad7544 fix(chat): retry externally aborted inbound turns
+0d61073 refactor(chat): unify editable progress adapters
+4783e2c fix(frontend): resolve finals after compaction rewrites turn baseline
+e3e85fd fix(chat): make rpc finals explicit
+215aa97 fix(chat): treat frontend aborts as lifecycle retries
+2169aca fix(frontend): recover chat turns after update disconnect
 -->
 
 ## 0.6.0
