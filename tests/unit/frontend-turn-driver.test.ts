@@ -1984,71 +1984,74 @@ test(
 );
 
 test(
-  "frontend SDK turn driver rejects disconnected prompt errors without frontend recovery",
+  "frontend SDK turn driver recovers disconnected prompt errors through daemon terminal replay",
   { concurrency: false },
   async () => {
-    const originalNow = Date.now;
-    let now = 0;
-    (Date as any).now = () => now;
-
-    try {
-      const client = createFrontendClient();
-      const originalConnect = client.connect;
-      let promptAttempted = false;
-      let recoveryStateCount = 0;
-      client.connect = async () => {
-        await originalConnect.call(client);
-      };
-      client.getState = async () => {
-        if (!promptAttempted) {
-          return {
-            sessionFile: "/tmp/frontend-chat.jsonl",
-            sessionId: "frontend-session",
-            isStreaming: false,
-          };
-        }
-        recoveryStateCount += 1;
-        now += 121_000;
-        return {
-          sessionFile: "/tmp/frontend-chat.jsonl",
+    const client = createFrontendClient();
+    const originalConnect = client.connect;
+    let connectCount = 0;
+    client.connect = async () => {
+      connectCount += 1;
+      await originalConnect.call(client);
+    };
+    client.getState = async () => ({
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      isStreaming: false,
+      turnActive: false,
+    });
+    client.prompt = async (text: string, options: any = {}) => {
+      client.calls.push({ type: "prompt", text, options });
+      await client.disconnect();
+      throw new Error("rin_disconnected:req_1");
+    };
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+    });
+    client.request = async (command: any) => {
+      client.calls.push({ type: "request", command });
+      if (command.type === "get_state") return await client.getState();
+      if (command.type === "replay_pending_terminal_turn_event") {
+        await emitDriverEvent(driver as any, {
+          type: "rpc_turn_event",
+          event: "complete",
+          finalText: "recovered by daemon replay",
+          result: {
+            messages: [{ type: "text", text: "recovered by daemon replay" }],
+          },
           sessionId: "frontend-session",
-          isStreaming: recoveryStateCount < 2,
-          turnActive: recoveryStateCount < 2,
-        };
-      };
-      client.getMessages = async () =>
-        promptAttempted && recoveryStateCount >= 2
-          ? [
-              { role: "user", content: "hello" },
-              {
-                role: "assistant",
-                content: "session text must not be a fallback",
-              },
-            ]
-          : [{ role: "user", content: "hello" }];
-      client.prompt = async (text: string, options: any = {}) => {
-        client.calls.push({ type: "prompt", text, options });
-        promptAttempted = true;
-        await client.disconnect();
-        throw new Error("rin_disconnected:req_1");
-      };
-      const driver = new RinFrontendTurnDriver({
-        clientFactory: () => client,
-        promptSource: "chat-bridge",
-      });
+          sessionFile: "/tmp/frontend-chat.jsonl",
+        });
+        return { replayed: true };
+      }
+      return {};
+    };
 
-      await assert.rejects(
-        () => driver.runTurn({ text: "hello" }),
-        /rin_disconnected:req_1/,
-      );
-      assert.equal(
-        client.calls.filter((call: any) => call.type === "prompt").length,
-        1,
-      );
-      assert.equal(recoveryStateCount, 0);
-    } finally {
-      (Date as any).now = originalNow;
-    }
+    const result = await driver.runTurn({ text: "hello" });
+
+    assert.equal(result.finalText, "recovered by daemon replay");
+    assert.equal(connectCount, 2);
+    assert.equal(
+      client.calls.filter((call: any) => call.type === "prompt").length,
+      1,
+    );
+    assert.equal(
+      client.calls.some(
+        (call: any) =>
+          call.type === "request" &&
+          call.command.type === "replay_pending_terminal_turn_event",
+      ),
+      true,
+    );
+    assert.equal(
+      client.calls.some(
+        (call: any) =>
+          call.type === "request" &&
+          call.command.type === "resolve_submitted_turn",
+      ),
+      false,
+    );
   },
 );
 
@@ -2145,9 +2148,9 @@ test("frontend SDK turn driver does not recover interrupted prompt errors from s
 
     await assert.rejects(
       () => driver.runTurn({ text: "hello" }),
-      /rin_disconnected:req_1/,
+      /frontend_turn_recovery_failed/,
     );
-    assert.equal(connectCount, 1);
+    assert.equal(connectCount, 2);
     assert.equal(
       client.calls.filter((call: any) => call.type === "prompt").length,
       1,

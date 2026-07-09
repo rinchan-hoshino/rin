@@ -29,7 +29,10 @@ import {
   sourceFrontendIdentity,
   type RinFrontendIdentity,
 } from "./frontend-identity.js";
-import { createRinFrontendTurnCancelledError } from "./lifecycle-errors.js";
+import {
+  createRinFrontendTurnCancelledError,
+  isRinFrontendTurnCancelledError,
+} from "./lifecycle-errors.js";
 import { replayPendingTerminalTurnEvent } from "./pending-terminal-turn.js";
 import { injectPromptContextHeader } from "./prompt-context.js";
 import {
@@ -73,6 +76,17 @@ export type RinFrontendTurnResult = {
 
 const TURN_RESULT_INVARIANT_ERROR = "rin_turn_result_invariant_failed";
 const TURN_RESULT_RECOVERY_TIMEOUT_ERROR = "rin_turn_result_recovery_timeout";
+
+function isRecoverableConnectionError(error: unknown) {
+  const message = safeString((error as any)?.message || error).trim();
+  if (message.includes("rpc_turn_queued_offline")) return false;
+  return (
+    isRinFrontendTurnCancelledError(error) ||
+    /rin_tui_not_connected|rin_disconnected|rin_session_recovering|frontend_turn_driver_disposed/.test(
+      message,
+    )
+  );
+}
 
 export type RinFrontendPassiveNoticeEvent = {
   type: "passive_notice";
@@ -1309,6 +1323,10 @@ export class RinFrontendTurnDriver {
 
       if (firstResult.type === "prompt_error") {
         const error = firstResult.error;
+        if (isRecoverableConnectionError(error)) {
+          await this.recoverLiveTurnAfterDisconnect();
+          return this.normalizeTurnCompletion(await liveTurn.promise);
+        }
         this.failLiveTurn(
           error instanceof Error
             ? error
@@ -1318,6 +1336,10 @@ export class RinFrontendTurnDriver {
         throw error;
       }
       if (firstResult.type === "turn_error") {
+        if (isRecoverableConnectionError(firstResult.error)) {
+          await this.recoverLiveTurnAfterDisconnect();
+          return this.normalizeTurnCompletion(await liveTurn.promise);
+        }
         this.liveTurnRecoveryContext = null;
         throw firstResult.error;
       }

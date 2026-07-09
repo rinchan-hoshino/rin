@@ -1916,21 +1916,9 @@ test("chat controller rethrows lifecycle cancellation without delivering an erro
     ],
   };
   controller.connect = async () => {};
-  controller.session = {
-    isStreaming: false,
-    sessionManager: {
-      getSessionFile: () => "/tmp/request-aborted.jsonl",
-      getSessionId: () => "session-request-aborted",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/request-aborted.jsonl",
-      sessionId: "session-request-aborted",
-    }),
-    prompt: async () => {
-      await controller.handleSessionEvent({ type: "agent_start" });
-      throw new Error("Request was aborted");
-    },
+  controller.driver.runTurn = async () => {
+    await controller.handleSessionEvent({ type: "agent_start" });
+    throw new Error("Request was aborted");
   };
   saveChatMessage(controller.agentDir, {
     chatKey: controller.chatKey,
