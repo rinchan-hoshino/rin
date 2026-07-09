@@ -8,9 +8,10 @@ export function createRinFrontendTurnCancelledError() {
 
 export function isRinFrontendTurnCancelledError(error: unknown) {
   const record = error as any;
+  const message = String(record?.message || error || "").trim();
   return (
     record?.code === RIN_FRONTEND_TURN_CANCELLED ||
-    record?.message === RIN_FRONTEND_TURN_CANCELLED ||
-    error === RIN_FRONTEND_TURN_CANCELLED
+    message === RIN_FRONTEND_TURN_CANCELLED ||
+    message === "Request was aborted"
   );
 }

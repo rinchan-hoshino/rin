@@ -2276,6 +2276,100 @@ test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controll
   }
 });
 
+test("chat main requeues frontend lifecycle aborts without delivering an error", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import fs from "node:fs";
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      let runTurnCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function () {
+        runTurnCalls += 1;
+        throw new Error("Request was aborted");
+      };
+
+      const bridge = await mainMod.startChatBridge({ hosted: true });
+      bridge.app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-1"];
+        },
+        internal: { async sendChatAction() {} },
+      });
+
+      bridge.app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId: "m-lifecycle-abort",
+        isDirect: true,
+        content: "update now",
+        stripped: { content: "update now" },
+        elements: [h.createChatRuntimeH().text("update now")],
+      });
+
+      const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+      const failedDir = path.join(agentDir, "data", "chat", "inbox", "failed");
+      const deadline = Date.now() + 8000;
+      let pendingFiles = [];
+      while (Date.now() < deadline) {
+        pendingFiles = fs.existsSync(pendingDir) ? fs.readdirSync(pendingDir).filter((name) => name.endsWith(".json")) : [];
+        if (runTurnCalls >= 1 && pendingFiles.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await bridge.stop();
+      const failedFiles = fs.existsSync(failedDir) ? fs.readdirSync(failedDir).filter((name) => name.endsWith(".json")) : [];
+      const assistantRows = storeMod
+        .listChatMessages(agentDir)
+        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+      if (runTurnCalls !== 1 || pendingFiles.length !== 1 || failedFiles.length !== 0 || assistantRows.length !== 0) {
+        throw new Error(JSON.stringify({ runTurnCalls, pendingFiles, failedFiles, assistantRows }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 20000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main reports an offline-queued frontend turn without retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

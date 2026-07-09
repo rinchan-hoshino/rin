@@ -1899,6 +1899,70 @@ test("chat controller leaves externally aborted inbound unprocessed for retry", 
   assert.equal(controller.currentTurn, null);
 });
 
+test("chat controller rethrows lifecycle cancellation without delivering an error final", async () => {
+  const controller = await createController();
+  const deliveries = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage(_chatId, nodes, options) {
+          deliveries.push({ nodes, options });
+          return ["m-error"];
+        },
+        internal: { async sendChatAction() {} },
+      },
+    ],
+  };
+  controller.connect = async () => {};
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => "/tmp/request-aborted.jsonl",
+      getSessionId: () => "session-request-aborted",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/request-aborted.jsonl",
+      sessionId: "session-request-aborted",
+    }),
+    prompt: async () => {
+      await controller.handleSessionEvent({ type: "agent_start" });
+      throw new Error("Request was aborted");
+    },
+  };
+  saveChatMessage(controller.agentDir, {
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    messageId: "m-request-aborted",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "update now",
+  });
+
+  await assert.rejects(
+    () =>
+      controller.runTurn({
+        text: "update now",
+        attachments: [],
+        replyToMessageId: "m-request-aborted",
+        incomingMessageId: "m-request-aborted",
+      }),
+    /Request was aborted/,
+  );
+
+  assert.deepEqual(deliveries, []);
+  const stored = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "m-request-aborted",
+  );
+  assert.equal(stored?.processedAt, undefined);
+});
+
 test("chat controller /new aborts a visible turn before driver live turn exists", async () => {
   const controller = await createController();
   const deliveries = [];

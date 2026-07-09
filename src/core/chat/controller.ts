@@ -11,6 +11,7 @@ import {
   type RinFrontendIdentity,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
+import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
 import {
   injectPromptContextHeader,
   type PromptContextMeta,
@@ -2211,6 +2212,9 @@ export class ChatController {
             sessionFile:
               abortedSession.sessionFile || this.currentSessionFile(),
           };
+        }
+        if (isRinFrontendTurnCancelledError(error)) {
+          throw error;
         }
         const errorSession = normalizeSessionRef(error as any);
         if (errorMessage !== "chat_restored_session_mismatch") {
