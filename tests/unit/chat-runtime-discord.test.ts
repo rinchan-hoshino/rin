@@ -10,9 +10,9 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const extraAdapters = await import(
+const adapters = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-runtime", "extra-adapters.js"),
+    path.join(rootDir, "dist", "core", "chat-runtime", "adapters.js"),
   ).href
 );
 
@@ -38,7 +38,7 @@ test("discord adapter syncs application commands through the Discord client", as
   );
   try {
     let bot: any = null;
-    const adapter = new extraAdapters.DiscordAdapter(
+    const adapter = new adapters.DiscordAdapter(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -85,7 +85,7 @@ test("discord adapter falls back to Discord REST for command sync", async () => 
   );
   try {
     let bot: any = null;
-    const adapter = new extraAdapters.DiscordAdapter(
+    const adapter = new adapters.DiscordAdapter(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -130,7 +130,7 @@ test("discord adapter treats command sync before ready as a no-op", async () => 
   );
   try {
     let bot: any = null;
-    new extraAdapters.DiscordAdapter(
+    new adapters.DiscordAdapter(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -159,7 +159,7 @@ test("discord adapter maps chat input interactions to Rin slash messages", async
   );
   try {
     const emitted: any[] = [];
-    const adapter = new extraAdapters.DiscordAdapter(
+    const adapter = new adapters.DiscordAdapter(
       {
         register() {},
         emit(eventName: string, payload: any) {
@@ -243,7 +243,7 @@ test("discord adapter edits one quoted non-final message and deletes it only on 
   );
   try {
     let bot: any = null;
-    const adapter = new extraAdapters.DiscordAdapter(
+    const adapter = new adapters.DiscordAdapter(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -359,7 +359,7 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
     const emitted: any[] = [];
     const warnings: string[] = [];
     const events: string[] = [];
-    const adapter = new extraAdapters.DiscordAdapter(
+    const adapter = new adapters.DiscordAdapter(
       {
         register() {},
         emit(eventName: string, payload: any) {
@@ -463,7 +463,7 @@ test("discord adapter treats guilds with only owner and bots as owner-only", asy
   );
   try {
     let bot: any = null;
-    const adapter = new extraAdapters.DiscordAdapter(
+    const adapter = new adapters.DiscordAdapter(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -531,7 +531,7 @@ test("discord adapter proves owner-only channels from private permission overwri
   );
   try {
     let bot: any = null;
-    const adapter = new extraAdapters.DiscordAdapter(
+    const adapter = new adapters.DiscordAdapter(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
