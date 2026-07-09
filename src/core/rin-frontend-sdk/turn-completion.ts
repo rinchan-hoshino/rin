@@ -112,7 +112,20 @@ function collectMessagesFromEntriesAfterBaseline(
     const baselineIndex = entries.findIndex(
       (entry) => entryId(entry) === baseline.branchLeafId,
     );
-    if (baselineIndex < 0) return null;
+    if (baselineIndex < 0) {
+      // Auto-compaction can rewrite the durable branch while a turn is still
+      // running, removing the pre-turn leaf that we captured as the structural
+      // baseline. In that case, timestamp is the remaining safe durable
+      // boundary: do not fall back to live branch/context snapshots, but do use
+      // durable entries written after this turn began so the RPC terminal event
+      // can still be produced for the already-generated final.
+      return entries
+        .map(entryMessage)
+        .filter(Boolean)
+        .filter((message) =>
+          isCurrentTurnMessage(message, baseline.turnStartedAtMs),
+        );
+    }
     const entriesById = new Map<string, any>();
     for (const entry of entries) {
       const id = entryId(entry);
