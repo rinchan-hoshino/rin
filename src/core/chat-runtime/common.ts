@@ -170,6 +170,126 @@ export function stripMentionTokens(text: string, tokens: string[]) {
   return next.replace(/^[\s,:，\-—]+/, "").trim();
 }
 
+export type EditableMessageSections = {
+  workingTextChunks: string[];
+  contentTextChunks: string[];
+  todoTextChunks: string[];
+};
+
+function normalizeTextChunks(value: unknown) {
+  return (Array.isArray(value) ? value : value ? [value] : [])
+    .map((item) => safeString(item))
+    .filter(Boolean);
+}
+
+export function emptyEditableMessageSections(): EditableMessageSections {
+  return {
+    workingTextChunks: [],
+    contentTextChunks: [],
+    todoTextChunks: [],
+  };
+}
+
+export function editableMessageSectionsFromRecord(
+  record: any,
+): EditableMessageSections {
+  const kind = safeString(record?.kind).trim();
+  const legacyMainTextChunks = normalizeTextChunks(
+    Array.isArray(record?.mainTextChunks)
+      ? record.mainTextChunks
+      : record?.mainText,
+  );
+  const legacyTextChunks = normalizeTextChunks(
+    Array.isArray(record?.textChunks) ? record.textChunks : record?.text,
+  );
+  const workingTextChunks = normalizeTextChunks(
+    Array.isArray(record?.workingTextChunks)
+      ? record.workingTextChunks
+      : record?.workingText,
+  );
+  const contentTextChunks = normalizeTextChunks(
+    Array.isArray(record?.contentTextChunks)
+      ? record.contentTextChunks
+      : record?.contentText,
+  );
+  const todoTextChunks = normalizeTextChunks(
+    Array.isArray(record?.todoTextChunks)
+      ? record.todoTextChunks
+      : record?.todoText,
+  );
+  return {
+    workingTextChunks: workingTextChunks.length
+      ? workingTextChunks
+      : kind === "working"
+        ? legacyMainTextChunks.length
+          ? legacyMainTextChunks
+          : legacyTextChunks
+        : [],
+    contentTextChunks: contentTextChunks.length
+      ? contentTextChunks
+      : kind && kind !== "working" && kind !== "todo"
+        ? legacyMainTextChunks.length
+          ? legacyMainTextChunks
+          : legacyTextChunks
+        : [],
+    todoTextChunks: todoTextChunks.length
+      ? todoTextChunks
+      : kind === "todo"
+        ? legacyMainTextChunks.length
+          ? legacyMainTextChunks
+          : legacyTextChunks
+        : [],
+  };
+}
+
+export function composeEditableMessageText(sections: EditableMessageSections) {
+  return [
+    sections.workingTextChunks.map((item) => safeString(item)).join(""),
+    sections.contentTextChunks.map((item) => safeString(item)).join(""),
+    sections.todoTextChunks.map((item) => safeString(item)).join(""),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export function updateEditableMessageSections(input: {
+  kind?: string;
+  textChunks: string[];
+  persisted?: Partial<EditableMessageSections> | null;
+  fallbackTodoTextChunks?: string[];
+  finalize?: boolean;
+}): EditableMessageSections {
+  const kind = safeString(input.kind).trim() || "working";
+  const nextTextChunks = normalizeTextChunks(input.textChunks);
+  const persisted = input.persisted || emptyEditableMessageSections();
+  const existingWorking = normalizeTextChunks(persisted.workingTextChunks);
+  const existingContent = normalizeTextChunks(persisted.contentTextChunks);
+  const existingTodo = normalizeTextChunks(persisted.todoTextChunks);
+  const fallbackTodo = normalizeTextChunks(input.fallbackTodoTextChunks);
+  const section =
+    kind === "todo"
+      ? "todo"
+      : kind === "working" && !input.finalize
+        ? "working"
+        : "content";
+  return {
+    workingTextChunks:
+      section === "working"
+        ? nextTextChunks
+        : input.finalize
+          ? []
+          : existingWorking,
+    contentTextChunks: section === "content" ? nextTextChunks : existingContent,
+    todoTextChunks: input.finalize
+      ? []
+      : section === "todo"
+        ? nextTextChunks
+        : existingTodo.length
+          ? existingTodo
+          : fallbackTodo,
+  };
+}
+
 export function splitPlainText(text: string, maxLength: number) {
   const normalized = safeString(text);
   if (!normalized) return [];

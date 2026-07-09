@@ -7,8 +7,10 @@ import { getWorkingReactionFrame } from "../chat/transport.js";
 import { formatRinTodoChecklistMarkdownContent } from "../rin-lib/todo-state.js";
 import {
   compactObject,
+  composeEditableMessageText,
   createPrefixedLogger,
   downloadToFile,
+  editableMessageSectionsFromRecord,
   editableWorkingText,
   emitBotStatus,
   ensureDir,
@@ -30,6 +32,7 @@ import {
   splitPlainText,
   isEditableWorkingText,
   stripMentionTokens,
+  updateEditableMessageSections,
 } from "./common.js";
 
 const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
@@ -244,6 +247,7 @@ class EditableTextMessageGroup {
           replyToMessageId:
             safeString(context?.replyToMessageId).trim() || undefined,
           kind: "working",
+          todoText: context?.todoNoticeText,
         });
         return ids.length > 0;
       },
@@ -286,11 +290,24 @@ class EditableTextMessageGroup {
       const text = textChunks.length
         ? textChunks.join("")
         : safeString(record?.text);
+      const kind = safeString(record?.kind).trim();
+      const sections = editableMessageSectionsFromRecord({
+        ...record,
+        kind,
+        text,
+        textChunks,
+      });
       return {
         messageIds,
         text,
         textChunks: textChunks.length ? textChunks : [text],
-        kind: safeString(record?.kind).trim(),
+        kind,
+        workingText: sections.workingTextChunks.join(""),
+        workingTextChunks: sections.workingTextChunks,
+        contentText: sections.contentTextChunks.join(""),
+        contentTextChunks: sections.contentTextChunks,
+        todoText: sections.todoTextChunks.join(""),
+        todoTextChunks: sections.todoTextChunks,
       };
     } catch {
       return null;
@@ -302,12 +319,26 @@ class EditableTextMessageGroup {
     messageIds: string[],
     textChunks: string[],
     kind: string,
+    sections: {
+      workingTextChunks?: string[];
+      contentTextChunks?: string[];
+      todoTextChunks?: string[];
+    } = {},
   ) {
     const nextMessageIds = normalizeDeliveredIds(messageIds);
     if (!nextMessageIds.length) return;
     const statePath = this.statePath(key);
     ensureDir(path.dirname(statePath));
     const nextTextChunks = textChunks.map((item) => safeString(item));
+    const workingTextChunks = (sections.workingTextChunks || []).map((item) =>
+      safeString(item),
+    );
+    const contentTextChunks = (sections.contentTextChunks || []).map((item) =>
+      safeString(item),
+    );
+    const todoTextChunks = (sections.todoTextChunks || []).map((item) =>
+      safeString(item),
+    );
     fs.writeFileSync(
       statePath,
       `${JSON.stringify(
@@ -318,6 +349,12 @@ class EditableTextMessageGroup {
           text: nextTextChunks.join(""),
           textChunks: nextTextChunks,
           kind: safeString(kind).trim(),
+          workingText: workingTextChunks.join(""),
+          workingTextChunks,
+          contentText: contentTextChunks.join(""),
+          contentTextChunks,
+          todoText: todoTextChunks.join(""),
+          todoTextChunks,
           updatedAt: new Date().toISOString(),
         },
         null,
@@ -341,6 +378,11 @@ class EditableTextMessageGroup {
     messageIds: string[],
     textChunks: string[],
     kind: string,
+    sections: {
+      workingTextChunks?: string[];
+      contentTextChunks?: string[];
+      todoTextChunks?: string[];
+    } = {},
   ) {
     const nextMessageIds = normalizeDeliveredIds(messageIds);
     if (!nextMessageIds.length) {
@@ -352,7 +394,7 @@ class EditableTextMessageGroup {
     this.messages.set(key, nextMessageIds[0] || "");
     this.texts.set(key, text);
     this.kinds.set(key, nextKind);
-    this.write(key, nextMessageIds, textChunks, nextKind);
+    this.write(key, nextMessageIds, textChunks, nextKind, sections);
   }
 
   private markFinalizing(key: string) {
@@ -396,15 +438,12 @@ class EditableTextMessageGroup {
     replyToMessageId?: string;
     finalize?: boolean;
     kind?: string;
+    todoText?: string;
   }) {
     const chatId = safeString(input.chatId).trim();
     const text = safeString(input.text);
     if (!chatId || !text) return [] as string[];
     const key = this.key(chatId, input.replyToMessageId);
-    const chunks = splitPlainText(text, this.options.maxTextLength).filter(
-      Boolean,
-    );
-    if (!chunks.length) return [] as string[];
     const finalize = Boolean(input.finalize);
     const kind =
       safeString(input.kind).trim() || (finalize ? "final" : "working");
@@ -413,26 +452,19 @@ class EditableTextMessageGroup {
         return normalizeDeliveredIds(this.messages.get(key));
       }
       const persisted = this.read(key);
-      if (!finalize && kind === "working") {
-        const currentId = safeString(
-          this.messages.get(key) || persisted?.messageIds?.[0] || "",
-        ).trim();
-        const currentKind = safeString(
-          this.kinds.get(key) || persisted?.kind || "",
-        ).trim();
-        const currentText = safeString(this.texts.get(key) || persisted?.text);
-        if (currentId && currentKind && currentKind !== "working") {
-          return [currentId];
-        }
-        if (
-          currentId &&
-          currentText &&
-          currentText !== this.workingText &&
-          !isEditableWorkingText(currentText, this.progressTexts)
-        ) {
-          return [currentId];
-        }
-      }
+      const fallbackTodoText = safeString(input.todoText).trim();
+      const sections = updateEditableMessageSections({
+        kind,
+        textChunks: [text],
+        persisted,
+        fallbackTodoTextChunks: fallbackTodoText ? [fallbackTodoText] : [],
+        finalize,
+      });
+      const chunks = splitPlainText(
+        composeEditableMessageText(sections),
+        this.options.maxTextLength,
+      ).filter(Boolean);
+      if (!chunks.length) return [] as string[];
       const existing = this.existingIds(key);
       if (
         !finalize &&
@@ -484,10 +516,11 @@ class EditableTextMessageGroup {
       }
       if (!delivered.length) return [] as string[];
       if (finalize) {
+        const hadExistingProgress = existing.length > 0;
         this.clear(key);
-        this.markFinalizing(key);
+        if (hadExistingProgress) this.markFinalizing(key);
       } else {
-        this.remember(key, delivered, chunks, kind);
+        this.remember(key, delivered, chunks, kind, sections);
       }
       return delivered;
     });

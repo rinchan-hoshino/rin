@@ -18,6 +18,8 @@ import {
   compactObject,
   createPrefixedLogger,
   editableWorkingText,
+  composeEditableMessageText,
+  editableMessageSectionsFromRecord,
   emitBotStatus,
   ensureDir,
   ensureExtension,
@@ -37,6 +39,7 @@ import {
   splitPlainText,
   stageChatMediaFromNode,
   isEditableWorkingText,
+  updateEditableMessageSections,
 } from "./common.js";
 import {
   DiscordAdapter,
@@ -1075,6 +1078,12 @@ class TelegramAdapter {
     text: string;
     textChunks: string[];
     kind: string;
+    workingText: string;
+    workingTextChunks: string[];
+    contentText: string;
+    contentTextChunks: string[];
+    todoText: string;
+    todoTextChunks: string[];
   } | null {
     const nextKey = safeString(key).trim();
     if (!nextKey) return null;
@@ -1096,12 +1105,25 @@ class TelegramAdapter {
       const text = textChunks.length
         ? textChunks.join("")
         : safeString(record?.text);
+      const kind = safeString(record?.kind).trim();
+      const sections = editableMessageSectionsFromRecord({
+        ...record,
+        kind,
+        textChunks,
+        text,
+      });
       return {
         messageId: messageIds[0] || "",
         messageIds,
         text,
         textChunks: textChunks.length ? textChunks : [text],
-        kind: safeString(record?.kind).trim(),
+        kind,
+        workingText: sections.workingTextChunks.join(""),
+        workingTextChunks: sections.workingTextChunks,
+        contentText: sections.contentTextChunks.join(""),
+        contentTextChunks: sections.contentTextChunks,
+        todoText: sections.todoTextChunks.join(""),
+        todoTextChunks: sections.todoTextChunks,
       };
     } catch {
       return null;
@@ -1113,6 +1135,11 @@ class TelegramAdapter {
     messageIds: string[],
     textChunks: string[],
     kind = "",
+    sections: {
+      workingTextChunks?: string[];
+      contentTextChunks?: string[];
+      todoTextChunks?: string[];
+    } = {},
   ) {
     const nextKey = safeString(key).trim();
     const nextMessageIds = messageIds
@@ -1120,6 +1147,15 @@ class TelegramAdapter {
       .filter(Boolean);
     if (!nextKey || !nextMessageIds.length) return;
     const nextTextChunks = textChunks.map((item) => safeString(item));
+    const workingTextChunks = (sections.workingTextChunks || []).map((item) =>
+      safeString(item),
+    );
+    const contentTextChunks = (sections.contentTextChunks || []).map((item) =>
+      safeString(item),
+    );
+    const todoTextChunks = (sections.todoTextChunks || []).map((item) =>
+      safeString(item),
+    );
     const statePath = this.workingMessageStatePath(nextKey);
     ensureDir(path.dirname(statePath));
     fs.writeFileSync(
@@ -1132,6 +1168,12 @@ class TelegramAdapter {
           text: nextTextChunks.join(""),
           textChunks: nextTextChunks,
           kind: safeString(kind).trim(),
+          workingText: workingTextChunks.join(""),
+          workingTextChunks,
+          contentText: contentTextChunks.join(""),
+          contentTextChunks,
+          todoText: todoTextChunks.join(""),
+          todoTextChunks,
           updatedAt: new Date().toISOString(),
         },
         null,
@@ -1153,6 +1195,11 @@ class TelegramAdapter {
     messageIds: string[],
     textChunks: string[],
     kind = "",
+    sections: {
+      workingTextChunks?: string[];
+      contentTextChunks?: string[];
+      todoTextChunks?: string[];
+    } = {},
   ) {
     const nextMessageIds = messageIds
       .map((item) => safeString(item).trim())
@@ -1171,6 +1218,7 @@ class TelegramAdapter {
       nextMessageIds,
       textChunks,
       nextKind,
+      sections,
     );
   }
 
@@ -1213,7 +1261,10 @@ class TelegramAdapter {
     return copy.progressTexts.includes(value) || isEditableWorkingText(value);
   }
 
-  private async deleteVisibleWorkingMessage(chatId: string) {
+  private async deleteVisibleWorkingMessage(
+    chatId: string,
+    markFinalizing = false,
+  ) {
     const target = splitTelegramChatThread(chatId);
     const key = this.workingMessageKey(target.scopedChatId, "chat");
     const persisted = this.readPersistedWorkingMessage(key);
@@ -1224,7 +1275,11 @@ class TelegramAdapter {
       persisted?.kind || this.workingMessageKinds.get(key) || "",
     ).trim();
     const text = safeString(
-      persisted?.text || this.workingMessageTexts.get(key) || "",
+      persisted?.workingText ||
+        persisted?.contentText ||
+        persisted?.text ||
+        this.workingMessageTexts.get(key) ||
+        "",
     );
     const isProgressArtifact =
       kind === "todo" ||
@@ -1233,6 +1288,7 @@ class TelegramAdapter {
     if (!messageIds.length || !isProgressArtifact) {
       return false;
     }
+    if (markFinalizing) this.markWorkingMessageFinalizing(key);
     for (const messageId of messageIds) {
       try {
         await this.callApi("deleteMessage", {
@@ -1276,6 +1332,30 @@ class TelegramAdapter {
     return [];
   }
 
+  private nextEditableMessageSections(
+    kind: string,
+    textChunks: string[],
+    persisted: {
+      workingTextChunks?: string[];
+      contentTextChunks?: string[];
+      todoTextChunks?: string[];
+    } | null,
+    fallbackTodoTextChunks: string[] = [],
+    finalize = false,
+  ) {
+    const sections = updateEditableMessageSections({
+      kind,
+      textChunks,
+      persisted,
+      fallbackTodoTextChunks,
+      finalize,
+    });
+    return {
+      ...sections,
+      textChunks: this.telegramTextChunks(composeEditableMessageText(sections)),
+    };
+  }
+
   private async updateWorkingMessage(input: {
     chatId?: string;
     text?: string;
@@ -1286,10 +1366,15 @@ class TelegramAdapter {
     finalize?: boolean;
     key?: string;
     kind?: string;
+    todoText?: string;
   }) {
+    const todoText = safeString(input?.todoText).trim();
     const ids = await this.updateWorkingMessageGroup({
       ...input,
       textChunks: [safeString(input?.text)],
+      todoTextChunks: todoText
+        ? [renderTelegramHtmlFromNodes([{ type: "markdown", text: todoText }])]
+        : [],
     });
     return ids[0] || "";
   }
@@ -1304,12 +1389,13 @@ class TelegramAdapter {
     finalize?: boolean;
     key?: string;
     kind?: string;
+    todoTextChunks?: string[];
   }) {
     const chatId = safeString(input?.chatId).trim();
-    const textChunks = (input?.textChunks || [])
+    const inputTextChunks = (input?.textChunks || [])
       .map((item) => safeString(item))
       .filter(Boolean);
-    if (!chatId || !textChunks.length) return [] as string[];
+    if (!chatId || !inputTextChunks.length) return [] as string[];
     const key =
       safeString(input?.key).trim() || this.workingMessageKey(chatId, "chat");
     const parseMode = safeString(input?.parseMode).trim() || undefined;
@@ -1324,27 +1410,15 @@ class TelegramAdapter {
         return [this.workingMessages.get(key) || ""].filter(Boolean);
       }
       const persisted = this.readPersistedWorkingMessage(key);
-      if (!finalize && kind === "working") {
-        const currentMessageId = safeString(
-          this.workingMessages.get(key) || persisted?.messageId || "",
-        ).trim();
-        const currentKind = safeString(
-          this.workingMessageKinds.get(key) || persisted?.kind || "",
-        ).trim();
-        const currentText = safeString(
-          this.workingMessageTexts.get(key) || persisted?.text || "",
-        );
-        if (currentMessageId && currentKind && currentKind !== "working") {
-          return [currentMessageId];
-        }
-        if (
-          currentMessageId &&
-          currentText &&
-          !this.isWorkingIndicatorText(currentText)
-        ) {
-          return [currentMessageId];
-        }
-      }
+      const sections = this.nextEditableMessageSections(
+        kind,
+        inputTextChunks,
+        persisted,
+        (input?.todoTextChunks || []).map((item) => safeString(item)),
+        finalize,
+      );
+      const textChunks = sections.textChunks;
+      if (!textChunks.length) return [] as string[];
       const existingMessageIds = (
         input?.messageIds?.length
           ? input.messageIds
@@ -1403,7 +1477,11 @@ class TelegramAdapter {
         this.clearWorkingMessage(key);
         this.markWorkingMessageFinalizing(key);
       } else {
-        this.rememberWorkingMessageGroup(key, delivered, textChunks, kind);
+        this.rememberWorkingMessageGroup(key, delivered, textChunks, kind, {
+          workingTextChunks: sections.workingTextChunks,
+          contentTextChunks: sections.contentTextChunks,
+          todoTextChunks: sections.todoTextChunks,
+        });
       }
       return delivered;
     });
@@ -1429,7 +1507,7 @@ class TelegramAdapter {
     let finalizedWorkingMessage = false;
     const ensureFinalProgressCleared = async () => {
       if (!isFinalDelivery || finalizedWorkingMessage) return;
-      await this.deleteVisibleWorkingMessage(deliveryChatId);
+      await this.deleteVisibleWorkingMessage(deliveryChatId, true);
       finalizedWorkingMessage = true;
     };
     const recordFailure = async (error: unknown, placeholder: string) => {
@@ -1510,9 +1588,10 @@ class TelegramAdapter {
                 preferredMessageId: firstReply,
                 parseMode: "HTML",
                 finalize: false,
-                // Working indicators and coalesced todo notices share the chat key
-                // so in-progress updates still edit one Telegram message group.
-                // Final replies delete that progress artifact and send fresh messages.
+                // Working indicators, interim text, and coalesced todo notices
+                // share one editable Telegram message with three regions:
+                // working, content, then optional todo. Final replies clear that
+                // progress artifact and are delivered as fresh messages.
                 // Non-coalesced passive notices stay isolated on the passive_notice key.
                 key: deliveryKey,
                 kind:
@@ -1525,6 +1604,7 @@ class TelegramAdapter {
             : [];
           if (shouldEditWorkingMessage) {
             delivered.push(...messageIds);
+            if (isFinalDelivery) finalizedWorkingMessage = true;
           } else {
             await ensureFinalProgressCleared();
             for (const textChunk of textChunks) {
@@ -1578,25 +1658,26 @@ class TelegramAdapter {
     );
     const chatId = target.scopedChatId;
     if (!target.chatId) return false;
-    if (safeString(context?.todoNoticeText).trim()) return true;
     const sourceMessageId = safeString(context?.messageId).trim();
     const replyToMessageId = safeString(
       context?.replyToMessageId || sourceMessageId,
     ).trim();
     const key = this.workingMessageKey(chatId, "chat");
     const persisted = this.readPersistedWorkingMessage(key);
-    const currentKind = safeString(
-      persisted?.kind || this.workingMessageKinds.get(key) || "",
-    ).trim();
-    if (currentKind && currentKind !== "working") return true;
     const currentText = safeString(
-      persisted?.text || this.workingMessageTexts.get(key) || "",
+      persisted
+        ? persisted.workingText
+        : this.workingMessageTexts.get(key) || "",
     );
     if (currentText && !this.isWorkingIndicatorText(currentText)) return true;
     await this.updateWorkingMessage({
       chatId,
-      text: this.workingMessageText(context),
+      text: renderTelegramHtmlFromNodes([
+        { type: "text", text: this.workingMessageText(context) },
+      ]),
+      todoText: context?.todoNoticeText,
       replyToMessageId: replyToMessageId || undefined,
+      parseMode: "HTML",
       // This is the same key used by coalesced todo notices and final replies.
       key,
       kind: "working",
