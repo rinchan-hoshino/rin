@@ -1828,6 +1828,77 @@ test("chat controller starts /new immediately through the TUI new-session path",
   assert.equal(controller.state.sessionFile, "new-chat.jsonl");
 });
 
+test("chat controller leaves externally aborted inbound unprocessed for retry", async () => {
+  const controller = await createController();
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "restart-chat.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  saveChatMessage(controller.agentDir, {
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    messageId: "m-restart",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "restart interrupted prompt",
+  });
+
+  let requestTag = "";
+  const session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-restart",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-restart",
+    }),
+    prompt: async (_text, options = {}) => {
+      requestTag = options.requestTag || "";
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "rpc_turn_event",
+          event: "error",
+          requestTag,
+          error: "chat_turn_aborted",
+          sessionFile,
+          sessionId: "session-restart",
+        },
+      });
+    },
+  };
+  controller.session = session;
+  controller.connect = async () => {
+    if (!controller.session) controller.session = session;
+  };
+
+  await assert.rejects(
+    () =>
+      controller.runTurn({
+        text: "restart interrupted prompt",
+        attachments: [],
+        replyToMessageId: "m-restart",
+        incomingMessageId: "m-restart",
+      }),
+    /chat_turn_aborted/,
+  );
+
+  const stored = getChatMessage(
+    controller.agentDir,
+    controller.chatKey,
+    "m-restart",
+  );
+  assert.equal(stored?.processedAt, undefined);
+  assert.equal(controller.currentTurn, null);
+});
+
 test("chat controller /new aborts a visible turn before driver live turn exists", async () => {
   const controller = await createController();
   const deliveries = [];

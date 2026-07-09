@@ -356,6 +356,7 @@ export class ChatController {
   externalWorkingVisible = false;
   turnAbortRequested = false;
   turnAbortGeneration = 0;
+  intentionallyAbortedTurnGenerations = new Set<number>();
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
   commandResponses?: ChatCommandResponses;
@@ -457,6 +458,7 @@ export class ChatController {
     this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration = 0;
+    this.intentionallyAbortedTurnGenerations.clear();
     this.driver.dispose();
   }
 
@@ -485,6 +487,7 @@ export class ChatController {
     this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
+    this.intentionallyAbortedTurnGenerations.clear();
     this.stagedDelivery = null;
     await this.clearWorkingReaction().catch(() => {});
     await this.clearCompactionWorkingReaction().catch(() => {});
@@ -495,6 +498,19 @@ export class ChatController {
     this.pendingSteeredDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.saveState();
+  }
+
+  private noteIntentionalTurnAbort() {
+    this.intentionallyAbortedTurnGenerations.add(this.turnAbortGeneration);
+  }
+
+  private consumeIntentionalTurnAbort(turnGeneration: number) {
+    const consumed =
+      this.intentionallyAbortedTurnGenerations.delete(turnGeneration);
+    if (this.intentionallyAbortedTurnGenerations.size > 32) {
+      this.intentionallyAbortedTurnGenerations.clear();
+    }
+    return consumed;
   }
 
   private currentIncomingMessageId() {
@@ -1791,6 +1807,7 @@ export class ChatController {
     if (abortingActiveTurn) {
       this.lastActivityAt = Date.now();
       try {
+        this.noteIntentionalTurnAbort();
         this.turnAbortGeneration += 1;
         this.turnAbortRequested = true;
         const data: any = {
@@ -1842,6 +1859,7 @@ export class ChatController {
           : undefined;
     this.lastActivityAt = Date.now();
     if (interruptingActiveTurn) {
+      this.noteIntentionalTurnAbort();
       this.turnAbortGeneration += 1;
       this.turnAbortRequested = true;
     }
@@ -2175,7 +2193,8 @@ export class ChatController {
             input.incomingMessageId,
           );
           const abortedSession = normalizeSessionRef(error);
-          this.markProcessedMessage(input.incomingMessageId, false);
+          const intentionallyAborted =
+            this.consumeIntentionalTurnAbort(turnAbortGeneration);
           await this.clearWorkingReactionFor(input.incomingMessageId);
           this.clearCurrentTurnFor(input.incomingMessageId);
           if (ownsCurrentTurn) {
@@ -2185,6 +2204,10 @@ export class ChatController {
             this.stagedDelivery = null;
           }
           this.saveState();
+          if (!intentionallyAborted) {
+            throw error;
+          }
+          this.markProcessedMessage(input.incomingMessageId, false);
           return {
             aborted: true,
             sessionId:
