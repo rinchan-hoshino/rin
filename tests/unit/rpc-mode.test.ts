@@ -2965,7 +2965,7 @@ test(
 );
 
 test(
-  "rpc mode resolves completed turns from durable session entries without a recheck window",
+  "rpc mode completes prompt turns from observed current assistant message_end",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2980,6 +2980,7 @@ test(
     const durableEntries: any[] = [
       { id: "base-entry", type: "message", message: baseMessage },
     ];
+    const sessionSubscribers = new Set<(event: any) => void>();
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -2998,18 +2999,25 @@ test(
         sessionId: "session-1",
         agent: { waitForIdle: async () => {} },
         bindExtensions: async () => {},
-        subscribe: () => () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
         prompt: async () => {
+          const assistantMessage = {
+            role: "assistant",
+            timestamp: Date.now(),
+            content: [{ type: "text", text: "observed final" }],
+          };
           durableEntries.push({
             id: "final-entry",
             parentId: "base-entry",
             type: "message",
-            message: {
-              role: "assistant",
-              timestamp: Date.now(),
-              content: [{ type: "text", text: "durable final" }],
-            },
+            message: assistantMessage,
           });
+          for (const handler of sessionSubscribers) {
+            handler({ type: "message_end", message: assistantMessage });
+          }
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
@@ -3090,7 +3098,7 @@ test(
           event.type === "rpc_turn_event" && event.event === "complete",
       );
       assert.equal(complete?.requestTag, "tag-1");
-      assert.equal(complete?.finalText, "durable final");
+      assert.equal(complete?.finalText, "observed final");
       assert.equal(
         events.some(
           (event) => event.type === "rpc_turn_event" && event.event === "error",
@@ -3105,7 +3113,7 @@ test(
 );
 
 test(
-  "rpc mode does not complete from message_end when the branch source has no final",
+  "rpc mode keeps non-deliverable assistant message_end active without scanning session history",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3138,7 +3146,10 @@ test(
         prompt: async () => {
           const assistantMessage = {
             role: "assistant",
-            content: [{ type: "text", text: "late final text" }],
+            content: [
+              { type: "text", text: "tool preface is not final" },
+              { type: "toolCall", name: "read", id: "call-1" },
+            ],
           };
           for (const handler of sessionSubscribers) {
             handler({ type: "message_end", message: assistantMessage });
@@ -3235,7 +3246,7 @@ test(
 );
 
 test(
-  "rpc mode resolves final text from durable entries after the turn baseline leaf",
+  "rpc mode resolves final text from current assistant message_end instead of durable entries",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3254,6 +3265,7 @@ test(
         },
       },
     ];
+    const sessionSubscribers = new Set<(event: any) => void>();
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3272,7 +3284,10 @@ test(
         sessionId: "session-1",
         agent: { state: { messages: [] }, waitForIdle: async () => {} },
         bindExtensions: async () => {},
-        subscribe: () => () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
         prompt: async () => {
           const assistantMessage = {
             role: "assistant",
@@ -3286,6 +3301,9 @@ test(
             parentId: "base-entry",
             message: assistantMessage,
           });
+          for (const handler of sessionSubscribers) {
+            handler({ type: "message_end", message: assistantMessage });
+          }
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
@@ -3382,7 +3400,7 @@ test(
 );
 
 test(
-  "rpc mode resolves persisted final text after prompt settles without message_end",
+  "rpc mode keeps prompt active when prompt settles without message_end",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3502,11 +3520,7 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
-      assert.equal(completion?.requestTag, "tag-1");
-      assert.equal(completion?.finalText, "final from stored session");
-      assert.deepEqual(completion?.result, {
-        messages: [{ type: "text", text: "final from stored session" }],
-      });
+      assert.equal(completion, undefined);
       assert.equal(
         events.some(
           (event) => event.type === "rpc_turn_event" && event.event === "error",
@@ -4815,7 +4829,7 @@ test(
 );
 
 test(
-  "rpc mode resume_interrupted_turn re-emits complete for an already persisted assistant final",
+  "rpc mode resume_interrupted_turn does not re-emit a persisted assistant final",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4826,7 +4840,7 @@ test(
       { role: "user", content: "restart prompt" },
       {
         role: "assistant",
-        content: [{ type: "text", text: "durable final after restart" }],
+        content: [{ type: "text", text: "old final must not replay" }],
       },
     ];
     let continued = false;
@@ -4857,7 +4871,7 @@ test(
         appendMessage: () => {},
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "durable final after restart",
+        getLastAssistantText: () => "old final must not replay",
         setThinkingLevel: () => {},
         cycleThinkingLevel: () => undefined,
         setSteeringMode: () => {},
@@ -4918,9 +4932,7 @@ test(
           event.type === "rpc_turn_event" && event.event === "complete",
       );
       assert.equal(continued, false);
-      assert.equal(complete?.requestTag, undefined);
-      assert.equal(complete?.finalText, "durable final after restart");
-      assert.equal(complete?.sessionFile, "/tmp/session-1.jsonl");
+      assert.equal(complete, undefined);
       assert.equal(
         events.some(
           (event) => event.type === "rpc_turn_event" && event.event === "error",

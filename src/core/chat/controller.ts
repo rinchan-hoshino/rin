@@ -1206,9 +1206,7 @@ export class ChatController {
     sessionFile?: string;
     bindSession?: boolean;
   }): ChatAssistantDelivery {
-    const text = safeString(
-      input.text ?? this.driver.latestAssistantText,
-    ).trim();
+    const text = safeString(input.text).trim();
     const parts = Array.isArray(input.parts) ? input.parts.filter(Boolean) : [];
     if (!text && !parts.length) {
       throw new Error("chat_final_assistant_text_missing");
@@ -1245,9 +1243,7 @@ export class ChatController {
     sessionFile?: string;
     bindSession?: boolean;
   }) {
-    const text = safeString(
-      input.text ?? this.driver.latestAssistantText,
-    ).trim();
+    const text = safeString(input.text).trim();
     this.stagedDelivery = this.buildAssistantDelivery(input);
     return text;
   }

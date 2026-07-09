@@ -15,16 +15,14 @@ import {
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
-  captureRinTurnCompletionBaseline,
-  resolveRinLatestSubmittedTurnCompletion,
-  resolveRinTurnCompletionAfterPromptSettled,
+  resolveRinTurnCompletionFromAssistantMessage,
+  resolveRinTurnCompletionFromTurnResult,
   resolveRinTurnFailureMessage,
   type RinTurnCompletionResolution,
 } from "../rin-frontend-sdk/turn-completion.js";
 import {
   emitPiSessionEvent,
   refreshPiSessionToolRegistry,
-  rewritePiSessionManagerFile,
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
 import {
@@ -297,10 +295,6 @@ async function resetSessionModelOptionsFromSettings(session: any) {
   };
 }
 
-async function forceFlushSessionFile(session: any) {
-  await Promise.resolve(rewritePiSessionManagerFile(session?.sessionManager));
-}
-
 function turnResolutionHasTerminalResult(
   session: any,
   resolution: RinTurnCompletionResolution | null | undefined,
@@ -315,7 +309,6 @@ function turnResolutionHasTerminalResult(
 
 async function runSessionTurnProducer(
   session: any,
-  baseline: ReturnType<typeof captureRinTurnCompletionBaseline>,
   action: () => Promise<RinTurnCompletionResolution | null | undefined>,
   options: { retryFailureMessage?: () => string } = {},
 ): Promise<RinTurnCompletionResolution | null> {
@@ -323,22 +316,12 @@ async function runSessionTurnProducer(
     retryFailureMessage: safeString(options.retryFailureMessage?.()).trim(),
   });
   const directResolution = await action();
-  if (
-    turnResolutionHasTerminalResult(session, directResolution, failureOptions())
-  ) {
-    return directResolution || null;
-  }
-  await forceFlushSessionFile(session);
-  const durableResolution = resolveRinTurnCompletionAfterPromptSettled(
-    session,
-    { baseline },
-  );
   return turnResolutionHasTerminalResult(
     session,
-    durableResolution,
+    directResolution,
     failureOptions(),
   )
-    ? durableResolution
+    ? directResolution || null
     : null;
 }
 
@@ -351,16 +334,14 @@ async function resumeInterruptedTurn(
     : null;
   if (!lastMessage) return null;
   if (lastMessage.role === "assistant") {
-    if (
-      !appendInterruptedToolResults(session, {
-        persistToSession: options.persistInterruptionMessage,
-      })
-    ) {
-      return resolveRinLatestSubmittedTurnCompletion(session);
-    }
+    const appendedInterruption = appendInterruptedToolResults(session, {
+      persistToSession: options.persistInterruptionMessage,
+    });
+    if (!appendedInterruption) return null;
   }
-  await session.agent.continue();
-  return null;
+  const result = await session.agent.continue();
+  const direct = resolveRinTurnCompletionFromTurnResult(result);
+  return direct.completion.finalText ? direct : null;
 }
 
 function isWorkerLocalSessionReplacementCommand(commandLine: string) {
@@ -623,13 +604,31 @@ export async function runCustomRpcMode(
   const startTurnTask = (
     requestTag: string,
     task: (
-      baseline: ReturnType<typeof captureRinTurnCompletionBaseline>,
+      getObservedCompletion: () => RinTurnCompletionResolution | null,
     ) => Promise<RinTurnCompletionResolution | null>,
     options: { forceTurnEvents?: boolean } = {},
   ) => {
     latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
-    const baseline = captureRinTurnCompletionBaseline(turnSession);
+    let observedCompletion: RinTurnCompletionResolution | null = null;
+    const rawUnsubscribeObservedCompletion = turnSession.subscribe?.(
+      (event: any) => {
+        if (event?.type !== "message_end") return;
+        const resolution = resolveRinTurnCompletionFromAssistantMessage(
+          event.message,
+        );
+        if (
+          resolution?.completion.finalText ||
+          resolveRinTurnFailureMessage(turnSession, resolution?.messages || [])
+        ) {
+          observedCompletion = resolution;
+        }
+      },
+    );
+    const unsubscribeObservedCompletion =
+      typeof rawUnsubscribeObservedCompletion === "function"
+        ? rawUnsubscribeObservedCompletion
+        : undefined;
     const promise = (async () => {
       const forceTurnEvents = options.forceTurnEvents === true;
       emitTurnEvent(
@@ -641,7 +640,7 @@ export async function runCustomRpcMode(
         },
         forceTurnEvents,
       );
-      let heartbeatTimer: NodeJS.Timeout | null =
+      const heartbeatTimer: NodeJS.Timeout | null =
         requestTag || forceTurnEvents
           ? setInterval(() => {
               emitTurnEvent(
@@ -656,12 +655,14 @@ export async function runCustomRpcMode(
             }, TURN_HEARTBEAT_INTERVAL_MS)
           : null;
       try {
-        const taskCompletion = await task(baseline);
+        const taskCompletion =
+          (await task(() => observedCompletion)) || observedCompletion;
         if (!taskCompletion) {
-          if (heartbeatTimer) {
-            clearInterval(heartbeatTimer);
-            heartbeatTimer = null;
-          }
+          const failureMessage = resolveRinTurnFailureMessage(turnSession, [], {
+            retryFailureMessage: latestAutoRetryFailureMessage,
+          });
+          if (failureMessage) throw new Error(failureMessage);
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
           await new Promise<never>(() => {});
         }
         const { messages, completion } = taskCompletion;
@@ -672,10 +673,7 @@ export async function runCustomRpcMode(
             { retryFailureMessage: latestAutoRetryFailureMessage },
           );
           if (failureMessage) throw new Error(failureMessage);
-          if (heartbeatTimer) {
-            clearInterval(heartbeatTimer);
-            heartbeatTimer = null;
-          }
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
           await new Promise<never>(() => {});
         }
         emitTurnEvent(
@@ -709,6 +707,7 @@ export async function runCustomRpcMode(
         if (retryFailureMessage) throw new Error(retryFailureMessage);
         throw error;
       } finally {
+        unsubscribeObservedCompletion?.();
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         if (activeTurnPromise === promise) activeTurnPromise = null;
       }
@@ -719,7 +718,7 @@ export async function runCustomRpcMode(
   const startInterruptTurnTask = (
     requestTag: string,
     task: (
-      baseline: ReturnType<typeof captureRinTurnCompletionBaseline>,
+      getObservedCompletion: () => RinTurnCompletionResolution | null,
     ) => Promise<RinTurnCompletionResolution | null>,
   ) => {
     interruptQueue = interruptQueue
@@ -904,17 +903,25 @@ export async function runCustomRpcMode(
             ),
           );
         }
-        startTurnTask(String(command.requestTag || ""), async (baseline) => {
-          return await runSessionTurnProducer(
-            session,
-            baseline,
-            async () => {
-              await session.prompt(command.message, promptOptions);
-              return null;
-            },
-            { retryFailureMessage: () => latestAutoRetryFailureMessage },
-          );
-        });
+        startTurnTask(
+          String(command.requestTag || ""),
+          async (getObservedCompletion) => {
+            return await runSessionTurnProducer(
+              session,
+              async () => {
+                const result = await session.prompt(
+                  command.message,
+                  promptOptions,
+                );
+                const direct = resolveRinTurnCompletionFromTurnResult(result);
+                return direct.completion.finalText
+                  ? direct
+                  : getObservedCompletion();
+              },
+              { retryFailureMessage: () => latestAutoRetryFailureMessage },
+            );
+          },
+        );
         return done(
           id,
           "prompt",
@@ -926,12 +933,12 @@ export async function runCustomRpcMode(
       case "resume_interrupted_turn":
         startInterruptTurnTask(
           String(command.requestTag || ""),
-          async (baseline) => {
+          async (getObservedCompletion) => {
             return await runSessionTurnProducer(
               session,
-              baseline,
               async () => {
-                return await resumeInterruptedTurn(session);
+                const result = await resumeInterruptedTurn(session);
+                return result || getObservedCompletion();
               },
               { retryFailureMessage: () => latestAutoRetryFailureMessage },
             );
@@ -1190,17 +1197,25 @@ export async function runCustomRpcMode(
           return { sent: true };
         });
       case "send_user_message":
-        startTurnTask(String(command.requestTag || ""), async (baseline) => {
-          return await runSessionTurnProducer(
-            session,
-            baseline,
-            async () => {
-              await session.sendUserMessage(command.content, command.options);
-              return null;
-            },
-            { retryFailureMessage: () => latestAutoRetryFailureMessage },
-          );
-        });
+        startTurnTask(
+          String(command.requestTag || ""),
+          async (getObservedCompletion) => {
+            return await runSessionTurnProducer(
+              session,
+              async () => {
+                const result = await session.sendUserMessage(
+                  command.content,
+                  command.options,
+                );
+                const direct = resolveRinTurnCompletionFromTurnResult(result);
+                return direct.completion.finalText
+                  ? direct
+                  : getObservedCompletion();
+              },
+              { retryFailureMessage: () => latestAutoRetryFailureMessage },
+            );
+          },
+        );
         return done(id, type, { sent: true });
       case "get_commands":
         return done(id, type, {

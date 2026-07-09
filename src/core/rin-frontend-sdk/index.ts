@@ -105,11 +105,9 @@ export {
 } from "./turn-driver.js";
 
 export {
-  captureRinTurnCompletionBaseline,
-  collectRinTurnCompletionMessages,
-  resolveRinTurnCompletionAfterPromptSettled,
+  resolveRinTurnCompletionFromAssistantMessage,
+  resolveRinTurnCompletionFromTurnResult,
   resolveRinTurnFailureMessage,
-  type RinTurnCompletionBaseline,
   type RinTurnCompletionResolution,
 } from "./turn-completion.js";
 

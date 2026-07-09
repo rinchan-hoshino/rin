@@ -8,7 +8,10 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const { resolveRinTurnCompletionAfterPromptSettled } = await import(
+const {
+  resolveRinTurnCompletionFromAssistantMessage,
+  resolveRinTurnCompletionFromTurnResult,
+} = await import(
   pathToFileURL(
     path.join(
       rootDir,
@@ -20,172 +23,31 @@ const { resolveRinTurnCompletionAfterPromptSettled } = await import(
   ).href
 );
 
-test("Rin turn completion resolves durable entries after the turn baseline when the live branch is stale", () => {
-  const baseAssistant = {
-    role: "assistant",
-    content: "previous final must not be reused",
-    timestamp: 1000,
-  };
-  const toolResult = {
-    role: "toolResult",
-    content: "validated work",
-    timestamp: 2000,
-  };
-  const durableFinal = {
-    role: "assistant",
-    content: "durable final from session entries",
-    timestamp: 3000,
-  };
-  const session = {
-    sessionManager: {
-      getBranch: () => [
-        { id: "base-entry", type: "message", message: baseAssistant },
-      ],
-      getEntries: () => [
-        { id: "base-entry", type: "message", message: baseAssistant },
-        {
-          id: "tool-result",
-          parentId: "base-entry",
-          type: "message",
-          message: toolResult,
-        },
-        {
-          id: "durable-final",
-          parentId: "tool-result",
-          type: "message",
-          message: durableFinal,
-        },
-      ],
-      buildSessionContext: () => ({
-        messages: [baseAssistant],
-      }),
-    },
-  };
-
-  const { completion } = resolveRinTurnCompletionAfterPromptSettled(session, {
-    baseline: {
-      turnStartedAtMs: 2000,
-      branchMessageCount: 1,
-      hasBranchLeafId: true,
-      branchLeafId: "base-entry",
-    },
+test("Rin turn completion resolves explicit TurnResult payloads", () => {
+  const { completion } = resolveRinTurnCompletionFromTurnResult({
+    messages: [{ type: "text", text: "explicit final" }],
   });
 
-  assert.equal(completion.finalText, "durable final from session entries");
+  assert.equal(completion.finalText, "explicit final");
 });
 
-test("Rin turn completion falls back to durable post-baseline timestamps when compaction removes the baseline leaf", () => {
-  const compactedSummary = {
-    role: "compactionSummary",
-    content: "summary must not be delivered",
-    timestamp: 2000,
-  };
-  const currentUser = {
-    role: "user",
-    content: "new prompt after compaction",
-    timestamp: 3000,
-  };
-  const currentFinal = {
+test("Rin turn completion resolves the current assistant message_end", () => {
+  const resolution = resolveRinTurnCompletionFromAssistantMessage({
     role: "assistant",
-    content: "final after compaction removed baseline leaf",
-    timestamp: 4000,
-  };
-  const session = {
-    sessionManager: {
-      getBranch: () => [
-        { id: "summary", type: "message", message: compactedSummary },
-        {
-          id: "current-user",
-          parentId: "summary",
-          type: "message",
-          message: currentUser,
-        },
-        {
-          id: "current-final",
-          parentId: "current-user",
-          type: "message",
-          message: currentFinal,
-        },
-      ],
-      getEntries: () => [
-        { id: "summary", type: "message", message: compactedSummary },
-        {
-          id: "current-user",
-          parentId: "summary",
-          type: "message",
-          message: currentUser,
-        },
-        {
-          id: "current-final",
-          parentId: "current-user",
-          type: "message",
-          message: currentFinal,
-        },
-      ],
-      buildSessionContext: () => ({
-        messages: [compactedSummary, currentUser, currentFinal],
-      }),
-      getLeafId: () => "current-final",
-    },
-  };
-
-  const { completion } = resolveRinTurnCompletionAfterPromptSettled(session, {
-    baseline: {
-      turnStartedAtMs: 2500,
-      branchMessageCount: 1,
-      hasBranchLeafId: true,
-      branchLeafId: "pre-compaction-leaf",
-    },
+    content: [{ type: "text", text: "message_end final" }],
   });
 
-  assert.equal(
-    completion.finalText,
-    "final after compaction removed baseline leaf",
-  );
+  assert.equal(resolution?.completion.finalText, "message_end final");
 });
 
-test("Rin turn completion does not resolve final text from live branch or context fallbacks", () => {
-  const oldUser = {
-    role: "user",
-    content: "old prompt",
-    timestamp: 1000,
-  };
-  const oldFinal = {
+test("Rin turn completion does not treat assistant tool-call prefaces as finals", () => {
+  const resolution = resolveRinTurnCompletionFromAssistantMessage({
     role: "assistant",
-    content: "old final must not be reused",
-    timestamp: 2000,
-  };
-  const newUser = {
-    role: "user",
-    content: "new prompt",
-    timestamp: 3000,
-  };
-  const liveBranchFinal = {
-    role: "assistant",
-    content: "live branch final must not be canonical",
-    timestamp: 4000,
-  };
-  const session = {
-    sessionManager: {
-      getBranch: () => [
-        { id: "new-user", type: "message", message: newUser },
-        { id: "new-final", type: "message", message: liveBranchFinal },
-      ],
-      getEntries: () => [],
-      buildSessionContext: () => ({
-        messages: [oldUser, oldFinal, newUser, liveBranchFinal],
-      }),
-    },
-  };
-
-  const { completion } = resolveRinTurnCompletionAfterPromptSettled(session, {
-    baseline: {
-      turnStartedAtMs: 3000,
-      branchMessageCount: 2,
-      hasBranchLeafId: true,
-      branchLeafId: "missing-baseline-leaf",
-    },
+    content: [
+      { type: "text", text: "not final" },
+      { type: "toolCall", name: "read", id: "call-1" },
+    ],
   });
 
-  assert.equal(completion.finalText, "");
+  assert.equal(resolution?.completion.finalText, "");
 });
