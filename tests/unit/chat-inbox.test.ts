@@ -23,6 +23,15 @@ const { saveChatMessage } = await import(
     .href
 );
 
+async function waitUntil(predicate, message) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(message);
+}
+
 test("chat inbox enqueues a durable inbound envelope keyed by chat and message id", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
   const session = {
@@ -1121,6 +1130,284 @@ test("chat inbox drain leaves same-chat backlog pending instead of processing-qu
   assert.equal(claimedJobs.length, 1);
   assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 2);
   assert.equal(inbox.listProcessingChatInboxFiles(agentDir).length, 1);
+});
+
+test("chat inbox drain does not let slow busy-chat admission block other chats", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+  await fs.mkdir(pendingDir, { recursive: true });
+  const now = new Date().toISOString();
+  const slowEnvelope = {
+    version: 1,
+    itemId: "slow-active",
+    chatKey: "telegram/1:slow-active",
+    messageId: "slow-active",
+    createdAt: now,
+    updatedAt: now,
+    attemptCount: 0,
+    routing: { chatType: "private", isDirect: true, mentionLike: false },
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "slow-active",
+      userId: "3",
+      messageId: "slow-active",
+      timestamp: Date.now(),
+      content: "slow",
+      stripped: { content: "slow" },
+    },
+    elements: [{ type: "text", attrs: { content: "slow" } }],
+  };
+  const fastEnvelope = {
+    ...slowEnvelope,
+    itemId: "fast-other-chat",
+    chatKey: "telegram/1:fast-other-chat",
+    messageId: "fast-other-chat",
+    session: {
+      ...slowEnvelope.session,
+      channelId: "fast-other-chat",
+      messageId: "fast-other-chat",
+      content: "fast",
+      stripped: { content: "fast" },
+    },
+    elements: [{ type: "text", attrs: { content: "fast" } }],
+  };
+  await fs.writeFile(
+    path.join(pendingDir, "00-slow.json"),
+    JSON.stringify(slowEnvelope, null, 2),
+  );
+  await fs.writeFile(
+    path.join(pendingDir, "01-fast.json"),
+    JSON.stringify(fastEnvelope, null, 2),
+  );
+
+  const claimedJobs = [];
+  let releaseSlowAdmission;
+  const slowAdmission = new Promise((resolve) => {
+    releaseSlowAdmission = resolve;
+  });
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: (chatKey) => ({
+      claimsInboundMessage: () => false,
+      hasActiveTurn: () => chatKey === "telegram/1:slow-active",
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+    hasActiveChatKeyWorker: (chatKey) => chatKey === "telegram/1:slow-active",
+    canClaimDuringActiveChatKeyWorker: async () => {
+      await slowAdmission;
+      return false;
+    },
+  });
+
+  const drainPromise = drain.drainChatInboxOnce();
+  await waitUntil(
+    () =>
+      claimedJobs.some((job) => job.envelope.messageId === "fast-other-chat"),
+    "slow busy-chat admission blocked an unrelated chat",
+  );
+  releaseSlowAdmission(false);
+  await drainPromise;
+
+  assert.equal(
+    claimedJobs.filter((job) => job.envelope.messageId === "fast-other-chat")
+      .length,
+    1,
+  );
+  assert.equal(
+    claimedJobs.some((job) => job.envelope.messageId === "slow-active"),
+    false,
+  );
+});
+
+test("chat inbox drain serializes async active admission per chat key", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+  await fs.mkdir(pendingDir, { recursive: true });
+  const now = new Date().toISOString();
+  const firstEnvelope = {
+    version: 1,
+    itemId: "same-active-1",
+    chatKey: "telegram/1:same-active",
+    messageId: "same-active-1",
+    createdAt: now,
+    updatedAt: now,
+    attemptCount: 0,
+    routing: { chatType: "private", isDirect: true, mentionLike: false },
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "same-active",
+      userId: "3",
+      messageId: "same-active-1",
+      timestamp: Date.now(),
+      content: "first",
+      stripped: { content: "first" },
+    },
+    elements: [{ type: "text", attrs: { content: "first" } }],
+  };
+  const secondEnvelope = {
+    ...firstEnvelope,
+    itemId: "same-active-2",
+    messageId: "same-active-2",
+    session: {
+      ...firstEnvelope.session,
+      messageId: "same-active-2",
+      content: "second",
+      stripped: { content: "second" },
+    },
+    elements: [{ type: "text", attrs: { content: "second" } }],
+  };
+  await fs.writeFile(
+    path.join(pendingDir, "00-first.json"),
+    JSON.stringify(firstEnvelope, null, 2),
+  );
+  await fs.writeFile(
+    path.join(pendingDir, "01-second.json"),
+    JSON.stringify(secondEnvelope, null, 2),
+  );
+
+  const claimedJobs = [];
+  const admissionCalls = [];
+  let releaseFirstAdmission;
+  const firstAdmission = new Promise((resolve) => {
+    releaseFirstAdmission = resolve;
+  });
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      claimsInboundMessage: () => false,
+      hasActiveTurn: () => true,
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+    hasActiveChatKeyWorker: () => true,
+    canClaimDuringActiveChatKeyWorker: (envelope) => {
+      admissionCalls.push(envelope.messageId);
+      if (envelope.messageId === "same-active-1") return firstAdmission;
+      return Promise.resolve(true);
+    },
+  });
+
+  await drain.drainChatInboxOnce();
+  assert.deepEqual(admissionCalls, ["same-active-1"]);
+  assert.equal(claimedJobs.length, 0);
+
+  releaseFirstAdmission(true);
+  await waitUntil(
+    () => claimedJobs.some((job) => job.envelope.messageId === "same-active-1"),
+    "first active admission did not claim",
+  );
+  await waitUntil(
+    () => admissionCalls.includes("same-active-2"),
+    "second active admission was not started after the first finished",
+  );
+  await waitUntil(
+    () => claimedJobs.some((job) => job.envelope.messageId === "same-active-2"),
+    "second active admission did not claim",
+  );
+
+  assert.deepEqual(
+    claimedJobs.map((job) => job.envelope.messageId),
+    ["same-active-1", "same-active-2"],
+  );
+});
+
+test("chat inbox drain redrains after async admission consumes an already handled item", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-inbox-"));
+  const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+  await fs.mkdir(pendingDir, { recursive: true });
+  const now = new Date().toISOString();
+  const firstEnvelope = {
+    version: 1,
+    itemId: "same-active-consumed-1",
+    chatKey: "telegram/1:same-active-consumed",
+    messageId: "same-active-consumed-1",
+    createdAt: now,
+    updatedAt: now,
+    attemptCount: 0,
+    routing: { chatType: "private", isDirect: true, mentionLike: false },
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "same-active-consumed",
+      userId: "3",
+      messageId: "same-active-consumed-1",
+      timestamp: Date.now(),
+      content: "already handled",
+      stripped: { content: "already handled" },
+    },
+    elements: [{ type: "text", attrs: { content: "already handled" } }],
+  };
+  const secondEnvelope = {
+    ...firstEnvelope,
+    itemId: "same-active-consumed-2",
+    messageId: "same-active-consumed-2",
+    session: {
+      ...firstEnvelope.session,
+      messageId: "same-active-consumed-2",
+      content: "second",
+      stripped: { content: "second" },
+    },
+    elements: [{ type: "text", attrs: { content: "second" } }],
+  };
+  await fs.writeFile(
+    path.join(pendingDir, "00-consumed.json"),
+    JSON.stringify(firstEnvelope, null, 2),
+  );
+  await fs.writeFile(
+    path.join(pendingDir, "01-second.json"),
+    JSON.stringify(secondEnvelope, null, 2),
+  );
+
+  const claimedJobs = [];
+  const admissionCalls = [];
+  let releaseFirstAdmission;
+  const firstAdmission = new Promise((resolve) => {
+    releaseFirstAdmission = resolve;
+  });
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      claimsInboundMessage: () => false,
+      hasActiveTurn: () => true,
+    }),
+    isInboundMessageProcessed: (_chatKey, messageId) =>
+      messageId === "same-active-consumed-1",
+    enqueueClaimedInboxItem: (job) => claimedJobs.push(job),
+    hasActiveChatKeyWorker: () => true,
+    canClaimDuringActiveChatKeyWorker: (envelope) => {
+      admissionCalls.push(envelope.messageId);
+      if (envelope.messageId === "same-active-consumed-1") {
+        return firstAdmission;
+      }
+      return Promise.resolve(true);
+    },
+  });
+
+  await drain.drainChatInboxOnce();
+  assert.deepEqual(admissionCalls, ["same-active-consumed-1"]);
+  assert.equal(claimedJobs.length, 0);
+
+  releaseFirstAdmission(true);
+  await waitUntil(
+    () => admissionCalls.includes("same-active-consumed-2"),
+    "second active admission was not started after first item was consumed",
+  );
+  await waitUntil(
+    () =>
+      claimedJobs.some(
+        (job) => job.envelope.messageId === "same-active-consumed-2",
+      ),
+    "second active admission did not claim after first item was consumed",
+  );
+
+  assert.deepEqual(
+    claimedJobs.map((job) => job.envelope.messageId),
+    ["same-active-consumed-2"],
+  );
+  assert.equal(inbox.listPendingChatInboxFiles(agentDir).length, 0);
 });
 
 test("chat inbox drain only bypasses a busy chat-key worker for active-turn work", async () => {

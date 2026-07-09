@@ -75,6 +75,22 @@ function invalidChatKeyError(chatKey: string) {
   return `invalid_chatKey:${safeString(chatKey).trim()}`;
 }
 
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return Boolean(value && typeof (value as any).then === "function");
+}
+
+type ClaimPendingFileResult =
+  | "claimed"
+  | "consumed"
+  | "retryLater"
+  | "unavailable";
+
+function shouldRedrainAfterAsyncAdmissionResult(
+  result: ClaimPendingFileResult,
+) {
+  return result !== "retryLater";
+}
+
 export function createChatInboxDrain(deps: {
   agentDir: string;
   getController: (chatKey: string) => ChatController;
@@ -87,8 +103,95 @@ export function createChatInboxDrain(deps: {
   ) => boolean | Promise<boolean>;
   logger?: { warn?: (...args: any[]) => void };
 }) {
+  const activeAdmissionChatKeys = new Set<string>();
+  let requestDrainChatInbox: () => void = () => {};
+
   const drainChatInboxOnce = async () => {
     const claimedChatKeys = new Set<string>();
+
+    const claimPendingFile = (
+      filePath: string,
+      pendingController: ChatController,
+      pendingChatKey: string,
+    ): ClaimPendingFileResult => {
+      let claimedPath = "";
+      try {
+        claimedPath = claimChatInboxFile(deps.agentDir, filePath);
+      } catch {
+        return "unavailable";
+      }
+      if (!claimedPath) return "unavailable";
+      const envelope = readChatInboxItem(claimedPath);
+      if (!envelope) {
+        completeChatInboxFile(claimedPath);
+        return "consumed";
+      }
+      const envelopeChatKey = safeString(envelope.chatKey || "").trim();
+      if (!envelopeChatKey || !parseChatKey(envelopeChatKey)) {
+        failChatInboxFile(
+          deps.agentDir,
+          claimedPath,
+          envelope,
+          invalidChatKeyError(envelopeChatKey),
+        );
+        return "consumed";
+      }
+      const nextAttemptAt = Date.parse(
+        safeString(envelope.nextAttemptAt || "").trim(),
+      );
+      if (Number.isFinite(nextAttemptAt) && nextAttemptAt > Date.now()) {
+        restoreChatInboxFile(deps.agentDir, claimedPath, envelope);
+        return "retryLater";
+      }
+      const controller =
+        envelope.chatKey && envelope.chatKey === pendingChatKey
+          ? pendingController
+          : envelope.chatKey
+            ? deps.getController(envelope.chatKey)
+            : null;
+      if (controller?.ownsInboundMessage?.(envelope.messageId)) {
+        completeChatInboxFile(claimedPath);
+        return "consumed";
+      }
+      if (
+        deps.isInboundMessageProcessed(envelope.chatKey, envelope.messageId)
+      ) {
+        completeChatInboxFile(claimedPath);
+        return "consumed";
+      }
+      deps.enqueueClaimedInboxItem({ claimedPath, envelope });
+      claimedChatKeys.add(envelope.chatKey);
+      return "claimed";
+    };
+
+    const scheduleAsyncBusyAdmission = (
+      filePath: string,
+      pendingController: ChatController,
+      pendingChatKey: string,
+      admission: Promise<boolean>,
+    ) => {
+      claimedChatKeys.add(pendingChatKey);
+      activeAdmissionChatKeys.add(pendingChatKey);
+      let shouldRequestDrainAfterAdmission = false;
+      void admission
+        .then((canClaim) => {
+          if (!canClaim) return;
+          shouldRequestDrainAfterAdmission =
+            shouldRedrainAfterAsyncAdmissionResult(
+              claimPendingFile(filePath, pendingController, pendingChatKey),
+            );
+        })
+        .catch((error: any) => {
+          deps.logger?.warn?.(
+            `chat inbox active admission failed chatKey=${pendingChatKey} err=${safeString(error?.message || error)}`,
+          );
+        })
+        .finally(() => {
+          activeAdmissionChatKeys.delete(pendingChatKey);
+          if (shouldRequestDrainAfterAdmission) requestDrainChatInbox();
+        });
+    };
+
     for (const filePath of listPendingChatInboxFiles(deps.agentDir)) {
       const pendingEnvelope = readChatInboxItem(filePath);
       if (!pendingEnvelope) {
@@ -108,71 +211,34 @@ export function createChatInboxDrain(deps: {
       const pendingController = deps.getController(pendingChatKey);
       const hasBusyChatKey = Boolean(
         claimedChatKeys.has(pendingChatKey) ||
+        activeAdmissionChatKeys.has(pendingChatKey) ||
         deps.hasActiveChatKeyWorker?.(pendingChatKey),
       );
-      const canClaimBusyChatKey = hasBusyChatKey
-        ? Boolean(
-            (pendingController as any)?.hasActiveTurn?.() &&
-            (await deps.canClaimDuringActiveChatKeyWorker?.(
-              pendingEnvelope,
-              pendingController,
-            )),
-          )
-        : true;
-      if (!canClaimBusyChatKey) continue;
-      let claimedPath = "";
-      try {
-        claimedPath = claimChatInboxFile(deps.agentDir, filePath);
-      } catch {
-        continue;
-      }
-      if (!claimedPath) continue;
-      const envelope = readChatInboxItem(claimedPath);
-      if (!envelope) {
-        completeChatInboxFile(claimedPath);
-        continue;
-      }
-      const envelopeChatKey = safeString(envelope.chatKey || "").trim();
-      if (!envelopeChatKey || !parseChatKey(envelopeChatKey)) {
-        failChatInboxFile(
-          deps.agentDir,
-          claimedPath,
-          envelope,
-          invalidChatKeyError(envelopeChatKey),
+      if (hasBusyChatKey) {
+        if (activeAdmissionChatKeys.has(pendingChatKey)) continue;
+        if (!(pendingController as any)?.hasActiveTurn?.()) continue;
+        const admission = deps.canClaimDuringActiveChatKeyWorker?.(
+          pendingEnvelope,
+          pendingController,
         );
-        continue;
+        if (isPromiseLike(admission)) {
+          scheduleAsyncBusyAdmission(
+            filePath,
+            pendingController,
+            pendingChatKey,
+            admission,
+          );
+          continue;
+        }
+        if (!admission) continue;
       }
-      const nextAttemptAt = Date.parse(
-        safeString(envelope.nextAttemptAt || "").trim(),
-      );
-      if (Number.isFinite(nextAttemptAt) && nextAttemptAt > Date.now()) {
-        restoreChatInboxFile(deps.agentDir, claimedPath, envelope);
-        continue;
-      }
-      const controller =
-        envelope.chatKey && envelope.chatKey === pendingChatKey
-          ? pendingController
-          : envelope.chatKey
-            ? deps.getController(envelope.chatKey)
-            : null;
-      if (controller?.ownsInboundMessage?.(envelope.messageId)) {
-        completeChatInboxFile(claimedPath);
-        continue;
-      }
-      if (
-        deps.isInboundMessageProcessed(envelope.chatKey, envelope.messageId)
-      ) {
-        completeChatInboxFile(claimedPath);
-        continue;
-      }
-      deps.enqueueClaimedInboxItem({ claimedPath, envelope });
-      claimedChatKeys.add(envelope.chatKey);
+      claimPendingFile(filePath, pendingController, pendingChatKey);
     }
   };
 
   let inboxDrainRunning = false;
   let inboxDrainRequested = false;
-  const requestDrainChatInbox = () => {
+  requestDrainChatInbox = () => {
     inboxDrainRequested = true;
     if (inboxDrainRunning) return;
     inboxDrainRunning = true;

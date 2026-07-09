@@ -10,8 +10,17 @@ export type ChatKeyWorkerPool<T> = {
   hasWorker: (chatKey: string) => boolean;
 };
 
+type ChatKeyWorkerPrepareResult =
+  | { prepared: PreparedChatKeyWorkerJob; error?: never }
+  | { prepared?: never; error: unknown };
+
+type ChatKeyWorkerEntry<T> = {
+  payload: T;
+  prepared: Promise<ChatKeyWorkerPrepareResult>;
+};
+
 type ChatKeyWorker<T> = {
-  queue: T[];
+  queue: ChatKeyWorkerEntry<T>[];
   pumping: boolean;
   activeTasks: Set<Promise<void>>;
 };
@@ -49,29 +58,16 @@ export function createChatKeyWorkerPool<T>(deps: {
     return task;
   };
 
-  const runPreparedPayload = async (
-    worker: ChatKeyWorker<T>,
-    chatKey: string,
-    prepared: PreparedChatKeyWorkerJob,
-  ) => {
-    startPreparedTask(worker, chatKey, prepared);
-  };
-
-  const runPayload = async (
-    worker: ChatKeyWorker<T>,
-    chatKey: string,
+  const prepareEntry = (
     payload: T,
-  ) => {
-    let prepared: PreparedChatKeyWorkerJob;
-    try {
-      prepared = await deps.prepare(payload, chatKey);
-    } catch (error) {
-      await deps.onPrepareError?.(payload, chatKey, error);
-      return;
-    }
-
-    await runPreparedPayload(worker, chatKey, prepared);
-  };
+    chatKey: string,
+  ): ChatKeyWorkerEntry<T> => ({
+    payload,
+    prepared: Promise.resolve()
+      .then(() => deps.prepare(payload, chatKey))
+      .then((prepared) => ({ prepared }))
+      .catch((error) => ({ error })),
+  });
 
   const pump = (chatKey: string) => {
     const worker = workers.get(chatKey);
@@ -80,9 +76,18 @@ export function createChatKeyWorkerPool<T>(deps: {
     void (async () => {
       try {
         while (worker.queue.length) {
-          const payload = worker.queue.shift();
-          if (!payload) continue;
-          await runPayload(worker, chatKey, payload);
+          const entry = worker.queue[0];
+          if (!entry) {
+            worker.queue.shift();
+            continue;
+          }
+          const result = await entry.prepared;
+          worker.queue.shift();
+          if ("error" in result) {
+            await deps.onPrepareError?.(entry.payload, chatKey, result.error);
+            continue;
+          }
+          startPreparedTask(worker, chatKey, result.prepared);
         }
       } finally {
         worker.pumping = false;
@@ -110,7 +115,7 @@ export function createChatKeyWorkerPool<T>(deps: {
         };
         workers.set(key, worker);
       }
-      worker.queue.push(payload);
+      worker.queue.push(prepareEntry(payload, key));
       pump(key);
     },
     hasWorker(chatKey: string) {
