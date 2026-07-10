@@ -384,6 +384,32 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
   assert.doesNotMatch(todoResult, /#1|#2|Checklist add|Added todo|completed/);
 });
 
+test("rpc zero-extension frontend provides Pi's custom entry renderer lookup", () => {
+  const session = new RpcInteractiveSession(
+    {
+      send() {
+        return Promise.resolve({ success: true, data: {} });
+      },
+      subscribe() {
+        return () => {};
+      },
+      isConnected() {
+        return true;
+      },
+    },
+    { noExtensions: true },
+  );
+
+  assert.equal(session.extensionOptions.noExtensions, true);
+  assert.ok(session.getToolDefinition("todo"));
+  assert.ok(session.getToolDefinition("recall"));
+  assert.equal(typeof session.extensionRunner.getEntryRenderer, "function");
+  assert.equal(
+    session.extensionRunner.getEntryRenderer("rin-system-prompt-state"),
+    undefined,
+  );
+});
+
 test("rpc extension command facade is backed by the daemon catalog", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({

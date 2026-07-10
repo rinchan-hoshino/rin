@@ -15,6 +15,7 @@ export { BUILTIN_SLASH_COMMANDS as PI_BUILTIN_SLASH_COMMANDS } from "../../../no
 export { formatKeyText } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/keybinding-hints.js";
 export {
   onThemeChange,
+  stopThemeWatcher,
   theme,
 } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 export {

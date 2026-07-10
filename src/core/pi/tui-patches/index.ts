@@ -1,3 +1,5 @@
+import { writeSync } from "node:fs";
+
 import {
   DynamicBorder,
   FooterComponent,
@@ -13,6 +15,7 @@ import {
   formatKeyText,
   getToolPath,
   onThemeChange,
+  stopThemeWatcher,
   theme,
 } from "../private-api.js";
 import {
@@ -91,6 +94,56 @@ class RinStartupExpandableText extends Text {
 
 function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
+}
+
+export function formatRinFatalError(prefix: unknown, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const headline = `${String(prefix || "TUI failure")}: ${message}`;
+  const stack = error instanceof Error ? String(error.stack || "").trim() : "";
+  const stackHeader =
+    error instanceof Error ? `${error.name}: ${error.message}` : "";
+  const details = stack && stack !== stackHeader ? `\n${stack}` : "";
+  return `\nRin fatal error\n${headline}${details}\n`;
+}
+
+export function writeRinFatalError(prefix: unknown, error: unknown) {
+  let output = "\nRin fatal error\nUnable to format the original failure.\n";
+  try {
+    output = formatRinFatalError(prefix, error);
+  } catch {}
+  try {
+    writeSync(2, output);
+  } catch {
+    try {
+      process.stderr.write(output);
+    } catch {}
+  }
+}
+
+function exitRinTuiAfterFatalError(
+  instance: any,
+  prefix: unknown,
+  error: unknown,
+): never {
+  const cleanupErrors: unknown[] = [];
+  try {
+    try {
+      stopThemeWatcher();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    try {
+      instance.stop();
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+  } finally {
+    writeRinFatalError(prefix, error);
+    for (const cleanupError of cleanupErrors) {
+      writeRinFatalError("TUI cleanup also failed", cleanupError);
+    }
+    process.exit(1);
+  }
 }
 
 const RESUME_SESSION_PROMPT_TEXT = "To resume this session:";
@@ -1345,6 +1398,18 @@ export async function applyRinTuiOverrides() {
       };
   }
 
+  const originalHandleFatalRuntimeError =
+    interactiveModeProto?.handleFatalRuntimeError;
+  if (typeof originalHandleFatalRuntimeError === "function") {
+    interactiveModeProto.handleFatalRuntimeError =
+      function handleFatalRuntimeErrorWithReadableTerminalOutput(
+        prefix: unknown,
+        error: unknown,
+      ) {
+        exitRinTuiAfterFatalError(this, prefix, error);
+      };
+  }
+
   const originalRebindCurrentSession =
     interactiveModeProto?.rebindCurrentSession;
   if (typeof originalRebindCurrentSession === "function") {
@@ -1434,6 +1499,40 @@ export async function applyRinTuiOverrides() {
         this.signalCleanupHandlers.push(() => {
           process.stdin.off("end", terminalClosedHandler);
           process.stdin.off("close", terminalClosedHandler);
+        });
+      };
+  }
+
+  const originalSubscribeToAgent = interactiveModeProto?.subscribeToAgent;
+  if (typeof originalSubscribeToAgent === "function") {
+    interactiveModeProto.subscribeToAgent =
+      function subscribeToAgentWithFatalErrorBoundary() {
+        const handleReportingFailure = (error: unknown) => {
+          writeRinFatalError("Failed to report session event failure", error);
+          process.exit(1);
+        };
+        const handleFailure = (error: unknown) => {
+          let result: unknown;
+          try {
+            result = this.handleFatalRuntimeError(
+              "Failed to handle session event",
+              error,
+            );
+          } catch (reportingError) {
+            handleReportingFailure(reportingError);
+            return;
+          }
+          void Promise.resolve(result).catch(handleReportingFailure);
+        };
+        this.unsubscribe = this.session.subscribe((event: unknown) => {
+          let result: unknown;
+          try {
+            result = this.handleEvent(event);
+          } catch (error) {
+            handleFailure(error);
+            return;
+          }
+          void Promise.resolve(result).catch(handleFailure);
         });
       };
   }

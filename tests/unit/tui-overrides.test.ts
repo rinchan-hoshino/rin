@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +32,10 @@ const loaderModule = await import(
 );
 const piTuiModule = await import("@earendil-works/pi-tui");
 const codingAgentModule = await import("@earendil-works/pi-coding-agent");
+const { RpcInteractiveSession } = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "runtime.js"))
+    .href
+);
 const themeModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "pi", "private-api.js")).href
 );
@@ -67,6 +72,112 @@ function clearStatusIndicatorForTest(kind) {
   this.activeStatusIndicator?.dispose?.();
   this.activeStatusIndicator = undefined;
   this.statusContainer?.clear?.();
+}
+
+function createZeroExtensionCustomEntryRenderInstance() {
+  const rpcSession = new RpcInteractiveSession(
+    {
+      send() {
+        return Promise.resolve({ success: true, data: {} });
+      },
+      subscribe() {
+        return () => {};
+      },
+      isConnected() {
+        return true;
+      },
+    },
+    { noExtensions: true },
+  );
+  const historyMessage = {
+    role: "user",
+    content: [{ type: "text", text: "history after custom state" }],
+  };
+  const entries = [
+    {
+      type: "custom",
+      customType: "rin-system-prompt-state",
+      data: { version: 1, systemPrompt: "core state" },
+    },
+    { type: "message", message: historyMessage },
+  ];
+  const renderedItems = [];
+  const addedMessages = [];
+  let chatClears = 0;
+  let footerInvalidations = 0;
+  const proto = codingAgentModule.InteractiveMode.prototype;
+
+  rpcSession.messages = [historyMessage];
+  rpcSession.state.messages = rpcSession.messages;
+  rpcSession.getFrontendStatusEvent = () => null;
+
+  const instance = {
+    isInitialized: true,
+    session: rpcSession,
+    sessionManager: {
+      buildContextEntries() {
+        return entries;
+      },
+      getEntries() {
+        return entries;
+      },
+    },
+    settingsManager: settingsManagerWithoutTerminalProgress,
+    ui: {
+      terminal: { setProgress() {} },
+      requestRender() {},
+    },
+    chatContainer: {
+      clear() {
+        chatClears += 1;
+      },
+      addChild() {},
+      removeChild() {},
+    },
+    pendingMessagesContainer: { clear() {} },
+    pendingTools: new Map(),
+    defaultEditor: { onEscape() {} },
+    footer: {
+      invalidate() {
+        footerInvalidations += 1;
+      },
+    },
+    statusContainer: { clear() {}, addChild() {} },
+    activeStatusIndicator: undefined,
+    compactionQueuedMessages: [],
+    streamingComponent: undefined,
+    streamingMessage: undefined,
+    renderInitialMessages: proto.renderInitialMessages,
+    renderSessionEntries: proto.renderSessionEntries,
+    addCustomEntryToChat: proto.addCustomEntryToChat,
+    rebuildChatFromMessages: proto.rebuildChatFromMessages,
+    renderSessionItems(items) {
+      for (const item of items) {
+        if (item?.type === "custom") {
+          this.addCustomEntryToChat(item);
+        } else {
+          renderedItems.push(item);
+        }
+      }
+    },
+    addMessageToChat(message) {
+      addedMessages.push(message);
+    },
+    renderProjectTrustWarningIfNeeded() {},
+    showStatus() {},
+    showError() {},
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    flushCompactionQueue() {},
+  };
+
+  return {
+    instance,
+    renderedItems,
+    addedMessages,
+    getChatClears: () => chatClears,
+    getFooterInvalidations: () => footerInvalidations,
+  };
 }
 
 async function writeTuiSessionRecord(agentDir, options) {
@@ -189,6 +300,67 @@ test("shutdown resume hint uses rin command name", async () => {
     );
     assert.doesNotMatch(output, /(^|\s)pi --session-dir/);
   });
+});
+
+test("fatal runtime errors restore the terminal before writing a readable error", () => {
+  const overridesUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "pi", "tui-patches", "index.js"),
+  ).href;
+  const script = `
+    const overrides = await import(${JSON.stringify(overridesUrl)});
+    const codingAgent = await import("@earendil-works/pi-coding-agent");
+    await overrides.applyRinTuiOverrides();
+    await codingAgent.InteractiveMode.prototype.handleFatalRuntimeError.call({
+      stop() { process.stderr.write("terminal-stopped\\n"); },
+      showError() {},
+    }, "Failed to resume session", new Error("renderer exploded"));
+  `;
+
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "--eval", script],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /terminal-stopped/);
+  assert.match(result.stderr, /Rin fatal error/);
+  assert.match(result.stderr, /Failed to resume session: renderer exploded/);
+  assert.ok(
+    result.stderr.indexOf("terminal-stopped") <
+      result.stderr.indexOf("Rin fatal error"),
+    result.stderr,
+  );
+});
+
+test("fatal runtime output survives terminal cleanup failures", () => {
+  const overridesUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "pi", "tui-patches", "index.js"),
+  ).href;
+  const script = `
+    const overrides = await import(${JSON.stringify(overridesUrl)});
+    const codingAgent = await import("@earendil-works/pi-coding-agent");
+    await overrides.applyRinTuiOverrides();
+    await codingAgent.InteractiveMode.prototype.handleFatalRuntimeError.call({
+      stop() {
+        process.stderr.write("terminal-stop-attempted\\n");
+        throw new Error("terminal stop failed");
+      },
+      showError() {},
+    }, "Failed to resume session", new Error("renderer exploded"));
+  `;
+
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "--eval", script],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /terminal-stop-attempted/);
+  assert.match(result.stderr, /Rin fatal error/);
+  assert.match(result.stderr, /Failed to resume session: renderer exploded/);
+  assert.match(result.stderr, /TUI cleanup also failed: terminal stop failed/);
 });
 
 test("startup header override replaces upstream Pi branding with Rin", async () => {
@@ -649,6 +821,20 @@ test("session replacement final render does not inject startup decorations into 
   overrides.renderRinCurrentSessionStateAfterReplacement(instance);
 
   assert.deepEqual(calls, ["messages"]);
+});
+
+test("zero-extension session replacement renders history after Rin core custom entries", async () => {
+  await overrides.applyRinTuiOverrides();
+  const { instance, renderedItems } =
+    createZeroExtensionCustomEntryRenderInstance();
+
+  overrides.renderRinCurrentSessionStateAfterReplacement(instance);
+
+  assert.equal(instance.session.extensionOptions.noExtensions, true);
+  assert.deepEqual(
+    renderedItems.map((message) => message.role),
+    ["user"],
+  );
 });
 
 test("update overrides replace startup update path and keep single changelog version state", async () => {
@@ -1838,6 +2024,63 @@ test("rpc compaction start keeps the dedicated compaction status indicator", asy
   } finally {
     instance.activeStatusIndicator?.dispose?.();
   }
+});
+
+test("async TUI event failures route through the fatal runtime error boundary", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  let listener;
+  let fatal;
+  const instance = {
+    session: {
+      subscribe(callback) {
+        listener = callback;
+        return () => {};
+      },
+    },
+    async handleEvent() {
+      throw new Error("compaction render failed");
+    },
+    async handleFatalRuntimeError(prefix, error) {
+      fatal = { prefix, error };
+    },
+  };
+
+  codingAgentModule.InteractiveMode.prototype.subscribeToAgent.call(instance);
+  const listenerResult = listener({ type: "compaction_end" });
+  await Promise.resolve(listenerResult).catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(fatal?.prefix, "Failed to handle session event");
+  assert.equal(fatal?.error?.message, "compaction render failed");
+});
+
+test("zero-extension compaction end rebuilds history containing Rin core custom entries", async () => {
+  await overrides.applyRinTuiOverrides();
+  const {
+    instance,
+    renderedItems,
+    addedMessages,
+    getChatClears,
+    getFooterInvalidations,
+  } = createZeroExtensionCustomEntryRenderInstance();
+
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "compaction_end",
+    reason: "threshold",
+    aborted: false,
+    result: { summary: "compacted", tokensBefore: 326_000 },
+    willRetry: false,
+  });
+
+  assert.equal(instance.session.extensionOptions.noExtensions, true);
+  assert.deepEqual(
+    renderedItems.map((message) => message.role),
+    ["user"],
+  );
+  assert.equal(addedMessages.at(-1)?.role, "compactionSummary");
+  assert.ok(getChatClears() >= 2);
+  assert.ok(getFooterInvalidations() >= 1);
 });
 
 test("rpc compaction end reattaches the existing Pi-owned loader", async () => {
