@@ -3020,6 +3020,121 @@ test("chat controller uses discord typing and reaction capabilities together", a
   ]);
 });
 
+test("chat controller logs failed discord typing without changing its cadence", async () => {
+  const warnings = [];
+  const controller = await createController("discord/bot-1:channel-1", {
+    logger: {
+      info() {},
+      warn(message) {
+        warnings.push(message);
+      },
+    },
+  });
+  let typingAttempts = 0;
+  let editableTicks = 0;
+  controller.app = {
+    bots: [
+      {
+        platform: "discord",
+        selfId: "bot-1",
+        workingIndicators: [
+          {
+            type: "polling",
+            presentation: "editable-message",
+            async tick() {
+              editableTicks += 1;
+              return true;
+            },
+          },
+          {
+            type: "polling",
+            presentation: "typing",
+            async tick() {
+              typingAttempts += 1;
+              if (typingAttempts === 1) {
+                throw new Error("typing endpoint unavailable");
+              }
+              return true;
+            },
+          },
+        ],
+      },
+    ],
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-discord-heartbeat",
+    workingNoticeSent: false,
+  };
+  controller.driver.frontendState.turnActive = true;
+
+  const originalNow = Date.now;
+  let now = 100_000;
+  Date.now = () => now;
+  try {
+    assert.equal(await controller.pollTyping(), true);
+    assert.equal(typingAttempts, 1);
+    assert.equal(editableTicks, 1);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /typing endpoint unavailable/);
+
+    now += 8_999;
+    assert.equal(await controller.pollTyping(), false);
+    assert.equal(typingAttempts, 1);
+    assert.equal(editableTicks, 1);
+
+    now += 1;
+    assert.equal(await controller.pollTyping(), true);
+    assert.equal(typingAttempts, 2);
+    assert.equal(editableTicks, 2);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("chat controller starts typing immediately after creating editable progress", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  let typingTicks = 0;
+  let editableTicks = 0;
+  controller.app = {
+    bots: [
+      {
+        platform: "discord",
+        selfId: "bot-1",
+        workingIndicators: [
+          {
+            type: "polling",
+            presentation: "editable-message",
+            async tick() {
+              editableTicks += 1;
+              return true;
+            },
+          },
+          {
+            type: "polling",
+            presentation: "typing",
+            async tick() {
+              typingTicks += 1;
+              return true;
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  await controller.beginVisibleProcessingTurn({
+    incomingMessageId: "m-discord-start",
+  });
+  assert.equal(editableTicks, 1);
+  assert.equal(typingTicks, 0);
+
+  controller.driver.frontendState.turnActive = true;
+  assert.equal(await controller.pollTyping(), true);
+  assert.equal(typingTicks, 1);
+  assert.equal(editableTicks, 1);
+});
+
 test("chat controller prioritizes reaction over marker while keeping typing independent", async () => {
   const controller = await createController("discord/bot-1:channel-1");
   const calls: string[] = [];
@@ -3151,6 +3266,100 @@ test("chat controller does not deliver text-only assistant messages as interim",
   assert.deepEqual(deliveries, [
     { text: "Final answer", replyToMessageId: "m-interim" },
   ]);
+});
+
+test("chat controller restores inbound reply identity before connect replays an interim", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  const deliveries = [];
+  controller.deliverAssistantInterim = async function (text) {
+    deliveries.push({
+      text: `… ${text}`,
+      replyToMessageId: this.currentReplyToMessageId() || null,
+    });
+    return true;
+  };
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    deliveries.push({
+      text: deliveryText(this.stagedDelivery),
+      replyToMessageId: this.stagedDelivery?.replyToMessageId || null,
+    });
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+  };
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "restart-interim-chat.jsonl",
+  );
+  saveChatMessage(controller.agentDir, {
+    chatKey: controller.chatKey,
+    platform: "discord",
+    botId: "bot-1",
+    chatId: "channel-1",
+    chatType: "group",
+    messageId: "m-restarted-turn",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "resume after restart",
+  });
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-restart-interim",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-restart-interim",
+    }),
+    prompt: async (_text, options = {}) => {
+      await emitRpcTurnComplete(controller, options, "Final answer");
+    },
+    switchSession: async () => {},
+  };
+  controller.connect = async () => {
+    await controller.handleFrontendEvent({
+      type: "assistant_interim",
+      text: "Recovered progress",
+    });
+  };
+
+  const result = await controller.runTurn({
+    text: "resume after restart",
+    attachments: [],
+    incomingMessageId: "m-restarted-turn",
+    replyToMessageId: "m-restarted-turn",
+  });
+
+  assert.equal(result.finalText, "Final answer");
+  assert.deepEqual(deliveries, [
+    { text: "… Recovered progress", replyToMessageId: "m-restarted-turn" },
+    { text: "Final answer", replyToMessageId: "m-restarted-turn" },
+  ]);
+});
+
+test("chat controller clears a primed reply identity when connect fails", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  controller.connect = async () => {
+    throw new Error("connect failed");
+  };
+
+  await assert.rejects(
+    () =>
+      controller.runTurn({
+        text: "resume after restart",
+        attachments: [],
+        incomingMessageId: "m-connect-failed",
+        replyToMessageId: "m-connect-failed",
+      }),
+    /connect failed/,
+  );
+
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.awaitingTurnSettle, false);
 });
 
 test("chat controller delivers leading tool-call text as the only interim source", async () => {

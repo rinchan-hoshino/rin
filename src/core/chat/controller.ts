@@ -90,6 +90,7 @@ const PLATFORM_TYPING_POLL_INTERVAL_MS: Record<string, number> = {
   discord: 9_000,
 };
 const DEFAULT_TYPING_POLL_INTERVAL_MS = WORKING_REACTION_INTERVAL_MS;
+const TYPING_FAILURE_WARNING_INTERVAL_MS = 30_000;
 
 function detachedControllerStatePath(dataDir: string, chatKey: string) {
   return path.join(
@@ -248,18 +249,33 @@ function pickVisibleWorkingIndicator(indicators: WorkingIndicator[]) {
   );
 }
 
-function selectWorkingIndicatorsForKind(
+function selectTypingIndicatorsForKind(
   indicators: WorkingIndicator[],
   kind: WorkingIndicatorKind,
 ) {
-  const selected: WorkingIndicator[] = indicators.filter(
+  return indicators.filter(
     (indicator) =>
       workingIndicatorKind(indicator) === kind &&
       workingIndicatorPresentation(indicator) === "typing",
   );
+}
+
+function selectVisibleWorkingIndicatorsForKind(
+  indicators: WorkingIndicator[],
+  kind: WorkingIndicatorKind,
+) {
   const visible = pickVisibleWorkingIndicator(indicators);
-  if (visible && workingIndicatorKind(visible) === kind) selected.push(visible);
-  return selected;
+  return visible && workingIndicatorKind(visible) === kind ? [visible] : [];
+}
+
+function selectWorkingIndicatorsForKind(
+  indicators: WorkingIndicator[],
+  kind: WorkingIndicatorKind,
+) {
+  return [
+    ...selectTypingIndicatorsForKind(indicators, kind),
+    ...selectVisibleWorkingIndicatorsForKind(indicators, kind),
+  ];
 }
 
 function selectWorkingIndicatorsForEnd(indicators: WorkingIndicator[]) {
@@ -334,6 +350,8 @@ export class ChatController {
   workingReactionTick = 0;
   lastWorkingReactionAt = 0;
   lastWorkingIndicatorAt = 0;
+  lastTypingIndicatorAt = 0;
+  lastTypingFailureWarningAt = 0;
   activeWorkingIndicators: WorkingIndicator[] = [];
   workingIndicatorTick = 0;
   currentTurn: ChatTurnMeta | null = null;
@@ -342,6 +360,7 @@ export class ChatController {
   compactionReactionTick = 0;
   lastCompactionReactionAt = 0;
   lastCompactionIndicatorAt = 0;
+  lastCompactionTypingIndicatorAt = 0;
   compactionIndicatorTick = 0;
   activeCommandTurnInput: ChatTurnTarget | null = null;
   pendingSteeredDeliveryTargets: ChatTurnTarget[] = [];
@@ -572,6 +591,41 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
   }
 
+  private async prepareTurnPrompt(
+    input: {
+      text: string;
+      attachments: SavedAttachment[];
+      incomingMessageId?: string;
+      replyToMessageId?: string;
+    },
+    deliverFinal: boolean,
+  ) {
+    let primedTurn: ChatTurnMeta | null = null;
+    if (deliverFinal && !this.currentTurn) {
+      // Reconnecting a recovered frontend can replay progress before connect()
+      // resolves. Install the inbox identity first so those updates reuse the
+      // original reply-scoped editable working message instead of creating an
+      // unscoped channel-level message.
+      this.setCurrentTurn(input);
+      primedTurn = this.currentTurn;
+      this.awaitingTurnSettle = true;
+    }
+    try {
+      await this.connect();
+      return await restorePromptParts({
+        text: input.text,
+        attachments: input.attachments,
+        startedAt: Date.now(),
+      });
+    } catch (error) {
+      if (primedTurn && this.currentTurn === primedTurn) {
+        this.awaitingTurnSettle = false;
+        this.clearCurrentTurn();
+      }
+      throw error;
+    }
+  }
+
   private currentTurnMatches(messageId?: string) {
     const current = this.currentIncomingMessageId();
     const target = safeString(messageId || "").trim();
@@ -702,17 +756,60 @@ export class ChatController {
     return Boolean(findBot(this.app, parsed.platform, parsed.botId));
   }
 
+  private chatPlatform() {
+    return parseChatKey(this.chatKey)?.platform.toLowerCase() || "";
+  }
+
   private typingPollIntervalMs() {
-    const platform = parseChatKey(this.chatKey)?.platform.toLowerCase() || "";
     return (
-      PLATFORM_TYPING_POLL_INTERVAL_MS[platform] ||
+      PLATFORM_TYPING_POLL_INTERVAL_MS[this.chatPlatform()] ||
       DEFAULT_TYPING_POLL_INTERVAL_MS
     );
   }
 
-  private isTypingPollDue(lastPolledAt: number, now = Date.now()) {
+  private isTypingHeartbeatDue(lastPolledAt: number, now = Date.now()) {
     return (
       lastPolledAt <= 0 || now - lastPolledAt >= this.typingPollIntervalMs()
+    );
+  }
+
+  private isVisibleWorkingPollDue(lastPolledAt: number, now = Date.now()) {
+    return this.isTypingHeartbeatDue(lastPolledAt, now);
+  }
+
+  private warnTypingIndicatorFailure(error: unknown, now = Date.now()) {
+    if (
+      this.lastTypingFailureWarningAt > 0 &&
+      now - this.lastTypingFailureWarningAt < TYPING_FAILURE_WARNING_INTERVAL_MS
+    ) {
+      return;
+    }
+    this.lastTypingFailureWarningAt = now;
+    this.logger.warn(
+      `chat typing indicator failed chatKey=${this.chatKey} err=${safeString(
+        (error as any)?.message || error,
+      )}`,
+    );
+  }
+
+  private async pollWorkingIndicators(
+    indicators: WorkingIndicator[],
+    context: Record<string, any>,
+    now: number,
+  ) {
+    return await Promise.all(
+      indicators.map(async (indicator) => {
+        try {
+          return Boolean(
+            await this.callWorkingIndicator(indicator, "tick", context),
+          );
+        } catch (error) {
+          if (workingIndicatorPresentation(indicator) === "typing") {
+            this.warnTypingIndicatorFailure(error, now);
+          }
+          return false;
+        }
+      }),
     );
   }
 
@@ -778,6 +875,7 @@ export class ChatController {
     this.workingReactionTick = 0;
     this.lastWorkingReactionAt = 0;
     this.lastWorkingIndicatorAt = 0;
+    this.lastTypingIndicatorAt = 0;
     this.workingIndicatorTick = 0;
     if (!options.preserveTodoNotice) this.latestTodoNoticeText = "";
     const context = this.workingIndicatorContext({
@@ -823,6 +921,7 @@ export class ChatController {
     this.compactionReactionTick = 0;
     this.lastCompactionReactionAt = 0;
     this.lastCompactionIndicatorAt = 0;
+    this.lastCompactionTypingIndicatorAt = 0;
     this.compactionIndicatorTick = 0;
     const context = this.compactionWorkingIndicatorContext({ event: "end" });
     const results = await Promise.all(
@@ -853,13 +952,27 @@ export class ChatController {
     if (!this.canDeliverReplies() || !this.compactionTurn) return false;
     const indicators = this.getWorkingIndicators();
     const now = Date.now();
-    if (!this.isTypingPollDue(this.lastCompactionIndicatorAt, now)) {
-      return false;
-    }
+    const typingIndicators = selectTypingIndicatorsForKind(
+      indicators,
+      "polling",
+    );
+    const visibleIndicators = selectVisibleWorkingIndicatorsForKind(
+      indicators,
+      "polling",
+    );
+    const typingDue =
+      typingIndicators.length > 0 &&
+      this.isTypingHeartbeatDue(this.lastCompactionTypingIndicatorAt, now);
+    const visibleDue =
+      visibleIndicators.length > 0 &&
+      this.isVisibleWorkingPollDue(this.lastCompactionIndicatorAt, now);
+    if (!typingDue && !visibleDue) return false;
+
     const messageId = safeString(
       this.compactionTurn.incomingMessageId || "",
     ).trim();
     const reactionDue =
+      visibleDue &&
       Boolean(messageId) &&
       (this.lastCompactionReactionAt <= 0 ||
         now - this.lastCompactionReactionAt >= WORKING_REACTION_INTERVAL_MS);
@@ -870,29 +983,26 @@ export class ChatController {
       reactionTick: this.compactionReactionTick,
       reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
     });
-    const selected = selectWorkingIndicatorsForKind(indicators, "polling");
-    if (
-      selected.some(
-        (indicator) => workingIndicatorPresentation(indicator) !== "typing",
-      ) ||
-      !this.compactionWorkingIndicators.length
-    ) {
+    const selected = [...typingIndicators, ...visibleIndicators];
+    if (visibleIndicators.length || !this.compactionWorkingIndicators.length) {
       this.compactionWorkingIndicators = selected;
     }
-    const results = await Promise.all(
-      selected.map((indicator) =>
-        this.callWorkingIndicator(indicator, "tick", context).catch(
-          () => false,
-        ),
-      ),
-    );
-    this.lastCompactionIndicatorAt = now;
-    this.compactionIndicatorTick += 1;
+    if (typingDue) this.lastCompactionTypingIndicatorAt = now;
+    if (visibleDue) this.lastCompactionIndicatorAt = now;
+    const [typingResults, visibleResults] = await Promise.all([
+      typingDue
+        ? this.pollWorkingIndicators(typingIndicators, context, now)
+        : Promise.resolve([]),
+      visibleDue
+        ? this.pollWorkingIndicators(visibleIndicators, context, now)
+        : Promise.resolve([]),
+    ]);
+    if (visibleDue) this.compactionIndicatorTick += 1;
     if (reactionDue) {
       this.lastCompactionReactionAt = now;
       this.compactionReactionTick += 1;
     }
-    return results.some(Boolean);
+    return [...typingResults, ...visibleResults].some(Boolean);
   }
 
   private async startEditableWorkingNotice(
@@ -1025,11 +1135,25 @@ export class ChatController {
     }
     const indicators = this.getWorkingIndicators();
     const now = Date.now();
-    if (!this.isTypingPollDue(this.lastWorkingIndicatorAt, now)) {
-      return false;
-    }
+    const typingIndicators = selectTypingIndicatorsForKind(
+      indicators,
+      "polling",
+    );
+    const visibleIndicators = selectVisibleWorkingIndicatorsForKind(
+      indicators,
+      "polling",
+    );
+    const typingDue =
+      typingIndicators.length > 0 &&
+      this.isTypingHeartbeatDue(this.lastTypingIndicatorAt, now);
+    const visibleDue =
+      visibleIndicators.length > 0 &&
+      this.isVisibleWorkingPollDue(this.lastWorkingIndicatorAt, now);
+    if (!typingDue && !visibleDue) return false;
+
     const messageId = this.currentIncomingMessageId();
     const reactionDue =
+      visibleDue &&
       Boolean(messageId) &&
       (this.lastWorkingReactionAt <= 0 ||
         now - this.lastWorkingReactionAt >= WORKING_REACTION_INTERVAL_MS);
@@ -1040,29 +1164,26 @@ export class ChatController {
       reactionTick: this.workingReactionTick,
       reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
     });
-    const selected = selectWorkingIndicatorsForKind(indicators, "polling");
-    if (
-      selected.some(
-        (indicator) => workingIndicatorPresentation(indicator) !== "typing",
-      ) ||
-      !this.activeWorkingIndicators.length
-    ) {
+    const selected = [...typingIndicators, ...visibleIndicators];
+    if (visibleIndicators.length || !this.activeWorkingIndicators.length) {
       this.activeWorkingIndicators = selected;
     }
-    const results = await Promise.all(
-      selected.map((indicator) =>
-        this.callWorkingIndicator(indicator, "tick", context).catch(
-          () => false,
-        ),
-      ),
-    );
-    this.lastWorkingIndicatorAt = now;
-    this.workingIndicatorTick += 1;
+    if (typingDue) this.lastTypingIndicatorAt = now;
+    if (visibleDue) this.lastWorkingIndicatorAt = now;
+    const [typingResults, visibleResults] = await Promise.all([
+      typingDue
+        ? this.pollWorkingIndicators(typingIndicators, context, now)
+        : Promise.resolve([]),
+      visibleDue
+        ? this.pollWorkingIndicators(visibleIndicators, context, now)
+        : Promise.resolve([]),
+    ]);
+    if (visibleDue) this.workingIndicatorTick += 1;
     if (reactionDue) {
       this.lastWorkingReactionAt = now;
       this.workingReactionTick += 1;
     }
-    return results.some(Boolean);
+    return [...typingResults, ...visibleResults].some(Boolean);
   }
 
   private async runExclusiveTurn<T>(run: () => Promise<T>) {
@@ -2044,12 +2165,10 @@ export class ChatController {
           ? safeString(input.managedSessionLeaf).trim() ||
             this.managedSessionLeafForFreshChat()
           : undefined;
-      await this.connect();
-      const { text, images } = await restorePromptParts({
-        text: input.text,
-        attachments: input.attachments,
-        startedAt: Date.now(),
-      });
+      const { text, images } = await this.prepareTurnPrompt(
+        input,
+        deliverFinal,
+      );
       const submittedText = formatPromptForChatContext(text, input.promptMeta);
       const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
         text: submittedText,
@@ -2150,12 +2269,10 @@ export class ChatController {
           ? safeString(input.managedSessionLeaf).trim() ||
             this.managedSessionLeafForFreshChat()
           : undefined;
-      await this.connect();
-      const { text, images } = await restorePromptParts({
-        text: input.text,
-        attachments: input.attachments,
-        startedAt: Date.now(),
-      });
+      const { text, images } = await this.prepareTurnPrompt(
+        input,
+        deliverFinal,
+      );
       if (deliverFinal) {
         await this.beginVisibleProcessingTurn({
           incomingMessageId: input.incomingMessageId,
