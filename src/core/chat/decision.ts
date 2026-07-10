@@ -338,8 +338,10 @@ export async function shouldProcessText(
       requiresMentionToStartTurn: chatType === "group",
     };
   }
+  const mentionsBot = chatType === "group" && mentionLike(session);
   const privateLikeGroup =
     chatType === "group" &&
+    !mentionsBot &&
     (await isPrivateLikeGroupSession(session, identity, context));
   const ownerPresent =
     chatType === "private" ||
@@ -349,7 +351,7 @@ export async function shouldProcessText(
     canAccessAgentInput({
       chatType,
       trust: context.trust,
-      mentionLike: mentionLike(session),
+      mentionLike: mentionsBot,
       commandLike: false,
       allowWithoutMention: privateLikeGroup,
     });
