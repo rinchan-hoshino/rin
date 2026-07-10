@@ -3,6 +3,7 @@ import type {
   AgentMessage,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
+import { buildContextEntries } from "@earendil-works/pi-coding-agent";
 
 import { asArray } from "../json-utils.js";
 import { safeString } from "../text-utils.js";
@@ -440,6 +441,8 @@ export class RpcInteractiveSession {
       getEntry: (id: string) => this.entryById.get(id),
       getLabel: (id: string) => this.labelsById.get(id),
       getBranch: (fromId?: string) => this.getBranch(fromId),
+      buildContextEntries: () =>
+        buildContextEntries(this.entries, this.leafId, this.entryById),
       buildSessionContext: () => this.buildSessionContext(),
       getEntries: () => [...this.entries],
       getSessionName: () => this.sessionName,

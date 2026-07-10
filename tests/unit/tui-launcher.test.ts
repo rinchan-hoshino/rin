@@ -213,6 +213,23 @@ test("rpc startup initializes interactive mode without extra notice flush", asyn
   assert.deepEqual(calls, ["init"]);
 });
 
+test("tui waits for pending terminal replies before stopping after startup failure", async () => {
+  const calls: string[] = [];
+
+  await launcher.stopInteractiveModeAfterTerminalQueries(
+    {
+      stop() {
+        calls.push("stop");
+      },
+    },
+    async (delayMs: number) => {
+      calls.push(`wait:${delayMs}`);
+    },
+  );
+
+  assert.deepEqual(calls, ["wait:150", "stop"]);
+});
+
 test("tui launcher clears the visible viewport before taking over the terminal", () => {
   const writes: string[] = [];
   launcher.clearVisibleTerminalForTuiStartup({

@@ -114,6 +114,7 @@ const RPC_TUI_STARTUP_TRANSIENT_ERROR_RE =
 const RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS = 30_000;
 const RPC_STARTUP_DAEMON_STATUS_POLL_MS = 150;
 const RPC_STARTUP_READY_TIMEOUT_MS = 10_000;
+const TUI_TERMINAL_QUERY_SETTLE_MS = 150;
 
 function errorMessage(error: unknown) {
   return rawErrorMessage(error);
@@ -174,6 +175,15 @@ function waitForRpcStartupStep<T>(operation: Promise<T>, label: string) {
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(1, ms)));
+}
+
+export async function stopInteractiveModeAfterTerminalQueries(
+  interactiveMode: Pick<InteractiveMode, "stop">,
+  wait: (delayMs: number) => Promise<unknown> = sleep,
+) {
+  // Keep Pi's stdin handler alive long enough to consume terminal query replies.
+  await wait(TUI_TERMINAL_QUERY_SETTLE_MS);
+  interactiveMode.stop?.();
 }
 
 export async function isDaemonReadyForRpcStartup(
@@ -317,7 +327,7 @@ async function runInteractiveMode(
   try {
     await interactiveMode.run();
   } catch (error) {
-    interactiveMode.stop?.();
+    await stopInteractiveModeAfterTerminalQueries(interactiveMode);
     throw error;
   }
 }
@@ -425,7 +435,9 @@ async function startRpcTui(
     );
     await initializeRpcInteractiveModeForStartup(interactiveMode, rpcSession);
   } catch (error) {
-    interactiveMode?.stop?.();
+    if (interactiveMode) {
+      await stopInteractiveModeAfterTerminalQueries(interactiveMode);
+    }
     if (runtimeHost) {
       await runtimeHost.dispose().catch(() => {});
     } else {

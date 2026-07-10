@@ -280,6 +280,10 @@ test("Rin update notice appends like the upstream Pi update notification", () =>
 function createResourceChromeInstance() {
   const chatContainer = new piTuiModule.Container();
   const loadedResourcesContainer = new piTuiModule.Container();
+  const historyMessage = {
+    role: "user",
+    content: [{ type: "text", text: "history line" }],
+  };
   const proto = codingAgentModule.InteractiveMode.prototype;
   const instance = {
     chatContainer,
@@ -338,16 +342,19 @@ function createResourceChromeInstance() {
       getEntries() {
         return [];
       },
-      buildSessionContext() {
-        return {
-          messages: [
-            {
-              role: "user",
-              content: [{ type: "text", text: "history line" }],
-            },
-          ],
-        };
+      buildContextEntries() {
+        return [{ type: "message", message: historyMessage }];
       },
+      buildSessionContext() {
+        return { messages: [historyMessage] };
+      },
+    },
+    renderSessionEntries(entries) {
+      this.renderSessionContext({
+        messages: entries.flatMap((entry) =>
+          entry.type === "message" ? [entry.message] : [],
+        ),
+      });
     },
     renderSessionContext(context) {
       for (const message of context.messages || []) {
@@ -1514,6 +1521,9 @@ test("rpc session resync redraw does not replay initial compaction status notice
       directHistoryRenders += 1;
     },
     sessionManager: {
+      buildContextEntries() {
+        return [];
+      },
       buildSessionContext() {
         return { messages: [] };
       },
@@ -1521,6 +1531,7 @@ test("rpc session resync redraw does not replay initial compaction status notice
         return [{ type: "compaction" }];
       },
     },
+    renderSessionEntries() {},
     showStatus(message) {
       statusMessages.push(message);
     },

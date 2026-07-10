@@ -1450,7 +1450,7 @@ test("rpc runtime normalizes daemon session listings into canonical session meta
   );
 });
 
-test("rpc runtime rebuilds session context from entries when messages are stale", () => {
+test("rpc runtime rebuilds Pi session context and active entries from snapshot state", () => {
   const session = new RpcInteractiveSession({
     send() {
       return Promise.resolve({ success: true, data: {} });
@@ -1487,6 +1487,12 @@ test("rpc runtime rebuilds session context from entries when messages are stale"
       type: "message",
       message: { role: "assistant", content: "world" },
     },
+    {
+      id: "m3",
+      parentId: "m1",
+      type: "message",
+      message: { role: "assistant", content: "inactive sibling" },
+    },
   ];
   session.entryById = new Map(
     session.entries.map((entry) => [entry.id, entry]),
@@ -1499,6 +1505,12 @@ test("rpc runtime rebuilds session context from entries when messages are stale"
     { role: "user", content: "hello" },
     { role: "assistant", content: "world" },
   ]);
+  assert.deepEqual(
+    session.sessionManager
+      .buildContextEntries()
+      .map((entry: { id: string }) => entry.id),
+    ["m1", "m2"],
+  );
 });
 
 test("rpc runtime promotes a temporary worker session before the first prompt", async () => {
