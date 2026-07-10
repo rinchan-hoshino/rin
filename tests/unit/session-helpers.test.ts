@@ -43,6 +43,7 @@ test("session helpers share deterministic thinking-level availability", () => {
     "medium",
     "high",
     "xhigh",
+    "max",
   ]);
   assert.deepEqual(sessionHelpers.computeAvailableThinkingLevels(standard), [
     "off",
@@ -62,6 +63,15 @@ test("session helpers share deterministic thinking-level availability", () => {
       thinkingLevelMap: { off: null, xhigh: "max" },
     }),
     ["minimal", "low", "medium", "high", "xhigh"],
+  );
+  assert.deepEqual(
+    sessionHelpers.computeAvailableThinkingLevels({
+      provider: "openai",
+      id: "gpt-5.6-sol",
+      reasoning: true,
+      thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+    }),
+    ["minimal", "low", "medium", "high", "xhigh", "max"],
   );
 });
 

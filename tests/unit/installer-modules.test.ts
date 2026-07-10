@@ -118,7 +118,7 @@ test("provider-auth computes available thinking levels deterministically", () =>
       id: "codex-max",
       reasoning: true,
     }),
-    ["off", "minimal", "low", "medium", "high", "xhigh"],
+    ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
   );
   assert.deepEqual(
     provider.computeAvailableThinkingLevels({
@@ -146,6 +146,15 @@ test("provider-auth computes available thinking levels deterministically", () =>
     }),
     ["minimal", "low", "medium", "high", "xhigh"],
   );
+  assert.deepEqual(
+    provider.computeAvailableThinkingLevels({
+      provider: "openai",
+      id: "gpt-5.6-sol",
+      reasoning: true,
+      thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+    }),
+    ["minimal", "low", "medium", "high", "xhigh", "max"],
+  );
 
   const first = provider.computeAvailableThinkingLevels({
     provider: "openai",
@@ -159,7 +168,7 @@ test("provider-auth computes available thinking levels deterministically", () =>
       id: "codex-max",
       reasoning: true,
     }),
-    ["off", "minimal", "low", "medium", "high", "xhigh"],
+    ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
   );
 });
 

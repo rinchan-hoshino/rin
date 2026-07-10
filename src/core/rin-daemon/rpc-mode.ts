@@ -43,6 +43,7 @@ const THINKING_LEVEL_ORDER = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ];
 
 type PendingExtensionUiRequest = {

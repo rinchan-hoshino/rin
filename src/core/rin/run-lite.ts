@@ -11,7 +11,7 @@ Options:
   --print, -p                    Non-interactive mode: process prompt and exit
   --provider <name>              Provider name
   --model <provider/model>       Model pattern or ID (supports provider/model)
-  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
+  --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh, max
   --session <file>               Use a specific session file
   --managed-session <leaf>       Create and keep a session under sessions/managed/<leaf>/
   --name <name>                  Set the session display name

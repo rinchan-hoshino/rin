@@ -16,13 +16,14 @@ export const ALL_THINKING_LEVELS = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ] as const satisfies ThinkingLevel[];
 
 export type AvailableThinkingLevel = (typeof ALL_THINKING_LEVELS)[number];
 
 const OFF_ONLY_THINKING_LEVELS = ["off"] as const satisfies ThinkingLevel[];
 const STANDARD_REASONING_THINKING_LEVELS = ALL_THINKING_LEVELS.filter(
-  (level) => level !== "xhigh",
+  (level) => level !== "xhigh" && level !== "max",
 );
 
 function normalizeModelText(value: string | null | undefined) {

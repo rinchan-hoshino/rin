@@ -383,7 +383,7 @@ function buildAssistantDesktopHtml() {
     <div class="panel">
       <label>Provider<input id="setting-provider" placeholder="openai" /></label>
       <label>Model<input id="setting-model" placeholder="provider/model" /></label>
-      <label>Thinking<select id="setting-thinking"><option value="">Default</option><option>off</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select></label>
+      <label>Thinking<select id="setting-thinking"><option value="">Default</option><option>off</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
       <label>Language<input id="setting-language" placeholder="zh_CN" /></label>
       <div class="toolbar"><button id="save-settings" type="button">Save settings</button><button id="refresh-runtime" type="button">Refresh runtime</button></div>
       <h2>Built-In Extensions</h2><div id="builtin-extensions" class="list"></div>
