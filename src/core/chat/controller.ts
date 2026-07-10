@@ -449,7 +449,7 @@ export class ChatController {
   async connect(options: { restoreSession?: boolean } = {}) {
     const restoreSessionFile =
       options.restoreSession === false ? "" : this.getRecoverableSessionFile();
-    await this.driver.connect({ restoreSessionFile });
+    const connected = await this.driver.connect({ restoreSessionFile });
     if (this.affectChatBinding && restoreSessionFile) {
       this.updateStoredSessionFile(
         this.driver.currentSessionFile(),
@@ -457,6 +457,7 @@ export class ChatController {
       );
       this.saveState();
     }
+    return connected;
   }
 
   dispose() {
@@ -611,12 +612,15 @@ export class ChatController {
       this.awaitingTurnSettle = true;
     }
     try {
-      await this.connect();
-      return await restorePromptParts({
-        text: input.text,
-        attachments: input.attachments,
-        startedAt: Date.now(),
-      });
+      const frontendReady = await this.connect();
+      return {
+        ...(await restorePromptParts({
+          text: input.text,
+          attachments: input.attachments,
+          startedAt: Date.now(),
+        })),
+        frontendReady,
+      };
     } catch (error) {
       if (primedTurn && this.currentTurn === primedTurn) {
         this.awaitingTurnSettle = false;
@@ -2048,12 +2052,22 @@ export class ChatController {
         await this.connect({ restoreSession: true });
         this.driver.interruptActiveTurnLikeTui();
       }
-      await this.connect({ restoreSession: !skipSessionRecovery });
+      const frontendReady = await this.connect({
+        restoreSession: !skipSessionRecovery,
+      });
       if (commandPolicy.acceptInboundBeforeExecution) {
         this.markAcceptedMessage(incomingMessageId);
       }
 
       let data: any = await this.driver.runCommand(commandLine, {
+        assumeConnected: frontendReady === true,
+        assumeSessionReady:
+          frontendReady === true &&
+          sameSessionFile(
+            this.agentDir,
+            this.driver.currentSessionFile(),
+            restoreSessionFile,
+          ),
         skipSessionRecovery,
         restoreSessionFile,
         sessionFile: explicitSessionFile,
@@ -2165,7 +2179,7 @@ export class ChatController {
           ? safeString(input.managedSessionLeaf).trim() ||
             this.managedSessionLeafForFreshChat()
           : undefined;
-      const { text, images } = await this.prepareTurnPrompt(
+      const { text, images, frontendReady } = await this.prepareTurnPrompt(
         input,
         deliverFinal,
       );
@@ -2173,6 +2187,14 @@ export class ChatController {
       const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
         text: submittedText,
         images,
+        assumeConnected: frontendReady === true,
+        assumeSessionReady:
+          frontendReady === true &&
+          sameSessionFile(
+            this.agentDir,
+            this.driver.currentSessionFile(),
+            restoreSessionFile,
+          ),
         sessionFile: wantedSessionFile,
         restoreSessionFile,
         managedSessionLeaf,
@@ -2269,7 +2291,7 @@ export class ChatController {
           ? safeString(input.managedSessionLeaf).trim() ||
             this.managedSessionLeafForFreshChat()
           : undefined;
-      const { text, images } = await this.prepareTurnPrompt(
+      const { text, images, frontendReady } = await this.prepareTurnPrompt(
         input,
         deliverFinal,
       );
@@ -2290,6 +2312,14 @@ export class ChatController {
         const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
           text: submittedText,
           images,
+          assumeConnected: frontendReady === true,
+          assumeSessionReady:
+            frontendReady === true &&
+            sameSessionFile(
+              this.agentDir,
+              this.driver.currentSessionFile(),
+              restoreSessionFile,
+            ),
           sessionFile: wantedSessionFile,
           restoreSessionFile,
           managedSessionLeaf,

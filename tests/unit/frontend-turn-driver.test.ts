@@ -375,6 +375,57 @@ test("frontend SDK turn driver applies Pi startup options before prompt submissi
   });
 });
 
+test("frontend SDK turn driver reuses the controller-restored command session", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  let stateCalls = 0;
+  const originalGetState = client.getState.bind(client);
+  client.getState = async () => {
+    stateCalls += 1;
+    return await originalGetState();
+  };
+
+  await driver.connect({ restoreSessionFile: "/tmp/frontend-chat.jsonl" });
+  const result = await driver.runCommand("/usage", {
+    assumeConnected: true,
+    assumeSessionReady: true,
+    restoreSessionFile: "/tmp/frontend-chat.jsonl",
+  });
+
+  assert.equal(result.text, "command done");
+  assert.equal(stateCalls, 1);
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "resumeSession"),
+    [{ type: "resumeSession", sessionFile: "/tmp/frontend-chat.jsonl" }],
+  );
+});
+
+test("frontend SDK turn driver reuses the controller-restored prompt session", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  let stateCalls = 0;
+  const originalGetState = client.getState.bind(client);
+  client.getState = async () => {
+    stateCalls += 1;
+    return await originalGetState();
+  };
+
+  await driver.connect({ restoreSessionFile: "/tmp/frontend-chat.jsonl" });
+  const result = await driver.runTurn({
+    text: "hello",
+    assumeConnected: true,
+    assumeSessionReady: true,
+    restoreSessionFile: "/tmp/frontend-chat.jsonl",
+  });
+
+  assert.equal(result.finalText, "frontend final");
+  assert.equal(stateCalls, 2);
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "resumeSession"),
+    [{ type: "resumeSession", sessionFile: "/tmp/frontend-chat.jsonl" }],
+  );
+});
+
 test("frontend SDK turn driver routes compact through the native compact client method", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;

@@ -705,6 +705,8 @@ export class RinFrontendTurnDriver {
   async runCommand(
     commandLine: string,
     options: {
+      assumeConnected?: boolean;
+      assumeSessionReady?: boolean;
       skipSessionRecovery?: boolean;
       restoreSessionFile?: string;
       sessionFile?: string;
@@ -735,7 +737,12 @@ export class RinFrontendTurnDriver {
         this.interruptActiveTurnLikeTui();
       }
     }
-    await this.connect();
+    if (options.assumeConnected) {
+      if (!this.client?.isConnected())
+        throw new Error("frontend_session_not_connected");
+    } else {
+      await this.connect();
+    }
     if (!this.client) throw new Error("frontend_session_not_connected");
     if (isFrontendNewSessionCommand(commandLine)) {
       if (sessionFile && !managedSessionLeaf) {
@@ -788,12 +795,17 @@ export class RinFrontendTurnDriver {
         throw missingSessionFileError(sessionFile);
       if (skipSessionRecovery) await this.selectSessionTarget(sessionFile);
     }
-    const ready = !skipSessionRecovery
-      ? await this.ensureSessionReady(
-          sessionFile || restoreSessionFile,
-          managedSessionLeaf,
-        )
-      : undefined;
+    const ready = options.assumeSessionReady
+      ? {
+          sessionId: this.currentSessionId() || undefined,
+          sessionFile: this.currentSessionFile() || undefined,
+        }
+      : !skipSessionRecovery
+        ? await this.ensureSessionReady(
+            sessionFile || restoreSessionFile,
+            managedSessionLeaf,
+          )
+        : undefined;
     const targetSessionFile = this.sessionFileFromReady(
       ready,
       sessionFile || restoreSessionFile,
@@ -1215,6 +1227,8 @@ export class RinFrontendTurnDriver {
       source?: string;
       requestTag?: string;
       streamingBehavior?: "steer" | "follow";
+      assumeConnected?: boolean;
+      assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
       disabledRinCapabilities?: string[];
     } & RinToolStartupOptions,
@@ -1230,7 +1244,12 @@ export class RinFrontendTurnDriver {
       const managedSessionLeaf = safeString(
         input.managedSessionLeaf || "",
       ).trim();
-      await this.connect();
+      if (input.assumeConnected) {
+        if (!this.client?.isConnected())
+          throw new Error("frontend_session_not_connected");
+      } else {
+        await this.connect();
+      }
       if (!this.client) throw new Error("frontend_session_not_connected");
       if (
         sessionFile &&
@@ -1239,11 +1258,16 @@ export class RinFrontendTurnDriver {
       ) {
         throw missingSessionFileError(sessionFile);
       }
-      const ready = await this.ensureSessionReady(
-        sessionFile || restoreSessionFile,
-        managedSessionLeaf,
-        input,
-      );
+      const ready = input.assumeSessionReady
+        ? {
+            sessionId: this.currentSessionId() || undefined,
+            sessionFile: this.currentSessionFile() || undefined,
+          }
+        : await this.ensureSessionReady(
+            sessionFile || restoreSessionFile,
+            managedSessionLeaf,
+            input,
+          );
       const targetSessionFile = this.sessionFileFromReady(
         ready,
         sessionFile || restoreSessionFile,

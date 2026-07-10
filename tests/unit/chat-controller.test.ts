@@ -106,6 +106,107 @@ function createRecoveredController(previousController) {
   return attachTestChatApp(controller);
 }
 
+test("chat controller tells the frontend driver not to reconnect for an idle command", async () => {
+  const controller = await createController();
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "existing-command.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "");
+  controller.updateStoredSessionFile(sessionFile);
+  let controllerConnectCalls = 0;
+  let commandOptions;
+  controller.connect = async () => {
+    controllerConnectCalls += 1;
+    controller.driver.client = { isConnected: () => true };
+    controller.driver.frontendState = { sessionFile };
+    return true;
+  };
+  controller.driver.runCommand = async (_commandLine, options) => {
+    commandOptions = options;
+    return { handled: true, text: "usage done" };
+  };
+  controller.deliverAssistantReply = async () => {};
+
+  await controller.runCommand("/usage");
+
+  assert.equal(controllerConnectCalls, 1);
+  assert.equal(commandOptions?.assumeConnected, true);
+  assert.equal(commandOptions?.assumeSessionReady, true);
+});
+
+test("chat controller tells the frontend driver not to reconnect for a prompt", async () => {
+  const controller = await createController();
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "existing-prompt.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "");
+  controller.updateStoredSessionFile(sessionFile);
+  let controllerConnectCalls = 0;
+  let turnInput;
+  controller.connect = async () => {
+    controllerConnectCalls += 1;
+    controller.driver.client = { isConnected: () => true };
+    controller.driver.frontendState = { sessionFile };
+    return true;
+  };
+  controller.driver.runTurn = async (input) => {
+    turnInput = input;
+    return { finalText: "done" };
+  };
+
+  await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    deliverFinal: false,
+  });
+
+  assert.equal(controllerConnectCalls, 1);
+  assert.equal(turnInput?.assumeConnected, true);
+  assert.equal(turnInput?.assumeSessionReady, true);
+});
+
+test("chat controller does not assume session readiness after an ineffective restore", async () => {
+  const controller = await createController();
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "wanted-command.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "");
+  controller.updateStoredSessionFile(sessionFile);
+  let commandOptions;
+  controller.connect = async () => {
+    controller.driver.client = { isConnected: () => true };
+    controller.driver.frontendState = {
+      sessionFile: path.join(controller.agentDir, "sessions", "other.jsonl"),
+    };
+    return true;
+  };
+  controller.driver.runCommand = async (_commandLine, options) => {
+    commandOptions = options;
+    return { handled: true, text: "usage done" };
+  };
+  controller.deliverAssistantReply = async () => {};
+
+  await controller.runCommand("/usage");
+
+  assert.equal(commandOptions?.assumeConnected, true);
+  assert.equal(commandOptions?.assumeSessionReady, false);
+});
+
 test("chat controller keeps the inbox request tag stable across frontend recreation", async () => {
   const first = await createController("discord/1:2");
   const second = createRecoveredController(first);
