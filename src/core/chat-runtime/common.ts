@@ -433,6 +433,11 @@ export function renderTelegramHtmlFromNodes(
   return renderChatNodesTelegramHtml(nodes, options);
 }
 
+export function isEditableProgressDeliveryKind(value: unknown) {
+  const deliveryKind = safeString(value).trim();
+  return deliveryKind === "interim" || deliveryKind === "passive_notice";
+}
+
 export function renderRichDeliveryErrorPlaceholder(error: unknown) {
   const message = (
     safeString((error as any)?.message || error) || "send_failed"

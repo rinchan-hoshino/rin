@@ -318,6 +318,63 @@ test("discord adapter keeps working, content, and todo editable before final tex
   });
 });
 
+test("discord adapter sends errors beside editable progress", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    const channel = {
+      send: async (payload: any) => {
+        const id = String(messages.size + 1);
+        const message = {
+          id,
+          payload,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            message.payload = nextPayload;
+            return message;
+          },
+        };
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => calls.push({ method: "delete", id }),
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C1", tick: 0 });
+    const error = await app.bots[0].sendMessage(
+      "C1",
+      [h.text("rin error: failed")],
+      { deliveryKind: "error", coalesceWithWorkingMessage: true },
+    );
+    await editable.tick({ chatId: "C1", tick: 1 });
+
+    assert.deepEqual(error, ["2"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "send", "edit"],
+    );
+    assert.equal(calls[0].id, "1");
+    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[1].id, "2");
+    assert.equal(calls[1].payload.content, "rin error: failed");
+    assert.equal(calls[2].id, "1");
+    assert.equal(calls[2].payload.content, "Working");
+  });
+});
+
 test("discord adapter uses neutral working frames without custom config", async () => {
   await withTempDir(async (agentDir) => {
     await fs.writeFile(
@@ -657,6 +714,42 @@ test("telegram adapter keeps working and todo editable before final text", async
     assert.match(calls[4].payload.text, /\n\n\[ \] first task$/);
     assert.equal(calls[5].payload.message_id, 2);
     assert.equal(calls[6].payload.text, "done");
+  });
+});
+
+test("telegram adapter sends errors beside editable progress", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      if (method === "sendMessage") return { message_id: String(calls.length) };
+      return { message_id: payload?.message_id };
+    };
+
+    await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 0 });
+    const error = await app.bots[0].sendMessage(
+      "456",
+      [h.text("rin error: failed")],
+      { deliveryKind: "error", coalesceWithWorkingMessage: true },
+    );
+    await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 1 });
+
+    assert.deepEqual(error, ["2"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["sendMessage", "sendMessage", "editMessageText"],
+    );
+    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[1].payload.text, "rin error: failed");
+    assert.equal(calls[2].payload.message_id, 1);
+    assert.equal(calls[2].payload.text, "Working");
   });
 });
 

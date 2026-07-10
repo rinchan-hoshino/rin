@@ -2140,7 +2140,7 @@ test("chat main reports daemon startup failure without retrying", async () => {
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
       const errorNotice = rows.find((item) => String(item.text || "").includes("connect ENOENT"));
       const succeeded = rows.some((item) => item.text === "retry reply");
-      if (succeeded || !errorNotice || connectCalls !== 1) {
+      if (succeeded || !errorNotice || errorNotice.deliveryKind !== "error" || connectCalls !== 1) {
         throw new Error(JSON.stringify({ connectCalls, errorNotice, rows }));
       }
       process.exit(0);

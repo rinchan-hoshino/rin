@@ -128,7 +128,7 @@ type ChatTurnMeta = ChatTurnTarget & {
 
 type ChatAssistantDelivery = {
   chatKey: string;
-  deliveryKind?: "final" | "interim" | "passive_notice";
+  deliveryKind?: "final" | "interim" | "passive_notice" | "error";
   parts: ChatMessagePart[];
   replyToMessageId?: string;
   coalesceWithWorkingMessage?: boolean;
@@ -156,15 +156,11 @@ function todoNoticeRenderModeForChatKey(chatKey: string): TodoNoticeRenderMode {
 
 function formatTodoNoticeText(
   todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
-  error?: string,
   mode: Exclude<TodoNoticeRenderMode, "native"> = "characters",
 ) {
-  const body =
-    mode === "markdown"
-      ? formatRinTodoChecklistMarkdownContent(todos)
-      : formatRinTodoChecklistCharacterContent(todos);
-  const errorText = safeString(error).trim();
-  return errorText ? `Error: ${errorText}\n${body}` : body;
+  return mode === "markdown"
+    ? formatRinTodoChecklistMarkdownContent(todos)
+    : formatRinTodoChecklistCharacterContent(todos);
 }
 
 function formatPromptForChatContext(
@@ -1212,6 +1208,7 @@ export class ChatController {
     replyToMessageId?: string;
     sessionFile?: string;
     bindSession?: boolean;
+    deliveryKind?: "final" | "error";
   }): ChatAssistantDelivery {
     const text = safeString(input.text).trim();
     const parts = Array.isArray(input.parts) ? input.parts.filter(Boolean) : [];
@@ -1231,7 +1228,7 @@ export class ChatController {
     const replyToMessageId = safeString(input.replyToMessageId || "").trim();
     return {
       chatKey: this.chatKey,
-      deliveryKind: "final",
+      deliveryKind: input.deliveryKind || "final",
       replyToMessageId: replyToMessageId || undefined,
       parts: [
         ...(replyToMessageId
@@ -1249,6 +1246,7 @@ export class ChatController {
     replyToMessageId?: string;
     sessionFile?: string;
     bindSession?: boolean;
+    deliveryKind?: "final" | "error";
   }) {
     const text = safeString(input.text).trim();
     this.stagedDelivery = this.buildAssistantDelivery(input);
@@ -1279,7 +1277,11 @@ export class ChatController {
   }
 
   private shouldSuppressQuietDelivery(deliveryKind: string) {
-    return this.isQuietModeEnabled() && deliveryKind !== "final";
+    return (
+      this.isQuietModeEnabled() &&
+      deliveryKind !== "final" &&
+      deliveryKind !== "error"
+    );
   }
 
   private async enqueueAndDrainDelivery(
@@ -1311,7 +1313,8 @@ export class ChatController {
     const normalizedPayload =
       (deliveryKind === "final" ||
         deliveryKind === "interim" ||
-        deliveryKind === "passive_notice") &&
+        deliveryKind === "passive_notice" ||
+        deliveryKind === "error") &&
       !payload.deliveryKind
         ? { ...payload, deliveryKind }
         : payload;
@@ -1401,7 +1404,7 @@ export class ChatController {
       createdAt: nowIso(),
     };
     const outcome = await this.enqueueAndDrainDelivery(deliveryPayload, {
-      deliveryKind: "final",
+      deliveryKind: pending.deliveryKind || "final",
       postDelivery,
       requireDelivery: true,
       waitUntilDeliverySettled: true,
@@ -1423,6 +1426,7 @@ export class ChatController {
     sessionFile?: string;
     clearProcessing?: boolean;
     bindSession?: boolean;
+    deliveryKind?: "final" | "error";
   }) {
     const bindSession = input.bindSession !== false && this.affectChatBinding;
     const text = this.stageAssistantDelivery({ ...input, bindSession });
@@ -1430,16 +1434,19 @@ export class ChatController {
     const replyToMessageId = safeString(
       input.replyToMessageId || input.incomingMessageId,
     ).trim();
+    const deliveryKind = input.deliveryKind || "final";
     const idempotencyKey = incomingMessageId
       ? JSON.stringify([
-          "final",
+          deliveryKind,
           this.chatKey,
           incomingMessageId,
           replyToMessageId,
           sha256Hex(JSON.stringify({ text, parts: input.parts || [] })),
         ])
       : "";
-    const id = idempotencyKey ? `final-${sha256Hex(idempotencyKey)}` : "";
+    const id = idempotencyKey
+      ? `${deliveryKind}-${sha256Hex(idempotencyKey)}`
+      : "";
     const delivery = await this.commitPendingDelivery(
       input.clearProcessing,
       {
@@ -1534,6 +1541,32 @@ export class ChatController {
     }
   }
 
+  private async sendErrorNoticeNow(text: string) {
+    const trimmed = safeString(text).trim();
+    if (!trimmed) return false;
+    if (!this.canDeliverReplies()) return true;
+    try {
+      await this.enqueueAndDrainDelivery(
+        {
+          createdAt: nowIso(),
+          chatKey: this.chatKey,
+          deliveryKind: "error",
+          replyToMessageId: this.currentReplyToMessageId() || undefined,
+          parts: [{ type: "text", text: formatRuntimeErrorForChat(trimmed) }],
+          ...this.currentConversationSessionPayload(),
+        },
+        {
+          deliveryKind: "error",
+          waitUntilDeliverySettled: true,
+          requireDelivery: true,
+        },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async sendTodoPassiveNoticeNow(event: any) {
     const todos = normalizeRinTodoItems(event?.todoItems);
     if (!todos?.length) {
@@ -1546,7 +1579,6 @@ export class ChatController {
     const mode = todoNoticeRenderModeForChatKey(this.chatKey);
     const noticeText = formatTodoNoticeText(
       todos,
-      error,
       mode === "native" ? "characters" : mode,
     );
     this.latestTodoNoticeText = noticeText;
@@ -1556,38 +1588,56 @@ export class ChatController {
       coalesceWithWorkingMessage: true,
     };
     if (mode !== "native") {
-      return await this.sendPassiveNoticeNow(noticeText, todoDeliveryOptions);
+      const todoDelivery = this.sendPassiveNoticeNow(
+        noticeText,
+        todoDeliveryOptions,
+      );
+      const errorDelivery = error
+        ? this.sendErrorNoticeNow(error)
+        : Promise.resolve(true);
+      const [todoDelivered, errorDelivered] = await Promise.all([
+        todoDelivery,
+        errorDelivery,
+      ]);
+      return todoDelivered && errorDelivered;
     }
 
-    try {
-      await this.enqueueAndDrainDelivery(
-        {
-          createdAt: nowIso(),
-          chatKey: this.chatKey,
-          deliveryKind: "passive_notice",
-          replyToMessageId: this.currentReplyToMessageId() || undefined,
-          coalesceWithWorkingMessage: true,
-          parts: [
-            ...(error
-              ? [{ type: "text" as const, text: `Error: ${error}` }]
-              : []),
-            {
-              type: "todo" as const,
-              title: "Todo",
-              items: todos.map((todo) => ({
-                text: todo.text,
-                done: todo.done,
-              })),
-            },
-          ],
-          ...this.currentConversationSessionPayload(),
-        },
-        { deliveryKind: "passive_notice", ...todoDeliveryOptions },
-      );
-      return true;
-    } catch {
-      return false;
-    }
+    const todoDelivery = (async () => {
+      try {
+        await this.enqueueAndDrainDelivery(
+          {
+            createdAt: nowIso(),
+            chatKey: this.chatKey,
+            deliveryKind: "passive_notice",
+            replyToMessageId: this.currentReplyToMessageId() || undefined,
+            coalesceWithWorkingMessage: true,
+            parts: [
+              {
+                type: "todo" as const,
+                title: "Todo",
+                items: todos.map((todo) => ({
+                  text: todo.text,
+                  done: todo.done,
+                })),
+              },
+            ],
+            ...this.currentConversationSessionPayload(),
+          },
+          { deliveryKind: "passive_notice", ...todoDeliveryOptions },
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    const errorDelivery = error
+      ? this.sendErrorNoticeNow(error)
+      : Promise.resolve(true);
+    const [todoDelivered, errorDelivered] = await Promise.all([
+      todoDelivery,
+      errorDelivery,
+    ]);
+    return todoDelivered && errorDelivered;
   }
 
   private async deliverPassiveNotice(text: string) {
@@ -1925,6 +1975,7 @@ export class ChatController {
         incomingMessageId,
         clearProcessing: true,
         bindSession: false,
+        deliveryKind: "error",
       });
       throw error;
     } finally {
@@ -2243,6 +2294,7 @@ export class ChatController {
               incomingMessageId: deliveryTarget.incomingMessageId,
               sessionFile: errorSessionFile || this.currentSessionFile(),
               clearProcessing: true,
+              deliveryKind: "error",
             });
             this.markOriginalProcessedIfRetargeted(
               input.incomingMessageId,

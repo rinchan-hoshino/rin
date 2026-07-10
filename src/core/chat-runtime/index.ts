@@ -23,6 +23,7 @@ import {
   ensureExtension,
   ensureFileName,
   fileUrl,
+  isEditableProgressDeliveryKind,
   normalizeNode,
   prepareOutboundNodes,
   randomWorkingText,
@@ -1198,7 +1199,8 @@ class TelegramAdapter {
                 )
               : this.workingMessageKey(deliveryChatId, "chat");
           const shouldEditWorkingMessage =
-            delivered.length === 0 && !isFinalDelivery;
+            delivered.length === 0 &&
+            isEditableProgressDeliveryKind(deliveryKind);
           const messageIds = shouldEditWorkingMessage
             ? await this.updateWorkingMessageGroup({
                 chatId: deliveryChatId,

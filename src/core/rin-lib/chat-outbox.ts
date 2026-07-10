@@ -54,7 +54,7 @@ export type ChatMessagePart =
       items: Array<{ text: string; done?: boolean }>;
     };
 
-export type ChatDeliveryKind = "final" | "interim" | "passive_notice";
+export type ChatDeliveryKind = "final" | "interim" | "passive_notice" | "error";
 
 export type ChatOutboxPayload = {
   createdAt: string;

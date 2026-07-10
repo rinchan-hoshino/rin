@@ -242,7 +242,7 @@ Core chat storage records messages. Automation for record-only chats comes from 
 
 ## Quiet chat display mode
 
-Configure quiet display for specific chats under `settings.json -> chat.byChatKey[chatKey].quietMode` when the chat should receive only messages that explicitly declare themselves as final deliveries, plus ordinary working indicators.
+Configure quiet display for specific chats under `settings.json -> chat.byChatKey[chatKey].quietMode` when the chat should receive only final replies, independent error deliveries, and ordinary working indicators.
 
 ```json
 {

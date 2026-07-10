@@ -1215,6 +1215,74 @@ test("chat controller renders todo notices as markdown for markdown chats", asyn
   ]);
 });
 
+test("chat controller keeps todo errors outside editable progress", async () => {
+  const controller = await createController("discord/1:2");
+  const deliveries = [];
+  controller.app.bots[0].platform = "discord";
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || "")
+      .filter(Boolean)
+      .join("\n");
+    deliveries.push({
+      text,
+      kind: options?.deliveryKind,
+      coalesce: options?.coalesceWithWorkingMessage === true,
+    });
+    return [`m-out-${deliveries.length}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "Error: failed to persist todo state\n[ ] Keep working",
+      noticeKind: "todo",
+      deferDuringTurn: false,
+      todoItems: [{ id: 1, text: "Keep working", done: false }],
+      todoError: "failed to persist todo state",
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(deliveries, [
+    {
+      text: "⏹️ Keep working",
+      kind: "passive_notice",
+      coalesce: true,
+    },
+    {
+      text: "rin error: failed to persist todo state",
+      kind: "error",
+      coalesce: false,
+    },
+  ]);
+  assert.equal(controller.latestTodoNoticeText, "⏹️ Keep working");
+});
+
+test("chat controller attempts independent todo errors when progress delivery fails", async () => {
+  for (const platform of ["discord", "slack"]) {
+    const controller = await createController(`${platform}/1:2`);
+    controller.app.bots[0].platform = platform;
+    const attempts = [];
+    controller.enqueueAndDrainDelivery = async (_payload, options) => {
+      attempts.push(options?.deliveryKind);
+      if (options?.deliveryKind === "passive_notice") {
+        throw new Error("progress delivery failed");
+      }
+      return { messageIds: ["m-error"], accepted: true, settled: true };
+    };
+
+    const delivered = await controller.sendTodoPassiveNoticeNow({
+      todoItems: [{ id: 1, text: "Keep working", done: false }],
+      todoError: "failed to persist todo state",
+    });
+
+    assert.equal(delivered, false);
+    assert.deepEqual(attempts.sort(), ["error", "passive_notice"]);
+  }
+});
+
 test("chat controller renders todo notices as character fallback for plain chats", async () => {
   const controller = await createController("minecraft/minecraft:overworld");
   controller.app.bots[0].platform = "minecraft";
@@ -1345,7 +1413,7 @@ test("chat controller binds passive notices to the current session for quote res
   assert.equal(linked?.sessionFile, sessionFile);
 });
 
-test("chat controller quiet mode suppresses non-final visible messages", async () => {
+test("chat controller quiet mode suppresses progress deliveries", async () => {
   const controller = await createController("telegram/1:2");
   await fs.writeFile(
     path.join(controller.agentDir, "settings.json"),
@@ -1354,6 +1422,10 @@ test("chat controller quiet mode suppresses non-final visible messages", async (
     }),
     "utf8",
   );
+  assert.equal(controller.shouldSuppressQuietDelivery("final"), false);
+  assert.equal(controller.shouldSuppressQuietDelivery("error"), false);
+  assert.equal(controller.shouldSuppressQuietDelivery("generic"), true);
+
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
@@ -1427,6 +1499,46 @@ test("chat controller quiet mode still sends final replies by delivery kind", as
   });
 
   assert.deepEqual(deliveries, [{ text: "quiet final", kind: "final" }]);
+});
+
+test("chat controller quiet mode still sends independent errors", async () => {
+  const controller = await createController("telegram/1:2");
+  await fs.writeFile(
+    path.join(controller.agentDir, "settings.json"),
+    JSON.stringify({
+      chat: { byChatKey: { "telegram/1:2": { quietMode: true } } },
+    }),
+    "utf8",
+  );
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || "")
+      .filter(Boolean)
+      .join(" ");
+    deliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-error-${deliveries.length}`];
+  };
+  controller.session = {
+    sessionManager: {
+      getSessionFile: () => "/tmp/quiet-error.jsonl",
+      getSessionId: () => "session-quiet-error",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/quiet-error.jsonl",
+      sessionId: "session-quiet-error",
+    }),
+    runCommand: async () => {
+      throw new Error("quiet failure");
+    },
+  };
+
+  await assert.rejects(controller.runCommand("/reload"), /quiet failure/);
+
+  assert.deepEqual(deliveries, [
+    { text: "rin error: quiet failure", kind: "error" },
+  ]);
 });
 
 test("chat controller runTurn quiet mode option overrides stored chat settings", async () => {
@@ -2498,7 +2610,10 @@ test("chat controller delivers visible non-transient command errors", async () =
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(deliveryText(this.stagedDelivery));
+    deliveries.push({
+      text: deliveryText(this.stagedDelivery),
+      kind: this.stagedDelivery?.deliveryKind,
+    });
     this.stagedDelivery = null;
   };
 
@@ -2518,14 +2633,17 @@ test("chat controller delivers visible non-transient command errors", async () =
   };
 
   await assert.rejects(controller.runCommand("/reload"), /boom/);
-  assert.deepEqual(deliveries, ["rin error: boom"]);
+  assert.deepEqual(deliveries, [{ text: "rin error: boom", kind: "error" }]);
 });
 
 test("chat controller reports daemon command errors without frontend retry classification", async () => {
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
-    deliveries.push(deliveryText(this.stagedDelivery));
+    deliveries.push({
+      text: deliveryText(this.stagedDelivery),
+      kind: this.stagedDelivery?.deliveryKind,
+    });
     this.stagedDelivery = null;
   };
 
@@ -2546,7 +2664,10 @@ test("chat controller reports daemon command errors without frontend retry class
     /connect ENOENT \/run\/user\/1001\/rin-daemon\/daemon.sock/,
   );
   assert.deepEqual(deliveries, [
-    "rin error: connect ENOENT /run/user/1001/rin-daemon/daemon.sock",
+    {
+      text: "rin error: connect ENOENT /run/user/1001/rin-daemon/daemon.sock",
+      kind: "error",
+    },
   ]);
 });
 

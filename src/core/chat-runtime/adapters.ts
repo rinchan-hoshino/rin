@@ -15,6 +15,7 @@ import {
   ensureExtension,
   ensureFileName,
   fileUrl,
+  isEditableProgressDeliveryKind,
   isImageMimeType,
   isImageName,
   normalizeNode,
@@ -903,7 +904,7 @@ export class DiscordAdapter {
           const shouldEditWorkingMessage =
             delivered.length === 0 &&
             coalesceWithWorkingMessage &&
-            !isFinalDelivery;
+            isEditableProgressDeliveryKind(deliveryKind);
           let textChunkIds: string[] = [];
           if (shouldEditWorkingMessage) {
             textChunkIds = await this.editableWorking.updateText({
@@ -1521,7 +1522,7 @@ export class SlackAdapter {
           if (
             coalesceWithWorkingMessage &&
             delivered.length === 0 &&
-            !isFinalDelivery
+            isEditableProgressDeliveryKind(deliveryKind)
           ) {
             messageIds = await this.editableWorking.updateText({
               chatId,
@@ -1575,7 +1576,7 @@ export class SlackAdapter {
           const shouldEditWorkingMessage =
             delivered.length === 0 &&
             coalesceWithWorkingMessage &&
-            !isFinalDelivery;
+            isEditableProgressDeliveryKind(deliveryKind);
           if (shouldEditWorkingMessage) {
             messageIds = await this.editableWorking.updateText({
               chatId,
@@ -2626,7 +2627,10 @@ export class LarkAdapter {
       await this.editableWorking.deleteProgress(chatId, replyToMessageId);
       return await this.sendPostText(chatId, text, replyToMessageId);
     }
-    if (coalesceWithWorkingMessage) {
+    if (
+      coalesceWithWorkingMessage &&
+      isEditableProgressDeliveryKind(deliveryKind)
+    ) {
       return await this.editableWorking.updateText({
         chatId,
         text,

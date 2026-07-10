@@ -405,9 +405,16 @@ export async function startChatBridge(
     deliveryKind: "command_ack" | "error" | "generic" = "generic",
   ) => {
     const id = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
-    enqueueChatOutboxPayload(runtime.agentDir, payload, { id, deliveryKind });
+    const deliveryPayload =
+      deliveryKind === "error" && !payload.deliveryKind
+        ? { ...payload, deliveryKind }
+        : payload;
+    enqueueChatOutboxPayload(runtime.agentDir, deliveryPayload, {
+      id,
+      deliveryKind,
+    });
     const results = await drainChatOutbox(app, runtime.agentDir, h, logger, {
-      chatKey: safeString(payload.chatKey).trim(),
+      chatKey: safeString(deliveryPayload.chatKey).trim(),
       itemId: id,
     });
     const own = Array.isArray(results)
