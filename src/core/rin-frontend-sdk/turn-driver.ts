@@ -172,6 +172,7 @@ export class RinFrontendTurnDriver {
   } | null = null;
   private turnInterruptionSeq = 0;
   private pendingTurnCount = 0;
+  private daemonShutdownDetached = false;
 
   constructor(options: {
     clientFactory: () => RinFrontendTurnClient;
@@ -205,11 +206,25 @@ export class RinFrontendTurnDriver {
     }
   }
 
+  private async disconnectSupersededClient(client: RinFrontendTurnClient) {
+    if (!this.daemonShutdownDetached && this.client === client) return false;
+    await client.disconnect?.().catch(() => {});
+    return true;
+  }
+
   async connect(options: { restoreSessionFile?: string } = {}) {
-    if (!this.client) this.client = this.clientFactory();
-    if (!this.client.isConnected()) {
-      await this.client.connect();
-      this.client.subscribe((event: RinFrontendEvent) => {
+    if (this.daemonShutdownDetached) return false;
+    const client = this.client || this.clientFactory();
+    this.client = client;
+    if (!client.isConnected()) {
+      try {
+        await client.connect();
+      } catch (error) {
+        if (await this.disconnectSupersededClient(client)) return false;
+        throw error;
+      }
+      if (await this.disconnectSupersededClient(client)) return false;
+      client.subscribe((event: RinFrontendEvent) => {
         void this.handleClientEvent(event).catch(() => {});
       });
     }
@@ -219,9 +234,12 @@ export class RinFrontendTurnDriver {
     ).trim();
     if (wantedSessionFile) {
       await this.selectSessionTarget(wantedSessionFile);
-      return;
+      if (await this.disconnectSupersededClient(client)) return false;
+      return true;
     }
     await this.refreshFrontendState().catch(() => {});
+    if (await this.disconnectSupersededClient(client)) return false;
+    return true;
   }
 
   dispose() {
@@ -233,6 +251,15 @@ export class RinFrontendTurnDriver {
     this.frontendState = {};
     if (client?.disconnect) {
       void client.disconnect().catch(() => {});
+    }
+  }
+
+  async detachForDaemonShutdown() {
+    this.daemonShutdownDetached = true;
+    const client = this.client;
+    this.client = null;
+    if (client?.disconnect) {
+      await client.disconnect().catch(() => {});
     }
   }
 
@@ -515,6 +542,7 @@ export class RinFrontendTurnDriver {
   }
 
   private async recoverLiveTurnAfterDisconnect() {
+    if (this.daemonShutdownDetached) return;
     if (!this.liveTurn || this.reconnectingTurnPromise) {
       return await this.reconnectingTurnPromise;
     }
@@ -522,16 +550,24 @@ export class RinFrontendTurnDriver {
     this.reconnectingTurnPromise = (async () => {
       this.setFrontendPhase("connecting");
       let deadline = Date.now() + 120_000;
-      while (this.liveTurn && Date.now() < deadline) {
+      while (
+        this.liveTurn &&
+        !this.daemonShutdownDetached &&
+        Date.now() < deadline
+      ) {
         try {
-          await this.connect({ restoreSessionFile: context?.sessionFile });
+          const connected = await this.connect({
+            restoreSessionFile: context?.sessionFile,
+          });
+          if (!connected || this.daemonShutdownDetached) break;
           await this.replayPendingTerminalTurnEvent(context?.sessionFile).catch(
             () => false,
           );
-          if (!this.liveTurn) break;
+          if (!this.liveTurn || this.daemonShutdownDetached) break;
           const state = await this.refreshFrontendState(
             context?.sessionFile,
           ).catch(() => ({}));
+          if (this.daemonShutdownDetached) break;
           if (
             Boolean((state as any)?.turnActive || (state as any)?.isStreaming)
           ) {
@@ -545,7 +581,7 @@ export class RinFrontendTurnDriver {
           await sleep(1000);
         }
       }
-      if (this.liveTurn) {
+      if (this.liveTurn && !this.daemonShutdownDetached) {
         this.failLiveTurn(new Error("frontend_turn_recovery_failed"));
       }
     })().finally(() => {

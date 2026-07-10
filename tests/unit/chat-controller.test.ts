@@ -244,6 +244,27 @@ test("chat controller terminates the frontend session before disposing", async (
   assert.deepEqual(calls, ["terminateSession", "dispose"]);
 });
 
+test("chat controller daemon shutdown detach preserves visible turn state", async () => {
+  const controller = await createController();
+  const calls = [];
+  const currentTurn = { id: "active-turn" };
+  controller.currentTurn = currentTurn;
+  controller.driver.detachForDaemonShutdown = async () => {
+    calls.push("detachForDaemonShutdown");
+  };
+  controller.clearWorkingReaction = async () => {
+    calls.push("clearWorkingReaction");
+  };
+  controller.clearCompactionWorkingReaction = async () => {
+    calls.push("clearCompactionWorkingReaction");
+  };
+
+  await controller.detachForDaemonShutdown();
+
+  assert.deepEqual(calls, ["detachForDaemonShutdown"]);
+  assert.equal(controller.currentTurn, currentTurn);
+});
+
 test("detached chat controllers persist their session file for later termination", async () => {
   const tempDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-controller-"),

@@ -1714,6 +1714,11 @@ export class ChatController {
     }
   }
 
+  async detachForDaemonShutdown() {
+    this.lastActivityAt = Date.now();
+    await this.driver.detachForDaemonShutdown();
+  }
+
   async shutdownSession() {
     this.lastActivityAt = Date.now();
     const wanted = this.getRecoverableSessionFile();

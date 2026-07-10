@@ -1392,14 +1392,14 @@ export async function startChatBridge(
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
       for (const controller of controllers.values()) {
         if (options.hosted === true) {
-          await controller.shutdownSession().catch(() => {});
+          await controller.detachForDaemonShutdown().catch(() => {});
         } else {
           controller.dispose();
         }
       }
       for (const controller of detachedControllers.values()) {
         if (options.hosted === true) {
-          await controller.shutdownSession().catch(() => {});
+          await controller.detachForDaemonShutdown().catch(() => {});
         } else {
           controller.dispose();
         }

@@ -478,6 +478,170 @@ test("frontend SDK dispose settles an active turn with internal lifecycle cancel
   });
 });
 
+test("frontend SDK daemon shutdown detach leaves an active turn recoverable without reconnecting", async () => {
+  const client = createFrontendClient();
+  const originalConnect = client.connect;
+  const originalDisconnect = client.disconnect;
+  let connectCount = 0;
+  let promptStarted = false;
+  let rejectPrompt;
+  client.connect = async () => {
+    connectCount += 1;
+    await originalConnect.call(client);
+  };
+  client.prompt = async () => {
+    promptStarted = true;
+    await new Promise((_resolve, reject) => {
+      rejectPrompt = reject;
+    });
+  };
+  client.disconnect = async () => {
+    await originalDisconnect.call(client);
+    rejectPrompt?.(new Error("rin_disconnected:daemon_shutdown"));
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  let settled = false;
+  const activeTurn = driver.runTurn({ text: "still running" }).finally(() => {
+    settled = true;
+  });
+  activeTurn.catch(() => {});
+  await waitUntil(() => promptStarted, "active turn did not start");
+
+  await driver.detachForDaemonShutdown();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  assert.equal(client.isConnected(), false);
+  assert.equal(connectCount, 1);
+  assert.equal(settled, false);
+});
+
+test("frontend SDK daemon shutdown detach stops an in-flight recovery reconnect", async () => {
+  const client = createFrontendClient();
+  const originalConnect = client.connect;
+  const originalDisconnect = client.disconnect;
+  let connectCount = 0;
+  let recoveryConnectStarted = false;
+  let releaseRecoveryConnect;
+  let replayRequests = 0;
+  client.connect = async () => {
+    connectCount += 1;
+    if (connectCount > 1) {
+      recoveryConnectStarted = true;
+      await new Promise((resolve) => {
+        releaseRecoveryConnect = resolve;
+      });
+    }
+    await originalConnect.call(client);
+  };
+  client.prompt = async () => {
+    await originalDisconnect.call(client);
+    throw new Error("rin_disconnected:daemon_restart");
+  };
+  const originalRequest = client.request;
+  client.request = async (command) => {
+    if (command.type === "replay_pending_terminal_turn_event") {
+      replayRequests += 1;
+    }
+    return await originalRequest.call(client, command);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  let settled = false;
+  const activeTurn = driver.runTurn({ text: "still running" }).finally(() => {
+    settled = true;
+  });
+  activeTurn.catch(() => {});
+  await waitUntil(
+    () => recoveryConnectStarted,
+    "recovery reconnect did not start",
+  );
+
+  await driver.detachForDaemonShutdown();
+  releaseRecoveryConnect();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  assert.equal((driver as any).reconnectingTurnPromise, null);
+  assert.equal(client.isConnected(), false);
+  assert.equal(connectCount, 2);
+  assert.equal(replayRequests, 0);
+  assert.equal(settled, false);
+});
+
+test("frontend SDK daemon shutdown detach closes a connection that finishes late", async () => {
+  const client = createFrontendClient();
+  const originalConnect = client.connect;
+  const originalDisconnect = client.disconnect;
+  let releaseConnect;
+  let connectStarted = false;
+  let disconnectCount = 0;
+  client.connect = async () => {
+    connectStarted = true;
+    await new Promise((resolve) => {
+      releaseConnect = resolve;
+    });
+    await originalConnect.call(client);
+  };
+  client.disconnect = async () => {
+    disconnectCount += 1;
+    await originalDisconnect.call(client);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const connecting = driver.connect();
+  await waitUntil(() => connectStarted, "connect did not start");
+  await driver.detachForDaemonShutdown();
+  releaseConnect();
+  await connecting;
+
+  assert.equal(client.isConnected(), false);
+  assert.equal(disconnectCount, 2);
+});
+
+test("frontend SDK daemon shutdown detach stops a session restore continuation", async () => {
+  const client = createFrontendClient();
+  const originalResumeSession = client.resumeSession;
+  let releaseResume;
+  let resumeStarted = false;
+  client.resumeSession = async (...args) => {
+    resumeStarted = true;
+    await new Promise((resolve) => {
+      releaseResume = resolve;
+    });
+    return await originalResumeSession.apply(client, args);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  const restoring = driver.connect({
+    restoreSessionFile: "/tmp/frontend-restored.jsonl",
+  });
+  await waitUntil(() => resumeStarted, "session restore did not start");
+  await driver.detachForDaemonShutdown();
+  releaseResume();
+  await restoring;
+
+  assert.equal(client.isConnected(), false);
+  assert.equal(
+    client.calls.some(
+      (call) => call.type === "request" && call.command.type === "get_state",
+    ),
+    false,
+  );
+});
+
 test("frontend SDK shutdown session follows TUI shutdown without lifecycle cancellation", async () => {
   const client = createFrontendClient();
   let promptStarted = false;

@@ -2164,7 +2164,7 @@ test("chat main reports daemon startup failure without retrying", async () => {
   }
 });
 
-test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controller dispose", async () => {
+test("hosted chat bridge shutdown detaches active frontends without aborting sessions", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2193,18 +2193,19 @@ test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controll
       });
 
       let runTurnCalls = 0;
+      let detachCalls = 0;
       let shutdownCalls = 0;
       let disposeCalls = 0;
-      let activeReject;
       controllerMod.ChatController.prototype.runTurn = async function () {
         runTurnCalls += 1;
-        await new Promise((_resolve, reject) => {
-          activeReject = reject;
-        });
+        await new Promise(() => {});
+      };
+      controllerMod.ChatController.prototype.detachForDaemonShutdown = async function () {
+        detachCalls += 1;
       };
       controllerMod.ChatController.prototype.shutdownSession = async function () {
         shutdownCalls += 1;
-        activeReject?.(new Error("Request was aborted"));
+        throw new Error("hosted daemon shutdown must not terminate sessions");
       };
       controllerMod.ChatController.prototype.dispose = function () {
         disposeCalls += 1;
@@ -2239,21 +2240,15 @@ test("hosted chat bridge shutdown uses frontend SDK shutdown instead of controll
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       await bridge.stop();
-      const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
+      const processingDir = path.join(agentDir, "data", "chat", "inbox", "processing");
       const failedDir = path.join(agentDir, "data", "chat", "inbox", "failed");
-      const waitDeadline = Date.now() + 2000;
-      while (Date.now() < waitDeadline) {
-        const pendingFiles = fs.existsSync(pendingDir) ? fs.readdirSync(pendingDir).filter((name) => name.endsWith(".json")) : [];
-        if (pendingFiles.length) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      const pendingFiles = fs.existsSync(pendingDir) ? fs.readdirSync(pendingDir).filter((name) => name.endsWith(".json")) : [];
+      const processingFiles = fs.existsSync(processingDir) ? fs.readdirSync(processingDir).filter((name) => name.endsWith(".json")) : [];
       const failedFiles = fs.existsSync(failedDir) ? fs.readdirSync(failedDir).filter((name) => name.endsWith(".json")) : [];
       const assistantRows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      if (runTurnCalls !== 1 || shutdownCalls !== 1 || disposeCalls !== 0 || pendingFiles.length !== 1 || failedFiles.length !== 0 || assistantRows.length !== 0) {
-        throw new Error(JSON.stringify({ runTurnCalls, shutdownCalls, disposeCalls, pendingFiles, failedFiles, assistantRows }));
+      if (runTurnCalls !== 1 || detachCalls !== 1 || shutdownCalls !== 0 || disposeCalls !== 0 || processingFiles.length !== 1 || failedFiles.length !== 0 || assistantRows.length !== 0) {
+        throw new Error(JSON.stringify({ runTurnCalls, detachCalls, shutdownCalls, disposeCalls, processingFiles, failedFiles, assistantRows }));
       }
       process.exit(0);
     `;
