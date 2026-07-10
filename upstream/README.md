@@ -12,7 +12,6 @@ Current mirrors:
 
 - `pi/`: mirrored from `badlogic/pi-mono` `packages/coding-agent`
 - `skill-creator/`: mirrored from `anthropics/skills` `skills/skill-creator`
-- `prompt-engineer/`: mirrored from `Jeffallan/claude-skills` `skills/prompt-engineer` for provenance/update watch; it is not installed as Rin's builtin prompt-engineering skill. Rin's replacement builtin lives in `docs/agent/builtin-skills/rin-prompt-engineering/`.
 
 Each mirror keeps its own `_upstream.json` with source and sync metadata.
 
@@ -27,5 +26,4 @@ Per-mirror aliases:
 ```bash
 npm run sync:pi-docs
 npm run sync:skill-creator
-npm run sync:prompt-engineer
 ```

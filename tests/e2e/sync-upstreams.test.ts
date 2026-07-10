@@ -78,25 +78,6 @@ function writeSkillCreatorSnapshot(
   );
 }
 
-function writePromptEngineerSnapshot(
-  root: string,
-  version: string,
-  sourceSubdir = "skills/prompt-engineer",
-) {
-  const sourceRoot = path.join(root, sourceSubdir);
-  fs.mkdirSync(path.join(sourceRoot, "references"), { recursive: true });
-  fs.writeFileSync(
-    path.join(sourceRoot, "SKILL.md"),
-    `prompt engineer body ${version}\n`,
-    "utf8",
-  );
-  fs.writeFileSync(
-    path.join(sourceRoot, "references", "guide.md"),
-    `prompt engineer reference ${version}\n`,
-    "utf8",
-  );
-}
-
 function commitSnapshot(root: string, message: string, tagName?: string) {
   run("git", ["add", "."], root);
   run("git", ["commit", "-m", message], root);
@@ -147,10 +128,6 @@ function skillCreatorUpstreamMetaPath(workspace: string) {
   return path.join(workspace, "upstream", "skill-creator", "_upstream.json");
 }
 
-function promptEngineerUpstreamMetaPath(workspace: string) {
-  return path.join(workspace, "upstream", "prompt-engineer", "_upstream.json");
-}
-
 function writeUpstreamMeta(filePath: string, meta: Record<string, string>) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(meta, null, 2) + "\n", "utf8");
@@ -167,13 +144,6 @@ function writeSkillCreatorUpstreamMeta(
   writeUpstreamMeta(skillCreatorUpstreamMetaPath(workspace), meta);
 }
 
-function writePromptEngineerUpstreamMeta(
-  workspace: string,
-  meta: Record<string, string>,
-) {
-  writeUpstreamMeta(promptEngineerUpstreamMetaPath(workspace), meta);
-}
-
 function readPiUpstreamMeta(workspace: string) {
   return JSON.parse(fs.readFileSync(piUpstreamMetaPath(workspace), "utf8"));
 }
@@ -181,12 +151,6 @@ function readPiUpstreamMeta(workspace: string) {
 function readSkillCreatorUpstreamMeta(workspace: string) {
   return JSON.parse(
     fs.readFileSync(skillCreatorUpstreamMetaPath(workspace), "utf8"),
-  );
-}
-
-function readPromptEngineerUpstreamMeta(workspace: string) {
-  return JSON.parse(
-    fs.readFileSync(promptEngineerUpstreamMetaPath(workspace), "utf8"),
   );
 }
 
@@ -447,46 +411,6 @@ test("sync-upstreams honors explicit skill-creator source subdir overrides", () 
   }
 });
 
-test("sync-upstreams mirrors the full prompt-engineer source root", () => {
-  const tempDir = makeTempDir("rin-sync-upstreams-prompt-engineer-");
-  const mirrorRepo = path.join(tempDir, "mirror.git");
-  const workspace = path.join(tempDir, "workspace");
-  try {
-    initMirrorRepo(mirrorRepo);
-    writePromptEngineerSnapshot(mirrorRepo, "default");
-    commitSnapshot(mirrorRepo, "snapshot prompt engineer", "prompt-test");
-
-    writeSyncWorkspace(workspace, "0.70.0");
-    const repo = pathToFileURL(mirrorRepo).href;
-    runSync(workspace, "prompt-engineer", [
-      "--repo",
-      repo,
-      "--ref",
-      "prompt-test",
-    ]);
-
-    const destRoot = path.join(workspace, "upstream", "prompt-engineer");
-    const nextMeta = readPromptEngineerUpstreamMeta(workspace);
-    assert.equal(nextMeta.repo, repo);
-    assert.equal(nextMeta.sourceSubdir, "skills/prompt-engineer");
-    assert.equal(nextMeta.ref, "prompt-test");
-    assert.equal(
-      nextMeta.resolvedCommit,
-      resolveGitRef(mirrorRepo, "prompt-test"),
-    );
-    assert.equal(
-      fs.readFileSync(path.join(destRoot, "SKILL.md"), "utf8"),
-      "prompt engineer body default\n",
-    );
-    assert.equal(
-      fs.readFileSync(path.join(destRoot, "references", "guide.md"), "utf8"),
-      "prompt engineer reference default\n",
-    );
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
 test("sync-upstreams preserves an existing skill-creator ref", () => {
   const tempDir = makeTempDir("rin-sync-upstreams-skill-current-");
   const mirrorRepo = path.join(tempDir, "mirror.git");
@@ -534,7 +458,6 @@ test("sync-upstreams defaults to all configured upstream mirrors", () => {
     initMirrorRepo(mirrorRepo);
     writeMirrorSnapshot(mirrorRepo, "0.70.0");
     writeSkillCreatorSnapshot(mirrorRepo, "default");
-    writePromptEngineerSnapshot(mirrorRepo, "default");
     commitTag(mirrorRepo, "0.70.0");
 
     writeSyncWorkspace(workspace, "0.70.0");
@@ -548,11 +471,6 @@ test("sync-upstreams defaults to all configured upstream mirrors", () => {
     writeSkillCreatorUpstreamMeta(workspace, {
       repo,
       sourceSubdir: "skills/skill-creator",
-      ref: "v0.70.0",
-    });
-    writePromptEngineerUpstreamMeta(workspace, {
-      repo,
-      sourceSubdir: "skills/prompt-engineer",
       ref: "v0.70.0",
     });
 
@@ -575,19 +493,6 @@ test("sync-upstreams defaults to all configured upstream mirrors", () => {
       fs.readFileSync(path.join(skillRoot, "SKILL.md"), "utf8"),
       "skill body default\n",
     );
-
-    const promptEngineerRoot = path.join(
-      workspace,
-      "upstream",
-      "prompt-engineer",
-    );
-    const promptEngineerMeta = readPromptEngineerUpstreamMeta(workspace);
-    assert.equal(promptEngineerMeta.repo, repo);
-    assert.equal(promptEngineerMeta.ref, "v0.70.0");
-    assert.equal(
-      fs.readFileSync(path.join(promptEngineerRoot, "SKILL.md"), "utf8"),
-      "prompt engineer body default\n",
-    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -603,7 +508,6 @@ test("sync-upstreams cleans temporary clone directories after successful sync", 
     initMirrorRepo(mirrorRepo);
     writeMirrorSnapshot(mirrorRepo, "0.70.0");
     writeSkillCreatorSnapshot(mirrorRepo, "cleanup");
-    writePromptEngineerSnapshot(mirrorRepo, "cleanup");
     commitTag(mirrorRepo, "0.70.0");
 
     writeSyncWorkspace(workspace, "0.70.0");
@@ -617,11 +521,6 @@ test("sync-upstreams cleans temporary clone directories after successful sync", 
     writeSkillCreatorUpstreamMeta(workspace, {
       repo,
       sourceSubdir: "skills/skill-creator",
-      ref: "v0.70.0",
-    });
-    writePromptEngineerUpstreamMeta(workspace, {
-      repo,
-      sourceSubdir: "skills/prompt-engineer",
       ref: "v0.70.0",
     });
 

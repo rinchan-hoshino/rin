@@ -211,7 +211,7 @@ Verified excerpts:
 Use in Rin prompt work:
 
 - Treat `openai-docs` as first-party OpenAI-specific prompt-upgrade guidance, not as a provider-neutral prompt-engineer replacement.
-- Do not mirror or install it in place of Rin's own prompt skill or the community `prompt-engineer` mirror without product direction.
+- Do not mirror or install it in place of Rin's own prompt skill without product direction.
 
 ### Structured outputs
 

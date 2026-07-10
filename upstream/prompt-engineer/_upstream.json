@@ -1,8 +1,0 @@
-{
-  "repo": "https://github.com/Jeffallan/claude-skills",
-  "sourceSubdir": "skills/prompt-engineer",
-  "ref": "main",
-  "resolvedCommit": "e8be415bc94d8d6ebddc2fb50e5d03c6e27d4319",
-  "syncedAt": "2026-06-02T19:27:53.667Z",
-  "syncMethod": "git sparse-checkout"
-}

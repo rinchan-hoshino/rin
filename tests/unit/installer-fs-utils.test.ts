@@ -376,15 +376,6 @@ test("syncInstalledDocs installs Rin-owned and selected upstream builtin skills"
     "# Skill\n",
     "utf8",
   );
-  await fs.mkdir(path.join(tempRoot, "upstream", "prompt-engineer"), {
-    recursive: true,
-  });
-  await fs.writeFile(
-    path.join(tempRoot, "upstream", "prompt-engineer", "SKILL.md"),
-    "# Prompt Engineer\n",
-    "utf8",
-  );
-
   await fs.mkdir(
     path.join(installDir, "docs", "rin", "builtin-skills", "legacy"),
     {
@@ -436,18 +427,6 @@ test("syncInstalledDocs installs Rin-owned and selected upstream builtin skills"
       "builtin-skills",
       "skill-creator",
       "SKILL.md",
-    ),
-  );
-  await assert.rejects(
-    fs.access(
-      path.join(
-        installDir,
-        "docs",
-        "rin",
-        "builtin-skills",
-        "prompt-engineer",
-        "SKILL.md",
-      ),
     ),
   );
   await assert.rejects(

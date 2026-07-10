@@ -99,13 +99,6 @@ const mirrors = {
     destRoot: path.join(repoRoot, "upstream", "skill-creator"),
     paths: null,
   },
-  "prompt-engineer": {
-    repo: "https://github.com/Jeffallan/claude-skills.git",
-    sourceSubdir: "skills/prompt-engineer",
-    defaultRef: "main",
-    destRoot: path.join(repoRoot, "upstream", "prompt-engineer"),
-    paths: null,
-  },
 };
 
 function resolveMirrorRef(mirror, existingMeta, options = {}) {

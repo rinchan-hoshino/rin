@@ -23,7 +23,6 @@
     "sync:upstreams": "tsx scripts/sync-upstreams.ts",
     "sync:pi-docs": "tsx scripts/sync-upstreams.ts pi",
     "sync:skill-creator": "tsx scripts/sync-upstreams.ts skill-creator",
-    "sync:prompt-engineer": "tsx scripts/sync-upstreams.ts prompt-engineer",
     "release:manifest": "tsx scripts/release/update-release-manifest.ts",
     "release:changelog": "tsx scripts/release/verify-changelog.ts",
     "release:bootstrap": "tsx scripts/release/export-bootstrap-branch.ts",
