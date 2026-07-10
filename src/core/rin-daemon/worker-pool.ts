@@ -56,6 +56,7 @@ type TerminalTurnWaiter = {
 type InterruptedTurnRecoveryIntent = {
   selector: SessionSelector;
   source: string;
+  requestTag?: string;
   promise?: Promise<void>;
 };
 
@@ -77,6 +78,7 @@ export type WorkerHandle = {
   turnActive: boolean;
   rpcTurnActive: boolean;
   turnRecoveryPending: boolean;
+  activeRequestTag?: string;
   isStreaming: boolean;
   isCompacting: boolean;
   rinWorking: boolean;
@@ -355,6 +357,7 @@ export class WorkerPool {
     worker.lastUsedAt = Date.now();
     worker.idleSince = null;
     const commandType = String(command?.type || "unknown");
+    const wasRunning = this.isWorkerRunning(worker);
     const recoverySelector = resolveSessionSelector(
       selector,
       resolveSessionSelector(
@@ -377,7 +380,13 @@ export class WorkerPool {
     }
     if (TURN_RECOVERY_COMMAND_TYPES.has(commandType)) {
       if (keepUntilTerminalTurnEvent) worker.turnRecoveryPending = true;
-      this.syncRunningWorkerRecordForSelector(recoverySelector, true);
+      const requestTag = String(command?.requestTag || "").trim();
+      if (!wasRunning && requestTag) worker.activeRequestTag = requestTag;
+      this.syncRunningWorkerRecordForSelector(
+        recoverySelector,
+        true,
+        worker.activeRequestTag,
+      );
     }
     this.syncRunningWorkerRecord(worker);
     this.writeWorkerStdin(worker, command, (error) => {
@@ -668,6 +677,7 @@ export class WorkerPool {
   continueInterruptedTurnSessionWorker(item: {
     sessionFile?: string;
     source?: string;
+    requestTag?: string;
   }) {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) return;
@@ -677,8 +687,11 @@ export class WorkerPool {
     const intent = existing || {
       selector,
       source: item.source || "daemon-restart",
+      requestTag: String(item.requestTag || "").trim() || undefined,
     };
     intent.source = item.source || intent.source || "daemon-restart";
+    intent.requestTag =
+      String(item.requestTag || "").trim() || intent.requestTag;
     this.interruptedTurnRecoveryIntents.set(key, intent);
     void this.runInterruptedTurnRecoveryIntent(key, intent);
   }
@@ -699,6 +712,7 @@ export class WorkerPool {
       const response = this.sendInternalCommand(worker, {
         type: "resume_interrupted_turn",
         source: intent.source || "daemon-restart",
+        ...(intent.requestTag ? { requestTag: intent.requestTag } : {}),
       });
       this.syncRunningWorkerRecord(worker);
       await response;
@@ -794,7 +808,10 @@ export class WorkerPool {
       }
       if (payload.command === "get_state") {
         worker.turnActive = Boolean(data.turnActive ?? data.isStreaming);
-        if (!worker.turnActive) worker.turnRecoveryPending = false;
+        if (!worker.turnActive) {
+          worker.turnRecoveryPending = false;
+          worker.activeRequestTag = undefined;
+        }
         worker.isStreaming = Boolean(data.isStreaming);
         worker.isCompacting = Boolean(data.isCompacting);
         worker.rinWorking = false;
@@ -809,6 +826,7 @@ export class WorkerPool {
       TURN_RECOVERY_COMMAND_TYPES.has(String(payload.command || ""))
     ) {
       worker.turnRecoveryPending = false;
+      worker.activeRequestTag = undefined;
       this.syncRunningWorkerRecordForSelector(
         resolveSessionSelector(
           sessionSelectorFromState(payload),
@@ -862,22 +880,31 @@ export class WorkerPool {
       worker.turnRecoveryPending = false;
       worker.rpcTurnActive = true;
       worker.turnActive = true;
+      worker.activeRequestTag =
+        String(payload.requestTag || "").trim() || worker.activeRequestTag;
       this.syncRunningWorkerRecord(worker);
     }
     if (
       payload.type === "rpc_turn_event" &&
       (payload.event === "complete" || payload.event === "error")
     ) {
-      this.syncRunningWorkerRecordForSelector(
-        sessionSelectorFromState(payload),
-        false,
-      );
-      worker.turnRecoveryPending = false;
-      worker.rpcTurnActive = false;
-      worker.turnActive = false;
-      worker.isStreaming = false;
-      this.syncRunningWorkerRecord(worker);
-      this.maybeReleaseWorker(worker);
+      const terminalRequestTag = String(payload.requestTag || "").trim();
+      const activeRequestTag = String(worker.activeRequestTag || "").trim();
+      const ownsActiveTurn =
+        !activeRequestTag || terminalRequestTag === activeRequestTag;
+      if (ownsActiveTurn) {
+        this.syncRunningWorkerRecordForSelector(
+          sessionSelectorFromState(payload),
+          false,
+        );
+        worker.turnRecoveryPending = false;
+        worker.rpcTurnActive = false;
+        worker.activeRequestTag = undefined;
+        worker.turnActive = false;
+        worker.isStreaming = false;
+        this.syncRunningWorkerRecord(worker);
+        this.maybeReleaseWorker(worker);
+      }
     }
     if (payload.type === "rpc_turn_event" && payload.event === "complete") {
       this.setWorkerSessionRefs(worker, sessionSelectorFromState(payload), {
@@ -963,6 +990,7 @@ export class WorkerPool {
       turnActive: false,
       rpcTurnActive: false,
       turnRecoveryPending: false,
+      activeRequestTag: undefined,
       isStreaming: false,
       isCompacting: false,
       rinWorking: false,
@@ -1404,10 +1432,16 @@ export class WorkerPool {
   private syncRunningWorkerRecordForSelector(
     selector: SessionSelector | undefined,
     running: boolean,
+    requestTag?: string,
   ) {
     const sessionFile = sessionSelectorFromState(selector).sessionFile;
     if (!sessionFile) return;
-    setRunningWorkerSession(this.options.agentDir, sessionFile, running);
+    setRunningWorkerSession(
+      this.options.agentDir,
+      sessionFile,
+      running,
+      requestTag,
+    );
   }
 
   private syncRunningWorkerRecord(worker: WorkerHandle) {
@@ -1417,6 +1451,7 @@ export class WorkerPool {
       this.options.agentDir,
       sessionFile,
       this.isWorkerRunning(worker),
+      worker.activeRequestTag,
     );
   }
 
@@ -1672,7 +1707,13 @@ export class WorkerPool {
     });
     if (TURN_RECOVERY_COMMAND_TYPES.has(commandType)) {
       if (keepUntilTerminalTurnEvent) worker.turnRecoveryPending = true;
-      this.syncRunningWorkerRecordForSelector(selector, true);
+      const requestTag = String(command?.requestTag || "").trim();
+      if (requestTag) worker.activeRequestTag = requestTag;
+      this.syncRunningWorkerRecordForSelector(
+        selector,
+        true,
+        worker.activeRequestTag,
+      );
     }
 
     if (!this.isWorkerStdinWritable(worker)) {

@@ -953,6 +953,7 @@ process.stdin.on('data', (chunk) => {
       process.stdout.write(JSON.stringify({
         type: 'rpc_turn_event',
         event: 'start',
+        requestTag: command.requestTag,
         sessionFile: command.sessionFile,
         sessionId: 'command-running',
       }) + '\n');
@@ -961,6 +962,7 @@ process.stdin.on('data', (chunk) => {
       process.stdout.write(JSON.stringify({
         type: 'rpc_turn_event',
         event: 'complete',
+        requestTag: command.requestTag,
         sessionFile: command.sessionFile,
         sessionId: 'command-running',
         finalText: 'done',
@@ -997,6 +999,7 @@ setInterval(() => {}, 1000);
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
     schemaVersion: 1,
     sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-1" },
   });
 
   await sleep(40);
@@ -1004,6 +1007,7 @@ setInterval(() => {}, 1000);
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
     schemaVersion: 1,
     sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-1" },
   });
 
   await sleep(180);
@@ -1080,6 +1084,7 @@ setInterval(() => {}, 1000);
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
     schemaVersion: 1,
     sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-1" },
   });
 
   pool.beginShutdown();
@@ -1088,6 +1093,7 @@ setInterval(() => {}, 1000);
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
     schemaVersion: 1,
     sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-1" },
   });
 
   await fs.rm(dir, { recursive: true, force: true });
@@ -1166,6 +1172,78 @@ setInterval(() => {}, 1000);
   });
   assert.equal(pool.getStatusSnapshot().workers[0]?.turnActive, true);
   assert.equal(pool.getStatusSnapshot().workers[0]?.isStreaming, false);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("stale terminal events do not clear a newer tagged active turn", async () => {
+  const dir = await makeTempDir("rin-worker-pool-stale-terminal-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(workerPath, "setInterval(() => {}, 1000);\n");
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "start",
+    requestTag: "tag-current",
+    sessionFile,
+    sessionId: "active",
+  });
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "tag-stale",
+    sessionFile,
+    sessionId: "active",
+    finalText: "stale",
+  });
+
+  assert.equal(worker.turnActive, true);
+  assert.equal(worker.rpcTurnActive, true);
+  assert.equal(worker.activeRequestTag, "tag-current");
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-current" },
+  });
+
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "tag-current",
+    sessionFile,
+    sessionId: "active",
+    finalText: "current",
+  });
+  assert.equal(worker.turnActive, false);
+  assert.equal(worker.rpcTurnActive, false);
+  assert.equal(worker.activeRequestTag, undefined);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [],
+  });
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

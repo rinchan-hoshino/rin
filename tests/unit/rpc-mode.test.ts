@@ -5291,6 +5291,134 @@ test(
 );
 
 test(
+  "rpc mode rejoins an active turn with the same durable request tag",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const calls = [];
+    const durableEntries: any[] = [];
+    let releasePrompt;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const promptGate = new Promise((resolve) => {
+        releasePrompt = resolve;
+      });
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        prompt: async (message, options) => {
+          calls.push([message, options]);
+          await promptGate;
+          durableEntries.push({
+            id: "final-entry",
+            type: "message",
+            message: {
+              role: "assistant",
+              timestamp: Date.now(),
+              content: [{ type: "text", text: "done" }],
+            },
+          });
+        },
+        sendCustomMessage: async () => {},
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: {
+          ...testSessionManager(() => []),
+          getEntries: () => durableEntries,
+        },
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "done",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-1", type: "prompt", message: "hello", requestTag: "chat-inbox-stable" })}\n`,
+        ),
+      );
+      await wait(10);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "rejoin-1", type: "prompt", message: "hello", requestTag: "chat-inbox-stable" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const response = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .find((line) => line?.id === "rejoin-1");
+      assert.equal(response?.data?.acceptedAs, "rejoin");
+      assert.equal(response?.data?.requestTag, "chat-inbox-stable");
+      assert.equal(calls.length, 1);
+
+      releasePrompt();
+      await wait(60);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode get_state keeps turnActive true across internal non-streaming gaps",
   { concurrency: false },
   async () => {

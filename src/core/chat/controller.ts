@@ -526,6 +526,12 @@ export class ChatController {
     ).trim();
   }
 
+  private requestTagForInboundMessage(messageId?: string) {
+    const normalizedMessageId = safeString(messageId).trim();
+    if (!normalizedMessageId) return "";
+    return `chat-inbox-${sha256Hex(`${this.chatKey}\n${normalizedMessageId}`)}`;
+  }
+
   claimsInboundMessage(messageId?: string) {
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return false;
@@ -2012,6 +2018,7 @@ export class ChatController {
         thinkingLevel: input.thinkingLevel,
         promptContext: input.promptMeta,
         source: "chat-bridge",
+        requestTag: this.requestTagForInboundMessage(input.incomingMessageId),
       });
       this.assertRestoredTurnStayedOnSession(
         restoreSessionFile,
@@ -2130,6 +2137,7 @@ export class ChatController {
           thinkingLevel: input.thinkingLevel,
           promptContext: input.promptMeta,
           source: "chat-bridge",
+          requestTag: this.requestTagForInboundMessage(input.incomingMessageId),
         });
         this.assertRestoredTurnStayedOnSession(
           restoreSessionFile,

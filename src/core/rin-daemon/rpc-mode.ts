@@ -99,7 +99,7 @@ async function promptWithQueueableTurnReceiver(
 
 function promptAdmission(
   session: any,
-  acceptedAs: "prompt" | "steer" | "followUp",
+  acceptedAs: "prompt" | "steer" | "followUp" | "rejoin",
   requestTag: unknown,
   options: { turnActive: boolean },
 ) {
@@ -585,6 +585,7 @@ export async function runCustomRpcMode(
     return done(id, type, map ? map(value) : value);
   };
   let activeTurnPromise: Promise<void> | null = null;
+  let activeTurnRequestTag = "";
   let latestAutoRetryFailureMessage = "";
   const isTurnActive = () => Boolean(activeTurnPromise);
   let interruptQueue = Promise.resolve();
@@ -630,6 +631,7 @@ export async function runCustomRpcMode(
       typeof rawUnsubscribeObservedCompletion === "function"
         ? rawUnsubscribeObservedCompletion
         : undefined;
+    activeTurnRequestTag = requestTag;
     const promise = (async () => {
       const forceTurnEvents = options.forceTurnEvents === true;
       emitTurnEvent(
@@ -710,7 +712,10 @@ export async function runCustomRpcMode(
       } finally {
         unsubscribeObservedCompletion?.();
         if (heartbeatTimer) clearInterval(heartbeatTimer);
-        if (activeTurnPromise === promise) activeTurnPromise = null;
+        if (activeTurnPromise === promise) {
+          activeTurnPromise = null;
+          activeTurnRequestTag = "";
+        }
       }
     })();
     activeTurnPromise = promise;
@@ -860,6 +865,20 @@ export async function runCustomRpcMode(
       case "prompt": {
         const queueableTurnActive =
           isTurnActive() || Boolean(session.isStreaming);
+        const requestTag = safeString(command.requestTag).trim();
+        if (
+          queueableTurnActive &&
+          requestTag &&
+          requestTag === activeTurnRequestTag
+        ) {
+          return done(
+            id,
+            "prompt",
+            promptAdmission(session, "rejoin", requestTag, {
+              turnActive: true,
+            }),
+          );
+        }
         const requestedQueueBehavior = command.streamingBehavior;
         const acceptedQueueBehavior = queueableTurnActive
           ? normalizePromptQueueBehavior(requestedQueueBehavior)

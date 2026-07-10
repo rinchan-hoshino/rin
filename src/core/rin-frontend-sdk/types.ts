@@ -203,7 +203,7 @@ export type RinNewSessionResult = RinSessionState & {
 export type RinPromptContext = PromptContextMeta;
 
 export type RinPromptAdmission = {
-  acceptedAs?: "prompt" | "steer" | "followUp";
+  acceptedAs?: "prompt" | "steer" | "followUp" | "rejoin";
   requestTag?: string;
   sessionFile?: string;
   sessionId?: string;

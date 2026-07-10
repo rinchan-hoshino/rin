@@ -140,7 +140,9 @@ function parseResumeCommandTarget(commandLine: string) {
 
 function promptAdmissionAcceptedAs(admission: unknown) {
   const acceptedAs = safeString((admission as RinPromptAdmission)?.acceptedAs);
-  return acceptedAs === "steer" || acceptedAs === "followUp"
+  return acceptedAs === "steer" ||
+    acceptedAs === "followUp" ||
+    acceptedAs === "rejoin"
     ? acceptedAs
     : acceptedAs === "prompt"
       ? "prompt"
@@ -1058,13 +1060,13 @@ export class RinFrontendTurnDriver {
     return this.normalizeTurnCompletion(await liveTurn.promise);
   }
 
-  private async followActiveTurn(ready?: RinSessionState) {
+  private async followActiveTurn(ready?: RinSessionState, requestTag = "") {
     if (!this.client) throw new Error("frontend_session_not_connected");
     const targetSessionFile = this.sessionFileFromReady(ready);
     this.resetAssistantSegmentTracking();
     this.latestAssistantText = "";
-    const liveTurn = this.liveTurn || this.startLiveTurn("");
-    liveTurn.requestTag = "";
+    const liveTurn = this.liveTurn || this.startLiveTurn(requestTag);
+    liveTurn.requestTag = requestTag;
     this.liveTurnRecoveryContext = {
       sessionFile: targetSessionFile || undefined,
     };
@@ -1211,6 +1213,7 @@ export class RinFrontendTurnDriver {
       resetModelOptionsFromSettings?: boolean;
       promptContext?: RinPromptContext;
       source?: string;
+      requestTag?: string;
       streamingBehavior?: "steer" | "follow";
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
       disabledRinCapabilities?: string[];
@@ -1272,28 +1275,10 @@ export class RinFrontendTurnDriver {
       const images = Array.isArray(input.images) ? input.images : [];
       this.throwIfTurnInterrupted(turnInterruptionSeq);
 
-      // A restarted frontend can find its durable inbox prompt already active
-      // in the restored worker. Rejoin that turn before admitting a new steer.
-      if (input.streamingBehavior !== "steer") {
-        const existing = await this.resolveSubmittedTurnForSession(
-          targetSessionFile,
-          { text, sentAt: input.promptContext?.sentAt },
-        );
-        this.throwIfTurnInterrupted(turnInterruptionSeq);
-        if (existing) {
-          if ("submitted" in existing) {
-            return await this.waitForExistingSubmittedTurn(
-              { text, sentAt: input.promptContext?.sentAt },
-              ready,
-            );
-          }
-          return existing;
-        }
-      }
-
       if (this.hasRemoteOrLiveTurnActive()) {
         this.clearAssistantInterimState();
-        const requestTag = this.createTurnRequestTag();
+        const requestTag =
+          safeString(input.requestTag).trim() || this.createTurnRequestTag();
         const admission = await submitNativeFrontendPromptTurn(this.client, {
           text,
           images,
@@ -1318,13 +1303,34 @@ export class RinFrontendTurnDriver {
               ).trim() || undefined,
           };
         }
+        if (acceptedAs === "rejoin" || acceptedAs === "prompt") {
+          return await this.followActiveTurn(ready, requestTag);
+        }
         return await this.followActiveTurn(ready);
+      }
+
+      if (input.streamingBehavior !== "steer") {
+        const existing = await this.resolveSubmittedTurnForSession(
+          targetSessionFile,
+          { text, sentAt: input.promptContext?.sentAt },
+        );
+        this.throwIfTurnInterrupted(turnInterruptionSeq);
+        if (existing) {
+          if ("submitted" in existing) {
+            return await this.waitForExistingSubmittedTurn(
+              { text, sentAt: input.promptContext?.sentAt },
+              ready,
+            );
+          }
+          return existing;
+        }
       }
 
       this.throwIfTurnInterrupted(turnInterruptionSeq);
       this.resetAssistantSegmentTracking();
       this.latestAssistantText = "";
-      const requestTag = this.createTurnRequestTag();
+      const requestTag =
+        safeString(input.requestTag).trim() || this.createTurnRequestTag();
       const liveTurn = this.startLiveTurn(requestTag);
       this.setFrontendPhase("sending");
       this.liveTurnRecoveryContext = {

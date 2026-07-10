@@ -106,6 +106,28 @@ function createRecoveredController(previousController) {
   return attachTestChatApp(controller);
 }
 
+test("chat controller keeps the inbox request tag stable across frontend recreation", async () => {
+  const first = await createController("discord/1:2");
+  const second = createRecoveredController(first);
+  const seen = [];
+  for (const controller of [first, second]) {
+    controller.driver.runTurn = async (input) => {
+      seen.push(input.requestTag);
+      return { finalText: "done" };
+    };
+    await controller.runTurn({
+      text: "same inbox message",
+      attachments: [],
+      incomingMessageId: "message-1",
+      deliverFinal: false,
+    });
+  }
+
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0], seen[1]);
+  assert.match(seen[0], /^chat-inbox-[a-f0-9]{64}$/);
+});
+
 test("detached non-chat controllers do not synthesize a chat frontend identity", async () => {
   const controller = await createController("cron:cli-123", {
     useChatFrontendIdentity: false,

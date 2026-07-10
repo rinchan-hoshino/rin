@@ -46,7 +46,7 @@ import {
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
 import { RinBackgroundExtensionManager } from "./extensions.js";
-import { listRunningWorkerSessionFiles } from "./running-workers.js";
+import { listRunningWorkerSessions } from "./running-workers.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 
@@ -611,10 +611,10 @@ export async function startDaemon(
   };
 
   clearLegacyRestartState(runtime.agentDir);
-  for (const sessionFile of listRunningWorkerSessionFiles(runtime.agentDir)) {
+  for (const runningSession of listRunningWorkerSessions(runtime.agentDir)) {
     try {
       workerPool.continueInterruptedTurnSessionWorker({
-        sessionFile,
+        ...runningSession,
         source: "daemon-restart",
       });
     } catch {}

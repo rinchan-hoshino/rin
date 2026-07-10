@@ -1834,14 +1834,15 @@ test("frontend SDK turn driver asks the daemon to replay pending terminal events
   assert.equal(liveTurnCreatedBeforeReplay, true);
 });
 
-test("frontend SDK turn driver reclaims a restored active submitted turn before backend admission", async () => {
+test("frontend SDK turn driver lets backend rejoin a restored active inbox turn", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
   const sessionFile = "/tmp/frontend-restored-active.jsonl";
-  let resolveCalls = 0;
+  const requestTag = "chat-inbox-stable";
+  let admittedRequestTag = "";
   let replayCalls = 0;
   client.request = async (command: any) => {
     client.calls.push({ type: "request", command });
@@ -1854,14 +1855,16 @@ test("frontend SDK turn driver reclaims a restored active submitted turn before 
       };
     }
     if (command.type === "resolve_submitted_turn") {
-      resolveCalls += 1;
-      return { submitted: true };
+      throw new Error(
+        "active turn identity must be decided by backend admission",
+      );
     }
     if (command.type === "replay_pending_terminal_turn_event") {
       replayCalls += 1;
       await emitDriverEvent(driver as any, {
         type: "rpc_turn_event",
         event: "complete",
+        requestTag: admittedRequestTag,
         finalText: "restored active final",
         result: {
           messages: [{ type: "text", text: "restored active final" }],
@@ -1875,14 +1878,15 @@ test("frontend SDK turn driver reclaims a restored active submitted turn before 
     if (command.type === "set_active_tools") return { tools: [] };
     return {};
   };
-  client.prompt = async () => {
-    throw new Error(
-      "restored active inbox work must rejoin instead of submitting a duplicate prompt",
-    );
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    admittedRequestTag = options.requestTag;
+    return { acceptedAs: "rejoin", requestTag: options.requestTag };
   };
 
   const result = await driver.runTurn({
     text: "restored active job",
+    requestTag,
     restoreSessionFile: sessionFile,
     promptContext: {
       source: "chat-bridge",
@@ -1892,11 +1896,11 @@ test("frontend SDK turn driver reclaims a restored active submitted turn before 
   });
 
   assert.equal(result.finalText, "restored active final");
-  assert.equal(resolveCalls, 1);
+  assert.equal(admittedRequestTag, requestTag);
   assert.equal(replayCalls, 1);
   assert.equal(
-    client.calls.some((call: any) => call.type === "prompt"),
-    false,
+    client.calls.filter((call: any) => call.type === "prompt").length,
+    1,
   );
 });
 

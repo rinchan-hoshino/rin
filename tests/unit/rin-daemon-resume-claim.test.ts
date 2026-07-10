@@ -728,6 +728,7 @@ test("daemon auto-resumes sessions recorded as running before restart", async ()
     `${JSON.stringify({
       schemaVersion: 1,
       sessionFiles: [sessionFile],
+      requestTags: { [sessionFile]: "chat-inbox-stable" },
     })}\n`,
   );
   await fs.writeFile(
@@ -738,11 +739,11 @@ const process = require("node:process");
 const logPath = ${JSON.stringify(logPath)};
 const sessionFile = ${JSON.stringify(sessionFile)};
 function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
-function log(type) { fs.appendFileSync(logPath, type + "\\n"); }
+function log(command) { fs.appendFileSync(logPath, JSON.stringify(command) + "\\n"); }
 let buffer = "";
 let switched = false;
 async function handle(command) {
-  log(command.type);
+  log(command);
   if (command.type === "switch_session") {
     await new Promise((resolve) => setTimeout(resolve, 100));
     switched = true;
@@ -788,7 +789,12 @@ process.stdin.on("data", (chunk) => {
     assert.equal(workers[0].sessionFile, sessionFile);
     assert.equal(workers[0].attachedConnections, 0);
     assert.equal(workers[0].isStreaming, true);
-    assert.deepEqual(await readLogLines(logPath), ["resume_interrupted_turn"]);
+    const commands = (await readLogLines(logPath)).map((line) =>
+      JSON.parse(line),
+    );
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0].type, "resume_interrupted_turn");
+    assert.equal(commands[0].requestTag, "chat-inbox-stable");
   } finally {
     try {
       daemon.kill("SIGKILL");
