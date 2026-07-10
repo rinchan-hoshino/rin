@@ -43,13 +43,16 @@ import {
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { preparePiManagedToolsForInstall } from "./pi-tools.js";
 import {
-  buildDaemonCommandScript,
   buildDaemonSocketProbeScript,
+  buildDaemonStatusScript,
   canConnectDaemonSocket,
   requestDaemonCommand,
 } from "../rin-daemon/client.js";
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
-import { isDaemonChatQuiescing } from "../rin/daemon-drain.js";
+import {
+  activateDaemonRestart,
+  snapshotDaemonRestart,
+} from "../rin/daemon-activation.js";
 import {
   createManagedRuntimeServiceActionContext,
   tryManagedServiceAction,
@@ -66,43 +69,6 @@ import {
 
 export function defaultDaemonReadyTimeoutMs() {
   return 30_000;
-}
-
-async function sendInstalledDaemonCommand(options: {
-  executionContext: InstallExecutionContext;
-  socketPath: string;
-  type: string;
-  requestId: string;
-}) {
-  const command = { id: options.requestId, type: options.type };
-  if (options.executionContext.sameUser) {
-    return await requestDaemonCommand(command, {
-      socketPath: options.socketPath,
-      timeoutMs: 5000,
-    });
-  }
-  const raw = captureInstallTargetCommand(
-    options.executionContext,
-    options.executionContext.targetNodePath,
-    [
-      "-e",
-      buildDaemonCommandScript(
-        command,
-        options.socketPath,
-        5000,
-        options.requestId,
-      ),
-    ],
-    {},
-    { runCommandAsUser, captureCommandAsUser },
-  );
-  return JSON.parse(String(raw || "null"));
-}
-
-function isLegacyPrepareUnsupportedError(error: unknown) {
-  return String((error as any)?.message || error || "").includes(
-    "rin_no_attached_session",
-  );
 }
 
 async function canConnectInstalledDaemon(options: {
@@ -126,26 +92,29 @@ async function canConnectInstalledDaemon(options: {
   }
 }
 
-async function prepareInstalledDaemonRestart(options: {
+async function queryInstalledDaemonStatus(options: {
   executionContext: InstallExecutionContext;
   socketPath: string;
 }) {
-  return await sendInstalledDaemonCommand({
-    ...options,
-    type: "daemon_prepare_restart",
-    requestId: "install_prepare_restart_1",
-  });
-}
-
-async function cancelInstalledDaemonRestart(options: {
-  executionContext: InstallExecutionContext;
-  socketPath: string;
-}) {
-  return await sendInstalledDaemonCommand({
-    ...options,
-    type: "daemon_cancel_restart",
-    requestId: "install_cancel_restart_1",
-  });
+  const requestId = `install_restart_status_${Date.now()}`;
+  try {
+    if (options.executionContext.sameUser) {
+      return await requestDaemonCommand(
+        { id: requestId, type: "daemon_status" },
+        { socketPath: options.socketPath, timeoutMs: 1500 },
+      );
+    }
+    const raw = captureInstallTargetCommand(
+      options.executionContext,
+      options.executionContext.targetNodePath,
+      ["-e", buildDaemonStatusScript(options.socketPath, 1500, requestId)],
+      {},
+      { runCommandAsUser, captureCommandAsUser },
+    );
+    return JSON.parse(String(raw || "null")) || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function managedRuntimeServiceFromInstallSpec(
@@ -176,22 +145,40 @@ function buildInstallStageManagedRuntimeService(
   return managedRuntimeServiceFromInstallSpec(service);
 }
 
-async function prepareInstalledDaemonRestartActivation(options: {
+async function snapshotInstalledDaemonRestart(options: {
   executionContext: InstallExecutionContext;
   socketPath: string;
 }) {
-  if (!(await canConnectInstalledDaemon(options))) return false;
-  try {
-    const preparedStatus = await prepareInstalledDaemonRestart(options);
-    return isDaemonChatQuiescing(preparedStatus);
-  } catch (error: any) {
-    const message = String(
-      error?.message || error || "prepare did not complete",
-    );
-    if (isLegacyPrepareUnsupportedError(error)) return false;
-    throw new Error(`Update restart prepare failed: ${message}`);
-  }
+  const daemonRunning = await canConnectInstalledDaemon(options);
+  return snapshotDaemonRestart(
+    daemonRunning ? await queryInstalledDaemonStatus(options) : undefined,
+    daemonRunning,
+  );
 }
+
+async function activateInstalledDaemonRestart(options: {
+  executionContext: InstallExecutionContext;
+  socketPath: string;
+  actionContext: ReturnType<typeof createManagedRuntimeServiceActionContext>;
+  service?: ManagedRuntimeService;
+  timeoutMs: number;
+}) {
+  const previousDaemon = await snapshotInstalledDaemonRestart(options);
+  return await activateDaemonRestart({
+    ...previousDaemon,
+    restart: async () =>
+      await tryManagedServiceAction(
+        options.actionContext,
+        "restart",
+        options.service,
+      ),
+    queryStatus: async () => await queryInstalledDaemonStatus(options),
+    timeoutMs: options.timeoutMs,
+    activationError:
+      "rin_daemon_restart_activation_unverified: replacement daemon did not become ready",
+  });
+}
+
 export function readExistingInitializationComplete(installDir: string) {
   try {
     const parsed = JSON.parse(
@@ -444,33 +431,47 @@ async function applyInstalledRuntime(
       targetNodePath: executionContext.targetNodePath,
     });
   }
+  let installedService: null | {
+    kind: "launchd" | "systemd" | "windows-startup";
+    label: string;
+    servicePath: string;
+    stdoutPath?: string;
+    stderrPath?: string;
+    service?: string;
+  } = null;
+  if (installServiceNow) {
+    try {
+      installedService = installDaemonService(
+        targetUser,
+        installDir,
+        useElevatedService,
+        serviceDeps,
+        { activate: false },
+      );
+    } catch (error) {
+      if (persistInstallerState) throw error;
+    }
+  }
+
+  const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
+    ? Math.max(0, Number(options.daemonReadyTimeoutMs))
+    : defaultDaemonReadyTimeoutMs();
   const shouldRestartBeforePersist =
     manageDaemon && !options.stopRuntimeBeforePublish;
   if (shouldRestartBeforePersist) {
-    const socketPath = daemonSocketPathForUser(targetUser, serviceDeps);
-    const preparedRestart = await prepareInstalledDaemonRestartActivation({
+    await activateInstalledDaemonRestart({
       executionContext,
-      socketPath,
-    });
-    try {
-      await tryManagedServiceAction(
-        createManagedRuntimeServiceActionContext({
-          currentUser,
-          targetUser,
-          installDir,
-        }),
-        "restart",
+      socketPath: daemonSocketPathForUser(targetUser, serviceDeps),
+      actionContext: createManagedRuntimeServiceActionContext({
+        currentUser,
+        targetUser,
+        installDir,
+      }),
+      service:
+        managedRuntimeServiceFromInstallSpec(installedService) ||
         buildInstallStageManagedRuntimeService(targetUser, installDir),
-      );
-    } catch (error) {
-      if (preparedRestart) {
-        await cancelInstalledDaemonRestart({
-          executionContext,
-          socketPath,
-        }).catch(() => {});
-      }
-      throw error;
-    }
+      timeoutMs: daemonReadyTimeoutMs,
+    });
   }
 
   const written = persistInstallerState
@@ -534,34 +535,6 @@ async function applyInstalledRuntime(
         },
       );
 
-  let installedService: null | {
-    kind: "launchd" | "systemd" | "windows-startup";
-    label: string;
-    servicePath: string;
-    stdoutPath?: string;
-    stderrPath?: string;
-    service?: string;
-  } = null;
-  if (installServiceNow && shouldRestartBeforePersist) {
-    try {
-      installedService = installDaemonService(
-        targetUser,
-        installDir,
-        useElevatedService,
-        serviceDeps,
-      );
-    } catch (error) {
-      if (persistInstallerState) throw error;
-      installedService = null;
-    }
-  } else if (installServiceNow && process.platform === "linux") {
-    installedService = buildSystemdUserService(
-      targetUser,
-      installDir,
-      targetHomeForUser,
-    );
-  }
-
   const installerManifest = reconcileInstallerManifest(
     {
       targetUser,
@@ -596,49 +569,21 @@ async function applyInstalledRuntime(
   );
 
   if (manageDaemon && !shouldRestartBeforePersist) {
-    if (installServiceNow) {
-      try {
-        installedService = installDaemonService(
-          targetUser,
-          installDir,
-          useElevatedService,
-          serviceDeps,
-        );
-      } catch (error) {
-        if (persistInstallerState) throw error;
-        installedService = null;
-      }
-    }
-    const socketPath = daemonSocketPathForUser(targetUser, serviceDeps);
-    const preparedRestart = await prepareInstalledDaemonRestartActivation({
+    await activateInstalledDaemonRestart({
       executionContext,
-      socketPath,
-    });
-    try {
-      await tryManagedServiceAction(
-        createManagedRuntimeServiceActionContext({
-          currentUser,
-          targetUser,
-          installDir,
-        }),
-        "restart",
+      socketPath: daemonSocketPathForUser(targetUser, serviceDeps),
+      actionContext: createManagedRuntimeServiceActionContext({
+        currentUser,
+        targetUser,
+        installDir,
+      }),
+      service:
         managedRuntimeServiceFromInstallSpec(installedService) ||
-          buildInstallStageManagedRuntimeService(targetUser, installDir),
-      );
-    } catch (error) {
-      if (preparedRestart) {
-        await cancelInstalledDaemonRestart({
-          executionContext,
-          socketPath,
-        }).catch(() => {});
-      }
-      throw error;
-    }
+        buildInstallStageManagedRuntimeService(targetUser, installDir),
+      timeoutMs: daemonReadyTimeoutMs,
+    });
   }
 
-  const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
-    ? Math.max(0, Number(options.daemonReadyTimeoutMs))
-    : defaultDaemonReadyTimeoutMs();
   const daemonReady = installedService
     ? await waitForSocket(
         daemonSocketPathForUser(targetUser, serviceDeps),

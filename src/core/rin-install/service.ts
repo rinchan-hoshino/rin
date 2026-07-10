@@ -286,6 +286,10 @@ export function buildLaunchdPlist(
   return { label, plistPath, plist, stdoutPath, stderrPath };
 }
 
+export type InstallDaemonServiceOptions = {
+  activate?: boolean;
+};
+
 export function installLaunchdAgent(
   targetUser: string,
   installDir: string,
@@ -294,6 +298,7 @@ export function installLaunchdAgent(
     findSystemUser: (user: string) => any;
     targetHomeForUser: (user: string) => string;
   },
+  options: InstallDaemonServiceOptions = {},
 ) {
   const { target, uid } = resolveTargetUserContext(targetUser, deps);
   if (uid < 0)
@@ -311,30 +316,26 @@ export function installLaunchdAgent(
       ownerUser: targetUser,
       ownerGroup: target?.gid,
     });
-    try {
-      runPrivileged("launchctl", ["bootout", `gui/${uid}`, plistPath]);
-    } catch {}
-    runPrivileged("launchctl", ["bootstrap", `gui/${uid}`, plistPath]);
-    try {
-      runPrivileged("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`]);
-    } catch {}
+    if (options.activate !== false) {
+      try {
+        runPrivileged("launchctl", ["bootout", `gui/${uid}`, plistPath]);
+      } catch {}
+      runPrivileged("launchctl", ["bootstrap", `gui/${uid}`, plistPath]);
+    }
   } else {
     ensureDir(path.dirname(plistPath));
     ensureDir(path.dirname(stdoutPath));
     writeManagedServiceFile(plistPath, plist);
-    try {
-      execFileSync("launchctl", ["bootout", `gui/${uid}`, plistPath], {
-        stdio: "ignore",
-      });
-    } catch {}
-    execFileSync("launchctl", ["bootstrap", `gui/${uid}`, plistPath], {
-      stdio: "inherit",
-    });
-    try {
-      execFileSync("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], {
+    if (options.activate !== false) {
+      try {
+        execFileSync("launchctl", ["bootout", `gui/${uid}`, plistPath], {
+          stdio: "ignore",
+        });
+      } catch {}
+      execFileSync("launchctl", ["bootstrap", `gui/${uid}`, plistPath], {
         stdio: "inherit",
       });
-    } catch {}
+    }
   }
   return {
     kind: "launchd" as const,
@@ -374,6 +375,7 @@ export function installSystemdUserService(
     findSystemUser: (user: string) => any;
     targetHomeForUser: (user: string) => string;
   },
+  options: InstallDaemonServiceOptions = {},
 ) {
   const spec = buildSystemdUserService(
     targetUser,
@@ -404,7 +406,7 @@ export function installSystemdUserService(
   runSystemdUserCommand(
     targetUser,
     { systemctl, userEnv },
-    ["enable", "--now", spec.label],
+    ["enable", ...(options.activate === false ? [] : ["--now"]), spec.label],
     elevated,
   );
   return spec;
@@ -652,6 +654,7 @@ export function installWindowsStartupLauncher(
   deps: {
     targetHomeForUser: (user: string) => string;
   },
+  options: InstallDaemonServiceOptions = {},
 ) {
   const spec = buildWindowsStartupLauncher(
     targetUser,
@@ -659,7 +662,9 @@ export function installWindowsStartupLauncher(
     deps.targetHomeForUser,
   );
   writeManagedServiceFile(spec.servicePath, spec.service, { elevated });
-  startWindowsDaemonProcess(targetUser, installDir, deps);
+  if (options.activate !== false) {
+    startWindowsDaemonProcess(targetUser, installDir, deps);
+  }
   return spec;
 }
 
@@ -671,20 +676,28 @@ export function installDaemonService(
     findSystemUser: (user: string) => any;
     targetHomeForUser: (user: string) => string;
   },
+  options: InstallDaemonServiceOptions = {},
 ) {
   if (process.platform === "darwin")
-    return installLaunchdAgent(targetUser, installDir, elevated, deps);
+    return installLaunchdAgent(targetUser, installDir, elevated, deps, options);
   if (
     process.platform === "linux" &&
     (fs.existsSync("/usr/bin/systemctl") || fs.existsSync("/bin/systemctl"))
   )
-    return installSystemdUserService(targetUser, installDir, elevated, deps);
+    return installSystemdUserService(
+      targetUser,
+      installDir,
+      elevated,
+      deps,
+      options,
+    );
   if (process.platform === "win32")
     return installWindowsStartupLauncher(
       targetUser,
       installDir,
       elevated,
       deps,
+      options,
     );
   throw new Error(`rin_service_install_unsupported:${process.platform}`);
 }

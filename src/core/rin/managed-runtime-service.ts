@@ -198,7 +198,76 @@ function tryBootoutLaunchd(
   return false;
 }
 
-function tryManagedLaunchdServiceAction(
+export async function runManagedLaunchdServiceAction(
+  context: ManagedRuntimeServiceActionContext,
+  service: ManagedRuntimeService,
+  action: "start" | "stop" | "restart",
+  deps: {
+    resolveDomain?: (targetUser: string) => string;
+    waitForDaemonUnavailable?: typeof waitForDaemonUnavailable;
+  } = {},
+) {
+  if (!service.path) {
+    throw new Error(`rin_managed_service_missing_path:${service.label}`);
+  }
+  const domain = (deps.resolveDomain || launchdDomainForTargetUser)(
+    context.targetUser,
+  );
+  const serviceTarget = `${domain}/${service.label}`;
+  if (action === "restart") {
+    try {
+      context.exec(["launchctl", "kickstart", "-k", serviceTarget]);
+      return service.label;
+    } catch (error: any) {
+      let serviceLoaded = false;
+      try {
+        context.capture(["launchctl", "print", serviceTarget], {
+          stdio: "ignore",
+        });
+        serviceLoaded = true;
+      } catch {}
+      if (serviceLoaded) {
+        throw new Error(
+          `rin_launchd_restart_failed:${String(error?.message || error)}`,
+        );
+      }
+      if (await context.canConnectSocket()) {
+        throw new Error("rin_launchd_daemon_stop_incomplete");
+      }
+      context.capture(["launchctl", "bootstrap", domain, service.path], {
+        stdio: "ignore",
+      });
+      return service.label;
+    }
+  }
+  if (action === "stop") {
+    const bootedOut = tryBootoutLaunchd(context, domain, service);
+    if (bootedOut) {
+      const unavailable = await (
+        deps.waitForDaemonUnavailable || waitForDaemonUnavailable
+      )(context);
+      if (!unavailable) {
+        throw new Error("rin_launchd_daemon_stop_incomplete");
+      }
+    } else if (await context.canConnectSocket()) {
+      throw new Error("rin_launchd_daemon_stop_incomplete");
+    }
+    return service.label;
+  }
+  let bootstrapped = false;
+  try {
+    context.capture(["launchctl", "bootstrap", domain, service.path], {
+      stdio: "ignore",
+    });
+    bootstrapped = true;
+  } catch {}
+  if (!bootstrapped) {
+    context.exec(["launchctl", "kickstart", serviceTarget]);
+  }
+  return service.label;
+}
+
+async function tryManagedLaunchdServiceAction(
   context: ManagedRuntimeServiceActionContext,
   service: ManagedRuntimeService,
   action: "start" | "stop" | "restart",
@@ -206,25 +275,7 @@ function tryManagedLaunchdServiceAction(
   if (process.platform !== "darwin") {
     throw new Error("rin_managed_service_unsupported:launchd");
   }
-  if (!service.path) {
-    throw new Error(`rin_managed_service_missing_path:${service.label}`);
-  }
-  const domain = launchdDomainForTargetUser(context.targetUser);
-  const serviceTarget = `${domain}/${service.label}`;
-  if (action === "stop") {
-    tryBootoutLaunchd(context, domain, service);
-    return service.label;
-  }
-  if (action === "restart") {
-    tryBootoutLaunchd(context, domain, service);
-  }
-  try {
-    context.capture(["launchctl", "bootstrap", domain, service.path], {
-      stdio: "ignore",
-    });
-  } catch {}
-  context.exec(["launchctl", "kickstart", "-k", serviceTarget]);
-  return service.label;
+  return await runManagedLaunchdServiceAction(context, service, action);
 }
 
 function stopWindowsDaemonFromLock(agentDir: string) {

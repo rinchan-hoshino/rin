@@ -8,7 +8,6 @@ import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import { readJsonFile } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import {
-  buildDaemonCommandScript,
   buildDaemonSocketProbeScript,
   buildDaemonStatusScript,
   canConnectDaemonSocket,
@@ -138,8 +137,6 @@ export type TargetExecutionContext = TargetExecutionContextBase & {
   capture: (argv: string[], options?: any) => string;
   canConnectSocket: () => Promise<boolean>;
   queryDaemonStatus: () => Promise<any>;
-  prepareDaemonRestart: () => Promise<any>;
-  cancelDaemonRestart: () => Promise<any>;
 };
 
 export function resolveRuntimeAgentDirForTarget(
@@ -210,36 +207,6 @@ export function createTargetExecutionContext(
     }
   };
 
-  const sendDaemonCommandInContext = async (
-    type: string,
-    requestId: string,
-  ) => {
-    const command = { id: requestId, type };
-    if (!isTargetUser) {
-      const raw = capture([
-        process.execPath,
-        "-e",
-        buildDaemonCommandScript(command, base.socketPath, 5000, requestId),
-      ]);
-      return JSON.parse(String(raw || "null"));
-    }
-    return await requestDaemonCommand(command, {
-      socketPath: base.socketPath,
-      timeoutMs: 5000,
-    });
-  };
-
-  const prepareDaemonRestartInContext = async () =>
-    await sendDaemonCommandInContext(
-      "daemon_prepare_restart",
-      "prepare_restart_1",
-    );
-  const cancelDaemonRestartInContext = async () =>
-    await sendDaemonCommandInContext(
-      "daemon_cancel_restart",
-      "cancel_restart_1",
-    );
-
   const queryDaemonStatusInContext = async () => {
     if (!isTargetUser) {
       try {
@@ -273,8 +240,6 @@ export function createTargetExecutionContext(
     capture,
     canConnectSocket: canConnectSocketInContext,
     queryDaemonStatus: queryDaemonStatusInContext,
-    prepareDaemonRestart: prepareDaemonRestartInContext,
-    cancelDaemonRestart: cancelDaemonRestartInContext,
   };
 }
 

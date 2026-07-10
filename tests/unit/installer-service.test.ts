@@ -240,6 +240,51 @@ test("installer service helpers prefer current daemon entry, quote systemd value
   });
 });
 
+test("core update can write a launchd service without activating it early", async () => {
+  await withTempDir(async (dir) => {
+    const installDir = path.join(dir, "install");
+    const targetHome = path.join(dir, "home");
+    const currentDaemon = path.join(
+      installDir,
+      "app",
+      "current",
+      "dist",
+      "app",
+      "rin-daemon",
+      "daemon.js",
+    );
+    const managedNode = path.join(
+      installDir,
+      "runtime",
+      "node",
+      "current",
+      "bin",
+      "node",
+    );
+    await fs.mkdir(path.dirname(currentDaemon), { recursive: true });
+    await fs.mkdir(path.dirname(managedNode), { recursive: true });
+    await fs.writeFile(currentDaemon, "export {};\n", "utf8");
+    await fs.writeFile(managedNode, "#!/bin/sh\n", { mode: 0o755 });
+
+    const spec = service.installLaunchdAgent(
+      "demo",
+      installDir,
+      false,
+      {
+        findSystemUser: () => ({ uid: 501, gid: 20, home: targetHome }),
+        targetHomeForUser: () => targetHome,
+      },
+      { activate: false },
+    );
+
+    assert.equal(spec.kind, "launchd");
+    assert.match(
+      await fs.readFile(spec.servicePath, "utf8"),
+      /<string>com\.rin\.daemon\.demo<\/string>/,
+    );
+  });
+});
+
 test("installer service uses managed node runtime when present", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "install");

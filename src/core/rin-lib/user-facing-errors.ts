@@ -344,8 +344,20 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       detail,
       ". Remove it.",
     ),
+  rin_launchd_daemon_stop_incomplete: () =>
+    "Rin could not stop the existing macOS background service.",
+  rin_launchd_restart_failed: (detail) =>
+    withDetail(
+      "Rin could not restart the macOS background service",
+      detail,
+      ".",
+    ),
   rin_launchd_target_user_not_found: () =>
     "Rin could not find the target launchd user. Check the target user.",
+  rin_daemon_restart_activation_unverified: () =>
+    "Rin could not verify that the replacement background service became ready.",
+  rin_daemon_restart_snapshot_unavailable: () =>
+    "Rin could not identify the current background service before restart.",
   rin_managed_service_action_failed: () =>
     "Rin could not control the recorded background service.",
   rin_managed_service_missing: () =>

@@ -328,8 +328,11 @@ test("rin lifecycle control uses the shared recorded managed service boundary", 
   );
 
   assert.match(controlSource, /tryManagedServiceAction\(context, "restart"\)/);
-  assert.match(controlSource, /prepared && !restartActionStarted/);
-  assert.match(controlSource, /cancelDaemonRestart\(\)/);
+  assert.match(controlSource, /activateDaemonRestart/);
+  assert.doesNotMatch(
+    controlSource,
+    /prepareDaemonRestart|cancelDaemonRestart/,
+  );
   assert.match(
     controlSource,
     /const daemonRunning = await context\.canConnectSocket\(\)/,
@@ -337,17 +340,12 @@ test("rin lifecycle control uses the shared recorded managed service boundary", 
   assert.doesNotMatch(controlSource, /waitForDaemonDrain/);
   assert.doesNotMatch(controlSource, /daemon still has active turns/);
   assert.match(finalizeSource, /tryManagedServiceAction\(/);
-  assert.match(
+  assert.match(finalizeSource, /snapshotInstalledDaemonRestart/);
+  assert.match(finalizeSource, /snapshotDaemonRestart/);
+  assert.match(finalizeSource, /activateDaemonRestart/);
+  assert.doesNotMatch(
     finalizeSource,
-    /if \(!\(await canConnectInstalledDaemon\(options\)\)\) return false/,
-  );
-  assert.match(
-    finalizeSource,
-    /isLegacyPrepareUnsupportedError\(error\)\) return false/,
-  );
-  assert.match(
-    finalizeSource,
-    /if \(preparedRestart\) \{[\s\S]*cancelInstalledDaemonRestart/,
+    /prepareInstalledDaemonRestart|cancelInstalledDaemonRestart/,
   );
   assert.doesNotMatch(
     finalizeSource,

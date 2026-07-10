@@ -1,5 +1,8 @@
 import { sleep } from "../platform/process.js";
-import { isDaemonChatQuiescing } from "./daemon-drain.js";
+import {
+  activateDaemonRestart,
+  snapshotDaemonRestart,
+} from "./daemon-activation.js";
 import { tryManagedServiceAction } from "./managed-runtime-service.js";
 export { readManagedRuntimeService } from "./managed-runtime-service.js";
 import {
@@ -39,12 +42,6 @@ async function ensureLifecycleDaemonAvailable(
   await ensureDaemonAvailable(context);
 }
 
-function isLegacyPrepareUnsupportedError(error: unknown) {
-  return String((error as any)?.message || error || "").includes(
-    "rin_no_attached_session",
-  );
-}
-
 export async function runStart(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
   const unit = await tryManagedServiceAction(context, "start");
@@ -65,32 +62,18 @@ export async function runStop(parsed: ParsedArgs) {
 
 export async function runRestart(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
-  let prepared = false;
-  let restartActionStarted = false;
-  let unit: string;
-  try {
-    const daemonRunning = await context.canConnectSocket();
-    if (daemonRunning) {
-      try {
-        const preparedStatus = await context.prepareDaemonRestart();
-        prepared = isDaemonChatQuiescing(preparedStatus);
-      } catch (error: any) {
-        const message = String(
-          error?.message || error || "prepare did not complete",
-        );
-        if (!isLegacyPrepareUnsupportedError(error)) {
-          throw new Error(`Restart prepare failed: ${message}`);
-        }
-      }
-    }
-    unit = await tryManagedServiceAction(context, "restart");
-    restartActionStarted = true;
-  } catch (error) {
-    if (prepared && !restartActionStarted) {
-      await context.cancelDaemonRestart().catch(() => {});
-    }
-    throw error;
-  }
-  await ensureLifecycleDaemonAvailable(context);
-  console.log(`rin restart complete: ${unit!}`);
+  const daemonRunning = await context.canConnectSocket();
+  const previousDaemon = snapshotDaemonRestart(
+    daemonRunning ? await context.queryDaemonStatus() : undefined,
+    daemonRunning,
+  );
+  const unit = await activateDaemonRestart({
+    ...previousDaemon,
+    restart: async () => await tryManagedServiceAction(context, "restart"),
+    queryStatus: context.queryDaemonStatus,
+    timeoutMs: 30_000,
+    activationError:
+      "rin_daemon_restart_activation_unverified: replacement daemon did not become ready",
+  });
+  console.log(`rin restart complete: ${unit}`);
 }
