@@ -1,5 +1,6 @@
 import {
   chatMessageLogPath,
+  getChatMessage,
   listChatMessagesByChatAndDate,
   normalizeStoredChatMessageRole,
   projectStoredChatMessageToChatLog,
@@ -79,6 +80,12 @@ export function appendChatLog(
 ) {
   const normalized = buildStoredMessageFromChatLogEntry(input);
   if (!normalized) return null;
+  const existing = getChatMessage(
+    agentDir,
+    normalized.chatKey,
+    normalized.messageId,
+  );
+  if (existing?.receivedAt) normalized.receivedAt = existing.receivedAt;
   const entry = storedMessageToChatLogEntry(
     upsertChatMessage(agentDir, normalized),
   );

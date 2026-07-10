@@ -94,6 +94,52 @@ test("chat chat log appends into unified message store and reads one day chat hi
   });
 });
 
+test("chat chat log preserves first-seen inbound timing after duplicate delivery", async () => {
+  await withTempRoot(async (root) => {
+    const chatKey = "lark/cli_bot:oc_chat";
+    const messageId = "om_duplicate";
+    messageStore.saveInboundChatMessage(root, {
+      messageId,
+      role: "user",
+      chatKey,
+      platform: "lark",
+      botId: "cli_bot",
+      chatId: "oc_chat",
+      chatType: "group",
+      receivedAt: "2026-07-10T03:14:50.500Z",
+      acceptedAt: "2026-07-10T03:14:50.544Z",
+      processedAt: "2026-07-10T03:14:50.544Z",
+      text: "/usage",
+    });
+    messageStore.saveInboundChatMessage(root, {
+      messageId,
+      role: "user",
+      chatKey,
+      platform: "lark",
+      botId: "cli_bot",
+      chatId: "oc_chat",
+      chatType: "group",
+      receivedAt: "2026-07-10T03:15:00.581Z",
+      text: "/usage",
+    });
+
+    chatLog.appendChatLog(root, {
+      timestamp: "2026-07-10T03:15:00.581Z",
+      chatKey,
+      role: "user",
+      text: "/usage",
+      messageId,
+    });
+
+    const stored = messageStore.getChatMessage(root, chatKey, messageId);
+    assert.equal(stored?.receivedAt, "2026-07-10T03:14:50.500Z");
+    assert.equal(stored?.lastReceivedAt, "2026-07-10T03:15:00.581Z");
+    assert.equal(stored?.duplicateCount, 1);
+    assert.equal(stored?.acceptedAt, "2026-07-10T03:14:50.544Z");
+    assert.equal(stored?.processedAt, "2026-07-10T03:14:50.544Z");
+  });
+});
+
 test("chat chat log reuses message-store projection for fallback text and timestamp fields", async () => {
   await withTempRoot(async (root) => {
     messageStore.saveChatMessage(root, {
