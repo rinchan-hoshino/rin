@@ -1834,6 +1834,72 @@ test("frontend SDK turn driver asks the daemon to replay pending terminal events
   assert.equal(liveTurnCreatedBeforeReplay, true);
 });
 
+test("frontend SDK turn driver reclaims a restored active submitted turn before backend admission", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const sessionFile = "/tmp/frontend-restored-active.jsonl";
+  let resolveCalls = 0;
+  let replayCalls = 0;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command.type === "get_state") {
+      return {
+        sessionFile,
+        sessionId: "frontend-session",
+        isStreaming: true,
+        turnActive: true,
+      };
+    }
+    if (command.type === "resolve_submitted_turn") {
+      resolveCalls += 1;
+      return { submitted: true };
+    }
+    if (command.type === "replay_pending_terminal_turn_event") {
+      replayCalls += 1;
+      await emitDriverEvent(driver as any, {
+        type: "rpc_turn_event",
+        event: "complete",
+        finalText: "restored active final",
+        result: {
+          messages: [{ type: "text", text: "restored active final" }],
+        },
+        sessionId: "frontend-session",
+        sessionFile,
+      });
+      return { replayed: true };
+    }
+    if (command.type === "get_active_tools") return { tools: [] };
+    if (command.type === "set_active_tools") return { tools: [] };
+    return {};
+  };
+  client.prompt = async () => {
+    throw new Error(
+      "restored active inbox work must rejoin instead of submitting a duplicate prompt",
+    );
+  };
+
+  const result = await driver.runTurn({
+    text: "restored active job",
+    restoreSessionFile: sessionFile,
+    promptContext: {
+      source: "chat-bridge",
+      chatKey: "telegram/1:2",
+      sentAt: 1778774580000,
+    },
+  });
+
+  assert.equal(result.finalText, "restored active final");
+  assert.equal(resolveCalls, 1);
+  assert.equal(replayCalls, 1);
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
+});
+
 test("frontend SDK turn driver follows active turn across transient reconnect before rpc final", async () => {
   const client = createFrontendClient();
   let getStateCount = 0;

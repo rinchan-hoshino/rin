@@ -1272,6 +1272,25 @@ export class RinFrontendTurnDriver {
       const images = Array.isArray(input.images) ? input.images : [];
       this.throwIfTurnInterrupted(turnInterruptionSeq);
 
+      // A restarted frontend can find its durable inbox prompt already active
+      // in the restored worker. Rejoin that turn before admitting a new steer.
+      if (input.streamingBehavior !== "steer") {
+        const existing = await this.resolveSubmittedTurnForSession(
+          targetSessionFile,
+          { text, sentAt: input.promptContext?.sentAt },
+        );
+        this.throwIfTurnInterrupted(turnInterruptionSeq);
+        if (existing) {
+          if ("submitted" in existing) {
+            return await this.waitForExistingSubmittedTurn(
+              { text, sentAt: input.promptContext?.sentAt },
+              ready,
+            );
+          }
+          return existing;
+        }
+      }
+
       if (this.hasRemoteOrLiveTurnActive()) {
         this.clearAssistantInterimState();
         const requestTag = this.createTurnRequestTag();
@@ -1300,23 +1319,6 @@ export class RinFrontendTurnDriver {
           };
         }
         return await this.followActiveTurn(ready);
-      }
-
-      if (input.streamingBehavior !== "steer") {
-        const existing = await this.resolveSubmittedTurnForSession(
-          targetSessionFile,
-          { text, sentAt: input.promptContext?.sentAt },
-        );
-        this.throwIfTurnInterrupted(turnInterruptionSeq);
-        if (existing) {
-          if ("submitted" in existing) {
-            return await this.waitForExistingSubmittedTurn(
-              { text, sentAt: input.promptContext?.sentAt },
-              ready,
-            );
-          }
-          return existing;
-        }
       }
 
       this.throwIfTurnInterrupted(turnInterruptionSeq);
