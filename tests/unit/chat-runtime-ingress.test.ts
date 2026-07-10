@@ -447,7 +447,6 @@ test("lark websocket events return before slow message handling settles", async 
   const originalClient = Lark.Client;
   const originalWSClient = Lark.WSClient;
   let capturedDispatcher: any;
-  const identityCalls: any[] = [];
 
   class FakeWSClient {
     start(params: any) {
@@ -457,12 +456,7 @@ test("lark websocket events return before slow message handling settles", async 
     close() {}
   }
 
-  Lark.Client = class FakeClient {
-    async request(options: any) {
-      identityCalls.push(options);
-      return { bot: { open_id: "ou_bot", app_name: "Rin" } };
-    }
-  };
+  Lark.Client = class FakeClient {};
   Lark.WSClient = FakeWSClient;
 
   try {
@@ -493,11 +487,6 @@ test("lark websocket events return before slow message handling settles", async 
     };
 
     await adapter.start();
-    assert.deepEqual(identityCalls, [
-      { url: "/open-apis/bot/v3/info", method: "GET", timeout: 5000 },
-    ]);
-    assert.equal(adapter.bot.user.openId, "ou_bot");
-    assert.equal(adapter.bot.user.name, "Rin");
     const handler = capturedDispatcher?.handles?.get("im.message.receive_v1");
     assert.equal(typeof handler, "function");
 
@@ -607,58 +596,6 @@ test("lark runtime reads merged forward messages into inbound text", async () =>
   const stored = inbox.readChatInboxItem(files[0]);
   assert.match(stored.routing?.text, /Alice: hello/);
   assert.doesNotMatch(stored.routing?.text, /Merged and Forwarded Message/);
-});
-
-test("lark runtime recognizes the bot mention from the official nested mention id shape", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-chat-runtime-"),
-  );
-  const app = runtime.createChatRuntimeApp(agentDir);
-  runtime.instantiateBuiltInChatRuntimeAdapters(app, {
-    dataDir: path.join(agentDir, "data"),
-    settings: {},
-    adapterEntries: [
-      {
-        key: "lark",
-        name: "Feishu",
-        config: { appId: "cli-test", appSecret: "secret" },
-      },
-    ],
-  });
-  const adapter = [...app.adapters][0];
-  adapter.bot.selfId = "cli-test";
-  adapter.bot.user = { openId: "ou_bot" };
-  const seen = [];
-  app.on("message", (session) => seen.push(session));
-
-  await adapter.handleMessage({
-    sender: { sender_type: "user", sender_id: { open_id: "ou_sender" } },
-    message: {
-      message_id: "om-mention",
-      message_type: "text",
-      chat_id: "oc_chat",
-      chat_type: "group",
-      create_time: "1713436800000",
-      content: JSON.stringify({ text: "@_user_1 ping" }),
-      mentions: [
-        {
-          key: "@_user_1",
-          id: { open_id: "ou_bot" },
-          mentioned_type: "bot",
-          name: "Rin",
-        },
-      ],
-    },
-  });
-
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0].stripped.appel, true);
-  assert.equal(seen[0].elements[0].type, "at");
-  assert.equal(seen[0].elements[0].attrs.id, "ou_bot");
-  assert.equal(seen[0].elements[0].attrs.name, "Rin");
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
-  assert.equal(stored.routing?.mentionLike, true);
 });
 
 test("lark runtime maps reply parent ids to canonical quote metadata", async () => {

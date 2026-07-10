@@ -2080,21 +2080,6 @@ export class QQAdapter {
   }
 }
 
-function larkMentionTargetId(mention: any) {
-  const nestedId =
-    mention?.id && typeof mention.id === "object" ? mention.id : {};
-  return safeString(
-    nestedId.open_id ||
-      nestedId.user_id ||
-      nestedId.union_id ||
-      (typeof mention?.id === "string" ? mention.id : "") ||
-      mention?.open_id ||
-      mention?.user_id ||
-      mention?.union_id ||
-      "",
-  ).trim();
-}
-
 export class LarkAdapter {
   private readonly app: any;
   private readonly config: Record<string, any>;
@@ -2205,27 +2190,6 @@ export class LarkAdapter {
       appSecret,
       domain,
     });
-    let botOpenId = "";
-    let botName = appId;
-    try {
-      const response = await this.client.request({
-        url: "/open-apis/bot/v3/info",
-        method: "GET",
-        timeout: 5000,
-      });
-      const botInfo =
-        response?.bot && typeof response.bot === "object"
-          ? response.bot
-          : response?.data?.bot && typeof response.data.bot === "object"
-            ? response.data.bot
-            : {};
-      botOpenId = safeString(botInfo.open_id || botInfo.openId).trim();
-      botName = safeString(botInfo.app_name || botInfo.appName).trim() || appId;
-    } catch (error: any) {
-      this.logger?.warn?.(
-        `get lark bot identity failed err=${safeString(error?.message || error)}`,
-      );
-    }
     this.wsClient = new Lark.WSClient({
       appId,
       appSecret,
@@ -2236,13 +2200,11 @@ export class LarkAdapter {
     this.bot.internal.wsClient = this.wsClient;
     this.bot.selfId = appId;
     this.bot.user = {
-      id: botOpenId || appId,
-      userId: botOpenId || appId,
-      openId: botOpenId || undefined,
-      appId,
-      name: botName,
-      username: botName,
-      nick: botName,
+      id: appId,
+      userId: appId,
+      name: appId,
+      username: appId,
+      nick: appId,
     };
     await this.wsClient.start({
       eventDispatcher: new Lark.EventDispatcher({}).register({
@@ -2376,7 +2338,8 @@ export class LarkAdapter {
           normalizeNode(
             "at",
             compactObject({
-              id: larkMentionTargetId(mention) || undefined,
+              id:
+                safeString(mention?.id || mention?.open_id).trim() || undefined,
               name: safeString(mention?.name).trim() || undefined,
             }),
           ),
@@ -2699,12 +2662,11 @@ export class LarkAdapter {
     const mentions = Array.isArray(message?.mentions)
       ? message.mentions
       : parsed.mentions;
-    const botOpenId = safeString(
-      this.bot?.user?.openId || this.bot?.user?.open_id || "",
-    ).trim();
     const mentionSelf = mentions.some((item: any) => {
-      const targetId = larkMentionTargetId(item);
-      return Boolean(botOpenId && targetId === botOpenId);
+      const key = safeString(
+        item?.key || item?.id || item?.open_id || "",
+      ).trim();
+      return key && key === safeString(this.bot?.selfId).trim();
     });
     const isForward = msgType === "merge_forward";
     const rawElements = isForward

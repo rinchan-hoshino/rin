@@ -142,40 +142,6 @@ test("chat decision lets Feishu owner-only groups skip mention without changing 
   assert.equal(result.trust, "OWNER");
 });
 
-test("chat decision skips Feishu member lookup when the owner explicitly mentions the bot", async () => {
-  const calls: string[] = [];
-  const result = await decision.shouldProcessText(
-    {
-      platform: "lark",
-      guildId: "oc_mentioned",
-      channelId: "oc_mentioned",
-      selfId: "cli_bot",
-      userId: "ou_owner",
-      bot: {
-        selfId: "cli_bot",
-        async getGuildMemberCount(chatId) {
-          calls.push(chatId);
-          throw new Error("member lookup must not block explicit mentions");
-        },
-      },
-      stripped: { appel: true, content: "ping" },
-      elements: [
-        { type: "at", attrs: { id: "ou_bot", name: "Rin" } },
-        { type: "text", attrs: { content: " ping" } },
-      ],
-    },
-    [
-      { type: "at", attrs: { id: "ou_bot", name: "Rin" } },
-      { type: "text", attrs: { content: " ping" } },
-    ],
-    identity,
-  );
-
-  assert.equal(result.allow, true);
-  assert.equal(result.requiresMentionToStartTurn, true);
-  assert.deepEqual(calls, []);
-});
-
 test("chat decision caches private-like group member counts by platform bot and chat", async () => {
   const calls: string[] = [];
   const session = {
