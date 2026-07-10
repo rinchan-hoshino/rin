@@ -762,7 +762,7 @@ test("chat runTurn lets explicit model options override per-chat defaults", asyn
   }
 });
 
-test("chat main reports unmatched private slash commands without starting an agent turn", async () => {
+test("chat main silently drops the removed private /session command", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -818,29 +818,23 @@ test("chat main reports unmatched private slash commands without starting an age
         selfId: "1",
         channelId: "2",
         userId: "owner-1",
-        messageId: "m-model-command",
+        messageId: "m-session-command",
         isDirect: true,
-        content: "/model openai/gpt-5",
-        stripped: { content: "/model openai/gpt-5" },
-        elements: [h.createChatRuntimeH().text("/model openai/gpt-5")],
+        content: "/session",
+        stripped: { content: "/session" },
+        elements: [h.createChatRuntimeH().text("/session")],
       });
 
-      const deadline = Date.now() + 5000;
-      let rows = [];
-      while (Date.now() < deadline) {
-        rows = storeMod
-          .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-        if (rows.length >= 1) break;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const rows = storeMod
+        .listChatMessages(agentDir)
+        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
 
       if (
         runCommandCalls !== 0 ||
         seen.length !== 0 ||
-        sentCount !== 1 ||
-        rows.length !== 1 ||
-        rows[0]?.text !== "Unknown command. Send /help to see available commands."
+        sentCount !== 0 ||
+        rows.length !== 0
       ) {
         throw new Error(JSON.stringify({ sentCount, runCommandCalls, seen, rows }));
       }

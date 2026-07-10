@@ -247,6 +247,8 @@ function getCommandTargets(session: any) {
 
 type ParsedInboundCommand = { name: string; argsText: string };
 
+const REMOVED_CHAT_COMMAND_NAMES = new Set(["session"]);
+
 type InboundCommandRequest = {
   commandLike: boolean;
   name: string;
@@ -966,6 +968,14 @@ export async function startChatBridge(
       elementsToText(queuedElements),
       commandRows,
     );
+    if (
+      commandRequest.commandLike &&
+      REMOVED_CHAT_COMMAND_NAMES.has(commandRequest.name)
+    ) {
+      return {
+        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
+      };
+    }
     if (commandRequest.command) {
       return {
         run: () =>
