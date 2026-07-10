@@ -14,7 +14,22 @@
 - Chat delivery and shutdown handling are more robust, including stricter outbound delivery, stale outbox expiry, lifecycle-cancel retry/suppression, active-turn preservation during daemon or bridge shutdown, hosted bridge frontend shutdown, and quieter shutdown failures before error delivery.
 - Scheduler and update flows now create dedicated first-run task sessions and wait for real daemon turns while ignoring display-only working state during restart drain.
 - Project licensing metadata now uses the GPL-3.0-or-later SPDX identifier with the standard GPL license text.
+- Chat and frontend session recovery now preserves active turns, Discord working continuity, first-seen timestamps, error delivery, and restored frontend sessions across daemon shutdowns and restarts.
+- TUI session rendering is aligned with the current Pi contract, and Rin now tracks the Pi 0.80.6 dependency line.
 <!-- rin-changelog-coverage
+7b6629b fix(chat): reuse restored frontend sessions
+1b018a6 fix(chat): remove session command handling
+ffd6ebb fix(chat): preserve first-seen time in chat log
+b39ca51 fix(chat): preserve Discord working continuity
+9771e01 fix(chat): keep errors outside editable progress
+8ad6913 Revert "fix(chat): bypass Lark member lookup for mentions"
+d79769f fix(chat): bypass Lark member lookup for mentions
+87ff206 fix(tui): restore Pi session rendering contract
+f047e11 fix(chat): rejoin restarted turns in backend
+7a69fea fix(chat): reclaim restored active inbox turns
+e8cd460 fix(chat): preserve turns during daemon shutdown
+67bbe08 chore(pi): sync 0.80.6
+e048314 chore(pi): sync 0.80.5
 b2b3251 fix(installer): preserve PowerShell bootstrap failure logs
 ff00278 fix(chat): simplify outbound message delivery
 a31c3e7 fix(chat): make usage image delivery strict
