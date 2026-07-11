@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   activateDaemonRestart,
+  captureDaemonRestartSnapshot,
   daemonChatStartedAt,
   isActivatedDaemonStatus,
   snapshotDaemonRestart,
@@ -36,6 +37,154 @@ test("daemon restart snapshot aborts before restart when a live generation is un
     () => snapshotDaemonRestart(undefined, true),
     /rin_daemon_restart_snapshot_unavailable/,
   );
+});
+
+test("daemon restart snapshot retries transient status loss before activation", async () => {
+  let queryCalls = 0;
+  const snapshot = await captureDaemonRestartSnapshot({
+    queryStatus: async () => {
+      queryCalls += 1;
+      return queryCalls === 1 ? undefined : { chat: { startedAt: "existing" } };
+    },
+    canConnect: async () => true,
+    timeoutMs: 100,
+    pollIntervalMs: 10,
+  });
+
+  assert.deepEqual(snapshot, {
+    previousChatStartedAt: "existing",
+    requireNewGeneration: true,
+  });
+  assert.equal(queryCalls, 2);
+});
+
+test("daemon restart snapshot distinguishes confirmed absence from unavailable live status", async () => {
+  let absenceProbeCalls = 0;
+  assert.deepEqual(
+    await captureDaemonRestartSnapshot({
+      queryStatus: async () => undefined,
+      canConnect: async () => {
+        absenceProbeCalls += 1;
+        return false;
+      },
+      timeoutMs: 100,
+      pollIntervalMs: 10,
+      absenceConfirmMs: 10,
+    }),
+    { previousChatStartedAt: "", requireNewGeneration: false },
+  );
+  assert.equal(absenceProbeCalls, 2);
+
+  let zeroWindowProbeCalls = 0;
+  await captureDaemonRestartSnapshot({
+    queryStatus: async () => undefined,
+    canConnect: async () => {
+      zeroWindowProbeCalls += 1;
+      return false;
+    },
+    timeoutMs: 100,
+    pollIntervalMs: 10,
+    absenceConfirmMs: 0,
+  });
+  assert.equal(zeroWindowProbeCalls, 2);
+
+  await assert.rejects(
+    captureDaemonRestartSnapshot({
+      queryStatus: async () => undefined,
+      canConnect: async () => true,
+      timeoutMs: 0,
+    }),
+    /rin_daemon_restart_snapshot_unavailable/,
+  );
+});
+
+test("daemon restart snapshot does not false-pass a query error and one failed socket probe", async () => {
+  let queryCalls = 0;
+  const snapshot = await captureDaemonRestartSnapshot({
+    queryStatus: async () => {
+      queryCalls += 1;
+      if (queryCalls === 1) throw new Error("transient query failure");
+      return { chat: { startedAt: "existing" } };
+    },
+    canConnect: async () => false,
+    timeoutMs: 200,
+    pollIntervalMs: 10,
+    absenceConfirmMs: 100,
+  });
+
+  assert.equal(snapshot.previousChatStartedAt, "existing");
+  assert.equal(queryCalls, 2);
+});
+
+test("daemon restart snapshot preserves false-probe evidence across an indeterminate probe", async () => {
+  let probeCalls = 0;
+  const snapshot = await captureDaemonRestartSnapshot({
+    queryStatus: async () => undefined,
+    canConnect: async () => {
+      probeCalls += 1;
+      if (probeCalls === 2) throw new Error("indeterminate probe");
+      return false;
+    },
+    timeoutMs: 100,
+    pollIntervalMs: 10,
+    absenceConfirmMs: 0,
+  });
+
+  assert.equal(snapshot.requireNewGeneration, false);
+  assert.equal(probeCalls, 3);
+});
+
+test("daemon restart snapshot never treats a generation-less status response as absence", async () => {
+  let probeCalls = 0;
+  await assert.rejects(
+    captureDaemonRestartSnapshot({
+      queryStatus: async () => ({ chat: { ready: true } }),
+      canConnect: async () => {
+        probeCalls += 1;
+        return false;
+      },
+      timeoutMs: 30,
+      pollIntervalMs: 10,
+      absenceConfirmMs: 10,
+    }),
+    /rin_daemon_restart_snapshot_unavailable/,
+  );
+  assert.equal(probeCalls, 0);
+});
+
+test("daemon restart snapshot bounds individual status and socket operations", async () => {
+  const startedAt = Date.now();
+  await assert.rejects(
+    captureDaemonRestartSnapshot({
+      queryStatus: async () => await new Promise(() => {}),
+      canConnect: async () => await new Promise(() => {}),
+      timeoutMs: 30,
+      operationTimeoutMs: 10,
+      pollIntervalMs: 10,
+    }),
+    /rin_daemon_restart_snapshot_unavailable/,
+  );
+  assert.ok(Date.now() - startedAt < 150);
+});
+
+test("daemon restart snapshot never probes or accepts absence after its total deadline", async () => {
+  let probeCalls = 0;
+  await assert.rejects(
+    captureDaemonRestartSnapshot({
+      queryStatus: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return undefined;
+      },
+      canConnect: async () => {
+        probeCalls += 1;
+        return false;
+      },
+      timeoutMs: 10,
+      operationTimeoutMs: 50,
+    }),
+    /rin_daemon_restart_snapshot_unavailable/,
+  );
+  assert.equal(probeCalls, 0);
 });
 
 test("daemon activation requires a different ready chat generation", () => {

@@ -1,7 +1,7 @@
 import { sleep } from "../platform/process.js";
 import {
   activateDaemonRestart,
-  snapshotDaemonRestart,
+  captureDaemonRestartSnapshot,
 } from "./daemon-activation.js";
 import { tryManagedServiceAction } from "./managed-runtime-service.js";
 export { readManagedRuntimeService } from "./managed-runtime-service.js";
@@ -62,11 +62,10 @@ export async function runStop(parsed: ParsedArgs) {
 
 export async function runRestart(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
-  const daemonRunning = await context.canConnectSocket();
-  const previousDaemon = snapshotDaemonRestart(
-    daemonRunning ? await context.queryDaemonStatus() : undefined,
-    daemonRunning,
-  );
+  const previousDaemon = await captureDaemonRestartSnapshot({
+    queryStatus: context.queryDaemonStatus,
+    canConnect: context.canConnectSocket,
+  });
   const unit = await activateDaemonRestart({
     ...previousDaemon,
     restart: async () => await tryManagedServiceAction(context, "restart"),

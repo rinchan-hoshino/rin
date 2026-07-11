@@ -51,7 +51,7 @@ import {
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
 import {
   activateDaemonRestart,
-  snapshotDaemonRestart,
+  captureDaemonRestartSnapshot,
 } from "../rin/daemon-activation.js";
 import {
   createManagedRuntimeServiceActionContext,
@@ -149,11 +149,10 @@ async function snapshotInstalledDaemonRestart(options: {
   executionContext: InstallExecutionContext;
   socketPath: string;
 }) {
-  const daemonRunning = await canConnectInstalledDaemon(options);
-  return snapshotDaemonRestart(
-    daemonRunning ? await queryInstalledDaemonStatus(options) : undefined,
-    daemonRunning,
-  );
+  return await captureDaemonRestartSnapshot({
+    queryStatus: async () => await queryInstalledDaemonStatus(options),
+    canConnect: async () => await canConnectInstalledDaemon(options),
+  });
 }
 
 async function activateInstalledDaemonRestart(options: {
