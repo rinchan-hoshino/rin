@@ -15,8 +15,15 @@
 - Scheduler and update flows now create dedicated first-run task sessions and wait for real daemon turns while ignoring display-only working state during restart drain.
 - Project licensing metadata now uses the GPL-3.0-or-later SPDX identifier with the standard GPL license text.
 - Chat and frontend session recovery now preserves active turns, Discord working continuity, first-seen timestamps, error delivery, and restored frontend sessions across daemon shutdowns and restarts.
-- TUI session rendering is aligned with the current Pi contract, and Rin now tracks the Pi 0.80.6 dependency line.
+- TUI session rendering and daemon restart recovery are more reliable, including restored custom entry rendering and simpler readiness checks with resilient status retries; obsolete prompt-engineer mirror metadata has also been removed.
 <!-- rin-changelog-coverage
+008cf3f fix: simplify daemon restart readiness
+af7d5b5 fix: preserve restart status query failures
+555ab4d fix: retry daemon restart snapshot
+43541f5 fix: remove obsolete restart quiescing
+2dbbba0 test(runtime): pin compaction threshold model fixture
+0cbf517 fix(tui): restore custom entry rendering
+36ec80f chore(upstream): remove unused prompt-engineer mirror
 7b6629b fix(chat): reuse restored frontend sessions
 1b018a6 fix(chat): remove session command handling
 ffd6ebb fix(chat): preserve first-seen time in chat log
