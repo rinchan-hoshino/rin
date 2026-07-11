@@ -106,6 +106,14 @@ test("configured Rin sessions disable completion-time threshold compaction only"
   });
   try {
     const session = configured.session;
+    const model = {
+      provider: "test",
+      id: "model",
+      contextWindow: 200_000,
+    };
+    // The isolated agent dir has no provider credentials, so pin the model
+    // instead of letting ambient model availability decide this threshold.
+    session.agent.state.model = model;
     assert.equal(
       Object.prototype.hasOwnProperty.call(session, "_checkCompaction"),
       true,
@@ -122,14 +130,14 @@ test("configured Rin sessions disable completion-time threshold compaction only"
       role: "assistant",
       stopReason: "toolUse",
       timestamp: Date.now(),
-      provider: session.model?.provider,
-      model: session.model?.id,
+      provider: model.provider,
+      model: model.id,
       usage: {
         input: 1,
         output: 1,
-        cacheRead: 239_998,
+        cacheRead: 179_998,
         cacheWrite: 0,
-        totalTokens: 240_000,
+        totalTokens: 180_000,
       },
     };
 
