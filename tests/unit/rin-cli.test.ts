@@ -328,18 +328,20 @@ test("rin lifecycle control uses the shared recorded managed service boundary", 
   );
 
   assert.match(controlSource, /tryManagedServiceAction\(context, "restart"\)/);
-  assert.match(controlSource, /activateDaemonRestart/);
+  assert.match(controlSource, /waitForDaemonAvailable/);
+  assert.doesNotMatch(controlSource, /activateDaemonRestart/);
   assert.doesNotMatch(
     controlSource,
-    /prepareDaemonRestart|cancelDaemonRestart/,
+    /prepareDaemonRestart|cancelDaemonRestart|snapshotDaemonRestart/,
   );
-  assert.match(controlSource, /snapshotDaemonRestart/);
   assert.doesNotMatch(controlSource, /waitForDaemonDrain/);
   assert.doesNotMatch(controlSource, /daemon still has active turns/);
   assert.match(finalizeSource, /tryManagedServiceAction\(/);
-  assert.match(finalizeSource, /snapshotInstalledDaemonRestart/);
-  assert.match(finalizeSource, /snapshotDaemonRestart/);
-  assert.match(finalizeSource, /activateDaemonRestart/);
+  assert.match(finalizeSource, /waitForSocket/);
+  assert.doesNotMatch(
+    finalizeSource,
+    /snapshotInstalledDaemonRestart|snapshotDaemonRestart|activateDaemonRestart/,
+  );
   assert.doesNotMatch(
     finalizeSource,
     /prepareInstalledDaemonRestart|cancelInstalledDaemonRestart/,

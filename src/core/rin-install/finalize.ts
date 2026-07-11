@@ -21,11 +21,7 @@ import {
   writeJsonFileWithPrivilege,
   writeLaunchersForUser,
 } from "./fs-utils.js";
-import {
-  createInstallExecutionContext,
-  captureInstallTargetCommand,
-  type InstallExecutionContext,
-} from "./execution-context.js";
+import { createInstallExecutionContext } from "./execution-context.js";
 import { defaultInstallDirForHome, installedReleaseRoot } from "./paths.js";
 import {
   normalizeInstalledChatSettings,
@@ -42,17 +38,7 @@ import {
 } from "./service.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { preparePiManagedToolsForInstall } from "./pi-tools.js";
-import {
-  buildDaemonSocketProbeScript,
-  buildDaemonStatusScript,
-  canConnectDaemonSocket,
-  requestDaemonCommand,
-} from "../rin-daemon/client.js";
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
-import {
-  activateDaemonRestart,
-  snapshotDaemonRestart,
-} from "../rin/daemon-activation.js";
 import {
   createManagedRuntimeServiceActionContext,
   tryManagedServiceAction,
@@ -69,48 +55,6 @@ import {
 
 export function defaultDaemonReadyTimeoutMs() {
   return 30_000;
-}
-
-async function canConnectInstalledDaemon(options: {
-  executionContext: InstallExecutionContext;
-  socketPath: string;
-}) {
-  if (options.executionContext.sameUser) {
-    return await canConnectDaemonSocket(options.socketPath, 500);
-  }
-  try {
-    captureInstallTargetCommand(
-      options.executionContext,
-      options.executionContext.targetNodePath,
-      ["-e", buildDaemonSocketProbeScript(options.socketPath, 500)],
-      {},
-      { runCommandAsUser, captureCommandAsUser },
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function queryInstalledDaemonStatus(options: {
-  executionContext: InstallExecutionContext;
-  socketPath: string;
-}) {
-  const requestId = `install_restart_status_${Date.now()}`;
-  if (options.executionContext.sameUser) {
-    return await requestDaemonCommand(
-      { id: requestId, type: "daemon_status" },
-      { socketPath: options.socketPath, timeoutMs: 5000 },
-    );
-  }
-  const raw = captureInstallTargetCommand(
-    options.executionContext,
-    options.executionContext.targetNodePath,
-    ["-e", buildDaemonStatusScript(options.socketPath, 5000, requestId)],
-    {},
-    { runCommandAsUser, captureCommandAsUser },
-  );
-  return JSON.parse(String(raw || "null")) || undefined;
 }
 
 function managedRuntimeServiceFromInstallSpec(
@@ -139,40 +83,6 @@ function buildInstallStageManagedRuntimeService(
     targetHomeForUser,
   );
   return managedRuntimeServiceFromInstallSpec(service);
-}
-
-async function snapshotInstalledDaemonRestart(options: {
-  executionContext: InstallExecutionContext;
-  socketPath: string;
-}) {
-  const daemonRunning = await canConnectInstalledDaemon(options);
-  return snapshotDaemonRestart(
-    daemonRunning ? await queryInstalledDaemonStatus(options) : undefined,
-    daemonRunning,
-  );
-}
-
-async function activateInstalledDaemonRestart(options: {
-  executionContext: InstallExecutionContext;
-  socketPath: string;
-  actionContext: ReturnType<typeof createManagedRuntimeServiceActionContext>;
-  service?: ManagedRuntimeService;
-  timeoutMs: number;
-}) {
-  const previousDaemon = await snapshotInstalledDaemonRestart(options);
-  return await activateDaemonRestart({
-    ...previousDaemon,
-    restart: async () =>
-      await tryManagedServiceAction(
-        options.actionContext,
-        "restart",
-        options.service,
-      ),
-    queryStatus: async () => await queryInstalledDaemonStatus(options),
-    timeoutMs: options.timeoutMs,
-    activationError:
-      "rin_daemon_restart_activation_unverified: replacement daemon did not become ready",
-  });
 }
 
 export function readExistingInitializationComplete(installDir: string) {
@@ -455,19 +365,16 @@ async function applyInstalledRuntime(
   const shouldRestartBeforePersist =
     manageDaemon && !options.stopRuntimeBeforePublish;
   if (shouldRestartBeforePersist) {
-    await activateInstalledDaemonRestart({
-      executionContext,
-      socketPath: daemonSocketPathForUser(targetUser, serviceDeps),
-      actionContext: createManagedRuntimeServiceActionContext({
+    await tryManagedServiceAction(
+      createManagedRuntimeServiceActionContext({
         currentUser,
         targetUser,
         installDir,
       }),
-      service:
-        managedRuntimeServiceFromInstallSpec(installedService) ||
+      "restart",
+      managedRuntimeServiceFromInstallSpec(installedService) ||
         buildInstallStageManagedRuntimeService(targetUser, installDir),
-      timeoutMs: daemonReadyTimeoutMs,
-    });
+    );
   }
 
   const written = persistInstallerState
@@ -565,19 +472,16 @@ async function applyInstalledRuntime(
   );
 
   if (manageDaemon && !shouldRestartBeforePersist) {
-    await activateInstalledDaemonRestart({
-      executionContext,
-      socketPath: daemonSocketPathForUser(targetUser, serviceDeps),
-      actionContext: createManagedRuntimeServiceActionContext({
+    await tryManagedServiceAction(
+      createManagedRuntimeServiceActionContext({
         currentUser,
         targetUser,
         installDir,
       }),
-      service:
-        managedRuntimeServiceFromInstallSpec(installedService) ||
+      "restart",
+      managedRuntimeServiceFromInstallSpec(installedService) ||
         buildInstallStageManagedRuntimeService(targetUser, installDir),
-      timeoutMs: daemonReadyTimeoutMs,
-    });
+    );
   }
 
   const daemonReady = installedService

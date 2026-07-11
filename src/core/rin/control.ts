@@ -1,8 +1,4 @@
 import { sleep } from "../platform/process.js";
-import {
-  activateDaemonRestart,
-  snapshotDaemonRestart,
-} from "./daemon-activation.js";
 import { tryManagedServiceAction } from "./managed-runtime-service.js";
 export { readManagedRuntimeService } from "./managed-runtime-service.js";
 import {
@@ -62,18 +58,11 @@ export async function runStop(parsed: ParsedArgs) {
 
 export async function runRestart(parsed: ParsedArgs) {
   const context = createTargetExecutionContext(parsed);
-  const daemonRunning = await context.canConnectSocket();
-  const previousDaemon = snapshotDaemonRestart(
-    daemonRunning ? await context.queryDaemonStatus() : undefined,
-    daemonRunning,
-  );
-  const unit = await activateDaemonRestart({
-    ...previousDaemon,
-    restart: async () => await tryManagedServiceAction(context, "restart"),
-    queryStatus: context.queryDaemonStatus,
-    timeoutMs: 30_000,
-    activationError:
-      "rin_daemon_restart_activation_unverified: replacement daemon did not become ready",
-  });
+  const unit = await tryManagedServiceAction(context, "restart");
+  if (!(await waitForDaemonAvailable(context, 30_000))) {
+    throw new Error(
+      `rin_daemon_restart_not_ready: daemon socket did not become reachable for ${context.targetUser}`,
+    );
+  }
   console.log(`rin restart complete: ${unit}`);
 }
