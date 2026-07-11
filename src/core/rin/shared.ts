@@ -213,7 +213,7 @@ export function createTargetExecutionContext(
         const raw = capture([
           process.execPath,
           "-e",
-          buildDaemonStatusScript(base.socketPath, 1500, "doctor_1"),
+          buildDaemonStatusScript(base.socketPath, 5000, "doctor_1"),
         ]);
         const decoded = JSON.parse(String(raw || "null"));
         return decoded == null ? undefined : decoded;
@@ -225,7 +225,7 @@ export function createTargetExecutionContext(
     try {
       return await requestDaemonCommand(
         { id: "doctor_1", type: "daemon_status" },
-        { socketPath: base.socketPath, timeoutMs: 1500 },
+        { socketPath: base.socketPath, timeoutMs: 5000 },
       );
     } catch {
       return undefined;

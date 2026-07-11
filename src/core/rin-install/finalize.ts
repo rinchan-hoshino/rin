@@ -51,7 +51,7 @@ import {
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
 import {
   activateDaemonRestart,
-  captureDaemonRestartSnapshot,
+  snapshotDaemonRestart,
 } from "../rin/daemon-activation.js";
 import {
   createManagedRuntimeServiceActionContext,
@@ -97,24 +97,20 @@ async function queryInstalledDaemonStatus(options: {
   socketPath: string;
 }) {
   const requestId = `install_restart_status_${Date.now()}`;
-  try {
-    if (options.executionContext.sameUser) {
-      return await requestDaemonCommand(
-        { id: requestId, type: "daemon_status" },
-        { socketPath: options.socketPath, timeoutMs: 1500 },
-      );
-    }
-    const raw = captureInstallTargetCommand(
-      options.executionContext,
-      options.executionContext.targetNodePath,
-      ["-e", buildDaemonStatusScript(options.socketPath, 1500, requestId)],
-      {},
-      { runCommandAsUser, captureCommandAsUser },
+  if (options.executionContext.sameUser) {
+    return await requestDaemonCommand(
+      { id: requestId, type: "daemon_status" },
+      { socketPath: options.socketPath, timeoutMs: 5000 },
     );
-    return JSON.parse(String(raw || "null")) || undefined;
-  } catch {
-    return undefined;
   }
+  const raw = captureInstallTargetCommand(
+    options.executionContext,
+    options.executionContext.targetNodePath,
+    ["-e", buildDaemonStatusScript(options.socketPath, 5000, requestId)],
+    {},
+    { runCommandAsUser, captureCommandAsUser },
+  );
+  return JSON.parse(String(raw || "null")) || undefined;
 }
 
 function managedRuntimeServiceFromInstallSpec(
@@ -149,10 +145,11 @@ async function snapshotInstalledDaemonRestart(options: {
   executionContext: InstallExecutionContext;
   socketPath: string;
 }) {
-  return await captureDaemonRestartSnapshot({
-    queryStatus: async () => await queryInstalledDaemonStatus(options),
-    canConnect: async () => await canConnectInstalledDaemon(options),
-  });
+  const daemonRunning = await canConnectInstalledDaemon(options);
+  return snapshotDaemonRestart(
+    daemonRunning ? await queryInstalledDaemonStatus(options) : undefined,
+    daemonRunning,
+  );
 }
 
 async function activateInstalledDaemonRestart(options: {

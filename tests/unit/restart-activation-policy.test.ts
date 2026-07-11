@@ -28,6 +28,18 @@ test("rin restart performs one managed restart and verifies a new daemon generat
   assert.doesNotMatch(restartBlock, /waitForDaemonDrain/);
 });
 
+test("rin update preserves one bounded status-query failure before restart", () => {
+  const finalize = source("src/core/rin-install/finalize.ts");
+  const queryBlock = finalize.slice(
+    finalize.indexOf("async function queryInstalledDaemonStatus"),
+    finalize.indexOf("function managedRuntimeServiceFromInstallSpec"),
+  );
+
+  assert.match(queryBlock, /timeoutMs:\s*5000/);
+  assert.match(queryBlock, /buildDaemonStatusScript\([^)]*5000/);
+  assert.doesNotMatch(queryBlock, /catch/);
+});
+
 test("rin update writes service files passively then verifies one restart", () => {
   const finalize = source("src/core/rin-install/finalize.ts");
   const restartActivationBlock = finalize.slice(
