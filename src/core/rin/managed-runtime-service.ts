@@ -216,15 +216,15 @@ export async function runManagedLaunchdServiceAction(
   const serviceTarget = `${domain}/${service.label}`;
   if (action === "restart") {
     const bootedOut = tryBootoutLaunchd(context, domain, service);
-    if (bootedOut) {
+    const shouldWaitForShutdown =
+      bootedOut || (await context.canConnectSocket());
+    if (shouldWaitForShutdown) {
       const unavailable = await (
         deps.waitForDaemonUnavailable || waitForDaemonUnavailable
-      )(context);
+      )(context, 30_000);
       if (!unavailable) {
         throw new Error("rin_launchd_daemon_stop_incomplete");
       }
-    } else if (await context.canConnectSocket()) {
-      throw new Error("rin_launchd_daemon_stop_incomplete");
     }
     context.capture(["launchctl", "bootstrap", domain, service.path], {
       stdio: "ignore",

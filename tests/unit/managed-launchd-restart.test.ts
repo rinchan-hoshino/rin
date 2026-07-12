@@ -42,7 +42,14 @@ const service = {
   path: "/Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
 };
 
-test("launchd restart waits for the old daemon to stop before bootstrapping", async () => {
+function waitResult(events: string[], result: boolean) {
+  return async (_context: unknown, timeoutMs?: number) => {
+    events.push(`wait-for-daemon-unavailable:${timeoutMs}`);
+    return result;
+  };
+}
+
+test("launchd restart gives the old daemon its full shutdown budget", async () => {
   const { context, events } = createContext();
 
   const result = await runManagedLaunchdServiceAction(
@@ -51,17 +58,14 @@ test("launchd restart waits for the old daemon to stop before bootstrapping", as
     "restart",
     {
       resolveDomain: () => "gui/501",
-      async waitForDaemonUnavailable() {
-        events.push("wait-for-daemon-unavailable");
-        return true;
-      },
+      waitForDaemonUnavailable: waitResult(events, true) as any,
     },
   );
 
   assert.equal(result, service.label);
   assert.deepEqual(events, [
     "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable",
+    "wait-for-daemon-unavailable:30000",
     "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
   ]);
 });
@@ -72,17 +76,14 @@ test("launchd restart fails before bootstrap when the old daemon remains live", 
   await assert.rejects(
     runManagedLaunchdServiceAction(context as any, service, "restart", {
       resolveDomain: () => "gui/501",
-      async waitForDaemonUnavailable() {
-        events.push("wait-for-daemon-unavailable");
-        return false;
-      },
+      waitForDaemonUnavailable: waitResult(events, false) as any,
     }),
     /rin_launchd_daemon_stop_incomplete/,
   );
 
   assert.deepEqual(events, [
     "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable",
+    "wait-for-daemon-unavailable:30000",
   ]);
 });
 
@@ -108,7 +109,33 @@ test("launchd restart bootstraps an unloaded job when no daemon is live", async 
   ]);
 });
 
-test("launchd restart fails when an unowned daemon remains live", async () => {
+test("launchd restart waits for a still-exiting daemon after the job is unloaded", async () => {
+  const { context, events } = createContext({
+    bootoutFails: true,
+    socketReady: true,
+  });
+
+  const result = await runManagedLaunchdServiceAction(
+    context as any,
+    service,
+    "restart",
+    {
+      resolveDomain: () => "gui/501",
+      waitForDaemonUnavailable: waitResult(events, true) as any,
+    },
+  );
+
+  assert.equal(result, service.label);
+  assert.deepEqual(events, [
+    "launchctl bootout gui/501/com.rin.daemon.demo",
+    "launchctl bootout /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
+    "socket-probe",
+    "wait-for-daemon-unavailable:30000",
+    "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
+  ]);
+});
+
+test("launchd restart fails when an unloaded daemon remains live", async () => {
   const { context, events } = createContext({
     bootoutFails: true,
     socketReady: true,
@@ -117,6 +144,7 @@ test("launchd restart fails when an unowned daemon remains live", async () => {
   await assert.rejects(
     runManagedLaunchdServiceAction(context as any, service, "restart", {
       resolveDomain: () => "gui/501",
+      waitForDaemonUnavailable: waitResult(events, false) as any,
     }),
     /rin_launchd_daemon_stop_incomplete/,
   );
@@ -125,6 +153,7 @@ test("launchd restart fails when an unowned daemon remains live", async () => {
     "launchctl bootout gui/501/com.rin.daemon.demo",
     "launchctl bootout /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
     "socket-probe",
+    "wait-for-daemon-unavailable:30000",
   ]);
 });
 
@@ -134,17 +163,14 @@ test("launchd restart propagates bootstrap failures", async () => {
   await assert.rejects(
     runManagedLaunchdServiceAction(context as any, service, "restart", {
       resolveDomain: () => "gui/501",
-      async waitForDaemonUnavailable() {
-        events.push("wait-for-daemon-unavailable");
-        return true;
-      },
+      waitForDaemonUnavailable: waitResult(events, true) as any,
     }),
     /bootstrap failed/,
   );
 
   assert.deepEqual(events, [
     "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable",
+    "wait-for-daemon-unavailable:30000",
     "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
   ]);
 });
