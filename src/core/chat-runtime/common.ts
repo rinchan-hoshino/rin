@@ -12,6 +12,7 @@ import {
   renderChatNodesMarkdown,
   renderChatNodesPlain,
   expandRichTextSyntaxNodes,
+  normalizeRenderedText,
   renderChatNodesTelegramHtml,
   type RenderChatNodesOptions,
 } from "../chat/rich-text.js";
@@ -291,7 +292,8 @@ export function updateEditableMessageSections(input: {
 }
 
 export function splitPlainText(text: string, maxLength: number) {
-  const normalized = safeString(text);
+  const normalized = normalizeRenderedText(text);
+  const trimChunk = (chunk: string) => normalizeRenderedText(chunk);
   if (!normalized) return [];
   const chars = Array.from(normalized);
   const limit = Math.max(1, Math.floor(maxLength) || 1);
@@ -301,7 +303,7 @@ export function splitPlainText(text: string, maxLength: number) {
   while (cursor < chars.length) {
     const remaining = chars.length - cursor;
     if (remaining <= limit) {
-      const chunk = chars.slice(cursor).join("").trim();
+      const chunk = trimChunk(chars.slice(cursor).join(""));
       if (chunk) chunks.push(chunk);
       break;
     }
@@ -318,13 +320,10 @@ export function splitPlainText(text: string, maxLength: number) {
     if (splitOffset <= 0) splitOffset = limit;
 
     const nextCursor = cursor + splitOffset;
-    const chunk = chars.slice(cursor, nextCursor).join("").trim();
+    const chunk = trimChunk(chars.slice(cursor, nextCursor).join(""));
     if (chunk) {
       chunks.push(chunk);
       cursor = nextCursor;
-      while (cursor < chars.length && /\s/.test(chars[cursor] || "")) {
-        cursor += 1;
-      }
       continue;
     }
 

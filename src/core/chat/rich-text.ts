@@ -9,7 +9,6 @@ export type RenderChatNodesOptions = {
   renderAt?: (attrs: Record<string, any>) => string;
   markdown?: "preserve" | "strip";
   includeMedia?: boolean;
-  preserveLineIndentation?: boolean;
 };
 
 export function chatMarkdownPolicyForPlatform(
@@ -110,10 +109,10 @@ export function stripMarkdownFormatting(text: string) {
     return label ? `[image: ${label}]` : "[image]";
   });
   next = next.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
-  next = next.replace(/^\s{0,3}#{1,6}\s+/gm, "");
-  next = next.replace(/^\s{0,3}>\s?/gm, "> ");
-  next = next.replace(/^\s*[-*+]\s+/gm, "- ");
-  next = next.replace(/^\s*(\d+)[.)]\s+/gm, "$1. ");
+  next = next.replace(/^([\t ]{0,3})#{1,6}\s+/gm, "$1");
+  next = next.replace(/^([\t ]{0,3})>\s?/gm, "$1> ");
+  next = next.replace(/^([\t ]*)[-*+]\s+/gm, "$1- ");
+  next = next.replace(/^([\t ]*)(\d+)[.)]\s+/gm, "$1$2. ");
   next = next.replace(/\*\*([^*\n]+)\*\*/g, "$1");
   next = next.replace(/(?<!\w)__([^_\n]+)__(?!\w)/g, "$1");
   next = next.replace(/\*([^*\n]+)\*/g, "$1");
@@ -122,23 +121,15 @@ export function stripMarkdownFormatting(text: string) {
   return normalizeRenderedText(next);
 }
 
-function normalizeRenderedText(
-  text: string,
-  options: { preserveLineIndentation?: boolean } = {},
-) {
-  const next = safeString(text)
+export function normalizeRenderedText(text: string) {
+  const normalized = safeString(text)
     .replace(/\r\n?/g, "\n")
     .replace(/[\t ]+\n/g, "\n");
-  const normalized = options.preserveLineIndentation
-    ? next
-        .split("\n")
-        .map((line) => {
-          const indentation = /^[\t ]*/.exec(line)?.[0] || "";
-          return `${indentation}${line.slice(indentation.length).replace(/[^\S\n]+/g, " ")}`;
-        })
-        .join("\n")
-    : next.replace(/\n[\t ]+/g, "\n").replace(/[^\S\n]+/g, " ");
-  return normalized.replace(/\n{3,}/g, "\n\n").trim();
+  if (!normalized.trim()) return "";
+  return normalized
+    .replace(/^(?:[\t ]*\n)+/, "")
+    .replace(/(?:\n[\t ]*)+$/, "")
+    .replace(/[\t ]+$/, "");
 }
 
 function renderNodeMarkdown(
@@ -216,9 +207,7 @@ export function renderChatNodesMarkdown(
   nodes: any[],
   options: RenderChatNodesOptions = {},
 ) {
-  return normalizeRenderedText(renderNodeMarkdown(nodes, options), {
-    preserveLineIndentation: options.preserveLineIndentation,
-  });
+  return normalizeRenderedText(renderNodeMarkdown(nodes, options));
 }
 
 export function renderChatNodesPlain(
@@ -511,7 +500,7 @@ export function markdownToTelegramHtml(text: string) {
   for (let i = 0; i < placeholders.length; i += 1) {
     next = next.replaceAll(`\u0000${i}\u0000`, placeholders[i] || "");
   }
-  return sanitizeTelegramHtml(next).trim();
+  return normalizeRenderedText(sanitizeTelegramHtml(next));
 }
 
 export function renderChatNodesTelegramHtml(
@@ -530,5 +519,5 @@ export function renderChatNodesTelegramHtml(
       return markdownToTelegramHtml(renderNodeMarkdown(node, options));
     })
     .join("");
-  return pieces.trim();
+  return normalizeRenderedText(pieces);
 }

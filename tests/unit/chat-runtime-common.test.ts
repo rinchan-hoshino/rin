@@ -35,7 +35,7 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
     chatRuntimeCommon.renderPlainTextFromNodes([
       { type: "text", text: "  fallback text  " },
     ]),
-    "fallback text",
+    "  fallback text",
   );
   assert.equal(
     chatRuntimeCommon.renderPlainTextFromNodes(nodes, {
@@ -118,6 +118,24 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
     ["text", "at"],
   );
   assert.equal(prepared.replyToMessageId, "abc123");
+});
+
+test("chat runtime renderers preserve shared whitespace semantics", () => {
+  const markdown = "    root  code\n\n- parent\n  - child\n    continuation";
+  const nodes = [
+    chatRuntimeCommon.normalizeNode("markdown", { content: markdown }),
+  ];
+
+  assert.equal(chatRuntimeCommon.renderMarkdownFromNodes(nodes), markdown);
+  assert.equal(
+    chatRuntimeCommon.renderPlainTextFromNodes(nodes),
+    "    root  code\n\n- parent\n  - child\n    continuation",
+  );
+  assert.equal(chatRuntimeCommon.renderTelegramHtmlFromNodes(nodes), markdown);
+  assert.deepEqual(
+    chatRuntimeCommon.splitPlainText(`${"x".repeat(8)}\n  child`, 10),
+    ["x".repeat(8), "  child"],
+  );
 });
 
 test("chat runtime common helpers expand markdown rich object syntax", () => {

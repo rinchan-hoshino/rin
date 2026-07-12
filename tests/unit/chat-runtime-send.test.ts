@@ -172,6 +172,69 @@ test("discord adapter deletes visible progress before final text", async () => {
   });
 });
 
+test("discord adapter preserves markdown indentation", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      channels: {
+        fetch: async () => ({
+          send: async (payload: any) => {
+            calls.push(payload);
+            return { id: "m1" };
+          },
+        }),
+      },
+    };
+    const markdown =
+      "    root code\n\n- parent\n  - child\n    continuation\n\n    nested code";
+
+    const result = await app.bots[0].sendMessage("C1", [h.markdown(markdown)]);
+
+    assert.deepEqual(result, ["m1"]);
+    assert.equal(calls[0].content, markdown);
+  });
+});
+
+test("discord adapter preserves indentation after a text split", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      channels: {
+        fetch: async () => ({
+          send: async (payload: any) => {
+            calls.push(payload);
+            return { id: `m${calls.length}` };
+          },
+        }),
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("C1", [
+      h.markdown(`${"x".repeat(1998)}\n  nested`),
+    ]);
+
+    assert.deepEqual(result, ["m1", "m2"]);
+    assert.deepEqual(
+      calls.map((payload) => payload.content),
+      ["x".repeat(1998), "  nested"],
+    );
+  });
+});
+
 test("discord adapter waits for in-flight editable progress before final cleanup", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -1270,6 +1333,30 @@ test("telegram adapter renders markdown nodes through Telegram HTML parse mode",
       calls[0].payload.text,
       /<a href="https:\/\/example\.com">docs<\/a>/,
     );
+  });
+});
+
+test("telegram adapter preserves shared markdown indentation semantics", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      return { message_id: String(calls.length) };
+    };
+    const markdown = "    root  code\n\n- parent\n  - child\n    continuation";
+
+    const result = await app.bots[0].sendMessage("456", [h.markdown(markdown)]);
+
+    assert.deepEqual(result, ["1"]);
+    assert.equal(calls[0].payload.parse_mode, "HTML");
+    assert.equal(calls[0].payload.text, markdown);
   });
 });
 

@@ -808,9 +808,8 @@ export class DiscordAdapter {
   }
 
   private renderOutboundText(nodes: any[]) {
-    return renderPlainTextFromNodes(nodes, {
+    return renderMarkdownFromNodes(nodes, {
       includeMedia: false,
-      markdown: "preserve",
       renderAt(attrs) {
         const id = safeString(attrs.id).trim();
         return id ? `<@${id}>` : safeString(attrs.name).trim();
@@ -1405,9 +1404,8 @@ export class SlackAdapter {
   }
 
   private renderOutboundText(nodes: any[]) {
-    return renderPlainTextFromNodes(nodes, {
+    return renderMarkdownFromNodes(nodes, {
       includeMedia: false,
-      markdown: "preserve",
       renderAt(attrs) {
         const id = safeString(attrs.id).trim();
         return id ? `<@${id}>` : safeString(attrs.name).trim();
@@ -2608,7 +2606,6 @@ export class LarkAdapter {
   private renderOutboundText(nodes: any[]) {
     return normalizeLarkMarkdownListBlocks(
       renderMarkdownFromNodes(nodes, {
-        preserveLineIndentation: true,
         renderAt(attrs) {
           const id = safeString(attrs.id).trim();
           const name = safeString(attrs.name).trim();
