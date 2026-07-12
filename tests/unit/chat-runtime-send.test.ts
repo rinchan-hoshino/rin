@@ -665,6 +665,58 @@ test("lark adapter deletes visible progress before final text", async () => {
   });
 });
 
+test("lark adapter serializes editable progress sections as post paragraphs", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push({ method: "create", payload });
+            return { data: { message_id: "m1" } };
+          },
+          update: async (payload: any) => {
+            calls.push({ method: "update", payload });
+            return { data: { message_id: payload.path.message_id } };
+          },
+        },
+      },
+    };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "oc_1", tick: 0 });
+    await app.bots[0].sendMessage("oc_1", [h.text("checking")], {
+      deliveryKind: "interim",
+      coalesceWithWorkingMessage: true,
+    });
+    await app.bots[0].sendMessage("oc_1", [h.text("⏹️ first task")], {
+      deliveryKind: "passive_notice",
+      coalesceWithWorkingMessage: true,
+    });
+
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["create", "update", "update"],
+    );
+    assert.deepEqual(JSON.parse(calls[1].payload.data.content).zh_cn.content, [
+      [{ tag: "md", text: "Working..." }],
+      [{ tag: "md", text: "checking" }],
+    ]);
+    assert.deepEqual(JSON.parse(calls[2].payload.data.content).zh_cn.content, [
+      [{ tag: "md", text: "Working..." }],
+      [{ tag: "md", text: "checking" }],
+      [{ tag: "md", text: "⏹️ first task" }],
+    ]);
+  });
+});
+
 test("telegram adapter keeps working and todo editable before final text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -2045,6 +2097,285 @@ test("lark adapter sends quote nodes through the native reply endpoint", async (
   });
 });
 
+test("lark adapter uploads images and preserves surrounding text order", async () => {
+  await withTempDir(async (agentDir) => {
+    const imagePath = path.join(agentDir, "preview.png");
+    await fs.writeFile(imagePath, Buffer.from("test-image"));
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    let nextMessageId = 1;
+    adapter.client = {
+      im: {
+        image: {
+          create: async (payload: any) => {
+            calls.push({ method: "uploadImage", payload });
+            return { image_key: "img_v2_preview" };
+          },
+        },
+        message: {
+          create: async (payload: any) => {
+            calls.push({ method: "createMessage", payload });
+            return { data: { message_id: `m${nextMessageId++}` } };
+          },
+          delete: async (payload: any) => {
+            calls.push({ method: "deleteMessage", payload });
+            return { ok: true };
+          },
+        },
+      },
+    };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "oc_1", tick: 0 });
+    const result = await app.bots[0].sendMessage("oc_1", [
+      h.text("before"),
+      h.image(imagePath),
+      h.text("after"),
+    ]);
+
+    assert.deepEqual(result, ["m2", "m3", "m4"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      [
+        "createMessage",
+        "deleteMessage",
+        "createMessage",
+        "uploadImage",
+        "createMessage",
+        "createMessage",
+      ],
+    );
+    assert.equal(calls[0].payload.data.msg_type, "post");
+    assert.equal(calls[1].payload.path.message_id, "m1");
+    assert.equal(calls[2].payload.data.msg_type, "post");
+    assert.equal(calls[3].payload.data.image_type, "message");
+    assert.deepEqual(calls[3].payload.data.image, Buffer.from("test-image"));
+    assert.equal(calls[4].payload.data.msg_type, "image");
+    assert.deepEqual(JSON.parse(calls[4].payload.data.content), {
+      image_key: "img_v2_preview",
+    });
+    assert.equal(calls[5].payload.data.msg_type, "post");
+  });
+});
+
+test("lark adapter downloads remote images and uses the native reply endpoint", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async () =>
+        new Response(Buffer.from("remote-image"), { status: 200 });
+      adapter.client = {
+        im: {
+          image: {
+            create: async (payload: any) => {
+              calls.push({ method: "uploadImage", payload });
+              return { data: { image_key: "img_v2_remote" } };
+            },
+          },
+          message: {
+            reply: async (payload: any) => {
+              calls.push({ method: "reply", payload });
+              return { data: { message_id: "reply-image" } };
+            },
+          },
+        },
+      };
+
+      const result = await app.bots[0].sendMessage("oc_1", [
+        h.quote("om_parent"),
+        h.image("https://example.com/remote.png"),
+      ]);
+
+      assert.deepEqual(result, ["reply-image"]);
+      assert.deepEqual(
+        calls.map((entry) => entry.method),
+        ["uploadImage", "reply"],
+      );
+      assert.deepEqual(
+        calls[0].payload.data.image,
+        Buffer.from("remote-image"),
+      );
+      assert.equal(calls[1].payload.path.message_id, "om_parent");
+      assert.equal(calls[1].payload.data.msg_type, "image");
+      assert.deepEqual(JSON.parse(calls[1].payload.data.content), {
+        image_key: "img_v2_remote",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("lark adapter reports image download failures and continues later text", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async () => new Response("missing", { status: 404 });
+      adapter.client = {
+        im: {
+          image: {
+            create: async () => {
+              throw new Error("image upload should not run");
+            },
+          },
+          message: {
+            create: async (payload: any) => {
+              calls.push(payload);
+              return { data: { message_id: `m${calls.length}` } };
+            },
+          },
+        },
+      };
+
+      const result = await app.bots[0].sendMessage("oc_1", [
+        h.text("before"),
+        h.image("https://example.com/missing.png"),
+        h.text("after"),
+      ]);
+
+      assert.deepEqual(result, ["m1", "m2", "m3"]);
+      assert.equal(calls.length, 3);
+      assert.equal(
+        JSON.parse(calls[0].data.content).zh_cn.content[0][0].text,
+        "before",
+      );
+      assert.equal(
+        JSON.parse(calls[1].data.content).zh_cn.content[0][0].text,
+        "Failed to download Lark image (HTTP 404)",
+      );
+      assert.equal(
+        JSON.parse(calls[2].data.content).zh_cn.content[0][0].text,
+        "after",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test("lark adapter rejects oversized local image files before reading or upload", async () => {
+  await withTempDir(async (agentDir) => {
+    const imagePath = path.join(agentDir, "oversized.png");
+    const imageFile = await fs.open(imagePath, "w");
+    await imageFile.truncate(10 * 1024 * 1024 + 1);
+    await imageFile.close();
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    let uploadAttempted = false;
+    adapter.client = {
+      im: {
+        image: {
+          create: async () => {
+            uploadAttempted = true;
+            return { image_key: "unexpected" };
+          },
+        },
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "limit-error" } };
+          },
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("oc_1", [
+      runtime.createChatRuntimeH().image(imagePath),
+    ]);
+
+    assert.deepEqual(result, ["limit-error"]);
+    assert.equal(uploadAttempted, false);
+    assert.equal(calls.length, 1);
+    assert.equal(
+      JSON.parse(calls[0].data.content).zh_cn.content[0][0].text,
+      "Lark image exceeds the 10 MB upload limit",
+    );
+  });
+});
+
+test("lark adapter aborts remote images declared over the upload limit", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    let uploadAttempted = false;
+    let fetchSignal: AbortSignal | undefined;
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async (_url, init) => {
+        fetchSignal = init?.signal as AbortSignal | undefined;
+        return new Response("small body", {
+          status: 200,
+          headers: { "content-length": String(10 * 1024 * 1024 + 1) },
+        });
+      };
+      adapter.client = {
+        im: {
+          image: {
+            create: async () => {
+              uploadAttempted = true;
+              return { image_key: "unexpected" };
+            },
+          },
+          message: {
+            create: async (payload: any) => {
+              calls.push(payload);
+              return { data: { message_id: "remote-limit-error" } };
+            },
+          },
+        },
+      };
+
+      const result = await app.bots[0].sendMessage("oc_1", [
+        h.image("https://example.com/oversized.png"),
+      ]);
+
+      assert.deepEqual(result, ["remote-limit-error"]);
+      assert.equal(fetchSignal?.aborted, true);
+      assert.equal(uploadAttempted, false);
+      assert.equal(calls.length, 1);
+      assert.equal(
+        JSON.parse(calls[0].data.content).zh_cn.content[0][0].text,
+        "Lark image exceeds the 10 MB upload limit",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 test("telegram working indicator sends typing and visible working text without reactions", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -2403,6 +2734,141 @@ test("lark adapter sends markdown nodes as native markdown rich text", async () 
         ],
       },
     });
+  });
+});
+
+test("lark adapter preserves blank lines inside fenced code while splitting post paragraphs", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+
+    await app.bots[0].sendMessage("oc_1", [
+      h.markdown(
+        "intro\n\n```ts\nconst first = 1;\n\nconst second = 2;\n```\n\noutro",
+      ),
+    ]);
+
+    assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
+      [{ tag: "md", text: "intro" }],
+      [
+        {
+          tag: "md",
+          text: "```ts\nconst first = 1;\n\nconst second = 2;\n```",
+        },
+      ],
+      [{ tag: "md", text: "outro" }],
+    ]);
+  });
+});
+
+test("lark adapter keeps loose lists and nested fenced code in one post paragraph", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+    const markdown =
+      "- first\n\n  continuation\n\n  ~~~ts\n  const first = 1;\n\n  const second = 2;\n  ~~~\n\n- second";
+
+    await app.bots[0].sendMessage("oc_1", [h.markdown(markdown)]);
+
+    assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
+      [{ tag: "md", text: markdown }],
+    ]);
+  });
+});
+
+test("lark adapter preserves blockquotes and indented code blocks", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+
+    await app.bots[0].sendMessage("oc_1", [
+      h.markdown("> first\n>\n> second\n\n    alpha\n\n    beta\n\noutro"),
+    ]);
+
+    assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
+      [{ tag: "md", text: "> first\n>\n> second" }],
+      [{ tag: "md", text: "    alpha\n\n    beta" }],
+      [{ tag: "md", text: "outro" }],
+    ]);
+  });
+});
+
+test("lark adapter keeps cross-paragraph reference links in one markdown scope", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+    const markdown =
+      "first [docs]\n\nsecond [docs]\n\n[docs]: https://example.com";
+
+    await app.bots[0].sendMessage("oc_1", [h.markdown(markdown)]);
+
+    assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
+      [{ tag: "md", text: markdown }],
+    ]);
   });
 });
 

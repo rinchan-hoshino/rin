@@ -158,6 +158,7 @@ Adapters choose the best native representation they support:
 - OneBot renders native mentions as CQ at elements and strips unsupported Markdown formatting from plain text.
 - OneBot local media is staged under `$HOME/.rin/data/chat-media/onebot`. If the OneBot implementation such as NapCat runs in Docker, mount the same path read-only into the container: `-v "$HOME/.rin/data/chat-media/onebot:$HOME/.rin/data/chat-media/onebot:ro"`.
 - Discord and Slack generally preserve Markdown-style text and map reply/thread behavior through their adapter APIs.
+- Feishu/Lark serializes blank-line-separated Markdown blocks as native post paragraphs, and uploads local or remote image content to obtain an `image_key` before sending a native image message.
 - Other adapters may strip Markdown formatting or send readable fallback text.
 
 Fallback contract:

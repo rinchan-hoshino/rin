@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+import { Lexer } from "marked";
 import WebSocket from "ws";
 
 import { EditableTextMessageGroup } from "./editable-text-message-group.js";
@@ -171,6 +173,9 @@ function createReactionWorkingIndicator(platform: string, getBot: () => any) {
   };
 }
 
+const LARK_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const LARK_IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
+
 const LARK_REACTION_TYPES: Record<string, string> = {
   "🤔": "THINKING",
   "🔥": "Fire",
@@ -205,6 +210,48 @@ function normalizeLarkMarkdownListBlocks(text: string) {
     if (blank) previousWasList = false;
   }
   return out.join("\n");
+}
+
+function splitLarkMarkdownParagraphs(text: string) {
+  const source = safeString(text).replace(/\r\n?/g, "\n");
+  if (!source.trim()) return [] as string[];
+  let tokens: any[];
+  try {
+    tokens = Lexer.lex(source, { gfm: true });
+  } catch {
+    return [source];
+  }
+  const links = (tokens as any)?.links;
+  if (links && typeof links === "object" && Object.keys(links).length) {
+    return [source];
+  }
+  const paragraphs: string[] = [];
+  let current = "";
+  let cursor = 0;
+  const flush = () => {
+    if (current.trim()) paragraphs.push(current);
+    current = "";
+  };
+  for (const token of tokens) {
+    const raw = safeString(token?.raw);
+    if (!raw) continue;
+    const index = source.indexOf(raw, cursor);
+    if (index < 0) return [source];
+    current += source.slice(cursor, index);
+    cursor = index + raw.length;
+    if (safeString(token?.type).trim() === "space") {
+      flush();
+      continue;
+    }
+    const trailingSeparator = raw.match(/\n{2,}$/)?.[0] || "";
+    current += trailingSeparator
+      ? raw.slice(0, -trailingSeparator.length)
+      : raw;
+    if (trailingSeparator) flush();
+  }
+  current += source.slice(cursor);
+  flush();
+  return paragraphs.length ? paragraphs : [source];
 }
 
 const QQ_REACTION_EMOJI_IDS: Record<string, string> = {
@@ -2578,19 +2625,19 @@ export class LarkAdapter {
       msg_type: "post",
       content: JSON.stringify({
         zh_cn: {
-          content: [[{ tag: "md", text }]],
+          content: splitLarkMarkdownParagraphs(text).map((paragraph) => [
+            { tag: "md", text: paragraph },
+          ]),
         },
       }),
     };
   }
 
-  private async sendPostText(
+  private async sendData(
     chatId: string,
-    text: string,
+    data: Record<string, any>,
     replyToMessageId?: string,
   ) {
-    if (!text) throw new Error("lark_send_message_empty");
-    const data = this.buildPostData(text);
     const result = replyToMessageId
       ? await this.client.im.message.reply({
           path: { message_id: replyToMessageId },
@@ -2610,6 +2657,138 @@ export class LarkAdapter {
     ].filter(Boolean);
   }
 
+  private async sendPostText(
+    chatId: string,
+    text: string,
+    replyToMessageId?: string,
+  ) {
+    if (!text) throw new Error("lark_send_message_empty");
+    return await this.sendData(
+      chatId,
+      this.buildPostData(text),
+      replyToMessageId,
+    );
+  }
+
+  private assertLarkImageSize(image: Buffer) {
+    if (!image.length) throw new Error("Lark image content is empty");
+    if (image.length > LARK_MAX_IMAGE_BYTES) {
+      throw new Error("Lark image exceeds the 10 MB upload limit");
+    }
+  }
+
+  private async downloadLarkImage(url: string) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, LARK_IMAGE_DOWNLOAD_TIMEOUT_MS);
+    timeout.unref?.();
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(
+          `Failed to download Lark image (HTTP ${response.status})`,
+        );
+      }
+      const contentLength = Number(response.headers.get("content-length"));
+      if (
+        Number.isFinite(contentLength) &&
+        contentLength > LARK_MAX_IMAGE_BYTES
+      ) {
+        controller.abort();
+        throw new Error("Lark image exceeds the 10 MB upload limit");
+      }
+      if (!response.body) throw new Error("Lark image content is empty");
+      const reader = response.body.getReader();
+      const chunks: Buffer[] = [];
+      let size = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > LARK_MAX_IMAGE_BYTES) {
+          controller.abort();
+          throw new Error("Lark image exceeds the 10 MB upload limit");
+        }
+        chunks.push(Buffer.from(value));
+      }
+      const image = Buffer.concat(chunks, size);
+      this.assertLarkImageSize(image);
+      return image;
+    } catch (error: any) {
+      const message = safeString(error?.message || error).trim();
+      if (
+        message.startsWith("Lark image ") ||
+        message.startsWith("Failed to download Lark image")
+      ) {
+        throw error;
+      }
+      if (timedOut) {
+        throw new Error("Lark image download timed out after 30 seconds");
+      }
+      throw new Error(
+        `Failed to download Lark image: ${message || "network error"}`,
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async assertLarkLocalImageSourceSize(node: any) {
+    const attrs =
+      node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
+    if (Buffer.isBuffer(attrs.data)) {
+      this.assertLarkImageSize(attrs.data);
+      return;
+    }
+    const src = safeString(attrs.src || attrs.url || "").trim();
+    if (!src || /^https?:\/\//i.test(src)) return;
+    const filePath = src.startsWith("file://")
+      ? fileURLToPath(src)
+      : path.resolve(src);
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (stat.size > LARK_MAX_IMAGE_BYTES) {
+        throw new Error("Lark image exceeds the 10 MB upload limit");
+      }
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+
+  private async sendImage(
+    chatId: string,
+    node: any,
+    replyToMessageId?: string,
+  ) {
+    await this.assertLarkLocalImageSourceSize(node);
+    const payload = await readBinaryFromNode(node);
+    if (!payload) throw new Error("Lark image content is empty");
+    const image = payload.data
+      ? payload.data
+      : payload.url
+        ? await this.downloadLarkImage(payload.url)
+        : Buffer.alloc(0);
+    this.assertLarkImageSize(image);
+    const uploaded = await this.client.im.image.create({
+      data: { image_type: "message", image },
+    });
+    const imageKey = safeString(
+      uploaded?.image_key || uploaded?.data?.image_key || "",
+    ).trim();
+    if (!imageKey) throw new Error("Lark image upload returned no image key");
+    return await this.sendData(
+      chatId,
+      {
+        msg_type: "image",
+        content: JSON.stringify({ image_key: imageKey }),
+      },
+      replyToMessageId,
+    );
+  }
+
   private async sendMessage(
     chatId: string,
     content: any,
@@ -2618,33 +2797,87 @@ export class LarkAdapter {
     const deliveryKind = safeString(options?.deliveryKind).trim() || "final";
     const isFinalDelivery = deliveryKind === "final";
     const { work, replyToMessageId } = prepareOutboundNodes(content);
-    const text = this.renderOutboundText(work);
-    if (!text) throw new Error("lark_send_message_empty");
+    if (!work.length) throw new Error("lark_send_message_empty");
     const coalesceWithWorkingMessage = Boolean(
       options?.coalesceWithWorkingMessage,
     );
+    const delivered: string[] = [];
+    const failures: unknown[] = [];
     if (isFinalDelivery) {
       await this.editableWorking.deleteProgress(chatId, replyToMessageId);
-      return await this.sendPostText(chatId, text, replyToMessageId);
     }
-    if (
-      coalesceWithWorkingMessage &&
-      isEditableProgressDeliveryKind(deliveryKind)
-    ) {
-      return await this.editableWorking.updateText({
-        chatId,
-        text,
-        replyToMessageId,
-        finalize: false,
-        kind:
-          deliveryKind === "passive_notice"
-            ? "todo"
-            : deliveryKind === "interim"
-              ? "interim"
-              : undefined,
-      });
+    const recordFailure = async (error: unknown) => {
+      failures.push(error);
+      this.logger.warn(
+        `rich message segment failed err=${safeString((error as any)?.message || error)}`,
+      );
+      try {
+        delivered.push(
+          ...(await this.sendPostText(
+            chatId,
+            renderRichDeliveryErrorPlaceholder(error),
+            replyToMessageId,
+          )),
+        );
+      } catch (placeholderError: any) {
+        this.logger.warn(
+          `rich failure placeholder failed err=${safeString(placeholderError?.message || placeholderError)}`,
+        );
+      }
+    };
+    let cursor = 0;
+    while (cursor < work.length) {
+      const type = safeString(work[cursor]?.type).trim().toLowerCase();
+      let messageIds: string[] = [];
+      if (type === "image") {
+        try {
+          messageIds = await this.sendImage(
+            chatId,
+            work[cursor],
+            replyToMessageId,
+          );
+        } catch (error) {
+          await recordFailure(error);
+        }
+        cursor += 1;
+      } else {
+        const textNodes: any[] = [];
+        while (cursor < work.length) {
+          const textType = safeString(work[cursor]?.type).trim().toLowerCase();
+          if (textType === "image") break;
+          textNodes.push(work[cursor]);
+          cursor += 1;
+        }
+        const text = this.renderOutboundText(textNodes);
+        if (!text) continue;
+        try {
+          const shouldEditWorkingMessage =
+            delivered.length === 0 &&
+            coalesceWithWorkingMessage &&
+            isEditableProgressDeliveryKind(deliveryKind);
+          messageIds = shouldEditWorkingMessage
+            ? await this.editableWorking.updateText({
+                chatId,
+                text,
+                replyToMessageId,
+                finalize: false,
+                kind:
+                  deliveryKind === "passive_notice"
+                    ? "todo"
+                    : deliveryKind === "interim"
+                      ? "interim"
+                      : undefined,
+              })
+            : await this.sendPostText(chatId, text, replyToMessageId);
+        } catch (error) {
+          await recordFailure(error);
+        }
+      }
+      delivered.push(...messageIds);
     }
-    return await this.sendPostText(chatId, text, replyToMessageId);
+    if (delivered.length) return delivered;
+    if (failures.length) throw failures[0];
+    throw new Error("lark_send_message_empty");
   }
 
   private async handleMessage(data: any) {
