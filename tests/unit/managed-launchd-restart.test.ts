@@ -5,7 +5,8 @@ import { runManagedLaunchdServiceAction } from "../../dist/core/rin/managed-runt
 
 function createContext(
   options: {
-    bootoutFails?: boolean;
+    kickstartFails?: boolean;
+    serviceLoaded?: boolean;
     socketReady?: boolean;
   } = {},
 ) {
@@ -16,13 +17,20 @@ function createContext(
       targetUser: "demo",
       capture(argv: string[]) {
         events.push(argv.join(" "));
-        if (argv[1] === "bootout" && options.bootoutFails) {
+        if (argv[1] === "print" && options.serviceLoaded === false) {
           throw new Error("service not loaded");
         }
         return "";
       },
       exec(argv: string[]) {
         events.push(argv.join(" "));
+        if (
+          options.kickstartFails &&
+          argv[1] === "kickstart" &&
+          argv[2] === "-k"
+        ) {
+          throw new Error("kickstart failed");
+        }
       },
       async canConnectSocket() {
         events.push("socket-probe");
@@ -38,53 +46,42 @@ const service = {
   path: "/Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
 };
 
-test("launchd restart proves the old daemon stopped before bootstrapping the replacement", async () => {
+test("launchd restart atomically hands replacement to launchd", async () => {
   const { context, events } = createContext();
 
   const result = await runManagedLaunchdServiceAction(
     context as any,
     service,
     "restart",
-    {
-      resolveDomain: () => "gui/501",
-      async waitForDaemonUnavailable() {
-        events.push("wait-for-daemon-unavailable");
-        return true;
-      },
-    },
+    { resolveDomain: () => "gui/501" },
   );
 
   assert.equal(result, service.label);
   assert.deepEqual(events, [
-    "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable",
-    "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
+    "launchctl kickstart -k gui/501/com.rin.daemon.demo",
   ]);
 });
 
-test("launchd restart fails closed when the old daemon does not stop", async () => {
-  const { context, events } = createContext();
+test("launchd restart fails closed when atomic kickstart cannot replace a loaded job", async () => {
+  const { context, events } = createContext({ kickstartFails: true });
 
   await assert.rejects(
     runManagedLaunchdServiceAction(context as any, service, "restart", {
       resolveDomain: () => "gui/501",
-      async waitForDaemonUnavailable() {
-        events.push("wait-for-daemon-unavailable");
-        return false;
-      },
     }),
-    /rin_launchd_daemon_stop_incomplete/,
+    /rin_launchd_restart_failed/,
   );
 
   assert.deepEqual(events, [
-    "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable",
+    "launchctl kickstart -k gui/501/com.rin.daemon.demo",
+    "launchctl print gui/501/com.rin.daemon.demo",
   ]);
 });
 
 test("launchd restart bootstraps an unloaded job only when no daemon is live", async () => {
   const { context, events } = createContext({
-    bootoutFails: true,
+    kickstartFails: true,
+    serviceLoaded: false,
     socketReady: false,
   });
 
@@ -97,8 +94,8 @@ test("launchd restart bootstraps an unloaded job only when no daemon is live", a
 
   assert.equal(result, service.label);
   assert.deepEqual(events, [
-    "launchctl bootout gui/501/com.rin.daemon.demo",
-    "launchctl bootout /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
+    "launchctl kickstart -k gui/501/com.rin.daemon.demo",
+    "launchctl print gui/501/com.rin.daemon.demo",
     "socket-probe",
     "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
   ]);
