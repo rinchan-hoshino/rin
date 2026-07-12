@@ -3,7 +3,10 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 
 import { sleep } from "../platform/process.js";
-import { canConnectDaemonSocket } from "../rin-daemon/client.js";
+import {
+  canConnectDaemonSocket,
+  requestDaemonCommand,
+} from "../rin-daemon/client.js";
 import { readDaemonInstanceLockOwner } from "../rin-daemon/lock.js";
 import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
@@ -48,6 +51,7 @@ export type ManagedRuntimeServiceActionContext = Pick<
   | "exec"
   | "capture"
   | "canConnectSocket"
+  | "queryDaemonStatus"
 > &
   NonNullable<Parameters<typeof readInstallerManifestForTarget>[1]>;
 
@@ -107,6 +111,17 @@ export function createManagedRuntimeServiceActionContext(options: {
     exec,
     capture,
     canConnectSocket: async () => await canConnectDaemonSocket(socketPath, 500),
+    queryDaemonStatus: async () => {
+      if (!isTargetUser) return undefined;
+      try {
+        return await requestDaemonCommand(
+          { id: "restart_status_1", type: "daemon_status" },
+          { socketPath, timeoutMs: 5_000 },
+        );
+      } catch {
+        return undefined;
+      }
+    },
   };
 }
 
@@ -203,12 +218,11 @@ function tryBootoutLaunchd(
 function forceStopDaemonLockOwner(context: ManagedRuntimeServiceActionContext) {
   const owner = readDaemonInstanceLockOwner(context.agentDir);
   const pid = Number(owner?.pid || 0);
-  const ownerSocketPath = String(owner?.socketPath || "").trim();
   if (
     !Number.isInteger(pid) ||
     pid <= 1 ||
     pid === process.pid ||
-    ownerSocketPath !== context.socketPath
+    String(owner?.socketPath || "").trim() !== context.socketPath
   ) {
     return false;
   }
@@ -221,15 +235,17 @@ function forceStopDaemonLockOwner(context: ManagedRuntimeServiceActionContext) {
       "-U",
       "-Fn",
     ]);
-    const ownsSocket = String(openFiles)
-      .split(/\r?\n/)
-      .some((line) => line === `n${context.socketPath}`);
-    if (!ownsSocket) return false;
+    if (
+      !String(openFiles)
+        .split(/\r?\n/)
+        .some((line) => line === `n${context.socketPath}`)
+    ) {
+      return false;
+    }
     process.kill(pid, "SIGKILL");
     return true;
   } catch (error: any) {
-    if (error?.code === "ESRCH") return true;
-    return false;
+    return error?.code === "ESRCH";
   }
 }
 
@@ -241,6 +257,7 @@ export async function runManagedLaunchdServiceAction(
     resolveDomain?: (targetUser: string) => string;
     waitForDaemonUnavailable?: typeof waitForDaemonUnavailable;
     forceStopDaemon?: typeof forceStopDaemonLockOwner;
+    queryDaemonStatus?: () => Promise<any>;
   } = {},
 ) {
   if (!service.path) {
@@ -251,20 +268,24 @@ export async function runManagedLaunchdServiceAction(
   );
   const serviceTarget = `${domain}/${service.label}`;
   if (action === "restart") {
+    const queryStatus = deps.queryDaemonStatus || context.queryDaemonStatus;
+    const status = await queryStatus();
+    const obsoleteQuiescingDaemon = status?.chat?.quiescing === true;
     const bootedOut = tryBootoutLaunchd(context, domain, service);
     const shouldWaitForShutdown =
       bootedOut || (await context.canConnectSocket());
     if (shouldWaitForShutdown) {
       const waitUntilUnavailable =
         deps.waitForDaemonUnavailable || waitForDaemonUnavailable;
-      const gracefullyUnavailable = await waitUntilUnavailable(context, 5_000);
-      if (!gracefullyUnavailable) {
+      let unavailable = await waitUntilUnavailable(context);
+      if (!unavailable && obsoleteQuiescingDaemon) {
         const forced = (deps.forceStopDaemon || forceStopDaemonLockOwner)(
           context,
         );
-        if (!forced || !(await waitUntilUnavailable(context, 5_000))) {
-          throw new Error("rin_launchd_daemon_stop_incomplete");
-        }
+        if (forced) unavailable = await waitUntilUnavailable(context);
+      }
+      if (!unavailable) {
+        throw new Error("rin_launchd_daemon_stop_incomplete");
       }
     }
     context.capture(["launchctl", "bootstrap", domain, service.path], {

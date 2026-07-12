@@ -11,6 +11,7 @@ function createContext(
     bootoutFails?: boolean;
     bootstrapFails?: boolean;
     socketReady?: boolean;
+    status?: any;
   } = {},
 ) {
   const events: string[] = [];
@@ -20,6 +21,9 @@ function createContext(
       targetUser: "demo",
       agentDir: "/Users/demo/.rin",
       socketPath: "/Users/demo/Library/Caches/rin-daemon/daemon.sock",
+      async queryDaemonStatus() {
+        return options.status;
+      },
       capture(argv: string[]) {
         events.push(argv.join(" "));
         if (argv[1] === "bootout" && options.bootoutFails) {
@@ -47,22 +51,7 @@ const service = {
   path: "/Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
 };
 
-function waitSequence(events: string[], results: boolean[]) {
-  let index = 0;
-  return async (_context: unknown, timeoutMs?: number) => {
-    events.push(`wait-for-daemon-unavailable:${timeoutMs}`);
-    return results[index++] ?? false;
-  };
-}
-
-function forceResult(events: string[], result: boolean) {
-  return () => {
-    events.push("force-stop-lock-owner");
-    return result;
-  };
-}
-
-test("launchd restart bootstraps after graceful daemon shutdown", async () => {
+test("launchd restart waits for the old daemon to stop before bootstrapping", async () => {
   const { context, events } = createContext();
 
   const result = await runManagedLaunchdServiceAction(
@@ -71,93 +60,78 @@ test("launchd restart bootstraps after graceful daemon shutdown", async () => {
     "restart",
     {
       resolveDomain: () => "gui/501",
-      waitForDaemonUnavailable: waitSequence(events, [true]) as any,
-      forceStopDaemon: forceResult(events, true),
-    } as any,
+      async waitForDaemonUnavailable() {
+        events.push("wait-for-daemon-unavailable");
+        return true;
+      },
+    },
   );
 
   assert.equal(result, service.label);
   assert.deepEqual(events, [
     "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable:5000",
+    "wait-for-daemon-unavailable",
     "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
   ]);
 });
 
-test("launchd restart force-stops a lock-owned daemon that ignores graceful shutdown", async () => {
-  const { context, events } = createContext();
-
-  const result = await runManagedLaunchdServiceAction(
-    context as any,
-    service,
-    "restart",
-    {
-      resolveDomain: () => "gui/501",
-      waitForDaemonUnavailable: waitSequence(events, [false, true]) as any,
-      forceStopDaemon: forceResult(events, true),
-    } as any,
-  );
-
-  assert.equal(result, service.label);
-  assert.deepEqual(events, [
-    "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable:5000",
-    "force-stop-lock-owner",
-    "wait-for-daemon-unavailable:5000",
-    "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
-  ]);
-});
-
-test("launchd restart force-stops an orphaned lock owner after its job is gone", async () => {
-  const { context, events } = createContext({
-    bootoutFails: true,
-    socketReady: true,
-  });
-
-  const result = await runManagedLaunchdServiceAction(
-    context as any,
-    service,
-    "restart",
-    {
-      resolveDomain: () => "gui/501",
-      waitForDaemonUnavailable: waitSequence(events, [false, true]) as any,
-      forceStopDaemon: forceResult(events, true),
-    } as any,
-  );
-
-  assert.equal(result, service.label);
-  assert.deepEqual(events, [
-    "launchctl bootout gui/501/com.rin.daemon.demo",
-    "launchctl bootout /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
-    "socket-probe",
-    "wait-for-daemon-unavailable:5000",
-    "force-stop-lock-owner",
-    "wait-for-daemon-unavailable:5000",
-    "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
-  ]);
-});
-
-test("launchd restart fails closed without a verified lock owner", async () => {
+test("launchd restart fails before bootstrap when the old daemon remains live", async () => {
   const { context, events } = createContext();
 
   await assert.rejects(
     runManagedLaunchdServiceAction(context as any, service, "restart", {
       resolveDomain: () => "gui/501",
-      waitForDaemonUnavailable: waitSequence(events, [false]) as any,
-      forceStopDaemon: forceResult(events, false),
-    } as any),
+      async waitForDaemonUnavailable() {
+        events.push("wait-for-daemon-unavailable");
+        return false;
+      },
+    }),
     /rin_launchd_daemon_stop_incomplete/,
   );
 
   assert.deepEqual(events, [
     "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable:5000",
-    "force-stop-lock-owner",
+    "wait-for-daemon-unavailable",
   ]);
 });
 
-test("launchd restart refuses a stale lock owner that does not own the socket", async () => {
-  const { context, events } = createContext();
+test("launchd restart replaces an obsolete quiescing daemon after bounded shutdown fails", async () => {
+  const { context, events } = createContext({
+    status: { chat: { quiescing: true } },
+  });
+  const unavailable = [false, true];
+
+  const result = await runManagedLaunchdServiceAction(
+    context as any,
+    service,
+    "restart",
+    {
+      resolveDomain: () => "gui/501",
+      async waitForDaemonUnavailable() {
+        events.push("wait-for-daemon-unavailable");
+        return unavailable.shift() ?? false;
+      },
+      forceStopDaemon() {
+        events.push("force-stop-obsolete-daemon");
+        return true;
+      },
+    },
+  );
+
+  assert.equal(result, service.label);
+  assert.deepEqual(events, [
+    "launchctl bootout gui/501/com.rin.daemon.demo",
+    "wait-for-daemon-unavailable",
+    "force-stop-obsolete-daemon",
+    "wait-for-daemon-unavailable",
+    "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
+  ]);
+});
+
+test("launchd restart refuses a stale migration lock owner without socket ownership", async () => {
+  const { context, events } = createContext({
+    status: { chat: { quiescing: true } },
+  });
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-launchd-lock-"));
   context.agentDir = agentDir;
   const lockDir = path.join(agentDir, "data", "core", "daemon", "daemon.lock");
@@ -175,7 +149,10 @@ test("launchd restart refuses a stale lock owner that does not own the socket", 
     await assert.rejects(
       runManagedLaunchdServiceAction(context as any, service, "restart", {
         resolveDomain: () => "gui/501",
-        waitForDaemonUnavailable: waitSequence(events, [false]) as any,
+        async waitForDaemonUnavailable() {
+          events.push("wait-for-daemon-unavailable");
+          return false;
+        },
       }),
       /rin_launchd_daemon_stop_incomplete/,
     );
@@ -185,28 +162,32 @@ test("launchd restart refuses a stale lock owner that does not own the socket", 
 
   assert.deepEqual(events, [
     "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable:5000",
+    "wait-for-daemon-unavailable",
     "/usr/sbin/lsof -a -p 999999 -U -Fn",
   ]);
 });
 
-test("launchd restart fails if the forced daemon still owns the socket", async () => {
-  const { context, events } = createContext();
+test("launchd restart does not force-stop a current daemon", async () => {
+  const { context, events } = createContext({ status: { chat: {} } });
 
   await assert.rejects(
     runManagedLaunchdServiceAction(context as any, service, "restart", {
       resolveDomain: () => "gui/501",
-      waitForDaemonUnavailable: waitSequence(events, [false, false]) as any,
-      forceStopDaemon: forceResult(events, true),
-    } as any),
+      async waitForDaemonUnavailable() {
+        events.push("wait-for-daemon-unavailable");
+        return false;
+      },
+      forceStopDaemon() {
+        events.push("force-stop-obsolete-daemon");
+        return true;
+      },
+    }),
     /rin_launchd_daemon_stop_incomplete/,
   );
 
   assert.deepEqual(events, [
     "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable:5000",
-    "force-stop-lock-owner",
-    "wait-for-daemon-unavailable:5000",
+    "wait-for-daemon-unavailable",
   ]);
 });
 
@@ -232,21 +213,48 @@ test("launchd restart bootstraps an unloaded job when no daemon is live", async 
   ]);
 });
 
+test("launchd restart fails when an unowned daemon remains live", async () => {
+  const { context, events } = createContext({
+    bootoutFails: true,
+    socketReady: true,
+  });
+
+  await assert.rejects(
+    runManagedLaunchdServiceAction(context as any, service, "restart", {
+      resolveDomain: () => "gui/501",
+      async waitForDaemonUnavailable() {
+        events.push("wait-for-daemon-unavailable");
+        return false;
+      },
+    }),
+    /rin_launchd_daemon_stop_incomplete/,
+  );
+
+  assert.deepEqual(events, [
+    "launchctl bootout gui/501/com.rin.daemon.demo",
+    "launchctl bootout /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
+    "socket-probe",
+    "wait-for-daemon-unavailable",
+  ]);
+});
+
 test("launchd restart propagates bootstrap failures", async () => {
   const { context, events } = createContext({ bootstrapFails: true });
 
   await assert.rejects(
     runManagedLaunchdServiceAction(context as any, service, "restart", {
       resolveDomain: () => "gui/501",
-      waitForDaemonUnavailable: waitSequence(events, [true]) as any,
-      forceStopDaemon: forceResult(events, true),
-    } as any),
+      async waitForDaemonUnavailable() {
+        events.push("wait-for-daemon-unavailable");
+        return true;
+      },
+    }),
     /bootstrap failed/,
   );
 
   assert.deepEqual(events, [
     "launchctl bootout gui/501/com.rin.daemon.demo",
-    "wait-for-daemon-unavailable:5000",
+    "wait-for-daemon-unavailable",
     "launchctl bootstrap gui/501 /Users/demo/Library/LaunchAgents/com.rin.daemon.demo.plist",
   ]);
 });

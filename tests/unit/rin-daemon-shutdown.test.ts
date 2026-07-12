@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -63,6 +64,51 @@ test("daemon shutdown stops hosted services before background extension wait", a
   ).exec(appSource)?.[1];
   assert.ok(hostedBody, "stopHostedServices missing");
   assert.equal(hostedBody.includes("backgroundExtensionManager"), false);
+});
+
+test("daemon bounds a hosted shutdown hook that never settles", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-daemon-hook-"));
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const launcherPath = path.join(agentDir, "launcher.mjs");
+  const daemonModuleUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"),
+  ).href;
+  await fs.writeFile(
+    launcherPath,
+    `import { startDaemon } from ${JSON.stringify(daemonModuleUrl)};\n` +
+      `await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, shutdownGraceMs: 250, onShutdown: async () => await new Promise(() => {}) });\n`,
+  );
+  const child = spawn(process.execPath, [launcherPath], {
+    cwd: rootDir,
+    env: { ...process.env, RIN_DIR: agentDir },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  try {
+    await waitForSocket(socketPath);
+    const startedAt = Date.now();
+    const exited = new Promise((resolve, reject) => {
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+      child.once("error", reject);
+    });
+    child.kill("SIGTERM");
+    const result = await Promise.race([
+      exited,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("daemon_exit_timeout")), 1500),
+      ),
+    ]);
+
+    assert.deepEqual(result, { code: 0, signal: null });
+    assert.ok(Date.now() - startedAt >= 200);
+  } finally {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("daemon exits promptly on SIGTERM even with connected rpc clients", async () => {

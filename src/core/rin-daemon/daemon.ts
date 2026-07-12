@@ -747,9 +747,23 @@ export async function startDaemon(
     if (shuttingDown) return;
     shuttingDown = true;
     cronScheduler.stop();
-    await Promise.resolve(options.onShutdown?.()).catch(() => {});
-    await backgroundExtensionManager.stop().catch(() => {});
     workerPool.beginShutdown();
+    const shutdownDeadline = Date.now() + shutdownGraceMs;
+    const settleBeforeShutdownDeadline = async (
+      task: () => unknown | Promise<unknown>,
+    ) => {
+      const remainingMs = Math.max(0, shutdownDeadline - Date.now());
+      if (remainingMs === 0) return;
+      await Promise.race([
+        Promise.resolve()
+          .then(task)
+          .catch(() => {}),
+        new Promise<void>((resolve) => setTimeout(resolve, remainingMs)),
+      ]);
+    };
+    await settleBeforeShutdownDeadline(() => options.onShutdown?.());
+    await settleBeforeShutdownDeadline(() => backgroundExtensionManager.stop());
+    await workerPool.shutdown(Math.max(0, shutdownDeadline - Date.now()));
     for (const socket of Array.from(activeSockets)) {
       try {
         socket.destroy();
@@ -767,7 +781,6 @@ export async function startDaemon(
         fs.rmSync(candidate, { force: true });
       } catch {}
     }
-    await workerPool.shutdown(shutdownGraceMs);
     await instanceLock.release().catch(() => {});
     process.exit(0);
   };
