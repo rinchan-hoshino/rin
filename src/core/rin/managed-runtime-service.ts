@@ -215,30 +215,21 @@ export async function runManagedLaunchdServiceAction(
   );
   const serviceTarget = `${domain}/${service.label}`;
   if (action === "restart") {
-    try {
-      context.exec(["launchctl", "kickstart", "-k", serviceTarget]);
-      return service.label;
-    } catch (error: any) {
-      let serviceLoaded = false;
-      try {
-        context.capture(["launchctl", "print", serviceTarget], {
-          stdio: "ignore",
-        });
-        serviceLoaded = true;
-      } catch {}
-      if (serviceLoaded) {
-        throw new Error(
-          `rin_launchd_restart_failed:${String(error?.message || error)}`,
-        );
-      }
-      if (await context.canConnectSocket()) {
+    const bootedOut = tryBootoutLaunchd(context, domain, service);
+    if (bootedOut) {
+      const unavailable = await (
+        deps.waitForDaemonUnavailable || waitForDaemonUnavailable
+      )(context);
+      if (!unavailable) {
         throw new Error("rin_launchd_daemon_stop_incomplete");
       }
-      context.capture(["launchctl", "bootstrap", domain, service.path], {
-        stdio: "ignore",
-      });
-      return service.label;
+    } else if (await context.canConnectSocket()) {
+      throw new Error("rin_launchd_daemon_stop_incomplete");
     }
+    context.capture(["launchctl", "bootstrap", domain, service.path], {
+      stdio: "ignore",
+    });
+    return service.label;
   }
   if (action === "stop") {
     const bootedOut = tryBootoutLaunchd(context, domain, service);
