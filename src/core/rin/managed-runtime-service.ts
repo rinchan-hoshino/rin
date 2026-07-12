@@ -43,6 +43,7 @@ export type ManagedRuntimeServiceActionContext = Pick<
   | "currentUser"
   | "isTargetUser"
   | "agentDir"
+  | "socketPath"
   | "systemctl"
   | "exec"
   | "capture"
@@ -101,6 +102,7 @@ export function createManagedRuntimeServiceActionContext(options: {
     currentUser,
     isTargetUser,
     agentDir,
+    socketPath,
     systemctl,
     exec,
     capture,
@@ -198,6 +200,39 @@ function tryBootoutLaunchd(
   return false;
 }
 
+function forceStopDaemonLockOwner(context: ManagedRuntimeServiceActionContext) {
+  const owner = readDaemonInstanceLockOwner(context.agentDir);
+  const pid = Number(owner?.pid || 0);
+  const ownerSocketPath = String(owner?.socketPath || "").trim();
+  if (
+    !Number.isInteger(pid) ||
+    pid <= 1 ||
+    pid === process.pid ||
+    ownerSocketPath !== context.socketPath
+  ) {
+    return false;
+  }
+  try {
+    const openFiles = context.capture([
+      "/usr/sbin/lsof",
+      "-a",
+      "-p",
+      String(pid),
+      "-U",
+      "-Fn",
+    ]);
+    const ownsSocket = String(openFiles)
+      .split(/\r?\n/)
+      .some((line) => line === `n${context.socketPath}`);
+    if (!ownsSocket) return false;
+    process.kill(pid, "SIGKILL");
+    return true;
+  } catch (error: any) {
+    if (error?.code === "ESRCH") return true;
+    return false;
+  }
+}
+
 export async function runManagedLaunchdServiceAction(
   context: ManagedRuntimeServiceActionContext,
   service: ManagedRuntimeService,
@@ -205,6 +240,7 @@ export async function runManagedLaunchdServiceAction(
   deps: {
     resolveDomain?: (targetUser: string) => string;
     waitForDaemonUnavailable?: typeof waitForDaemonUnavailable;
+    forceStopDaemon?: typeof forceStopDaemonLockOwner;
   } = {},
 ) {
   if (!service.path) {
@@ -219,11 +255,16 @@ export async function runManagedLaunchdServiceAction(
     const shouldWaitForShutdown =
       bootedOut || (await context.canConnectSocket());
     if (shouldWaitForShutdown) {
-      const unavailable = await (
-        deps.waitForDaemonUnavailable || waitForDaemonUnavailable
-      )(context, 30_000);
-      if (!unavailable) {
-        throw new Error("rin_launchd_daemon_stop_incomplete");
+      const waitUntilUnavailable =
+        deps.waitForDaemonUnavailable || waitForDaemonUnavailable;
+      const gracefullyUnavailable = await waitUntilUnavailable(context, 5_000);
+      if (!gracefullyUnavailable) {
+        const forced = (deps.forceStopDaemon || forceStopDaemonLockOwner)(
+          context,
+        );
+        if (!forced || !(await waitUntilUnavailable(context, 5_000))) {
+          throw new Error("rin_launchd_daemon_stop_incomplete");
+        }
       }
     }
     context.capture(["launchctl", "bootstrap", domain, service.path], {
