@@ -781,7 +781,7 @@ test("lark adapter deletes visible progress before final text", async () => {
   });
 });
 
-test("lark adapter serializes editable progress sections as post paragraphs", async () => {
+test("lark adapter keeps editable progress sections as native paragraphs", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -822,13 +822,16 @@ test("lark adapter serializes editable progress sections as post paragraphs", as
       ["create", "update", "update"],
     );
     assert.deepEqual(JSON.parse(calls[1].payload.data.content).zh_cn.content, [
-      [{ tag: "md", text: "Working..." }],
-      [{ tag: "md", text: "checking" }],
+      [{ tag: "text", text: "Working..." }],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "text", text: "checking" }],
     ]);
     assert.deepEqual(JSON.parse(calls[2].payload.data.content).zh_cn.content, [
-      [{ tag: "md", text: "Working..." }],
-      [{ tag: "md", text: "checking" }],
-      [{ tag: "md", text: "⏹️ first task" }],
+      [{ tag: "text", text: "Working..." }],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "text", text: "checking" }],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "text", text: "⏹️ first task" }],
     ]);
   });
 });
@@ -2181,7 +2184,7 @@ test("discord adapter reports a failed rich segment and continues later segments
   });
 });
 
-test("lark adapter sends text and structured at as native markdown rich text", async () => {
+test("lark adapter sends text and structured at as native post elements", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -2213,14 +2216,36 @@ test("lark adapter sends text and structured at as native markdown rich text", a
       zh_cn: {
         content: [
           [
-            {
-              tag: "md",
-              text: '<at user_id="ou_123">Alice</at> hello',
-            },
+            { tag: "at", user_id: "ou_123" },
+            { tag: "text", text: " hello" },
           ],
         ],
       },
     });
+  });
+});
+
+test("lark adapter rejects a nonzero API response even when the SDK resolves", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    adapter.client = {
+      im: {
+        message: {
+          create: async () => ({ code: 230001, msg: "invalid message" }),
+        },
+      },
+    };
+
+    await assert.rejects(
+      app.bots[0].sendMessage("oc_1", [h.text("hello")]),
+      /lark_api_error:230001:invalid message/,
+    );
   });
 });
 
@@ -2263,7 +2288,7 @@ test("lark adapter sends quote nodes through the native reply endpoint", async (
           data: {
             msg_type: "post",
             content: JSON.stringify({
-              zh_cn: { content: [[{ tag: "md", text: "follow up" }]] },
+              zh_cn: { content: [[{ tag: "text", text: "follow up" }]] },
             }),
           },
         },
@@ -2868,7 +2893,7 @@ test("lark adapter maps fire working reaction to the supported emoji type", asyn
   });
 });
 
-test("lark adapter sends markdown nodes as native markdown rich text", async () => {
+test("lark adapter maps markdown inline styles and mentions to native elements", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -2901,10 +2926,11 @@ test("lark adapter sends markdown nodes as native markdown rich text", async () 
       zh_cn: {
         content: [
           [
-            {
-              tag: "md",
-              text: '**bold** [docs](https://example.com)\n<at user_id="ou_123">Alice</at>',
-            },
+            { tag: "text", text: "bold", style: ["bold"] },
+            { tag: "text", text: " " },
+            { tag: "a", text: "docs", href: "https://example.com" },
+            { tag: "text", text: "\n" },
+            { tag: "at", user_id: "ou_123" },
           ],
         ],
       },
@@ -2912,7 +2938,75 @@ test("lark adapter sends markdown nodes as native markdown rich text", async () 
   });
 });
 
-test("lark adapter preserves blank lines inside fenced code while splitting post paragraphs", async () => {
+test("lark adapter falls back when mention markup is not structurally native", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+    const markdown = '<at user_id="ou_123">Alice **bold**</at>';
+
+    await app.bots[0].sendMessage("oc_1", [h.markdown(markdown)]);
+
+    assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
+      [{ tag: "md", text: markdown }],
+    ]);
+  });
+});
+
+test("lark adapter serializes simple markdown as native post paragraphs", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: "m1" } };
+          },
+        },
+      },
+    };
+
+    await app.bots[0].sendMessage("oc_1", [
+      h.markdown("intro **bold** [link](https://example.com)\n\noutro"),
+    ]);
+
+    assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
+      [
+        { tag: "text", text: "intro " },
+        { tag: "text", text: "bold", style: ["bold"] },
+        { tag: "text", text: " " },
+        { tag: "a", text: "link", href: "https://example.com" },
+      ],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "text", text: "outro" }],
+    ]);
+  });
+});
+
+test("lark adapter preserves unsupported link content by falling back to markdown", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -2935,24 +3029,26 @@ test("lark adapter preserves blank lines inside fenced code while splitting post
 
     await app.bots[0].sendMessage("oc_1", [
       h.markdown(
-        "intro\n\n```ts\nconst first = 1;\n\nconst second = 2;\n```\n\noutro",
+        "[**bold**](https://example.com)\n\n[`code`](https://example.com)",
       ),
     ]);
 
     assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
-      [{ tag: "md", text: "intro" }],
       [
         {
-          tag: "md",
-          text: "```ts\nconst first = 1;\n\nconst second = 2;\n```",
+          tag: "a",
+          text: "bold",
+          href: "https://example.com",
+          style: ["bold"],
         },
       ],
-      [{ tag: "md", text: "outro" }],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "md", text: "[`code`](https://example.com)" }],
     ]);
   });
 });
 
-test("lark adapter keeps loose lists and nested fenced code in one post paragraph", async () => {
+test("lark adapter emits fenced code through the native code block tag", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -2972,13 +3068,16 @@ test("lark adapter keeps loose lists and nested fenced code in one post paragrap
         },
       },
     };
-    const markdown =
-      "- first\n\n  continuation\n\n  ~~~ts\n  const first = 1;\n\n  const second = 2;\n  ~~~\n\n- second";
-
-    await app.bots[0].sendMessage("oc_1", [h.markdown(markdown)]);
+    await app.bots[0].sendMessage("oc_1", [
+      h.markdown("before\n\n```ts\nconst value = 1;\n```\n\nafter"),
+    ]);
 
     assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
-      [{ tag: "md", text: markdown }],
+      [{ tag: "text", text: "before" }],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "code_block", language: "ts", text: "const value = 1;" }],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "text", text: "after" }],
     ]);
   });
 });
@@ -3010,13 +3109,15 @@ test("lark adapter preserves blockquotes and indented code blocks", async () => 
 
     assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
       [{ tag: "md", text: "> first\n>\n> second" }],
-      [{ tag: "md", text: "    alpha\n\n    beta" }],
-      [{ tag: "md", text: "outro" }],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "code_block", text: "alpha\n\nbeta" }],
+      [{ tag: "text", text: "\n" }],
+      [{ tag: "text", text: "outro" }],
     ]);
   });
 });
 
-test("lark adapter keeps cross-paragraph reference links in one markdown scope", async () => {
+test("lark adapter resolves cross-paragraph reference links into native links", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -3042,7 +3143,15 @@ test("lark adapter keeps cross-paragraph reference links in one markdown scope",
     await app.bots[0].sendMessage("oc_1", [h.markdown(markdown)]);
 
     assert.deepEqual(JSON.parse(calls[0].data.content).zh_cn.content, [
-      [{ tag: "md", text: markdown }],
+      [
+        { tag: "text", text: "first " },
+        { tag: "a", text: "docs", href: "https://example.com" },
+      ],
+      [{ tag: "text", text: "\n" }],
+      [
+        { tag: "text", text: "second " },
+        { tag: "a", text: "docs", href: "https://example.com" },
+      ],
     ]);
   });
 });

@@ -212,46 +212,142 @@ function normalizeLarkMarkdownListBlocks(text: string) {
   return out.join("\n");
 }
 
-function splitLarkMarkdownParagraphs(text: string) {
-  const source = safeString(text).replace(/\r\n?/g, "\n");
-  if (!source.trim()) return [] as string[];
-  let tokens: any[];
-  try {
-    tokens = Lexer.lex(source, { gfm: true });
-  } catch {
-    return [source];
-  }
-  const links = (tokens as any)?.links;
-  if (links && typeof links === "object" && Object.keys(links).length) {
-    return [source];
-  }
-  const paragraphs: string[] = [];
-  let current = "";
-  let cursor = 0;
-  const flush = () => {
-    if (current.trim()) paragraphs.push(current);
-    current = "";
-  };
-  for (const token of tokens) {
-    const raw = safeString(token?.raw);
-    if (!raw) continue;
-    const index = source.indexOf(raw, cursor);
-    if (index < 0) return [source];
-    current += source.slice(cursor, index);
-    cursor = index + raw.length;
-    if (safeString(token?.type).trim() === "space") {
-      flush();
+function larkPostStyle(styles: string[]) {
+  return styles.length ? { style: [...new Set(styles)] } : {};
+}
+
+function renderLarkInlineElements(
+  tokens: any[],
+  styles: string[] = [],
+): any[] | null {
+  const elements: any[] = [];
+  const inlineTokens = Array.isArray(tokens) ? tokens : [];
+  for (let index = 0; index < inlineTokens.length; index += 1) {
+    const token = inlineTokens[index];
+    const type = safeString(token?.type).trim();
+    if (type === "text" || type === "escape") {
+      elements.push({
+        tag: "text",
+        text: safeString(token?.text),
+        ...larkPostStyle(styles),
+      });
       continue;
     }
-    const trailingSeparator = raw.match(/\n{2,}$/)?.[0] || "";
-    current += trailingSeparator
-      ? raw.slice(0, -trailingSeparator.length)
-      : raw;
-    if (trailingSeparator) flush();
+    if (type === "strong" || type === "em" || type === "del") {
+      const style =
+        type === "strong" ? "bold" : type === "em" ? "italic" : "lineThrough";
+      const nested = renderLarkInlineElements(token?.tokens, [
+        ...styles,
+        style,
+      ]);
+      if (!nested) return null;
+      elements.push(...nested);
+      continue;
+    }
+    if (type === "link") {
+      const href = safeString(token?.href).trim();
+      if (!href) return null;
+      const nested = renderLarkInlineElements(token?.tokens, styles);
+      if (!nested?.length || nested.some((element) => element.tag !== "text")) {
+        return null;
+      }
+      elements.push(
+        ...nested.map((element) => ({
+          tag: "a",
+          text: element.text,
+          href,
+          ...(element.style ? { style: element.style } : {}),
+        })),
+      );
+      continue;
+    }
+    if (type === "br") {
+      elements.push({ tag: "text", text: "\n", ...larkPostStyle(styles) });
+      continue;
+    }
+    if (type === "html") {
+      const match = safeString(token?.raw).match(/^<at\s+user_id="([^"]+)">$/);
+      if (!match) return null;
+      const nextToken = inlineTokens[index + 1];
+      const followingToken = inlineTokens[index + 2];
+      const closeIndex =
+        safeString(nextToken?.raw) === "</at>"
+          ? index + 1
+          : safeString(nextToken?.type) === "text" &&
+              safeString(followingToken?.raw) === "</at>"
+            ? index + 2
+            : -1;
+      if (closeIndex < 0) return null;
+      elements.push({
+        tag: "at",
+        user_id: match[1],
+        ...larkPostStyle(styles),
+      });
+      index = closeIndex;
+      continue;
+    }
+    return null;
   }
-  current += source.slice(cursor);
-  flush();
-  return paragraphs.length ? paragraphs : [source];
+  return elements;
+}
+
+function renderLarkPostBlock(token: any): any[] {
+  const type = safeString(token?.type).trim();
+  if (type === "paragraph" || type === "text") {
+    const inline = renderLarkInlineElements(token?.tokens);
+    if (inline?.length) return inline;
+  }
+  if (type === "heading") {
+    const inline = renderLarkInlineElements(token?.tokens, ["bold"]);
+    if (inline?.length) return inline;
+  }
+  if (type === "code") {
+    const language = safeString(token?.lang).trim().split(/\s+/)[0];
+    return [
+      {
+        tag: "code_block",
+        ...(language ? { language } : {}),
+        text: safeString(token?.text),
+      },
+    ];
+  }
+  if (type === "hr") return [{ tag: "hr" }];
+  return [{ tag: "md", text: safeString(token?.raw) }];
+}
+
+function renderLarkPostContent(text: string) {
+  const source = safeString(text).replace(/\r\n?/g, "\n");
+  try {
+    const tokens = Lexer.lex(source, { gfm: true }) as any[];
+    const content: any[][] = [];
+    let pendingBlank = false;
+    let previousRaw = "";
+    for (const token of tokens) {
+      if (safeString(token?.type).trim() === "space") {
+        pendingBlank = true;
+        continue;
+      }
+      if (content.length && (pendingBlank || /\n{2,}$/.test(previousRaw))) {
+        content.push([{ tag: "text", text: "\n" }]);
+      }
+      const row = renderLarkPostBlock(token);
+      if (row.length) content.push(row);
+      previousRaw = safeString(token?.raw);
+      pendingBlank = false;
+    }
+    return content.length ? content : [[{ tag: "text", text: source }]];
+  } catch {
+    return [[{ tag: "md", text: source }]];
+  }
+}
+
+function assertLarkApiSuccess(result: any) {
+  const code = Number(result?.code);
+  if (Number.isFinite(code) && code !== 0) {
+    throw new Error(
+      `lark_api_error:${code}:${safeString(result?.msg || result?.message || "unknown")}`,
+    );
+  }
 }
 
 const QQ_REACTION_EMOJI_IDS: Record<string, string> = {
@@ -2622,9 +2718,7 @@ export class LarkAdapter {
       msg_type: "post",
       content: JSON.stringify({
         zh_cn: {
-          content: splitLarkMarkdownParagraphs(text).map((paragraph) => [
-            { tag: "md", text: paragraph },
-          ]),
+          content: renderLarkPostContent(text),
         },
       }),
     };
@@ -2649,6 +2743,7 @@ export class LarkAdapter {
             ...data,
           },
         });
+    assertLarkApiSuccess(result);
     return [
       safeString(result?.data?.message_id || result?.message_id || "").trim(),
     ].filter(Boolean);
