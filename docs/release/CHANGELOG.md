@@ -16,7 +16,18 @@
 - Project licensing metadata now uses the GPL-3.0-or-later SPDX identifier with the standard GPL license text.
 - Chat and frontend session recovery now preserves active turns, Discord working continuity, first-seen timestamps, error delivery, and restored frontend sessions across daemon shutdowns and restarts.
 - TUI session rendering and daemon restart recovery are more reliable, including restored custom entry rendering and simpler readiness checks with resilient status retries; obsolete prompt-engineer mirror metadata has also been removed.
+- macOS daemon restarts now replace stale launchd-owned processes more reliably while bounding shutdown waits, and chat delivery preserves native Lark images plus outbound Markdown indentation.
 <!-- rin-changelog-coverage
+ca1a6ca fix(chat): preserve outbound Markdown indentation
+1b81ec3 fix(chat): send native Lark images
+d2d8187 refactor: remove obsolete macOS daemon migration
+d54e0b8 fix: bound daemon shutdown before restart
+75c50cf fix: replace stuck macOS daemon ownership
+f731d6c fix: allow macOS daemon shutdown to finish
+07975c1 fix: wait for macOS daemon shutdown before restart
+dcbc461 fix: restore macOS launchd reload on restart
+bd1f90e revert: preserve atomic macOS daemon restart
+c9a4d07 fix: replace stale macOS daemon on restart
 008cf3f fix: simplify daemon restart readiness
 af7d5b5 fix: preserve restart status query failures
 555ab4d fix: retry daemon restart snapshot
