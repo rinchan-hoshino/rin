@@ -3,6 +3,7 @@ import { asArray } from "../json-utils.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
 import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
+import type { RpcResourceSnapshot } from "../rin-lib/rpc-resources.js";
 import { renderUsageReportForChat } from "../rin/usage.js";
 import { listBoundSessions } from "../session/factory.js";
 
@@ -183,7 +184,7 @@ export async function getCommandArgumentCompletions(
   return { items: asArray(result).map(normalizeCompletionItem) };
 }
 
-export function getResourceDiagnostics(session: any) {
+export function getResourceDiagnostics(session: any): RpcResourceSnapshot {
   const resourceLoader = session?.resourceLoader;
   const skills = resourceLoader?.getSkills?.() || {};
   const prompts = resourceLoader?.getPrompts?.() || {};

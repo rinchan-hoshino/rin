@@ -15,6 +15,11 @@ import { createRinCapabilityDefinitions } from "../rin-lib/runtime.js";
 import { serializeRinToolStartupOptions } from "../rin-lib/tool-options.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
+import {
+  emptyRpcResourceSnapshot,
+  normalizeRpcResourceSnapshot,
+  type RpcResourceSnapshot,
+} from "../rin-lib/rpc-resources.js";
 import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
 import {
   applyFrontendBuiltinCommandText,
@@ -88,65 +93,6 @@ function cancelledExtensionUiResponse(
   return id
     ? { type: "extension_ui_response", id, cancelled: true }
     : undefined;
-}
-
-type RpcResourceSnapshot = {
-  skills: { skills: any[]; diagnostics: any[] };
-  prompts: { prompts: any[]; diagnostics: any[] };
-  themes: { themes: any[]; diagnostics: any[] };
-  extensions: {
-    extensions: any[];
-    errors: any[];
-    diagnostics: any[];
-    commandDiagnostics: any[];
-    shortcutDiagnostics: any[];
-  };
-};
-
-function emptyRpcResourceSnapshot(): RpcResourceSnapshot {
-  return {
-    skills: { skills: [], diagnostics: [] },
-    prompts: { prompts: [], diagnostics: [] },
-    themes: { themes: [], diagnostics: [] },
-    extensions: {
-      extensions: [],
-      errors: [],
-      diagnostics: [],
-      commandDiagnostics: [],
-      shortcutDiagnostics: [],
-    },
-  };
-}
-
-function normalizeResourceSection(value: any, itemKey: string) {
-  return {
-    [itemKey]: asArray(value?.[itemKey]),
-    diagnostics: asArray(value?.diagnostics),
-  };
-}
-
-function normalizeRpcResourceSnapshot(value: any): RpcResourceSnapshot {
-  return {
-    skills: normalizeResourceSection(value?.skills, "skills") as {
-      skills: any[];
-      diagnostics: any[];
-    },
-    prompts: normalizeResourceSection(value?.prompts, "prompts") as {
-      prompts: any[];
-      diagnostics: any[];
-    },
-    themes: normalizeResourceSection(value?.themes, "themes") as {
-      themes: any[];
-      diagnostics: any[];
-    },
-    extensions: {
-      extensions: asArray(value?.extensions?.extensions),
-      errors: asArray(value?.extensions?.errors),
-      diagnostics: asArray(value?.extensions?.diagnostics),
-      commandDiagnostics: asArray(value?.extensions?.commandDiagnostics),
-      shortcutDiagnostics: asArray(value?.extensions?.shortcutDiagnostics),
-    },
-  };
 }
 
 function normalizeQueuedMessages(value: any) {

@@ -2,6 +2,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  buildGitHubRefArchiveUrl,
+  buildNpmTarballUrl,
+} from "../../src/core/release-urls.ts";
+
 function argValue(argv, index, option) {
   const value = argv[index + 1];
   if (!value || String(value).startsWith("--")) {
@@ -95,31 +100,6 @@ function trim(value) {
   return String(value || "").trim();
 }
 
-function buildNpmTarballUrl(packageName, version) {
-  const encodedName = encodeURIComponent(packageName);
-  const fileBase = packageName.split("/").pop();
-  return `https://registry.npmjs.org/${encodedName}/-/${fileBase}-${version}.tgz`;
-}
-
-function githubCodeloadRepoPath(repoUrl) {
-  const normalizedRepo = trim(repoUrl)
-    .replace(/\.git$/i, "")
-    .replace(/\/+$/g, "");
-  const sshMatch = /^git@github\.com:([^/]+)\/([^/]+)$/i.exec(normalizedRepo);
-  if (sshMatch?.[1] && sshMatch[2]) {
-    return [sshMatch[1], sshMatch[2]].map(encodeURIComponent).join("/");
-  }
-  try {
-    const parsed = new URL(normalizedRepo);
-    if (parsed.hostname.toLowerCase() !== "github.com") return "";
-    const [owner, repo] = parsed.pathname.split("/").filter(Boolean);
-    if (!owner || !repo) return "";
-    return [owner, repo].map(encodeURIComponent).join("/");
-  } catch {
-    return "";
-  }
-}
-
 function applyPlatformAsset(entry, args) {
   const platform = trim(args.assetPlatform);
   const bundleUrl = trim(args.assetUrl);
@@ -134,22 +114,6 @@ function applyPlatformAsset(entry, args) {
       ? { nodeVersion: trim(args.assetNodeVersion) }
       : {}),
   };
-}
-
-function buildGitHubRefArchiveUrl(repoUrl, ref) {
-  const normalizedRepo = trim(repoUrl)
-    .replace(/\.git$/i, "")
-    .replace(/\/+$/g, "");
-  const normalizedRef = trim(ref) || "main";
-  const encodedRef = normalizedRef
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  const codeloadRepo = githubCodeloadRepoPath(normalizedRepo);
-  if (codeloadRepo) {
-    return `https://codeload.github.com/${codeloadRepo}/tar.gz/${encodedRef}`;
-  }
-  return `${normalizedRepo}/archive/${encodedRef}.tar.gz`;
 }
 
 const args = parseArgs(process.argv.slice(2));

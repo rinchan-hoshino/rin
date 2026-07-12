@@ -70,10 +70,10 @@ test("local CI runner reuses image dependencies before repo checks", () => {
 test("repository test scripts bound default test concurrency", () => {
   const packageJson = JSON.parse(readRepoFile("package.json"));
 
-  assert.match(packageJson.scripts["test:unit"], /--test-concurrency=4/);
+  assert.match(packageJson.scripts["test:unit"], /--concurrency 4/);
   assert.match(packageJson.scripts["test:release"], /--test-concurrency=4/);
-  assert.match(packageJson.scripts["test:e2e"], /--test-concurrency=2/);
-  assert.match(packageJson.scripts["test:interactive"], /--test-concurrency=2/);
+  assert.match(packageJson.scripts["test:e2e"], /--concurrency 2/);
+  assert.match(packageJson.scripts["test:interactive"], /--concurrency 2/);
 });
 
 test("local CI runner enables inner install-to-TUI smoke before tests", () => {

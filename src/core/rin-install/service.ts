@@ -29,6 +29,7 @@ import {
   windowsStartupLauncherPathForHome,
 } from "./paths.js";
 import { sleep } from "../platform/process.js";
+import { windowsCmdQuote } from "../platform/windows-command.js";
 import {
   buildDaemonSocketProbeScript,
   canConnectDaemonSocket,
@@ -108,10 +109,6 @@ function escapeXmlText(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
-}
-
-function windowsCmdQuote(value: string) {
-  return `"${String(value).replace(/"/g, '""')}"`;
 }
 
 function resolveTargetUserContext(

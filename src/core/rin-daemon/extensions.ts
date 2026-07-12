@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import {
@@ -13,6 +13,7 @@ import {
   type RinBackgroundExtensionConfig,
 } from "../rin-extension-settings.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
+import { importRuntimeModule } from "../rin-lib/runtime-module-loader.js";
 import type {
   ChatRuntimeExternalAdapterEntry,
   ChatRuntimeExternalAdapterProvider,
@@ -240,75 +241,11 @@ function readJson(filePath: string) {
   }
 }
 
-function resolveJitiStaticPath() {
-  try {
-    return path.join(
-      path.dirname(requireFromHere.resolve("jiti/package.json")),
-      "lib",
-      "jiti-static.mjs",
-    );
-  } catch {
-    return path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-      "node_modules",
-      "jiti",
-      "lib",
-      "jiti-static.mjs",
-    );
-  }
-}
-
-function resolveJitiAliases() {
-  const pkg = readJson(
-    path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "package.json",
-    ),
-  );
-  const names = Object.keys({
-    ...(pkg?.dependencies || {}),
-    ...(pkg?.devDependencies || {}),
-  });
-  return Object.fromEntries(
-    names.flatMap((name) => {
-      try {
-        return [[name, requireFromHere.resolve(name)]];
-      } catch {
-        return [];
-      }
-    }),
-  );
-}
-
-async function importBackgroundExtensionPath(modulePath: string) {
-  if (modulePath.endsWith(".ts")) {
-    const { createJiti } = await import(
-      pathToFileURL(resolveJitiStaticPath()).href
-    );
-    const jiti = createJiti(import.meta.url, {
-      moduleCache: false,
-      alias: resolveJitiAliases(),
-    });
-    return await jiti.import(modulePath, { default: true });
-  }
-  return await import(pathToFileURL(modulePath).href);
-}
-
 async function importBackgroundExtensionModule(
   runtimeRoot: string,
   entry: RinBackgroundExtensionConfig,
 ) {
-  if (entry.modulePath)
-    return await importBackgroundExtensionPath(entry.modulePath);
+  if (entry.modulePath) return await importRuntimeModule(entry.modulePath);
   const { packageName } = entry;
   try {
     const importerPath = ensureRuntimeImporter(

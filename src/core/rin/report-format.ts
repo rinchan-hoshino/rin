@@ -8,6 +8,26 @@ export function formatReportTime(value: unknown) {
   return new Date(timestamp).toLocaleString();
 }
 
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_COLOR_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
+
+export function stripAnsi(value: string) {
+  return value.replace(ANSI_COLOR_PATTERN, "");
+}
+
+export function truncateAnsi(value: string, width: number) {
+  const clean = stripAnsi(value);
+  if (clean.length <= width) return value;
+  if (width <= 1) return clean.slice(0, Math.max(0, width));
+  return `${clean.slice(0, width - 1)}…`;
+}
+
+export function padAnsi(value: string, width: number) {
+  const clean = stripAnsi(value);
+  if (clean.length >= width) return truncateAnsi(value, width);
+  return `${value}${" ".repeat(width - clean.length)}`;
+}
+
 function pad(value: string, width: number) {
   if (value.length >= width) return value;
   return `${value}${" ".repeat(width - value.length)}`;

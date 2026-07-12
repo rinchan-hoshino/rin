@@ -12,6 +12,11 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "./frontend-identity.js";
+import {
+  isRinRpcResponse,
+  normalizeRinRpcInbound,
+  readRinRpcResponseData,
+} from "./rpc-ingress.js";
 import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,
@@ -45,8 +50,9 @@ function rpcTimeoutMs(command: RinRpcCommand) {
   return DEFAULT_RPC_TIMEOUT_MS;
 }
 
-function toFrontendEvent(event: any): InteractiveFrontendEvent | null {
-  if (!event || typeof event !== "object") return null;
+function toFrontendEvent(value: unknown): InteractiveFrontendEvent | null {
+  const event = normalizeRinRpcInbound(value);
+  if (!event) return null;
 
   if (event.type === "stderr") {
     return { type: "status", level: "warning", text: String(event.line || "") };
@@ -112,7 +118,11 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   requestId = 0;
   pending = new Map<
     string,
-    { resolve: Function; reject: Function; timer: NodeJS.Timeout }
+    {
+      resolve: (response: RinRpcResponse) => void;
+      reject: (error: Error) => void;
+      timer: NodeJS.Timeout;
+    }
   >();
   listeners = new Set<(event: InteractiveFrontendEvent) => void>();
   connectPromise: Promise<void> | null = null;
@@ -518,14 +528,16 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   }
 
   private handleLine(line: string) {
-    let data: any;
+    let parsed: unknown;
     try {
-      data = JSON.parse(line);
+      parsed = JSON.parse(line);
     } catch {
       return;
     }
+    const data = normalizeRinRpcInbound(parsed);
+    if (!data) return;
 
-    if (data?.type === "response" && data.id && this.pending.has(data.id)) {
+    if (isRinRpcResponse(data) && this.pending.has(data.id)) {
       const pending = this.pending.get(data.id)!;
       this.pending.delete(data.id);
       clearTimeout(pending.timer);
@@ -567,10 +579,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     }
   }
 
-  private getData(response: any) {
-    if (!response || response.success !== true) {
-      throw new Error(String(response?.error || "rin_request_failed"));
-    }
-    return response.data;
+  private getData(response: unknown): any {
+    return readRinRpcResponseData(response);
   }
 }

@@ -16,6 +16,10 @@ import { type InstallerI18n } from "./i18n.js";
 import { restoreTerminalCursor, runInstallerProgress } from "./progress.js";
 import { readJsonFile } from "../platform/fs.js";
 import {
+  forwardChildSignals,
+  signalExitCode,
+} from "../platform/child-signals.js";
+import {
   appendDependencyPruneLog,
   pruneDuplicatePiCodingAgentDependencies,
 } from "./runtime-dependency-prune.js";
@@ -61,32 +65,15 @@ async function downloadFile(url: string, outFile: string) {
   fs.writeFileSync(outFile, buffer);
 }
 
-const FORWARDED_UPDATE_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-
-function signalExitCode(signal: NodeJS.Signals) {
-  if (signal === "SIGINT") return 130;
-  if (signal === "SIGTERM") return 143;
-  if (signal === "SIGHUP") return 129;
-  return 1;
-}
-
 export async function runUpdateCommand(
   command: string,
   args: string[],
   options: any = {},
 ) {
   const child = spawn(command, args, { stdio: "inherit", ...options });
-  let forwardedSignal: NodeJS.Signals | null = null;
-  const handlers = new Map<NodeJS.Signals, () => void>();
-  for (const signal of FORWARDED_UPDATE_SIGNALS) {
-    const handler = () => {
-      forwardedSignal = signal;
-      restoreTerminalCursor();
-      if (!child.killed) child.kill(signal);
-    };
-    handlers.set(signal, handler);
-    process.once(signal, handler);
-  }
+  const forwarding = forwardChildSignals(child, {
+    beforeForward: restoreTerminalCursor,
+  });
 
   try {
     const result = await new Promise<{
@@ -96,7 +83,9 @@ export async function runUpdateCommand(
       child.once("error", reject);
       child.once("exit", (code, signal) => resolve({ code, signal }));
     });
-    if (forwardedSignal) process.exit(signalExitCode(forwardedSignal));
+    if (forwarding.forwardedSignal) {
+      process.exit(signalExitCode(forwarding.forwardedSignal));
+    }
     if (result.signal) process.exit(signalExitCode(result.signal));
     if (result.code && result.code !== 0) {
       const error: any = new Error(`rin_update_command_failed:${result.code}`);
@@ -104,9 +93,7 @@ export async function runUpdateCommand(
       throw error;
     }
   } finally {
-    for (const [signal, handler] of handlers) {
-      process.off(signal, handler);
-    }
+    forwarding.cleanup();
     restoreTerminalCursor();
   }
 }

@@ -276,7 +276,7 @@ test("rin update is a thin wrapper around rin-install update", () => {
   assert.match(workflowSource, /runInstallerProgress/);
   assert.match(workflowSource, /runLoggedUpdateCommandSync/);
   assert.match(workflowSource, /spawn/);
-  assert.match(workflowSource, /FORWARDED_UPDATE_SIGNALS/);
+  assert.match(workflowSource, /forwardChildSignals/);
   assert.match(workflowSource, /restoreTerminalCursor/);
   assert.match(workflowSource, /--loglevel=error/);
   assert.equal(source.includes("rin update:"), false);

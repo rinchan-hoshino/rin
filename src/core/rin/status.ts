@@ -8,7 +8,11 @@ import {
   ParsedArgs,
   safeString,
 } from "./shared.js";
-import { formatReportTime } from "./report-format.js";
+import {
+  formatReportTime,
+  padAnsi as pad,
+  truncateAnsi as truncate,
+} from "./report-format.js";
 import {
   canConnectDaemonSocket,
   requestDaemonCommand,
@@ -198,26 +202,6 @@ function formatDuration(ms: unknown) {
   if (minutes < 60) return `${minutes}m${rest.toString().padStart(2, "0")}s`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h${(minutes % 60).toString().padStart(2, "0")}m`;
-}
-
-const ANSI_ESCAPE = String.fromCharCode(27);
-const ANSI_COLOR_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
-
-function stripAnsi(value: string) {
-  return value.replace(ANSI_COLOR_PATTERN, "");
-}
-
-function truncate(value: string, width: number) {
-  const clean = stripAnsi(value);
-  if (clean.length <= width) return value;
-  if (width <= 1) return clean.slice(0, width);
-  return `${clean.slice(0, width - 1)}…`;
-}
-
-function pad(value: string, width: number) {
-  const clean = stripAnsi(value);
-  if (clean.length >= width) return truncate(value, width);
-  return `${value}${" ".repeat(width - clean.length)}`;
 }
 
 function statusDot(state: string) {

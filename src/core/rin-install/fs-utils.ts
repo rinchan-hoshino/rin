@@ -12,6 +12,7 @@ import {
   writeJsonFile,
 } from "../platform/fs.js";
 import { pickPrivilegeCommand, shellQuote } from "../rin-lib/system.js";
+import { windowsCmdQuote } from "../platform/windows-command.js";
 import { nowFileTimestamp } from "../time-utils.js";
 import {
   appConfigDirForHome,
@@ -324,10 +325,6 @@ function writeLauncherExecutableForUser(
   const ownerUser = target?.name || userName;
   const ownerGroup = target?.name ? String(target?.gid ?? "") : "";
   writeTextFileWithPrivilege(filePath, content, ownerUser, ownerGroup, 0o755);
-}
-
-function windowsCmdQuote(value: string) {
-  return `"${String(value).replace(/"/g, '""')}"`;
 }
 
 export function windowsCmdLauncherScript(

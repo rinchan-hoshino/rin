@@ -231,6 +231,22 @@ function normalizeTaskTarget(target: CronTaskTarget | undefined) {
   };
 }
 
+export function validateCronTaskBinding(
+  session: CronTaskSessionBinding,
+  target: CronTaskTarget,
+  frontend?: CronTaskFrontendBinding,
+) {
+  if (session.mode === "session_continue") {
+    if (frontend) throw new Error("cron_session_continue_frontend_forbidden");
+    if (target.kind !== "session_continue") {
+      throw new Error("cron_session_continue_requires_target");
+    }
+  } else if (target.kind === "session_continue") {
+    throw new Error("cron_session_continue_requires_session");
+  }
+  return { session, target, frontend };
+}
+
 function normalizeTaskTermination(
   termination: CronTaskTermination | null | undefined,
   existing: CronTaskRecord | undefined,
@@ -582,14 +598,7 @@ export class CronScheduler {
             : { kind: "session_continue" as const }))
         : (input.target ?? existing?.target);
     const normalizedTarget = normalizeTaskTarget(targetInput);
-    if (session.mode === "session_continue") {
-      if (frontend) throw new Error("cron_session_continue_frontend_forbidden");
-      if (normalizedTarget.kind !== "session_continue") {
-        throw new Error("cron_session_continue_requires_target");
-      }
-    } else if (normalizedTarget.kind === "session_continue") {
-      throw new Error("cron_session_continue_requires_session");
-    }
+    validateCronTaskBinding(session, normalizedTarget, frontend);
     const { dedicatedSessionFile, dedicatedSessionPersistent } =
       resolveDedicatedSessionBinding({
         agentDir: this.options.agentDir,
@@ -812,16 +821,7 @@ export class CronScheduler {
         row.trigger = normalizeTaskTrigger(row.trigger);
         row.condition = normalizeTaskCondition(row.condition, undefined);
         row.target = normalizeTaskTarget(row.target);
-        if (row.session.mode === "session_continue") {
-          if (row.frontend) {
-            throw new Error("cron_session_continue_frontend_forbidden");
-          }
-          if (row.target.kind !== "session_continue") {
-            throw new Error("cron_session_continue_requires_target");
-          }
-        } else if (row.target.kind === "session_continue") {
-          throw new Error("cron_session_continue_requires_session");
-        }
+        validateCronTaskBinding(row.session, row.target, row.frontend);
         if (row.session.mode === "dedicated") {
           row.dedicatedSessionPersistent = true;
           row.dedicatedSessionFile = getManagedTaskSessionFile(

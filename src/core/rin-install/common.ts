@@ -4,22 +4,17 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { restoreTerminalCursor } from "./progress.js";
+import {
+  forwardChildSignals,
+  signalExitCode,
+} from "../platform/child-signals.js";
 import { normalizeUserName } from "./users.js";
-
-const FORWARDED_CHILD_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
 export function shouldRunCommandThroughShell(
   command: string,
   platform: NodeJS.Platform = process.platform,
 ) {
   return platform === "win32" && /\.(?:cmd|bat)$/i.test(String(command || ""));
-}
-
-function signalExitCode(signal: NodeJS.Signals) {
-  if (signal === "SIGINT") return 130;
-  if (signal === "SIGTERM") return 143;
-  if (signal === "SIGHUP") return 129;
-  return 1;
 }
 
 export function runCommand(command: string, args: string[], options: any = {}) {
@@ -31,19 +26,11 @@ export function runCommand(command: string, args: string[], options: any = {}) {
         options.shell ??
         shouldRunCommandThroughShell(command, process.platform),
     });
-    let forwardedSignal: NodeJS.Signals | null = null;
-    const handlers = new Map<NodeJS.Signals, () => void>();
-    for (const signal of FORWARDED_CHILD_SIGNALS) {
-      const handler = () => {
-        forwardedSignal = signal;
-        restoreTerminalCursor();
-        if (!child.killed) child.kill(signal);
-      };
-      handlers.set(signal, handler);
-      process.once(signal, handler);
-    }
+    const forwarding = forwardChildSignals(child, {
+      beforeForward: restoreTerminalCursor,
+    });
     const cleanup = () => {
-      for (const [signal, handler] of handlers) process.off(signal, handler);
+      forwarding.cleanup();
       restoreTerminalCursor();
     };
     child.on("error", (error) => {
@@ -52,7 +39,9 @@ export function runCommand(command: string, args: string[], options: any = {}) {
     });
     child.on("exit", (code, signal) => {
       cleanup();
-      if (forwardedSignal) return resolve(signalExitCode(forwardedSignal));
+      if (forwarding.forwardedSignal) {
+        return resolve(signalExitCode(forwarding.forwardedSignal));
+      }
       if (signal) return reject(new Error(`terminated:${signal}`));
       resolve(code ?? 0);
     });

@@ -6,6 +6,10 @@ import { execFileSync, spawn } from "node:child_process";
 import { normalizeLanguageTag } from "../language.js";
 import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import { readJsonFile } from "../platform/fs.js";
+import {
+  forwardChildSignals,
+  signalExitCode,
+} from "../platform/child-signals.js";
 import { sleep } from "../platform/process.js";
 import {
   buildDaemonSocketProbeScript,
@@ -277,31 +281,13 @@ export async function ensureDaemonAvailable(context: TargetExecutionContext) {
   );
 }
 
-const FORWARDED_CHILD_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-
-function signalExitCode(signal: NodeJS.Signals) {
-  if (signal === "SIGINT") return 130;
-  if (signal === "SIGTERM") return 143;
-  if (signal === "SIGHUP") return 129;
-  return 1;
-}
-
 async function runInteractiveCommand(
   command: string,
   args: string[],
   options: any = {},
 ) {
   const child = spawn(command, args, { stdio: "inherit", ...options });
-  let forwardedSignal: NodeJS.Signals | null = null;
-  const handlers = new Map<NodeJS.Signals, () => void>();
-  for (const signal of FORWARDED_CHILD_SIGNALS) {
-    const handler = () => {
-      forwardedSignal = signal;
-      if (!child.killed) child.kill(signal);
-    };
-    handlers.set(signal, handler);
-    process.once(signal, handler);
-  }
+  const forwarding = forwardChildSignals(child);
 
   try {
     const result = await new Promise<{
@@ -311,7 +297,9 @@ async function runInteractiveCommand(
       child.once("error", reject);
       child.once("exit", (code, signal) => resolve({ code, signal }));
     });
-    if (forwardedSignal) process.exit(signalExitCode(forwardedSignal));
+    if (forwarding.forwardedSignal) {
+      process.exit(signalExitCode(forwarding.forwardedSignal));
+    }
     if (result.signal) process.exit(signalExitCode(result.signal));
     if (result.code && result.code !== 0) {
       const error: any = new Error(`rin_child_command_failed:${result.code}`);
@@ -319,9 +307,7 @@ async function runInteractiveCommand(
       throw error;
     }
   } finally {
-    for (const [signal, handler] of handlers) {
-      process.off(signal, handler);
-    }
+    forwarding.cleanup();
   }
 }
 

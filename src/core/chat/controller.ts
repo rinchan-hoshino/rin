@@ -52,12 +52,13 @@ import {
   markProcessedChatMessage,
   safeString,
 } from "./chat-helpers.js";
+import { type ChatMessagePart } from "../rin-lib/chat-outbox.js";
 import {
-  enqueueChatOutboxPayload,
-  readChatOutboxItemById,
-  type ChatMessagePart,
-} from "../rin-lib/chat-outbox.js";
-import { drainChatOutbox } from "./boot.js";
+  buildChatAssistantDelivery,
+  enqueueAndDrainChatDelivery,
+  type ChatAssistantDelivery,
+  type ChatDeliveryOptions,
+} from "./delivery.js";
 import { listChatMessages } from "./message-store.js";
 import { restorePromptParts } from "./transport.js";
 import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
@@ -65,23 +66,6 @@ import { resolveChatQuietModeEnabled } from "./settings.js";
 
 const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
 const WORKING_REACTION_INTERVAL_MS = 30_000;
-
-type ChatDeliveryOutcome = {
-  messageIds: string[];
-  accepted: boolean;
-  settled: boolean;
-};
-
-function chatDeliveryOutcome(
-  messageIds: string[] = [],
-  options: { accepted?: boolean; settled?: boolean } = {},
-): ChatDeliveryOutcome {
-  return {
-    messageIds,
-    accepted: options.accepted !== false,
-    settled: options.settled !== false,
-  };
-}
 
 const PLATFORM_TYPING_POLL_INTERVAL_MS: Record<string, number> = {
   // Telegram Bot API sendChatAction expires after 5 seconds.
@@ -125,16 +109,6 @@ type ChatTurnMeta = ChatTurnTarget & {
   startedAt: number;
   ackIncomingMessageId?: string;
   ackReplyToMessageId?: string;
-};
-
-type ChatAssistantDelivery = {
-  chatKey: string;
-  deliveryKind?: "final" | "interim" | "passive_notice" | "error";
-  parts: ChatMessagePart[];
-  replyToMessageId?: string;
-  coalesceWithWorkingMessage?: boolean;
-  sessionFile?: string;
-  sessionBinding?: "conversation";
 };
 
 type TodoNoticeRenderMode = "native" | "markdown" | "characters";
@@ -825,6 +799,14 @@ export class ChatController {
     );
   }
 
+  private shouldSuppressQuietDelivery(deliveryKind: string) {
+    return (
+      this.isQuietModeEnabled() &&
+      deliveryKind !== "final" &&
+      deliveryKind !== "error"
+    );
+  }
+
   private async runDriverTurnWithQuietMode(
     quietMode: unknown,
     input: Parameters<RinFrontendTurnDriver["runTurn"]>[0],
@@ -1335,34 +1317,14 @@ export class ChatController {
     bindSession?: boolean;
     deliveryKind?: "final" | "error";
   }): ChatAssistantDelivery {
-    const text = safeString(input.text).trim();
-    const parts = Array.isArray(input.parts) ? input.parts.filter(Boolean) : [];
-    if (!text && !parts.length) {
-      throw new Error("chat_final_assistant_text_missing");
-    }
-    const sessionPayload =
-      input.bindSession === false
-        ? {}
-        : {
-            sessionFile: toStoredSessionFile(
-              this.agentDir,
-              input.sessionFile || this.currentSessionFile(),
-            ),
-            sessionBinding: "conversation" as const,
-          };
-    const replyToMessageId = safeString(input.replyToMessageId || "").trim();
-    return {
-      chatKey: this.chatKey,
-      deliveryKind: input.deliveryKind || "final",
-      replyToMessageId: replyToMessageId || undefined,
-      parts: [
-        ...(replyToMessageId
-          ? [{ type: "quote" as const, id: replyToMessageId }]
-          : []),
-        ...(parts.length ? parts : [{ type: "text" as const, text }]),
-      ],
-      ...sessionPayload,
-    };
+    return buildChatAssistantDelivery(
+      {
+        agentDir: this.agentDir,
+        chatKey: this.chatKey,
+        currentSessionFile: this.currentSessionFile(),
+      },
+      input,
+    );
   }
 
   private stageAssistantDelivery(input: {
@@ -1378,135 +1340,21 @@ export class ChatController {
     return text;
   }
 
-  private async waitForOutboxDelivery(
-    id: string,
-    timeoutMs?: number,
-  ): Promise<string[] | null> {
-    const hasDeadline = Number.isFinite(timeoutMs);
-    const deadline = hasDeadline
-      ? Date.now() + Math.max(1, Number(timeoutMs))
-      : 0;
-    while (!hasDeadline || Date.now() <= deadline) {
-      const current = readChatOutboxItemById(this.agentDir, id)?.item;
-      if (current?.status === "delivered") return current.deliveryResult || [];
-      if (current?.status === "failed") {
-        throw new Error(current.lastError || "chat_outbox_delivery_failed");
-      }
-      const lastError = safeString(current?.lastError).trim();
-      if (lastError && !/^chat_outbox_delivery_pending$/.test(lastError)) {
-        throw new Error(lastError);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return null;
-  }
-
-  private shouldSuppressQuietDelivery(deliveryKind: string) {
-    return (
-      this.isQuietModeEnabled() &&
-      deliveryKind !== "final" &&
-      deliveryKind !== "error"
-    );
-  }
-
   private async enqueueAndDrainDelivery(
     payload: any,
-    options: {
-      id?: string;
-      idempotencyKey?: string;
-      deliveryKind?:
-        | "final"
-        | "interim"
-        | "passive_notice"
-        | "error"
-        | "command_ack"
-        | "generic";
-      postDelivery?: any;
-      coalesceWithWorkingMessage?: boolean;
-      requireDelivery?: boolean;
-      waitForDeliveryMs?: number;
-      waitUntilDeliverySettled?: boolean;
-    } = {},
+    options: ChatDeliveryOptions = {},
   ) {
-    const idempotencyKey = safeString(options.idempotencyKey).trim();
-    const id =
-      safeString(options.id).trim() ||
-      (idempotencyKey
-        ? `dedupe-${sha256Hex(idempotencyKey)}`
-        : `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`);
-    const deliveryKind = safeString(options.deliveryKind).trim();
-    const normalizedPayload =
-      (deliveryKind === "final" ||
-        deliveryKind === "interim" ||
-        deliveryKind === "passive_notice" ||
-        deliveryKind === "error") &&
-      !payload.deliveryKind
-        ? { ...payload, deliveryKind }
-        : payload;
-    const effectiveDeliveryKind = safeString(
-      normalizedPayload?.deliveryKind || deliveryKind,
-    ).trim();
-    if (this.shouldSuppressQuietDelivery(effectiveDeliveryKind)) {
-      return chatDeliveryOutcome([], { accepted: false });
-    }
-    enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
-      ...options,
-      id,
-    });
-    const results = await drainChatOutbox(
-      this.app,
-      this.agentDir,
-      this.h,
-      this.logger,
+    return await enqueueAndDrainChatDelivery(
       {
-        chatKey: safeString(normalizedPayload?.chatKey).trim(),
-        itemId: id,
+        agentDir: this.agentDir,
+        app: this.app,
+        h: this.h,
+        logger: this.logger,
+        quietModeEnabled: this.isQuietModeEnabled(),
       },
+      payload,
+      options,
     );
-    const own = Array.isArray(results)
-      ? results.find((item: any) => item?.id === id)
-      : null;
-    if (own && own.status !== "delivered") {
-      if (own.status === "dispatched") {
-        const deliveryResult = options.waitUntilDeliverySettled
-          ? await this.waitForOutboxDelivery(id)
-          : Number.isFinite(options.waitForDeliveryMs)
-            ? await this.waitForOutboxDelivery(id, options.waitForDeliveryMs)
-            : null;
-        if (deliveryResult) return chatDeliveryOutcome(deliveryResult);
-        const current = readChatOutboxItemById(this.agentDir, id)?.item;
-        if (
-          (current?.status === "queued" || current?.status === "sending") &&
-          /^chat_outbox_delivery_pending$/.test(
-            safeString(current.lastError).trim(),
-          )
-        ) {
-          return chatDeliveryOutcome([], { settled: false });
-        }
-        if (options.requireDelivery)
-          throw new Error("chat_outbox_delivery_pending");
-        return chatDeliveryOutcome([]);
-      }
-      const errorMessage =
-        safeString((own as any).error).trim() || "chat_outbox_delivery_pending";
-      if (/^chat_outbox_delivery_timeout:/.test(errorMessage)) {
-        return chatDeliveryOutcome((own as any)?.deliveryResult || []);
-      }
-      throw new Error(errorMessage);
-    }
-    if (!own && idempotencyKey) {
-      const current = readChatOutboxItemById(this.agentDir, id)?.item;
-      if (current?.status === "delivered") {
-        return chatDeliveryOutcome(current.deliveryResult || []);
-      }
-      if (current?.status === "failed") {
-        throw new Error(current.lastError || "chat_outbox_delivery_failed");
-      }
-      if (current?.status === "queued" || current?.status === "sending") {
-        return chatDeliveryOutcome([], { settled: false });
-      }
-    }
-    return chatDeliveryOutcome((own as any)?.deliveryResult || []);
   }
 
   private async commitPendingDelivery(
@@ -1515,14 +1363,16 @@ export class ChatController {
     deliveryOptions: { id?: string; idempotencyKey?: string } = {},
   ) {
     const pending = this.stagedDelivery;
-    if (!pending) return chatDeliveryOutcome([], { accepted: false });
+    if (!pending) {
+      return { messageIds: [], accepted: false, settled: true };
+    }
     if (!this.canDeliverReplies()) {
       this.stagedDelivery = null;
       if (clearProcessing) {
         await this.clearWorkingReaction().catch(() => {});
         this.currentTurn = null;
       }
-      return chatDeliveryOutcome([], { accepted: false });
+      return { messageIds: [], accepted: false, settled: true };
     }
     const deliveryPayload = {
       ...pending,

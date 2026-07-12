@@ -1,8 +1,4 @@
-import { spawn } from "node:child_process";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { sleep } from "../platform/process.js";
 import type { RpcSocketLike } from "../platform/rpc-socket.js";
@@ -12,6 +8,7 @@ import {
   takePendingTerminalTurnEvent,
 } from "./pending-turn-events.js";
 import { setRunningWorkerSession } from "./running-workers.js";
+import { spawnWorkerProcess } from "./worker-process.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import {
@@ -67,7 +64,7 @@ type InitialWorkerSession =
 
 export type WorkerHandle = {
   id: string;
-  child: ReturnType<typeof spawn>;
+  child: ReturnType<typeof spawnWorkerProcess>;
   stdoutBuffer: { buffer: string };
   stderrBuffer: { buffer: string };
   connections: Set<ConnectionState>;
@@ -913,25 +910,6 @@ export class WorkerPool {
     }
   }
 
-  private writeWorkerResourceOptionsFile(
-    resourceOptions: Record<string, unknown> | undefined,
-  ) {
-    if (!resourceOptions) return [];
-    const root =
-      this.options.resourceOptionsDir ||
-      path.join(os.tmpdir(), "rin-worker-options");
-    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-    const filePath = path.join(
-      root,
-      `worker-options-${process.pid}-${crypto.randomBytes(8).toString("hex")}.json`,
-    );
-    fs.writeFileSync(filePath, `${JSON.stringify(resourceOptions)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    return ["--resource-options-file", filePath];
-  }
-
   private resourceOptionsWithInitialSession(
     resourceOptions: Record<string, unknown> | undefined,
     initialSession: InitialWorkerSession,
@@ -968,16 +946,14 @@ export class WorkerPool {
 
     const workerResourceOptions =
       resourceOptions || this.options.resourceOptions;
-    const workerArgs = [
-      this.options.workerPath,
-      ...this.writeWorkerResourceOptionsFile(workerResourceOptions),
-    ];
-    const child = spawn(process.execPath, workerArgs, {
-      cwd: this.options.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
-      windowsHide: true,
-    });
+    const child = spawnWorkerProcess(
+      {
+        workerPath: this.options.workerPath,
+        cwd: this.options.cwd,
+        resourceOptionsDir: this.options.resourceOptionsDir,
+      },
+      workerResourceOptions,
+    );
 
     const worker: WorkerHandle = {
       id: `worker_${++this.workerSeq}`,

@@ -26,11 +26,16 @@ function usageNumber(value: unknown): number {
   return Number.isFinite(num) ? num : 0;
 }
 
-function usageField(source: any, key: string): number {
-  return usageNumber(source?.[key]);
+function usageValue(source: unknown, key: string): unknown {
+  if (source == null) return undefined;
+  return (source as Record<string, unknown>)[key];
 }
 
-function readUsageCounts(usage: any): UsageCounts {
+function usageField(source: unknown, key: string): number {
+  return usageNumber(usageValue(source, key));
+}
+
+function readUsageCounts(usage: unknown): UsageCounts {
   return {
     input: usageField(usage, "input"),
     output: usageField(usage, "output"),
@@ -39,7 +44,7 @@ function readUsageCounts(usage: any): UsageCounts {
   };
 }
 
-function readUsageCosts(cost: any): UsageCosts {
+function readUsageCosts(cost: unknown): UsageCosts {
   return {
     costInput: usageField(cost, "input"),
     costOutput: usageField(cost, "output"),
@@ -53,19 +58,19 @@ function derivedTotalTokens(counts: UsageCounts): number {
   return counts.input + counts.output + counts.cacheRead + counts.cacheWrite;
 }
 
-function resolveTotalTokens(usage: any, counts: UsageCounts): number {
+function resolveTotalTokens(usage: unknown, counts: UsageCounts): number {
   return usageField(usage, "totalTokens") || derivedTotalTokens(counts);
 }
 
-export function readUsageMetrics(usage: any): UsageMetrics {
+export function readUsageMetrics(usage: unknown): UsageMetrics {
   const counts = readUsageCounts(usage);
   return {
     ...counts,
     totalTokens: resolveTotalTokens(usage, counts),
-    ...readUsageCosts(usage?.cost),
+    ...readUsageCosts(usageValue(usage, "cost")),
   };
 }
 
-export function calculateUsageTotalTokens(usage: any): number {
+export function calculateUsageTotalTokens(usage: unknown): number {
   return readUsageMetrics(usage).totalTokens;
 }
