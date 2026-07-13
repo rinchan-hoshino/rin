@@ -2960,6 +2960,62 @@ test("chat controller polls typing and rotating reactions while a turn is active
   ]);
 });
 
+test("chat controller keeps typing heartbeat frequent while throttling editable Working animation to reaction interval", async () => {
+  const controller = await createController("discord/1:2");
+  const calls: Array<[string, number]> = [];
+  controller.app.bots[0].platform = "discord";
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "typing",
+      async tick({ tick }) {
+        calls.push(["typing", Number(tick)]);
+        return true;
+      },
+    },
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick({ tick }) {
+        calls.push(["edit", Number(tick)]);
+        return true;
+      },
+    },
+  ];
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-edit-interval",
+    workingNoticeSent: true,
+  };
+  controller.driver.hasVisibleChatWorkingTurn = () => true;
+
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(calls, [
+    ["typing", 0],
+    ["edit", 0],
+  ]);
+
+  controller.lastTypingIndicatorAt -= 9_000;
+  controller.lastWorkingIndicatorAt -= 9_000;
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(calls, [
+    ["typing", 0],
+    ["edit", 0],
+    ["typing", 1],
+  ]);
+
+  controller.lastTypingIndicatorAt -= 9_000;
+  controller.lastWorkingIndicatorAt -= 21_000;
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(calls, [
+    ["typing", 0],
+    ["edit", 0],
+    ["typing", 1],
+    ["typing", 1],
+    ["edit", 1],
+  ]);
+});
+
 test("chat controller clears typing and working reactions after canonical completion", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
@@ -3275,7 +3331,7 @@ test("chat controller logs failed discord typing without changing its cadence", 
     now += 1;
     assert.equal(await controller.pollTyping(), true);
     assert.equal(typingAttempts, 2);
-    assert.equal(editableTicks, 2);
+    assert.equal(editableTicks, 1);
   } finally {
     Date.now = originalNow;
   }

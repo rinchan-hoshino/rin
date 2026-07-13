@@ -781,8 +781,18 @@ export class ChatController {
     );
   }
 
-  private isVisibleWorkingPollDue(lastPolledAt: number, now = Date.now()) {
-    return this.isTypingHeartbeatDue(lastPolledAt, now);
+  private isVisibleWorkingPollDue(
+    indicators: WorkingIndicator[],
+    lastPolledAt: number,
+    now = Date.now(),
+  ) {
+    const intervalMs = indicators.some(
+      (indicator) =>
+        workingIndicatorPresentation(indicator) === "editable-message",
+    )
+      ? WORKING_REACTION_INTERVAL_MS
+      : this.typingPollIntervalMs();
+    return lastPolledAt <= 0 || now - lastPolledAt >= intervalMs;
   }
 
   private warnTypingIndicatorFailure(error: unknown, now = Date.now()) {
@@ -994,7 +1004,11 @@ export class ChatController {
       this.isTypingHeartbeatDue(this.lastCompactionTypingIndicatorAt, now);
     const visibleDue =
       visibleIndicators.length > 0 &&
-      this.isVisibleWorkingPollDue(this.lastCompactionIndicatorAt, now);
+      this.isVisibleWorkingPollDue(
+        visibleIndicators,
+        this.lastCompactionIndicatorAt,
+        now,
+      );
     if (!typingDue && !visibleDue) return false;
 
     const messageId = safeString(
@@ -1237,7 +1251,11 @@ export class ChatController {
       this.isTypingHeartbeatDue(this.lastTypingIndicatorAt, now);
     const visibleDue =
       visibleIndicators.length > 0 &&
-      this.isVisibleWorkingPollDue(this.lastWorkingIndicatorAt, now);
+      this.isVisibleWorkingPollDue(
+        visibleIndicators,
+        this.lastWorkingIndicatorAt,
+        now,
+      );
     if (!typingDue && !visibleDue) return false;
 
     const messageId = this.currentIncomingMessageId();
