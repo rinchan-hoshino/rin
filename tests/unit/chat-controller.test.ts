@@ -2832,27 +2832,27 @@ test("chat controller replaces editable Working with a completed assistant summa
 
   await controller.handleFrontendEvent({
     type: "assistant_summary",
-    text: "Designing casual greeting response",
+    text: "**Planning the response**\n\n**Designing [casual](https://example.com) greeting response**",
   });
 
   assert.equal(contexts.length, 1);
   assert.equal(
     contexts[0].assistantSummaryText,
-    "Designing casual greeting response",
+    "Designing casual greeting response...",
   );
   assert.equal(
     controller.latestAssistantSummaryText,
-    "Designing casual greeting response",
+    "Designing casual greeting response...",
   );
 
   await controller.handleFrontendEvent({
     type: "assistant_summary",
-    text: "Checking the rendered result",
+    text: "**Checking the rendered result.**",
   });
   assert.equal(contexts.length, 2);
   assert.equal(
     contexts[1].assistantSummaryText,
-    "Checking the rendered result",
+    "Checking the rendered result.",
   );
 
   await controller.clearWorkingReaction();

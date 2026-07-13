@@ -31,6 +31,7 @@ import {
   resolveChatCommandResponses,
   type ChatCommandResponses,
 } from "./command-responses.js";
+import { stripMarkdownFormatting } from "./rich-text.js";
 import {
   missingSessionFileError,
   normalizeSessionRef,
@@ -1137,7 +1138,20 @@ export class ChatController {
   }
 
   private async showAssistantSummary(text: unknown) {
-    const summary = safeString(text).trim();
+    const latestSummary = safeString(text)
+      .replace(/\r\n?/g, "\n")
+      .trim()
+      .split(/\n\s*\n/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .at(-1);
+    const plainSummary = stripMarkdownFormatting(latestSummary)
+      .replace(/\s+/g, " ")
+      .trim();
+    const summary =
+      plainSummary && !/\p{P}$/u.test(plainSummary)
+        ? `${plainSummary}...`
+        : plainSummary;
     if (!summary || !this.currentTurn || !this.awaitingTurnSettle) {
       return false;
     }
