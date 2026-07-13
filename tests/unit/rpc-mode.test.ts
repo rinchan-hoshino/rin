@@ -3624,7 +3624,7 @@ test(
 );
 
 test(
-  "rpc mode prompt streamingBehavior keeps Pi prompt queue path during tracked non-streaming gaps",
+  "rpc mode prompt streamingBehavior keeps Pi prompt queue path during active-run non-streaming gaps",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3632,7 +3632,8 @@ test(
     const handlers = new Map();
     const lines = [];
     const calls = [];
-    const agentState = { isStreaming: false };
+    const activeRunSignal = new AbortController().signal;
+    const agentState = { isStreaming: false, activeRun: false };
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3651,12 +3652,19 @@ test(
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
         sessionId: "session-1",
-        agent: { state: agentState, waitForIdle: async () => {} },
+        agent: {
+          get signal() {
+            return agentState.activeRun ? activeRunSignal : undefined;
+          },
+          state: agentState,
+          waitForIdle: async () => {},
+        },
         bindExtensions: async () => {},
         subscribe: () => () => {},
         async prompt(message, options) {
           calls.push(["prompt", message, options, this.isStreaming]);
           if (!options?.streamingBehavior) {
+            agentState.activeRun = true;
             await new Promise(() => {});
           }
         },
@@ -3753,7 +3761,7 @@ test(
 );
 
 test(
-  "rpc mode prompt admission steers plain messages during tracked non-streaming gaps",
+  "rpc mode prompt admission steers plain messages during active-run non-streaming gaps",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3761,7 +3769,8 @@ test(
     const handlers = new Map();
     const lines = [];
     const calls = [];
-    const agentState = { isStreaming: false };
+    const activeRunSignal = new AbortController().signal;
+    const agentState = { isStreaming: false, activeRun: false };
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3780,12 +3789,19 @@ test(
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
         sessionId: "session-1",
-        agent: { state: agentState, waitForIdle: async () => {} },
+        agent: {
+          get signal() {
+            return agentState.activeRun ? activeRunSignal : undefined;
+          },
+          state: agentState,
+          waitForIdle: async () => {},
+        },
         bindExtensions: async () => {},
         subscribe: () => () => {},
         async prompt(message, options) {
           calls.push(["prompt", message, options, this.isStreaming]);
           if (!options?.streamingBehavior) {
+            agentState.activeRun = true;
             await new Promise(() => {});
           }
         },
@@ -3891,6 +3907,118 @@ test(
 );
 
 test(
+  "rpc mode prompt admission trusts the Pi active run during an untracked recovery gap",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const calls = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: {
+          signal: new AbortController().signal,
+          state: { isStreaming: false },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        async prompt(message, options) {
+          calls.push([message, options, this.isStreaming]);
+          if (!this.isStreaming || options?.streamingBehavior !== "steer") {
+            throw new Error(
+              "Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.",
+            );
+          }
+        },
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => session.messages || []),
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: async () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "queue-1", type: "prompt", message: "recovery follow-in", requestTag: "tag-2" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      assert.deepEqual(calls, [
+        [
+          "recovery follow-in",
+          {
+            images: undefined,
+            streamingBehavior: "steer",
+            source: "rpc",
+            requestTag: "tag-2",
+          },
+          true,
+        ],
+      ]);
+      const output = lines.join("");
+      assert.match(output, /"acceptedAs":"steer"/);
+      assert.doesNotMatch(output, /"event":"error"/);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode prompt streamingBehavior uses native queue without starting a second tracked turn",
   { concurrency: false },
   async () => {
@@ -3916,6 +4044,7 @@ test(
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
         agent: {
+          signal: new AbortController().signal,
           waitForIdle: async () => {
             waitForIdleCalls += 1;
           },

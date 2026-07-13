@@ -863,11 +863,10 @@ export async function runCustomRpcMode(
         resolvePendingExtensionUiRequest(command);
         return done(id, type);
       case "prompt": {
-        const queueableTurnActive =
-          isTurnActive() || Boolean(session.isStreaming);
+        const piActiveRun = Boolean(session.agent?.signal);
         const requestTag = safeString(command.requestTag).trim();
         if (
-          queueableTurnActive &&
+          isTurnActive() &&
           requestTag &&
           requestTag === activeTurnRequestTag
         ) {
@@ -880,7 +879,7 @@ export async function runCustomRpcMode(
           );
         }
         const requestedQueueBehavior = command.streamingBehavior;
-        const acceptedQueueBehavior = queueableTurnActive
+        const acceptedQueueBehavior = piActiveRun
           ? normalizePromptQueueBehavior(requestedQueueBehavior)
           : undefined;
         const promptOptions: Record<string, unknown> = {
@@ -901,7 +900,7 @@ export async function runCustomRpcMode(
           promptOptions.frontendIdentity = frontendIdentity;
         }
         if (acceptedQueueBehavior) {
-          if (isTurnActive() && !session.isStreaming) {
+          if (!session.isStreaming) {
             await promptWithQueueableTurnReceiver(
               session,
               command.message,
