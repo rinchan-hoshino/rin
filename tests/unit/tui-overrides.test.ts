@@ -1117,21 +1117,7 @@ test("rpc frontend startup statuses use one animated loader until working starts
     pendingTools: { clear() {} },
     retryCountdown: undefined,
     retryLoader: undefined,
-    loadingAnimation: undefined,
     workingVisible: true,
-    stopWorkingLoader() {
-      this.loadingAnimation?.stop?.();
-      this.loadingAnimation = undefined;
-      this.statusContainer.clear();
-    },
-    createWorkingLoader() {
-      return new loaderModule.Loader(
-        this.ui,
-        (value) => value,
-        (value) => value,
-        "Working...",
-      );
-    },
   };
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
@@ -1143,7 +1129,6 @@ test("rpc frontend startup statuses use one animated loader until working starts
 
   const startupStatus = instance.statusContainer.child;
   assert.ok(startupStatus);
-  assert.equal(instance.loadingAnimation, undefined);
   assert.equal(startupStatus.constructor.name, "Loader");
   assert.notEqual(startupStatus.intervalId, null);
   assert.ok(startupStatus.frames.length > 1);
@@ -1190,7 +1175,6 @@ test("rpc frontend startup statuses use one animated loader until working starts
     connected: true,
   });
 
-  assert.equal(instance.loadingAnimation, undefined);
   assert.equal(instance.statusContainer.child, undefined);
   assert.equal(startupStatus.intervalId, null);
   assert.ok(clears >= 1);
@@ -1232,16 +1216,7 @@ test("rpc transport status remains visible after ordinary events while reconnect
     pendingTools: { clear() {} },
     retryCountdown: undefined,
     retryLoader: undefined,
-    loadingAnimation: undefined,
     workingVisible: false,
-    createWorkingLoader() {
-      return new loaderModule.Loader(
-        this.ui,
-        (value) => value,
-        (value) => value,
-        "Working...",
-      );
-    },
   };
 
   try {
@@ -1276,8 +1251,9 @@ test("rpc transport status remains visible after ordinary events while reconnect
   }
 });
 
-test("rpc working status only reattaches an existing Pi-owned loader", async () => {
+test("rpc working status reattaches the existing Pi working indicator", async () => {
   await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
 
   let renders = 0;
   const ui = {
@@ -1286,16 +1262,12 @@ test("rpc working status only reattaches an existing Pi-owned loader", async () 
     },
     terminal: { setProgress() {} },
   };
-  const existingLoader = new loaderModule.Loader(
-    ui,
-    (x) => x,
-    (x) => x,
-    "Working...",
-  );
   const instance = {
     isInitialized: true,
     ui,
+    settingsManager: settingsManagerWithoutTerminalProgress,
     session: {
+      isStreaming: true,
       getFrontendStatusEvent() {
         return {
           type: "rpc_frontend_status",
@@ -1305,6 +1277,8 @@ test("rpc working status only reattaches an existing Pi-owned loader", async () 
         };
       },
     },
+    workingVisible: true,
+    defaultWorkingMessage: "Working...",
     statusContainer: {
       child: undefined,
       clear() {
@@ -1315,10 +1289,23 @@ test("rpc working status only reattaches an existing Pi-owned loader", async () 
       },
     },
     footer: { invalidate() {} },
-    loadingAnimation: existingLoader,
+    pendingTools: new Map(),
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
+      .setWorkingVisible,
+    activeStatusIndicator: undefined,
   };
 
   try {
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      { type: "agent_start" },
+    );
+    const existingIndicator = instance.activeStatusIndicator;
+    assert.equal(existingIndicator?.kind, "working");
+    instance.statusContainer.clear();
+
     renders = 0;
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
@@ -1330,11 +1317,11 @@ test("rpc working status only reattaches an existing Pi-owned loader", async () 
       },
     );
 
-    assert.equal(instance.loadingAnimation, existingLoader);
-    assert.equal(instance.statusContainer.child, existingLoader);
+    assert.equal(instance.activeStatusIndicator, existingIndicator);
+    assert.equal(instance.statusContainer.child, existingIndicator);
     assert.ok(renders >= 1);
   } finally {
-    existingLoader.stop();
+    instance.activeStatusIndicator?.dispose?.();
   }
 });
 
@@ -1963,7 +1950,6 @@ test("rpc compaction start keeps the dedicated compaction status indicator", asy
         };
       },
     },
-    loadingAnimation: undefined,
     statusContainer: {
       child: undefined,
       clear() {
@@ -1997,7 +1983,6 @@ test("rpc compaction start keeps the dedicated compaction status indicator", asy
     const compactionIndicator = instance.activeStatusIndicator;
     assert.ok(compactionIndicator);
     assert.equal(compactionIndicator.kind, "compaction");
-    assert.equal(instance.loadingAnimation, undefined);
     assert.equal(instance.statusContainer.child, compactionIndicator);
 
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
@@ -2010,7 +1995,6 @@ test("rpc compaction start keeps the dedicated compaction status indicator", asy
       },
     );
 
-    assert.equal(instance.loadingAnimation, undefined);
     assert.equal(instance.statusContainer.child, compactionIndicator);
 
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
@@ -2018,7 +2002,6 @@ test("rpc compaction start keeps the dedicated compaction status indicator", asy
       { type: "status", level: "warning", text: "Still compacting..." },
     );
 
-    assert.equal(instance.loadingAnimation, undefined);
     assert.equal(instance.statusContainer.child, compactionIndicator);
     assert.ok(renders >= 1);
   } finally {
@@ -2083,8 +2066,9 @@ test("zero-extension compaction end rebuilds history containing Rin core custom 
   assert.ok(getFooterInvalidations() >= 1);
 });
 
-test("rpc compaction end reattaches the existing Pi-owned loader", async () => {
+test("rpc compaction end restores the Pi working indicator while the turn remains active", async () => {
   await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
 
   let renders = 0;
   const ui = {
@@ -2093,17 +2077,14 @@ test("rpc compaction end reattaches the existing Pi-owned loader", async () => {
     },
     terminal: { setProgress() {} },
   };
-  const existingLoader = new loaderModule.Loader(
-    ui,
-    (x) => x,
-    (x) => x,
-    "Working...",
-  );
   const instance = {
     isInitialized: true,
     ui,
     settingsManager: settingsManagerWithoutTerminalProgress,
     session: {
+      isStreaming: true,
+      isCompacting: false,
+      abortCompaction() {},
       getFrontendStatusEvent() {
         return {
           type: "rpc_frontend_status",
@@ -2113,11 +2094,14 @@ test("rpc compaction end reattaches the existing Pi-owned loader", async () => {
         };
       },
     },
-    loadingAnimation: existingLoader,
+    workingVisible: true,
+    workingMessage: undefined,
+    defaultWorkingMessage: "Working...",
+    workingIndicatorOptions: undefined,
     statusContainer: {
-      child: existingLoader,
+      child: undefined,
       clear() {
-        this.child = null;
+        this.child = undefined;
       },
       addChild(child) {
         this.child = child;
@@ -2128,6 +2112,7 @@ test("rpc compaction end reattaches the existing Pi-owned loader", async () => {
       addChild() {},
       removeChild() {},
     },
+    pendingTools: new Map(),
     defaultEditor: { onEscape() {} },
     footer: { invalidate() {} },
     flushCompactionQueue() {},
@@ -2135,26 +2120,44 @@ test("rpc compaction end reattaches the existing Pi-owned loader", async () => {
     showStatus() {},
     showStatusIndicator: showStatusIndicatorForTest,
     clearStatusIndicator: clearStatusIndicatorForTest,
+    setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
+      .setWorkingVisible,
     activeStatusIndicator: undefined,
   };
 
   try {
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
+      { type: "agent_start" },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "working");
+
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      { type: "compaction_start", reason: "threshold" },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "compaction");
+
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
       { type: "compaction_end", aborted: false, willRetry: false },
     );
 
-    assert.equal(instance.loadingAnimation, existingLoader);
-    assert.equal(instance.statusContainer.child, existingLoader);
-    assert.equal(instance.loadingAnimation?.message, "Working...");
+    assert.equal(instance.activeStatusIndicator?.kind, "working");
+    assert.equal(
+      instance.statusContainer.child,
+      instance.activeStatusIndicator,
+    );
+    assert.equal(instance.activeStatusIndicator?.message, "Working...");
     assert.ok(renders >= 1);
   } finally {
-    existingLoader.stop();
+    instance.activeStatusIndicator?.dispose?.();
   }
 });
 
-test("local compaction end restores the working loader while the turn is still streaming", async () => {
+test("local compaction end restores the Pi working indicator while the turn is still streaming", async () => {
   await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
 
   let renders = 0;
   const ui = {
@@ -2163,25 +2166,22 @@ test("local compaction end restores the working loader while the turn is still s
     },
     terminal: { setProgress() {} },
   };
-  const existingLoader = new loaderModule.Loader(
-    ui,
-    (x) => x,
-    (x) => x,
-    "Working...",
-  );
   const instance = {
     isInitialized: true,
     ui,
     settingsManager: settingsManagerWithoutTerminalProgress,
     session: {
       isStreaming: true,
+      abortCompaction() {},
     },
-    loadingAnimation: existingLoader,
+    workingVisible: true,
+    workingMessage: undefined,
     defaultWorkingMessage: "Working...",
+    workingIndicatorOptions: undefined,
     statusContainer: {
-      child: existingLoader,
+      child: undefined,
       clear() {
-        this.child = null;
+        this.child = undefined;
       },
       addChild(child) {
         this.child = child;
@@ -2192,6 +2192,7 @@ test("local compaction end restores the working loader while the turn is still s
       addChild() {},
       removeChild() {},
     },
+    pendingTools: new Map(),
     defaultEditor: { onEscape() {} },
     footer: { invalidate() {} },
     flushCompactionQueue() {},
@@ -2199,21 +2200,38 @@ test("local compaction end restores the working loader while the turn is still s
     showStatus() {},
     showStatusIndicator: showStatusIndicatorForTest,
     clearStatusIndicator: clearStatusIndicatorForTest,
+    setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
+      .setWorkingVisible,
     activeStatusIndicator: undefined,
   };
 
   try {
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
+      { type: "agent_start" },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "working");
+
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      { type: "compaction_start", reason: "threshold" },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "compaction");
+
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
       { type: "compaction_end", aborted: false, willRetry: false },
     );
 
-    assert.equal(instance.loadingAnimation, existingLoader);
-    assert.equal(instance.statusContainer.child, existingLoader);
-    assert.equal(instance.loadingAnimation?.message, "Working...");
+    assert.equal(instance.activeStatusIndicator?.kind, "working");
+    assert.equal(
+      instance.statusContainer.child,
+      instance.activeStatusIndicator,
+    );
+    assert.equal(instance.activeStatusIndicator?.message, "Working...");
     assert.ok(renders >= 1);
   } finally {
-    existingLoader.stop();
+    instance.activeStatusIndicator?.dispose?.();
   }
 });
 

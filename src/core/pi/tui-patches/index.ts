@@ -309,12 +309,7 @@ function stopRpcTransportStatusComponent(instance: any) {
 }
 
 function createRpcTransportStatusLoader(instance: any, message: string) {
-  const loader =
-    typeof instance?.createWorkingLoader === "function"
-      ? instance.createWorkingLoader()
-      : new Loader(instance.ui, (text: string) => text, dim, message);
-  loader.setMessage?.(message);
-  return loader;
+  return new Loader(instance.ui, (text: string) => text, dim, message);
 }
 
 function formatRpcTransportStatusLabel(label: string) {
@@ -356,17 +351,30 @@ function showRpcTransportStatus(instance: any, event: any) {
   }
 }
 
-function reattachExistingPiLoader(instance: any) {
+function syncPiWorkingStatusIndicator(instance: any) {
   const clearedTransportStatus = stopRpcTransportStatusComponent(instance);
-  if (!instance?.loadingAnimation) {
-    if (clearedTransportStatus) instance?.ui?.requestRender?.();
+  const indicator = instance?.activeStatusIndicator;
+  if (indicator) {
+    if (indicator.kind !== "working") {
+      if (clearedTransportStatus) instance?.ui?.requestRender?.();
+      return;
+    }
+    if (!statusContainerHasChild(instance, indicator)) {
+      instance.statusContainer.clear();
+      instance.statusContainer.addChild(indicator);
+    }
+    instance.ui.requestRender();
     return;
   }
-  if (!statusContainerHasChild(instance, instance.loadingAnimation)) {
-    instance.statusContainer.clear();
-    instance.statusContainer.addChild(instance.loadingAnimation);
+  if (
+    instance?.workingVisible !== false &&
+    instance?.session?.isStreaming &&
+    typeof instance?.setWorkingVisible === "function"
+  ) {
+    instance.setWorkingVisible(true);
+    return;
   }
-  instance.ui.requestRender();
+  if (clearedTransportStatus) instance?.ui?.requestRender?.();
 }
 
 function reattachCompactionStatusIndicator(instance: any) {
@@ -386,7 +394,7 @@ function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
   const status = statusOverride ?? instance.session.getFrontendStatusEvent?.();
   const phase = String(status?.phase || "");
   if (phase === "working") {
-    reattachExistingPiLoader(instance);
+    syncPiWorkingStatusIndicator(instance);
     return;
   }
   if (phase === "compacting" && reattachCompactionStatusIndicator(instance)) {
@@ -400,10 +408,10 @@ function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
   if (changed || phase === "idle") instance?.ui?.requestRender?.();
 }
 
-function syncLocalPiLoader(instance: any) {
+function syncLocalPiWorkingStatus(instance: any) {
   if (isRpcTransportControlled(instance)) return;
   if (!instance?.session?.isStreaming) return;
-  reattachExistingPiLoader(instance);
+  syncPiWorkingStatusIndicator(instance);
 }
 
 function shouldReapplyLocalPiLoaderAfterEvent(instance: any, event: any) {
@@ -1588,7 +1596,7 @@ export async function applyRinTuiOverrides() {
 
       syncRpcFrontendStatus(this);
       if (shouldReapplyLocalPiLoader) {
-        syncLocalPiLoader(this);
+        syncLocalPiWorkingStatus(this);
       }
     };
   }
