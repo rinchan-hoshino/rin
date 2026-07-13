@@ -271,15 +271,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   background_extension_entrypoint_missing: () =>
     "Background extension is missing a Rin extension entry point. Export a Rin extension factory or background service.",
 
-  qq_app_id_required: () =>
-    "QQ adapter needs an app id before it can start. Add the app id.",
-  qq_reaction_requires_channel_chat: () =>
-    "QQ reaction failed because the target is not a channel chat. Use a channel chat or skip the reaction.",
-  qq_send_message_empty: () =>
-    "QQ send failed because the outgoing message is empty. Add text or an attachment.",
-  qq_token_required: () =>
-    "QQ adapter needs a token before it can start. Add the token.",
-
   rin_agent_sdk_task_id_required: () =>
     "Agent SDK task operation needs a task id. Provide the task id.",
   rin_app_cli_failed: () => "Rin command failed before it could finish.",

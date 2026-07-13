@@ -64,7 +64,6 @@ Rin's built-in direct chat runtime supports these adapter families:
 
 - Telegram
 - OneBot
-- QQ
 - Feishu / Lark
 - Discord
 - Slack
@@ -87,12 +86,6 @@ Minimal built-in adapter examples:
       "protocol": "ws",
       "selfId": "123456789",
       "token": ""
-    },
-    "qq": {
-      "id": "app-id",
-      "secret": "app-secret",
-      "token": "bot-token",
-      "type": "public"
     },
     "lark": { "platform": "feishu", "appId": "cli_xxx", "appSecret": "secret" },
     "discord": { "token": "bot-token" },
@@ -125,14 +118,13 @@ telegram/8623230033:-1001234567890
 onebot/2301401877:private:123456
 onebot/2301401877:1067390680
 discord/1519908956212822117:1519903290694045796
-qq/app-id:123456789
 lark/cli_xxx:oc_xxx
 ```
 
 Rules:
 
 - Every platform chat key uses the same bot-qualified shape: `platform/botId:chatId`.
-- `botId` is the stable account/bot identity for the adapter instance, such as Telegram bot id, OneBot selfId, Discord bot id, Lark appId, QQ app id, Slack bot user id, or Minecraft selfId.
+- `botId` is the stable account/bot identity for the adapter instance, such as Telegram bot id, OneBot selfId, Discord bot id, Lark appId, Slack bot user id, or Minecraft selfId.
 - Do not introduce platform-specific unqualified forms such as `platform:chatId`; migrate stored files and settings to the single canonical shape instead.
 - Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
 - OneBot private chats commonly use `private:<userId>`; group chats use the group id.

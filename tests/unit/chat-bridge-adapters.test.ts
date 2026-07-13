@@ -26,7 +26,7 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
 
   assert.deepEqual(
     specs.map((item) => item.key),
-    ["telegram", "onebot", "qq", "lark", "discord", "slack", "minecraft"],
+    ["telegram", "onebot", "lark", "discord", "slack", "minecraft"],
   );
   assert.deepEqual(adapters.getChatBridgeAdapterSpec("telegram")?.defaults, {
     protocol: "polling",
@@ -39,7 +39,6 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
   assert.deepEqual(adapters.listSupportedChatBridgeLabels(), [
     "Telegram",
     "OneBot",
-    "QQ",
     "Feishu / Lark",
     "Discord",
     "Slack",
@@ -47,16 +46,10 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
   ]);
 });
 
-test("chat bridge adapter config materialization covers built-in official adapters", () => {
+test("chat bridge adapter config materialization covers built-in adapters", () => {
   const config = support.buildChatConfigFromSettings({
     chat: {
       discord: { token: "discord-token" },
-      qq: {
-        id: "qq-app-id",
-        secret: "qq-secret",
-        token: "qq-token",
-        type: "public",
-      },
       lark: [
         {
           name: "corp-a",
@@ -70,15 +63,6 @@ test("chat bridge adapter config materialization covers built-in official adapte
   assert.deepEqual(config.plugins["adapter-discord"], {
     token: "discord-token",
   });
-  assert.deepEqual(config.plugins["adapter-qq"], {
-    protocol: "websocket",
-    sandbox: false,
-    authType: "bearer",
-    id: "qq-app-id",
-    secret: "qq-secret",
-    token: "qq-token",
-    type: "public",
-  });
   assert.deepEqual(config.plugins["adapter-lark"], {
     protocol: "ws",
     platform: "feishu",
@@ -90,21 +74,11 @@ test("chat bridge adapter config materialization covers built-in official adapte
 test("chat bridge adapter config materialization applies minimal setup defaults", () => {
   const config = support.buildChatConfigFromSettings({
     chat: {
-      qq: { id: "app-id", secret: "secret", token: "token", type: "public" },
       lark: { appId: "cli_xxx", appSecret: "secret_xxx" },
       slack: { token: "xapp-demo", botToken: "xoxb-demo" },
     },
   });
 
-  assert.deepEqual(config.plugins["adapter-qq"], {
-    protocol: "websocket",
-    sandbox: false,
-    authType: "bearer",
-    id: "app-id",
-    secret: "secret",
-    token: "token",
-    type: "public",
-  });
   assert.deepEqual(config.plugins["adapter-lark"], {
     protocol: "ws",
     platform: "feishu",

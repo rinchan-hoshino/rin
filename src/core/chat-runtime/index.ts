@@ -36,14 +36,12 @@ import {
   safeString,
   sleep,
   splitPlainText,
-  stageChatMediaFromNode,
 } from "./common.js";
 import { EditableTextMessageGroup } from "./editable-text-message-group.js";
 import {
   DiscordAdapter,
   LarkAdapter,
   MinecraftAdapter,
-  QQAdapter,
   SlackAdapter,
 } from "./adapters.js";
 
@@ -1420,13 +1418,6 @@ function isOneBotGroupChatId(chatId: string) {
   return Boolean(value) && !value.startsWith("private:");
 }
 
-export const ONEBOT_MEDIA_CACHE_RELATIVE_DIR = path.join(
-  "chat-media",
-  "onebot",
-);
-export const ONEBOT_MEDIA_DOCKER_MOUNT_PATH =
-  "$HOME/.rin/data/chat-media/onebot";
-export const ONEBOT_MEDIA_DOCKER_VOLUME_HINT = `-v "${ONEBOT_MEDIA_DOCKER_MOUNT_PATH}:${ONEBOT_MEDIA_DOCKER_MOUNT_PATH}:ro"`;
 export const ONEBOT_ACTION_TIMEOUT_MS = 20_000;
 export const ONEBOT_MEDIA_ACTION_TIMEOUT_MS = 10 * 60_000 + 5_000;
 
@@ -1488,45 +1479,14 @@ function oneBotFailureText(payload: any) {
   );
 }
 
-function isOneBotLocalMediaVisibilityFailure(
-  payload: any,
-  action: string,
-  params: any,
-) {
-  if (!isOneBotTimeoutParamAction(action)) return false;
-  const message = oneBotFailureText(payload);
-  return /ENOENT|file:\/\/|no such file|not found|rich[- ]?media/i.test(
-    message,
-  );
-}
-
-export const ONEBOT_LOCAL_MEDIA_VISIBILITY_HINT =
-  "OneBot/NapCat cannot read Rin's local media file. If NapCat runs in Docker, mount the media directory read-only:";
-
-export function formatOneBotActionFailureMessage(
-  payload: any,
-  action = "",
-  params?: any,
-) {
-  const message = oneBotFailureText(payload) || "onebot_action_failed";
-  if (!isOneBotLocalMediaVisibilityFailure(payload, action, params)) {
-    return message;
-  }
-  if (message.includes(ONEBOT_LOCAL_MEDIA_VISIBILITY_HINT)) {
-    return message;
-  }
-  return [
-    message,
-    ONEBOT_LOCAL_MEDIA_VISIBILITY_HINT,
-    ONEBOT_MEDIA_DOCKER_VOLUME_HINT,
-  ].join("\n");
+export function formatOneBotActionFailureMessage(payload: any) {
+  return oneBotFailureText(payload) || "onebot_action_failed";
 }
 
 class OneBotAdapter {
   private readonly app: ChatRuntimeApp;
   private readonly config: Record<string, any>;
   private readonly logger: any;
-  private readonly cacheDir: string;
   private ws: WebSocket | null = null;
   private loopPromise: Promise<void> | null = null;
   private stopped = false;
@@ -1538,23 +1498,19 @@ class OneBotAdapter {
       resolve: (value: any) => void;
       reject: (error: unknown) => void;
       timer: NodeJS.Timeout;
-      action: string;
-      params: any;
     }
   >();
   readonly bot: any;
 
   constructor(
     app: ChatRuntimeApp,
-    dataDir: string,
+    _dataDir: string,
     config: Record<string, any>,
     logger: any,
   ) {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:onebot", logger);
-    this.cacheDir = path.join(dataDir, ONEBOT_MEDIA_CACHE_RELATIVE_DIR);
-    ensureDir(this.cacheDir);
     this.bot = {
       platform: "onebot",
       selfId: safeString(config?.selfId).trim(),
@@ -1774,15 +1730,7 @@ class OneBotAdapter {
         safeString(payload?.status).trim() === "failed" ||
         Number(payload?.retcode) < 0
       ) {
-        pending.reject(
-          new Error(
-            formatOneBotActionFailureMessage(
-              payload,
-              pending.action,
-              pending.params,
-            ),
-          ),
-        );
+        pending.reject(new Error(formatOneBotActionFailureMessage(payload)));
         return;
       }
       pending.resolve(payload?.data);
@@ -1823,13 +1771,7 @@ class OneBotAdapter {
         this.pending.delete(echo);
         reject(new Error(`onebot_action_timeout:${action}`));
       }, timeoutMs);
-      this.pending.set(echo, {
-        resolve,
-        reject,
-        timer,
-        action,
-        params: actionParams,
-      });
+      this.pending.set(echo, { resolve, reject, timer });
       try {
         ws.send(actionPayload, (error?: Error) => {
           if (error) {
@@ -1852,16 +1794,11 @@ class OneBotAdapter {
     return task;
   }
 
-  private async normalizeOutboundMedia(node: any, type: "image" | "file") {
-    const staged = await stageChatMediaFromNode(node, {
-      cacheDir: this.cacheDir,
-      consumerDir: this.cacheDir,
-      fallbackMimeType:
-        type === "image" ? "image/png" : "application/octet-stream",
-      fallbackName: `${type}-${Date.now()}`,
-      type,
-    });
-    return safeString(staged?.src).trim();
+  private async normalizeOutboundMedia(node: any, _type: "image" | "file") {
+    const payload = await readBinaryFromNode(node);
+    if (!payload) return "";
+    if (payload.url) return payload.url;
+    return `base64://${payload.data.toString("base64")}`;
   }
 
   private async renderOutboundMessage(nodes: any[]) {
@@ -2467,7 +2404,6 @@ const BUILT_IN_CHAT_RUNTIME_ADAPTER_FACTORIES: Record<
 > = {
   telegram: TelegramAdapter,
   onebot: OneBotAdapter,
-  qq: QQAdapter,
   lark: LarkAdapter,
   discord: DiscordAdapter,
   slack: SlackAdapter,

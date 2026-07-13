@@ -1,7 +1,6 @@
 export type ChatBridgeBuiltInAdapterKey =
   | "telegram"
   | "onebot"
-  | "qq"
   | "lark"
   | "discord"
   | "slack"
@@ -25,12 +24,6 @@ const ONEBOT_DEFAULTS = {
   endpoint: "",
   selfId: "",
   token: "",
-};
-
-const QQ_DEFAULTS = {
-  protocol: "websocket",
-  sandbox: false,
-  authType: "bearer",
 };
 
 const LARK_DEFAULTS = {
@@ -64,12 +57,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     label: "OneBot",
     pluginKey: "adapter-onebot",
     defaults: ONEBOT_DEFAULTS,
-  },
-  {
-    key: "qq",
-    label: "QQ",
-    pluginKey: "adapter-qq",
-    defaults: QQ_DEFAULTS,
   },
   {
     key: "lark",

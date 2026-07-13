@@ -48,7 +48,7 @@ The core todo capability registers the `todo` tool and `/todos` command from Rin
 
 ## Chat bridge
 
-Rin's direct built-in chat bridge currently includes Telegram, OneBot, QQ, Feishu / Lark, Discord, Slack, and Minecraft / QueQiao.
+Rin's direct built-in chat bridge currently includes Telegram, OneBot, Feishu / Lark, Discord, Slack, and Minecraft / QueQiao.
 
 Use `docs/chat-bridge.md` for:
 

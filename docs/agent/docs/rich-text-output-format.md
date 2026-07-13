@@ -155,8 +155,7 @@ This text is sent after the image.
 Adapters choose the best native representation they support:
 
 - Telegram renders supported Markdown as HTML and native mentions as `tg://user?id=...` links.
-- OneBot renders native mentions as CQ at elements and strips unsupported Markdown formatting from plain text.
-- OneBot local media is staged under `$HOME/.rin/data/chat-media/onebot`. If the OneBot implementation such as NapCat runs in Docker, mount the same path read-only into the container: `-v "$HOME/.rin/data/chat-media/onebot:$HOME/.rin/data/chat-media/onebot:ro"`.
+- OneBot renders native mentions as CQ at elements, strips unsupported Markdown formatting from plain text, and embeds local media as `base64://` CQ payloads.
 - Discord and Slack generally preserve Markdown-style text and map reply/thread behavior through their adapter APIs.
 - Feishu/Lark serializes blank-line-separated Markdown blocks as native post paragraphs, and uploads local or remote image content to obtain an `image_key` before sending a native image message.
 - Other adapters may strip Markdown formatting or send readable fallback text.

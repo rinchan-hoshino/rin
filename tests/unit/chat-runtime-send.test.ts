@@ -1880,7 +1880,7 @@ test("onebot adapter renders structured at as native CQ mention", async () => {
   });
 });
 
-test("onebot adapter stages all local media under the fixed chat-media directory", async () => {
+test("onebot adapter embeds all local media as base64", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
@@ -1892,12 +1892,10 @@ test("onebot adapter stages all local media under the fixed chat-media directory
     const imagePath = path.join(agentDir, "avatar.png");
     const videoPath = path.join(agentDir, "clip.mp4");
     const filePath = path.join(agentDir, "notes.txt");
-    const mediaDir = path.join(agentDir, "data", "chat-media", "onebot");
     const calls: Array<{ action: string; params: any }> = [];
     await fs.writeFile(imagePath, Buffer.from("png"));
     await fs.writeFile(videoPath, Buffer.from("mp4"));
     await fs.writeFile(filePath, Buffer.from("notes"));
-    await fs.rm(mediaDir, { recursive: true, force: true });
     adapter.callAction = async (action: string, params: any) => {
       calls.push({ action, params });
       return { message_id: "m1" };
@@ -1916,26 +1914,12 @@ test("onebot adapter stages all local media under the fixed chat-media directory
       calls[0].params.timeout,
       runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
     );
-    assert.doesNotMatch(calls[0].params.message, /runtime-cache/);
-    assert.match(
+    assert.equal(
       calls[0].params.message,
-      /\[CQ:image,file=file:\/\/.*data\/chat-media\/onebot\/.*avatar\.png\]/,
+      "[CQ:image,file=base64://cG5n]" +
+        "[CQ:video,file=base64://bXA0]" +
+        "[CQ:file,file=base64://bm90ZXM=]",
     );
-    assert.match(
-      calls[0].params.message,
-      /\[CQ:video,file=file:\/\/.*data\/chat-media\/onebot\/.*clip\.mp4\]/,
-    );
-    assert.match(
-      calls[0].params.message,
-      /\[CQ:file,file=file:\/\/.*data\/chat-media\/onebot\/.*notes\.txt\]/,
-    );
-    const stagedPaths = [
-      ...calls[0].params.message.matchAll(/file:\/\/([^\]]+)/g),
-    ].map((match) => decodeURIComponent(match[1] || ""));
-    assert.equal(stagedPaths.length, 3);
-    for (const stagedPath of stagedPaths) {
-      await assert.doesNotReject(fs.stat(stagedPath));
-    }
   });
 });
 
@@ -1977,8 +1961,7 @@ test("onebot media actions use the extended action timeout", () => {
   );
   assert.equal(
     runtime.oneBotActionTimeoutMs("send_group_msg", {
-      message:
-        "[CQ:file,file=file:///home/rin/.rin/data/chat-media/onebot/pack.mrpack]",
+      message: "[CQ:file,file=base64://cGFjaw==]",
     }),
     runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
   );
@@ -2000,8 +1983,7 @@ test("onebot send and upload actions pass bounded timeouts into NapCat payloads"
   for (const action of ["send_private_msg", "send_group_msg", "send_msg"]) {
     assert.equal(
       runtime.withOneBotActionTimeoutParam(action, {
-        message:
-          "[CQ:image,file=file:///home/rin/.rin/data/chat-media/onebot/card.png]",
+        message: "[CQ:image,file=base64://cG5n]",
       }).timeout,
       runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
     );
@@ -2009,7 +1991,7 @@ test("onebot send and upload actions pass bounded timeouts into NapCat payloads"
   for (const action of ["upload_private_file", "upload_group_file"]) {
     assert.equal(
       runtime.withOneBotActionTimeoutParam(action, {
-        file: "/home/rin/.rin/data/chat-media/onebot/card.png",
+        file: "/app/napcat/cache/card.png",
       }).timeout,
       runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
     );
@@ -2020,60 +2002,29 @@ test("onebot send and upload actions pass bounded timeouts into NapCat payloads"
   );
   assert.equal(
     runtime.withOneBotActionTimeoutParam("send_group_msg", {
-      message:
-        "[CQ:image,file=file:///home/rin/.rin/data/chat-media/onebot/card.png]",
+      message: "[CQ:image,file=base64://cG5n]",
       timeout: 42,
     }).timeout,
     42,
   );
 });
 
-test("onebot media action failures include the fixed Docker mount hint", () => {
-  const message = runtime.formatOneBotActionFailureMessage(
-    {
-      status: "failed",
-      retcode: 1200,
-      message:
-        "ENOENT: no such file or directory, open '/home/rin/.rin/data/chat-media/onebot/avatar.png'",
-    },
-    "send_private_msg",
-    { message: "plain text without local media" },
-  );
+test("onebot action failures preserve the adapter error without path hints", () => {
+  const message = runtime.formatOneBotActionFailureMessage({
+    status: "failed",
+    retcode: 1200,
+    message: "rich media transfer failed",
+  });
 
-  assert.match(message, /OneBot\/NapCat cannot read Rin's local media file/u);
-  assert.match(
-    message,
-    /-v "\$HOME\/\.rin\/data\/chat-media\/onebot:\$HOME\/\.rin\/data\/chat-media\/onebot:ro"/,
-  );
+  assert.equal(message, "rich media transfer failed");
 });
 
-test("onebot generic file-word failures do not get local media hints", () => {
-  const message = runtime.formatOneBotActionFailureMessage(
-    {
-      status: "failed",
-      retcode: 1200,
-      message: "Timeout while sending file list update",
-    },
-    "send_group_msg",
-    { message: "plain text without local media" },
-  );
-
-  assert.equal(message, "Timeout while sending file list update");
-});
-
-test("onebot media send timeouts do not get local media visibility hints", () => {
-  const message = runtime.formatOneBotActionFailureMessage(
-    {
-      status: "failed",
-      retcode: 1200,
-      message: "Timeout while sending file list update",
-    },
-    "send_group_msg",
-    {
-      message:
-        "[CQ:file,file=file:///home/rin/.rin/data/chat-media/onebot/pack.mrpack]",
-    },
-  );
+test("onebot generic file-word failures preserve the adapter error", () => {
+  const message = runtime.formatOneBotActionFailureMessage({
+    status: "failed",
+    retcode: 1200,
+    message: "Timeout while sending file list update",
+  });
 
   assert.equal(message, "Timeout while sending file list update");
 });
