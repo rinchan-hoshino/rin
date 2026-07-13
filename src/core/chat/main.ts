@@ -401,8 +401,6 @@ export async function startChatBridge(
 
   const settings = loadChatSettings(settingsPath);
 
-  reconcileCommittedChatOutboxProcessing(runtime.agentDir);
-  const inboxRecovery = reconcileChatInboxRecovery(runtime.agentDir);
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
   const enqueueAndDrainOutbox = async (
@@ -1410,6 +1408,8 @@ export async function startChatBridge(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );
 
+  reconcileCommittedChatOutboxProcessing(runtime.agentDir);
+  const inboxRecovery = reconcileChatInboxRecovery(runtime.agentDir);
   if (
     inboxRecovery.restoredProcessing.length ||
     inboxRecovery.restoredOrphans.length

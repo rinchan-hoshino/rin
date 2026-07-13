@@ -285,6 +285,112 @@ test("chat main ignores private help commands from untrusted senders", async () 
   }
 });
 
+test("chat startup does not restore inbox work before adapters are ready", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "delayed", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+      inbox.enqueueChatInboxItem(agentDir, {
+        chatKey: "delayed/1:2",
+        messageId: "startup-not-ready",
+        session: {
+          platform: "delayed",
+          selfId: "1",
+          channelId: "2",
+          userId: "owner-1",
+          messageId: "startup-not-ready",
+          timestamp: Date.now(),
+          isDirect: true,
+          content: "hello",
+          stripped: { content: "hello" },
+        },
+        elements: [{ type: "text", attrs: { content: "hello" } }],
+      });
+      const pending = inbox.listPendingChatInboxFiles(agentDir);
+      if (pending.length !== 1 || !inbox.claimChatInboxFile(agentDir, pending[0])) {
+        throw new Error("processing_fixture_not_ready");
+      }
+
+      let runTurnCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function () {
+        runTurnCalls += 1;
+        return { handled: true };
+      };
+      let releaseAdapterStart;
+      const adapterStartGate = new Promise((resolve) => {
+        releaseAdapterStart = resolve;
+      });
+      const starting = mainMod.startChatBridge({
+        hosted: true,
+        chatAdapterProviders: [{
+          key: "delayed",
+          name: "Delayed",
+          config: {},
+          provider: () => ({
+            adapter: {
+              async start() {
+                await adapterStartGate;
+              },
+              async stop() {},
+            },
+            bot: {
+              platform: "delayed",
+              selfId: "1",
+              status: 1,
+              async sendMessage() { return ["sent"]; },
+            },
+          }),
+        }],
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 3500));
+      const callsBeforeReady = runTurnCalls;
+      releaseAdapterStart();
+      const bridge = await starting;
+      await bridge.stop();
+      if (callsBeforeReady !== 0) {
+        throw new Error(JSON.stringify({ callsBeforeReady }));
+      }
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main restores every stranded processing inbox item on startup", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
