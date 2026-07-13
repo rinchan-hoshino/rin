@@ -43,6 +43,7 @@ export type StoredChatMessage = {
   chatType?: "private" | "group";
   receivedAt: string;
   platformTimestamp?: number;
+  providerCursor?: string;
   userId?: string;
   nickname?: string;
   chatName?: string;

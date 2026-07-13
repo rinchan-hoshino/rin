@@ -6,6 +6,10 @@ import { Lexer } from "marked";
 import WebSocket from "ws";
 
 import { EditableTextMessageGroup } from "./editable-text-message-group.js";
+import {
+  InboundRecoveryGate,
+  listInboundRecoveryHeads,
+} from "./inbound-recovery.js";
 import { getWorkingReactionFrame } from "../chat/transport.js";
 import { formatRinTodoChecklistMarkdownContent } from "../rin-lib/todo-state.js";
 import {
@@ -47,6 +51,17 @@ const DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE_WITH_SOURCE = 4;
 const DISCORD_MESSAGE_FLAG_EPHEMERAL = 1 << 6;
 const DISCORD_MAX_TEXT_LENGTH = 2000;
 const SLACK_MAX_TEXT_LENGTH = 40000;
+
+function compareDiscordMessageIds(left: unknown, right: unknown) {
+  const leftId = safeString(left).trim();
+  const rightId = safeString(right).trim();
+  if (/^\d+$/.test(leftId) && /^\d+$/.test(rightId)) {
+    const leftValue = BigInt(leftId);
+    const rightValue = BigInt(rightId);
+    return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+  }
+  return leftId.localeCompare(rightId);
+}
 
 function isOutboundMediaNodeType(type: string) {
   return ["image", "file", "video", "audio", "sticker"].includes(type);
@@ -559,6 +574,7 @@ export class DiscordAdapter {
   private readonly logger: any;
   private readonly cacheDir: string;
   private readonly editableWorking: EditableTextMessageGroup;
+  private readonly inboundGate = new InboundRecoveryGate<any>();
   private client: any = null;
   readonly bot: any;
 
@@ -814,6 +830,96 @@ export class DiscordAdapter {
     return true;
   }
 
+  private mergeDiscordRecoveryMessages(recovered: any[], buffered: any[]) {
+    const messages = new Map<string, any>();
+    for (const message of [...recovered, ...buffered]) {
+      const messageId = safeString(message?.id).trim();
+      if (messageId) messages.set(messageId, message);
+    }
+    return [...messages.values()].sort((left, right) =>
+      compareDiscordMessageIds(left?.id, right?.id),
+    );
+  }
+
+  private async fetchDiscordMessagesAfter(
+    channel: any,
+    initialMessageId: string,
+  ) {
+    const recovered: any[] = [];
+    let cursor = initialMessageId;
+    for (;;) {
+      const response = await channel?.messages?.fetch?.({
+        after: cursor,
+        limit: 100,
+      });
+      const page = collectionValues(response)
+        .filter((message) => compareDiscordMessageIds(message?.id, cursor) > 0)
+        .sort((left, right) => compareDiscordMessageIds(left?.id, right?.id));
+      if (!page.length) break;
+      recovered.push(...page);
+      const nextCursor = safeString(page.at(-1)?.id).trim();
+      if (!nextCursor || nextCursor === cursor) break;
+      cursor = nextCursor;
+    }
+    return recovered;
+  }
+
+  private async recoverDiscordMessages() {
+    const agentDir = safeString(this.app?.agentDir).trim();
+    const botId = safeString(this.bot?.selfId).trim();
+    if (!agentDir || !botId) return [] as any[];
+    const recovered: any[] = [];
+    const failures: string[] = [];
+    for (const head of listInboundRecoveryHeads(agentDir, "discord", botId)) {
+      try {
+        const channel = await this.fetchChannel(head.chatId);
+        if (!channel?.messages?.fetch) {
+          throw new Error("Discord message history is unavailable");
+        }
+        recovered.push(
+          ...(await this.fetchDiscordMessagesAfter(channel, head.messageId)),
+        );
+      } catch (error: any) {
+        const detail = safeString(error?.message || error).trim();
+        failures.push(`${head.chatKey}:${detail || "history_failed"}`);
+      }
+    }
+    if (failures.length) {
+      this.bot.inboundRecovery = {
+        status: "degraded",
+        failures,
+      };
+      this.logger?.warn?.(
+        `inbound recovery degraded failures=${JSON.stringify(failures)}`,
+      );
+    } else {
+      this.bot.inboundRecovery = { status: "ready" };
+    }
+    return recovered;
+  }
+
+  private async finishDiscordRecovery(recovered: any[]) {
+    let nextRecovered = recovered;
+    for (;;) {
+      const buffered = this.inboundGate.drain();
+      const messages = this.mergeDiscordRecoveryMessages(
+        nextRecovered,
+        buffered,
+      );
+      nextRecovered = [];
+      try {
+        for (const message of messages) {
+          await this.handleMessage(message);
+        }
+      } catch (error) {
+        this.inboundGate.prepend(buffered);
+        throw error;
+      }
+      if (!this.inboundGate.hasPending()) break;
+    }
+    this.inboundGate.open();
+  }
+
   async start() {
     const token = safeString(this.config?.token).trim();
     if (!token) throw new Error("discord_token_required");
@@ -831,25 +937,38 @@ export class DiscordAdapter {
     this.bot.internal.client = this.client;
     this.bot.internal.rest = this.client.rest;
 
-    this.client.on(Discord.Events.ClientReady, (client: any) => {
-      this.bot.selfId = safeString(client?.user?.id).trim();
-      this.bot.user = {
-        id: this.bot.selfId,
-        userId: this.bot.selfId,
-        name:
-          safeString(client?.user?.globalName).trim() ||
-          safeString(client?.user?.username).trim() ||
-          undefined,
-        username: safeString(client?.user?.username).trim() || undefined,
-        nick:
-          safeString(client?.user?.globalName).trim() ||
-          safeString(client?.user?.username).trim() ||
-          undefined,
-      };
-      emitBotStatus(this.app, this.bot, 1);
+    this.inboundGate.begin();
+    let resolveReady: () => void = () => {};
+    let rejectReady: (error: unknown) => void = () => {};
+    const ready = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    this.client.once(Discord.Events.ClientReady, (client: any) => {
+      void (async () => {
+        this.bot.selfId = safeString(client?.user?.id).trim();
+        this.bot.user = {
+          id: this.bot.selfId,
+          userId: this.bot.selfId,
+          name:
+            safeString(client?.user?.globalName).trim() ||
+            safeString(client?.user?.username).trim() ||
+            undefined,
+          username: safeString(client?.user?.username).trim() || undefined,
+          nick:
+            safeString(client?.user?.globalName).trim() ||
+            safeString(client?.user?.username).trim() ||
+            undefined,
+        };
+        const recovered = await this.recoverDiscordMessages();
+        await this.finishDiscordRecovery(recovered);
+        emitBotStatus(this.app, this.bot, 1);
+        resolveReady();
+      })().catch(rejectReady);
     });
 
     this.client.on(Discord.Events.MessageCreate, (message: any) => {
+      if (this.inboundGate.buffer(message)) return;
       void this.handleMessage(message).catch((error: any) => {
         this.logger?.warn?.(
           `message handling failed err=${safeString(error?.message || error)}`,
@@ -875,6 +994,20 @@ export class DiscordAdapter {
     });
 
     await this.client.login(token);
+    try {
+      await ready;
+    } catch (error: any) {
+      this.bot.inboundRecovery = {
+        status: "degraded",
+        failures: [
+          safeString(error?.message || error).trim() || "catch_up_failed",
+        ],
+      };
+      try {
+        await this.client?.destroy?.();
+      } catch {}
+      throw error;
+    }
   }
 
   async stop() {
@@ -1423,6 +1556,10 @@ export class SlackAdapter {
       });
     });
 
+    this.bot.inboundRecovery = {
+      status: "ready",
+      mode: "native-ack-retry",
+    };
     await this.socket.start();
     emitBotStatus(this.app, this.bot, 1);
   }
@@ -1853,6 +1990,11 @@ export class LarkAdapter {
   private readonly cacheDir: string;
   private client: any = null;
   private wsClient: any = null;
+  private readonly inboundGate = new InboundRecoveryGate<{
+    data: any;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }>();
   readonly bot: any;
 
   constructor(
@@ -1947,18 +2089,49 @@ export class LarkAdapter {
       username: appId,
       nick: appId,
     };
+    this.inboundGate.begin();
     await this.wsClient.start({
       eventDispatcher: new Lark.EventDispatcher({}).register({
-        "im.message.receive_v1": (data: any) => {
-          void this.handleMessage(data).catch((error: any) => {
+        "im.message.receive_v1": async (data: any) => {
+          try {
+            if (this.inboundGate.isBuffering()) {
+              await new Promise<void>((resolve, reject) => {
+                if (!this.inboundGate.buffer({ data, resolve, reject })) {
+                  void this.handleMessage(data).then(resolve, reject);
+                }
+              });
+              return;
+            }
+            await this.handleMessage(data);
+          } catch (error: any) {
             this.logger?.warn?.(
               `message handling failed err=${safeString(error?.message || error)}`,
             );
-          });
+            throw error;
+          }
         },
       }),
     });
-    emitBotStatus(this.app, this.bot, 1);
+    try {
+      const recovered = await this.recoverLarkMessages();
+      await this.finishLarkRecovery(recovered);
+      emitBotStatus(this.app, this.bot, 1);
+    } catch (error: any) {
+      const detail =
+        safeString(error?.message || error).trim() || "catch_up_failed";
+      this.bot.inboundRecovery = {
+        status: "degraded",
+        failures: [detail],
+      };
+      for (const entry of this.inboundGate.drain()) {
+        entry.reject(error);
+      }
+      this.inboundGate.open();
+      try {
+        this.wsClient?.close?.({ force: true });
+      } catch {}
+      throw error;
+    }
   }
 
   async stop() {
@@ -1968,6 +2141,198 @@ export class LarkAdapter {
     this.wsClient = null;
     this.client = null;
     emitBotStatus(this.app, this.bot, 0);
+  }
+
+  private wrapLarkHistoryMessage(message: any) {
+    const sender =
+      message?.sender && typeof message.sender === "object"
+        ? message.sender
+        : {};
+    const senderId = safeString(sender?.id).trim();
+    const senderIdType = safeString(sender?.id_type).trim();
+    return {
+      message: {
+        ...message,
+        message_type:
+          safeString(message?.message_type || message?.msg_type).trim() ||
+          undefined,
+        content:
+          safeString(message?.content || message?.body?.content).trim() ||
+          undefined,
+      },
+      sender: {
+        ...sender,
+        sender_id:
+          sender?.sender_id && typeof sender.sender_id === "object"
+            ? sender.sender_id
+            : compactObject({
+                open_id: senderIdType === "open_id" ? senderId : undefined,
+                user_id: senderIdType === "user_id" ? senderId : undefined,
+                union_id: senderIdType === "union_id" ? senderId : undefined,
+              }),
+      },
+    };
+  }
+
+  private async fetchLarkMessagesAfter(head: {
+    chatKey: string;
+    chatId: string;
+    messageId: string;
+    platformTimestamp: number;
+  }) {
+    const recovered: any[] = [];
+    let pageToken = "";
+    let foundCursor = false;
+    for (;;) {
+      const response = await this.client?.im?.message?.list?.({
+        params: compactObject({
+          container_id_type: "chat",
+          container_id: head.chatId,
+          start_time: String(
+            Math.max(0, Math.floor(head.platformTimestamp / 1000) - 1),
+          ),
+          sort_type: "ByCreateTimeAsc",
+          page_size: 50,
+          page_token: pageToken || undefined,
+        }),
+      });
+      assertLarkApiSuccess(response);
+      const data =
+        response?.data && typeof response.data === "object"
+          ? response.data
+          : response;
+      const items = Array.isArray(data?.items) ? data.items : [];
+      for (const item of items) {
+        const messageId = safeString(item?.message_id).trim();
+        if (!foundCursor) {
+          if (messageId === head.messageId) foundCursor = true;
+          continue;
+        }
+        recovered.push(this.wrapLarkHistoryMessage(item));
+      }
+      const nextToken = safeString(data?.page_token).trim();
+      if (!data?.has_more || !nextToken || nextToken === pageToken) break;
+      pageToken = nextToken;
+    }
+    if (!foundCursor) {
+      throw new Error(
+        `Lark message history did not return recovery cursor ${head.messageId}`,
+      );
+    }
+    return recovered;
+  }
+
+  private async recoverLarkMessages() {
+    const agentDir = safeString(this.app?.agentDir).trim();
+    const botId = safeString(this.bot?.selfId).trim();
+    if (!agentDir || !botId) return [] as any[];
+    const recovered: any[] = [];
+    const failures: string[] = [];
+    for (const head of listInboundRecoveryHeads(agentDir, "lark", botId)) {
+      try {
+        recovered.push(...(await this.fetchLarkMessagesAfter(head)));
+      } catch (error: any) {
+        const detail = safeString(error?.message || error).trim();
+        failures.push(`${head.chatKey}:${detail || "history_failed"}`);
+      }
+    }
+    if (failures.length) {
+      this.bot.inboundRecovery = {
+        status: "degraded",
+        failures,
+      };
+      this.logger.warn(
+        `inbound recovery degraded failures=${JSON.stringify(failures)}`,
+      );
+    } else {
+      this.bot.inboundRecovery = { status: "ready" };
+    }
+    return recovered;
+  }
+
+  private mergeLarkRecoveryMessages(
+    recovered: any[],
+    buffered: Array<{
+      data: any;
+      resolve: () => void;
+      reject: (error: unknown) => void;
+    }>,
+  ) {
+    const messages = new Map<
+      string,
+      {
+        data: any;
+        sourceOrder: number;
+        index: number;
+        waiters: Array<{
+          resolve: () => void;
+          reject: (error: unknown) => void;
+        }>;
+      }
+    >();
+    for (const [index, data] of recovered.entries()) {
+      const messageId = safeString(data?.message?.message_id).trim();
+      if (messageId) {
+        messages.set(messageId, {
+          data,
+          sourceOrder: 0,
+          index,
+          waiters: [],
+        });
+      }
+    }
+    for (const [index, entry] of buffered.entries()) {
+      const messageId =
+        safeString(entry.data?.message?.message_id).trim() ||
+        `buffered:${index}`;
+      const current = messages.get(messageId);
+      if (current) {
+        current.data = entry.data;
+        current.waiters.push({
+          resolve: entry.resolve,
+          reject: entry.reject,
+        });
+        continue;
+      }
+      messages.set(messageId, {
+        data: entry.data,
+        sourceOrder: 1,
+        index,
+        waiters: [{ resolve: entry.resolve, reject: entry.reject }],
+      });
+    }
+    return [...messages.values()].sort((left, right) => {
+      const leftTime = Number(left.data?.message?.create_time || 0);
+      const rightTime = Number(right.data?.message?.create_time || 0);
+      return (
+        leftTime - rightTime ||
+        left.sourceOrder - right.sourceOrder ||
+        left.index - right.index
+      );
+    });
+  }
+
+  private async finishLarkRecovery(recovered: any[]) {
+    let nextRecovered = recovered;
+    for (;;) {
+      const buffered = this.inboundGate.drain();
+      const messages = this.mergeLarkRecoveryMessages(nextRecovered, buffered);
+      nextRecovered = [];
+      for (let index = 0; index < messages.length; index += 1) {
+        const entry = messages[index];
+        try {
+          await this.handleMessage(entry.data);
+          for (const waiter of entry.waiters) waiter.resolve();
+        } catch (error) {
+          for (const pending of messages.slice(index)) {
+            for (const waiter of pending.waiters) waiter.reject(error);
+          }
+          throw error;
+        }
+      }
+      if (!this.inboundGate.hasPending()) break;
+    }
+    this.inboundGate.open();
   }
 
   private parseMessageContent(raw: string) {
@@ -2551,11 +2916,14 @@ export class LarkAdapter {
       data?.message && typeof data.message === "object" ? data.message : {};
     const sender =
       data?.sender && typeof data.sender === "object" ? data.sender : {};
+    const senderType = safeString(sender?.sender_type).trim().toLowerCase();
+    if (senderType === "app" || senderType === "bot") return;
     const senderId = safeString(
       sender?.sender_id?.open_id ||
         sender?.sender_id?.user_id ||
-        sender?.sender_id ||
-        "",
+        sender?.sender_id?.union_id ||
+        sender?.id ||
+        (typeof sender?.sender_id === "string" ? sender.sender_id : ""),
     ).trim();
     if (!senderId) return;
     const msgType = safeString(
@@ -2766,6 +3134,13 @@ export class MinecraftAdapter {
         settled = true;
         this.ws = ws;
         this.bot.internal.ws = ws;
+        this.bot.inboundRecovery = {
+          status: "degraded",
+          failures: ["provider_replay_unsupported"],
+        };
+        this.logger.warn(
+          "inbound recovery degraded: QueQiao does not expose a durable replay/history action",
+        );
         emitBotStatus(this.app, this.bot, 1);
         resolve();
       });

@@ -15,6 +15,10 @@ const adapters = await import(
     path.join(rootDir, "dist", "core", "chat-runtime", "adapters.js"),
   ).href
 );
+const messageStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
+    .href
+);
 
 function namedPermission(value: boolean, name: string, bit: bigint) {
   return {
@@ -31,6 +35,96 @@ function viewPermission(value: boolean) {
 function adminPermission(value: boolean) {
   return namedPermission(value, "Administrator", 8n);
 }
+
+function discordInboundMessage(id: string, timestamp: number, content: string) {
+  return {
+    id,
+    createdTimestamp: timestamp,
+    channelId: "channel-1",
+    guildId: "guild-1",
+    guild: { name: "Guild" },
+    channel: { id: "channel-1", name: "chat", guild: { name: "Guild" } },
+    author: { id: "owner-1", username: "owner", bot: false },
+    member: { displayName: "Owner" },
+    mentions: { users: { has: () => false } },
+    attachments: new Map(),
+    content,
+  };
+}
+
+test("discord adapter catches up native history before buffered live messages", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-recovery-"),
+  );
+  try {
+    const seen: string[] = [];
+    let bot: any = null;
+    const app = {
+      agentDir,
+      register(_adapter: unknown, registeredBot: any) {
+        bot = registeredBot;
+      },
+      emit(event: string, session: any) {
+        if (event === "message") seen.push(session.messageId);
+        return true;
+      },
+    };
+    const adapter = new adapters.DiscordAdapter(
+      app,
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    bot.selfId = "bot-discord";
+    messageStore.saveChatMessage(agentDir, {
+      role: "user",
+      platform: "discord",
+      botId: "bot-discord",
+      chatId: "channel-1",
+      chatKey: "discord/bot-discord:channel-1",
+      messageId: "100",
+      receivedAt: "2026-07-13T00:00:00.000Z",
+      platformTimestamp: 1000,
+    });
+    const missed = discordInboundMessage("200", 2000, "missed");
+    const duplicateLive = discordInboundMessage("300", 3000, "live copy");
+    const newestLive = discordInboundMessage("400", 3000, "newest");
+    (adapter as any).client = {
+      channels: {
+        async fetch(channelId: string) {
+          assert.equal(channelId, "channel-1");
+          return {
+            messages: {
+              async fetch(options: any) {
+                if (options.after === "100") {
+                  assert.deepEqual(options, { after: "100", limit: 100 });
+                  return new Map([
+                    [missed.id, missed],
+                    [duplicateLive.id, duplicateLive],
+                  ]);
+                }
+                assert.deepEqual(options, { after: "300", limit: 100 });
+                return new Map();
+              },
+            },
+          };
+        },
+      },
+    };
+    (adapter as any).inboundGate.begin();
+    (adapter as any).inboundGate.buffer(duplicateLive);
+    (adapter as any).inboundGate.buffer(newestLive);
+
+    const recovered = await (adapter as any).recoverDiscordMessages();
+    await (adapter as any).finishDiscordRecovery(recovered);
+
+    assert.deepEqual(seen, ["200", "300", "400"]);
+    assert.deepEqual(bot.inboundRecovery, { status: "ready" });
+    assert.equal((adapter as any).inboundGate.isBuffering(), false);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
 
 test("discord adapter syncs application commands through the Discord client", async () => {
   const agentDir = await fs.mkdtemp(

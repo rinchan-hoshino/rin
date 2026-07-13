@@ -44,6 +44,11 @@ import {
   MinecraftAdapter,
   SlackAdapter,
 } from "./adapters.js";
+import {
+  InboundRecoveryGate,
+  listInboundRecoveryHeads,
+  mergeInboundRecoverySessions,
+} from "./inbound-recovery.js";
 
 function toSnakeCase(value: string) {
   return safeString(value)
@@ -534,6 +539,23 @@ class TelegramAdapter {
     if (!token) throw new Error("telegram_token_required");
     this.running = true;
     await this.bootstrap();
+    try {
+      await this.catchUpTelegramUpdates();
+    } catch (error: any) {
+      this.running = false;
+      this.bot.inboundRecovery = {
+        status: "degraded",
+        failures: [
+          safeString(error?.message || error).trim() || "catch_up_failed",
+        ],
+      };
+      throw error;
+    }
+    this.bot.inboundRecovery = {
+      status: "ready",
+      mode: "native-cursor",
+    };
+    emitBotStatus(this.app, this.bot, 1);
     this.pollPromise = this.pollLoop();
   }
 
@@ -590,7 +612,6 @@ class TelegramAdapter {
       name: this.bot.name,
       nick: this.bot.name,
     };
-    emitBotStatus(this.app, this.bot, 1);
   }
 
   private createApi(dispatcher: UndiciAgent) {
@@ -617,33 +638,51 @@ class TelegramAdapter {
     return await fn(payload || {}, signal);
   }
 
+  private async handleTelegramUpdates(updates: any[]) {
+    for (const update of updates) {
+      const updateId = Number(update?.update_id);
+      await this.handleUpdate(update);
+      if (Number.isFinite(updateId)) {
+        this.nextOffset = Math.max(this.nextOffset, updateId + 1);
+        this.saveCursor();
+      }
+    }
+  }
+
+  private async getTelegramUpdates(timeout: number, signal?: AbortSignal) {
+    const updates = await this.callApi(
+      "getUpdates",
+      {
+        offset: this.nextOffset,
+        timeout,
+        limit: 100,
+        allowed_updates: [
+          "message",
+          "edited_message",
+          "channel_post",
+          "edited_channel_post",
+        ],
+      },
+      signal,
+    );
+    return Array.isArray(updates) ? updates : [];
+  }
+
+  private async catchUpTelegramUpdates() {
+    for (;;) {
+      const updates = await this.getTelegramUpdates(0);
+      await this.handleTelegramUpdates(updates);
+      if (!updates.length) break;
+    }
+  }
+
   private async pollLoop() {
     while (this.running) {
       const abort = new AbortController();
       this.pollAbort = abort;
       try {
-        const updates = await this.callApi(
-          "getUpdates",
-          {
-            offset: this.nextOffset,
-            timeout: 25,
-            allowed_updates: [
-              "message",
-              "edited_message",
-              "channel_post",
-              "edited_channel_post",
-            ],
-          },
-          abort.signal,
-        );
-        for (const update of Array.isArray(updates) ? updates : []) {
-          const updateId = Number(update?.update_id);
-          await this.handleUpdate(update);
-          if (Number.isFinite(updateId)) {
-            this.nextOffset = Math.max(this.nextOffset, updateId + 1);
-            this.saveCursor();
-          }
-        }
+        const updates = await this.getTelegramUpdates(25, abort.signal);
+        await this.handleTelegramUpdates(updates);
       } catch (error: any) {
         if (!this.running) break;
         const detail = safeString(error?.message || error).trim();
@@ -1491,6 +1530,7 @@ class OneBotAdapter {
   private loopPromise: Promise<void> | null = null;
   private stopped = false;
   private nextEchoId = 1;
+  private readonly inboundGate = new InboundRecoveryGate<any>();
   private readonly workingReactions = new Map<string, string>();
   private readonly pending = new Map<
     string,
@@ -1647,20 +1687,32 @@ class OneBotAdapter {
   private async runLoop() {
     while (!this.stopped) {
       try {
+        this.inboundGate.begin();
         await this.connect();
+        const recovered = await this.recoverOneBotMessages();
+        await this.finishOneBotRecovery(recovered);
+        emitBotStatus(this.app, this.bot, 1);
         await new Promise<void>((resolve) => {
           this.ws?.once("close", () => resolve());
         });
       } catch (error: any) {
         if (!this.stopped) {
-          this.logger.warn(
-            `connect failed err=${safeString(error?.message || error)}`,
-          );
+          const detail =
+            safeString(error?.message || error).trim() || "catch_up_failed";
+          this.bot.inboundRecovery = {
+            status: "degraded",
+            failures: [detail],
+          };
+          this.logger.warn(`connect failed err=${detail}`);
         }
       } finally {
         emitBotStatus(this.app, this.bot, 0);
         this.rejectPending(new Error("onebot_disconnected"));
+        const ws = this.ws;
         this.ws = null;
+        try {
+          ws?.close();
+        } catch {}
       }
       if (!this.stopped) {
         await sleep(3000);
@@ -1696,7 +1748,6 @@ class OneBotAdapter {
         emitBotStatus(this.app, this.bot, 0);
       });
     });
-    emitBotStatus(this.app, this.bot, 1);
     try {
       const login: any = await this.callAction("get_login_info", {});
       const selfId = safeString(
@@ -1741,9 +1792,119 @@ class OneBotAdapter {
       this.bot.selfId = selfId;
     }
     if (safeString(payload?.post_type).trim() === "message") {
+      if (this.inboundGate.buffer(payload)) return;
       const session = await this.buildSession(payload);
       if (session) this.app.emit("message", session);
     }
+  }
+
+  private async fetchOneBotMessagesAfter(head: {
+    chatKey: string;
+    chatId: string;
+    messageId: string;
+    providerCursor?: string;
+  }) {
+    const recovered: any[] = [];
+    let cursor = safeString(head.providerCursor || head.messageId).trim();
+    for (;;) {
+      const isPrivate = head.chatId.startsWith("private:");
+      const targetId = Number(head.chatId.replace(/^private:/, "").trim());
+      const action = isPrivate
+        ? "get_friend_msg_history"
+        : "get_group_msg_history";
+      const response = await this.callAction(
+        action,
+        compactObject({
+          ...(isPrivate ? { user_id: targetId } : { group_id: targetId }),
+          message_seq:
+            /^\d+$/.test(cursor) && Number.isSafeInteger(Number(cursor))
+              ? Number(cursor)
+              : cursor,
+          count: 100,
+          reverse_order: false,
+        }),
+      );
+      const page = Array.isArray(response?.messages) ? response.messages : [];
+      const cursorIndex = page.findIndex(
+        (message: any) =>
+          safeString(message?.message_seq || message?.message_id).trim() ===
+          cursor,
+      );
+      if (cursorIndex < 0) {
+        throw new Error(
+          `OneBot message history did not return recovery cursor ${cursor}`,
+        );
+      }
+      const newer = page.slice(cursorIndex + 1);
+      recovered.push(...newer);
+      const nextCursor = safeString(
+        page.at(-1)?.message_seq || page.at(-1)?.message_id,
+      ).trim();
+      if (!newer.length || !nextCursor || nextCursor === cursor) {
+        break;
+      }
+      cursor = nextCursor;
+    }
+    return recovered;
+  }
+
+  private async recoverOneBotMessages() {
+    const agentDir = safeString(this.app?.agentDir).trim();
+    const botId = safeString(this.bot?.selfId).trim();
+    if (!agentDir || !botId) return [] as any[];
+    const recovered: any[] = [];
+    const failures: string[] = [];
+    for (const head of listInboundRecoveryHeads(agentDir, "onebot", botId)) {
+      try {
+        recovered.push(...(await this.fetchOneBotMessagesAfter(head)));
+      } catch (error: any) {
+        const detail = safeString(error?.message || error).trim();
+        failures.push(`${head.chatKey}:${detail || "history_failed"}`);
+      }
+    }
+    if (failures.length) {
+      this.bot.inboundRecovery = {
+        status: "degraded",
+        failures,
+      };
+      this.logger.warn(
+        `inbound recovery degraded failures=${JSON.stringify(failures)}`,
+      );
+    } else {
+      this.bot.inboundRecovery = { status: "ready" };
+    }
+    return recovered;
+  }
+
+  private async finishOneBotRecovery(recoveredPayloads: any[]) {
+    let recoveredSessions = (
+      await Promise.all(
+        recoveredPayloads.map((payload) => this.buildSession(payload)),
+      )
+    ).filter(Boolean);
+    for (;;) {
+      const bufferedPayloads = this.inboundGate.drain();
+      try {
+        const bufferedSessions = (
+          await Promise.all(
+            bufferedPayloads.map((payload) => this.buildSession(payload)),
+          )
+        ).filter(Boolean);
+        const sessions = mergeInboundRecoverySessions(
+          recoveredSessions,
+          bufferedSessions,
+        );
+        recoveredSessions = [];
+        for (const session of sessions) {
+          this.app.emit("message", session);
+        }
+      } catch (error) {
+        this.inboundGate.prepend(bufferedPayloads);
+        throw error;
+      }
+      if (!this.inboundGate.hasPending()) break;
+    }
+    this.inboundGate.open();
   }
 
   private callAction(action: string, params?: any) {
@@ -2310,6 +2471,9 @@ class OneBotAdapter {
       selfId: selfId || undefined,
       bot: this.bot,
       messageId: safeString(payload?.message_id).trim(),
+      providerCursor:
+        safeString(payload?.message_seq || payload?.message_id).trim() ||
+        undefined,
       timestamp: Number.isFinite(Number(payload?.time))
         ? Number(payload.time) * 1000
         : Date.now(),

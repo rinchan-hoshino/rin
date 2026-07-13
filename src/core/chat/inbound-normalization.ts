@@ -331,6 +331,7 @@ export function buildInboundStoredChatMessageInput(
     chatType: getChatType(session),
     receivedAt,
     platformTimestamp: normalizePlatformTimestamp(session?.timestamp),
+    providerCursor: safeString(session?.providerCursor).trim() || undefined,
     userId: userId || undefined,
     nickname: pickSenderNickname(session) || undefined,
     chatName: pickChatName(session) || undefined,

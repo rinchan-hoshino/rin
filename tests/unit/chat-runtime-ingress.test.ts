@@ -15,8 +15,17 @@ const runtime = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
     .href
 );
+const adapters = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat-runtime", "adapters.js"),
+  ).href
+);
 const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
+);
+const messageStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
+    .href
 );
 const nodeRequire = createRequire(import.meta.url);
 
@@ -283,6 +292,168 @@ test("onebot group sessions preserve both group card and account nickname", asyn
   assert.equal(stored.session?.author?.accountNickname, undefined);
 });
 
+test("onebot runtime catches up native history before buffered live messages", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-onebot-recovery-"),
+  );
+  try {
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        {
+          key: "onebot",
+          name: "OneBot",
+          config: { endpoint: "ws://127.0.0.1:3001", selfId: "bot-1" },
+        },
+      ],
+    });
+    const adapter = [...app.adapters][0];
+    const seen: string[] = [];
+    app.on("message", (session) => seen.push(session.messageId));
+    messageStore.saveChatMessage(agentDir, {
+      role: "user",
+      platform: "onebot",
+      botId: "bot-1",
+      chatId: "123",
+      chatKey: "onebot/bot-1:123",
+      messageId: "id-100",
+      receivedAt: "2026-07-13T00:00:00.000Z",
+      platformTimestamp: 1000,
+      providerCursor: "100",
+    });
+    const payload = (
+      messageId: string,
+      messageSeq: string,
+      time: number,
+      text: string,
+    ) => ({
+      post_type: "message",
+      message_type: "group",
+      self_id: "bot-1",
+      group_id: "123",
+      user_id: "owner-1",
+      message_id: messageId,
+      message_seq: messageSeq,
+      time,
+      sender: { nickname: "Owner" },
+      raw_message: text,
+      message: [{ type: "text", data: { text } }],
+    });
+    const head = payload("id-100", "100", 1, "head");
+    const missed = payload("id-200", "200", 2, "missed");
+    const duplicateLive = payload("id-300", "300", 3, "live copy");
+    const newestLive = payload("id-400", "400", 3, "newest");
+    adapter.callAction = async (action: string, params: any) => {
+      assert.equal(action, "get_group_msg_history");
+      assert.equal(params.group_id, 123);
+      assert.equal(params.count, 100);
+      assert.equal(params.reverse_order, false);
+      if (params.message_seq === 100) {
+        return { messages: [head, missed, duplicateLive] };
+      }
+      assert.equal(params.message_seq, 300);
+      return { messages: [duplicateLive] };
+    };
+    adapter.inboundGate.begin();
+    adapter.inboundGate.buffer(duplicateLive);
+    adapter.inboundGate.buffer(newestLive);
+
+    const recovered = await adapter.recoverOneBotMessages();
+    await adapter.finishOneBotRecovery(recovered);
+
+    assert.deepEqual(seen, ["id-200", "id-300", "id-400"]);
+    assert.deepEqual(adapter.bot.inboundRecovery, { status: "ready" });
+    assert.equal(adapter.inboundGate.isBuffering(), false);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("onebot runtime requeues buffered ingress when durable emit fails", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-onebot-requeue-"),
+  );
+  try {
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        {
+          key: "onebot",
+          name: "OneBot",
+          config: { endpoint: "ws://127.0.0.1:3001", selfId: "bot-1" },
+        },
+      ],
+    });
+    const adapter = [...app.adapters][0];
+    const payload = { message_id: "buffered-1" };
+    adapter.inboundGate.begin();
+    adapter.inboundGate.buffer(payload);
+    adapter.buildSession = async () => ({
+      platform: "onebot",
+      selfId: "bot-1",
+      channelId: "123",
+      messageId: "buffered-1",
+      timestamp: 1000,
+    });
+    app.emit = () => {
+      throw new Error("durable inbox write failed");
+    };
+
+    await assert.rejects(
+      adapter.finishOneBotRecovery([]),
+      /durable inbox write failed/,
+    );
+
+    assert.equal(adapter.inboundGate.hasPending(), true);
+    assert.deepEqual(adapter.inboundGate.drain(), [payload]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("telegram runtime reports ready only after native cursor catch-up", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-telegram-recovery-"),
+  );
+  try {
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        { key: "telegram", name: "Telegram", config: { token: "123:abc" } },
+      ],
+    });
+    const adapter = [...app.adapters][0];
+    let releaseCatchUp: () => void = () => {};
+    const catchUp = new Promise<void>((resolve) => {
+      releaseCatchUp = resolve;
+    });
+    adapter.bootstrap = async () => {};
+    adapter.catchUpTelegramUpdates = async () => await catchUp;
+    adapter.pollLoop = async () => {};
+
+    const starting = adapter.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(adapter.bot.status, 0);
+    assert.equal(adapter.bot.inboundRecovery, undefined);
+
+    releaseCatchUp();
+    await starting;
+    assert.equal(adapter.bot.status, 1);
+    assert.deepEqual(adapter.bot.inboundRecovery, {
+      status: "ready",
+      mode: "native-cursor",
+    });
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("telegram runtime advances the poll cursor only after the update is handled", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
@@ -396,7 +567,137 @@ test("slack runtime acks only after the inbound event is emitted", async () => {
   assert.deepEqual(order, ["emit", "ack:1"]);
 });
 
-test("lark websocket events return before slow message handling settles", async () => {
+test("lark runtime paginates native history before releasing buffered events", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-lark-recovery-"),
+  );
+  try {
+    const seen: string[] = [];
+    let bot: any = null;
+    const adapter = new adapters.LarkAdapter(
+      {
+        agentDir,
+        register(_adapter: unknown, registeredBot: any) {
+          bot = registeredBot;
+        },
+        emit(event: string, session: any) {
+          if (event === "message") seen.push(session.messageId);
+          return true;
+        },
+      },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    bot.selfId = "app-1";
+    messageStore.saveChatMessage(agentDir, {
+      role: "user",
+      platform: "lark",
+      botId: "app-1",
+      chatId: "chat-1",
+      chatKey: "lark/app-1:chat-1",
+      messageId: "m100",
+      receivedAt: "2026-07-13T00:00:00.000Z",
+      platformTimestamp: 1000,
+    });
+    const historyItem = (
+      messageId: string,
+      createTime: string,
+      text: string,
+      senderType = "user",
+    ) => ({
+      message_id: messageId,
+      create_time: createTime,
+      chat_id: "chat-1",
+      chat_type: "group",
+      msg_type: "text",
+      body: { content: JSON.stringify({ text }) },
+      sender: {
+        id: senderType === "app" ? "app-open-id" : "owner-1",
+        id_type: "open_id",
+        sender_type: senderType,
+      },
+    });
+    const eventData = (
+      messageId: string,
+      createTime: string,
+      text: string,
+    ) => ({
+      message: {
+        message_id: messageId,
+        create_time: createTime,
+        chat_id: "chat-1",
+        chat_type: "group",
+        message_type: "text",
+        content: JSON.stringify({ text }),
+      },
+      sender: {
+        sender_type: "user",
+        sender_id: { open_id: "owner-1" },
+      },
+    });
+    const listCalls: any[] = [];
+    (adapter as any).client = {
+      im: {
+        message: {
+          async list(options: any) {
+            listCalls.push(options);
+            if (!options.params.page_token) {
+              return {
+                code: 0,
+                data: {
+                  items: [
+                    historyItem("m100", "1000", "head"),
+                    historyItem("m150", "1500", "bot output", "app"),
+                    historyItem("m200", "2000", "missed"),
+                  ],
+                  has_more: true,
+                  page_token: "next-page",
+                },
+              };
+            }
+            return {
+              code: 0,
+              data: {
+                items: [historyItem("m300", "3000", "history copy")],
+                has_more: false,
+              },
+            };
+          },
+        },
+      },
+    };
+    let resolved = 0;
+    (adapter as any).inboundGate.begin();
+    (adapter as any).inboundGate.buffer({
+      data: eventData("m300", "3000", "live copy"),
+      resolve: () => {
+        resolved += 1;
+      },
+      reject: assert.fail,
+    });
+    (adapter as any).inboundGate.buffer({
+      data: eventData("m400", "3000", "newest"),
+      resolve: () => {
+        resolved += 1;
+      },
+      reject: assert.fail,
+    });
+
+    const recovered = await (adapter as any).recoverLarkMessages();
+    await (adapter as any).finishLarkRecovery(recovered);
+
+    assert.equal(listCalls.length, 2);
+    assert.equal(listCalls[1].params.page_token, "next-page");
+    assert.deepEqual(seen, ["m200", "m300", "m400"]);
+    assert.equal(resolved, 2);
+    assert.deepEqual(bot.inboundRecovery, { status: "ready" });
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("lark websocket events settle only after durable message handling", async () => {
   const Lark = nodeRequire("@larksuiteoapi/node-sdk");
   const originalClient = Lark.Client;
   const originalWSClient = Lark.WSClient;
@@ -453,17 +754,11 @@ test("lark websocket events return before slow message handling settles", async 
       firstTick.then(() => "pending"),
     ]);
 
-    let assertionError: unknown;
-    try {
-      assert.equal(handlingStarted, true);
-      assert.equal(state, "settled");
-    } catch (error) {
-      assertionError = error;
-    }
+    assert.equal(handlingStarted, true);
+    assert.equal(state, "pending");
 
     resolveHandling();
     await handled;
-    if (assertionError) throw assertionError;
   } finally {
     Lark.Client = originalClient;
     Lark.WSClient = originalWSClient;
