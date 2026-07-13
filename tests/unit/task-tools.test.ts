@@ -136,6 +136,12 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
     async ({ requests, socketPath }) => {
       const rin = createRinAgentSdk({ socketPath });
       await rin.chat.send({ chatKey: "telegram/1:2", text: "hello" });
+      await rin.chat.send({
+        chatKey: "telegram/1:2",
+        text: "legacy",
+        parts: [{ type: "text", text: "structured" }],
+        replyTo: "m0",
+      });
       const turn = await rin.chat.runTurn({
         chatKey: "telegram/1:2",
         text: "reply",
@@ -157,6 +163,7 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
         requests.map((request) => request.type),
         [
           "chat_send",
+          "chat_send",
           "chat_run_turn",
           "chat_typing",
           "chat_react",
@@ -167,16 +174,21 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
       );
       assert.deepEqual(requests[0].payload, {
         chatKey: "telegram/1:2",
-        text: "hello",
+        parts: [{ type: "text", text: "hello" }],
       });
-      assert.deepEqual(requests[2].payload, { chatKey: "telegram/1:2" });
-      assert.deepEqual(requests[3].payload, {
+      assert.deepEqual(requests[1].payload, {
+        chatKey: "telegram/1:2",
+        parts: [{ type: "text", text: "structured" }],
+        replyTo: "m0",
+      });
+      assert.deepEqual(requests[3].payload, { chatKey: "telegram/1:2" });
+      assert.deepEqual(requests[4].payload, {
         chatKey: "telegram/1:2",
         messageId: "m1",
         emoji: "👀",
       });
-      assert.deepEqual(requests[4].payload, { controllerKey: "agent-test" });
-      assert.deepEqual(requests[5].payload, {
+      assert.deepEqual(requests[5].payload, { controllerKey: "agent-test" });
+      assert.deepEqual(requests[6].payload, {
         chatKey: "telegram/1:3",
       });
       assert.equal(turn.finalText, "ok");

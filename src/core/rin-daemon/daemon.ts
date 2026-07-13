@@ -642,8 +642,8 @@ export async function startDaemon(
         connection.clientBuffer = connection.clientBuffer.slice(idx + 1);
         if (line.endsWith("\r")) line = line.slice(0, -1);
         if (!line.trim()) continue;
+        let command: any;
         (async () => {
-          let command: any;
           try {
             command = JSON.parse(line);
           } catch {
@@ -687,7 +687,15 @@ export async function startDaemon(
           workerPool.forwardToWorker(connection, worker, command);
           workerPool.evictDetachedWorkers();
         })().catch((error) => {
-          writeLine(socket, response(undefined, "unknown", false, error));
+          writeLine(
+            socket,
+            response(
+              command?.id,
+              String(command?.type || "unknown"),
+              false,
+              error,
+            ),
+          );
         });
       }
     });

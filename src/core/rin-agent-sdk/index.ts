@@ -98,6 +98,16 @@ function commandOptions(options: RinAgentSdkOptions) {
   };
 }
 
+function normalizeChatSendOptions(payload: ChatSendOptions) {
+  const { text, parts, ...rest } = payload;
+  return {
+    ...rest,
+    parts: Array.isArray(parts)
+      ? parts
+      : [{ type: "text", text: String(text ?? "") }],
+  };
+}
+
 export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
   const request = async <T = unknown>(
     command: Record<string, unknown>,
@@ -239,7 +249,7 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
     chat: {
       send: async (payload: ChatSendOptions, override?: RinAgentSdkOptions) =>
         await request<{ delivered?: boolean }>(
-          { type: "chat_send", payload },
+          { type: "chat_send", payload: normalizeChatSendOptions(payload) },
           override,
         ),
       runTurn: async (

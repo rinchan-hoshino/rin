@@ -39,6 +39,46 @@ async function waitForSocket(socketPath, timeoutMs = 5000) {
   throw new Error(`socket_not_ready:${socketPath}`);
 }
 
+test("daemon preserves command identity when a local command throws", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-error-"),
+  );
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const launcherPath = path.join(agentDir, "launcher.mjs");
+  const daemonModuleUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"),
+  ).href;
+  const clientModuleUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "client.js"),
+  ).href;
+  await fs.writeFile(
+    launcherPath,
+    `import { startDaemon } from ${JSON.stringify(daemonModuleUrl)};\n` +
+      `await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, handleLocalCommand: async (command) => { if (command?.type === "diagnostic_failure") throw new Error("diagnostic_failure_detail"); } });\n`,
+  );
+  const child = spawn(process.execPath, [launcherPath], {
+    cwd: rootDir,
+    env: { ...process.env, RIN_DIR: agentDir },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  try {
+    await waitForSocket(socketPath);
+    const { requestDaemonCommand } = await import(clientModuleUrl);
+    await assert.rejects(
+      requestDaemonCommand(
+        { id: "diagnostic_1", type: "diagnostic_failure" },
+        { socketPath, timeoutMs: 500 },
+      ),
+      /diagnostic_failure_detail/,
+    );
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("daemon shutdown stops hosted services before background extension wait", async () => {
   const daemonSource = await fs.readFile(
     path.join(rootDir, "src", "core", "rin-daemon", "daemon.ts"),
