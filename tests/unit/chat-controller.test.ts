@@ -2207,38 +2207,59 @@ test("chat controller rethrows lifecycle cancellation without delivering an erro
   assert.equal(stored?.processedAt, undefined);
 });
 
-test("chat controller /new aborts a visible turn before driver live turn exists", async () => {
+test("chat controller /new cleans up editable Working that settles after abort", async () => {
   const controller = await createController();
   const deliveries = [];
+  const visibleEvents: string[] = [];
   controller.commitPendingDelivery = async function () {
     deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
+  // Isolate generation-aware cleanup from the ordinary command-final cleanup.
+  controller.clearWorkingReaction = async () => false;
 
-  const originalBeginVisible =
-    controller.beginVisibleProcessingTurn.bind(controller);
-  let markVisibleEntered!: () => void;
-  let releaseVisible!: () => void;
-  const visibleEntered = new Promise<void>((resolve) => {
-    markVisibleEntered = resolve;
+  let markWorkingStarted!: () => void;
+  let releaseWorking!: () => void;
+  const workingStarted = new Promise<void>((resolve) => {
+    markWorkingStarted = resolve;
   });
-  const visibleReleased = new Promise<void>((resolve) => {
-    releaseVisible = resolve;
+  const workingReleased = new Promise<void>((resolve) => {
+    releaseWorking = resolve;
   });
-  controller.beginVisibleProcessingTurn = async (input: any) => {
-    await originalBeginVisible(input);
-    markVisibleEntered();
-    await visibleReleased;
-  };
+  controller.app.bots[0].workingIndicators = [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        visibleEvents.push(`tick:${context?.messageId}`);
+        markWorkingStarted();
+        await workingReleased;
+        visibleEvents.push(`sent:${context?.messageId}`);
+        return true;
+      },
+      async end(context) {
+        visibleEvents.push(
+          `end:${context?.messageId}:${context?.replyToMessageId}`,
+        );
+        return true;
+      },
+    },
+  ];
 
   let promptCalled = false;
   let abortCalled = false;
+  let releasePrompt!: () => void;
+  const promptReleased = new Promise<void>((resolve) => {
+    releasePrompt = resolve;
+  });
   controller.driver.runTurn = async () => {
     promptCalled = true;
-    return { finalText: "should not be submitted" };
+    await promptReleased;
+    throw new Error("chat_turn_aborted");
   };
   controller.driver.interruptActiveTurnLikeTui = () => {
     abortCalled = true;
+    releasePrompt();
     return { sessionFile: "/tmp/old-chat.jsonl" };
   };
   controller.driver.runCommand = async (commandLine: string) => {
@@ -2259,21 +2280,27 @@ test("chat controller /new aborts a visible turn before driver live turn exists"
     replyToMessageId: "m-old",
     incomingMessageId: "m-old",
   });
-  await visibleEntered;
+  await workingStarted;
 
   const newCommandPromise = controller.runCommand("/new", "m-new", "m-new");
   await new Promise((resolve) => setImmediate(resolve));
-  releaseVisible();
+  releaseWorking();
   const [newCommand, aborted] = await Promise.all([
     newCommandPromise,
     firstTurn,
   ]);
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(newCommand.text, "Started a new session.");
   assert.equal(abortCalled, true);
-  assert.equal(promptCalled, false);
+  assert.equal(promptCalled, true);
   assert.equal(aborted.aborted, true);
   assert.deepEqual(deliveries, ["Started a new session."]);
+  assert.deepEqual(visibleEvents, [
+    "tick:m-old",
+    "sent:m-old",
+    "end:m-old:m-old",
+  ]);
 });
 
 test("chat controller suppresses /compact acknowledgement but keeps configured /reload response", async () => {
@@ -3505,6 +3532,10 @@ test("chat controller restores inbound reply identity before connect replays an 
 
 test("chat controller clears a primed reply identity when connect fails", async () => {
   const controller = await createController("discord/bot-1:channel-1");
+  let visibleStarts = 0;
+  controller.beginVisibleProcessingTurn = async () => {
+    visibleStarts += 1;
+  };
   controller.connect = async () => {
     throw new Error("connect failed");
   };
@@ -3520,6 +3551,7 @@ test("chat controller clears a primed reply identity when connect fails", async 
     /connect failed/,
   );
 
+  assert.equal(visibleStarts, 0);
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.awaitingTurnSettle, false);
 });
@@ -5272,7 +5304,7 @@ test("chat controller terminate does not clear an existing durable chat binding"
   assert.equal(persistedState.sessionFile, "terminating-chat.jsonl");
 });
 
-test("chat controller waits for editable Working before prompt submission and keeps polling", async () => {
+test("chat controller submits the prompt without waiting for editable Working and keeps polling", async () => {
   const controller = await createController("discord/1:C1");
   controller.app.bots[0].platform = "discord";
   controller.app.bots[0].selfId = "1";
@@ -5326,10 +5358,12 @@ test("chat controller waits for editable Working before prompt submission and ke
     incomingMessageId: "m-editable-start",
   });
   await workingStarted;
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls, ["working:0"]);
-  releaseWorking();
   while (!calls.includes("prompt")) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.deepEqual(calls, ["working:0", "prompt"]);
+  releaseWorking();
+  while (controller.workingIndicatorTick < 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   controller.driver.frontendPhase = "working";

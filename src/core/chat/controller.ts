@@ -476,7 +476,7 @@ export class ChatController {
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
-    this.turnAbortGeneration = 0;
+    this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
     this.driver.dispose();
   }
@@ -873,6 +873,26 @@ export class ChatController {
     return Promise.resolve(handler.call(indicator, context));
   }
 
+  private async endWorkingIndicatorsForTurn(
+    indicators: WorkingIndicator[],
+    input: { incomingMessageId?: string; replyToMessageId?: string },
+  ) {
+    const incomingMessageId = safeString(input.incomingMessageId).trim();
+    const replyToMessageId =
+      safeString(input.replyToMessageId).trim() || incomingMessageId;
+    const context = this.workingIndicatorContext({
+      event: "end",
+      messageId: incomingMessageId || undefined,
+      replyToMessageId: replyToMessageId || undefined,
+    });
+    const results = await Promise.all(
+      selectWorkingIndicatorsForEnd(indicators).map((indicator) =>
+        this.callWorkingIndicator(indicator, "end", context).catch(() => false),
+      ),
+    );
+    return results.some(Boolean);
+  }
+
   async clearWorkingReaction(options: { preserveTodoNotice?: boolean } = {}) {
     const indicators = this.activeWorkingIndicators.length
       ? this.activeWorkingIndicators
@@ -1047,6 +1067,7 @@ export class ChatController {
     incomingMessageId?: string;
     replyToMessageId?: string;
   }) {
+    const turnGeneration = this.turnAbortGeneration;
     const previousIncomingMessageId = this.currentIncomingMessageId();
     const nextIncomingMessageId = safeString(
       input.incomingMessageId || "",
@@ -1066,6 +1087,10 @@ export class ChatController {
     const editableStarted = await this.startEditableWorkingNotice(
       indicators,
     ).catch(() => false);
+    if (this.turnAbortGeneration !== turnGeneration) {
+      await this.endWorkingIndicatorsForTurn(indicators, input);
+      return;
+    }
     if (editableStarted) {
       // Subsequent animation ticks still use the normal chat polling path.
       // Do not poll synchronously here: before the driver marks the turn active,
@@ -1074,8 +1099,13 @@ export class ChatController {
     }
     const marker = this.startWorkingMarker(indicators).catch(() => false);
     const poll = this.pollTyping().catch(() => false);
+    const presentation = Promise.all([marker, poll]).then(async () => {
+      if (this.turnAbortGeneration !== turnGeneration) {
+        await this.endWorkingIndicatorsForTurn(indicators, input);
+      }
+    });
     await Promise.race([
-      Promise.all([marker, poll]),
+      presentation,
       new Promise((resolve) => setImmediate(resolve)),
     ]);
   }
@@ -2351,10 +2381,13 @@ export class ChatController {
         deliverFinal,
       );
       if (deliverFinal) {
-        await this.beginVisibleProcessingTurn({
+        // Progress delivery is presentation, not admission. Editable adapters
+        // serialize their own working/final operations, so a slow platform send
+        // must not postpone prompt submission.
+        void this.beginVisibleProcessingTurn({
           incomingMessageId: input.incomingMessageId,
           replyToMessageId: input.replyToMessageId,
-        });
+        }).catch(() => false);
       }
       try {
         if (this.turnAbortGeneration !== turnAbortGeneration) {
