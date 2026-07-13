@@ -2464,6 +2464,61 @@ test("rpc agent end does not leave a stale working status indicator after the tu
   assert.equal(disposed, true);
 });
 
+test("rpc thinking cycle shows success only after daemon acknowledgement", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  let acknowledge;
+  const statuses = [];
+  const instance = {
+    session: {
+      getFrontendStatusEvent() {
+        return null;
+      },
+      cycleThinkingLevel() {
+        return new Promise((resolve) => {
+          acknowledge = resolve;
+        });
+      },
+    },
+    footer: { invalidate() {} },
+    updateEditorBorderColor() {},
+    showStatus(message) {
+      statuses.push(message);
+    },
+    showError() {},
+  };
+
+  const pending =
+    codingAgentModule.InteractiveMode.prototype.cycleThinkingLevel.call(
+      instance,
+    );
+  assert.deepEqual(statuses, []);
+
+  acknowledge("high");
+  await pending;
+
+  assert.deepEqual(statuses, ["Thinking level: high"]);
+});
+
+test("rpc setting mutation failures are surfaced in the TUI", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const errors = [];
+  const instance = {
+    isInitialized: true,
+    showError(message) {
+      errors.push(message);
+    },
+  };
+
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "rpc_settings_mutation_error",
+    error: "disconnected: req_7",
+  });
+
+  assert.deepEqual(errors, ["Failed to save setting: disconnected: req_7"]);
+});
+
 test("signal handler override routes SIGINT through interactive Ctrl+C handling", async () => {
   await overrides.applyRinTuiOverrides();
 

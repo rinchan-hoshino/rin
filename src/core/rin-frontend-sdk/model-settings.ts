@@ -9,6 +9,10 @@ type RpcModeStateKey = "steeringMode" | "followUpMode";
 const DEFAULT_RPC_MODE = "one-at-a-time";
 
 let persistentSettingsManagerPromise: Promise<any> | null = null;
+const rpcSettingsMutationQueues = new WeakMap<
+  object,
+  Map<string, Promise<unknown>>
+>();
 
 function setRpcTargetState(target: any, key: string, value: unknown) {
   target[key] = value;
@@ -17,8 +21,38 @@ function setRpcTargetState(target: any, key: string, value: unknown) {
   }
 }
 
-function sendRpcClientMessage(target: any, payload: Record<string, unknown>) {
-  void target?.client?.send?.(payload).catch(() => {});
+async function callRpcSettingsMutation(
+  target: any,
+  command: Record<string, unknown> & { type: string },
+) {
+  return target.callRpcSettingsMutation
+    ? await target.callRpcSettingsMutation(command)
+    : await target.call(command.type, command);
+}
+
+async function enqueueRpcSettingsMutation<T>(
+  target: object,
+  key: string,
+  mutate: () => Promise<T>,
+): Promise<T> {
+  let queues = rpcSettingsMutationQueues.get(target);
+  if (!queues) {
+    queues = new Map();
+    rpcSettingsMutationQueues.set(target, queues);
+  }
+  const previous = queues.get(key) ?? Promise.resolve();
+  const ready = previous.then(
+    () => undefined,
+    () => undefined,
+  );
+  const current = ready.then(mutate);
+  queues.set(key, current);
+  try {
+    return await current;
+  } finally {
+    if (queues.get(key) === current) queues.delete(key);
+    if (queues.size === 0) rpcSettingsMutationQueues.delete(target);
+  }
 }
 
 function normalizeRpcMode(
@@ -111,66 +145,107 @@ export async function cycleRpcModel(
   );
 }
 
-export function setRpcThinkingLevel(target: any, level: ThinkingLevel) {
-  const next = resolveRpcThinkingLevel(target, level);
-  setRpcTargetState(target, "thinkingLevel", next);
-  sendRpcClientMessage(target, { type: "set_thinking_level", level: next });
+async function applyRpcThinkingLevel(
+  target: any,
+  resolveNext: () => ThinkingLevel | undefined,
+): Promise<ThinkingLevel | undefined> {
+  return await enqueueRpcSettingsMutation(target, "thinkingLevel", async () => {
+    const next = resolveNext();
+    if (next === undefined) return undefined;
+    await callRpcSettingsMutation(target, {
+      type: "set_thinking_level",
+      level: next,
+    });
+    setRpcTargetState(target, "thinkingLevel", next);
+    target.emitEvent?.({ type: "thinking_level_changed", level: next });
+    return next;
+  });
 }
 
-export function cycleRpcThinkingLevel(target: any): ThinkingLevel | undefined {
-  const levels = computeAvailableThinkingLevels(target.model);
-  if (levels.length <= 1) return undefined;
-  const next =
-    levels[
+export async function setRpcThinkingLevel(
+  target: any,
+  level: ThinkingLevel,
+): Promise<ThinkingLevel> {
+  return (await applyRpcThinkingLevel(target, () =>
+    resolveRpcThinkingLevel(target, level),
+  ))!;
+}
+
+export async function cycleRpcThinkingLevel(
+  target: any,
+): Promise<ThinkingLevel | undefined> {
+  return await applyRpcThinkingLevel(target, () => {
+    const levels = computeAvailableThinkingLevels(target.model);
+    if (levels.length <= 1) return undefined;
+    return levels[
       (Math.max(0, levels.indexOf(target.thinkingLevel)) + 1) % levels.length
     ];
-  setRpcThinkingLevel(target, next);
-  return next;
+  });
 }
 
-function setRpcModeOption(
+async function setRpcModeOption(
   target: any,
   options: {
     mode: RpcModeValue;
     stateKey: RpcModeStateKey;
     fallback: RpcModeValue;
-    settingsSetter: "setSteeringMode" | "setFollowUpMode";
     commandType: "set_steering_mode" | "set_follow_up_mode";
   },
 ) {
-  const next = normalizeRpcMode(
-    options.mode,
-    normalizeRpcMode(target?.[options.stateKey], options.fallback),
+  return await enqueueRpcSettingsMutation(
+    target,
+    options.stateKey,
+    async () => {
+      const next = normalizeRpcMode(
+        options.mode,
+        normalizeRpcMode(target?.[options.stateKey], options.fallback),
+      );
+      await callRpcSettingsMutation(target, {
+        type: options.commandType,
+        mode: next,
+      });
+      setRpcTargetState(target, options.stateKey, next);
+      return next;
+    },
   );
-  setRpcTargetState(target, options.stateKey, next);
-  target?.settingsManager?.[options.settingsSetter]?.(next);
-  sendRpcClientMessage(target, { type: options.commandType, mode: next });
 }
 
-export function setRpcSteeringMode(target: any, mode: "all" | "one-at-a-time") {
-  setRpcModeOption(target, {
+export async function setRpcSteeringMode(
+  target: any,
+  mode: "all" | "one-at-a-time",
+) {
+  return await setRpcModeOption(target, {
     mode,
     stateKey: "steeringMode",
     fallback: "all",
-    settingsSetter: "setSteeringMode",
     commandType: "set_steering_mode",
   });
 }
 
-export function setRpcFollowUpMode(target: any, mode: "all" | "one-at-a-time") {
-  setRpcModeOption(target, {
+export async function setRpcFollowUpMode(
+  target: any,
+  mode: "all" | "one-at-a-time",
+) {
+  return await setRpcModeOption(target, {
     mode,
     stateKey: "followUpMode",
     fallback: DEFAULT_RPC_MODE,
-    settingsSetter: "setFollowUpMode",
     commandType: "set_follow_up_mode",
   });
 }
 
-export function setRpcAutoCompaction(target: any, enabled: boolean) {
-  setRpcTargetState(target, "autoCompactionEnabled", Boolean(enabled));
-  sendRpcClientMessage(target, {
-    type: "set_auto_compaction",
-    enabled: Boolean(enabled),
-  });
+export async function setRpcAutoCompaction(target: any, enabled: boolean) {
+  return await enqueueRpcSettingsMutation(
+    target,
+    "autoCompactionEnabled",
+    async () => {
+      const next = Boolean(enabled);
+      await callRpcSettingsMutation(target, {
+        type: "set_auto_compaction",
+        enabled: next,
+      });
+      setRpcTargetState(target, "autoCompactionEnabled", next);
+      return next;
+    },
+  );
 }

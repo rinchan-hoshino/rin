@@ -43,6 +43,7 @@ import {
   readRinChangelogEntries,
   type RinUpdateNotice,
 } from "../../rin-lib/update-notices.js";
+import { formatRuntimeErrorForFrontendDisplay } from "../../rin-lib/user-facing-errors.js";
 import { extractMessageText } from "../../message-content.js";
 import {
   listBoundSessionPage,
@@ -1391,6 +1392,31 @@ export async function applyRinTuiOverrides() {
       };
   }
 
+  const originalCycleThinkingLevel = interactiveModeProto?.cycleThinkingLevel;
+  if (typeof originalCycleThinkingLevel === "function") {
+    interactiveModeProto.cycleThinkingLevel =
+      function cycleRpcThinkingLevelAfterAcknowledgement() {
+        if (!isRpcTransportControlled(this)) {
+          return originalCycleThinkingLevel.call(this);
+        }
+        return Promise.resolve(this.session.cycleThinkingLevel())
+          .then((newLevel: unknown) => {
+            if (newLevel === undefined) {
+              this.showStatus("Current model does not support thinking");
+              return;
+            }
+            this.footer.invalidate();
+            this.updateEditorBorderColor();
+            this.showStatus(`Thinking level: ${String(newLevel)}`);
+          })
+          .catch((error: unknown) => {
+            this.showError(
+              `Failed to save thinking level: ${formatRuntimeErrorForFrontendDisplay(error)}`,
+            );
+          });
+      };
+  }
+
   const originalRebindCurrentSession =
     interactiveModeProto?.rebindCurrentSession;
   if (typeof originalRebindCurrentSession === "function") {
@@ -1530,6 +1556,13 @@ export async function applyRinTuiOverrides() {
 
       if (event?.type === "rpc_frontend_status") {
         syncRpcFrontendStatus(this, event);
+        return;
+      }
+
+      if (event?.type === "rpc_settings_mutation_error") {
+        this.showError(
+          `Failed to save setting: ${String(event.error || "unknown error")}`,
+        );
         return;
       }
 

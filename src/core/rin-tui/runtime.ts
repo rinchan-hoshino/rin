@@ -15,7 +15,10 @@ import { createRinCapabilityDefinitions } from "../rin-lib/runtime.js";
 import { serializeRinToolStartupOptions } from "../rin-lib/tool-options.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
-import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
+import {
+  formatRuntimeErrorForFrontendDisplay,
+  rawErrorMessage,
+} from "../rin-lib/user-facing-errors.js";
 import {
   applyFrontendBuiltinCommandText,
   parseFrontendCompactCommand,
@@ -733,6 +736,22 @@ export class RpcInteractiveSession {
     return (await this.listSessionPage(scope)).sessions;
   }
 
+  async callRpcSettingsMutation(
+    command: Record<string, unknown> & { type: RinRpcCommandType },
+  ) {
+    return await this.call(command.type, command, { retryOnReconnect: false });
+  }
+
+  private reportRpcSettingsMutation<T>(mutation: Promise<T>): Promise<T> {
+    void mutation.catch((error) => {
+      this.emitEvent({
+        type: "rpc_settings_mutation_error",
+        error: formatRuntimeErrorForFrontendDisplay(error),
+      } as any);
+    });
+    return mutation;
+  }
+
   async setModel(model: any) {
     await setRpcModel(this as any, model, () =>
       this.refreshState(REFRESH_MODELS),
@@ -756,11 +775,13 @@ export class RpcInteractiveSession {
   }
 
   setThinkingLevel(level: ThinkingLevel) {
-    setRpcThinkingLevel(this as any, level);
+    return this.reportRpcSettingsMutation(
+      setRpcThinkingLevel(this as any, level),
+    );
   }
 
-  cycleThinkingLevel(): ThinkingLevel | undefined {
-    return cycleRpcThinkingLevel(this as any);
+  async cycleThinkingLevel(): Promise<ThinkingLevel | undefined> {
+    return await cycleRpcThinkingLevel(this as any);
   }
 
   getAvailableThinkingLevels() {
@@ -768,11 +789,15 @@ export class RpcInteractiveSession {
   }
 
   setSteeringMode(mode: "all" | "one-at-a-time") {
-    setRpcSteeringMode(this as any, mode);
+    return this.reportRpcSettingsMutation(
+      setRpcSteeringMode(this as any, mode),
+    );
   }
 
   setFollowUpMode(mode: "all" | "one-at-a-time") {
-    setRpcFollowUpMode(this as any, mode);
+    return this.reportRpcSettingsMutation(
+      setRpcFollowUpMode(this as any, mode),
+    );
   }
 
   async compact(customInstructions?: string) {
@@ -787,7 +812,9 @@ export class RpcInteractiveSession {
   abortBranchSummary() {}
 
   setAutoCompactionEnabled(enabled: boolean) {
-    setRpcAutoCompaction(this as any, enabled);
+    return this.reportRpcSettingsMutation(
+      setRpcAutoCompaction(this as any, enabled),
+    );
   }
 
   async executeBash(
@@ -1751,6 +1778,7 @@ export class RpcInteractiveSession {
   private async call(
     type: RinRpcCommandType,
     payload: Record<string, unknown> = {},
+    options: { retryOnReconnect?: boolean } = {},
   ) {
     const sessionScoped = isSessionScopedCommand(type);
     const send = async () =>
@@ -1759,6 +1787,9 @@ export class RpcInteractiveSession {
         ...this.buildSessionCommandPayload(type, payload),
       });
     if (sessionScoped && !this.client.isConnected()) {
+      if (options.retryOnReconnect === false) {
+        throw new Error("rin_tui_not_connected");
+      }
       await this.waitForDaemonAvailable();
     }
     let response: any;
@@ -1774,8 +1805,12 @@ export class RpcInteractiveSession {
       ) {
         this.recoveryPending = true;
         this.emitFrontendStatus(true);
-        if (this.restorePromise || this.reconnectPromise) {
-          throw error;
+        if (
+          options.retryOnReconnect === false ||
+          this.restorePromise ||
+          this.reconnectPromise
+        ) {
+          throw asRawRuntimeError(error);
         }
         await this.waitForDaemonAvailable();
         response = await send();

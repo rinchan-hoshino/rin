@@ -713,7 +713,7 @@ test("rpc runtime answers daemon extension UI requests through the bound UI cont
   ]);
 });
 
-test("rpc runtime keeps control methods bound to the session instance", async () => {
+test("rpc runtime keeps control methods bound and leaves settings persistence to the daemon", async () => {
   const sent = [];
   const model = { provider: "test", id: "demo-model", name: "Demo Model" };
   const session = new RpcInteractiveSession({
@@ -788,18 +788,18 @@ test("rpc runtime keeps control methods bound to the session instance", async ()
   } = session;
 
   await setModel(model);
-  setSteeringMode("one-at-a-time");
-  setFollowUpMode("all");
-  setAutoCompactionEnabled(true);
-
-  await new Promise((resolve) => setImmediate(resolve));
+  await Promise.all([
+    setSteeringMode("one-at-a-time"),
+    setFollowUpMode("all"),
+    setAutoCompactionEnabled(true),
+  ]);
 
   assert.deepEqual(session.model, model);
   assert.deepEqual(session.state.model, model);
   assert.equal(session.steeringMode, "one-at-a-time");
   assert.equal(session.followUpMode, "all");
-  assert.equal(session.settingsManager.getSteeringMode(), "one-at-a-time");
-  assert.equal(session.settingsManager.getFollowUpMode(), "all");
+  assert.equal(session.settingsManager.getSteeringMode(), "all");
+  assert.equal(session.settingsManager.getFollowUpMode(), "one-at-a-time");
   assert.deepEqual(
     sent.map((entry) => entry.type),
     [

@@ -25,6 +25,7 @@ import {
   refreshPiSessionToolRegistry,
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
+import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
 import {
   getCommandArgumentCompletions,
   getOAuthState,
@@ -45,6 +46,7 @@ const THINKING_LEVEL_ORDER = [
   "xhigh",
   "max",
 ];
+const sessionSettingsMutationQueues = new WeakMap<object, Promise<unknown>>();
 
 type PendingExtensionUiRequest = {
   resolve: (response: any) => void;
@@ -232,6 +234,67 @@ function setSessionThinkingLevel(
     });
   }
   return { level: effectiveLevel };
+}
+
+async function flushSessionSettings(session: any) {
+  const settings = session?.settingsManager;
+  await settings?.flush?.();
+  const errors = settings?.drainErrors?.();
+  if (!Array.isArray(errors) || errors.length === 0) return;
+  const detail = errors
+    .map((item: any) => rawErrorMessage(item?.error ?? item))
+    .filter(Boolean)
+    .join("; ");
+  throw new Error(`rin_settings_write_failed${detail ? `: ${detail}` : ""}`);
+}
+
+async function runPersistedSessionMutation<T>(
+  session: any,
+  mutate: () => T | Promise<T>,
+) {
+  const settings = session?.settingsManager;
+  if (!settings || typeof settings !== "object") {
+    const value = await mutate();
+    await flushSessionSettings(session);
+    return value;
+  }
+  const previous = sessionSettingsMutationQueues.get(settings);
+  const ready = previous
+    ? previous.then(
+        () => undefined,
+        () => undefined,
+      )
+    : Promise.resolve();
+  const current = ready.then(async () => {
+    const value = await mutate();
+    await flushSessionSettings(session);
+    return value;
+  });
+  sessionSettingsMutationQueues.set(settings, current);
+  try {
+    return await current;
+  } finally {
+    if (sessionSettingsMutationQueues.get(settings) === current) {
+      sessionSettingsMutationQueues.delete(settings);
+    }
+  }
+}
+
+async function setPersistentSessionThinkingLevel(session: any, level: string) {
+  return await runPersistedSessionMutation(session, async () => {
+    const result = await setSessionThinkingLevel(session, level);
+    const effectiveLevel = safeString(
+      result?.level || session?.thinkingLevel || level,
+    ).trim();
+    const settings = session?.settingsManager;
+    if (
+      effectiveLevel &&
+      settings?.getDefaultThinkingLevel?.() !== effectiveLevel
+    ) {
+      settings?.setDefaultThinkingLevel?.(effectiveLevel);
+    }
+    return result ?? (effectiveLevel ? { level: effectiveLevel } : undefined);
+  });
 }
 
 async function setSessionModel(
@@ -1016,7 +1079,8 @@ export async function runCustomRpcMode(
         return run(
           id,
           type,
-          () => session.cycleModel(),
+          () =>
+            runPersistedSessionMutation(session, () => session.cycleModel()),
           (value) => value ?? null,
         );
       case "get_all_models":
@@ -1041,12 +1105,14 @@ export async function runCustomRpcMode(
           ),
         );
       case "set_thinking_level":
-        return run(id, type, () =>
-          setSessionThinkingLevel(session, safeString(command.level).trim(), {
-            persistSettings:
-              command.persistSettings === false ? false : undefined,
-          }),
-        );
+        return run(id, type, () => {
+          const level = safeString(command.level).trim();
+          return command.persistSettings === false
+            ? setSessionThinkingLevel(session, level, {
+                persistSettings: false,
+              })
+            : setPersistentSessionThinkingLevel(session, level);
+        });
       case "reset_model_options_from_settings":
         return run(id, type, () =>
           resetSessionModelOptionsFromSettings(session),
@@ -1055,13 +1121,24 @@ export async function runCustomRpcMode(
         return run(
           id,
           type,
-          () => session.cycleThinkingLevel(),
+          () =>
+            runPersistedSessionMutation(session, () =>
+              session.cycleThinkingLevel(),
+            ),
           (level) => (level ? { level } : null),
         );
       case "set_steering_mode":
-        return run(id, type, () => session.setSteeringMode(command.mode));
+        return run(id, type, () =>
+          runPersistedSessionMutation(session, () =>
+            session.setSteeringMode(command.mode),
+          ),
+        );
       case "set_follow_up_mode":
-        return run(id, type, () => session.setFollowUpMode(command.mode));
+        return run(id, type, () =>
+          runPersistedSessionMutation(session, () =>
+            session.setFollowUpMode(command.mode),
+          ),
+        );
       case "compact":
         return run(id, type, async () => {
           const value = await session.compact(command.customInstructions);
@@ -1072,11 +1149,15 @@ export async function runCustomRpcMode(
         });
       case "set_auto_compaction":
         return run(id, type, () =>
-          session.setAutoCompactionEnabled(Boolean(command.enabled)),
+          runPersistedSessionMutation(session, () =>
+            session.setAutoCompactionEnabled(Boolean(command.enabled)),
+          ),
         );
       case "set_auto_retry":
         return run(id, type, () =>
-          session.setAutoRetryEnabled(Boolean(command.enabled)),
+          runPersistedSessionMutation(session, () =>
+            session.setAutoRetryEnabled(Boolean(command.enabled)),
+          ),
         );
       case "abort_retry":
         return run(id, type, () => session.abortRetry());
@@ -1315,10 +1396,16 @@ export async function runCustomRpcMode(
           throw new Error(
             `Model not found: ${command.provider}/${command.modelId}`,
           );
-        await setSessionModel(session, model, {
-          persistSettings:
-            command.persistSettings === false ? false : undefined,
-        });
+        const persistSettings = command.persistSettings !== false;
+        const mutate = () =>
+          setSessionModel(session, model, {
+            persistSettings: persistSettings ? undefined : false,
+          });
+        if (persistSettings) {
+          await runPersistedSessionMutation(session, mutate);
+        } else {
+          await mutate();
+        }
         return done(id, type, model);
       }
       case "rename_session": {

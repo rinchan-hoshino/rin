@@ -1096,6 +1096,151 @@ test(
 );
 
 test(
+  "rpc mode confirms persistent thinking changes only after the settings write finishes",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const calls: string[] = [];
+    let finishFlush: (() => void) | undefined;
+    let settingsErrors: any[] = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        get thinkingLevel() {
+          return this.agent.state.thinkingLevel;
+        },
+        agent: {
+          state: { thinkingLevel: "high" },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        getAvailableThinkingLevels: () => ["off", "low", "medium", "high"],
+        setThinkingLevel(level: string) {
+          calls.push(`session.set:${level}`);
+        },
+        settingsManager: {
+          defaultThinkingLevel: "low",
+          getDefaultThinkingLevel() {
+            return this.defaultThinkingLevel;
+          },
+          setDefaultThinkingLevel(level: string) {
+            calls.push(`settings.set:${level}`);
+            this.defaultThinkingLevel = level;
+          },
+          flush() {
+            calls.push("settings.flush");
+            return new Promise((resolve) => {
+              finishFlush = resolve;
+            });
+          },
+          drainErrors() {
+            calls.push("settings.drainErrors");
+            const errors = settingsErrors;
+            settingsErrors = [];
+            return errors;
+          },
+        },
+        sessionManager: testSessionManager(),
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: { listAll: async () => [], list: async () => [] },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "set_thinking_level", level: "high" })}\n`,
+        ),
+      );
+      await wait(0);
+
+      assert.deepEqual(calls, [
+        "session.set:high",
+        "settings.set:high",
+        "settings.flush",
+      ]);
+      assert.equal(
+        lines.some((line) => {
+          try {
+            return JSON.parse(line)?.id === "1";
+          } catch {
+            return false;
+          }
+        }),
+        false,
+      );
+
+      finishFlush?.();
+      await wait(0);
+
+      assert.deepEqual(calls, [
+        "session.set:high",
+        "settings.set:high",
+        "settings.flush",
+        "settings.drainErrors",
+      ]);
+      const response = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .find((line) => line?.type === "response" && line.id === "1");
+      assert.equal(response.success, true);
+      assert.equal(session.settingsManager.defaultThinkingLevel, "high");
+
+      settingsErrors = [{ scope: "global", error: new Error("disk full") }];
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "2", type: "set_thinking_level", level: "high" })}\n`,
+        ),
+      );
+      await wait(0);
+      finishFlush?.();
+      await wait(0);
+
+      const failedResponse = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .find((line) => line?.type === "response" && line.id === "2");
+      assert.equal(failedResponse.success, false);
+      assert.match(
+        failedResponse.error,
+        /rin_settings_write_failed: disk full/,
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode applies non-persistent thinking level changes without calling the settings-backed setter",
   { concurrency: false },
   async () => {
