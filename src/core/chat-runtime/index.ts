@@ -1430,6 +1430,28 @@ export const ONEBOT_MEDIA_DOCKER_VOLUME_HINT = `-v "${ONEBOT_MEDIA_DOCKER_MOUNT_
 export const ONEBOT_ACTION_TIMEOUT_MS = 20_000;
 export const ONEBOT_MEDIA_ACTION_TIMEOUT_MS = 10 * 60_000 + 5_000;
 
+function isOneBotLoopbackEndpoint(endpoint: unknown) {
+  try {
+    const hostname = new URL(safeString(endpoint).trim()).hostname
+      .replace(/^\[|\]$/g, "")
+      .toLowerCase();
+    return (
+      hostname === "localhost" ||
+      hostname === "::1" ||
+      /^127(?:\.[0-9]{1,3}){3}$/.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function shouldInlineOneBotLocalImage(config: any) {
+  const mode = safeString(config?.localImageMode).trim().toLowerCase();
+  if (mode === "base64") return true;
+  if (mode === "file") return false;
+  return !isOneBotLoopbackEndpoint(config?.endpoint);
+}
+
 function isOneBotTimeoutParamAction(action: string) {
   return /^(send_private_msg|send_group_msg|send_msg|upload_private_file|upload_group_file)$/.test(
     safeString(action).trim(),
@@ -1861,6 +1883,16 @@ class OneBotAdapter {
       fallbackName: `${type}-${Date.now()}`,
       type,
     });
+    if (
+      type === "image" &&
+      staged &&
+      !staged.remote &&
+      staged.path &&
+      shouldInlineOneBotLocalImage(this.config)
+    ) {
+      const data = await fs.promises.readFile(staged.path);
+      return `base64://${data.toString("base64")}`;
+    }
     return safeString(staged?.src).trim();
   }
 

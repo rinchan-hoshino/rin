@@ -86,7 +86,8 @@ Minimal built-in adapter examples:
       "endpoint": "ws://127.0.0.1:3001",
       "protocol": "ws",
       "selfId": "123456789",
-      "token": ""
+      "token": "",
+      "localImageMode": "auto"
     },
     "qq": {
       "id": "app-id",
@@ -107,7 +108,7 @@ Minimal built-in adapter examples:
 }
 ```
 
-Use only the adapter entries the owner requested. For multiple accounts of the same adapter, use an array of entries with `name` fields under that adapter key. After writing settings, restart with the target-aware launcher, for example `rin restart` or `rin -u <user> restart`, then verify with `rin status --json` and an adapter-specific send or stored-message check.
+Use only the adapter entries the owner requested. For multiple accounts of the same adapter, use an array of entries with `name` fields under that adapter key. OneBot `localImageMode` defaults to `auto`: local images use `base64://` when the WebSocket endpoint is remote and staged `file://` paths when it is loopback. Set it explicitly to `base64` for a loopback Docker endpoint without a shared media mount, or `file` when NapCat can read Rin's staged path. After writing settings, restart with the target-aware launcher, for example `rin restart` or `rin -u <user> restart`, then verify with `rin status --json` and an adapter-specific send or stored-message check.
 
 ## Chat key and identity contract
 

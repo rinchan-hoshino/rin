@@ -1885,7 +1885,7 @@ test("onebot adapter stages all local media under the fixed chat-media directory
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
       name: "OneBot",
-      config: { selfId: "1", url: "ws://127.0.0.1:9" },
+      config: { selfId: "1", endpoint: "ws://127.0.0.1:9" },
     });
     const adapter = [...app.adapters][0];
     const h = runtime.createChatRuntimeH();
@@ -1936,6 +1936,65 @@ test("onebot adapter stages all local media under the fixed chat-media directory
     for (const stagedPath of stagedPaths) {
       await assert.doesNotReject(fs.stat(stagedPath));
     }
+  });
+});
+
+test("onebot adapter inlines local images for a remote endpoint", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { selfId: "1", endpoint: "ws://192.168.100.20:3001" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const imagePath = path.join(agentDir, "usage.png");
+    const calls: Array<{ action: string; params: any }> = [];
+    await fs.writeFile(imagePath, Buffer.from("png"));
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      return { message_id: "m1" };
+    };
+
+    await app.bots[0].sendMessage("private:2", [
+      h.image(imagePath),
+      h.image("https://example.com/remote.png"),
+    ]);
+
+    assert.equal(calls[0].action, "send_private_msg");
+    assert.match(calls[0].params.message, /\[CQ:image,file=base64:\/\/cG5n\]/);
+    assert.match(
+      calls[0].params.message,
+      /\[CQ:image,file=https:\/\/example\.com\/remote\.png\]/,
+    );
+    assert.doesNotMatch(calls[0].params.message, /file:\/\//);
+  });
+});
+
+test("onebot adapter allows forcing base64 local images on loopback", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: {
+        selfId: "1",
+        endpoint: "ws://127.0.0.1:3001",
+        localImageMode: "base64",
+      },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const imagePath = path.join(agentDir, "usage.png");
+    const calls: Array<{ action: string; params: any }> = [];
+    await fs.writeFile(imagePath, Buffer.from("png"));
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      return { message_id: "m1" };
+    };
+
+    await app.bots[0].sendMessage("private:2", [h.image(imagePath)]);
+
+    assert.match(calls[0].params.message, /\[CQ:image,file=base64:\/\/cG5n\]/);
   });
 });
 
