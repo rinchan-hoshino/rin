@@ -111,6 +111,102 @@ test("rpc mode exposes Pi-compatible session entries and tree", async () => {
 });
 
 test(
+  "rpc mode correlates user start with its exact append result",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    let emitSessionEvent: ((event: any) => void) | undefined;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          emitSessionEvent = handler;
+          return () => {};
+        },
+        sessionManager: {
+          ...testSessionManager(),
+          getLeafId: () => "unused-global-leaf",
+          appendMessage: (message) =>
+            message.content[0].text === "first"
+              ? "first-user-entry"
+              : "second-user-entry",
+        },
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: { listAll: async () => [], list: async () => [] },
+      });
+      await wait(0);
+      assert.equal(typeof emitSessionEvent, "function");
+      const firstMessage = {
+        role: "user",
+        content: [{ type: "text", text: "first" }],
+      };
+      const secondMessage = {
+        role: "user",
+        content: [{ type: "text", text: "second" }],
+      };
+      emitSessionEvent?.({ type: "message_start", message: firstMessage });
+      emitSessionEvent?.({ type: "message_start", message: secondMessage });
+      emitSessionEvent?.({ type: "message_end", message: secondMessage });
+      session.sessionManager.appendMessage(secondMessage);
+      emitSessionEvent?.({ type: "message_end", message: firstMessage });
+      session.sessionManager.appendMessage(firstMessage);
+      session.sessionManager.appendMessage({
+        role: "user",
+        content: [{ type: "text", text: "untracked" }],
+      });
+
+      const events = lines.map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      });
+      const starts = events.filter((line) => line?.type === "message_start");
+      const persisted = events.filter(
+        (line) => line?.type === "rin_user_message_persisted",
+      );
+      const firstStart = starts.find(
+        (event) => event.message?.content?.[0]?.text === "first",
+      );
+      const secondStart = starts.find(
+        (event) => event.message?.content?.[0]?.text === "second",
+      );
+      assert.deepEqual(
+        persisted.map((event) => [event.sessionLeafId, event.userMessageId]),
+        [
+          ["second-user-entry", secondStart?.userMessageId],
+          ["first-user-entry", firstStart?.userMessageId],
+        ],
+      );
+      assert.match(firstStart?.userMessageId, /^user-message-/);
+      assert.match(secondStart?.userMessageId, /^user-message-/);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode sleep_session disposes without terminalizing an active turn",
   { concurrency: false },
   async () => {

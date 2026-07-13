@@ -996,6 +996,8 @@ export async function runCustomRpcMode(
   };
 
   let unsubscribeSessionEvents: (() => void) | undefined;
+  let restoreSessionAppendMessage: (() => void) | undefined;
+  let userMessageSeq = 0;
   const bindCurrentSession = async () => {
     const session = getSession();
     await session.bindExtensions({
@@ -1035,6 +1037,41 @@ export async function runCustomRpcMode(
     });
 
     unsubscribeSessionEvents?.();
+    restoreSessionAppendMessage?.();
+    const userMessageIds = new WeakMap<object, string>();
+    const sessionManager = session.sessionManager;
+    const originalAppendMessage = sessionManager?.appendMessage;
+    if (typeof originalAppendMessage === "function") {
+      const wrappedAppendMessage = function (this: any, message: any) {
+        const result = originalAppendMessage.call(this, message);
+        const sessionLeafId = safeString(result).trim();
+        if (message?.role === "user" && sessionLeafId) {
+          const userMessageId =
+            message && typeof message === "object"
+              ? userMessageIds.get(message)
+              : undefined;
+          if (message && typeof message === "object") {
+            userMessageIds.delete(message);
+          }
+          if (userMessageId) {
+            output({
+              type: "rin_user_message_persisted",
+              sessionLeafId,
+              userMessageId,
+            });
+          }
+        }
+        return result;
+      };
+      sessionManager.appendMessage = wrappedAppendMessage;
+      restoreSessionAppendMessage = () => {
+        if (sessionManager.appendMessage === wrappedAppendMessage) {
+          sessionManager.appendMessage = originalAppendMessage;
+        }
+      };
+    } else {
+      restoreSessionAppendMessage = undefined;
+    }
     unsubscribeSessionEvents = session.subscribe((event: any) => {
       if (event?.type === "auto_retry_start") {
         latestAutoRetryFailureMessage = "";
@@ -1051,6 +1088,14 @@ export async function runCustomRpcMode(
         } else {
           latestAutoRetryFailureMessage = "";
         }
+      }
+      if (event?.type === "message_start" && event.message?.role === "user") {
+        const userMessageId = `user-message-${Date.now().toString(36)}-${++userMessageSeq}`;
+        userMessageIds.set(event.message, userMessageId);
+        output(
+          withCompactionEventMetadata(session, { ...event, userMessageId }),
+        );
+        return;
       }
       output(withCompactionEventMetadata(session, event));
     });

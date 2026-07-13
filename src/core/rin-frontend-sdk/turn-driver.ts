@@ -101,7 +101,12 @@ export type RinFrontendPassiveNoticeEvent = {
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "turn_accepted" }
-  | { type: "user_message_start"; text: string }
+  | { type: "user_message_start"; text: string; userMessageId?: string }
+  | {
+      type: "user_message_persisted";
+      sessionLeafId: string;
+      userMessageId?: string;
+    }
   | RinFrontendPassiveNoticeEvent
   | { type: "compaction_start_notice"; text: string }
   | { type: "assistant_summary"; text: string }
@@ -1548,7 +1553,22 @@ export class RinFrontendTurnDriver {
         this.emit({ type: "turn_accepted" });
         return;
       case "user_message_start":
-        this.emit({ type: "user_message_start", text: event.text });
+        this.emit({
+          type: "user_message_start",
+          text: event.text,
+          ...(event.userMessageId
+            ? { userMessageId: event.userMessageId }
+            : {}),
+        });
+        return;
+      case "user_message_persisted":
+        this.emit({
+          type: "user_message_persisted",
+          sessionLeafId: event.sessionLeafId,
+          ...(event.userMessageId
+            ? { userMessageId: event.userMessageId }
+            : {}),
+        });
         return;
       case "passive_notice":
         this.emitPassiveNoticeAtPullCheckpoint(

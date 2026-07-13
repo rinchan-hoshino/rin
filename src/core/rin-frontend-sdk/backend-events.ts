@@ -357,8 +357,26 @@ export function createRinFrontendBackendEventTranslator(
                   trim: true,
                 }),
               ).trim(),
+              ...(safeString(payload.userMessageId).trim()
+                ? {
+                    userMessageId: safeString(payload.userMessageId).trim(),
+                  }
+                : {}),
             },
           ];
+        case "rin_user_message_persisted": {
+          const sessionLeafId = safeString(payload.sessionLeafId).trim();
+          const userMessageId = safeString(payload.userMessageId).trim();
+          return sessionLeafId
+            ? [
+                {
+                  type: "user_message_persisted",
+                  sessionLeafId,
+                  ...(userMessageId ? { userMessageId } : {}),
+                },
+              ]
+            : [];
+        }
         case "agent_end":
           return [];
         case "message_update": {

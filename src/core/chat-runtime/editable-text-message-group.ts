@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   composeEditableMessageText,
+  editableIntermediateHeadText,
   editableMessageSectionsFromRecord,
   editableWorkingText,
   ensureDir,
@@ -69,16 +70,18 @@ export class EditableTextMessageGroup {
     this.workingFrames = normalizeDeliveredIds(
       options.workingFrames?.length ? options.workingFrames : copy.frames,
     );
-    this.workingText =
+    this.workingText = editableIntermediateHeadText(
       safeString(options.workingText).trim() ||
-      this.workingFrames[0] ||
-      "Working...";
+        this.workingFrames[0] ||
+        "Working...",
+    );
     this.progressTexts = normalizeDeliveredIds([
       this.workingText,
-      ...this.workingFrames,
+      ...this.workingFrames.map(editableIntermediateHeadText),
       ...(options.progressTexts?.length
         ? options.progressTexts
-        : copy.progressTexts),
+        : copy.progressTexts
+      ).map(editableIntermediateHeadText),
     ]);
     ensureDir(this.options.cacheDir);
   }
@@ -90,12 +93,15 @@ export class EditableTextMessageGroup {
       tick: async (context: any) => {
         const chatId = safeString(context?.chatId).trim();
         if (!chatId) return false;
+        const statusText = safeString(context?.workingStatusText).trim();
         const summaryText = safeString(context?.assistantSummaryText).trim();
         const ids = await this.updateText({
           chatId,
-          text:
-            summaryText ||
-            editableWorkingText(context?.tick, this.workingFrames),
+          text: editableIntermediateHeadText(
+            statusText ||
+              summaryText ||
+              editableWorkingText(context?.tick, this.workingFrames),
+          ),
           replyToMessageId:
             safeString(context?.replyToMessageId).trim() || undefined,
           kind: "working",
@@ -330,6 +336,7 @@ export class EditableTextMessageGroup {
         kind,
         textChunks: inputTextChunks,
         persisted,
+        fallbackWorkingTextChunks: [this.workingText],
         fallbackTodoTextChunks: input.todoTextChunks?.length
           ? input.todoTextChunks
           : fallbackTodoText

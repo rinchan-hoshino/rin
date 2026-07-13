@@ -17,6 +17,7 @@ import { composeChatKeyForBot } from "../chat/support.js";
 import {
   compactObject,
   createPrefixedLogger,
+  editableIntermediateHeadText,
   editableWorkingText,
   emitBotStatus,
   ensureDir,
@@ -1314,6 +1315,7 @@ class TelegramAdapter {
     );
     const chatId = target.scopedChatId;
     if (!target.chatId) return false;
+    const statusText = safeString(context?.workingStatusText).trim();
     const summaryText = safeString(context?.assistantSummaryText).trim();
     const sourceMessageId = safeString(context?.messageId).trim();
     const replyToMessageId = safeString(
@@ -1323,9 +1325,17 @@ class TelegramAdapter {
     await this.updateWorkingMessage({
       chatId,
       text: renderTelegramHtmlFromNodes([
-        summaryText
-          ? { type: "markdown", text: summaryText }
-          : { type: "text", text: this.workingMessageText(context) },
+        statusText || summaryText
+          ? {
+              type: "markdown",
+              text: editableIntermediateHeadText(statusText || summaryText),
+            }
+          : {
+              type: "text",
+              text: editableIntermediateHeadText(
+                this.workingMessageText(context),
+              ),
+            },
       ]),
       todoText: context?.todoNoticeText,
       replyToMessageId: replyToMessageId || undefined,

@@ -410,6 +410,7 @@ test("discord adapter edits one quoted non-final message and deletes it only on 
       ["sent-1"],
     );
     assert.equal(sends.length, 1);
+    assert.equal(sends[0].content, "... Working...\n\n────────\n\nfirst");
     assert.deepEqual(sends[0].reply, {
       messageReference: "incoming-1",
       failIfNotExists: false,
@@ -423,7 +424,12 @@ test("discord adapter edits one quoted non-final message and deletes it only on 
       ["sent-1"],
     );
     assert.equal(sends.length, 1);
-    assert.deepEqual(edits, [{ id: "sent-1", payload: { content: "second" } }]);
+    assert.deepEqual(edits, [
+      {
+        id: "sent-1",
+        payload: { content: "... Working...\n\n────────\n\nsecond" },
+      },
+    ]);
 
     await bot.workingIndicators[0].end({ chatId: "channel-1" });
     assert.deepEqual(deletes, []);

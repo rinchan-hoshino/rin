@@ -166,7 +166,7 @@ test("discord adapter deletes visible progress before final text", async () => {
       calls.map((entry) => entry.method),
       ["send", "delete", "send"],
     );
-    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[1].id, "1");
     assert.equal(calls[2].payload.content, "done");
   });
@@ -212,15 +212,31 @@ test("discord adapter replaces editable Working with assistant summary", async (
       tick: 1,
       assistantSummaryText: "**Designing casual greeting response**",
     });
+    await editable.tick({
+      chatId: "C1",
+      tick: 2,
+      assistantSummaryText: "**Designing casual greeting response**",
+      workingStatusText: "Compacting...",
+    });
+    await editable.tick({
+      chatId: "C1",
+      tick: 3,
+      assistantSummaryText: "**Designing casual greeting response**",
+    });
 
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "edit"],
+      ["send", "edit", "edit", "edit"],
     );
-    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(
       calls[1].payload.content,
-      "**Designing casual greeting response**",
+      "... **Designing casual greeting response**",
+    );
+    assert.equal(calls[2].payload.content, "... Compacting...");
+    assert.equal(
+      calls[3].payload.content,
+      "... **Designing casual greeting response**",
     );
   });
 });
@@ -321,7 +337,7 @@ test("discord adapter waits for in-flight editable progress before final cleanup
           },
         };
         calls.push({ method: "send", id, payload });
-        if (payload?.content === "Working...") {
+        if (payload?.content === "... Working...") {
           workingSendStarted();
           await workingBlocked;
         }
@@ -355,7 +371,7 @@ test("discord adapter waits for in-flight editable progress before final cleanup
       calls.map((entry) => entry.method),
       ["send", "delete", "send"],
     );
-    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[0].payload.reply?.messageReference, "m-owner");
     assert.equal(calls[1].id, "1");
     assert.equal(calls[2].payload.content, "done");
@@ -404,11 +420,10 @@ test("discord adapter keeps working, content, and todo editable before final tex
       deliveryKind: "passive_notice",
       coalesceWithWorkingMessage: true,
     });
-    const interim = await app.bots[0].sendMessage(
-      "C1",
-      [h.text("… checking")],
-      { deliveryKind: "interim", coalesceWithWorkingMessage: true },
-    );
+    const interim = await app.bots[0].sendMessage("C1", [h.text("checking")], {
+      deliveryKind: "interim",
+      coalesceWithWorkingMessage: true,
+    });
     await editable.tick({ chatId: "C1", tick: 2 });
     const final = await app.bots[0].sendMessage("C1", [h.text("done")]);
 
@@ -418,16 +433,19 @@ test("discord adapter keeps working, content, and todo editable before final tex
       calls.map((entry) => entry.method),
       ["send", "edit", "edit", "edit", "edit", "delete", "send"],
     );
-    assert.equal(calls[0].payload.content, "Working...");
-    assert.equal(calls[1].payload.content, "Working");
-    assert.equal(calls[2].payload.content, "Working\n\n[ ] first task");
+    assert.equal(calls[0].payload.content, "... Working...");
+    assert.equal(calls[1].payload.content, "... Working");
+    assert.equal(
+      calls[2].payload.content,
+      "... Working\n\n────────\n\n[ ] first task",
+    );
     assert.equal(
       calls[3].payload.content,
-      "Working\n\n… checking\n\n[ ] first task",
+      "... Working\n\n────────\n\nchecking\n\n────────\n\n[ ] first task",
     );
     assert.equal(
       calls[4].payload.content,
-      "Working.\n\n… checking\n\n[ ] first task",
+      "... Working.\n\n────────\n\nchecking\n\n────────\n\n[ ] first task",
     );
     assert.equal(calls[5].id, "1");
     assert.equal(calls[6].payload.content, "done");
@@ -483,11 +501,11 @@ test("discord adapter sends errors beside editable progress", async () => {
       ["send", "send", "edit"],
     );
     assert.equal(calls[0].id, "1");
-    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[1].id, "2");
     assert.equal(calls[1].payload.content, "rin error: failed");
     assert.equal(calls[2].id, "1");
-    assert.equal(calls[2].payload.content, "Working");
+    assert.equal(calls[2].payload.content, "... Working");
   });
 });
 
@@ -539,8 +557,8 @@ test("discord adapter uses neutral working frames without custom config", async 
       calls.map((entry) => entry.method),
       ["send", "edit", "delete", "send"],
     );
-    assert.equal(calls[0].payload.content, "Working...");
-    assert.equal(calls[1].payload.content, "Working");
+    assert.equal(calls[0].payload.content, "... Working...");
+    assert.equal(calls[1].payload.content, "... Working");
     assert.equal(calls[2].id, "1");
     assert.equal(calls[3].payload.content, "done");
   });
@@ -590,10 +608,10 @@ test("discord adapter sends a new Working message when the cached progress is no
       ["send", "edit", "send", "delete", "delete", "send"],
     );
     assert.equal(calls[0].id, "1");
-    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[1].id, "1");
     assert.equal(calls[2].id, "2");
-    assert.equal(calls[2].payload.content, "Working");
+    assert.equal(calls[2].payload.content, "... Working");
     assert.equal(calls[3].id, "1");
     assert.equal(calls[4].id, "2");
     assert.equal(calls[5].payload.content, "done");
@@ -637,7 +655,7 @@ test("discord adapter deletes visible progress before final media", async () => 
       calls.map((entry) => entry.method),
       ["send", "delete", "send"],
     );
-    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[1].id, "1");
     assert.deepEqual(calls[2].payload.files, ["https://example.com/demo.png"]);
   });
@@ -680,7 +698,7 @@ test("slack adapter deletes visible progress before final text", async () => {
       calls.map((entry) => entry.method),
       ["postMessage", "delete", "postMessage"],
     );
-    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[0].payload.text, "... Working...");
     assert.equal(calls[1].payload.channel, "C123");
     assert.equal(calls[1].payload.ts, "1");
     assert.equal(calls[2].payload.channel, "C123");
@@ -727,7 +745,7 @@ test("slack adapter deletes visible progress before final media", async () => {
       calls.map((entry) => entry.method),
       ["postMessage", "delete", "postMessage"],
     );
-    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[0].payload.text, "... Working...");
     assert.equal(calls[1].payload.ts, "1");
     assert.equal(calls[2].payload.text, "https://example.com/demo.png");
   });
@@ -776,7 +794,7 @@ test("lark adapter sends progress as new messages without edit capability", asyn
     );
     const todoResult = await app.bots[0].sendMessage(
       "oc_1",
-      [h.text("⏹️ first task")],
+      [h.text("⬜ first task")],
       {
         deliveryKind: "passive_notice",
         coalesceWithWorkingMessage: true,
@@ -838,12 +856,15 @@ test("telegram adapter keeps working and todo editable before final text", async
         "sendMessage",
       ],
     );
-    assert.equal(calls[1].payload.text, "Working...");
+    assert.equal(calls[1].payload.text, "... Working...");
     assert.equal(calls[2].payload.message_id, 2);
-    assert.equal(calls[2].payload.text, "Working...\n\n[ ] first task");
+    assert.equal(
+      calls[2].payload.text,
+      "... Working...\n\n────────\n\n[ ] first task",
+    );
     assert.equal(calls[4].payload.message_id, 2);
-    assert.match(calls[4].payload.text, /^Working/);
-    assert.match(calls[4].payload.text, /\n\n\[ \] first task$/);
+    assert.match(calls[4].payload.text, /^\.\.\. Working/);
+    assert.match(calls[4].payload.text, /────────\n\n\[ \] first task$/);
     assert.equal(calls[5].payload.message_id, 2);
     assert.equal(calls[6].payload.text, "done");
   });
@@ -875,10 +896,10 @@ test("telegram adapter replaces editable Working with assistant summary", async 
       calls.map((entry) => entry.method),
       ["sendMessage", "editMessageText"],
     );
-    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[0].payload.text, "... Working...");
     assert.equal(
       calls[1].payload.text,
-      "<b>Designing casual greeting response</b>",
+      "... <b>Designing casual greeting response</b>",
     );
   });
 });
@@ -912,10 +933,10 @@ test("telegram adapter sends errors beside editable progress", async () => {
       calls.map((entry) => entry.method),
       ["sendMessage", "sendMessage", "editMessageText"],
     );
-    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[0].payload.text, "... Working...");
     assert.equal(calls[1].payload.text, "rin error: failed");
     assert.equal(calls[2].payload.message_id, 1);
-    assert.equal(calls[2].payload.text, "Working");
+    assert.equal(calls[2].payload.text, "... Working");
   });
 });
 
@@ -937,12 +958,12 @@ test("telegram adapter keeps todo below repeated working ticks from context", as
     await app.bots[0].workingIndicators[0].tick({
       chatId: "456",
       tick: 0,
-      todoNoticeText: "✅ ~~finished task~~\n⏹️ next task",
+      todoNoticeText: "✅ ~~finished task~~\n⬜ next task",
     });
     await app.bots[0].workingIndicators[0].tick({
       chatId: "456",
       tick: 1,
-      todoNoticeText: "✅ ~~finished task~~\n⏹️ next task",
+      todoNoticeText: "✅ ~~finished task~~\n⬜ next task",
     });
 
     assert.deepEqual(
@@ -951,13 +972,13 @@ test("telegram adapter keeps todo below repeated working ticks from context", as
     );
     assert.equal(
       calls[0].payload.text,
-      "Working...\n\n✅ <s>finished task</s>\n⏹️ next task",
+      "... Working...\n\n────────\n\n✅ <s>finished task</s>\n⬜ next task",
     );
     assert.equal(calls[0].payload.parse_mode, "HTML");
-    assert.match(calls[1].payload.text, /^Working/);
+    assert.match(calls[1].payload.text, /^\.\.\. Working/);
     assert.match(
       calls[1].payload.text,
-      /\n\n✅ <s>finished task<\/s>\n⏹️ next task$/,
+      /────────\n\n✅ <s>finished task<\/s>\n⬜ next task$/,
     );
     assert.equal(calls[1].payload.parse_mode, "HTML");
   });
@@ -1002,10 +1023,13 @@ test("telegram adapter keeps todo below interim text before final reply", async 
         "sendMessage",
       ],
     );
-    assert.equal(calls[1].payload.text, "Working...\n\n[ ] first task");
+    assert.equal(
+      calls[1].payload.text,
+      "... Working...\n\n────────\n\n[ ] first task",
+    );
     assert.equal(
       calls[2].payload.text,
-      "Working...\n\nchecking\n\n[ ] first task",
+      "... Working...\n\n────────\n\nchecking\n\n────────\n\n[ ] first task",
     );
     assert.equal(calls[3].payload.message_id, 1);
     assert.equal(calls[4].payload.text, "done");
@@ -1030,11 +1054,10 @@ test("telegram adapter edits one progress message from Working through interim b
 
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 0 });
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 1 });
-    const interim = await app.bots[0].sendMessage(
-      "456",
-      [h.text("… checking")],
-      { deliveryKind: "interim", coalesceWithWorkingMessage: true },
-    );
+    const interim = await app.bots[0].sendMessage("456", [h.text("checking")], {
+      deliveryKind: "interim",
+      coalesceWithWorkingMessage: true,
+    });
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 2 });
     const final = await app.bots[0].sendMessage("456", [h.text("done")]);
 
@@ -1051,13 +1074,13 @@ test("telegram adapter edits one progress message from Working through interim b
         "sendMessage",
       ],
     );
-    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[0].payload.text, "... Working...");
     assert.equal(calls[1].payload.message_id, 1);
-    assert.equal(calls[1].payload.text, "Working");
+    assert.equal(calls[1].payload.text, "... Working");
     assert.equal(calls[2].payload.message_id, 1);
-    assert.equal(calls[2].payload.text, "Working\n\n… checking");
+    assert.equal(calls[2].payload.text, "... Working\n\n────────\n\nchecking");
     assert.equal(calls[3].payload.message_id, 1);
-    assert.equal(calls[3].payload.text, "Working.\n\n… checking");
+    assert.equal(calls[3].payload.text, "... Working.\n\n────────\n\nchecking");
     assert.equal(calls[4].payload.message_id, 1);
     assert.equal(calls[5].payload.text, "done");
   });
@@ -1068,7 +1091,9 @@ test("telegram adapter uses custom working frame list from i18n", async () => {
     await fs.writeFile(
       path.join(agentDir, "i18n.json"),
       JSON.stringify({
-        chat: { runtime: { working: { frames: ["Loop A", "Loop B"] } } },
+        chat: {
+          runtime: { working: { frames: ["Loop A", "Loop B", "..."] } },
+        },
       }),
     );
     const app = createRuntimeApp(agentDir, {
@@ -1088,13 +1113,15 @@ test("telegram adapter uses custom working frame list from i18n", async () => {
     const editable = requireEditableIndicator(app.bots[0]);
     await editable.tick({ chatId: "456", tick: 0 });
     await editable.tick({ chatId: "456", tick: 1 });
+    await editable.tick({ chatId: "456", tick: 2 });
     const final = await app.bots[0].sendMessage("456", [h.text("done")]);
 
-    assert.deepEqual(final, ["4"]);
-    assert.equal(calls[0].payload.text, "Loop A");
-    assert.equal(calls[1].payload.text, "Loop B");
-    assert.equal(calls[2].payload.message_id, 1);
-    assert.equal(calls[3].payload.text, "done");
+    assert.deepEqual(final, ["5"]);
+    assert.equal(calls[0].payload.text, "... Loop A");
+    assert.equal(calls[1].payload.text, "... Loop B");
+    assert.equal(calls[2].payload.text, "... ...");
+    assert.equal(calls[3].payload.message_id, 1);
+    assert.equal(calls[4].payload.text, "done");
   });
 });
 
@@ -1206,7 +1233,7 @@ test("telegram adapter blocks late summary ticks while final text clears progres
       calls.map((entry) => entry.method),
       ["sendMessage", "deleteMessage", "sendMessage"],
     );
-    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(calls[0].payload.text, "... Working...");
     assert.equal(calls[1].payload.message_id, 1);
     assert.equal(calls[2].payload.text, "done");
   });
@@ -1247,7 +1274,10 @@ test("telegram adapter clears coalesced todo when final reply is media-only", as
       ["sendMessage", "editMessageText", "deleteMessage", "sendPhoto"],
     );
     assert.equal(calls[1].payload.message_id, 1);
-    assert.equal(calls[1].payload.text, "Working...\n\n[ ] first task");
+    assert.equal(
+      calls[1].payload.text,
+      "... Working...\n\n────────\n\n[ ] first task",
+    );
     assert.equal(calls[2].payload.message_id, 1);
   });
 });
@@ -2511,7 +2541,7 @@ test("telegram working indicator sends typing and visible working text without r
     );
     assert.equal(calls[0].payload.action, "typing");
     assert.equal(calls[1].payload.reply_to_message_id, "101");
-    assert.equal(calls[1].payload.text, "Working...");
+    assert.equal(calls[1].payload.text, "... Working...");
   });
 });
 
@@ -3171,7 +3201,7 @@ test("slack adapter sends todo nodes as Block Kit checkboxes", async () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].channel, "C123");
     assert.equal(calls[0].thread_ts, "99");
-    assert.equal(calls[0].text, "Todo\n⏹️ Keep working\n✅ ~~Ship renderer~~");
+    assert.equal(calls[0].text, "Todo\n⬜ Keep working\n✅ ~~Ship renderer~~");
     assert.equal(calls[0].blocks[0].text.text, "*Todo*");
     const checkbox = calls[0].blocks[1].elements[0];
     assert.equal(checkbox.type, "checkboxes");

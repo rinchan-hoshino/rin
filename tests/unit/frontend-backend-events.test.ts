@@ -15,6 +15,42 @@ const sdk = await import(
 );
 const NOTICE_CHANGED = "💡 Self-improve review updated demo.";
 
+test("frontend backend event translator preserves the persisted user leaf", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "message_start",
+      userMessageId: "user-message-1",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+      },
+    }),
+    [
+      {
+        type: "user_message_start",
+        text: "hello",
+        userMessageId: "user-message-1",
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "rin_user_message_persisted",
+      sessionLeafId: "user-entry",
+      userMessageId: "user-message-1",
+    }),
+    [
+      {
+        type: "user_message_persisted",
+        sessionLeafId: "user-entry",
+        userMessageId: "user-message-1",
+      },
+    ],
+  );
+});
+
 test("frontend backend event translator exposes status as a shared frontend event", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 

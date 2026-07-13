@@ -1243,6 +1243,66 @@ test("chat controller coalesces automatic compaction completion into the active 
   ]);
 });
 
+test("chat controller lets editable compaction temporarily own the Working head", async () => {
+  const controller = await createController("telegram/1:2");
+  const contexts = [];
+  const deliveries = [];
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        contexts.push({ ...context });
+        return true;
+      },
+      async end() {
+        return false;
+      },
+    },
+  ];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    deliveries.push({
+      text: nodes.map((node) => node?.attrs?.content || "").join(""),
+      coalesce: options?.coalesceWithWorkingMessage === true,
+    });
+    return [`m-out-${deliveries.length}`];
+  };
+  controller.driver.frontendPhase = "working";
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-owner",
+    replyToMessageId: "m-owner",
+    workingNoticeSent: true,
+  };
+  controller.awaitingTurnSettle = true;
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(contexts.at(-1)?.workingStatusText, "Compacting...");
+  assert.deepEqual(deliveries, []);
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      tokensBefore: 108642,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(contexts.at(-1)?.workingStatusText, undefined);
+  assert.deepEqual(deliveries, [
+    { text: "Compacted from 108,642 tokens", coalesce: true },
+  ]);
+});
+
 test("chat controller delivers non-deferred passive notices during active turns", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
@@ -1310,10 +1370,295 @@ test("chat controller renders todo notices as markdown for markdown chats", asyn
     {
       type: "markdown",
       attrs: {
-        content: "⏹️ Keep working\n✅ ~~Ship renderer~~",
+        content: "⬜ Keep working\n✅ ~~Ship renderer~~",
       },
     },
   ]);
+});
+
+test("chat controller sends the active non-empty todo once after each new user message", async () => {
+  const controller = await createController("onebot/1:2");
+  controller.app.bots[0].platform = "onebot";
+  controller.app.bots[0].selfId = "1";
+  const sessionFile = path.join(controller.agentDir, "sessions", "todo.jsonl");
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(
+    sessionFile,
+    `${[
+      {
+        type: "custom",
+        id: "todo-state",
+        parentId: null,
+        customType: "rin.todo",
+        data: {
+          todos: [{ id: 1, text: "Keep working", done: false }],
+          nextId: 2,
+        },
+      },
+      {
+        type: "message",
+        id: "user-message",
+        parentId: "todo-state",
+        message: { role: "user", content: [{ type: "text", text: "go" }] },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n")}\n`,
+    "utf8",
+  );
+  controller.driver.frontendState = {
+    sessionFile,
+    turnActive: true,
+    isStreaming: true,
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-todo",
+    replyToMessageId: "m-todo",
+    workingNoticeSent: false,
+  };
+  controller.awaitingTurnSettle = true;
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    deliveries.push({
+      text: nodes.map((node) => node?.attrs?.content || "").join(""),
+      coalesce: options?.coalesceWithWorkingMessage === true,
+    });
+    return [`m-out-${deliveries.length}`];
+  };
+
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "go",
+    userMessageId: "user-event-1",
+  });
+  await Promise.all([
+    controller.handleFrontendEvent({
+      type: "user_message_persisted",
+      sessionLeafId: "user-message",
+      userMessageId: "user-event-1",
+    }),
+    controller.handleFrontendEvent({
+      type: "user_message_persisted",
+      sessionLeafId: "user-message",
+      userMessageId: "user-event-1",
+    }),
+  ]);
+  assert.equal(
+    controller.workingIndicatorContext({ event: "tick" }).todoNoticeText,
+    "⬜ Keep working",
+  );
+
+  await fs.appendFile(
+    sessionFile,
+    `${JSON.stringify({
+      type: "message",
+      id: "user-continue",
+      parentId: "user-message",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "continue" }],
+      },
+    })}\n`,
+    "utf8",
+  );
+  controller.setCurrentTurn({
+    incomingMessageId: "m-todo-2",
+    replyToMessageId: "m-todo-2",
+  });
+  controller.awaitingTurnSettle = true;
+  assert.equal(
+    controller.workingIndicatorContext({ event: "tick" }).todoNoticeText,
+    undefined,
+  );
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "continue",
+    userMessageId: "user-event-2",
+  });
+  await controller.handleFrontendEvent({
+    type: "user_message_persisted",
+    sessionLeafId: "user-continue",
+    userMessageId: "user-event-2",
+  });
+
+  await fs.appendFile(
+    sessionFile,
+    `${[
+      {
+        type: "custom",
+        id: "todo-empty",
+        parentId: "user-continue",
+        customType: "rin.todo",
+        data: { todos: [], nextId: 1 },
+      },
+      {
+        type: "message",
+        id: "user-after-empty",
+        parentId: "todo-empty",
+        message: { role: "user", content: [{ type: "text", text: "done" }] },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n")}\n`,
+    "utf8",
+  );
+  controller.setCurrentTurn({
+    incomingMessageId: "m-todo-empty",
+    replyToMessageId: "m-todo-empty",
+  });
+  controller.awaitingTurnSettle = true;
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "done",
+    userMessageId: "user-event-empty",
+  });
+  await controller.handleFrontendEvent({
+    type: "user_message_persisted",
+    sessionLeafId: "user-after-empty",
+    userMessageId: "user-event-empty",
+  });
+
+  const retrySessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "todo-retry.jsonl",
+  );
+  await fs.writeFile(
+    retrySessionFile,
+    `${[
+      {
+        type: "custom",
+        id: "stale-todo",
+        parentId: null,
+        customType: "rin.todo",
+        data: {
+          todos: [{ id: 1, text: "Stale todo", done: false }],
+          nextId: 2,
+        },
+      },
+      {
+        type: "message",
+        id: "stale-user",
+        parentId: "stale-todo",
+        message: { role: "user", content: [{ type: "text", text: "old" }] },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n")}\n`,
+    "utf8",
+  );
+  controller.driver.frontendState.sessionFile = retrySessionFile;
+  controller.setCurrentTurn({
+    incomingMessageId: "m-todo-retry",
+    replyToMessageId: "m-todo-retry",
+  });
+  controller.awaitingTurnSettle = true;
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "retry",
+    userMessageId: "user-event-retry",
+  });
+  const delayedTodoDelivery = Promise.all([
+    controller.handleFrontendEvent({
+      type: "user_message_persisted",
+      sessionLeafId: "retry-user",
+      userMessageId: "user-event-retry",
+    }),
+    controller.handleFrontendEvent({
+      type: "user_message_persisted",
+      sessionLeafId: "retry-user",
+      userMessageId: "user-event-retry",
+    }),
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await fs.appendFile(
+    retrySessionFile,
+    `${JSON.stringify({
+      type: "message",
+      id: "retry-user",
+      parentId: "retry-todo",
+      message: { role: "user", content: [{ type: "text", text: "retry" }] },
+    })}\n`,
+    "utf8",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  await fs.appendFile(
+    retrySessionFile,
+    `${JSON.stringify({
+      type: "custom",
+      id: "retry-todo",
+      parentId: "stale-user",
+      customType: "rin.todo",
+      data: {
+        todos: [{ id: 1, text: "Retry todo", done: false }],
+        nextId: 2,
+      },
+    })}\n`,
+    "utf8",
+  );
+  await delayedTodoDelivery;
+
+  assert.deepEqual(deliveries, [
+    { text: "⬜ Keep working", coalesce: true },
+    { text: "⬜ Keep working", coalesce: true },
+    { text: "⬜ Retry todo", coalesce: true },
+  ]);
+});
+
+test("chat controller cancels a pending todo branch read when the turn settles", async () => {
+  const controller = await createController("onebot/1:2");
+  controller.driver.frontendState = {
+    sessionFile: path.join(controller.agentDir, "sessions", "delayed.jsonl"),
+    turnActive: true,
+    isStreaming: true,
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-todo-cancel",
+    replyToMessageId: "m-todo-cancel",
+    workingNoticeSent: false,
+  };
+  controller.awaitingTurnSettle = true;
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (...args) => {
+    deliveries.push(args);
+    return ["unexpected"];
+  };
+  let releaseRead;
+  let markReadStarted;
+  const readStarted = new Promise((resolve) => {
+    markReadStarted = resolve;
+  });
+  controller.readTodoSnapshotForNotice = async () => {
+    markReadStarted();
+    return await new Promise((resolve) => {
+      releaseRead = resolve;
+    });
+  };
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "cancel",
+    userMessageId: "user-event-cancel",
+  });
+
+  const pending = controller.handleFrontendEvent({
+    type: "user_message_persisted",
+    sessionLeafId: "user-cancel",
+    userMessageId: "user-event-cancel",
+  });
+  await readStarted;
+  assert.ok(controller.todoNoticeOperation);
+  controller.awaitingTurnSettle = false;
+  releaseRead({
+    todos: [{ id: 1, text: "must not send", done: false }],
+    nextId: 2,
+    pendingCount: 1,
+  });
+  await pending;
+
+  assert.equal(controller.todoNoticeOperation, null);
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller keeps todo errors outside editable progress", async () => {
@@ -1348,7 +1693,7 @@ test("chat controller keeps todo errors outside editable progress", async () => 
 
   assert.deepEqual(deliveries, [
     {
-      text: "⏹️ Keep working",
+      text: "⬜ Keep working",
       kind: "passive_notice",
       coalesce: true,
     },
@@ -1358,7 +1703,7 @@ test("chat controller keeps todo errors outside editable progress", async () => 
       coalesce: false,
     },
   ]);
-  assert.equal(controller.latestTodoNoticeText, "⏹️ Keep working");
+  assert.equal(controller.latestTodoNoticeText, "⬜ Keep working");
 });
 
 test("chat controller attempts independent todo errors when progress delivery fails", async () => {
@@ -1415,7 +1760,7 @@ test("chat controller renders todo notices as character fallback for plain chats
     {
       type: "markdown",
       attrs: {
-        content: "⏹️ Keep working\n✅ Ship renderer",
+        content: "⬜ Keep working\n✅ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
       },
     },
   ]);
@@ -1733,7 +2078,7 @@ test("chat controller runTurn quiet mode option overrides stored chat settings",
     quietMode: false,
   });
   assert.deepEqual(loudDeliveries, [
-    { text: "… visible interim", kind: "interim" },
+    { text: "... visible interim", kind: "interim" },
     { text: "- [ ] visible todo", kind: "passive_notice" },
   ]);
 });
@@ -2865,11 +3210,11 @@ test("chat controller replaces editable Working with a completed assistant summa
   assert.equal(contexts.length, 1);
   assert.equal(
     contexts[0].assistantSummaryText,
-    "Designing casual greeting response...",
+    "Designing casual greeting response",
   );
   assert.equal(
     controller.latestAssistantSummaryText,
-    "Designing casual greeting response...",
+    "Designing casual greeting response",
   );
 
   await controller.handleFrontendEvent({
@@ -2894,6 +3239,51 @@ test("chat controller replaces editable Working with a completed assistant summa
   });
   assert.equal(contexts.length, 2);
   assert.equal(controller.latestAssistantSummaryText, "");
+});
+
+test("chat controller keeps editable summary and compaction refreshes suppressed when progress is hidden", async () => {
+  const controller = await createController("telegram/1:2");
+  const contexts = [];
+  const deliveries = [];
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        contexts.push({ ...context });
+        return true;
+      },
+    },
+  ];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes) => {
+    deliveries.push(nodes);
+    return [`m-out-${deliveries.length}`];
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-hidden-progress",
+    replyToMessageId: "m-hidden-progress",
+    workingNoticeSent: false,
+  };
+  controller.awaitingTurnSettle = true;
+  controller.driver.frontendState = { turnActive: false, isStreaming: false };
+  controller.driver.hasVisibleChatWorkingTurn = () => false;
+
+  await controller.handleFrontendEvent({
+    type: "assistant_summary",
+    text: "Hidden summary",
+  });
+  assert.deepEqual(contexts, []);
+
+  controller.quietModeOverride = true;
+  controller.driver.frontendState = { turnActive: true, isStreaming: true };
+  await controller.handleFrontendEvent({
+    type: "compaction_start_notice",
+    text: "Compacting...",
+  });
+
+  assert.deepEqual(contexts, []);
+  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller polls typing and rotating reactions while a turn is active", async () => {
@@ -3798,7 +4188,7 @@ test("chat controller treats delivered interim assistant text as an inbound repl
   assert.equal(inbound?.sessionFile, "interim-boundary-chat.jsonl");
   assert.equal(assistant?.role, "assistant");
   assert.equal(assistant?.replyToMessageId, "m-interim-boundary");
-  assert.equal(assistant?.text, "… I will check this");
+  assert.equal(assistant?.text, "... I will check this");
   assert.equal(assistant?.sessionFile, "interim-boundary-chat.jsonl");
 });
 

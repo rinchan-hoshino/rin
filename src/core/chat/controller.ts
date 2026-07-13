@@ -23,6 +23,7 @@ import {
   formatRinTodoChecklistCharacterContent,
   formatRinTodoChecklistMarkdownContent,
   normalizeRinTodoItems,
+  readTodoSnapshotFromSessionFile,
   type RinTodoItem,
 } from "../rin-lib/todo-state.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
@@ -47,7 +48,6 @@ import {
   writeJsonFile,
 } from "./support.js";
 import {
-  CHAT_INTERIM_REPLY_PREFIX,
   ChatState,
   SavedAttachment,
   markProcessedChatMessage,
@@ -64,7 +64,7 @@ import { restorePromptParts } from "./transport.js";
 import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
 import { resolveChatQuietModeEnabled } from "./settings.js";
 
-const INTERIM_PREFIX = CHAT_INTERIM_REPLY_PREFIX;
+const INTERMEDIATE_PREFIX = "... ";
 const WORKING_REACTION_INTERVAL_MS = 30_000;
 
 type ChatDeliveryOutcome = {
@@ -370,7 +370,26 @@ export class ChatController {
   pendingPassiveNotices: string[] = [];
   latestTodoNoticeText = "";
   latestAssistantSummaryText = "";
-  awaitingTurnSettle = false;
+  workingStatusText = "";
+  todoNoticeTurnKey = "";
+  todoNoticeOperation: {
+    turnKey: string;
+    abort: AbortController;
+    promise: Promise<{ completed: boolean; sent: boolean }>;
+  } | null = null;
+  todoTurnKeyByUserMessageId = new Map<string, Promise<string>>();
+  private readTodoSnapshotForNotice = readTodoSnapshotFromSessionFile;
+  private _awaitingTurnSettle = false;
+  get awaitingTurnSettle() {
+    return this._awaitingTurnSettle;
+  }
+  set awaitingTurnSettle(value: boolean) {
+    this._awaitingTurnSettle = value;
+    if (!value) {
+      this.todoNoticeOperation?.abort.abort();
+      this.todoNoticeOperation = null;
+    }
+  }
   externalWorkingVisible = false;
   turnAbortRequested = false;
   turnAbortGeneration = 0;
@@ -475,6 +494,10 @@ export class ChatController {
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
+    this.workingStatusText = "";
+    this.todoNoticeTurnKey = "";
+    this.todoNoticeOperation = null;
+    this.todoTurnKeyByUserMessageId.clear();
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
@@ -504,6 +527,10 @@ export class ChatController {
   async clearProcessingState() {
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
+    this.workingStatusText = "";
+    this.todoNoticeTurnKey = "";
+    this.todoNoticeOperation = null;
+    this.todoTurnKeyByUserMessageId.clear();
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
@@ -581,6 +608,9 @@ export class ChatController {
     incomingMessageId?: string;
     replyToMessageId?: string;
   }) {
+    this.todoNoticeOperation?.abort.abort();
+    this.todoNoticeOperation = null;
+    this.latestTodoNoticeText = "";
     const nextIncomingMessageId =
       safeString(input.incomingMessageId || "").trim() || undefined;
     const nextReplyToMessageId =
@@ -592,6 +622,7 @@ export class ChatController {
       workingNoticeSent: false,
     };
     this.backendAcceptedIncomingMessageId = "";
+    this.todoNoticeTurnKey = "";
   }
 
   private async prepareTurnPrompt(
@@ -653,6 +684,8 @@ export class ChatController {
   }
 
   private clearCurrentTurn() {
+    this.todoNoticeOperation?.abort.abort();
+    this.todoNoticeOperation = null;
     this.currentTurn = null;
     this.backendAcceptedIncomingMessageId = "";
     this.latestAssistantSummaryText = "";
@@ -745,6 +778,7 @@ export class ChatController {
       tick: this.workingIndicatorTick,
       todoNoticeText: this.latestTodoNoticeText || undefined,
       assistantSummaryText: this.latestAssistantSummaryText || undefined,
+      workingStatusText: this.workingStatusText || undefined,
       ...extra,
     };
   }
@@ -1181,6 +1215,48 @@ export class ChatController {
     return this.driver.hasWorkerActiveTurn();
   }
 
+  private editableWorkingIndicator(indicators = this.getWorkingIndicators()) {
+    return selectVisibleWorkingIndicatorsForKind(indicators, "polling").find(
+      (indicator) =>
+        workingIndicatorPresentation(indicator) === "editable-message",
+    );
+  }
+
+  private hasEditableWorkingIndicator() {
+    return Boolean(this.editableWorkingIndicator());
+  }
+
+  private async refreshEditableWorkingNotice(
+    options: { force?: boolean } = {},
+  ) {
+    if (
+      !this.currentTurn ||
+      !this.awaitingTurnSettle ||
+      !this.canDeliverReplies() ||
+      this.shouldSuppressQuietDelivery("passive_notice") ||
+      (!options.force && !this.shouldShowTypingIndicator())
+    ) {
+      return false;
+    }
+    const editable = this.editableWorkingIndicator();
+    if (!editable) return false;
+
+    const now = Date.now();
+    const context = this.workingIndicatorContext({
+      event: "tick",
+      tick: this.workingIndicatorTick,
+      reactionDue: false,
+    });
+    const result = await this.callWorkingIndicator(
+      editable,
+      "tick",
+      context,
+    ).catch(() => false);
+    this.lastWorkingIndicatorAt = now;
+    this.workingIndicatorTick += 1;
+    return Boolean(result);
+  }
+
   private async showAssistantSummary(text: unknown) {
     const latestSummary = safeString(text)
       .replace(/\r\n?/g, "\n")
@@ -1189,45 +1265,14 @@ export class ChatController {
       .map((item) => item.trim())
       .filter(Boolean)
       .at(-1);
-    const plainSummary = stripMarkdownFormatting(latestSummary)
+    const summary = stripMarkdownFormatting(latestSummary)
       .replace(/\s+/g, " ")
       .trim();
-    const summary =
-      plainSummary && !/\p{P}$/u.test(plainSummary)
-        ? `${plainSummary}...`
-        : plainSummary;
     if (!summary || !this.currentTurn || !this.awaitingTurnSettle) {
       return false;
     }
     this.latestAssistantSummaryText = summary;
-    if (!this.canDeliverReplies() || !this.shouldShowTypingIndicator()) {
-      return false;
-    }
-
-    const indicators = this.getWorkingIndicators();
-    const editableIndicators = selectVisibleWorkingIndicatorsForKind(
-      indicators,
-      "polling",
-    ).filter(
-      (indicator) =>
-        workingIndicatorPresentation(indicator) === "editable-message",
-    );
-    if (!editableIndicators.length) return false;
-
-    const now = Date.now();
-    const context = this.workingIndicatorContext({
-      event: "tick",
-      tick: this.workingIndicatorTick,
-      reactionDue: false,
-    });
-    const results = await this.pollWorkingIndicators(
-      editableIndicators,
-      context,
-      now,
-    );
-    this.lastWorkingIndicatorAt = now;
-    this.workingIndicatorTick += 1;
-    return results.some(Boolean);
+    return await this.refreshEditableWorkingNotice();
   }
 
   async pollTyping() {
@@ -1708,7 +1753,14 @@ export class ChatController {
           chatKey: this.chatKey,
           deliveryKind: "interim",
           replyToMessageId: replyToMessageId || undefined,
-          parts: [{ type: "text", text: `${INTERIM_PREFIX}${trimmed}` }],
+          parts: [
+            {
+              type: "text",
+              text: this.hasEditableWorkingIndicator()
+                ? trimmed
+                : `${INTERMEDIATE_PREFIX}${trimmed}`,
+            },
+          ],
           coalesceWithWorkingMessage: true,
           ...this.currentConversationSessionPayload(),
         },
@@ -1792,6 +1844,117 @@ export class ChatController {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  private currentTodoNoticeTurnKey() {
+    return (
+      this.currentIncomingMessageId() ||
+      (this.currentTurn
+        ? `${this.currentSessionFile() || "session"}:${this.currentTurn.startedAt}`
+        : "")
+    );
+  }
+
+  private async waitForTodoRetry(delayMs: number, signal: AbortSignal) {
+    if (signal.aborted) return;
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, delayMs);
+      signal.addEventListener("abort", done, { once: true });
+    });
+  }
+
+  private async currentTodoNoticeOutcome(
+    turnKey: string,
+    sessionFile: string | undefined,
+    sessionLeafId: string,
+    signal: AbortSignal,
+  ) {
+    let snapshot;
+    let retryDelayMs = 10;
+    while (
+      !signal.aborted &&
+      this.currentTurn &&
+      this.awaitingTurnSettle &&
+      this.currentTodoNoticeTurnKey() === turnKey
+    ) {
+      if (this.shouldSuppressQuietDelivery("passive_notice")) {
+        return { completed: true, sent: false };
+      }
+      snapshot = await this.readTodoSnapshotForNotice(
+        sessionFile,
+        sessionLeafId,
+      );
+      if (snapshot) break;
+      await this.waitForTodoRetry(retryDelayMs, signal);
+      retryDelayMs = Math.min(250, retryDelayMs * 2);
+    }
+    if (
+      signal.aborted ||
+      !this.currentTurn ||
+      !this.awaitingTurnSettle ||
+      !snapshot ||
+      this.currentTodoNoticeTurnKey() !== turnKey
+    ) {
+      return { completed: false, sent: false };
+    }
+    if (!snapshot.todos.length) {
+      this.latestTodoNoticeText = "";
+      return { completed: true, sent: false };
+    }
+    const sent = await this.sendTodoPassiveNoticeNow({
+      todoItems: snapshot.todos,
+    });
+    return { completed: sent, sent };
+  }
+
+  private async sendCurrentTodoAfterUserMessage(
+    sessionLeafId: unknown,
+    expectedTurnKey: unknown,
+  ) {
+    const turnKey = safeString(expectedTurnKey).trim();
+    const expectedLeafId = safeString(sessionLeafId).trim();
+    if (
+      !turnKey ||
+      !expectedLeafId ||
+      this.currentTodoNoticeTurnKey() !== turnKey ||
+      this.todoNoticeTurnKey === turnKey
+    ) {
+      return false;
+    }
+
+    const existing = this.todoNoticeOperation;
+    if (existing?.turnKey === turnKey) {
+      return (await existing.promise).sent;
+    }
+
+    const abort = new AbortController();
+    const operation = {
+      turnKey,
+      abort,
+      promise: this.currentTodoNoticeOutcome(
+        turnKey,
+        this.currentSessionFile(),
+        expectedLeafId,
+        abort.signal,
+      ),
+    };
+    this.todoNoticeOperation = operation;
+    try {
+      const outcome = await operation.promise;
+      if (outcome.completed && this.currentTodoNoticeTurnKey() === turnKey) {
+        this.todoNoticeTurnKey = turnKey;
+      }
+      return outcome.sent;
+    } finally {
+      if (this.todoNoticeOperation === operation) {
+        this.todoNoticeOperation = null;
+      }
     }
   }
 
@@ -1888,8 +2051,10 @@ export class ChatController {
   }
 
   private async finishCompactionNotice() {
+    this.workingStatusText = "";
     await this.clearCompactionWorkingReaction().catch(() => false);
     this.compactionTurn = null;
+    await this.refreshEditableWorkingNotice().catch(() => false);
   }
 
   private compactionAckTarget() {
@@ -1958,6 +2123,27 @@ export class ChatController {
       ackIncomingMessageId;
     const coalesceReplyToMessageId =
       this.currentReplyToMessageId() || ackReplyToMessageId || undefined;
+
+    if (this.hasEditableWorkingIndicator()) {
+      this.ensureVisibleCommandTurn();
+      this.workingStatusText = trimmed;
+      const incomingMessageId =
+        this.currentIncomingMessageId() || ackIncomingMessageId;
+      const replyToMessageId =
+        this.currentReplyToMessageId() ||
+        ackReplyToMessageId ||
+        incomingMessageId;
+      this.compactionTurn = {
+        startedAt: Date.now(),
+        incomingMessageId: incomingMessageId || undefined,
+        replyToMessageId: replyToMessageId || undefined,
+        workingNoticeSent: true,
+        ackIncomingMessageId: ackIncomingMessageId || undefined,
+        ackReplyToMessageId: ackReplyToMessageId || undefined,
+      };
+      return await this.refreshEditableWorkingNotice({ force: true });
+    }
+
     try {
       const delivery = await this.enqueueAndDrainDelivery(
         {
@@ -2017,6 +2203,10 @@ export class ChatController {
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
+    this.workingStatusText = "";
+    this.todoNoticeTurnKey = "";
+    this.todoNoticeOperation = null;
+    this.todoTurnKeyByUserMessageId.clear();
     this.turnAbortRequested = false;
     this.turnAbortGeneration = 0;
   }
@@ -2624,9 +2814,30 @@ export class ChatController {
         this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
         return;
-      case "user_message_start":
-        await this.activatePendingSteeredDeliveryTarget(event.text);
+      case "user_message_start": {
+        const userMessageId = safeString(event.userMessageId).trim();
+        const activation = this.activatePendingSteeredDeliveryTarget(
+          event.text,
+        ).then(() => this.currentTodoNoticeTurnKey());
+        if (userMessageId) {
+          this.todoTurnKeyByUserMessageId.set(userMessageId, activation);
+        }
+        await activation;
         return;
+      }
+      case "user_message_persisted": {
+        const userMessageId = safeString(event.userMessageId).trim();
+        const turnKeyPromise =
+          this.todoTurnKeyByUserMessageId.get(userMessageId);
+        if (!userMessageId || !turnKeyPromise) return;
+        const turnKey = await turnKeyPromise;
+        this.todoTurnKeyByUserMessageId.delete(userMessageId);
+        await this.sendCurrentTodoAfterUserMessage(
+          event.sessionLeafId,
+          turnKey,
+        );
+        return;
+      }
       case "passive_notice":
         if (event.noticeKind === "compaction_end") {
           await this.deliverCompactionEndNotice(event.text);

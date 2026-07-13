@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -58,6 +59,189 @@ test("todo state reads the latest branch-aware custom entry", () => {
   ]);
 });
 
+test("todo state reads the latest todo from the active session-file branch", async () => {
+  const tempDir = await fs.mkdtemp(
+    path.join(process.env.TMPDIR || "/tmp", "rin-todo-state-"),
+  );
+  const sessionFile = path.join(tempDir, "branch.jsonl");
+  const entries = [
+    {
+      type: "custom",
+      id: "todo-main",
+      parentId: null,
+      customType: todoState.RIN_TODO_CUSTOM_ENTRY_TYPE,
+      data: {
+        todos: [{ id: 1, text: "main task", done: false }],
+        nextId: 2,
+      },
+    },
+    {
+      type: "custom",
+      id: "todo-abandoned",
+      parentId: "todo-main",
+      customType: todoState.RIN_TODO_CUSTOM_ENTRY_TYPE,
+      data: {
+        todos: [{ id: 1, text: "wrong branch", done: false }],
+        nextId: 2,
+      },
+    },
+    {
+      type: "message",
+      id: "active-user",
+      parentId: "todo-main",
+      message: { role: "user", content: [{ type: "text", text: "continue" }] },
+    },
+  ];
+  await fs.writeFile(
+    sessionFile,
+    `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    "utf8",
+  );
+
+  try {
+    const snapshot =
+      await todoState.readTodoSnapshotFromSessionFile(sessionFile);
+    assert.deepEqual(snapshot.todos, [
+      { id: 1, text: "main task", done: false },
+    ]);
+    assert.deepEqual(
+      (
+        await todoState.readTodoSnapshotFromSessionFile(
+          sessionFile,
+          "active-user",
+        )
+      ).todos,
+      [{ id: 1, text: "main task", done: false }],
+    );
+    assert.equal(
+      await todoState.readTodoSnapshotFromSessionFile(
+        sessionFile,
+        "future-user",
+      ),
+      undefined,
+    );
+    assert.equal(
+      await todoState.readTodoSnapshotFromSessionFile(sessionFile, "todo-main"),
+      undefined,
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("todo state retries an expected user leaf with an incomplete ancestor chain", async () => {
+  const tempDir = await fs.mkdtemp(
+    path.join(process.env.TMPDIR || "/tmp", "rin-todo-ancestors-"),
+  );
+  const sessionFile = path.join(tempDir, "ancestors.jsonl");
+  const user = {
+    type: "message",
+    id: "user",
+    parentId: "todo",
+    message: { role: "user", content: [{ type: "text", text: "go" }] },
+  };
+  const todo = {
+    type: "custom",
+    id: "todo",
+    parentId: null,
+    customType: todoState.RIN_TODO_CUSTOM_ENTRY_TYPE,
+    data: {
+      todos: [{ id: 1, text: "wait for ancestors", done: false }],
+      nextId: 2,
+    },
+  };
+
+  try {
+    await fs.writeFile(sessionFile, `${JSON.stringify(user)}\n`, "utf8");
+    assert.equal(
+      await todoState.readTodoSnapshotFromSessionFile(sessionFile, "user"),
+      undefined,
+    );
+
+    await fs.writeFile(
+      sessionFile,
+      `${JSON.stringify(user)}\n${JSON.stringify(todo)}\n`,
+      "utf8",
+    );
+    assert.deepEqual(
+      (await todoState.readTodoSnapshotFromSessionFile(sessionFile, "user"))
+        .todos,
+      [{ id: 1, text: "wait for ancestors", done: false }],
+    );
+
+    await fs.writeFile(
+      sessionFile,
+      `${JSON.stringify({ ...todo, parentId: "user" })}\n${JSON.stringify(
+        user,
+      )}\n`,
+      "utf8",
+    );
+    assert.equal(
+      await todoState.readTodoSnapshotFromSessionFile(sessionFile, "user"),
+      undefined,
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("todo state leaves unavailable session files distinguishable from empty todo", async () => {
+  assert.equal(
+    await todoState.readTodoSnapshotFromSessionFile(
+      path.join(process.env.TMPDIR || "/tmp", "missing-rin-session.jsonl"),
+    ),
+    undefined,
+  );
+});
+
+test("todo state treats a partially written JSONL tail as retryable", async () => {
+  const tempDir = await fs.mkdtemp(
+    path.join(process.env.TMPDIR || "/tmp", "rin-todo-partial-"),
+  );
+  const sessionFile = path.join(tempDir, "partial.jsonl");
+  const todo = {
+    type: "custom",
+    id: "todo",
+    parentId: null,
+    customType: todoState.RIN_TODO_CUSTOM_ENTRY_TYPE,
+    data: {
+      todos: [{ id: 1, text: "retry me", done: false }],
+      nextId: 2,
+    },
+  };
+  const user = {
+    type: "message",
+    id: "user",
+    parentId: "todo",
+    message: { role: "user", content: [{ type: "text", text: "go" }] },
+  };
+
+  try {
+    await fs.writeFile(
+      sessionFile,
+      `${JSON.stringify(todo)}\n${JSON.stringify(user).slice(0, -2)}`,
+      "utf8",
+    );
+    assert.equal(
+      await todoState.readTodoSnapshotFromSessionFile(sessionFile),
+      undefined,
+    );
+
+    await fs.writeFile(
+      sessionFile,
+      `${JSON.stringify(todo)}\n${JSON.stringify(user)}\n`,
+      "utf8",
+    );
+    const snapshot =
+      await todoState.readTodoSnapshotFromSessionFile(sessionFile);
+    assert.deepEqual(snapshot.todos, [
+      { id: 1, text: "retry me", done: false },
+    ]);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("todo state ignores context-visible todo tool-result details", () => {
   const session = {
     sessionManager: {
@@ -92,16 +276,16 @@ test("todo state formats markdown chat fallback with markdown strikethrough", ()
     { text: "Done item", done: true },
   ]);
 
-  assert.equal(content, "⏹️ Open item\n✅ ~~Done item~~");
+  assert.equal(content, "⬜ Open item\n✅ ~~Done item~~");
 });
 
-test("todo state formats character-only chat fallback without strikethrough", () => {
+test("todo state preserves visible strikethrough in character-only chat fallback", () => {
   const content = todoState.formatRinTodoChecklistCharacterContent([
     { text: "Open item", done: false },
     { text: "Done item", done: true },
   ]);
 
-  assert.equal(content, "⏹️ Open item\n✅ Done item");
+  assert.equal(content, "⬜ Open item\n✅ D̶o̶n̶e̶ i̶t̶e̶m̶");
 });
 
 test("todo state does not expose hidden final-continuation helpers", () => {

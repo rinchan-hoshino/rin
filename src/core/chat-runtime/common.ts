@@ -41,6 +41,9 @@ const DEFAULT_EDITABLE_WORKING_FRAMES = [
   "Working..",
 ];
 
+export const EDITABLE_INTERMEDIATE_PREFIX = "...";
+export const EDITABLE_MESSAGE_SECTION_SEPARATOR = "────────";
+
 type ChatRuntimeWorkingCopy = {
   frames: string[];
   progressTexts: string[];
@@ -108,6 +111,15 @@ export function editableWorkingText(tick: unknown, frames?: unknown) {
     : DEFAULT_EDITABLE_WORKING_FRAMES;
   const index = Math.abs(Math.floor(Number(tick) || 0)) % resolvedFrames.length;
   return resolvedFrames[index] || DEFAULT_EDITABLE_WORKING_FRAMES[0];
+}
+
+export function editableIntermediateHeadText(text: unknown) {
+  const value = safeString(text).trim();
+  if (!value) return "";
+  if (value.startsWith(`${EDITABLE_INTERMEDIATE_PREFIX} `)) {
+    return value;
+  }
+  return `${EDITABLE_INTERMEDIATE_PREFIX} ${value}`;
 }
 
 export function randomWorkingText(frames?: unknown) {
@@ -250,13 +262,14 @@ export function composeEditableMessageText(sections: EditableMessageSections) {
     sections.todoTextChunks.map((item) => safeString(item)).join(""),
   ]
     .filter(Boolean)
-    .join("\n\n");
+    .join(`\n\n${EDITABLE_MESSAGE_SECTION_SEPARATOR}\n\n`);
 }
 
 export function updateEditableMessageSections(input: {
   kind?: string;
   textChunks: string[];
   persisted?: Partial<EditableMessageSections> | null;
+  fallbackWorkingTextChunks?: string[];
   fallbackTodoTextChunks?: string[];
   finalize?: boolean;
 }): EditableMessageSections {
@@ -266,6 +279,7 @@ export function updateEditableMessageSections(input: {
   const existingWorking = normalizeTextChunks(persisted.workingTextChunks);
   const existingContent = normalizeTextChunks(persisted.contentTextChunks);
   const existingTodo = normalizeTextChunks(persisted.todoTextChunks);
+  const fallbackWorking = normalizeTextChunks(input.fallbackWorkingTextChunks);
   const fallbackTodo = normalizeTextChunks(input.fallbackTodoTextChunks);
   const section =
     kind === "todo"
@@ -279,7 +293,9 @@ export function updateEditableMessageSections(input: {
         ? nextTextChunks
         : input.finalize
           ? []
-          : existingWorking,
+          : existingWorking.length
+            ? existingWorking
+            : fallbackWorking,
     contentTextChunks: section === "content" ? nextTextChunks : existingContent,
     todoTextChunks: input.finalize
       ? []

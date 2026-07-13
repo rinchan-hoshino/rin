@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+
 import { safeString } from "../text-utils.js";
 
 export type RinTodoItem = {
@@ -61,9 +63,17 @@ export function formatRinTodoChecklistMarkdownContent(
   return todos
     .map((todo) => {
       const text = formatRinTodoLineText(todo);
-      return `${todo.done ? "✅" : "⏹️"} ${todo.done ? `~~${text}~~` : text}`;
+      return `${todo.done ? "✅" : "⬜"} ${todo.done ? `~~${text}~~` : text}`;
     })
     .join("\n");
+}
+
+function characterStrikethrough(text: string) {
+  return Array.from(text)
+    .map((character) =>
+      /\s/u.test(character) ? character : `${character}\u0336`,
+    )
+    .join("");
 }
 
 export function formatRinTodoChecklistCharacterContent(
@@ -74,7 +84,9 @@ export function formatRinTodoChecklistCharacterContent(
   return todos
     .map((todo) => {
       const text = formatRinTodoLineText(todo);
-      return `${todo.done ? "✅" : "⏹️"} ${text}`;
+      return `${todo.done ? "✅" : "⬜"} ${
+        todo.done ? characterStrikethrough(text) : text
+      }`;
     })
     .join("\n");
 }
@@ -118,11 +130,81 @@ function branchEntriesFromSession(session: any) {
   return [];
 }
 
-export function readTodoSnapshotFromSession(session: any): RinTodoSnapshot {
+function activeBranchFromEntries(entries: unknown[], expectedLeafId?: string) {
+  const records = entries.filter((entry): entry is Record<string, any> =>
+    Boolean(entry && typeof entry === "object"),
+  );
+  const entriesById = new Map(
+    records
+      .map((entry) => [safeString(entry.id).trim(), entry] as const)
+      .filter(([id]) => Boolean(id)),
+  );
+  const leafId =
+    safeString(expectedLeafId).trim() ||
+    [...records]
+      .reverse()
+      .map((entry) => safeString(entry.id).trim())
+      .find(Boolean);
+  if (!leafId) return records;
+
+  const leaf = entriesById.get(leafId);
+  if (!leaf) return undefined;
+  if (expectedLeafId && safeString(leaf.message?.role).trim() !== "user") {
+    return undefined;
+  }
+  const branch: Record<string, any>[] = [];
+  const visited = new Set<string>();
+  let entryId: string | undefined = leafId;
+  while (entryId) {
+    if (visited.has(entryId)) return undefined;
+    visited.add(entryId);
+    const entry = entriesById.get(entryId);
+    if (!entry) return undefined;
+    branch.push(entry);
+    entryId = safeString(entry.parentId).trim() || undefined;
+  }
+  return branch.reverse();
+}
+
+async function readSessionFileEntries(sessionFile: unknown) {
+  const filePath = safeString(sessionFile).trim();
+  if (!filePath) return undefined;
+  try {
+    const entries: unknown[] = [];
+    for (const line of (await fs.readFile(filePath, "utf8")).split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        entries.push(JSON.parse(trimmed));
+      } catch {
+        return undefined;
+      }
+    }
+    return entries;
+  } catch {
+    return undefined;
+  }
+}
+
+function readTodoSnapshotFromEntries(entries: unknown[]): RinTodoSnapshot {
   let latest: RinTodoSnapshot = todoSnapshot();
-  for (const entry of branchEntriesFromSession(session)) {
+  for (const entry of entries) {
     const next = todoSnapshotFromCustomEntry(entry);
     if (next) latest = next;
   }
   return latest;
+}
+
+export function readTodoSnapshotFromSession(session: any): RinTodoSnapshot {
+  return readTodoSnapshotFromEntries(branchEntriesFromSession(session));
+}
+
+export async function readTodoSnapshotFromSessionFile(
+  sessionFile: unknown,
+  expectedLeafId?: string,
+): Promise<RinTodoSnapshot | undefined> {
+  const entries = await readSessionFileEntries(sessionFile);
+  if (!entries) return undefined;
+  const branch = activeBranchFromEntries(entries, expectedLeafId);
+  return branch ? readTodoSnapshotFromEntries(branch) : undefined;
 }
