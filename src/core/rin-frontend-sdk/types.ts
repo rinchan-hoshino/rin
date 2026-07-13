@@ -71,7 +71,8 @@ export type RinFrontendStatusPhase =
   | "starting"
   | "sending"
   | "working"
-  | "compacting";
+  | "compacting"
+  | "retrying";
 
 export type RinFrontendBackendEvent =
   | {

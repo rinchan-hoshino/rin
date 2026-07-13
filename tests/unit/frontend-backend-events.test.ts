@@ -55,6 +55,25 @@ test("frontend backend event translator exposes status as a shared frontend even
       },
     ],
   );
+  assert.deepEqual(
+    translator.translate({
+      type: "rpc_frontend_status",
+      phase: "retrying",
+      label: "Retrying",
+      connected: true,
+      turnActive: true,
+    }),
+    [
+      {
+        type: "status",
+        phase: "retrying",
+        label: "Retrying",
+        connected: true,
+        turnActive: true,
+        isStreaming: undefined,
+      },
+    ],
+  );
 });
 
 test("frontend backend event translator exposes Pi working and compaction events", () => {

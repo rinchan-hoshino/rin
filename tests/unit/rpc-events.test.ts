@@ -108,6 +108,30 @@ test("rpc session events do not refresh whole state on every stream update", asy
 
   await events.handleRpcSessionEvent(
     target,
+    { type: "auto_retry_start", attempt: 1 },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.retryAttempt, 1);
+
+  await events.handleRpcSessionEvent(
+    target,
+    { type: "auto_retry_end", success: true, attempt: 1 },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.retryAttempt, 0);
+
+  await events.handleRpcSessionEvent(
+    target,
     { type: "worker_exit", code: 9, signal: null },
     async () => {
       refreshMessages += 1;
@@ -142,6 +166,10 @@ test("rpc session events do not refresh whole state on every stream update", asy
     { type: "compaction_start", reason: "threshold" },
     { type: "frontend_status_refresh", force: true, compacting: true },
     { type: "compaction_end", reason: "threshold", aborted: false },
+    { type: "frontend_status_refresh", force: true, compacting: false },
+    { type: "auto_retry_start", attempt: 1 },
+    { type: "frontend_status_refresh", force: true, compacting: false },
+    { type: "auto_retry_end", success: true, attempt: 1 },
     { type: "frontend_status_refresh", force: true, compacting: false },
     { type: "worker_exit", code: 9, signal: null },
     { type: "rpc_turn_event", event: "complete", requestTag: "tag-1" },

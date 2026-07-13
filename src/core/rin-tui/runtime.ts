@@ -293,6 +293,7 @@ type RpcFrontendPhase =
   | "idle"
   | "starting"
   | "compacting"
+  | "retrying"
   | "sending"
   | "working"
   | "connecting";
@@ -304,6 +305,7 @@ const RPC_FRONTEND_PHASE_LABELS: Record<
   connecting: "Connecting",
   starting: "Starting",
   compacting: "Compacting context",
+  retrying: "Retrying",
   sending: "Sending",
   working: "Working",
 };
@@ -1308,6 +1310,7 @@ export class RpcInteractiveSession {
     }
     if (!this.rpcConnected || this.recoveryPending) return "connecting";
     if (this.isCompacting) return "compacting";
+    if (this.retryAttempt > 0) return "retrying";
     if (this.remoteTurnRunning) return "working";
     if (this.activeTurn) return "sending";
     return "idle";

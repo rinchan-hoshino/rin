@@ -37,7 +37,8 @@ function statusPhase(value: unknown): RinFrontendStatusPhase {
     phase === "starting" ||
     phase === "sending" ||
     phase === "working" ||
-    phase === "compacting"
+    phase === "compacting" ||
+    phase === "retrying"
   ) {
     return phase;
   }

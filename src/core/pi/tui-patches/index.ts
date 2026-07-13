@@ -64,12 +64,12 @@ const PRESERVE_SCROLLBACK_PATCH = Symbol.for(
 const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
 const RPC_TRANSPORT_STATUS_COMPONENT_KEY = "__rinRpcTransportStatusComponent";
 const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
+const RPC_TRANSPORT_STATUS_KIND = "rinRpcTransport";
 const SESSION_SELECTOR_PAGE_SIZE = 30;
 const RPC_TRANSPORT_STATUS_PHASES = new Set([
   "starting",
   "connecting",
   "sending",
-  "compacting",
 ]);
 
 class RinStartupExpandableText extends Text {
@@ -287,29 +287,37 @@ function isRpcTransportControlled(instance: any) {
   return typeof instance?.session?.getFrontendStatusEvent === "function";
 }
 
-function statusContainerHasChild(instance: any, child: any) {
-  if (!child) return false;
-  const container = instance?.statusContainer;
-  if (Array.isArray(container?.children))
-    return container.children.includes(child);
-  return container?.child === child;
+class RinRpcTransportStatusIndicator extends Loader {
+  readonly kind = RPC_TRANSPORT_STATUS_KIND;
+
+  constructor(
+    private instance: any,
+    message: string,
+  ) {
+    super(instance.ui, (text: string) => text, dim, message);
+  }
+
+  dispose() {
+    this.stop();
+    if (this.instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY] === this) {
+      this.instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = undefined;
+      this.instance[RPC_TRANSPORT_STATUS_MESSAGE_KEY] = undefined;
+    }
+  }
 }
 
 function stopRpcTransportStatusComponent(instance: any) {
   const component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
   if (!component) return false;
-  component.stop?.();
-  const wasAttached = statusContainerHasChild(instance, component);
-  if (wasAttached) {
-    instance.statusContainer.clear();
+  instance.clearStatusIndicator(RPC_TRANSPORT_STATUS_KIND);
+  if (instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY] === component) {
+    component.dispose();
   }
-  instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = undefined;
-  instance[RPC_TRANSPORT_STATUS_MESSAGE_KEY] = undefined;
-  return wasAttached;
+  return true;
 }
 
-function createRpcTransportStatusLoader(instance: any, message: string) {
-  return new Loader(instance.ui, (text: string) => text, dim, message);
+function createRpcTransportStatusIndicator(instance: any, message: string) {
+  return new RinRpcTransportStatusIndicator(instance, message);
 }
 
 function formatRpcTransportStatusLabel(label: string) {
@@ -327,66 +335,29 @@ function showRpcTransportStatus(instance: any, event: any) {
   const label = String(event?.label || phase || "Starting");
   const message = formatRpcTransportStatusLabel(label);
   let component = instance?.[RPC_TRANSPORT_STATUS_COMPONENT_KEY];
-  const attached = statusContainerHasChild(instance, component);
   const previousMessage = instance?.[RPC_TRANSPORT_STATUS_MESSAGE_KEY];
-  if (component && attached && previousMessage === message) {
-    return;
-  }
+  if (component && previousMessage === message) return;
 
-  let renderedByLoader = false;
   if (!component) {
-    component = createRpcTransportStatusLoader(instance, message);
+    component = createRpcTransportStatusIndicator(instance, message);
     instance[RPC_TRANSPORT_STATUS_COMPONENT_KEY] = component;
-    renderedByLoader = true;
+    instance.showStatusIndicator(component);
   } else if (previousMessage !== message) {
-    component.setMessage?.(message);
-    renderedByLoader = true;
+    component.setMessage(message);
   }
   instance[RPC_TRANSPORT_STATUS_MESSAGE_KEY] = message;
-
-  if (!attached) {
-    instance.statusContainer.clear();
-    instance.statusContainer.addChild(component);
-    if (!renderedByLoader) instance.ui.requestRender();
-  }
 }
 
-function syncPiWorkingStatusIndicator(instance: any) {
+function syncPiWorkingStatusFromSession(instance: any) {
   const clearedTransportStatus = stopRpcTransportStatusComponent(instance);
-  const indicator = instance?.activeStatusIndicator;
-  if (indicator) {
-    if (indicator.kind !== "working") {
-      if (clearedTransportStatus) instance?.ui?.requestRender?.();
-      return;
-    }
-    if (!statusContainerHasChild(instance, indicator)) {
-      instance.statusContainer.clear();
-      instance.statusContainer.addChild(indicator);
-    }
-    instance.ui.requestRender();
-    return;
-  }
   if (
     instance?.workingVisible !== false &&
     instance?.session?.isStreaming &&
     typeof instance?.setWorkingVisible === "function"
   ) {
     instance.setWorkingVisible(true);
-    return;
   }
   if (clearedTransportStatus) instance?.ui?.requestRender?.();
-}
-
-function reattachCompactionStatusIndicator(instance: any) {
-  const indicator = instance?.activeStatusIndicator;
-  if (indicator?.kind !== "compaction") return false;
-  stopRpcTransportStatusComponent(instance);
-  if (!statusContainerHasChild(instance, indicator)) {
-    instance.statusContainer.clear();
-    instance.statusContainer.addChild(indicator);
-  }
-  instance.ui.requestRender();
-  return true;
 }
 
 function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
@@ -394,10 +365,12 @@ function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
   const status = statusOverride ?? instance.session.getFrontendStatusEvent?.();
   const phase = String(status?.phase || "");
   if (phase === "working") {
-    syncPiWorkingStatusIndicator(instance);
+    syncPiWorkingStatusFromSession(instance);
     return;
   }
-  if (phase === "compacting" && reattachCompactionStatusIndicator(instance)) {
+  if (phase === "compacting" || phase === "retrying") {
+    const changed = stopRpcTransportStatusComponent(instance);
+    if (changed) instance?.ui?.requestRender?.();
     return;
   }
   if (RPC_TRANSPORT_STATUS_PHASES.has(phase)) {
@@ -411,10 +384,10 @@ function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
 function syncLocalPiWorkingStatus(instance: any) {
   if (isRpcTransportControlled(instance)) return;
   if (!instance?.session?.isStreaming) return;
-  syncPiWorkingStatusIndicator(instance);
+  instance.setWorkingVisible(instance?.workingVisible !== false);
 }
 
-function shouldReapplyLocalPiLoaderAfterEvent(instance: any, event: any) {
+function shouldSyncLocalWorkingAfterEvent(instance: any, event: any) {
   return (
     !isRpcTransportControlled(instance) && event?.type === "compaction_end"
   );
@@ -1586,7 +1559,7 @@ export async function applyRinTuiOverrides() {
 
       if (shouldSuppressLocalUserEcho(this, event)) return;
 
-      const shouldReapplyLocalPiLoader = shouldReapplyLocalPiLoaderAfterEvent(
+      const shouldSyncLocalWorking = shouldSyncLocalWorkingAfterEvent(
         this,
         event,
       );
@@ -1595,7 +1568,7 @@ export async function applyRinTuiOverrides() {
       await originalHandleEvent.call(this, event);
 
       syncRpcFrontendStatus(this);
-      if (shouldReapplyLocalPiLoader) {
+      if (shouldSyncLocalWorking) {
         syncLocalPiWorkingStatus(this);
       }
     };

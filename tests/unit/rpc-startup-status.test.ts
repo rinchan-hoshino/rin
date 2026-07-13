@@ -106,7 +106,16 @@ test("rpc frontend status labels follow phase priority", () => {
   });
 
   session.isCompacting = false;
+  session.retryAttempt = 2;
   session.remoteTurnRunning = true;
+  assert.deepEqual(session.getFrontendStatusEvent(), {
+    type: "rpc_frontend_status",
+    phase: "retrying",
+    label: "Retrying",
+    connected: true,
+  });
+
+  session.retryAttempt = 0;
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "working",

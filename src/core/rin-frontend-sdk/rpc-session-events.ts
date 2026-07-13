@@ -98,7 +98,9 @@ export async function handleRinRpcSessionEvent(
   target.emitEvent?.(payload);
   if (
     payload.type === "compaction_start" ||
-    payload.type === "compaction_end"
+    payload.type === "compaction_end" ||
+    payload.type === "auto_retry_start" ||
+    payload.type === "auto_retry_end"
   ) {
     emitFrontendStatus();
   }

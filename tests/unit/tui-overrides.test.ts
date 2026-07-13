@@ -1118,6 +1118,9 @@ test("rpc frontend startup statuses use one animated loader until working starts
     retryCountdown: undefined,
     retryLoader: undefined,
     workingVisible: true,
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    activeStatusIndicator: undefined,
   };
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
@@ -1129,7 +1132,10 @@ test("rpc frontend startup statuses use one animated loader until working starts
 
   const startupStatus = instance.statusContainer.child;
   assert.ok(startupStatus);
-  assert.equal(startupStatus.constructor.name, "Loader");
+  assert.equal(
+    startupStatus.constructor.name,
+    "RinRpcTransportStatusIndicator",
+  );
   assert.notEqual(startupStatus.intervalId, null);
   assert.ok(startupStatus.frames.length > 1);
   assert.equal(startupStatus.message, "Starting...");
@@ -1217,6 +1223,9 @@ test("rpc transport status remains visible after ordinary events while reconnect
     retryCountdown: undefined,
     retryLoader: undefined,
     workingVisible: false,
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    activeStatusIndicator: undefined,
   };
 
   try {
@@ -1247,11 +1256,94 @@ test("rpc transport status remains visible after ordinary events while reconnect
     assert.equal(instance.statusContainer.child.message, "Connecting...");
     assert.equal(additions, 2);
   } finally {
+    instance.activeStatusIndicator?.dispose?.();
+  }
+});
+
+test("rpc transport statuses use Pi's status API as the only component owner", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  const calls = [];
+  const instance = {
+    isInitialized: true,
+    ui: { requestRender() {} },
+    statusContainer: {
+      child: undefined,
+      clear() {
+        this.child = undefined;
+      },
+      addChild(child) {
+        this.child = child;
+      },
+    },
+    session: {
+      isStreaming: true,
+      getFrontendStatusEvent() {
+        return {
+          type: "rpc_frontend_status",
+          phase: "starting",
+          label: "Starting",
+          connected: false,
+        };
+      },
+    },
+    showStatusIndicator(indicator) {
+      calls.push({ method: "showStatusIndicator", kind: indicator.kind });
+      this.semanticIndicator = indicator;
+    },
+    clearStatusIndicator(kind) {
+      calls.push({ method: "clearStatusIndicator", kind });
+      this.semanticIndicator?.dispose?.();
+      this.semanticIndicator = undefined;
+    },
+    setWorkingVisible(visible) {
+      calls.push({ method: "setWorkingVisible", visible });
+    },
+  };
+
+  try {
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "rpc_frontend_status",
+        phase: "starting",
+        label: "Starting",
+        connected: false,
+      },
+    );
+    assert.deepEqual(calls, [
+      { method: "showStatusIndicator", kind: "rinRpcTransport" },
+    ]);
+
+    calls.length = 0;
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "rpc_frontend_status",
+        phase: "working",
+        label: "Working",
+        connected: true,
+      },
+    );
+    assert.deepEqual(calls, [
+      { method: "clearStatusIndicator", kind: "rinRpcTransport" },
+      { method: "setWorkingVisible", visible: true },
+    ]);
+  } finally {
+    instance.semanticIndicator?.dispose?.();
     instance.statusContainer.child?.stop?.();
   }
 });
 
-test("rpc working status reattaches the existing Pi working indicator", async () => {
+test("Rin status coordination does not read Pi private component fields", async () => {
+  const source = await fs.readFile(
+    path.join(rootDir, "src", "core", "pi", "tui-patches", "index.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /\b(?:activeStatusIndicator|loadingAnimation)\b/);
+});
+
+test("rpc transport-to-working transition stays within Pi's status API", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -1302,9 +1394,19 @@ test("rpc working status reattaches the existing Pi working indicator", async ()
       instance,
       { type: "agent_start" },
     );
-    const existingIndicator = instance.activeStatusIndicator;
-    assert.equal(existingIndicator?.kind, "working");
-    instance.statusContainer.clear();
+    const initialWorkingIndicator = instance.activeStatusIndicator;
+    assert.equal(initialWorkingIndicator?.kind, "working");
+
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "rpc_frontend_status",
+        phase: "connecting",
+        label: "Connecting",
+        connected: false,
+      },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "rinRpcTransport");
 
     renders = 0;
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
@@ -1317,9 +1419,90 @@ test("rpc working status reattaches the existing Pi working indicator", async ()
       },
     );
 
-    assert.equal(instance.activeStatusIndicator, existingIndicator);
-    assert.equal(instance.statusContainer.child, existingIndicator);
+    assert.equal(instance.activeStatusIndicator?.kind, "working");
+    assert.notEqual(instance.activeStatusIndicator, initialWorkingIndicator);
+    assert.equal(
+      instance.statusContainer.child,
+      instance.activeStatusIndicator,
+    );
     assert.ok(renders >= 1);
+  } finally {
+    instance.activeStatusIndicator?.dispose?.();
+  }
+});
+
+test("rpc retry phase preserves Pi retry status before returning to Working", async () => {
+  await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
+
+  const ui = {
+    requestRender() {},
+    terminal: { setProgress() {} },
+  };
+  const instance = {
+    isInitialized: true,
+    ui,
+    settingsManager: settingsManagerWithoutTerminalProgress,
+    session: {
+      isStreaming: true,
+      retryAttempt: 0,
+      abortRetry() {},
+      getFrontendStatusEvent() {
+        return {
+          type: "rpc_frontend_status",
+          phase: this.retryAttempt > 0 ? "retrying" : "working",
+          label: this.retryAttempt > 0 ? "Retrying" : "Working",
+          connected: true,
+        };
+      },
+    },
+    workingVisible: true,
+    defaultWorkingMessage: "Working...",
+    statusContainer: {
+      child: undefined,
+      clear() {
+        this.child = undefined;
+      },
+      addChild(child) {
+        this.child = child;
+      },
+    },
+    footer: { invalidate() {} },
+    pendingTools: new Map(),
+    defaultEditor: { onEscape() {} },
+    showError() {},
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
+      .setWorkingVisible,
+    activeStatusIndicator: undefined,
+  };
+
+  try {
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      { type: "agent_start" },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "working");
+
+    instance.session.retryAttempt = 1;
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "auto_retry_start",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1000,
+      },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "retry");
+
+    instance.session.retryAttempt = 0;
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      { type: "auto_retry_end", success: true, attempt: 1 },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "working");
   } finally {
     instance.activeStatusIndicator?.dispose?.();
   }
@@ -2066,7 +2249,7 @@ test("zero-extension compaction end rebuilds history containing Rin core custom 
   assert.ok(getFooterInvalidations() >= 1);
 });
 
-test("rpc compaction end restores the Pi working indicator while the turn remains active", async () => {
+test("rpc compaction end renders Pi Working from the still-active turn", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -2088,8 +2271,8 @@ test("rpc compaction end restores the Pi working indicator while the turn remain
       getFrontendStatusEvent() {
         return {
           type: "rpc_frontend_status",
-          phase: "working",
-          label: "Working",
+          phase: this.isCompacting ? "compacting" : "working",
+          label: this.isCompacting ? "Compacting context" : "Working",
           connected: true,
         };
       },
@@ -2132,12 +2315,14 @@ test("rpc compaction end restores the Pi working indicator while the turn remain
     );
     assert.equal(instance.activeStatusIndicator?.kind, "working");
 
+    instance.session.isCompacting = true;
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
       { type: "compaction_start", reason: "threshold" },
     );
     assert.equal(instance.activeStatusIndicator?.kind, "compaction");
 
+    instance.session.isCompacting = false;
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
       { type: "compaction_end", aborted: false, willRetry: false },
@@ -2155,7 +2340,7 @@ test("rpc compaction end restores the Pi working indicator while the turn remain
   }
 });
 
-test("local compaction end restores the Pi working indicator while the turn is still streaming", async () => {
+test("local compaction end renders Pi Working from the streaming session", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 

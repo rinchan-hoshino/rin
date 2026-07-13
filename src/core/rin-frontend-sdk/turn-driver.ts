@@ -1531,7 +1531,9 @@ export class RinFrontendTurnDriver {
     switch (event.type) {
       case "status":
         this.setFrontendPhase(
-          event.phase === "compacting" ? "working" : event.phase,
+          event.phase === "compacting" || event.phase === "retrying"
+            ? "working"
+            : event.phase,
         );
         if (typeof event.turnActive === "boolean") {
           this.frontendState.turnActive = event.turnActive;
