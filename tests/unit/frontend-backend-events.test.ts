@@ -151,6 +151,85 @@ test("frontend backend event translator does not expose compact summary when tok
   );
 });
 
+test("frontend backend event translator emits only completed assistant summaries", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+  const partial = {
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: "Designing casual greeting response" },
+      { type: "text", text: "Assistant content stays separate" },
+    ],
+  };
+
+  assert.deepEqual(
+    translator.translate({
+      type: "message_update",
+      message: partial,
+      assistantMessageEvent: {
+        type: "thinking_delta",
+        contentIndex: 0,
+        delta: " response",
+        partial,
+      },
+    }),
+    [{ type: "assistant_stream", text: "Assistant content stays separate" }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_update",
+      message: partial,
+      assistantMessageEvent: {
+        type: "thinking_end",
+        contentIndex: 0,
+        content: "Designing casual greeting response",
+        partial,
+      },
+    }),
+    [
+      {
+        type: "assistant_summary",
+        text: "Designing casual greeting response",
+      },
+      { type: "assistant_stream", text: "Assistant content stays separate" },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_update",
+      message: partial,
+      assistantMessageEvent: {
+        type: "thinking_end",
+        contentIndex: 0,
+        content: "Designing casual greeting response",
+        partial,
+      },
+    }),
+    [{ type: "assistant_stream", text: "Assistant content stays separate" }],
+  );
+
+  for (const text of [
+    "Checking the rendered result",
+    "Designing casual greeting response",
+  ]) {
+    assert.deepEqual(
+      translator.translate({
+        type: "message_update",
+        message: partial,
+        assistantMessageEvent: {
+          type: "thinking_end",
+          contentIndex: 0,
+          content: text,
+          partial,
+        },
+      }),
+      [
+        { type: "assistant_summary", text },
+        { type: "assistant_stream", text: "Assistant content stays separate" },
+      ],
+    );
+  }
+});
+
 test("frontend backend event translator classifies assistant tool preface as interim", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 

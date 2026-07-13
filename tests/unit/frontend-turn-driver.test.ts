@@ -1611,6 +1611,44 @@ test("frontend SDK turn driver trusts backend prompt admission over stale local 
   assert.equal(promptCall.options.streamingBehavior, undefined);
 });
 
+test("frontend SDK turn driver forwards a completed summary without assistant content", async () => {
+  const driver = createDriver();
+  const summaries: string[] = [];
+  driver.subscribe((event: any) => {
+    if (event.type === "assistant_summary") summaries.push(event.text);
+  });
+
+  (driver as any).testClient.prompt = async (
+    _text: string,
+    options: any = {},
+  ) => {
+    await emitDriverEvent(driver, { type: "agent_start" });
+    const partial = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Inspecting current frontend state" },
+        { type: "text", text: "Final content" },
+      ],
+    };
+    await emitDriverEvent(driver, {
+      type: "message_update",
+      message: partial,
+      assistantMessageEvent: {
+        type: "thinking_end",
+        contentIndex: 0,
+        content: "Inspecting current frontend state",
+        partial,
+      },
+    });
+    await emitRpcTurnComplete(driver, options.requestTag, "Final content");
+  };
+
+  const result = await driver.runTurn({ text: "hello" });
+
+  assert.equal(result.finalText, "Final content");
+  assert.deepEqual(summaries, ["Inspecting current frontend state"]);
+});
+
 test("frontend SDK turn driver does not leak growing final-answer prefixes as interim", async () => {
   const driver = createDriver();
   const interimTexts: string[] = [];

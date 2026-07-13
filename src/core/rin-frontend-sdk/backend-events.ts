@@ -62,6 +62,12 @@ function assistantInterimText(message: any) {
   ).trim();
 }
 
+function completedAssistantSummary(payload: any) {
+  const event = payload?.assistantMessageEvent;
+  if (event?.type !== "thinking_end") return "";
+  return safeString(event.content).trim();
+}
+
 type TodoNotice = {
   text: string;
   todos: RinTodoItem[];
@@ -217,13 +223,25 @@ export function createRinFrontendBackendEventTranslator(
   let latestAssistantText = "";
   let latestAssistantFinalText = "";
   let activeToolBatch: ActiveToolBatch | null = null;
+  let latestDeliveredAssistantSummary = "";
   const deliveredAssistantInterimTexts = new Set<string>();
 
   const resetAssistantSegments = () => {
     latestAssistantText = "";
     latestAssistantFinalText = "";
     activeToolBatch = null;
+    latestDeliveredAssistantSummary = "";
     deliveredAssistantInterimTexts.clear();
+  };
+
+  const takeSummary = (text: string) => {
+    const trimmed = safeString(text).trim();
+    if (!trimmed || latestDeliveredAssistantSummary === trimmed) return null;
+    latestDeliveredAssistantSummary = trimmed;
+    return {
+      type: "assistant_summary",
+      text: trimmed,
+    } satisfies RinFrontendBackendEvent;
   };
 
   const takeInterim = (text: string) => {
@@ -342,13 +360,21 @@ export function createRinFrontendBackendEventTranslator(
           ];
         case "agent_end":
           return [];
-        case "message_update":
+        case "message_update": {
           if (payload?.message?.role !== "assistant") return [];
           latestAssistantText =
             assistantText(payload.message) || latestAssistantText;
-          return latestAssistantText
-            ? [{ type: "assistant_stream", text: latestAssistantText }]
-            : [];
+          const events: RinFrontendBackendEvent[] = [];
+          const summary = takeSummary(completedAssistantSummary(payload));
+          if (summary) events.push(summary);
+          if (latestAssistantText) {
+            events.push({
+              type: "assistant_stream",
+              text: latestAssistantText,
+            });
+          }
+          return events;
+        }
         case "message_end": {
           if (payload?.message?.role !== "assistant") return [];
           if (isAssistantFailedMessage(payload.message)) return [];

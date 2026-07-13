@@ -104,6 +104,7 @@ export type RinFrontendTurnDriverEvent =
   | { type: "user_message_start"; text: string }
   | RinFrontendPassiveNoticeEvent
   | { type: "compaction_start_notice"; text: string }
+  | { type: "assistant_summary"; text: string }
   | { type: "assistant_interim"; text: string };
 
 export type RinFrontendTurnClient = RinFrontendClient & {
@@ -1586,6 +1587,9 @@ export class RinFrontendTurnDriver {
         return;
       case "assistant_stream":
         this.latestAssistantText = event.text;
+        return;
+      case "assistant_summary":
+        this.emit({ type: "assistant_summary", text: event.text });
         return;
       case "assistant_interim":
         this.emit({ type: "assistant_interim", text: event.text });

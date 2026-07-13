@@ -98,6 +98,7 @@ export type RinFrontendBackendEvent =
   | { type: "external_working_end" }
   | { type: "working_visible"; visible: boolean }
   | { type: "assistant_stream"; text: string }
+  | { type: "assistant_summary"; text: string }
   | { type: "assistant_interim"; text: string }
   | {
       type: "assistant_final";

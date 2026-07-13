@@ -1277,6 +1277,7 @@ class TelegramAdapter {
     );
     const chatId = target.scopedChatId;
     if (!target.chatId) return false;
+    const summaryText = safeString(context?.assistantSummaryText).trim();
     const sourceMessageId = safeString(context?.messageId).trim();
     const replyToMessageId = safeString(
       context?.replyToMessageId || sourceMessageId,
@@ -1285,7 +1286,9 @@ class TelegramAdapter {
     await this.updateWorkingMessage({
       chatId,
       text: renderTelegramHtmlFromNodes([
-        { type: "text", text: this.workingMessageText(context) },
+        summaryText
+          ? { type: "markdown", text: summaryText }
+          : { type: "text", text: this.workingMessageText(context) },
       ]),
       todoText: context?.todoNoticeText,
       replyToMessageId: replyToMessageId || undefined,

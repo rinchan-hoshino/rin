@@ -90,9 +90,12 @@ export class EditableTextMessageGroup {
       tick: async (context: any) => {
         const chatId = safeString(context?.chatId).trim();
         if (!chatId) return false;
+        const summaryText = safeString(context?.assistantSummaryText).trim();
         const ids = await this.updateText({
           chatId,
-          text: editableWorkingText(context?.tick, this.workingFrames),
+          text:
+            summaryText ||
+            editableWorkingText(context?.tick, this.workingFrames),
           replyToMessageId:
             safeString(context?.replyToMessageId).trim() || undefined,
           kind: "working",

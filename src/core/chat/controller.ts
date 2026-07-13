@@ -368,6 +368,7 @@ export class ChatController {
   stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
   latestTodoNoticeText = "";
+  latestAssistantSummaryText = "";
   awaitingTurnSettle = false;
   externalWorkingVisible = false;
   turnAbortRequested = false;
@@ -653,6 +654,7 @@ export class ChatController {
   private clearCurrentTurn() {
     this.currentTurn = null;
     this.backendAcceptedIncomingMessageId = "";
+    this.latestAssistantSummaryText = "";
   }
 
   private setActiveCommandTurnInput(input: {
@@ -741,6 +743,7 @@ export class ChatController {
       replyToMessageId: this.currentReplyToMessageId() || undefined,
       tick: this.workingIndicatorTick,
       todoNoticeText: this.latestTodoNoticeText || undefined,
+      assistantSummaryText: this.latestAssistantSummaryText || undefined,
       ...extra,
     };
   }
@@ -881,6 +884,7 @@ export class ChatController {
     this.lastWorkingIndicatorAt = 0;
     this.lastTypingIndicatorAt = 0;
     this.workingIndicatorTick = 0;
+    this.latestAssistantSummaryText = "";
     if (!options.preserveTodoNotice) this.latestTodoNoticeText = "";
     const context = this.workingIndicatorContext({
       event: "end",
@@ -1055,6 +1059,7 @@ export class ChatController {
     }
     this.setCurrentTurn(input);
     this.latestTodoNoticeText = "";
+    this.latestAssistantSummaryText = "";
     this.awaitingTurnSettle = true;
     const indicators = this.getWorkingIndicators();
     const editableStarted = await this.startEditableWorkingNotice(
@@ -1129,6 +1134,42 @@ export class ChatController {
       return this.driver.hasVisibleChatWorkingTurn();
     }
     return this.driver.hasWorkerActiveTurn();
+  }
+
+  private async showAssistantSummary(text: unknown) {
+    const summary = safeString(text).trim();
+    if (!summary || !this.currentTurn || !this.awaitingTurnSettle) {
+      return false;
+    }
+    this.latestAssistantSummaryText = summary;
+    if (!this.canDeliverReplies() || !this.shouldShowTypingIndicator()) {
+      return false;
+    }
+
+    const indicators = this.getWorkingIndicators();
+    const editableIndicators = selectVisibleWorkingIndicatorsForKind(
+      indicators,
+      "polling",
+    ).filter(
+      (indicator) =>
+        workingIndicatorPresentation(indicator) === "editable-message",
+    );
+    if (!editableIndicators.length) return false;
+
+    const now = Date.now();
+    const context = this.workingIndicatorContext({
+      event: "tick",
+      tick: this.workingIndicatorTick,
+      reactionDue: false,
+    });
+    const results = await this.pollWorkingIndicators(
+      editableIndicators,
+      context,
+      now,
+    );
+    this.lastWorkingIndicatorAt = now;
+    this.workingIndicatorTick += 1;
+    return results.some(Boolean);
   }
 
   async pollTyping() {
@@ -2538,6 +2579,9 @@ export class ChatController {
         return;
       case "compaction_start_notice":
         await this.deliverCompactionStartNotice(event.text);
+        return;
+      case "assistant_summary":
+        await this.showAssistantSummary(event.text);
         return;
       case "assistant_interim":
         await this.deliverAssistantInterim(event.text);

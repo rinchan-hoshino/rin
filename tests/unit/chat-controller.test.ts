@@ -2808,6 +2808,67 @@ test("chat controller preserves active turn typing when external working ends", 
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
 });
 
+test("chat controller replaces editable Working with a completed assistant summary", async () => {
+  const controller = await createController("telegram/1:2");
+  const contexts: any[] = [];
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        contexts.push(context);
+        return true;
+      },
+    },
+  ];
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-summary",
+    workingNoticeSent: true,
+  };
+  controller.awaitingTurnSettle = true;
+  controller.driver.frontendState.turnActive = true;
+  controller.driver.hasVisibleChatWorkingTurn = () => true;
+
+  await controller.handleFrontendEvent({
+    type: "assistant_summary",
+    text: "Designing casual greeting response",
+  });
+
+  assert.equal(contexts.length, 1);
+  assert.equal(
+    contexts[0].assistantSummaryText,
+    "Designing casual greeting response",
+  );
+  assert.equal(
+    controller.latestAssistantSummaryText,
+    "Designing casual greeting response",
+  );
+
+  await controller.handleFrontendEvent({
+    type: "assistant_summary",
+    text: "Checking the rendered result",
+  });
+  assert.equal(contexts.length, 2);
+  assert.equal(
+    contexts[1].assistantSummaryText,
+    "Checking the rendered result",
+  );
+
+  await controller.clearWorkingReaction();
+  assert.equal(controller.latestAssistantSummaryText, "");
+  controller.latestAssistantSummaryText = "Residual summary state";
+  controller.awaitingTurnSettle = false;
+  controller.clearCurrentTurn();
+  assert.equal(controller.latestAssistantSummaryText, "");
+  await controller.handleFrontendEvent({
+    type: "assistant_summary",
+    text: "Late stale summary",
+  });
+  assert.equal(contexts.length, 2);
+  assert.equal(controller.latestAssistantSummaryText, "");
+});
+
 test("chat controller polls typing and rotating reactions while a turn is active", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];

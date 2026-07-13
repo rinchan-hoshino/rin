@@ -172,6 +172,59 @@ test("discord adapter deletes visible progress before final text", async () => {
   });
 });
 
+test("discord adapter replaces editable Working with assistant summary", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    const channel = {
+      send: async (payload: any) => {
+        const id = String(messages.size + 1);
+        const message = {
+          id,
+          payload,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            message.payload = nextPayload;
+            return message;
+          },
+        };
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => calls.push({ method: "delete", id }),
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({ chatId: "C1", tick: 0 });
+    await editable.tick({
+      chatId: "C1",
+      tick: 1,
+      assistantSummaryText: "**Designing casual greeting response**",
+    });
+
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "edit"],
+    );
+    assert.equal(calls[0].payload.content, "Working...");
+    assert.equal(
+      calls[1].payload.content,
+      "**Designing casual greeting response**",
+    );
+  });
+});
+
 test("discord adapter preserves markdown indentation", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -832,6 +885,40 @@ test("telegram adapter keeps working and todo editable before final text", async
   });
 });
 
+test("telegram adapter replaces editable Working with assistant summary", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      if (method === "sendMessage") return { message_id: String(calls.length) };
+      return { message_id: payload?.message_id };
+    };
+
+    await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 0 });
+    await app.bots[0].workingIndicators[0].tick({
+      chatId: "456",
+      tick: 1,
+      assistantSummaryText: "**Designing casual greeting response**",
+    });
+
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["sendMessage", "editMessageText"],
+    );
+    assert.equal(calls[0].payload.text, "Working...");
+    assert.equal(
+      calls[1].payload.text,
+      "<b>Designing casual greeting response</b>",
+    );
+  });
+});
+
 test("telegram adapter sends errors beside editable progress", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -1122,7 +1209,7 @@ test("telegram adapter scopes forum topic sessions and outbound payloads", async
   });
 });
 
-test("telegram adapter blocks late working ticks while final text clears progress", async () => {
+test("telegram adapter blocks late summary ticks while final text clears progress", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -1140,6 +1227,7 @@ test("telegram adapter blocks late working ticks while final text clears progres
         await app.bots[0].workingIndicators[0].tick({
           chatId: "456",
           tick: 1,
+          assistantSummaryText: "Late stale summary",
         });
       }
       if (method === "sendMessage") return { message_id: String(calls.length) };
