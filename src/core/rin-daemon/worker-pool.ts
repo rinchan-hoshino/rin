@@ -62,6 +62,7 @@ type InterruptedTurnRecoveryIntent = {
   selector: SessionSelector;
   source: string;
   requestTag?: string;
+  frontendOwner?: boolean;
   promise?: Promise<void>;
   retryAttempt?: number;
   retryTimer?: NodeJS.Timeout;
@@ -489,6 +490,7 @@ export class WorkerPool {
         recoverySelector,
         true,
         worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
+        worker.activeLifecycleFrontendOwner,
       );
     }
     this.syncRunningWorkerRecord(worker);
@@ -791,6 +793,7 @@ export class WorkerPool {
     sessionFile?: string;
     source?: string;
     requestTag?: string;
+    frontendOwner?: boolean;
   }) {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) return;
@@ -805,12 +808,27 @@ export class WorkerPool {
         requestedTag !== undefined && requestedTag.length > 0
           ? requestedTag
           : undefined,
+      frontendOwner: item.frontendOwner === true,
     };
     intent.source = item.source || intent.source || "daemon-restart";
     if (requestedTag !== undefined && requestedTag.length > 0) {
       intent.requestTag = requestedTag;
     }
+    intent.frontendOwner = item.frontendOwner === true;
     this.interruptedTurnRecoveryIntents.set(key, intent);
+    const owningWorker = this.findWorkerBySelector(intent.selector);
+    const expectedTag = intent.requestTag ?? "";
+    if (
+      owningWorker?.activeLifecycleRequestTag === expectedTag &&
+      (!owningWorker.activeLifecycleSelector ||
+        sessionMatchesSelector(
+          intent.selector,
+          owningWorker.activeLifecycleSelector,
+        ))
+    ) {
+      owningWorker.activeLifecycleFrontendOwner = intent.frontendOwner === true;
+      this.syncRunningWorkerRecord(owningWorker);
+    }
     void this.runInterruptedTurnRecoveryIntent(key, intent);
   }
 
@@ -849,7 +867,11 @@ export class WorkerPool {
       );
       if (worker.activeLifecycleRequestTag !== undefined) {
         if (!ownsLifecycle) return false;
-        if (hasPendingRecovery || hasConfirmedOwnedLiveTurn) return true;
+        worker.activeLifecycleFrontendOwner = intent.frontendOwner === true;
+        if (hasPendingRecovery || hasConfirmedOwnedLiveTurn) {
+          this.syncRunningWorkerRecord(worker);
+          return true;
+        }
       } else {
         if (liveTurnActivity) return false;
         if (hasPendingRecovery) return true;
@@ -858,7 +880,13 @@ export class WorkerPool {
       worker.idleSince = null;
       worker.turnRecoveryPending = true;
       if (!ownsLifecycle) {
-        this.setLifecycleOwner(worker, expectedTag, intent.selector);
+        this.setLifecycleOwner(
+          worker,
+          expectedTag,
+          intent.selector,
+          undefined,
+          intent.frontendOwner === true,
+        );
       }
       if (intent.requestTag) worker.activeRequestTag = intent.requestTag;
       this.syncRunningWorkerRecord(worker);
@@ -873,6 +901,7 @@ export class WorkerPool {
           intent.selector,
           true,
           intent.requestTag,
+          intent.frontendOwner === true,
         );
         throw error;
       }
@@ -2026,6 +2055,7 @@ export class WorkerPool {
     selector: SessionSelector | undefined,
     running: boolean,
     requestTag?: string,
+    frontendOwner = false,
   ) {
     const sessionFile = sessionSelectorFromState(selector).sessionFile;
     if (!sessionFile) return;
@@ -2034,6 +2064,7 @@ export class WorkerPool {
       sessionFile,
       running,
       requestTag,
+      frontendOwner,
     );
   }
 
@@ -2045,6 +2076,7 @@ export class WorkerPool {
       sessionFile,
       this.isWorkerRunning(worker),
       worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
+      worker.activeLifecycleFrontendOwner,
     );
   }
 
@@ -2340,6 +2372,7 @@ export class WorkerPool {
         selector,
         true,
         worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
+        worker.activeLifecycleFrontendOwner,
       );
     }
 

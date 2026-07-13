@@ -892,6 +892,139 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("restart recovery restores frontend ownership for the same inbox prompt", async () => {
+  const dir = await makeTempDir("rin-worker-pool-frontend-recovery-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(${JSON.stringify(logPath)}, command.type + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-stable",
+    frontendOwner: true,
+  });
+  while ((await readCommandLog(logPath)).length === 0) await sleep(5);
+
+  worker.turnActive = true;
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "same-inbox-rejoin",
+      type: "prompt",
+      message: "original inbox prompt",
+      requestTag: "chat-inbox-stable",
+      sessionFile,
+    },
+    true,
+  );
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "different-inbox-prompt",
+      type: "prompt",
+      message: "different prompt",
+      requestTag: "chat-inbox-different",
+      sessionFile,
+    },
+    true,
+  );
+  await sleep(20);
+
+  assert.deepEqual(await readCommandLog(logPath), ["get_state", "prompt"]);
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"id":"same-inbox-rejoin"') &&
+        value.includes('"error":"rin_turn_recovery_in_progress"'),
+    ),
+    false,
+  );
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"id":"different-inbox-prompt"') &&
+        value.includes('"error":"rin_turn_recovery_in_progress"'),
+    ),
+    true,
+  );
+
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-stable",
+    frontendOwner: false,
+  });
+  await sleep(5);
+  assert.equal(worker.activeLifecycleFrontendOwner, false);
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "same-inbox-after-owner-clear",
+      type: "prompt",
+      message: "original inbox prompt",
+      requestTag: "chat-inbox-stable",
+      sessionFile,
+    },
+    true,
+  );
+  await sleep(10);
+  assert.deepEqual(await readCommandLog(logPath), ["get_state", "prompt"]);
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"id":"same-inbox-after-owner-clear"') &&
+        value.includes('"error":"rin_turn_recovery_in_progress"'),
+    ),
+    true,
+  );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("a same-tag prompt can rejoin a frontend-owned turn before start", async () => {
   const dir = await makeTempDir("rin-worker-pool-prompt-rejoin-gap-");
   const workerPath = path.join(dir, "worker-source");
@@ -3589,6 +3722,7 @@ setInterval(() => {}, 1000);
     schemaVersion: 1,
     sessionFiles: [sessionFile],
     requestTags: { [sessionFile]: "tag-1" },
+    frontendOwners: { [sessionFile]: true },
   });
 
   await sleep(40);
@@ -3597,6 +3731,7 @@ setInterval(() => {}, 1000);
     schemaVersion: 1,
     sessionFiles: [sessionFile],
     requestTags: { [sessionFile]: "tag-1" },
+    frontendOwners: { [sessionFile]: true },
   });
 
   await sleep(180);
@@ -3674,6 +3809,7 @@ setInterval(() => {}, 1000);
     schemaVersion: 1,
     sessionFiles: [sessionFile],
     requestTags: { [sessionFile]: "tag-1" },
+    frontendOwners: { [sessionFile]: true },
   });
 
   pool.beginShutdown();
@@ -3683,6 +3819,7 @@ setInterval(() => {}, 1000);
     schemaVersion: 1,
     sessionFiles: [sessionFile],
     requestTags: { [sessionFile]: "tag-1" },
+    frontendOwners: { [sessionFile]: true },
   });
 
   await fs.rm(dir, { recursive: true, force: true });
@@ -3765,6 +3902,7 @@ setInterval(() => {}, 1000);
     schemaVersion: 1,
     sessionFiles: [sessionFile],
     requestTags: { [sessionFile]: "rpc-running" },
+    frontendOwners: { [sessionFile]: true },
   });
   assert.equal(pool.getStatusSnapshot().workers[0]?.turnActive, true);
   assert.equal(pool.getStatusSnapshot().workers[0]?.isStreaming, false);
@@ -3861,6 +3999,7 @@ test("stale terminal events do not clear a newer tagged active turn", async () =
     schemaVersion: 1,
     sessionFiles: [sessionFile],
     requestTags: { [sessionFile]: "tag-current" },
+    frontendOwners: { [sessionFile]: true },
   });
 
   (pool as any).updateWorkerMetadata(worker, {

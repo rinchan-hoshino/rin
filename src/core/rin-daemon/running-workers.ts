@@ -10,11 +10,13 @@ type RunningWorkerState = {
   schemaVersion: 1;
   sessionFiles: string[];
   requestTags?: Record<string, string>;
+  frontendOwners?: Record<string, true>;
 };
 
 export type RunningWorkerSession = {
   sessionFile: string;
   requestTag?: string;
+  frontendOwner?: true;
 };
 
 export function runningWorkersStatePath(agentDir: string) {
@@ -35,9 +37,14 @@ function readState(filePath: string): RunningWorkerState {
       parsed?.requestTags && typeof parsed.requestTags === "object"
         ? parsed.requestTags
         : {};
+    const rawFrontendOwners =
+      parsed?.frontendOwners && typeof parsed.frontendOwners === "object"
+        ? parsed.frontendOwners
+        : {};
     const seen = new Set<string>();
     const sessionFiles: string[] = [];
     const requestTags: Record<string, string> = {};
+    const frontendOwners: Record<string, true> = {};
     for (const value of rawSessionFiles) {
       const sessionFile = normalizeSessionFile(value);
       if (!sessionFile || seen.has(sessionFile)) continue;
@@ -47,11 +54,15 @@ function readState(filePath: string): RunningWorkerState {
       if (typeof requestTag === "string" && requestTag.length > 0) {
         requestTags[sessionFile] = requestTag;
       }
+      if (rawFrontendOwners[sessionFile] === true) {
+        frontendOwners[sessionFile] = true;
+      }
     }
     return {
       schemaVersion: 1,
       sessionFiles,
       ...(Object.keys(requestTags).length ? { requestTags } : {}),
+      ...(Object.keys(frontendOwners).length ? { frontendOwners } : {}),
     };
   } catch {
     return { schemaVersion: 1, sessionFiles: [] };
@@ -75,6 +86,9 @@ export function listRunningWorkerSessions(agentDir: string) {
     ...(state.requestTags?.[sessionFile]
       ? { requestTag: state.requestTags[sessionFile] }
       : {}),
+    ...(state.frontendOwners?.[sessionFile]
+      ? { frontendOwner: true as const }
+      : {}),
   }));
 }
 
@@ -87,6 +101,7 @@ export function setRunningWorkerSession(
   sessionFile: string | undefined,
   running: boolean,
   requestTag?: string,
+  frontendOwner = false,
 ) {
   if (!agentDir || !sessionFile) return;
   const filePath = runningWorkersStatePath(agentDir);
@@ -97,6 +112,7 @@ export function setRunningWorkerSession(
     (entry) => entry !== normalized,
   );
   const requestTags = { ...(state.requestTags || {}) };
+  const frontendOwners = { ...(state.frontendOwners || {}) };
   if (running) {
     sessionFiles.push(normalized);
     if (typeof requestTag === "string" && requestTag.length > 0) {
@@ -104,12 +120,19 @@ export function setRunningWorkerSession(
     } else {
       delete requestTags[normalized];
     }
+    if (frontendOwner) {
+      frontendOwners[normalized] = true;
+    } else {
+      delete frontendOwners[normalized];
+    }
   } else {
     delete requestTags[normalized];
+    delete frontendOwners[normalized];
   }
   writeState(filePath, {
     schemaVersion: 1,
     sessionFiles,
     ...(Object.keys(requestTags).length ? { requestTags } : {}),
+    ...(Object.keys(frontendOwners).length ? { frontendOwners } : {}),
   });
 }
