@@ -733,7 +733,7 @@ test("slack adapter deletes visible progress before final media", async () => {
   });
 });
 
-test("lark adapter deletes visible progress before final text", async () => {
+test("lark adapter sends progress as new messages without edit capability", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -748,10 +748,7 @@ test("lark adapter deletes visible progress before final text", async () => {
         message: {
           create: async (payload: any) => {
             calls.push({ method: "create", payload });
-            const count = calls.filter(
-              (entry) => entry.method === "create",
-            ).length;
-            return { data: { message_id: `m${count}` } };
+            return { data: { message_id: `m${calls.length}` } };
           },
           update: async (payload: any) => {
             calls.push({ method: "update", payload });
@@ -765,74 +762,38 @@ test("lark adapter deletes visible progress before final text", async () => {
       },
     };
 
-    const editable = requireEditableIndicator(app.bots[0]);
-    await editable.tick({ chatId: "oc_1", tick: 0 });
-    const result = await app.bots[0].sendMessage("oc_1", [h.text("done")]);
-
-    assert.deepEqual(result, ["m2"]);
     assert.deepEqual(
-      calls.map((entry) => entry.method),
-      ["create", "delete", "create"],
+      app.bots[0].workingIndicators.map((item: any) => item.presentation),
+      ["reaction", "typing"],
     );
-    assert.equal(calls[0].payload.data.receive_id, "oc_1");
-    assert.equal(calls[1].payload.path.message_id, "m1");
-    assert.equal(calls[2].payload.data.receive_id, "oc_1");
-    assert.match(calls[2].payload.data.content, /done/);
-  });
-});
-
-test("lark adapter keeps editable progress sections as native paragraphs", async () => {
-  await withTempDir(async (agentDir) => {
-    const app = createRuntimeApp(agentDir, {
-      key: "lark",
-      name: "Lark",
-      config: { appId: "app", appSecret: "secret" },
-    });
-    const adapter = [...app.adapters][0];
-    const h = runtime.createChatRuntimeH();
-    const calls: any[] = [];
-    adapter.client = {
-      im: {
-        message: {
-          create: async (payload: any) => {
-            calls.push({ method: "create", payload });
-            return { data: { message_id: "m1" } };
-          },
-          update: async (payload: any) => {
-            calls.push({ method: "update", payload });
-            return { data: { message_id: payload.path.message_id } };
-          },
-        },
+    const interimResult = await app.bots[0].sendMessage(
+      "oc_1",
+      [h.text("checking")],
+      {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
       },
-    };
+    );
+    const todoResult = await app.bots[0].sendMessage(
+      "oc_1",
+      [h.text("⏹️ first task")],
+      {
+        deliveryKind: "passive_notice",
+        coalesceWithWorkingMessage: true,
+      },
+    );
+    const finalResult = await app.bots[0].sendMessage("oc_1", [h.text("done")]);
 
-    const editable = requireEditableIndicator(app.bots[0]);
-    await editable.tick({ chatId: "oc_1", tick: 0 });
-    await app.bots[0].sendMessage("oc_1", [h.text("checking")], {
-      deliveryKind: "interim",
-      coalesceWithWorkingMessage: true,
-    });
-    await app.bots[0].sendMessage("oc_1", [h.text("⏹️ first task")], {
-      deliveryKind: "passive_notice",
-      coalesceWithWorkingMessage: true,
-    });
-
+    assert.deepEqual(interimResult, ["m1"]);
+    assert.deepEqual(todoResult, ["m2"]);
+    assert.deepEqual(finalResult, ["m3"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["create", "update", "update"],
+      ["create", "create", "create"],
     );
-    assert.deepEqual(JSON.parse(calls[1].payload.data.content).zh_cn.content, [
-      [{ tag: "text", text: "Working..." }],
-      [{ tag: "text", text: "\n" }],
-      [{ tag: "text", text: "checking" }],
-    ]);
-    assert.deepEqual(JSON.parse(calls[2].payload.data.content).zh_cn.content, [
-      [{ tag: "text", text: "Working..." }],
-      [{ tag: "text", text: "\n" }],
-      [{ tag: "text", text: "checking" }],
-      [{ tag: "text", text: "\n" }],
-      [{ tag: "text", text: "⏹️ first task" }],
-    ]);
+    assert.match(calls[0].payload.data.content, /checking/);
+    assert.match(calls[1].payload.data.content, /first task/);
+    assert.match(calls[2].payload.data.content, /done/);
   });
 });
 
@@ -2282,36 +2243,25 @@ test("lark adapter uploads images and preserves surrounding text order", async (
       },
     };
 
-    const editable = requireEditableIndicator(app.bots[0]);
-    await editable.tick({ chatId: "oc_1", tick: 0 });
     const result = await app.bots[0].sendMessage("oc_1", [
       h.text("before"),
       h.image(imagePath),
       h.text("after"),
     ]);
 
-    assert.deepEqual(result, ["m2", "m3", "m4"]);
+    assert.deepEqual(result, ["m1", "m2", "m3"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      [
-        "createMessage",
-        "deleteMessage",
-        "createMessage",
-        "uploadImage",
-        "createMessage",
-        "createMessage",
-      ],
+      ["createMessage", "uploadImage", "createMessage", "createMessage"],
     );
     assert.equal(calls[0].payload.data.msg_type, "post");
-    assert.equal(calls[1].payload.path.message_id, "m1");
-    assert.equal(calls[2].payload.data.msg_type, "post");
-    assert.equal(calls[3].payload.data.image_type, "message");
-    assert.deepEqual(calls[3].payload.data.image, Buffer.from("test-image"));
-    assert.equal(calls[4].payload.data.msg_type, "image");
-    assert.deepEqual(JSON.parse(calls[4].payload.data.content), {
+    assert.equal(calls[1].payload.data.image_type, "message");
+    assert.deepEqual(calls[1].payload.data.image, Buffer.from("test-image"));
+    assert.equal(calls[2].payload.data.msg_type, "image");
+    assert.deepEqual(JSON.parse(calls[2].payload.data.content), {
       image_key: "img_v2_preview",
     });
-    assert.equal(calls[5].payload.data.msg_type, "post");
+    assert.equal(calls[3].payload.data.msg_type, "post");
   });
 });
 

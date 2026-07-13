@@ -1851,7 +1851,6 @@ export class LarkAdapter {
   private readonly config: Record<string, any>;
   private readonly logger: any;
   private readonly cacheDir: string;
-  private readonly editableWorking: EditableTextMessageGroup;
   private client: any = null;
   private wsClient: any = null;
   readonly bot: any;
@@ -1872,8 +1871,6 @@ export class LarkAdapter {
       wsClient: null,
       createMessage: async (options: any) =>
         await this.client?.im?.message?.create?.(options),
-      updateMessage: async (options: any) =>
-        await this.client?.im?.message?.update?.(options),
       getMessage: async (options: any) =>
         await this.client?.im?.message?.get?.(options),
       getChat: async (options: any) =>
@@ -1891,33 +1888,11 @@ export class LarkAdapter {
       getUser: async (options: any) =>
         await this.client?.contact?.user?.get?.(options),
     };
-    this.editableWorking = new EditableTextMessageGroup({
-      cacheDir: this.cacheDir,
-      cacheScope: sanitizeCacheScope(config?.appId, "default"),
-      maxTextLength: 30_000,
-      agentDir: app?.agentDir,
-      sendText: async ({ chatId, text, replyToMessageId }) =>
-        await this.sendPostText(chatId, text, replyToMessageId),
-      editText: async ({ messageId, text }) => {
-        const result = await internal.updateMessage({
-          path: { message_id: messageId },
-          data: this.buildPostData(text),
-        });
-        return safeString(
-          result?.data?.message_id || result?.message_id || messageId,
-        ).trim();
-      },
-      deleteMessage: async ({ messageId }) =>
-        await this.client?.im?.message?.delete?.({
-          path: { message_id: messageId },
-        }),
-    });
     this.bot = {
       platform: "lark",
       selfId: "",
       status: 0,
       workingIndicators: [
-        this.editableWorking.indicator(),
         createReactionWorkingIndicator("lark", () => this.bot),
         createTypingWorkingIndicator(() => this.bot),
       ],
@@ -2508,20 +2483,12 @@ export class LarkAdapter {
   private async sendMessage(
     chatId: string,
     content: any,
-    options: Record<string, any> = {},
+    _options: Record<string, any> = {},
   ) {
-    const deliveryKind = safeString(options?.deliveryKind).trim() || "final";
-    const isFinalDelivery = deliveryKind === "final";
     const { work, replyToMessageId } = prepareOutboundNodes(content);
     if (!work.length) throw new Error("lark_send_message_empty");
-    const coalesceWithWorkingMessage = Boolean(
-      options?.coalesceWithWorkingMessage,
-    );
     const delivered: string[] = [];
     const failures: unknown[] = [];
-    if (isFinalDelivery) {
-      await this.editableWorking.deleteProgress(chatId, replyToMessageId);
-    }
     const recordFailure = async (error: unknown) => {
       failures.push(error);
       this.logger.warn(
@@ -2567,24 +2534,7 @@ export class LarkAdapter {
         const text = this.renderOutboundText(textNodes);
         if (!text) continue;
         try {
-          const shouldEditWorkingMessage =
-            delivered.length === 0 &&
-            coalesceWithWorkingMessage &&
-            isEditableProgressDeliveryKind(deliveryKind);
-          messageIds = shouldEditWorkingMessage
-            ? await this.editableWorking.updateText({
-                chatId,
-                text,
-                replyToMessageId,
-                finalize: false,
-                kind:
-                  deliveryKind === "passive_notice"
-                    ? "todo"
-                    : deliveryKind === "interim"
-                      ? "interim"
-                      : undefined,
-              })
-            : await this.sendPostText(chatId, text, replyToMessageId);
+          messageIds = await this.sendPostText(chatId, text, replyToMessageId);
         } catch (error) {
           await recordFailure(error);
         }
