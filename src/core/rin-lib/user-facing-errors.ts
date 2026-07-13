@@ -286,6 +286,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "This command does not support selecting the beta channel here. Remove the beta selector.",
   rin_command_failed: (detail) =>
     withDetail("Rin command failed", detail, ". Check the command output."),
+  rin_duplicate_command_id: () =>
+    "Rin rejected a duplicate command identifier that is still in use.",
   rin_installer_fd_install_dir_missing: () =>
     "Rin installer needs the default local config directory before preparing managed search tools.",
   rin_installer_fd_manager_unavailable: () =>
@@ -454,9 +456,15 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_windows_daemon_pid_missing: () =>
     "Rin found a Windows daemon socket but could not find its process id.",
 
+  rpc_turn_already_active: () =>
+    "Rin already has a turn in progress for this session.",
   rpc_turn_failed: () => "Rin failed while running the remote turn.",
   rpc_turn_final_output_missing: () =>
     "Rin finished the turn without a final reply.",
+  rin_turn_recovery_in_progress: () =>
+    "Rin is still recovering the previous turn for this session.",
+  rin_turn_request_tag_required: () =>
+    "Rin could not start the turn because its durable request identity is missing.",
   rin_turn_result_invariant_failed: () =>
     "Rin's remote turn ended without a durable terminal result.",
   rin_turn_result_recovery_timeout: () =>

@@ -13,9 +13,11 @@ import {
   renameBoundSession,
 } from "../session/factory.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
 import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
   resolveRinTurnCompletionFromAssistantMessage,
+  resolveRinTurnCompletionFromMessages,
   resolveRinTurnCompletionFromTurnResult,
   resolveRinTurnFailureMessage,
   type RinTurnCompletionResolution,
@@ -99,16 +101,21 @@ async function promptWithQueueableTurnReceiver(
   return await session.prompt.call(receiver, message, options);
 }
 
+function rpcRequestTag(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
 function promptAdmission(
   session: any,
   acceptedAs: "prompt" | "steer" | "followUp" | "rejoin",
   requestTag: unknown,
   options: { turnActive: boolean },
 ) {
+  const normalizedRequestTag = rpcRequestTag(requestTag);
   return {
     acceptedAs,
-    ...(safeString(requestTag).trim()
-      ? { requestTag: safeString(requestTag).trim() }
+    ...(normalizedRequestTag.length > 0
+      ? { requestTag: normalizedRequestTag }
       : {}),
     sessionFile: session?.sessionFile,
     sessionId: session?.sessionId,
@@ -359,6 +366,62 @@ async function resetSessionModelOptionsFromSettings(session: any) {
   };
 }
 
+type TurnBranchCursor = {
+  sessionManager: any;
+  leafId: string | null;
+};
+
+function captureTurnBranchCursor(session: any): TurnBranchCursor | null {
+  const sessionManager = session?.sessionManager;
+  if (typeof sessionManager?.getBranch !== "function") return null;
+  const branch = sessionManager.getBranch();
+  if (!Array.isArray(branch)) return null;
+  const managerLeafId = safeString(sessionManager.getLeafId?.()).trim();
+  if (branch.length === 0) {
+    return managerLeafId ? null : { sessionManager, leafId: null };
+  }
+  const branchLeafId = safeString(branch.at(-1)?.id).trim();
+  if (!branchLeafId) return null;
+  if (managerLeafId && managerLeafId !== branchLeafId) return null;
+  return { sessionManager, leafId: branchLeafId };
+}
+
+function resolveTurnCompletionSinceBranchCursor(
+  session: any,
+  cursor: TurnBranchCursor | null,
+): RinTurnCompletionResolution | null {
+  if (!cursor || session?.sessionManager !== cursor.sessionManager) return null;
+  const branch = cursor.sessionManager.getBranch?.();
+  if (!Array.isArray(branch)) return null;
+  const managerLeafId = safeString(cursor.sessionManager.getLeafId?.()).trim();
+  if (branch.length === 0) {
+    if (managerLeafId) return null;
+  } else {
+    const branchLeafId = safeString(branch.at(-1)?.id).trim();
+    if (!branchLeafId) return null;
+    if (
+      typeof cursor.sessionManager.getLeafId === "function" &&
+      managerLeafId !== branchLeafId
+    ) {
+      return null;
+    }
+  }
+  let turnEntries = branch;
+  if (cursor.leafId) {
+    const cursorIndex = branch.findIndex(
+      (entry: any) => safeString(entry?.id).trim() === cursor.leafId,
+    );
+    if (cursorIndex < 0) return null;
+    turnEntries = branch.slice(cursorIndex + 1);
+  }
+  const messages = turnEntries
+    .filter((entry: any) => entry?.type === "message")
+    .map((entry: any) => entry.message)
+    .filter(Boolean);
+  if (!messages.length) return null;
+  return resolveRinTurnCompletionFromMessages(messages);
+}
+
 function turnResolutionHasTerminalResult(
   session: any,
   resolution: RinTurnCompletionResolution | null | undefined,
@@ -387,6 +450,17 @@ async function runSessionTurnProducer(
   )
     ? directResolution || null
     : null;
+}
+
+function isInterruptedTurnResumable(session: any) {
+  if (session?.agent?.signal) return true;
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage) return false;
+  if (lastMessage.role !== "assistant") return true;
+  return extractPiContinuableToolCallParts(lastMessage).length > 0;
 }
 
 async function resumeInterruptedTurn(
@@ -649,6 +723,8 @@ export async function runCustomRpcMode(
   };
   let activeTurnPromise: Promise<void> | null = null;
   let activeTurnRequestTag = "";
+  let gracefulSessionShutdown = false;
+  let turnGeneration = 0;
   let latestAutoRetryFailureMessage = "";
   const isTurnActive = () => Boolean(activeTurnPromise);
   let interruptQueue = Promise.resolve();
@@ -662,7 +738,7 @@ export async function runCustomRpcMode(
     output({
       type: "rpc_turn_event",
       event,
-      ...(requestTag ? { requestTag } : {}),
+      ...(requestTag || force ? { requestTag } : {}),
       ...payload,
     });
   };
@@ -673,8 +749,10 @@ export async function runCustomRpcMode(
     ) => Promise<RinTurnCompletionResolution | null>,
     options: { forceTurnEvents?: boolean } = {},
   ) => {
+    if (activeTurnPromise) throw new Error("rpc_turn_already_active");
     latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
+    const turnBranchCursor = captureTurnBranchCursor(turnSession);
     let observedCompletion: RinTurnCompletionResolution | null = null;
     const rawUnsubscribeObservedCompletion = turnSession.subscribe?.(
       (event: any) => {
@@ -695,12 +773,14 @@ export async function runCustomRpcMode(
         ? rawUnsubscribeObservedCompletion
         : undefined;
     activeTurnRequestTag = requestTag;
+    const currentTurnGeneration = ++turnGeneration;
     const promise = (async () => {
       const forceTurnEvents = options.forceTurnEvents === true;
       emitTurnEvent(
         "start",
         requestTag,
         {
+          turnGeneration: currentTurnGeneration,
           sessionFile: turnSession.sessionFile,
           sessionId: turnSession.sessionId,
         },
@@ -713,6 +793,7 @@ export async function runCustomRpcMode(
                 "heartbeat",
                 requestTag,
                 {
+                  turnGeneration: currentTurnGeneration,
                   sessionFile: turnSession.sessionFile,
                   sessionId: turnSession.sessionId,
                 },
@@ -722,14 +803,16 @@ export async function runCustomRpcMode(
           : null;
       try {
         const taskCompletion =
-          (await task(() => observedCompletion)) || observedCompletion;
+          (await task(() => observedCompletion)) ||
+          observedCompletion ||
+          resolveTurnCompletionSinceBranchCursor(turnSession, turnBranchCursor);
         if (!taskCompletion) {
           const failureMessage = resolveRinTurnFailureMessage(turnSession, [], {
             retryFailureMessage: latestAutoRetryFailureMessage,
           });
           if (failureMessage) throw new Error(failureMessage);
-          if (heartbeatTimer) clearInterval(heartbeatTimer);
-          await new Promise<never>(() => {});
+          if (gracefulSessionShutdown) return;
+          throw new Error("rpc_turn_final_output_missing");
         }
         const { messages, completion } = taskCompletion;
         if (!completion.finalText) {
@@ -739,13 +822,14 @@ export async function runCustomRpcMode(
             { retryFailureMessage: latestAutoRetryFailureMessage },
           );
           if (failureMessage) throw new Error(failureMessage);
-          if (heartbeatTimer) clearInterval(heartbeatTimer);
-          await new Promise<never>(() => {});
+          if (gracefulSessionShutdown) return;
+          throw new Error("rpc_turn_final_output_missing");
         }
         emitTurnEvent(
           "complete",
           requestTag,
           {
+            turnGeneration: currentTurnGeneration,
             sessionFile: turnSession.sessionFile,
             sessionId: turnSession.sessionId,
             finalText: completion.finalText,
@@ -754,6 +838,54 @@ export async function runCustomRpcMode(
           forceTurnEvents,
         );
       } catch (error: any) {
+        if (gracefulSessionShutdown) {
+          const recoveredCompletion =
+            observedCompletion ||
+            resolveTurnCompletionSinceBranchCursor(
+              turnSession,
+              turnBranchCursor,
+            );
+          if (recoveredCompletion?.completion.finalText) {
+            emitTurnEvent(
+              "complete",
+              requestTag,
+              {
+                turnGeneration: currentTurnGeneration,
+                sessionFile: turnSession.sessionFile,
+                sessionId: turnSession.sessionId,
+                finalText: recoveredCompletion.completion.finalText,
+                result: recoveredCompletion.completion.result,
+              },
+              forceTurnEvents,
+            );
+            return;
+          }
+          const recoveredFailureMessage = resolveRinTurnFailureMessage(
+            turnSession,
+            recoveredCompletion?.messages || [],
+            { retryFailureMessage: latestAutoRetryFailureMessage },
+          );
+          if (
+            !recoveredFailureMessage &&
+            isRinFrontendTurnCancelledError(error)
+          ) {
+            return;
+          }
+          emitTurnEvent(
+            "error",
+            requestTag,
+            {
+              turnGeneration: currentTurnGeneration,
+              sessionFile: turnSession.sessionFile,
+              sessionId: turnSession.sessionId,
+              error:
+                recoveredFailureMessage ||
+                String(error?.message || error || "rpc_turn_failed"),
+            },
+            forceTurnEvents,
+          );
+          return;
+        }
         const retryFailureMessage = safeString(
           latestAutoRetryFailureMessage,
         ).trim();
@@ -764,6 +896,7 @@ export async function runCustomRpcMode(
           "error",
           requestTag,
           {
+            turnGeneration: currentTurnGeneration,
             sessionFile: turnSession.sessionFile,
             sessionId: turnSession.sessionId,
             error: errorMessage,
@@ -794,7 +927,11 @@ export async function runCustomRpcMode(
       .then(
         async () => {
           const session = getSession();
-          if (session.isStreaming || session.isCompacting)
+          if (
+            session.isStreaming ||
+            session.isCompacting ||
+            session.agent?.signal
+          )
             await session.abort();
           try {
             await activeTurnPromise;
@@ -803,7 +940,11 @@ export async function runCustomRpcMode(
         },
         async () => {
           const session = getSession();
-          if (session.isStreaming || session.isCompacting)
+          if (
+            session.isStreaming ||
+            session.isCompacting ||
+            session.agent?.signal
+          )
             await session.abort();
           try {
             await activeTurnPromise;
@@ -927,7 +1068,8 @@ export async function runCustomRpcMode(
         return done(id, type);
       case "prompt": {
         const piActiveRun = Boolean(session.agent?.signal);
-        const requestTag = safeString(command.requestTag).trim();
+        const turnAlreadyActive = isTurnActive() || piActiveRun;
+        const requestTag = rpcRequestTag(command.requestTag);
         if (
           isTurnActive() &&
           requestTag &&
@@ -942,7 +1084,7 @@ export async function runCustomRpcMode(
           );
         }
         const requestedQueueBehavior = command.streamingBehavior;
-        const acceptedQueueBehavior = piActiveRun
+        const acceptedQueueBehavior = turnAlreadyActive
           ? normalizePromptQueueBehavior(requestedQueueBehavior)
           : undefined;
         const promptOptions: Record<string, unknown> = {
@@ -950,7 +1092,7 @@ export async function runCustomRpcMode(
           streamingBehavior: acceptedQueueBehavior,
           source: command.source || "rpc",
         };
-        if (command.requestTag !== undefined) {
+        if (typeof command.requestTag === "string") {
           promptOptions.requestTag = command.requestTag;
         }
         if (command.promptContext !== undefined) {
@@ -986,7 +1128,7 @@ export async function runCustomRpcMode(
           );
         }
         startTurnTask(
-          String(command.requestTag || ""),
+          rpcRequestTag(command.requestTag),
           async (getObservedCompletion) => {
             return await runSessionTurnProducer(
               session,
@@ -1014,7 +1156,7 @@ export async function runCustomRpcMode(
       }
       case "resume_interrupted_turn":
         startInterruptTurnTask(
-          String(command.requestTag || ""),
+          rpcRequestTag(command.requestTag),
           async (getObservedCompletion) => {
             return await runSessionTurnProducer(
               session,
@@ -1043,6 +1185,8 @@ export async function runCustomRpcMode(
           await session.abort();
         });
       case "shutdown_session": {
+        gracefulSessionShutdown = true;
+        const activeTurnToSettle = activeTurnPromise;
         const frontendIdentity = normalizeFrontendIdentity(
           command.frontendIdentity,
         );
@@ -1052,29 +1196,46 @@ export async function runCustomRpcMode(
         try {
           await session.abort();
         } catch {}
+        try {
+          await activeTurnToSettle;
+        } catch {}
         await runtime.dispose();
         output(done(id, type, { shutdown: true }));
         return process.exit(0);
       }
-      case "sleep_session":
+      case "sleep_session": {
+        gracefulSessionShutdown = true;
+        const activeTurnToSettle = activeTurnPromise;
         try {
           await session.abort();
+        } catch {}
+        try {
+          await activeTurnToSettle;
         } catch {}
         session.dispose();
         output(done(id, type, { sleeping: true }));
         return process.exit(0);
+      }
       case "attach_session":
         return done(
           id,
           type,
           getSessionState(session, { turnActive: isTurnActive() }),
         );
-      case "get_state":
-        return done(
-          id,
-          type,
-          getSessionState(session, { turnActive: isTurnActive() }),
-        );
+      case "get_state": {
+        const trackedTurnActive = isTurnActive();
+        return done(id, type, {
+          ...getSessionState(session, { turnActive: trackedTurnActive }),
+          piActiveRun: Boolean(session.agent?.signal),
+          interruptedTurnResumable: isInterruptedTurnResumable(session),
+          ...(trackedTurnActive
+            ? {
+                requestTag: activeTurnRequestTag,
+                turnGeneration,
+              }
+            : {}),
+        });
+      }
       case "cycle_model":
         return run(
           id,
@@ -1297,8 +1458,11 @@ export async function runCustomRpcMode(
           return { sent: true };
         });
       case "send_user_message":
+        if (isTurnActive() || session.agent?.signal) {
+          throw new Error("rpc_turn_already_active");
+        }
         startTurnTask(
-          String(command.requestTag || ""),
+          rpcRequestTag(command.requestTag),
           async (getObservedCompletion) => {
             return await runSessionTurnProducer(
               session,

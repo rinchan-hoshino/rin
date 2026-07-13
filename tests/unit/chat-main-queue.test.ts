@@ -2359,6 +2359,237 @@ test("chat main requeues frontend lifecycle aborts without delivering an error",
   }
 });
 
+test("chat main commits one terminal error so restart recovery cannot replay the same inbound", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const chatHelpersMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      let runTurnCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function (input) {
+        runTurnCalls += 1;
+        chatHelpersMod.markProcessedChatMessage(
+          agentDir,
+          this.chatKey,
+          input.incomingMessageId,
+          { acceptedAt: new Date().toISOString() },
+        );
+        throw undefined;
+      };
+      const createBot = () => ({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-" + Date.now() + "-" + Math.random()];
+        },
+        internal: { async sendChatAction() {} },
+      });
+
+      const first = await mainMod.startChatBridge({ hosted: true });
+      first.app.bots.push(createBot());
+      first.app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId: "m-terminal-error-once",
+        isDirect: true,
+        content: "continue interrupted turn",
+        stripped: { content: "continue interrupted turn" },
+        elements: [h.createChatRuntimeH().text("continue interrupted turn")],
+      });
+
+      const firstDeadline = Date.now() + 8000;
+      while (Date.now() < firstDeadline) {
+        const errors = storeMod
+          .listChatMessages(agentDir)
+          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant" && item.deliveryKind === "error");
+        if (errors.length >= 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await first.stop();
+
+      const second = await mainMod.startChatBridge({ hosted: true });
+      second.app.bots.push(createBot());
+      const secondDeadline = Date.now() + 3000;
+      while (Date.now() < secondDeadline && runTurnCalls < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await second.stop();
+
+      const inbound = storeMod.getChatMessage(
+        agentDir,
+        "telegram/1:2",
+        "m-terminal-error-once",
+      );
+      const errors = storeMod
+        .listChatMessages(agentDir)
+        .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant" && item.deliveryKind === "error");
+      if (runTurnCalls !== 1 || !inbound?.processedAt || errors.length !== 1) {
+        throw new Error(JSON.stringify({ runTurnCalls, inbound, errors }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 20000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat startup honors terminal outbox ownership before orphan inbox recovery", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const outboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+      storeMod.saveChatMessage(agentDir, {
+        chatKey: "telegram/1:2",
+        platform: "telegram",
+        botId: "1",
+        chatId: "2",
+        chatType: "private",
+        messageId: "m-crash-window",
+        role: "user",
+        receivedAt: new Date().toISOString(),
+        acceptedAt: new Date().toISOString(),
+        userId: "owner-1",
+        text: "accepted before crash",
+      });
+      outboxMod.enqueueChatOutboxPayload(
+        agentDir,
+        {
+          createdAt: new Date().toISOString(),
+          chatKey: "telegram/1:2",
+          replyToMessageId: "m-crash-window",
+          deliveryKind: "error",
+          parts: [{ type: "text", text: "one terminal error" }],
+        },
+        {
+          id: "error-crash-window",
+          idempotencyKey: "error-crash-window",
+          deliveryKind: "error",
+          postDelivery: {
+            markProcessed: {
+              chatKey: "telegram/1:2",
+              messageId: "m-crash-window",
+              bindSession: false,
+            },
+          },
+        },
+      );
+
+      let runTurnCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function () {
+        runTurnCalls += 1;
+        throw new Error("inbound_replayed_after_terminal_commit");
+      };
+
+      const bridge = await mainMod.startChatBridge({ hosted: true });
+      bridge.app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-crash-window"];
+        },
+        internal: { async sendChatAction() {} },
+      });
+
+      const deadline = Date.now() + 5000;
+      let inbound;
+      let errors = [];
+      while (Date.now() < deadline) {
+        inbound = storeMod.getChatMessage(
+          agentDir,
+          "telegram/1:2",
+          "m-crash-window",
+        );
+        errors = storeMod
+          .listChatMessages(agentDir)
+          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant" && item.deliveryKind === "error");
+        if (inbound?.processedAt && errors.length === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await bridge.stop();
+
+      if (runTurnCalls !== 0 || !inbound?.processedAt || errors.length !== 1) {
+        throw new Error(JSON.stringify({ runTurnCalls, inbound, errors }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 20000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main reports an offline-queued frontend turn without retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

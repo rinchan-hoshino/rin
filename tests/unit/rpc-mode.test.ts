@@ -111,7 +111,7 @@ test("rpc mode exposes Pi-compatible session entries and tree", async () => {
 });
 
 test(
-  "rpc mode sleep_session disposes the session without emitting runtime shutdown",
+  "rpc mode sleep_session disposes without terminalizing an active turn",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -119,12 +119,16 @@ test(
     const processExit = process.exit;
     const handlers = new Map();
     const calls: string[] = [];
+    const lines: string[] = [];
+    let rejectPrompt: ((error: Error) => void) | undefined;
+    let promptStarted = false;
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
       return this;
     };
-    process.stdout.write = function () {
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
       return true;
     };
     process.exit = (() => {
@@ -138,11 +142,18 @@ test(
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
         sessionId: "session-1",
-        agent: { waitForIdle: async () => {} },
+        agent: { waitForIdle: async () => {}, state: { messages: [] } },
         bindExtensions: async () => {},
         subscribe: () => () => {},
+        prompt: async () => {
+          promptStarted = true;
+          return await new Promise((_resolve, reject) => {
+            rejectPrompt = reject;
+          });
+        },
         abort: async () => {
           calls.push("session.abort");
+          rejectPrompt?.(new Error("Request was aborted"));
         },
         dispose: () => {
           calls.push("session.dispose");
@@ -172,15 +183,141 @@ test(
       const onData = handlers.get("data");
       assert.equal(typeof onData, "function");
       onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "prompt", type: "prompt", message: "active turn", requestTag: "active-tag" })}\n`,
+        ),
+      );
+      while (!promptStarted) await wait(1);
+      onData(
         Buffer.from(`${JSON.stringify({ id: "1", type: "sleep_session" })}\n`),
       );
       await wait(20);
 
+      const terminalEvents = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(
+          (line) =>
+            line?.type === "rpc_turn_event" &&
+            (line.event === "complete" || line.event === "error"),
+        );
+      assert.deepEqual(terminalEvents, []);
       assert.deepEqual(calls, [
         "session.abort",
         "session.dispose",
         "process.exit",
       ]);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+      process.exit = processExit;
+    }
+  },
+);
+
+test(
+  "rpc mode sleep_session delivers a final committed during graceful abort",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const processExit = process.exit;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const subscribers = new Set<(event: any) => void>();
+    let rejectPrompt: ((error: Error) => void) | undefined;
+    let promptStarted = false;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+    process.exit = (() => undefined as never) as unknown as typeof process.exit;
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {}, state: { messages: [] } },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          subscribers.add(handler);
+          return () => subscribers.delete(handler);
+        },
+        prompt: async () => {
+          promptStarted = true;
+          await new Promise<void>((_resolve, reject) => {
+            rejectPrompt = reject;
+          });
+        },
+        abort: async () => {
+          const message = {
+            role: "assistant",
+            content: [{ type: "text", text: "committed final" }],
+          };
+          for (const subscriber of subscribers) {
+            subscriber({ type: "message_end", message });
+          }
+          rejectPrompt?.(new Error("Request was aborted"));
+        },
+        dispose: () => {},
+        sessionManager: {
+          ...testSessionManager(() => []),
+          _rewriteFile: () => {},
+        },
+      };
+      const runtime = { session, dispose: async () => {} };
+
+      void runCustomRpcMode(runtime, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "prompt", type: "prompt", message: "active turn", requestTag: "active-tag" })}\n`,
+        ),
+      );
+      while (!promptStarted) await wait(1);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "sleep", type: "sleep_session" })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const terminalEvents = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(
+          (line) =>
+            line?.type === "rpc_turn_event" &&
+            (line.event === "complete" || line.event === "error"),
+        );
+      assert.equal(terminalEvents.length, 1);
+      assert.equal(terminalEvents[0]?.event, "complete");
+      assert.equal(terminalEvents[0]?.finalText, "committed final");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -1929,6 +2066,7 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
+      assert.equal(completion?.turnGeneration, 1);
       assert.equal(completion?.requestTag, "tag-1");
       assert.equal(completion?.finalText, "final from rpc mode");
       assert.deepEqual(completion?.result, {
@@ -3005,6 +3143,23 @@ test(
         timestamp: new Date(Date.now() - 60_000).toISOString(),
         content: [{ type: "text", text: "stale previous final" }],
       };
+      const durableEntries = [
+        {
+          id: "older-entry",
+          parentId: null,
+          type: "message",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "old prompt" }],
+          },
+        },
+        {
+          id: "actual-baseline-leaf",
+          parentId: "older-entry",
+          type: "message",
+          message: oldAssistant,
+        },
+      ];
       const session = {
         isStreaming: false,
         isCompacting: false,
@@ -3022,7 +3177,11 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          ...testSessionManager(() => session.messages || []),
+          getBranch: () => durableEntries,
+          getLeafId: () => "older-entry",
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -3092,16 +3251,14 @@ test(
         ),
         false,
       );
-      assert.equal(
-        events.some(
-          (event) => event.type === "rpc_turn_event" && event.event === "error",
-        ),
-        false,
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
+      assert.equal(error?.error, "rpc_turn_final_output_missing");
       const stateResponse = events.find(
         (event) => event.type === "response" && event.id === "2",
       );
-      assert.equal(stateResponse?.data?.turnActive, true);
+      assert.equal(stateResponse?.data?.turnActive, false);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -3258,7 +3415,7 @@ test(
 );
 
 test(
-  "rpc mode keeps non-deliverable assistant message_end active without scanning session history",
+  "rpc mode rejects a branch fallback when the manager leaf remains stale",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3266,6 +3423,17 @@ test(
     const handlers = new Map();
     const lines = [];
     const sessionSubscribers = new Set();
+    const durableEntries: any[] = [
+      {
+        id: "baseline-entry",
+        parentId: null,
+        type: "message",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "previous prompt" }],
+        },
+      },
+    ];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3299,13 +3467,26 @@ test(
           for (const handler of sessionSubscribers) {
             handler({ type: "message_end", message: assistantMessage });
           }
+          durableEntries.push({
+            id: "unselected-final-entry",
+            parentId: "baseline-entry",
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "not on the manager leaf" }],
+            },
+          });
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          ...testSessionManager(() => session.messages || []),
+          getBranch: () => durableEntries,
+          getLeafId: () => "baseline-entry",
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -3372,17 +3553,16 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
-      assert.equal(completion, undefined);
-      assert.equal(
-        events.some(
-          (event) => event.type === "rpc_turn_event" && event.event === "error",
-        ),
-        false,
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
+      assert.equal(completion, undefined);
+      assert.equal(error?.requestTag, "tag-1");
+      assert.equal(error?.error, "rpc_turn_final_output_missing");
       const stateResponse = events.find(
         (event) => event.type === "response" && event.id === "2",
       );
-      assert.equal(stateResponse?.data?.turnActive, true);
+      assert.equal(stateResponse?.data?.turnActive, false);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -3545,7 +3725,7 @@ test(
 );
 
 test(
-  "rpc mode keeps prompt active when prompt settles without message_end",
+  "rpc mode resolves a first-turn branch final when prompt settles without message_end",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3553,12 +3733,7 @@ test(
     const handlers = new Map();
     const lines = [];
     const durableEntries: any[] = [];
-    const stateMessages = [
-      {
-        role: "assistant",
-        content: [{ type: "text", text: "previous final must not leak" }],
-      },
-    ];
+    const stateMessages: any[] = [];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3590,6 +3765,7 @@ test(
           stateMessages.push(assistantMessage);
           durableEntries.push({
             id: "stored-final-entry",
+            parentId: null,
             type: "message",
             message: assistantMessage,
           });
@@ -3602,6 +3778,8 @@ test(
         sessionManager: {
           ...testSessionManager(() => stateMessages),
           getEntries: () => durableEntries,
+          getBranch: () => durableEntries,
+          getLeafId: () => durableEntries.at(-1)?.id ?? null,
         },
         messages: stateMessages,
         getSessionStats: () => ({}),
@@ -3665,13 +3843,15 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
-      assert.equal(completion, undefined);
-      assert.equal(
-        events.some(
-          (event) => event.type === "rpc_turn_event" && event.event === "error",
-        ),
-        false,
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
+      assert.equal(completion?.requestTag, "tag-1");
+      assert.equal(completion?.finalText, "final from stored session");
+      assert.deepEqual(completion?.result, {
+        messages: [{ type: "text", text: "final from stored session" }],
+      });
+      assert.equal(error, undefined);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -3906,7 +4086,7 @@ test(
 );
 
 test(
-  "rpc mode prompt admission steers plain messages during active-run non-streaming gaps",
+  "rpc mode prompt admission steers during tracked-turn signal gaps",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4003,6 +4183,7 @@ test(
         ),
       );
       await wait(10);
+      agentState.activeRun = false;
       onData(
         Buffer.from(
           `${JSON.stringify({ id: "queue-1", type: "prompt", message: "plain follow-in", requestTag: "tag-2" })}\n`,
@@ -4943,7 +5124,7 @@ test(
       await wait(20);
 
       assert.deepEqual(bindCalls, ["first"]);
-      assert.equal(unsubscribeCount, 0);
+      assert.equal(unsubscribeCount, 1);
       assert.deepEqual(prompts, [
         [
           "first",
@@ -5205,14 +5386,12 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
+      const error = events.find(
+        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      );
       assert.equal(continued, false);
       assert.equal(complete, undefined);
-      assert.equal(
-        events.some(
-          (event) => event.type === "rpc_turn_event" && event.event === "error",
-        ),
-        false,
-      );
+      assert.equal(error?.error, "rpc_turn_final_output_missing");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -5221,7 +5400,7 @@ test(
 );
 
 test(
-  "rpc mode resume_interrupted_turn keeps liveness active without requestTag until a terminal result exists",
+  "rpc mode resume_interrupted_turn terminates when no resumable result exists",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -5322,9 +5501,10 @@ test(
         (event) => event.type === "response" && event.id === "3",
       );
       assert.ok(start);
-      assert.equal(start.requestTag, undefined);
-      assert.equal(finished, undefined);
-      assert.equal(stateResponse?.data?.turnActive, true);
+      assert.equal(start.requestTag, "");
+      assert.equal(finished?.event, "error");
+      assert.equal(finished?.error, "rpc_turn_final_output_missing");
+      assert.equal(stateResponse?.data?.turnActive, false);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -5812,6 +5992,8 @@ test(
       const stateResponse = responses.find((payload) => payload.id === "2");
       assert.equal(stateResponse?.data?.turnActive, true);
       assert.equal(stateResponse?.data?.isStreaming, false);
+      assert.equal(stateResponse?.data?.piActiveRun, false);
+      assert.equal(stateResponse?.data?.interruptedTurnResumable, false);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

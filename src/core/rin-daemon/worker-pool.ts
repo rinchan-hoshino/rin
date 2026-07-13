@@ -63,6 +63,8 @@ type InterruptedTurnRecoveryIntent = {
   source: string;
   requestTag?: string;
   promise?: Promise<void>;
+  retryAttempt?: number;
+  retryTimer?: NodeJS.Timeout;
 };
 
 type InitialWorkerSession =
@@ -85,6 +87,19 @@ export type WorkerHandle = {
   rpcTurnActive: boolean;
   turnRecoveryPending: boolean;
   activeRequestTag?: string;
+  activeTurnGeneration?: number;
+  activeLifecycleRequestTag?: string;
+  activeLifecycleSelector?: SessionSelector;
+  activeLifecycleOwnerCommandId?: string;
+  activeLifecycleFrontendOwner: boolean;
+  activeLifecycleRecoveryProbeCommandId?: string;
+  lifecycleEpoch: number;
+  activeLifecycleEpoch?: number;
+  activeLifecycleRecoveryProbeEpoch?: number;
+  lastTurnGeneration: number;
+  versionedLifecycleSeen: boolean;
+  legacyTurnActive: boolean;
+  legacyTurnSettled: boolean;
   isStreaming: boolean;
   isCompacting: boolean;
   rinWorking: boolean;
@@ -130,9 +145,18 @@ const TURN_RECOVERY_COMMAND_TYPES = new Set([
   "send_user_message",
 ]);
 
+const INTERRUPTED_TURN_RECOVERY_RETRY_MIN_MS = 100;
+const INTERRUPTED_TURN_RECOVERY_RETRY_MAX_MS = 2_000;
+const INTERRUPTED_TURN_RECOVERY_RETRY_LIMIT = 6;
+
+function lifecycleRequestTag(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 function expectsTerminalTurnEvent(commandType: string, command: any) {
   if (commandType === "resume_interrupted_turn") return true;
-  return Boolean(String(command?.requestTag || "").trim());
+  const requestTag = lifecycleRequestTag(command?.requestTag);
+  return requestTag !== undefined && requestTag.length > 0;
 }
 
 function hasResumableWorkerActivity(worker: WorkerHandle) {
@@ -356,6 +380,19 @@ export class WorkerPool {
     command: any,
     attach: boolean,
   ) {
+    const commandType = String(command?.type || "unknown");
+    const commandId = command?.id ? String(command.id) : undefined;
+    if (
+      commandId !== undefined &&
+      (worker.pendingResponses.has(commandId) ||
+        worker.activeLifecycleOwnerCommandId === commandId)
+    ) {
+      writeLine(
+        connection.socket,
+        responseError(commandId, commandType, "rin_duplicate_command_id"),
+      );
+      return;
+    }
     if (attach) this.attachWorker(connection, worker);
     const selector = this.getSessionSelector(command);
     if (hasSessionSelector(selector)) {
@@ -363,7 +400,6 @@ export class WorkerPool {
     }
     worker.lastUsedAt = Date.now();
     worker.idleSince = null;
-    const commandType = String(command?.type || "unknown");
     const wasRunning = this.isWorkerRunning(worker);
     const recoverySelector = resolveSessionSelector(
       selector,
@@ -376,9 +412,55 @@ export class WorkerPool {
       commandType,
       command,
     );
-    if (command?.id) {
-      worker.pendingResponses.set(String(command.id), {
-        id: String(command.id),
+    const commandRequestTag = lifecycleRequestTag(command?.requestTag);
+    const terminalLifecycleCommand =
+      TURN_RECOVERY_COMMAND_TYPES.has(commandType);
+    const workerHasLiveTurn = Boolean(
+      worker.turnActive ||
+      worker.rpcTurnActive ||
+      worker.isStreaming ||
+      worker.isCompacting ||
+      worker.rinWorking,
+    );
+    const canRejoinFrontendTurn = Boolean(
+      worker.activeLifecycleFrontendOwner &&
+      (workerHasLiveTurn || worker.turnRecoveryPending),
+    );
+    let lifecycleAdmissionError = "";
+    if (
+      terminalLifecycleCommand &&
+      (commandRequestTag === undefined ||
+        (commandType !== "resume_interrupted_turn" &&
+          commandRequestTag.length === 0))
+    ) {
+      lifecycleAdmissionError = "rin_turn_request_tag_required";
+    } else if (
+      terminalLifecycleCommand &&
+      worker.activeLifecycleRequestTag !== undefined &&
+      (commandType !== "prompt" ||
+        commandRequestTag !== worker.activeLifecycleRequestTag ||
+        !canRejoinFrontendTurn)
+    ) {
+      lifecycleAdmissionError = "rin_turn_recovery_in_progress";
+    } else if (
+      terminalLifecycleCommand &&
+      worker.activeLifecycleRequestTag === undefined &&
+      wasRunning
+    ) {
+      lifecycleAdmissionError = "rin_turn_recovery_in_progress";
+    }
+    if (lifecycleAdmissionError) {
+      if (commandId !== undefined) {
+        writeLine(
+          connection.socket,
+          responseError(commandId, commandType, lifecycleAdmissionError),
+        );
+      }
+      return;
+    }
+    if (commandId !== undefined) {
+      worker.pendingResponses.set(commandId, {
+        id: commandId,
         commandType,
         selector: recoverySelector,
         expectsTerminalTurnEvent: keepUntilTerminalTurnEvent,
@@ -386,13 +468,27 @@ export class WorkerPool {
       });
     }
     if (TURN_RECOVERY_COMMAND_TYPES.has(commandType)) {
-      if (keepUntilTerminalTurnEvent) worker.turnRecoveryPending = true;
-      const requestTag = String(command?.requestTag || "").trim();
-      if (!wasRunning && requestTag) worker.activeRequestTag = requestTag;
+      const installsLifecycleOwner = Boolean(
+        keepUntilTerminalTurnEvent &&
+        commandRequestTag !== undefined &&
+        !wasRunning &&
+        worker.activeLifecycleRequestTag === undefined,
+      );
+      if (installsLifecycleOwner && commandRequestTag !== undefined) {
+        worker.turnRecoveryPending = true;
+        this.setLifecycleOwner(
+          worker,
+          commandRequestTag,
+          recoverySelector,
+          commandId,
+          true,
+        );
+        if (commandRequestTag) worker.activeRequestTag = commandRequestTag;
+      }
       this.syncRunningWorkerRecordForSelector(
         recoverySelector,
         true,
-        worker.activeRequestTag,
+        worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
       );
     }
     this.syncRunningWorkerRecord(worker);
@@ -413,10 +509,15 @@ export class WorkerPool {
     this.attachWorker(connection, worker);
   }
 
-  async readWorkerState(worker: WorkerHandle) {
-    const payload = await this.sendInternalCommand(worker, {
-      type: "get_state",
-    });
+  async readWorkerState(
+    worker: WorkerHandle,
+    options: { lifecycleRecoveryProbe?: boolean } = {},
+  ) {
+    const payload = await this.sendInternalCommand(
+      worker,
+      { type: "get_state" },
+      options,
+    );
     if (payload?.success !== true) {
       throw new Error(String(payload?.error || "rin_worker_state_unavailable"));
     }
@@ -554,8 +655,9 @@ export class WorkerPool {
     if (!selector.sessionFile) throw new Error("rin_session_file_required");
     const worker = await this.ensureWorkerForSession(selector);
     const requestTag =
-      String(item.requestTag || "").trim() ||
-      `rin_resume_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+      typeof item.requestTag === "string"
+        ? item.requestTag
+        : `rin_resume_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
     const followActiveTurn = Boolean(
       worker.turnActive ||
       worker.rpcTurnActive ||
@@ -634,6 +736,10 @@ export class WorkerPool {
 
   destroyAll() {
     clearInterval(this.reaper);
+    for (const intent of this.interruptedTurnRecoveryIntents.values()) {
+      if (intent.retryTimer) clearTimeout(intent.retryTimer);
+    }
+    this.interruptedTurnRecoveryIntents.clear();
     for (const worker of Array.from(this.workers)) {
       this.destroyWorker(worker);
     }
@@ -691,14 +797,19 @@ export class WorkerPool {
     const key = this.sessionClaimKey(selector);
     if (!key) return;
     const existing = this.interruptedTurnRecoveryIntents.get(key);
+    const requestedTag = lifecycleRequestTag(item.requestTag);
     const intent = existing || {
       selector,
       source: item.source || "daemon-restart",
-      requestTag: String(item.requestTag || "").trim() || undefined,
+      requestTag:
+        requestedTag !== undefined && requestedTag.length > 0
+          ? requestedTag
+          : undefined,
     };
     intent.source = item.source || intent.source || "daemon-restart";
-    intent.requestTag =
-      String(item.requestTag || "").trim() || intent.requestTag;
+    if (requestedTag !== undefined && requestedTag.length > 0) {
+      intent.requestTag = requestedTag;
+    }
     this.interruptedTurnRecoveryIntents.set(key, intent);
     void this.runInterruptedTurnRecoveryIntent(key, intent);
   }
@@ -708,18 +819,127 @@ export class WorkerPool {
     intent: InterruptedTurnRecoveryIntent,
   ) {
     if (intent.promise) return await intent.promise;
+    if (intent.retryTimer) {
+      clearTimeout(intent.retryTimer);
+      intent.retryTimer = undefined;
+    }
     intent.promise = (async () => {
       const worker = await this.ensureWorkerForSession(intent.selector);
       if (!this.isWorkerRoutable(worker)) return false;
-      if (this.isWorkerRunning(worker)) {
-        return this.hasPendingInterruptedTurnResume(worker);
+      const expectedTag = intent.requestTag ?? "";
+      const ownsLifecycle =
+        worker.activeLifecycleRequestTag === expectedTag &&
+        (!worker.activeLifecycleSelector ||
+          sessionMatchesSelector(
+            intent.selector,
+            worker.activeLifecycleSelector,
+          ));
+      const liveTurnActivity = Boolean(
+        worker.turnActive ||
+        worker.rpcTurnActive ||
+        worker.isStreaming ||
+        worker.isCompacting ||
+        worker.rinWorking,
+      );
+      const hasPendingRecovery = this.hasPendingInterruptedTurnRecovery(worker);
+      const hasConfirmedOwnedLiveTurn = Boolean(
+        liveTurnActivity &&
+        worker.versionedLifecycleSeen &&
+        worker.activeTurnGeneration !== undefined,
+      );
+      if (worker.activeLifecycleRequestTag !== undefined) {
+        if (!ownsLifecycle) return false;
+        if (hasPendingRecovery || hasConfirmedOwnedLiveTurn) return true;
+      } else {
+        if (liveTurnActivity) return false;
+        if (hasPendingRecovery) return true;
       }
       worker.lastUsedAt = Date.now();
       worker.idleSince = null;
+      worker.turnRecoveryPending = true;
+      if (!ownsLifecycle) {
+        this.setLifecycleOwner(worker, expectedTag, intent.selector);
+      }
+      if (intent.requestTag) worker.activeRequestTag = intent.requestTag;
+      this.syncRunningWorkerRecord(worker);
+      const probeLifecycleEpoch = worker.activeLifecycleEpoch;
+      let state: any;
+      try {
+        state = await this.readWorkerState(worker, {
+          lifecycleRecoveryProbe: true,
+        });
+      } catch (error) {
+        this.syncRunningWorkerRecordForSelector(
+          intent.selector,
+          true,
+          intent.requestTag,
+        );
+        throw error;
+      }
+      const probeStillOwnsLifecycle = Boolean(
+        this.interruptedTurnRecoveryIntents.get(key) === intent &&
+        worker.activeLifecycleEpoch === probeLifecycleEpoch &&
+        worker.activeLifecycleRequestTag === expectedTag &&
+        (!worker.activeLifecycleSelector ||
+          sessionMatchesSelector(
+            intent.selector,
+            worker.activeLifecycleSelector,
+          )),
+      );
+      if (!probeStillOwnsLifecycle) return true;
+      const reportedGeneration = Number(state.turnGeneration);
+      const reportedSelector = sessionSelectorFromState(state);
+      const ownsReportedRpcTurn = Boolean(
+        state.turnActive === true &&
+        lifecycleRequestTag(state.requestTag) === expectedTag &&
+        Number.isSafeInteger(reportedGeneration) &&
+        reportedGeneration > 0 &&
+        hasSessionSelector(reportedSelector) &&
+        sessionMatchesSelector(reportedSelector, intent.selector),
+      );
+      if (ownsReportedRpcTurn) {
+        worker.turnActive = true;
+        worker.rpcTurnActive = true;
+        worker.turnRecoveryPending = true;
+        worker.versionedLifecycleSeen = true;
+        worker.lastTurnGeneration = Math.max(
+          worker.lastTurnGeneration,
+          reportedGeneration,
+        );
+        worker.activeTurnGeneration = reportedGeneration;
+        worker.isStreaming = Boolean(state.isStreaming);
+        this.syncRunningWorkerRecord(worker);
+        return true;
+      }
+      if (state.turnActive || state.isStreaming || state.piActiveRun) {
+        worker.turnActive = false;
+        worker.isStreaming = false;
+        this.syncRunningWorkerRecord(worker);
+        return false;
+      }
+      const liveActivityAfterProbe = Boolean(
+        worker.turnActive ||
+        worker.rpcTurnActive ||
+        worker.isStreaming ||
+        worker.isCompacting ||
+        worker.rinWorking,
+      );
+      if (liveActivityAfterProbe) {
+        const ownsLateVersionedTurn = Boolean(
+          worker.versionedLifecycleSeen &&
+          worker.activeTurnGeneration !== undefined,
+        );
+        return ownsLateVersionedTurn;
+      }
+      if (state.interruptedTurnResumable === false) {
+        this.syncRunningWorkerRecordForSelector(intent.selector, false);
+        this.maybeReleaseWorker(worker);
+        return true;
+      }
       const response = this.sendInternalCommand(worker, {
         type: "resume_interrupted_turn",
         source: intent.source || "daemon-restart",
-        ...(intent.requestTag ? { requestTag: intent.requestTag } : {}),
+        requestTag: intent.requestTag ?? "",
       });
       this.syncRunningWorkerRecord(worker);
       await response;
@@ -731,21 +951,94 @@ export class WorkerPool {
           this.interruptedTurnRecoveryIntents.delete(key);
         } else {
           intent.promise = undefined;
+          this.scheduleInterruptedTurnRecoveryRetry(key, intent);
         }
       })
       .catch(() => {
         if (this.interruptedTurnRecoveryIntents.get(key) === intent) {
           intent.promise = undefined;
+          this.scheduleInterruptedTurnRecoveryRetry(key, intent);
         }
       });
     return await intent.promise;
   }
 
-  private hasPendingInterruptedTurnResume(worker: WorkerHandle) {
+  private scheduleInterruptedTurnRecoveryRetry(
+    key: string,
+    intent: InterruptedTurnRecoveryIntent,
+  ) {
+    if (
+      this.shuttingDown ||
+      intent.retryTimer ||
+      this.interruptedTurnRecoveryIntents.get(key) !== intent
+    ) {
+      return;
+    }
+    const attempt = Math.max(1, Number(intent.retryAttempt || 0) + 1);
+    if (attempt > INTERRUPTED_TURN_RECOVERY_RETRY_LIMIT) {
+      this.exhaustInterruptedTurnRecovery(key, intent);
+      return;
+    }
+    intent.retryAttempt = attempt;
+    const delayMs = Math.min(
+      INTERRUPTED_TURN_RECOVERY_RETRY_MAX_MS,
+      INTERRUPTED_TURN_RECOVERY_RETRY_MIN_MS * 2 ** (attempt - 1),
+    );
+    intent.retryTimer = setTimeout(() => {
+      intent.retryTimer = undefined;
+      if (
+        !this.shuttingDown &&
+        this.interruptedTurnRecoveryIntents.get(key) === intent
+      ) {
+        void this.runInterruptedTurnRecoveryIntent(key, intent);
+      }
+    }, delayMs);
+    intent.retryTimer.unref?.();
+  }
+
+  private exhaustInterruptedTurnRecovery(
+    key: string,
+    intent: InterruptedTurnRecoveryIntent,
+  ) {
+    if (this.interruptedTurnRecoveryIntents.get(key) !== intent) return;
+    if (intent.retryTimer) clearTimeout(intent.retryTimer);
+    this.interruptedTurnRecoveryIntents.delete(key);
+    const expectedTag = intent.requestTag ?? "";
+    rememberPendingTerminalTurnEvent(this.options.agentDir, {
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag: expectedTag,
+      ...intent.selector,
+      error: "rin_turn_result_recovery_timeout",
+    });
+    const worker = this.findWorkerBySelector(intent.selector);
+    if (!worker) {
+      this.syncRunningWorkerRecordForSelector(intent.selector, false);
+      return;
+    }
+    const ownsLifecycle =
+      worker.activeLifecycleRequestTag === expectedTag &&
+      (!worker.activeLifecycleSelector ||
+        sessionMatchesSelector(
+          intent.selector,
+          worker.activeLifecycleSelector,
+        ));
+    if (!ownsLifecycle || worker.activeLifecycleFrontendOwner) return;
+    worker.turnRecoveryPending = false;
+    if (worker.activeRequestTag === expectedTag) {
+      worker.activeRequestTag = undefined;
+    }
+    this.clearLifecycleOwner(worker);
+    this.syncRunningWorkerRecord(worker);
+    this.maybeReleaseWorker(worker);
+  }
+
+  private hasPendingInterruptedTurnRecovery(worker: WorkerHandle) {
     for (const pending of worker.pendingResponses.values()) {
       if (pending.commandType === "resume_interrupted_turn") return true;
     }
-    return false;
+    const probeId = worker.activeLifecycleRecoveryProbeCommandId;
+    return Boolean(probeId && worker.pendingResponses.has(probeId));
   }
 
   private getInterruptedTurnRecoveryIntent(worker: WorkerHandle) {
@@ -798,8 +1091,200 @@ export class WorkerPool {
     this.destroyAll();
   }
 
+  private setLifecycleOwner(
+    worker: WorkerHandle,
+    requestTag: string,
+    selector: SessionSelector,
+    ownerCommandId?: string,
+    frontendOwner = false,
+  ) {
+    const ownedSelector = resolveSessionSelector(
+      this.getWorkerSelector(worker),
+      selector,
+    );
+    worker.activeLifecycleRequestTag = requestTag;
+    worker.activeLifecycleSelector = hasSessionSelector(ownedSelector)
+      ? ownedSelector
+      : undefined;
+    worker.activeLifecycleOwnerCommandId = ownerCommandId;
+    worker.activeLifecycleFrontendOwner = frontendOwner;
+    worker.activeLifecycleRecoveryProbeCommandId = undefined;
+    worker.activeLifecycleRecoveryProbeEpoch = undefined;
+    worker.lifecycleEpoch += 1;
+    worker.activeLifecycleEpoch = worker.lifecycleEpoch;
+    worker.legacyTurnSettled = false;
+  }
+
+  private clearLifecycleOwner(worker: WorkerHandle) {
+    worker.activeLifecycleRequestTag = undefined;
+    worker.activeLifecycleSelector = undefined;
+    worker.activeLifecycleOwnerCommandId = undefined;
+    worker.activeLifecycleFrontendOwner = false;
+    worker.activeLifecycleRecoveryProbeCommandId = undefined;
+    worker.activeLifecycleEpoch = undefined;
+    worker.activeLifecycleRecoveryProbeEpoch = undefined;
+  }
+
+  private extendLifecycleOwnerSelector(
+    worker: WorkerHandle,
+    selector: SessionSelector,
+  ) {
+    const incomingSelector = sessionSelectorFromState(selector);
+    if (!hasSessionSelector(incomingSelector)) return;
+    const currentSelector = worker.activeLifecycleSelector;
+    if (
+      currentSelector &&
+      !sessionMatchesSelector(incomingSelector, currentSelector)
+    ) {
+      return;
+    }
+    worker.activeLifecycleSelector = resolveSessionSelector(
+      currentSelector,
+      incomingSelector,
+    );
+  }
+
+  private rpcTurnEventMatchesLifecycleOwner(
+    worker: WorkerHandle,
+    payload: any,
+  ) {
+    if (worker.activeLifecycleRequestTag === undefined) return false;
+    const incomingRequestTag = lifecycleRequestTag(payload?.requestTag);
+    if (
+      incomingRequestTag === undefined ||
+      incomingRequestTag !== worker.activeLifecycleRequestTag
+    ) {
+      return false;
+    }
+    if (
+      worker.activeLifecycleSelector &&
+      !sessionMatchesSelector(
+        sessionSelectorFromState(payload),
+        worker.activeLifecycleSelector,
+      )
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private supersedeLegacyTurnForVersionedProtocol(worker: WorkerHandle) {
+    const pendingRecovery = this.getInterruptedTurnRecoveryIntent(worker);
+    if (pendingRecovery) {
+      this.interruptedTurnRecoveryIntents.delete(pendingRecovery.key);
+    }
+    this.rejectTerminalTurnWaiters(worker, new Error("rin_turn_superseded"));
+    worker.turnRecoveryPending = false;
+    worker.rpcTurnActive = false;
+    worker.turnActive = false;
+    worker.activeRequestTag = undefined;
+    worker.activeTurnGeneration = undefined;
+    worker.isStreaming = false;
+    worker.legacyTurnActive = false;
+    worker.legacyTurnSettled = true;
+    this.syncRunningWorkerRecord(worker);
+  }
+
+  private acceptsRpcTurnEvent(worker: WorkerHandle, payload: any) {
+    if (payload?.type !== "rpc_turn_event") return true;
+    const event = String(payload.event || "");
+    const isTerminal = event === "complete" || event === "error";
+    const isLifecycle =
+      event === "start" || event === "heartbeat" || isTerminal;
+    if (!isLifecycle) return true;
+    if (!this.rpcTurnEventMatchesLifecycleOwner(worker, payload)) return false;
+
+    const hasGeneration = Object.prototype.hasOwnProperty.call(
+      payload,
+      "turnGeneration",
+    );
+    const generation = payload.turnGeneration;
+    if (
+      hasGeneration &&
+      (typeof generation !== "number" ||
+        !Number.isSafeInteger(generation) ||
+        generation <= 0)
+    ) {
+      return false;
+    }
+
+    if (!hasGeneration) {
+      if (worker.versionedLifecycleSeen) return false;
+      if (event === "start") {
+        if (worker.legacyTurnSettled) return false;
+        worker.legacyTurnActive = true;
+        return true;
+      }
+      if (event === "heartbeat") return worker.legacyTurnActive;
+      if (
+        !worker.legacyTurnActive &&
+        !worker.turnRecoveryPending &&
+        !worker.turnActive &&
+        !worker.isStreaming
+      ) {
+        return false;
+      }
+      worker.legacyTurnActive = false;
+      worker.legacyTurnSettled = true;
+      return true;
+    }
+
+    if (event === "start") {
+      if (generation < worker.lastTurnGeneration) return false;
+      if (
+        worker.activeTurnGeneration !== undefined &&
+        generation !== worker.activeTurnGeneration
+      ) {
+        return false;
+      }
+      if (
+        worker.activeTurnGeneration === undefined &&
+        generation === worker.lastTurnGeneration
+      ) {
+        return false;
+      }
+      if (worker.legacyTurnActive) {
+        this.supersedeLegacyTurnForVersionedProtocol(worker);
+      }
+      worker.versionedLifecycleSeen = true;
+      if (generation > worker.lastTurnGeneration) {
+        worker.lastTurnGeneration = generation;
+        worker.activeTurnGeneration = generation;
+      }
+      return true;
+    }
+
+    if (worker.legacyTurnActive) return false;
+    if (event === "heartbeat") {
+      return (
+        worker.versionedLifecycleSeen &&
+        generation === worker.lastTurnGeneration &&
+        worker.activeTurnGeneration === generation
+      );
+    }
+    if (
+      generation === worker.lastTurnGeneration &&
+      worker.activeTurnGeneration === generation
+    ) {
+      worker.versionedLifecycleSeen = true;
+      worker.activeTurnGeneration = undefined;
+      return true;
+    }
+    if (
+      generation > worker.lastTurnGeneration &&
+      worker.activeTurnGeneration === undefined &&
+      (worker.turnRecoveryPending || worker.turnActive || worker.isStreaming)
+    ) {
+      worker.versionedLifecycleSeen = true;
+      worker.lastTurnGeneration = generation;
+      return true;
+    }
+    return false;
+  }
+
   private updateWorkerMetadata(worker: WorkerHandle, payload: any) {
-    if (!payload || typeof payload !== "object") return;
+    if (!payload || typeof payload !== "object") return false;
+    if (!this.acceptsRpcTurnEvent(worker, payload)) return false;
     worker.lastUsedAt = Date.now();
     const pendingResponse = payload.id
       ? worker.pendingResponses.get(String(payload.id))
@@ -814,31 +1299,60 @@ export class WorkerPool {
         this.setWorkerSessionRefs(worker, sessionSelectorFromState(data));
       }
       if (payload.command === "get_state") {
-        worker.turnActive = Boolean(data.turnActive ?? data.isStreaming);
-        if (!worker.turnActive) {
+        const reportedTurnActive = Boolean(data.turnActive ?? data.isStreaming);
+        const hasLifecycleOwner =
+          worker.activeLifecycleRequestTag !== undefined;
+        const isMatchingRecoveryProbe = Boolean(
+          pendingResponse &&
+          worker.activeLifecycleEpoch !== undefined &&
+          worker.activeLifecycleRecoveryProbeCommandId === pendingResponse.id &&
+          worker.activeLifecycleRecoveryProbeEpoch ===
+            worker.activeLifecycleEpoch,
+        );
+        const appliesReportedTurnState =
+          !hasLifecycleOwner || isMatchingRecoveryProbe;
+        if (appliesReportedTurnState) {
+          worker.turnActive = reportedTurnActive;
+          worker.isStreaming = Boolean(data.isStreaming);
+          worker.rinWorking = false;
+        }
+        const clearsLifecycleOwner = Boolean(
+          !reportedTurnActive &&
+          (!hasLifecycleOwner ||
+            (isMatchingRecoveryProbe &&
+              data.interruptedTurnResumable === false)),
+        );
+        if (clearsLifecycleOwner) {
           worker.turnRecoveryPending = false;
           worker.activeRequestTag = undefined;
+          worker.activeTurnGeneration = undefined;
+          this.clearLifecycleOwner(worker);
+          worker.legacyTurnActive = false;
+        } else if (isMatchingRecoveryProbe) {
+          worker.activeLifecycleRecoveryProbeCommandId = undefined;
+          worker.activeLifecycleRecoveryProbeEpoch = undefined;
         }
-        worker.isStreaming = Boolean(data.isStreaming);
         worker.isCompacting = Boolean(data.isCompacting);
-        worker.rinWorking = false;
         this.maybeReleaseWorker(worker);
-        return;
+        return true;
       }
     }
 
     if (
       payload.type === "response" &&
       payload.success !== true &&
-      TURN_RECOVERY_COMMAND_TYPES.has(String(payload.command || ""))
+      TURN_RECOVERY_COMMAND_TYPES.has(String(payload.command || "")) &&
+      pendingResponse &&
+      worker.activeLifecycleOwnerCommandId === pendingResponse.id
     ) {
       worker.turnRecoveryPending = false;
       worker.activeRequestTag = undefined;
+      this.clearLifecycleOwner(worker);
       this.syncRunningWorkerRecordForSelector(
         resolveSessionSelector(
           sessionSelectorFromState(payload),
           resolveSessionSelector(
-            pendingResponse?.selector,
+            pendingResponse.selector,
             this.getWorkerSelector(worker),
           ),
         ),
@@ -881,43 +1395,47 @@ export class WorkerPool {
     ) {
       const selector = sessionSelectorFromState(payload);
       if (hasSessionSelector(selector)) {
+        this.extendLifecycleOwnerSelector(worker, selector);
         this.setWorkerSessionRefs(worker, selector, { syncConnections: false });
       }
       this.syncRunningWorkerRecordForSelector(selector, true);
       worker.turnRecoveryPending = false;
       worker.rpcTurnActive = true;
       worker.turnActive = true;
-      worker.activeRequestTag =
-        String(payload.requestTag || "").trim() || worker.activeRequestTag;
+      if (payload.event === "start") {
+        const requestTag = lifecycleRequestTag(payload.requestTag);
+        worker.activeRequestTag = requestTag || undefined;
+      }
       this.syncRunningWorkerRecord(worker);
     }
     if (
       payload.type === "rpc_turn_event" &&
       (payload.event === "complete" || payload.event === "error")
     ) {
-      const terminalRequestTag = String(payload.requestTag || "").trim();
-      const activeRequestTag = String(worker.activeRequestTag || "").trim();
-      const ownsActiveTurn =
-        !activeRequestTag || terminalRequestTag === activeRequestTag;
-      if (ownsActiveTurn) {
-        this.syncRunningWorkerRecordForSelector(
-          sessionSelectorFromState(payload),
-          false,
-        );
-        worker.turnRecoveryPending = false;
-        worker.rpcTurnActive = false;
-        worker.activeRequestTag = undefined;
-        worker.turnActive = false;
-        worker.isStreaming = false;
-        this.syncRunningWorkerRecord(worker);
-        this.maybeReleaseWorker(worker);
+      const pendingRecovery = this.getInterruptedTurnRecoveryIntent(worker);
+      if (pendingRecovery) {
+        this.interruptedTurnRecoveryIntents.delete(pendingRecovery.key);
       }
+      this.syncRunningWorkerRecordForSelector(
+        sessionSelectorFromState(payload),
+        false,
+      );
+      worker.turnRecoveryPending = false;
+      worker.rpcTurnActive = false;
+      worker.activeRequestTag = undefined;
+      worker.activeTurnGeneration = undefined;
+      this.clearLifecycleOwner(worker);
+      worker.turnActive = false;
+      worker.isStreaming = false;
+      this.syncRunningWorkerRecord(worker);
+      this.maybeReleaseWorker(worker);
     }
     if (payload.type === "rpc_turn_event" && payload.event === "complete") {
       this.setWorkerSessionRefs(worker, sessionSelectorFromState(payload), {
         syncConnections: false,
       });
     }
+    return true;
   }
 
   private writeWorkerResourceOptionsFile(
@@ -1017,6 +1535,19 @@ export class WorkerPool {
       rpcTurnActive: false,
       turnRecoveryPending: false,
       activeRequestTag: undefined,
+      activeTurnGeneration: undefined,
+      activeLifecycleRequestTag: undefined,
+      activeLifecycleSelector: undefined,
+      activeLifecycleOwnerCommandId: undefined,
+      activeLifecycleFrontendOwner: false,
+      activeLifecycleRecoveryProbeCommandId: undefined,
+      lifecycleEpoch: 0,
+      activeLifecycleEpoch: undefined,
+      activeLifecycleRecoveryProbeEpoch: undefined,
+      lastTurnGeneration: 0,
+      versionedLifecycleSeen: false,
+      legacyTurnActive: false,
+      legacyTurnSettled: false,
       isStreaming: false,
       isCompacting: false,
       rinWorking: false,
@@ -1052,7 +1583,7 @@ export class WorkerPool {
           return;
         }
 
-        this.updateWorkerMetadata(worker, payload);
+        if (!this.updateWorkerMetadata(worker, payload)) return;
 
         if (
           payload?.type === "response" &&
@@ -1354,8 +1885,8 @@ export class WorkerPool {
     for (const waiter of Array.from(this.terminalTurnWaiters)) {
       if (waiter.worker !== worker) continue;
       if (
-        waiter.requestTag &&
-        String(payload?.requestTag || "") !== waiter.requestTag
+        waiter.requestTag !== undefined &&
+        lifecycleRequestTag(payload?.requestTag) !== waiter.requestTag
       ) {
         continue;
       }
@@ -1513,7 +2044,7 @@ export class WorkerPool {
       this.options.agentDir,
       sessionFile,
       this.isWorkerRunning(worker),
-      worker.activeRequestTag,
+      worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
     );
   }
 
@@ -1727,7 +2258,11 @@ export class WorkerPool {
     this.destroyWorker(worker);
   }
 
-  private sendInternalCommand(worker: WorkerHandle, command: any) {
+  private sendInternalCommand(
+    worker: WorkerHandle,
+    command: any,
+    options: { lifecycleRecoveryProbe?: boolean } = {},
+  ) {
     const id = `rin_internal_${++this.internalRequestSeq}`;
     const commandType = String(command?.type || "unknown");
     const selector = resolveSessionSelector(
@@ -1768,14 +2303,43 @@ export class WorkerPool {
       reject: rejectCommand,
       finalize,
     });
+    if (
+      options.lifecycleRecoveryProbe === true &&
+      worker.activeLifecycleRequestTag !== undefined
+    ) {
+      worker.activeLifecycleRecoveryProbeCommandId = id;
+      worker.activeLifecycleRecoveryProbeEpoch = worker.activeLifecycleEpoch;
+    }
     if (TURN_RECOVERY_COMMAND_TYPES.has(commandType)) {
-      if (keepUntilTerminalTurnEvent) worker.turnRecoveryPending = true;
-      const requestTag = String(command?.requestTag || "").trim();
-      if (requestTag) worker.activeRequestTag = requestTag;
+      const requestTag = lifecycleRequestTag(command?.requestTag);
+      if (keepUntilTerminalTurnEvent && requestTag !== undefined) {
+        worker.turnRecoveryPending = true;
+        if (worker.activeLifecycleRequestTag === undefined) {
+          this.setLifecycleOwner(worker, requestTag, selector, id);
+        } else if (
+          worker.activeLifecycleOwnerCommandId === undefined &&
+          worker.activeLifecycleRequestTag === requestTag
+        ) {
+          const commandSelector = resolveSessionSelector(
+            this.getWorkerSelector(worker),
+            selector,
+          );
+          if (
+            !worker.activeLifecycleSelector ||
+            sessionMatchesSelector(
+              commandSelector,
+              worker.activeLifecycleSelector,
+            )
+          ) {
+            worker.activeLifecycleOwnerCommandId = id;
+          }
+        }
+        if (requestTag) worker.activeRequestTag = requestTag;
+      }
       this.syncRunningWorkerRecordForSelector(
         selector,
         true,
-        worker.activeRequestTag,
+        worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
       );
     }
 

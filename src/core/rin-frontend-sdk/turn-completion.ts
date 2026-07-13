@@ -23,9 +23,15 @@ export function resolveRinTurnCompletionFromAssistantMessage(
   message: any,
 ): RinTurnCompletionResolution | null {
   if (safeString(message?.role).trim() !== "assistant") return null;
+  return resolveRinTurnCompletionFromMessages([message]);
+}
+
+export function resolveRinTurnCompletionFromMessages(
+  messages: any[],
+): RinTurnCompletionResolution {
   return {
-    messages: [message],
-    completion: resolveTurnCompletion({ messages: [message] }),
+    messages,
+    completion: resolveTurnCompletion({ messages }),
   };
 }
 

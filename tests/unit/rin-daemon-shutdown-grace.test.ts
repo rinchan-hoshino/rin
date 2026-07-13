@@ -162,6 +162,7 @@ process.stdin.on("data", (chunk) => {
       const timer = setTimeout(() => {
         timers.delete(timer);
         send({ type: "agent_end" });
+        send({ type: "rpc_turn_event", event: "complete", turnGeneration: 1, requestTag: command.requestTag, sessionFile: "/tmp/fake-session.jsonl", sessionId: "fake-session", finalText: "done" });
         send({ type: "response", id: command.id, command: command.type, success: true });
       }, delay);
       timers.add(timer);
@@ -188,7 +189,7 @@ test("daemon waits for the current worker step to finish before exiting", async 
         (payload) => payload?.type === "response" && payload?.id === "1",
       );
       socket.write(
-        `${JSON.stringify({ id: "2", type: "prompt", message: "hello" })}\n`,
+        `${JSON.stringify({ id: "2", type: "prompt", message: "hello", requestTag: "graceful-turn" })}\n`,
       );
       await waitForLine(socket, (payload) => payload?.type === "agent_start");
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -227,7 +228,7 @@ test("daemon stops waiting once the graceful shutdown timeout is reached", async
         (payload) => payload?.type === "response" && payload?.id === "1",
       );
       socket.write(
-        `${JSON.stringify({ id: "2", type: "prompt", message: "hello" })}\n`,
+        `${JSON.stringify({ id: "2", type: "prompt", message: "hello", requestTag: "timeout-turn" })}\n`,
       );
       await waitForLine(socket, (payload) => payload?.type === "agent_start");
       await new Promise((resolve) => setTimeout(resolve, 100));

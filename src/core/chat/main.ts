@@ -29,6 +29,7 @@ import {
 import {
   drainChatOutbox,
   getChatCommandRows,
+  reconcileCommittedChatOutboxProcessing,
   syncDiscordCommands,
   syncTelegramCommands,
 } from "./boot.js";
@@ -54,8 +55,10 @@ import {
   hasInboundChatMessageReplyBoundary,
   isInboundChatMessageProcessed,
   isReplyToLatestAssistantMessage,
+  markProcessedChatMessage,
 } from "./chat-helpers.js";
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
+import { buildChatMessageRecordKey } from "./message-store.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { readChatCommandResponses } from "./command-responses.js";
 import {
@@ -109,6 +112,7 @@ import {
   cleanupChatOutboxHistory,
   enqueueChatOutboxPayload,
   type ChatOutboxPayloadInput,
+  type EnqueueChatOutboxOptions,
 } from "../rin-lib/chat-outbox.js";
 import { sendReaction, sendTyping } from "./transport.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
@@ -397,21 +401,29 @@ export async function startChatBridge(
 
   const settings = loadChatSettings(settingsPath);
 
+  reconcileCommittedChatOutboxProcessing(runtime.agentDir);
+  const inboxRecovery = reconcileChatInboxRecovery(runtime.agentDir);
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
   const enqueueAndDrainOutbox = async (
     payload: ChatOutboxPayloadInput,
     deliveryKind: "command_ack" | "error" | "generic" = "generic",
+    options: EnqueueChatOutboxOptions & { onEnqueued?: () => void } = {},
   ) => {
-    const id = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
+    const id =
+      safeString(options.id).trim() ||
+      `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
     const deliveryPayload =
       deliveryKind === "error" && !payload.deliveryKind
         ? { ...payload, deliveryKind }
         : payload;
     enqueueChatOutboxPayload(runtime.agentDir, deliveryPayload, {
       id,
+      idempotencyKey: options.idempotencyKey,
       deliveryKind,
+      postDelivery: options.postDelivery,
     });
+    options.onEnqueued?.();
     const results = await drainChatOutbox(app, runtime.agentDir, h, logger, {
       chatKey: safeString(deliveryPayload.chatKey).trim(),
       itemId: id,
@@ -759,7 +771,9 @@ export async function startChatBridge(
         .map((item) => ({ name: item.name, path: item.path })),
     };
     const handleTurnFailure = async (error: any) => {
-      const errorMessage = safeString((error as any)?.message || error);
+      const errorMessage =
+        safeString((error as any)?.message || error).trim() ||
+        "Chat turn failed.";
       const messageProcessed = messageId
         ? isInboundChatMessageProcessed(
             runtime.agentDir,
@@ -795,19 +809,61 @@ export async function startChatBridge(
         `chat turn failed chatKey=${decision.chatKey} err=${errorMessage}`,
       );
       if (errorMessage && messageId && !messageProcessed) {
-        void enqueueAndDrainOutbox(
-          {
-            createdAt: nowIso(),
-            chatKey: decision.chatKey,
-            replyToMessageId: messageId || undefined,
-            parts: [
-              { type: "text", text: formatRuntimeErrorForChat(errorMessage) },
-            ],
-            sessionFile: linkedSessionFile || undefined,
-          },
-          "error",
-        ).catch(() => {});
-        void controller.clearProcessingState().catch(() => {});
+        let terminalErrorCommitted = false;
+        try {
+          const idempotencyKey = JSON.stringify([
+            "error",
+            decision.chatKey,
+            messageId,
+          ]);
+          await enqueueAndDrainOutbox(
+            {
+              createdAt: nowIso(),
+              chatKey: decision.chatKey,
+              replyToMessageId: messageId,
+              parts: [
+                {
+                  type: "text",
+                  text: formatRuntimeErrorForChat(errorMessage),
+                },
+              ],
+              sessionFile: linkedSessionFile || undefined,
+            },
+            "error",
+            {
+              id: `error-${buildChatMessageRecordKey(decision.chatKey, messageId)}`,
+              idempotencyKey,
+              postDelivery: {
+                markProcessed: {
+                  chatKey: decision.chatKey,
+                  messageId,
+                  bindSession: false,
+                },
+              },
+              onEnqueued: () => {
+                terminalErrorCommitted = true;
+                const timestamp = nowIso();
+                markProcessedChatMessage(
+                  runtime.agentDir,
+                  decision.chatKey,
+                  messageId,
+                  {
+                    acceptedAt: timestamp,
+                    processedAt: timestamp,
+                  },
+                );
+              },
+            },
+          );
+        } catch {
+          if (!terminalErrorCommitted) {
+            return {
+              retry: true,
+              errorMessage,
+            };
+          }
+        }
+        await controller.clearProcessingState().catch(() => {});
       }
       return {
         retry: false,
@@ -1354,7 +1410,6 @@ export async function startChatBridge(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );
 
-  const inboxRecovery = reconcileChatInboxRecovery(runtime.agentDir);
   if (
     inboxRecovery.restoredProcessing.length ||
     inboxRecovery.restoredOrphans.length

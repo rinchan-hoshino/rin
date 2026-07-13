@@ -428,6 +428,18 @@ function applyPostDelivery(agentDir: string, item: ChatOutboxItem) {
   });
 }
 
+export function reconcileCommittedChatOutboxProcessing(agentDir: string) {
+  let reconciled = 0;
+  for (const { item } of listChatOutboxItems(agentDir)) {
+    if (item.deliveryKind !== "final" && item.deliveryKind !== "error")
+      continue;
+    if (!item.postDelivery?.markProcessed) continue;
+    applyPostDelivery(agentDir, item);
+    reconciled += 1;
+  }
+  return reconciled;
+}
+
 function deliveredChatOutboxItem(
   item: ChatOutboxItem,
   deliveryResult: string[],

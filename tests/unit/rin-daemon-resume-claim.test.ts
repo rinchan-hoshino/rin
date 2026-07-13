@@ -474,6 +474,7 @@ process.stdin.on("data", (chunk) => {
         id: "2",
         type: "prompt",
         message: "old turn",
+        requestTag: "old-turn",
       });
       const second = await client.request({ id: "3", type: "new_session" });
 
@@ -750,6 +751,22 @@ async function handle(command) {
     send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false, sessionFile, sessionId: "active-session" } });
     return;
   }
+  if (command.type === "get_state") {
+    send({
+      type: "response",
+      id: command.id,
+      command: command.type,
+      success: true,
+      data: {
+        sessionFile,
+        sessionId: "active-session",
+        turnActive: false,
+        isStreaming: false,
+        interruptedTurnResumable: true,
+      },
+    });
+    return;
+  }
   if (command.type === "resume_interrupted_turn") {
     send({ type: "agent_start" });
     send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
@@ -792,9 +809,106 @@ process.stdin.on("data", (chunk) => {
     const commands = (await readLogLines(logPath)).map((line) =>
       JSON.parse(line),
     );
-    assert.equal(commands.length, 1);
-    assert.equal(commands[0].type, "resume_interrupted_turn");
-    assert.equal(commands[0].requestTag, "chat-inbox-stable");
+    assert.deepEqual(
+      commands.map((command) => command.type),
+      ["get_state", "resume_interrupted_turn"],
+    );
+    assert.equal(commands[1].requestTag, "chat-inbox-stable");
+  } finally {
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("daemon discards a recorded running turn when the restored session is already terminal", async () => {
+  const agentDir = await makeTempDir("rin-daemon-stale-resume-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.js");
+  const logPath = path.join(agentDir, "commands.log");
+  const sessionFile = path.join(agentDir, "sessions", "terminal-session.jsonl");
+  const runningWorkersPath = path.join(
+    agentDir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.mkdir(path.dirname(runningWorkersPath), { recursive: true });
+  await fs.writeFile(sessionFile, "");
+  await fs.writeFile(
+    runningWorkersPath,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      sessionFiles: [sessionFile],
+      requestTags: { [sessionFile]: "chat-inbox-already-final" },
+    })}\n`,
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+const fs = require("node:fs");
+const process = require("node:process");
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, JSON.stringify(command) + "\\n");
+    if (command.type === "get_state") {
+      send({
+        type: "response",
+        id: command.id,
+        command: command.type,
+        success: true,
+        data: {
+          sessionFile,
+          sessionId: "terminal-session",
+          turnActive: false,
+          isStreaming: false,
+          interruptedTurnResumable: false,
+        },
+      });
+      continue;
+    }
+    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+  }
+});
+`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  try {
+    await waitForSocket(socketPath);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const commands = (await readLogLines(logPath)).map((line) =>
+      JSON.parse(line),
+    );
+    assert.deepEqual(
+      commands.map((command) => command.type),
+      ["get_state"],
+    );
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(runningWorkersPath, "utf8")),
+      {
+        schemaVersion: 1,
+        sessionFiles: [],
+      },
+    );
   } finally {
     try {
       daemon.kill("SIGKILL");

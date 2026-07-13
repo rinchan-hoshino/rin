@@ -39,10 +39,16 @@ test("running worker records preserve legacy session-only state and durable requ
     { sessionFile, requestTag: "chat-inbox-stable" },
   ]);
 
-  setRunningWorkerSession(agentDir, sessionFile, true);
+  setRunningWorkerSession(agentDir, sessionFile, true, "");
+  assert.deepEqual(listRunningWorkerSessions(agentDir), [{ sessionFile }]);
+
+  setRunningWorkerSession(agentDir, sessionFile, true, " durable tag ");
   assert.deepEqual(listRunningWorkerSessions(agentDir), [
-    { sessionFile, requestTag: "chat-inbox-stable" },
+    { sessionFile, requestTag: " durable tag " },
   ]);
+
+  setRunningWorkerSession(agentDir, sessionFile, true);
+  assert.deepEqual(listRunningWorkerSessions(agentDir), [{ sessionFile }]);
 
   setRunningWorkerSession(agentDir, sessionFile, false);
   assert.deepEqual(listRunningWorkerSessions(agentDir), []);

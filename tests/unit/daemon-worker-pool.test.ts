@@ -414,7 +414,665 @@ setInterval(() => {}, 1000);
   await sleep(150);
 
   assert.deepEqual(await readCommandLog(logPath), [
+    "get_state:",
     "resume_interrupted_turn:daemon-restart",
+  ]);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery follows a live Pi run without issuing another resume", async () => {
+  const dir = await makeTempDir("rin-worker-pool-live-pi-run-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + "\\n");
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: {
+        sessionFile,
+        sessionId: "live-pi-run",
+        turnActive: false,
+        isStreaming: false,
+        piActiveRun: true,
+        interruptedTurnResumable: true,
+      },
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "tag-live",
+  });
+  await sleep(100);
+
+  assert.deepEqual(await readCommandLog(logPath), ["get_state"]);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-live" },
+  });
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery waits for an unowned Pi run before resuming", async () => {
+  const dir = await makeTempDir("rin-worker-pool-pi-run-wait-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+let stateReads = 0;
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + "\\n");
+    if (command.type === "get_state") stateReads += 1;
+    const responseLine = JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: command.type === "get_state" ? {
+        sessionFile,
+        sessionId: "pi-run-wait",
+        turnActive: false,
+        isStreaming: false,
+        piActiveRun: stateReads === 1,
+        interruptedTurnResumable: true,
+      } : {},
+    }) + "\\n";
+    process.stdout.write(
+      responseLine +
+      (command.type === "get_state" && stateReads === 2
+        ? JSON.stringify({ type: "agent_start" }) + "\\n"
+        : ""),
+    );
+    if (command.type === "get_state" && stateReads === 1) {
+      setTimeout(() => {
+        process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
+      }, 10);
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "owned-recovery",
+  });
+
+  const deadline = Date.now() + 2000;
+  let commands: string[] = [];
+  while (Date.now() < deadline) {
+    commands = await readCommandLog(logPath);
+    if (commands.includes("resume_interrupted_turn")) break;
+    await sleep(20);
+  }
+  assert.deepEqual(commands.slice(0, 4), [
+    "get_state",
+    "get_state",
+    "get_state",
+    "resume_interrupted_turn",
+  ]);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery does not resume after a terminal settles its probe", async () => {
+  const dir = await makeTempDir("rin-worker-pool-probe-terminal-race-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + "\\n");
+    const response = JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: command.type === "get_state" ? {
+        sessionFile,
+        sessionId: "probe-terminal-race",
+        turnActive: false,
+        isStreaming: false,
+        interruptedTurnResumable: true,
+      } : {},
+    }) + "\\n";
+    const terminal = command.type === "get_state"
+      ? JSON.stringify({
+          type: "rpc_turn_event",
+          event: "complete",
+          turnGeneration: 1,
+          requestTag: "race-turn",
+          sessionFile,
+          sessionId: "probe-terminal-race",
+          finalText: "already settled",
+        }) + "\\n"
+      : "";
+    process.stdout.write(response + terminal);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "race-turn",
+  });
+  await sleep(200);
+
+  assert.deepEqual(await readCommandLog(logPath), ["get_state"]);
+  assert.equal(worker.turnRecoveryPending, false);
+  assert.equal(worker.activeLifecycleRequestTag, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart preflight failure preserves recovery ownership for a late terminal", async () => {
+  const dir = await makeTempDir("rin-worker-pool-preflight-failure-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: false,
+      error: "state unavailable",
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "tag-recovery",
+  });
+  await sleep(50);
+
+  assert.equal(worker.turnRecoveryPending, true);
+  assert.equal(worker.activeRequestTag, "tag-recovery");
+  assert.equal(worker.activeLifecycleRequestTag, "tag-recovery");
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-recovery" },
+  });
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      turnGeneration: 1,
+      requestTag: "tag-recovery",
+      sessionFile,
+      sessionId: "recovered-session",
+      finalText: "late recovered final",
+    })}\n`,
+  );
+  await sleep(10);
+
+  assert.equal(worker.turnActive, false);
+  assert.equal(worker.turnRecoveryPending, false);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [],
+  });
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("a new prompt is not forwarded without ownership during restart preflight", async () => {
+  const dir = await makeTempDir("rin-worker-pool-preflight-prompt-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(${JSON.stringify(logPath)}, command.type + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "old-turn",
+  });
+  while ((await readCommandLog(logPath)).length === 0) await sleep(5);
+
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "new-prompt",
+      type: "prompt",
+      message: "new turn",
+      requestTag: "new-turn",
+      sessionFile,
+    },
+    true,
+  );
+  worker.turnActive = true;
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "same-recovery-tag",
+      type: "prompt",
+      message: "old turn",
+      requestTag: "old-turn",
+      sessionFile,
+    },
+    true,
+  );
+  worker.turnActive = false;
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "untagged-prompt",
+      type: "prompt",
+      message: "untagged turn",
+      sessionFile,
+    },
+    true,
+  );
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "new-user-message",
+      type: "send_user_message",
+      content: "new turn",
+      requestTag: "new-user-turn",
+      sessionFile,
+    },
+    true,
+  );
+  await sleep(20);
+
+  assert.deepEqual(await readCommandLog(logPath), ["get_state"]);
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"id":"new-prompt"') &&
+        value.includes('"error":"rin_turn_recovery_in_progress"'),
+    ),
+    true,
+  );
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"id":"same-recovery-tag"') &&
+        value.includes('"error":"rin_turn_recovery_in_progress"'),
+    ),
+    true,
+  );
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"id":"untagged-prompt"') &&
+        value.includes('"error":"rin_turn_request_tag_required"'),
+    ),
+    true,
+  );
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"id":"new-user-message"') &&
+        value.includes('"error":"rin_turn_recovery_in_progress"'),
+    ),
+    true,
+  );
+  assert.equal(worker.activeLifecycleRequestTag, "old-turn");
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("a same-tag prompt can rejoin a frontend-owned turn before start", async () => {
+  const dir = await makeTempDir("rin-worker-pool-prompt-rejoin-gap-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(${JSON.stringify(logPath)}, command.id + ":" + command.type + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 5000 });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "first-prompt",
+      type: "prompt",
+      message: "first",
+      requestTag: "shared-turn",
+    },
+    true,
+  );
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "same-tag-rejoin",
+      type: "prompt",
+      message: "first",
+      requestTag: "shared-turn",
+    },
+    true,
+  );
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "different-tag",
+      type: "prompt",
+      message: "second",
+      requestTag: "different-turn",
+    },
+    true,
+  );
+  await sleep(20);
+
+  assert.deepEqual(await readCommandLog(logPath), [
+    "first-prompt:prompt",
+    "same-tag-rejoin:prompt",
+  ]);
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"id":"different-tag"') &&
+        value.includes('"error":"rin_turn_recovery_in_progress"'),
+    ),
+    true,
+  );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery retries a transient preflight failure before resuming", async () => {
+  const dir = await makeTempDir("rin-worker-pool-preflight-retry-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+let stateReads = 0;
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + "\\n");
+    if (command.type === "get_state") {
+      stateReads += 1;
+      if (stateReads === 1) {
+        process.stdout.write(JSON.stringify({
+          id: command.id,
+          type: "response",
+          command: command.type,
+          success: false,
+          error: "transient state failure",
+        }) + "\\n");
+      } else {
+        process.stdout.write(JSON.stringify({
+          id: command.id,
+          type: "response",
+          command: command.type,
+          success: true,
+          data: {
+            sessionFile,
+            sessionId: "retry-session",
+            turnActive: false,
+            isStreaming: false,
+            interruptedTurnResumable: true,
+          },
+        }) + "\\n");
+      }
+      continue;
+    }
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: {},
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "tag-retry",
+  });
+
+  const deadline = Date.now() + 2000;
+  let commands: string[] = [];
+  while (Date.now() < deadline) {
+    commands = await readCommandLog(logPath);
+    if (commands.includes("resume_interrupted_turn")) break;
+    await sleep(20);
+  }
+
+  assert.deepEqual(commands.slice(0, 3), [
+    "get_state",
+    "get_state",
+    "resume_interrupted_turn",
   ]);
 
   pool.destroyAll();
@@ -481,35 +1139,123 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("resumeInterruptedTurnSession follows an active turn without sending another resume", async () => {
-  const dir = await makeTempDir("rin-worker-pool-");
+test("resumeInterruptedTurnSession drops unowned terminals before forwarding or resolving", async () => {
+  const dir = await makeTempDir("rin-worker-pool-active-terminal-");
   const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const pendingEventsPath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "pending-turn-events.json",
+  );
   await fs.writeFile(
     workerPath,
     "process.stdin.resume(); setInterval(() => {}, 1000);\n",
   );
 
-  const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 1000 });
-  const worker = pool.restoreSessionWorker({
-    sessionFile: "/tmp/session.jsonl",
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 1000,
   });
+  const worker = pool.restoreSessionWorker({ sessionFile });
   assert.ok(worker);
-  worker.turnActive = true;
-  worker.rpcTurnActive = true;
 
+  let settled = false;
   const resultPromise = pool.resumeInterruptedTurnSession({
-    sessionFile: "/tmp/session.jsonl",
+    sessionFile,
     source: "scheduled-task",
     requestTag: "run-1",
   });
+  void resultPromise.then(() => {
+    settled = true;
+  });
+  await sleep(10);
+  const internalRequestId = [...worker.pendingResponses.keys()].find((id) =>
+    id.startsWith("rin_internal_"),
+  );
+  assert.ok(internalRequestId);
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: internalRequestId,
+      type: "response",
+      command: "resume_interrupted_turn",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      turnGeneration: 1,
+      requestTag: "run-1",
+      sessionFile,
+      sessionId: "session-1",
+    })}\n`,
+  );
   await sleep(0);
   worker.child.stdout.emit(
     "data",
     `${JSON.stringify({
       type: "rpc_turn_event",
       event: "complete",
-      requestTag: "active-1",
-      sessionFile: "/tmp/session.jsonl",
+      turnGeneration: 1,
+      sessionFile,
+      sessionId: "session-1",
+      finalText: "empty tag must not settle",
+    })}\n`,
+  );
+  await sleep(10);
+
+  assert.equal(settled, false);
+  assert.equal(worker.turnActive, true);
+  await assert.rejects(fs.readFile(pendingEventsPath, "utf8"), {
+    code: "ENOENT",
+  });
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  pool.attachWorkerToConnection(connection, worker);
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      turnGeneration: 2,
+      requestTag: "other-turn",
+      sessionFile,
+      sessionId: "session-1",
+      finalText: "newer unowned terminal",
+    })}\n`,
+  );
+  await sleep(10);
+
+  assert.equal(settled, false);
+  assert.equal(writes.length, 0);
+  assert.equal(worker.turnActive, true);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      turnGeneration: 1,
+      requestTag: "run-1",
+      sessionFile,
       sessionId: "session-1",
       finalText: "active final",
     })}\n`,
@@ -517,10 +1263,1751 @@ test("resumeInterruptedTurnSession follows an active turn without sending anothe
 
   const result = await resultPromise;
   assert.equal(result.finalText, "active final");
-  assert.equal(result.sessionFile, "/tmp/session.jsonl");
+  assert.equal(result.sessionFile, sessionFile);
+  assert.equal(writes.length, 1);
+
+  for (const event of ["start", "heartbeat"]) {
+    worker.child.stdout.emit(
+      "data",
+      `${JSON.stringify({
+        type: "rpc_turn_event",
+        event,
+        requestTag: "run-1",
+        sessionFile,
+        sessionId: "session-1",
+      })}\n`,
+    );
+  }
+  await sleep(10);
+  assert.equal(worker.turnActive, false);
+  assert.equal(writes.length, 1);
+
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "untagged-turn",
+      type: "resume_interrupted_turn",
+      requestTag: "",
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "untagged-turn",
+      type: "response",
+      command: "resume_interrupted_turn",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      turnGeneration: 2,
+      requestTag: "",
+      sessionFile,
+      sessionId: "session-1",
+    })}\n`,
+  );
+  await sleep(10);
+  assert.equal(worker.turnActive, true);
+  assert.equal(writes.length, 3);
+
+  for (const event of ["heartbeat", "complete"]) {
+    worker.child.stdout.emit(
+      "data",
+      `${JSON.stringify({
+        type: "rpc_turn_event",
+        event,
+        turnGeneration: 2,
+        requestTag: "must-not-claim-empty-owner",
+        sessionFile,
+        sessionId: "session-1",
+        finalText: "tagged event must not claim an untagged turn",
+      })}\n`,
+    );
+  }
+  await sleep(10);
+  assert.equal(worker.turnActive, true);
+  assert.equal(writes.length, 3);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      sessionFile,
+      sessionId: "session-1",
+      finalText: "legacy terminal must not settle a versioned turn",
+    })}\n`,
+  );
+  await sleep(10);
+  assert.equal(worker.turnActive, true);
+  assert.equal(writes.length, 3);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      turnGeneration: 2,
+      requestTag: "",
+      sessionFile,
+      sessionId: "session-1",
+      finalText: "versioned final",
+    })}\n`,
+  );
+  await sleep(10);
+  assert.equal(worker.turnActive, false);
+  assert.equal(writes.length, 4);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("legacy lifecycle accepts consecutive command-owned turns without admitting late terminals", async () => {
+  const dir = await makeTempDir("rin-worker-pool-legacy-consecutive-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 1000,
+  });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+
+  const emit = (payload: Record<string, unknown>) => {
+    worker.child.stdout.emit("data", `${JSON.stringify(payload)}\n`);
+  };
+  const runLegacyTurn = async (id: string, requestTag: string) => {
+    pool.forwardToWorker(connection, worker, {
+      id,
+      type: "prompt",
+      message: requestTag,
+      requestTag,
+    });
+    emit({ id, type: "response", command: "prompt", success: true, data: {} });
+    emit({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag,
+      sessionFile,
+    });
+    await sleep(0);
+  };
+
+  await runLegacyTurn("turn-1", "legacy-1");
+  emit({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "legacy-1",
+    sessionFile,
+    finalText: "first final",
+  });
+  await sleep(0);
+  assert.equal(worker.turnActive, false);
+
+  await runLegacyTurn("turn-2", "legacy-2");
+  assert.equal(worker.turnActive, true);
+  const forwardedBeforeLateTerminal = writes.length;
+  emit({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "legacy-1",
+    sessionFile,
+    finalText: "late first final",
+  });
+  await sleep(0);
+  assert.equal(worker.turnActive, true);
+  assert.equal(writes.length, forwardedBeforeLateTerminal);
+
+  emit({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "legacy-2",
+    sessionFile,
+    finalText: "second final",
+  });
+  await sleep(0);
+  assert.equal(worker.turnActive, false);
+  const completions = writes
+    .flatMap((value) => value.trim().split("\n"))
+    .filter(Boolean)
+    .map((value) => JSON.parse(value))
+    .filter(
+      (payload) =>
+        payload.type === "rpc_turn_event" && payload.event === "complete",
+    );
+  assert.deepEqual(
+    completions.map((payload) => [payload.requestTag, payload.finalText]),
+    [
+      ["legacy-1", "first final"],
+      ["legacy-2", "second final"],
+    ],
+  );
+});
+
+test("a duplicate in-flight spaced command id cannot replace the lifecycle owner epoch", async () => {
+  const dir = await makeTempDir("rin-worker-pool-duplicate-owner-id-");
+  const workerPath = path.join(dir, "worker-source");
+  const commandLogPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `import fs from "node:fs";\nlet buffer = "";\nprocess.stdin.setEncoding("utf8");\nprocess.stdin.on("data", chunk => { buffer += chunk; while (true) { const index = buffer.indexOf("\\n"); if (index < 0) break; const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (line.trim()) fs.appendFileSync(${JSON.stringify(commandLogPath)}, line + "\\n"); } });\nsetInterval(() => {}, 1000);\n`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: " duplicate-id ",
+      type: "prompt",
+      message: "owner",
+      requestTag: "owner-tag",
+      sessionFile,
+    },
+    true,
+  );
+  const ownerPending = worker.pendingResponses.get(" duplicate-id ");
+  assert.ok(ownerPending);
+  const ownerBefore = {
+    activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+    activeLifecycleSelector: worker.activeLifecycleSelector,
+    activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+    activeRequestTag: worker.activeRequestTag,
+    turnRecoveryPending: worker.turnRecoveryPending,
+  };
+  const stateBefore = await fs.readFile(statePath, "utf8");
+  const terminalWaiter = pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+  });
+
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: " duplicate-id ",
+      type: "prompt",
+      message: "must not be forwarded",
+      requestTag: "replacement-tag",
+      sessionFile,
+    },
+    true,
+  );
+  await sleep(20);
+
+  assert.equal(worker.pendingResponses.get(" duplicate-id "), ownerPending);
+  assert.deepEqual(
+    {
+      activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+      activeLifecycleSelector: worker.activeLifecycleSelector,
+      activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+      activeRequestTag: worker.activeRequestTag,
+      turnRecoveryPending: worker.turnRecoveryPending,
+    },
+    ownerBefore,
+  );
+  assert.equal(await fs.readFile(statePath, "utf8"), stateBefore);
+  assert.equal(
+    writes.some((value) => value.includes("rin_duplicate_command_id")),
+    true,
+  );
+  const loggedCommands = await readCommandLog(commandLogPath);
+  assert.equal(loggedCommands.length, 1);
+  assert.equal(JSON.parse(loggedCommands[0]).message, "owner");
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: " duplicate-id ",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "owner-tag",
+      sessionFile,
+    })}\n`,
+  );
+  assert.equal(worker.pendingResponses.has(" duplicate-id "), false);
+  const activeOwnerBeforeReuse = {
+    activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+    activeLifecycleSelector: worker.activeLifecycleSelector,
+    activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+    activeRequestTag: worker.activeRequestTag,
+    turnActive: worker.turnActive,
+    legacyTurnActive: worker.legacyTurnActive,
+  };
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: " duplicate-id ",
+      type: "prompt",
+      message: "must also be rejected after response",
+      requestTag: "replacement-after-response",
+      sessionFile,
+    },
+    true,
+  );
+  await sleep(20);
+  assert.equal(worker.pendingResponses.has(" duplicate-id "), false);
+  assert.deepEqual(
+    {
+      activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+      activeLifecycleSelector: worker.activeLifecycleSelector,
+      activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+      activeRequestTag: worker.activeRequestTag,
+      turnActive: worker.turnActive,
+      legacyTurnActive: worker.legacyTurnActive,
+    },
+    activeOwnerBeforeReuse,
+  );
+  assert.equal((await readCommandLog(commandLogPath)).length, 1);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "owner-tag",
+      sessionFile,
+      finalText: "owner final",
+    })}\n`,
+  );
+  const result = await terminalWaiter;
+  assert.equal(result.finalText, "owner final");
+  assert.equal(worker.turnActive, false);
+});
+
+test("a failed owner command with a spaced id clears only its installed lifecycle", async () => {
+  const dir = await makeTempDir("rin-worker-pool-spaced-owner-id-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: " owner-command ",
+      type: "prompt",
+      message: "hello",
+      requestTag: "owner-tag",
+      sessionFile,
+    },
+    true,
+  );
+  assert.equal(worker.activeLifecycleOwnerCommandId, " owner-command ");
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: " owner-command ",
+      type: "response",
+      command: "prompt",
+      success: false,
+      error: "prompt_admission_failed",
+    })}\n`,
+  );
+  await sleep(0);
+
+  assert.equal(worker.pendingResponses.size, 0);
+  assert.equal(worker.turnRecoveryPending, false);
+  assert.equal(worker.activeRequestTag, undefined);
+  assert.equal(worker.activeLifecycleRequestTag, undefined);
+  assert.equal(worker.activeLifecycleSelector, undefined);
+  assert.equal(worker.activeLifecycleOwnerCommandId, undefined);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [],
+  });
+  assert.equal(
+    writes.some((value) => value.includes('"id":" owner-command "')),
+    true,
+  );
+});
+
+test("a delayed recovery intent cannot overwrite an owner installed while worker selection waits", async () => {
+  const dir = await makeTempDir("rin-worker-pool-delayed-recovery-owner-");
+  const workerPath = path.join(dir, "worker-source");
+  const commandLogPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `import fs from "node:fs";\nlet buffer = "";\nprocess.stdin.setEncoding("utf8");\nprocess.stdin.on("data", chunk => { buffer += chunk; while (true) { const index = buffer.indexOf("\\n"); if (index < 0) break; const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (line.trim()) fs.appendFileSync(${JSON.stringify(commandLogPath)}, line + "\\n"); } });\nsetInterval(() => {}, 1000);\n`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  const originalEnsureWorkerForSession = (
+    pool as any
+  ).ensureWorkerForSession.bind(pool);
+  let releaseSelection!: () => void;
+  const selectionGate = new Promise<void>((resolve) => {
+    releaseSelection = resolve;
+  });
+  (pool as any).ensureWorkerForSession = async (selector: any) => {
+    await selectionGate;
+    return await originalEnsureWorkerForSession(selector);
+  };
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "stale-recovery",
+  });
+  await sleep(0);
+
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "new-prompt-owner",
+      type: "prompt",
+      message: "new owner",
+      requestTag: "new-owner",
+      sessionFile,
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "new-prompt-owner",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  const ownerBefore = {
+    activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+    activeLifecycleSelector: worker.activeLifecycleSelector,
+    activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+    activeLifecycleEpoch: worker.activeLifecycleEpoch,
+    lifecycleEpoch: worker.lifecycleEpoch,
+  };
+  (pool as any).ensureWorkerForSession = originalEnsureWorkerForSession;
+  const terminalWaiter = pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+  });
+  await sleep(0);
+  worker.turnRecoveryPending = false;
+  releaseSelection();
+  await sleep(30);
+
+  assert.deepEqual(
+    {
+      activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+      activeLifecycleSelector: worker.activeLifecycleSelector,
+      activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+      activeLifecycleEpoch: worker.activeLifecycleEpoch,
+      lifecycleEpoch: worker.lifecycleEpoch,
+    },
+    ownerBefore,
+  );
+  const commands = await readCommandLog(commandLogPath);
+  assert.deepEqual(
+    commands.map((value) => JSON.parse(value).type),
+    ["prompt"],
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "new-owner",
+      sessionFile,
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "new-owner",
+      sessionFile,
+      finalText: "new owner final",
+    })}\n`,
+  );
+  const result = await terminalWaiter;
+  assert.equal(result.finalText, "new owner final");
+  assert.equal(worker.turnActive, false);
+});
+
+test("an overlapping get_state response cannot clear a prompt lifecycle owner", async () => {
+  const dir = await makeTempDir("rin-worker-pool-overlap-state-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.setWorkerSessionRefs(worker, { sessionFile, sessionId: "session-1" });
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "owned-prompt",
+      type: "prompt",
+      message: "hello",
+      requestTag: "prompt-owner",
+      sessionFile,
+      sessionId: "session-1",
+    },
+    true,
+  );
+  const terminalWaiter = pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+  });
+  let waiterSettled = false;
+  void terminalWaiter.then(
+    () => {
+      waiterSettled = true;
+    },
+    () => {
+      waiterSettled = true;
+    },
+  );
+  const ownerBefore = {
+    activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+    activeLifecycleSelector: worker.activeLifecycleSelector,
+    activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+    activeRequestTag: worker.activeRequestTag,
+    turnRecoveryPending: worker.turnRecoveryPending,
+    turnActive: worker.turnActive,
+    activeTurnGeneration: worker.activeTurnGeneration,
+    legacyTurnActive: worker.legacyTurnActive,
+  };
+  const stateBefore = await fs.readFile(statePath, "utf8");
+
+  pool.requestWorker(
+    worker,
+    connection,
+    { id: "overlapping-state", type: "get_state", sessionFile },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "overlapping-state",
+      type: "response",
+      command: "get_state",
+      success: true,
+      data: {
+        turnActive: false,
+        isStreaming: false,
+        interruptedTurnResumable: false,
+      },
+    })}\n`,
+  );
+  await sleep(0);
+
+  assert.deepEqual(
+    {
+      activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+      activeLifecycleSelector: worker.activeLifecycleSelector,
+      activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+      activeRequestTag: worker.activeRequestTag,
+      turnRecoveryPending: worker.turnRecoveryPending,
+      turnActive: worker.turnActive,
+      activeTurnGeneration: worker.activeTurnGeneration,
+      legacyTurnActive: worker.legacyTurnActive,
+    },
+    ownerBefore,
+  );
+  assert.equal(waiterSettled, false);
+  assert.equal(await fs.readFile(statePath, "utf8"), stateBefore);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "owned-prompt",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      turnGeneration: 1,
+      requestTag: "prompt-owner",
+      sessionFile,
+      sessionId: "session-1",
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      turnGeneration: 1,
+      requestTag: "prompt-owner",
+      sessionFile,
+      sessionId: "session-1",
+      finalText: "owned final",
+    })}\n`,
+  );
+  const result = await terminalWaiter;
+  assert.equal(result.finalText, "owned final");
+  assert.equal(worker.turnActive, false);
+  assert.equal(
+    writes.some((value) => value.includes('"finalText":"owned final"')),
+    true,
+  );
+});
+
+test("overlapping terminal prompts are rejected without disturbing the active owner", async () => {
+  for (const protocol of ["legacy", "versioned"]) {
+    for (const secondResponseSuccess of [true, false]) {
+      const dir = await makeTempDir(
+        `rin-worker-pool-overlap-${protocol}-${secondResponseSuccess}-`,
+      );
+      const workerPath = path.join(dir, "worker-source");
+      const sessionFile = path.join(dir, "session.jsonl");
+      const statePath = path.join(
+        dir,
+        "data",
+        "core",
+        "workers",
+        "running-workers.json",
+      );
+      const pendingEventsPath = path.join(
+        dir,
+        "data",
+        "core",
+        "workers",
+        "pending-turn-events.json",
+      );
+      await fs.writeFile(
+        workerPath,
+        "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+      );
+
+      const writes: string[] = [];
+      const connection = {
+        socket: {
+          destroyed: false,
+          write(value: string) {
+            writes.push(String(value));
+          },
+        },
+        clientBuffer: "",
+      };
+      const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+      const worker = pool.restoreSessionWorker({ sessionFile });
+      assert.ok(worker);
+      pool.setWorkerSessionRefs(worker, {
+        sessionFile,
+        sessionId: `session-${protocol}`,
+      });
+      const ownerTag = `${protocol}-owner`;
+      pool.requestWorker(
+        worker,
+        connection,
+        {
+          id: `${protocol}-first-command`,
+          type: "prompt",
+          message: "first",
+          requestTag: ownerTag,
+          sessionFile,
+          sessionId: `session-${protocol}`,
+        },
+        true,
+      );
+      worker.child.stdout.emit(
+        "data",
+        `${JSON.stringify({
+          id: `${protocol}-first-command`,
+          type: "response",
+          command: "prompt",
+          success: true,
+          data: {},
+        })}\n`,
+      );
+      worker.child.stdout.emit(
+        "data",
+        `${JSON.stringify({
+          type: "rpc_turn_event",
+          event: "start",
+          ...(protocol === "versioned" ? { turnGeneration: 1 } : {}),
+          requestTag: ownerTag,
+          sessionFile,
+          sessionId: `session-${protocol}`,
+        })}\n`,
+      );
+      const terminalWaiter = pool.resumeInterruptedTurnSession({
+        sessionFile,
+        source: "scheduled-task",
+      });
+      let waiterSettled = false;
+      void terminalWaiter.then(
+        () => {
+          waiterSettled = true;
+        },
+        () => {
+          waiterSettled = true;
+        },
+      );
+      await sleep(0);
+      const ownerBefore = {
+        activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+        activeLifecycleSelector: worker.activeLifecycleSelector,
+        activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+        activeRequestTag: worker.activeRequestTag,
+        activeTurnGeneration: worker.activeTurnGeneration,
+        lastTurnGeneration: worker.lastTurnGeneration,
+        versionedLifecycleSeen: worker.versionedLifecycleSeen,
+        legacyTurnActive: worker.legacyTurnActive,
+        legacyTurnSettled: worker.legacyTurnSettled,
+        turnActive: worker.turnActive,
+        rpcTurnActive: worker.rpcTurnActive,
+      };
+      const stateBefore = await fs.readFile(statePath, "utf8");
+
+      pool.requestWorker(
+        worker,
+        connection,
+        {
+          id: `${protocol}-second-command`,
+          type: "prompt",
+          message: "second",
+          requestTag: `${protocol}-second-tag`,
+          sessionFile,
+          sessionId: `session-${protocol}`,
+        },
+        true,
+      );
+      worker.child.stdout.emit(
+        "data",
+        `${JSON.stringify({
+          id: `${protocol}-second-command`,
+          type: "response",
+          command: "prompt",
+          success: secondResponseSuccess,
+          ...(secondResponseSuccess
+            ? { data: { acceptedAs: "steer", turnActive: true } }
+            : { error: "prompt_admission_failed" }),
+          sessionFile,
+          sessionId: `session-${protocol}`,
+        })}\n`,
+      );
+      await sleep(0);
+
+      assert.deepEqual(
+        {
+          activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+          activeLifecycleSelector: worker.activeLifecycleSelector,
+          activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+          activeRequestTag: worker.activeRequestTag,
+          activeTurnGeneration: worker.activeTurnGeneration,
+          lastTurnGeneration: worker.lastTurnGeneration,
+          versionedLifecycleSeen: worker.versionedLifecycleSeen,
+          legacyTurnActive: worker.legacyTurnActive,
+          legacyTurnSettled: worker.legacyTurnSettled,
+          turnActive: worker.turnActive,
+          rpcTurnActive: worker.rpcTurnActive,
+        },
+        ownerBefore,
+        `${protocol}:${secondResponseSuccess}`,
+      );
+      assert.equal(waiterSettled, false);
+      assert.equal(await fs.readFile(statePath, "utf8"), stateBefore);
+      assert.equal(
+        writes.some(
+          (value) =>
+            value.includes(`"id":"${protocol}-second-command"`) &&
+            value.includes('"error":"rin_turn_recovery_in_progress"'),
+        ),
+        true,
+      );
+
+      worker.child.stdout.emit(
+        "data",
+        `${JSON.stringify({
+          type: "rpc_turn_event",
+          event: "complete",
+          ...(protocol === "versioned" ? { turnGeneration: 1 } : {}),
+          requestTag: ownerTag,
+          sessionFile,
+          sessionId: `session-${protocol}`,
+          finalText: `${protocol} final`,
+        })}\n`,
+      );
+      const result = await terminalWaiter;
+      assert.equal(result.finalText, `${protocol} final`);
+      assert.equal(worker.turnActive, false);
+      assert.equal(
+        writes.some((value) =>
+          value.includes(`"finalText":"${protocol} final"`),
+        ),
+        true,
+      );
+      await assert.rejects(fs.readFile(pendingEventsPath, "utf8"), {
+        code: "ENOENT",
+      });
+      pool.destroyAll();
+    }
+  }
+});
+
+test("explicit empty recovery tags remain empty through command ownership and durability", async () => {
+  const dir = await makeTempDir("rin-worker-pool-explicit-empty-tag-");
+  const workerPath = path.join(dir, "worker-source");
+  const commandLogPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `import fs from "node:fs";\nlet buffer = "";\nprocess.stdin.setEncoding("utf8");\nprocess.stdin.on("data", chunk => { buffer += chunk; while (true) { const index = buffer.indexOf("\\n"); if (index < 0) break; const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (line.trim()) fs.appendFileSync(${JSON.stringify(commandLogPath)}, line + "\\n"); } });\nsetInterval(() => {}, 1000);\n`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.attachWorkerToConnection(connection, worker);
+  const resultPromise = pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+    requestTag: "",
+  });
+  await sleep(20);
+
+  assert.equal(worker.activeLifecycleRequestTag, "");
+  const commands = await readCommandLog(commandLogPath);
+  assert.equal(commands.length, 1);
+  const command = JSON.parse(commands[0]);
+  assert.equal(command.type, "resume_interrupted_turn");
+  assert.equal(command.requestTag, "");
+  const durableState = JSON.parse(await fs.readFile(statePath, "utf8"));
+  assert.deepEqual(durableState, {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+  });
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: "resume_interrupted_turn",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      sessionFile,
+    })}\n`,
+  );
+  await sleep(0);
+  assert.equal(worker.turnActive, false);
+  assert.equal(worker.activeLifecycleRequestTag, "");
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "",
+      sessionFile,
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      sessionFile,
+      finalText: "missing tag must not complete",
+    })}\n`,
+  );
+  await sleep(0);
+  assert.equal(worker.turnActive, true);
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "",
+      sessionFile,
+      finalText: "empty tag final",
+    })}\n`,
+  );
+  const result = await resultPromise;
+  assert.equal(result.finalText, "empty tag final");
+  assert.equal(worker.turnActive, false);
+});
+
+test("lifecycle request tags use exact raw string ownership", async () => {
+  const requestTags = ["tag", " tag ", "tag ", ""];
+  for (const ownerTag of requestTags) {
+    const dir = await makeTempDir(
+      `rin-worker-pool-exact-tag-${Buffer.from(ownerTag).toString("hex") || "empty"}-`,
+    );
+    const workerPath = path.join(dir, "worker-source");
+    const sessionFile = path.join(dir, "session.jsonl");
+    const statePath = path.join(
+      dir,
+      "data",
+      "core",
+      "workers",
+      "running-workers.json",
+    );
+    const pendingEventsPath = path.join(
+      dir,
+      "data",
+      "core",
+      "workers",
+      "pending-turn-events.json",
+    );
+    await fs.writeFile(
+      workerPath,
+      "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+    );
+
+    const writes: string[] = [];
+    const connection = {
+      socket: {
+        destroyed: false,
+        write(value: string) {
+          writes.push(String(value));
+        },
+      },
+      clientBuffer: "",
+    };
+    const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+    const worker = pool.restoreSessionWorker({ sessionFile });
+    assert.ok(worker);
+    pool.setWorkerSessionRefs(worker, {
+      sessionFile,
+      sessionId: "session-1",
+    });
+    const commandType = ownerTag ? "prompt" : "resume_interrupted_turn";
+    pool.requestWorker(
+      worker,
+      connection,
+      {
+        id: "exact-tag-command",
+        type: commandType,
+        ...(commandType === "prompt" ? { message: "hello" } : {}),
+        requestTag: ownerTag,
+        sessionFile,
+        sessionId: "session-1",
+      },
+      true,
+    );
+    worker.child.stdout.emit(
+      "data",
+      `${JSON.stringify({
+        id: "exact-tag-command",
+        type: "response",
+        command: commandType,
+        success: true,
+        data: {},
+      })}\n`,
+    );
+    assert.equal(worker.activeLifecycleRequestTag, ownerTag);
+    const persisted = JSON.parse(await fs.readFile(statePath, "utf8"));
+    assert.equal(persisted.requestTags?.[sessionFile], ownerTag || undefined);
+
+    for (const otherTag of requestTags.filter((tag) => tag !== ownerTag)) {
+      const before = {
+        activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+        activeLifecycleSelector: worker.activeLifecycleSelector,
+        activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+        turnActive: worker.turnActive,
+        rpcTurnActive: worker.rpcTurnActive,
+        legacyTurnActive: worker.legacyTurnActive,
+      };
+      const writesBefore = writes.length;
+      worker.child.stdout.emit(
+        "data",
+        `${JSON.stringify({
+          type: "rpc_turn_event",
+          event: "start",
+          requestTag: otherTag,
+          sessionFile,
+          sessionId: "session-1",
+        })}\n`,
+      );
+      await sleep(0);
+      assert.deepEqual(
+        {
+          activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+          activeLifecycleSelector: worker.activeLifecycleSelector,
+          activeLifecycleOwnerCommandId: worker.activeLifecycleOwnerCommandId,
+          turnActive: worker.turnActive,
+          rpcTurnActive: worker.rpcTurnActive,
+          legacyTurnActive: worker.legacyTurnActive,
+        },
+        before,
+      );
+      assert.equal(writes.length, writesBefore);
+    }
+
+    worker.child.stdout.emit(
+      "data",
+      `${JSON.stringify({
+        type: "rpc_turn_event",
+        event: "start",
+        requestTag: ownerTag,
+        sessionFile,
+        sessionId: "session-1",
+      })}\n`,
+    );
+    const terminalWaiter = pool.resumeInterruptedTurnSession({
+      sessionFile,
+      source: "scheduled-task",
+    });
+    let waiterSettled = false;
+    void terminalWaiter.then(
+      () => {
+        waiterSettled = true;
+      },
+      () => {
+        waiterSettled = true;
+      },
+    );
+    await sleep(0);
+    for (const otherTag of requestTags.filter((tag) => tag !== ownerTag)) {
+      const writesBefore = writes.length;
+      worker.child.stdout.emit(
+        "data",
+        `${JSON.stringify({
+          type: "rpc_turn_event",
+          event: "complete",
+          requestTag: otherTag,
+          sessionFile,
+          sessionId: "session-1",
+          finalText: "wrong tag final",
+        })}\n`,
+      );
+      await sleep(0);
+      assert.equal(waiterSettled, false);
+      assert.equal(worker.turnActive, true);
+      assert.equal(writes.length, writesBefore);
+    }
+
+    const detachedWrongTag = requestTags.find((tag) => tag !== ownerTag)!;
+    worker.connections.delete(connection);
+    connection.attachedWorker = undefined;
+    worker.child.stdout.emit(
+      "data",
+      `${JSON.stringify({
+        type: "rpc_turn_event",
+        event: "complete",
+        requestTag: detachedWrongTag,
+        sessionFile,
+        sessionId: "session-1",
+        finalText: "detached wrong tag final",
+      })}\n`,
+    );
+    await sleep(0);
+    assert.equal(waiterSettled, false);
+    await assert.rejects(fs.readFile(pendingEventsPath, "utf8"), {
+      code: "ENOENT",
+    });
+    pool.attachWorkerToConnection(connection, worker);
+    worker.child.stdout.emit(
+      "data",
+      `${JSON.stringify({
+        type: "rpc_turn_event",
+        event: "complete",
+        requestTag: ownerTag,
+        sessionFile,
+        sessionId: "session-1",
+        finalText: "exact final",
+      })}\n`,
+    );
+    const result = await terminalWaiter;
+    assert.equal(result.finalText, "exact final");
+    assert.equal(worker.turnActive, false);
+    pool.destroyAll();
+  }
+});
+
+test("owned lifecycle events reject malformed generation fields without side effects", async () => {
+  const dir = await makeTempDir("rin-worker-pool-invalid-generation-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const pendingEventsPath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "pending-turn-events.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.setWorkerSessionRefs(worker, { sessionFile, sessionId: "session-1" });
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "invalid-generation-command",
+      type: "prompt",
+      message: "legacy turn",
+      requestTag: "invalid-generation-owner",
+      sessionFile,
+      sessionId: "session-1",
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "invalid-generation-command",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "invalid-generation-owner",
+      sessionFile,
+      sessionId: "session-1",
+    })}\n`,
+  );
+  const terminalWaiter = pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+  });
+  let waiterSettled = false;
+  void terminalWaiter.then(
+    () => {
+      waiterSettled = true;
+    },
+    () => {
+      waiterSettled = true;
+    },
+  );
+  await sleep(0);
+
+  const snapshot = () => ({
+    sessionFile: worker.sessionFile,
+    sessionId: worker.sessionId,
+    turnActive: worker.turnActive,
+    rpcTurnActive: worker.rpcTurnActive,
+    turnRecoveryPending: worker.turnRecoveryPending,
+    activeRequestTag: worker.activeRequestTag,
+    activeTurnGeneration: worker.activeTurnGeneration,
+    activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+    activeLifecycleSelector: worker.activeLifecycleSelector,
+    lastTurnGeneration: worker.lastTurnGeneration,
+    versionedLifecycleSeen: worker.versionedLifecycleSeen,
+    legacyTurnActive: worker.legacyTurnActive,
+    legacyTurnSettled: worker.legacyTurnSettled,
+    isStreaming: worker.isStreaming,
+  });
+  const malformedGenerations = [0, -1, 1.5, "1", "invalid", true, null];
+  for (const event of ["start", "heartbeat", "complete", "error"]) {
+    for (const turnGeneration of malformedGenerations) {
+      const before = snapshot();
+      const writesBefore = writes.length;
+      const payload = {
+        type: "rpc_turn_event",
+        event,
+        turnGeneration,
+        requestTag: "invalid-generation-owner",
+        sessionFile,
+        sessionId: "session-1",
+        finalText: "must not complete",
+        error: "must not error",
+      };
+      worker.child.stdout.emit("data", `${JSON.stringify(payload)}\n`);
+      await sleep(0);
+      assert.deepEqual(
+        snapshot(),
+        before,
+        `${event}:${String(turnGeneration)}`,
+      );
+      assert.equal(writes.length, writesBefore);
+      assert.equal(waiterSettled, false);
+
+      if (event === "complete" || event === "error") {
+        worker.connections.delete(connection);
+        connection.attachedWorker = undefined;
+        worker.child.stdout.emit("data", `${JSON.stringify(payload)}\n`);
+        await sleep(0);
+        assert.deepEqual(
+          snapshot(),
+          before,
+          `detached-${event}:${String(turnGeneration)}`,
+        );
+        await assert.rejects(fs.readFile(pendingEventsPath, "utf8"), {
+          code: "ENOENT",
+        });
+        pool.attachWorkerToConnection(connection, worker);
+      }
+    }
+  }
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "invalid-generation-owner",
+      sessionFile,
+      sessionId: "session-1",
+      finalText: "valid legacy final",
+    })}\n`,
+  );
+  const result = await terminalWaiter;
+  assert.equal(result.finalText, "valid legacy final");
+});
+
+test("an idle worker rejects an unowned versioned start without metadata changes", async () => {
+  const dir = await makeTempDir("rin-worker-pool-unowned-start-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.attachWorkerToConnection(connection, worker);
+  const metadataBefore = {
+    sessionFile: worker.sessionFile,
+    sessionId: worker.sessionId,
+    turnActive: worker.turnActive,
+    turnRecoveryPending: worker.turnRecoveryPending,
+    activeRequestTag: worker.activeRequestTag,
+    activeTurnGeneration: worker.activeTurnGeneration,
+    activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+    lastTurnGeneration: worker.lastTurnGeneration,
+    versionedLifecycleSeen: worker.versionedLifecycleSeen,
+    legacyTurnActive: worker.legacyTurnActive,
+    legacyTurnSettled: worker.legacyTurnSettled,
+  };
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      turnGeneration: 7,
+      requestTag: "orphan",
+      sessionFile,
+      sessionId: "orphan-session",
+    })}\n`,
+  );
+  await sleep(10);
+
+  assert.deepEqual(
+    {
+      sessionFile: worker.sessionFile,
+      sessionId: worker.sessionId,
+      turnActive: worker.turnActive,
+      turnRecoveryPending: worker.turnRecoveryPending,
+      activeRequestTag: worker.activeRequestTag,
+      activeTurnGeneration: worker.activeTurnGeneration,
+      activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+      lastTurnGeneration: worker.lastTurnGeneration,
+      versionedLifecycleSeen: worker.versionedLifecycleSeen,
+      legacyTurnActive: worker.legacyTurnActive,
+      legacyTurnSettled: worker.legacyTurnSettled,
+    },
+    metadataBefore,
+  );
+  assert.equal(writes.length, 0);
+});
+
+test("legacy terminals with an empty tag cannot cross the owned session selector", async () => {
+  const dir = await makeTempDir("rin-worker-pool-cross-session-terminal-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session-a.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.setWorkerSessionRefs(worker, {
+    sessionFile,
+    sessionId: "session-a",
+  });
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "empty-tag-turn",
+      type: "resume_interrupted_turn",
+      requestTag: "",
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "empty-tag-turn",
+      type: "response",
+      command: "resume_interrupted_turn",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "",
+      sessionFile,
+      sessionId: "session-a",
+    })}\n`,
+  );
+  const resultPromise = pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+  });
+  let settled = false;
+  void resultPromise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await sleep(0);
+  const writesBeforeMismatch = writes.length;
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "",
+      sessionFile: path.join(dir, "session-b.jsonl"),
+      sessionId: "session-b",
+      finalText: "wrong session final",
+    })}\n`,
+  );
+  await sleep(10);
+
+  assert.equal(settled, false);
+  assert.equal(worker.turnActive, true);
+  assert.equal(writes.length, writesBeforeMismatch);
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "",
+      sessionFile,
+      sessionId: "session-a",
+      finalText: "owned final",
+    })}\n`,
+  );
+  const result = await resultPromise;
+  assert.equal(result.finalText, "owned final");
+  assert.equal(worker.turnActive, false);
+});
+
+test("an unowned versioned heartbeat cannot supersede active legacy lifecycle", async () => {
+  const dir = await makeTempDir("rin-worker-pool-protocol-tombstone-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 1000,
+  });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "legacy-command",
+      type: "prompt",
+      message: "legacy turn",
+      requestTag: "legacy-active",
+      sessionFile,
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "legacy-command",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "legacy-active",
+      sessionFile,
+    })}\n`,
+  );
+  const legacyResult = pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+  });
+  let legacySettled = false;
+  void legacyResult.then(
+    () => {
+      legacySettled = true;
+    },
+    () => {
+      legacySettled = true;
+    },
+  );
+  await sleep(0);
+  const metadataBefore = {
+    turnActive: worker.turnActive,
+    turnRecoveryPending: worker.turnRecoveryPending,
+    activeRequestTag: worker.activeRequestTag,
+    activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+    legacyTurnActive: worker.legacyTurnActive,
+    legacyTurnSettled: worker.legacyTurnSettled,
+    versionedLifecycleSeen: worker.versionedLifecycleSeen,
+  };
+  const stateBefore = await fs.readFile(statePath, "utf8");
+  const writesBefore = writes.length;
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "heartbeat",
+      turnGeneration: 1,
+      requestTag: "unowned-versioned",
+      sessionFile,
+    })}\n`,
+  );
+  await sleep(10);
+
+  assert.equal(legacySettled, false);
+  assert.deepEqual(
+    {
+      turnActive: worker.turnActive,
+      turnRecoveryPending: worker.turnRecoveryPending,
+      activeRequestTag: worker.activeRequestTag,
+      activeLifecycleRequestTag: worker.activeLifecycleRequestTag,
+      legacyTurnActive: worker.legacyTurnActive,
+      legacyTurnSettled: worker.legacyTurnSettled,
+      versionedLifecycleSeen: worker.versionedLifecycleSeen,
+    },
+    metadataBefore,
+  );
+  assert.equal(writes.length, writesBefore);
+  assert.equal(await fs.readFile(statePath, "utf8"), stateBefore);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "legacy-active",
+      sessionFile,
+      finalText: "legacy final",
+    })}\n`,
+  );
+  const result = await legacyResult;
+  assert.equal(result.finalText, "legacy final");
+  assert.equal(worker.turnActive, false);
+});
+
+test("an owned versioned start supersedes legacy lifecycle before switching protocols", async () => {
+  const dir = await makeTempDir("rin-worker-pool-owned-protocol-switch-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "switch-command",
+      type: "prompt",
+      message: "switch",
+      requestTag: "owned-switch",
+      sessionFile,
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "switch-command",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "owned-switch",
+      sessionFile,
+    })}\n`,
+  );
+  const legacyWaiter = pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+  });
+  const legacyRejected = assert.rejects(legacyWaiter, /rin_turn_superseded/);
+  await sleep(0);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      turnGeneration: 1,
+      requestTag: "owned-switch",
+      sessionFile,
+    })}\n`,
+  );
+  await legacyRejected;
+  assert.equal(worker.versionedLifecycleSeen, true);
+  assert.equal(worker.legacyTurnActive, false);
+  assert.equal(worker.turnActive, true);
+  assert.equal(worker.activeLifecycleRequestTag, "owned-switch");
+  const writesAfterSwitch = writes.length;
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "owned-switch",
+      sessionFile,
+      finalText: "legacy final after switch",
+    })}\n`,
+  );
+  await sleep(0);
+  assert.equal(worker.turnActive, true);
+  assert.equal(writes.length, writesAfterSwitch);
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      turnGeneration: 1,
+      requestTag: "owned-switch",
+      sessionFile,
+      finalText: "versioned final",
+    })}\n`,
+  );
+  await sleep(0);
+  assert.equal(worker.turnActive, false);
+  assert.equal(
+    writes.some((value) => value.includes('"finalText":"versioned final"')),
+    true,
+  );
 });
 
 test("selectSession shares daemon-restart recovery without owning the resume", async () => {
@@ -573,10 +3060,13 @@ setInterval(() => {}, 1000);
   assert.equal(connection.attachedWorker, selected);
   const commands = await waitForCommandLogPrefix(
     logPath,
-    ["resume_interrupted_turn:daemon-restart"],
+    ["get_state:", "resume_interrupted_turn:daemon-restart"],
     1000,
   );
-  assert.deepEqual(commands, ["resume_interrupted_turn:daemon-restart"]);
+  assert.deepEqual(commands, [
+    "get_state:",
+    "resume_interrupted_turn:daemon-restart",
+  ]);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
@@ -606,6 +3096,16 @@ process.stdin.on("data", (chunk) => {
     if (!line.trim()) continue;
     const command = JSON.parse(line);
     fs.appendFileSync(logPath, command.type + ":" + (command.source || "") + "\\n");
+    if (command.type === "get_state") {
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: { sessionFile, sessionId: "resume-decoupled", interruptedTurnResumable: true },
+      }) + "\\n");
+      continue;
+    }
     if (command.type === "switch_session") {
       setTimeout(() => {
         process.stdout.write(JSON.stringify({
@@ -643,14 +3143,17 @@ setInterval(() => {}, 1000);
   const elapsedMs = Date.now() - startedAt;
   const commands = await waitForCommandLogPrefix(
     logPath,
-    ["resume_interrupted_turn:daemon-restart"],
+    ["get_state:", "resume_interrupted_turn:daemon-restart"],
     1000,
   );
 
   assert.ok(selected);
   assert.equal(connection.attachedWorker, selected);
   assert.ok(elapsedMs < 300, `selection waited for resume: ${elapsedMs}ms`);
-  assert.deepEqual(commands, ["resume_interrupted_turn:daemon-restart"]);
+  assert.deepEqual(commands, [
+    "get_state:",
+    "resume_interrupted_turn:daemon-restart",
+  ]);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
@@ -709,13 +3212,16 @@ setInterval(() => {}, 1000);
   const selected = await selectedPromise;
   const commands = await waitForCommandLogPrefix(
     logPath,
-    ["resume_interrupted_turn:daemon-restart"],
+    ["get_state:", "resume_interrupted_turn:daemon-restart"],
     1000,
   );
 
   assert.ok(selected);
   assert.equal(connection.attachedWorker, selected);
-  assert.deepEqual(commands, ["resume_interrupted_turn:daemon-restart"]);
+  assert.deepEqual(commands, [
+    "get_state:",
+    "resume_interrupted_turn:daemon-restart",
+  ]);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
@@ -778,11 +3284,14 @@ setInterval(() => {}, 1000);
   pool.evictDetachedWorkers();
   const commands = await waitForCommandLogPrefix(
     logPath,
-    ["resume_interrupted_turn:daemon-restart"],
+    ["get_state:", "resume_interrupted_turn:daemon-restart"],
     1000,
   );
 
-  assert.deepEqual(commands, ["resume_interrupted_turn:daemon-restart"]);
+  assert.deepEqual(commands, [
+    "get_state:",
+    "resume_interrupted_turn:daemon-restart",
+  ]);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
@@ -813,13 +3322,17 @@ process.stdin.on('data', (chunk) => {
     buffer = buffer.slice(idx + 1);
     if (!line.trim()) continue;
     const command = JSON.parse(line);
-    if (command.type === 'switch_session') {
+    if (command.type === 'switch_session' || command.type === 'get_state') {
       process.stdout.write(JSON.stringify({
         id: command.id,
         type: 'response',
         command: command.type,
         success: true,
-        data: { sessionFile, sessionId: 'pending-turn-session' },
+        data: {
+          sessionFile,
+          sessionId: 'pending-turn-session',
+          interruptedTurnResumable: true,
+        },
       }) + '\n');
       continue;
     }
@@ -835,6 +3348,7 @@ process.stdin.on('data', (chunk) => {
         process.stdout.write(JSON.stringify({
           type: 'rpc_turn_event',
           event: 'complete',
+          requestTag: command.requestTag,
           sessionFile,
           sessionId: 'pending-turn-session',
           finalText: 'replayed durable final',
@@ -1208,6 +3722,7 @@ process.stdin.on('data', (chunk) => {
     process.stdout.write(JSON.stringify({
       type: 'rpc_turn_event',
       event: 'start',
+      requestTag: command.requestTag,
       sessionFile: command.sessionFile,
       sessionId: 'active',
     }) + '\n');
@@ -1235,7 +3750,12 @@ setInterval(() => {}, 1000);
   pool.requestWorker(
     worker,
     connection,
-    { id: "prompt-1", type: "prompt", sessionFile },
+    {
+      id: "prompt-1",
+      type: "prompt",
+      requestTag: "rpc-running",
+      sessionFile,
+    },
     true,
   );
 
@@ -1244,6 +3764,7 @@ setInterval(() => {}, 1000);
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
     schemaVersion: 1,
     sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "rpc-running" },
   });
   assert.equal(pool.getStatusSnapshot().workers[0]?.turnActive, true);
   assert.equal(pool.getStatusSnapshot().workers[0]?.isStreaming, false);
@@ -1278,11 +3799,49 @@ test("stale terminal events do not clear a newer tagged active turn", async () =
   const worker = pool.resolveWorkerForCommand(connection, {
     type: "new_session",
   });
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "current-command",
+      type: "prompt",
+      message: "current",
+      requestTag: "tag-current",
+      sessionFile,
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "current-command",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
 
   (pool as any).updateWorkerMetadata(worker, {
     type: "rpc_turn_event",
     event: "start",
     requestTag: "tag-current",
+    sessionFile,
+    sessionId: "active",
+  });
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "tag-current",
+    sessionFile,
+    sessionId: "different-session-id",
+    finalText: "cross-session",
+  });
+  assert.equal(worker.turnActive, true);
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "start",
+    requestTag: "tag-stale",
     sessionFile,
     sessionId: "active",
   });
@@ -1312,6 +3871,153 @@ test("stale terminal events do not clear a newer tagged active turn", async () =
     sessionId: "active",
     finalText: "current",
   });
+  assert.equal(worker.turnActive, false);
+  assert.equal(worker.rpcTurnActive, false);
+  assert.equal(worker.activeRequestTag, undefined);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [],
+  });
+
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "start",
+    requestTag: "tag-current",
+    sessionFile,
+    sessionId: "active",
+  });
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "heartbeat",
+    requestTag: "tag-current",
+    sessionFile,
+    sessionId: "active",
+  });
+  assert.equal(worker.turnActive, false);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [],
+  });
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("older turn events cannot overwrite or reactivate a newer generation", async () => {
+  const dir = await makeTempDir("rin-worker-pool-turn-generation-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(workerPath, "setInterval(() => {}, 1000);\n");
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "current-versioned-command",
+      type: "prompt",
+      message: "current",
+      requestTag: "tag-current",
+      sessionFile,
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "current-versioned-command",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "start",
+    turnGeneration: 2,
+    requestTag: "tag-current",
+    sessionFile,
+    sessionId: "active",
+  });
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "start",
+    turnGeneration: 2,
+    requestTag: "tag-stale",
+    sessionFile,
+    sessionId: "active",
+  });
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "heartbeat",
+    turnGeneration: 2,
+    requestTag: "tag-stale",
+    sessionFile,
+    sessionId: "active",
+  });
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "heartbeat",
+    turnGeneration: 1,
+    requestTag: "tag-stale",
+    sessionFile,
+    sessionId: "active",
+  });
+
+  assert.equal(worker.turnActive, true);
+  assert.equal(worker.activeRequestTag, "tag-current");
+
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "complete",
+    turnGeneration: 2,
+    requestTag: "tag-stale",
+    sessionFile,
+    sessionId: "active",
+    finalText: "stale",
+  });
+  assert.equal(worker.turnActive, true);
+  assert.equal(worker.activeRequestTag, "tag-current");
+
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "complete",
+    turnGeneration: 2,
+    requestTag: "tag-current",
+    sessionFile,
+    sessionId: "active",
+    finalText: "current",
+  });
+  (pool as any).updateWorkerMetadata(worker, {
+    type: "rpc_turn_event",
+    event: "heartbeat",
+    turnGeneration: 1,
+    requestTag: "tag-stale",
+    sessionFile,
+    sessionId: "active",
+  });
+
   assert.equal(worker.turnActive, false);
   assert.equal(worker.rpcTurnActive, false);
   assert.equal(worker.activeRequestTag, undefined);
@@ -2151,11 +4857,11 @@ setInterval(() => {}, 1000);
 
   worker.child.stdout.emit(
     "data",
-    `${JSON.stringify({ type: "rpc_turn_event", event: "complete", sessionFile: sessionA })}\n`,
+    `${JSON.stringify({ type: "test_event", sessionFile: sessionA })}\n`,
   );
   worker.child.stdout.emit(
     "data",
-    `${JSON.stringify({ type: "rpc_turn_event", event: "complete", sessionFile: sessionB })}\n`,
+    `${JSON.stringify({ type: "test_event", sessionFile: sessionB })}\n`,
   );
   await sleep(20);
 
@@ -2275,7 +4981,11 @@ test("client worker commands fail closed stdin without daemon stream errors", as
   worker.child.stdin.end();
   await new Promise((resolve) => worker.child.stdin.once("finish", resolve));
 
-  pool.forwardToWorker(connection, worker, { id: "1", type: "prompt" });
+  pool.forwardToWorker(connection, worker, {
+    id: "1",
+    type: "prompt",
+    requestTag: "closed-stdin-turn",
+  });
 
   assert.equal(worker.pendingResponses.size, 0);
   assert.equal(pool.getStatusSnapshot().workerCount, 0);

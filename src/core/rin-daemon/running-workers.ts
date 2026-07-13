@@ -43,8 +43,10 @@ function readState(filePath: string): RunningWorkerState {
       if (!sessionFile || seen.has(sessionFile)) continue;
       seen.add(sessionFile);
       sessionFiles.push(sessionFile);
-      const requestTag = String(rawRequestTags[sessionFile] || "").trim();
-      if (requestTag) requestTags[sessionFile] = requestTag;
+      const requestTag = rawRequestTags[sessionFile];
+      if (typeof requestTag === "string" && requestTag.length > 0) {
+        requestTags[sessionFile] = requestTag;
+      }
     }
     return {
       schemaVersion: 1,
@@ -97,8 +99,11 @@ export function setRunningWorkerSession(
   const requestTags = { ...(state.requestTags || {}) };
   if (running) {
     sessionFiles.push(normalized);
-    const normalizedRequestTag = String(requestTag || "").trim();
-    if (normalizedRequestTag) requestTags[normalized] = normalizedRequestTag;
+    if (typeof requestTag === "string" && requestTag.length > 0) {
+      requestTags[normalized] = requestTag;
+    } else {
+      delete requestTags[normalized];
+    }
   } else {
     delete requestTags[normalized];
   }
