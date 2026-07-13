@@ -442,8 +442,11 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin is not connected to an interactive session yet. Start or reconnect the Rin interface.",
   rin_wait_for_idle_timeout: () =>
     "Rin did not become idle before the timeout. Wait a moment, abort the turn if needed.",
+  rin_worker_cleanup_failed: () =>
+    "Rin could not finish cleaning up the background worker.",
   rin_worker_exit: () =>
     "Rin's background worker exited before the request finished.",
+  rin_worker_oom: () => "Rin's background worker ran out of memory.",
   rin_worker_failed: () =>
     "Rin's background worker failed before the request finished.",
   rin_windows_daemon_cross_user_unsupported: () =>

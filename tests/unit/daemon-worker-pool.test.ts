@@ -114,6 +114,81 @@ test("daemon workers hide Windows console windows", () => {
   );
 });
 
+test("worker cgroup attachment completes before the worker is returned", async () => {
+  const dir = await makeTempDir("rin-worker-pool-cgroup-order-");
+  const workerPath = path.join(dir, "worker-source");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const attached: Array<{ workerId: string; pid: number }> = [];
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 5000,
+    workerCgroupIsolation: {
+      attachWorker(workerId: string, pid: number) {
+        attached.push({ workerId, pid });
+        return {
+          wasOomKilled: () => false,
+          cleanup: async () => true,
+        };
+      },
+    },
+  });
+
+  const worker = pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    { type: "new_session" },
+  );
+
+  assert.deepEqual(attached, [{ workerId: worker.id, pid: worker.child.pid! }]);
+  assert.ok(worker.cgroupLease);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("worker creation fails closed when cgroup attachment fails", async () => {
+  const dir = await makeTempDir("rin-worker-pool-cgroup-failure-");
+  const workerPath = path.join(dir, "worker-source");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+  let spawnedPid = 0;
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 5000,
+    workerCgroupIsolation: {
+      attachWorker(_workerId: string, pid: number) {
+        spawnedPid = pid;
+        throw new Error("cgroup attach failed");
+      },
+    },
+  });
+
+  assert.throws(
+    () =>
+      pool.resolveWorkerForCommand(
+        { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+        { type: "new_session" },
+      ),
+    /cgroup attach failed/,
+  );
+  assert.ok(spawnedPid > 0);
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (!fsSync.existsSync(`/proc/${spawnedPid}`)) break;
+    await sleep(10);
+  }
+  assert.equal(fsSync.existsSync(`/proc/${spawnedPid}`), false);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 async function makeTempDir(prefix) {
   const root = process.env.RIN_TEST_TMPDIR || "/home/rin/tmp";
   await fs.mkdir(root, { recursive: true });
@@ -2218,6 +2293,156 @@ test("client worker commands fail closed stdin without daemon stream errors", as
       );
     }),
   );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("worker OOM is reported without turning it into an ordinary exit", async () => {
+  const dir = await makeTempDir("rin-worker-pool-oom-");
+  const workerPath = path.join(dir, "worker-source");
+  await fs.writeFile(
+    workerPath,
+    "setTimeout(() => process.exit(33), 100); process.stdin.resume();\n",
+  );
+
+  const writes: string[] = [];
+  const cleaned: string[] = [];
+  const connection = {
+    socket: { destroyed: false, write: (line: string) => writes.push(line) },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 5000,
+    workerCgroupIsolation: {
+      attachWorker(workerId: string) {
+        return {
+          wasOomKilled: () => true,
+          cleanup: async () => {
+            cleaned.push(workerId);
+            return true;
+          },
+        };
+      },
+    },
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.attachWorker(connection, worker);
+
+  await waitForChildExit(worker.child);
+  await sleep(20);
+
+  const events = writes.map((line) => JSON.parse(line));
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "worker_oom" &&
+        event.code === 33 &&
+        event.signal === null,
+    ),
+  );
+  assert.equal(
+    events.some((event) => event.type === "worker_exit"),
+    false,
+  );
+  assert.deepEqual(cleaned, [worker.id]);
+});
+
+test("OOM worker recovery resumes only the affected session with an OOM source", async () => {
+  const dir = await makeTempDir("rin-worker-pool-oom-recovery-");
+  const workerPath = path.join(dir, "worker-source");
+  const firstRunMarker = path.join(dir, "first-run.txt");
+  const resumeSourcePath = path.join(dir, "resume-source.txt");
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+const marker = ${JSON.stringify(firstRunMarker)};
+const sourcePath = ${JSON.stringify(resumeSourcePath)};
+const firstRun = !fs.existsSync(marker);
+if (firstRun) fs.writeFileSync(marker, 'done');
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (firstRun && command.type === 'prompt') process.exit(9);
+    if (command.type === 'resume_interrupted_turn') {
+      fs.writeFileSync(sourcePath, String(command.source || ''));
+    }
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { sessionFile: '/tmp/oom-recovered.jsonl', sessionId: 'oom-recovered', isStreaming: false, isCompacting: false },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  let attachedWorkers = 0;
+  const connection = {
+    socket: { destroyed: false, write: (line: string) => writes.push(line) },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 5000,
+    workerCgroupIsolation: {
+      attachWorker() {
+        attachedWorkers += 1;
+        const oomKilled = attachedWorkers === 1;
+        return {
+          wasOomKilled: () => oomKilled,
+          cleanup: async () => true,
+        };
+      },
+    },
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(worker, {
+    sessionFile: "/tmp/oom-recovered.jsonl",
+    sessionId: "oom-recovered",
+  });
+  pool.attachWorker(connection, worker);
+  pool.forwardToWorker(connection, worker, {
+    id: "oom_prompt",
+    type: "prompt",
+    requestTag: "oom-turn",
+  });
+
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (writes.some((line) => JSON.parse(line).type === "session_recovered")) {
+      break;
+    }
+    await sleep(25);
+  }
+
+  const payloads = writes.map((line) => JSON.parse(line));
+  assert.deepEqual(
+    payloads.map((payload) => payload.type),
+    ["worker_oom", "session_recovering", "response", "session_recovered"],
+  );
+  assert.equal(payloads[1].resumeTurn, true);
+  assert.equal(payloads[2].error, "rin_session_recovering");
+  assert.equal(await fs.readFile(resumeSourcePath, "utf8"), "worker-oom");
+  assert.equal(pool.getStatusSnapshot().workerCount, 1);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

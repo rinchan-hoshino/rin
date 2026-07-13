@@ -49,6 +49,10 @@ import { RinBackgroundExtensionManager } from "./extensions.js";
 import { listRunningWorkerSessions } from "./running-workers.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
+import {
+  createWorkerCgroupIsolation,
+  type WorkerCgroupIsolation,
+} from "./worker-cgroup-isolation.js";
 
 function writeLine(socket: RpcSocketLike, payload: unknown) {
   if (!socket.destroyed) socket.write(`${JSON.stringify(payload)}\n`);
@@ -114,10 +118,14 @@ export async function startDaemon(
     workerGcIdleMs?: number;
     workerSweepIntervalMs?: number;
     shutdownGraceMs?: number;
+    workerCgroupIsolation?: WorkerCgroupIsolation;
   } = {},
 ) {
   const runtime = resolveRuntimeProfile();
   applyRuntimeProfileEnvironment(runtime);
+  const workerCgroupIsolation =
+    options.workerCgroupIsolation ||
+    createWorkerCgroupIsolation({ warn: (message) => console.warn(message) });
   const socketPath = options.socketPath || defaultDaemonSocketPath();
   const bridgeSocketPath = bridgeDaemonSocketPath(
     process.env.RIN_DIR || runtime.agentDir,
@@ -145,6 +153,7 @@ export async function startDaemon(
     sweepIntervalMs: options.workerSweepIntervalMs,
     resourceOptionsDir: coreDataPath(runtime.agentDir, "workers", "options"),
     agentDir: runtime.agentDir,
+    workerCgroupIsolation,
     onWorkerSpawn: (requester, worker) => {
       if (requester)
         writeLine(requester.socket, {

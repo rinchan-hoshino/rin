@@ -12,6 +12,11 @@ import {
   takePendingTerminalTurnEvent,
 } from "./pending-turn-events.js";
 import { setRunningWorkerSession } from "./running-workers.js";
+import {
+  WORKER_CGROUP_DELEGATION_ENV,
+  type WorkerCgroupIsolation,
+  type WorkerCgroupLease,
+} from "./worker-cgroup-isolation.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import {
@@ -68,6 +73,7 @@ type InitialWorkerSession =
 export type WorkerHandle = {
   id: string;
   child: ReturnType<typeof spawn>;
+  cgroupLease?: WorkerCgroupLease;
   stdoutBuffer: { buffer: string };
   stderrBuffer: { buffer: string };
   connections: Set<ConnectionState>;
@@ -181,6 +187,7 @@ export class WorkerPool {
       resourceOptions?: Record<string, unknown>;
       resourceOptionsDir?: string;
       agentDir?: string;
+      workerCgroupIsolation?: WorkerCgroupIsolation;
     },
   ) {
     this.gcIdleMs = Math.max(0, Number(options.gcIdleMs ?? 30_000));
@@ -972,16 +979,35 @@ export class WorkerPool {
       this.options.workerPath,
       ...this.writeWorkerResourceOptionsFile(workerResourceOptions),
     ];
+    const workerId = `worker_${++this.workerSeq}`;
+    const workerEnv = { ...process.env };
+    delete workerEnv[WORKER_CGROUP_DELEGATION_ENV];
     const child = spawn(process.execPath, workerArgs, {
       cwd: this.options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: workerEnv,
       windowsHide: true,
     });
-
+    let cgroupLease: WorkerCgroupLease | undefined;
+    if (this.options.workerCgroupIsolation) {
+      if (!child.pid) {
+        child.kill("SIGKILL");
+        throw new Error("Rin worker process id is unavailable");
+      }
+      try {
+        cgroupLease = this.options.workerCgroupIsolation.attachWorker(
+          workerId,
+          child.pid,
+        );
+      } catch (error) {
+        child.kill("SIGKILL");
+        throw error;
+      }
+    }
     const worker: WorkerHandle = {
-      id: `worker_${++this.workerSeq}`,
+      id: workerId,
       child,
+      cgroupLease,
       stdoutBuffer: { buffer: "" },
       stderrBuffer: { buffer: "" },
       connections: new Set(),
@@ -1084,18 +1110,18 @@ export class WorkerPool {
       this.handleWorkerStdinFailure(worker, error);
     });
 
-    child.on("exit", (code, signal) => {
+    child.on("exit", async (code, signal) => {
       const liveConnections = new Set<ConnectionState>(worker.connections);
       for (const pending of worker.pendingResponses.values()) {
         pending.finalize?.();
         if (pending.connection) liveConnections.add(pending.connection);
       }
       const selector = this.getWorkerSelector(worker);
-      const shouldRecover = this.shouldRecoverWorker(worker, liveConnections);
-      this.rejectTerminalTurnWaiters(
+      const recoveryEligible = this.shouldRecoverWorker(
         worker,
-        new Error(shouldRecover ? "rin_session_recovering" : "rin_worker_exit"),
+        liveConnections,
       );
+      const oomKilled = worker.cgroupLease?.wasOomKilled() === true;
       this.deleteWorkerSessionRefs(worker);
       this.workers.delete(worker);
       for (const connection of Array.from(worker.connections)) {
@@ -1107,26 +1133,62 @@ export class WorkerPool {
       const pending = Array.from(worker.pendingResponses.values());
       worker.pendingResponses.clear();
       worker.ignoredResponseIds.clear();
+
+      let cleanupComplete = true;
+      try {
+        cleanupComplete = worker.cgroupLease
+          ? await worker.cgroupLease.cleanup()
+          : true;
+      } catch {
+        cleanupComplete = false;
+      }
+      const shouldRecover = cleanupComplete && recoveryEligible;
+      const exitError = !cleanupComplete
+        ? "rin_worker_cleanup_failed"
+        : oomKilled
+          ? "rin_worker_oom"
+          : "rin_worker_exit";
+      this.rejectTerminalTurnWaiters(
+        worker,
+        new Error(shouldRecover ? "rin_session_recovering" : exitError),
+      );
+      if (oomKilled) {
+        for (const connection of liveConnections) {
+          writeLine(connection.socket, {
+            type: "worker_oom",
+            code: code ?? null,
+            signal: signal ?? null,
+          });
+        }
+      }
       if (shouldRecover) {
-        this.recoverWorker(selector, worker, liveConnections, pending);
+        this.recoverWorker(
+          selector,
+          worker,
+          liveConnections,
+          pending,
+          oomKilled ? "worker-oom" : "worker-exit",
+        );
         return;
       }
-      for (const connection of liveConnections) {
-        writeLine(connection.socket, {
-          type: "worker_exit",
-          code: code ?? null,
-          signal: signal ?? null,
-        });
+      if (!oomKilled) {
+        for (const connection of liveConnections) {
+          writeLine(connection.socket, {
+            type: "worker_exit",
+            code: code ?? null,
+            signal: signal ?? null,
+          });
+        }
       }
       for (const entry of pending) {
         if (entry.reject) {
-          entry.reject(new Error("rin_worker_exit"));
+          entry.reject(new Error(exitError));
           continue;
         }
         if (entry.connection) {
           writeLine(
             entry.connection.socket,
-            responseError(entry.id, entry.commandType, "rin_worker_exit"),
+            responseError(entry.id, entry.commandType, exitError),
           );
         }
       }
@@ -1476,6 +1538,7 @@ export class WorkerPool {
     worker: WorkerHandle,
     liveConnections: Set<ConnectionState>,
     pending: PendingResponse[],
+    source = "worker-exit",
   ) {
     const resumeTurn = hasResumableWorkerActivity(worker);
     for (const connection of liveConnections) {
@@ -1516,7 +1579,7 @@ export class WorkerPool {
         if (resumeTurn && !this.isWorkerRunning(recovered)) {
           await this.sendInternalCommand(recovered, {
             type: "resume_interrupted_turn",
-            source: "worker-exit",
+            source,
           });
         }
         for (const connection of liveConnections) {

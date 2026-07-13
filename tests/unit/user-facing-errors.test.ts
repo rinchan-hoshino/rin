@@ -89,6 +89,14 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin's background worker exited before the request finished.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("rin_worker_oom"),
+    "Rin's background worker ran out of memory.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_worker_cleanup_failed"),
+    "Rin could not finish cleaning up the background worker.",
+  );
+  assert.equal(
     formatRuntimeErrorForUser("rin_no_attached_session"),
     "Rin could not find a session attached to this chat command.",
   );

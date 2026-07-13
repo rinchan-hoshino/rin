@@ -165,6 +165,13 @@ test("installer service helpers prefer current daemon entry, quote systemd value
     );
     assert.doesNotMatch(spec.service, /\/usr\/bin\/env|"node"/);
     assert.match(spec.service, /^Environment="PATH=.+"$/m);
+    assert.match(
+      spec.service,
+      /^Environment="RIN_SYSTEMD_CGROUP_DELEGATION=1"$/m,
+    );
+    assert.match(spec.service, /^Delegate=memory$/m);
+    assert.match(spec.service, /^DelegateSubgroup=daemon$/m);
+    assert.match(spec.service, /^OOMPolicy=continue$/m);
     assert.ok(spec.service.includes(`${targetLinuxHome}/.local/bin`));
     assert.equal(spec.service.includes("/home/THE_cattail"), false);
     assert.equal(spec.service.includes("/tmp/installer-only-bin"), false);

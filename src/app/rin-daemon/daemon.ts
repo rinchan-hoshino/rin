@@ -13,6 +13,7 @@ import { defaultDaemonSocketPath } from "../../core/rin-lib/common.js";
 import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
 import { startDaemon } from "../../core/rin-daemon/daemon.js";
 import { RinBackgroundExtensionManager } from "../../core/rin-daemon/extensions.js";
+import { createWorkerCgroupIsolation } from "../../core/rin-daemon/worker-cgroup-isolation.js";
 import {
   acquireDaemonInstanceLock,
   type DaemonInstanceLock,
@@ -44,6 +45,9 @@ async function main() {
 
   const runtime = resolveRuntimeProfile();
   applyRuntimeProfileEnvironment(runtime);
+  const workerCgroupIsolation = createWorkerCgroupIsolation({
+    warn: (message) => console.warn(message),
+  });
 
   const daemonSocketPath = process.argv[2] || defaultDaemonSocketPath();
   let daemonLock: DaemonInstanceLock | null = null;
@@ -111,6 +115,7 @@ async function main() {
       instanceLock: daemonLock,
       socketPath: daemonSocketPath,
       workerPath,
+      workerCgroupIsolation,
       chat: {
         send: async (payload) =>
           await (await getHostedChatBridge()).send(payload),
