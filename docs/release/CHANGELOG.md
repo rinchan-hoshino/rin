@@ -1,5 +1,112 @@
 # Rin Changelog
 
+## 0.8.0
+
+- Chat progress and final delivery now share clearer ownership and layout rules, with native Lark post paragraphs, configurable working frames, completed summaries, and quieter pending delivery state.
+- Interrupted and restored turns recover more reliably across daemon restarts, bridge readiness, frontend reconnects, compaction, worker OOM failures, and lifecycle cancellation while producing one terminal outcome.
+- TUI and frontend flows now preserve loaded resources, custom entries, durable RPC settings, active-run steering, compaction working state, and prompt admission semantics more consistently.
+- Installer and update handling now preserves initialization and PowerShell failure state, uses the target runtime for cross-user helpers, and reports system and restart errors more clearly.
+- Telegram topics, Discord working continuity, native Lark images, Markdown indentation, OneBot media, and shared editable progress adapters now follow stricter platform-specific delivery contracts.
+- macOS daemon restart handling now replaces stale launchd-owned processes while bounding shutdown waits and preserving atomic restart behavior.
+- Runtime usage and maintenance surfaces now include quota-aware trend charts, dedicated first-run scheduler sessions, updated Pi integrations, and removal of obsolete adapter and mirror paths.
+<!-- rin-changelog-coverage
+13332bd fix(installer): preserve init completion state
+1d99d58 fix(chat-runtime): clean up progress before final replies
+bbf6402 fix(tui): mount loaded resources on startup
+d538ff4 fix(installer): make system errors readable
+a33c9e7 fix(chat): stabilize editable progress replies
+5057944 fix(chat): unify progress delivery semantics
+176a453 fix(chat): keep custom working copy out of defaults
+629d32d fix(chat): keep working frames user-configured
+cc6cc6c fix(chat): keep pending outbox delivery silent
+380306b fix(chat): coalesce automatic compaction completion
+b0bb35d fix(chat): verify pending outbox delivery state
+5237a6d fix(chat): keep Telegram topic scope in delivery
+1eae247 fix(chat): stop retrying turns by frontend error type
+f5a26eb fix(frontend): stop recovering turns by error strings
+1698ce6 fix(frontend): remove remaining error-string recovery
+0fad213 fix(chat): treat pending final delivery as output acceptance
+cf41fd2 feat(usage): include quota details in trend chart
+b2b3251 fix(installer): preserve PowerShell bootstrap failure logs
+ff00278 fix(chat): simplify outbound message delivery
+a31c3e7 fix(chat): make usage image delivery strict
+3188a1d fix(chat): expire stale outbox deliveries
+00d2902 fix(chat): suppress lifecycle cancellation errors
+cfde2db fix(chat): retry lifecycle-cancelled inbox turns
+6ad99d7 fix(chat): preserve active turns during daemon shutdown
+ed7b718 fix(chat): use frontend shutdown for hosted bridge stop
+848b9bf fix(scheduler): create dedicated task sessions on first run
+a837296 fix(chat): restore active inbox jobs during bridge shutdown
+ba6c9ba fix(chat): suppress shutdown failures before error delivery
+c2e6874 fix(update): wait for daemon turns before restart
+c70d306 chore(chat): add ingress timeline diagnostic
+e986492 Revert "chore(chat): add ingress timeline diagnostic"
+eb54160 fix(installer): use target runtime for cross-user helpers
+e33c1d0 fix(update): ignore display-only working state during daemon drain
+442c264 fix(chat): decouple inbox admission waits
+d8bb2bc fix(chat): coalesce editable progress messages
+be0faca feat(chat): share editable progress sections
+c32b578 fix(frontend): centralize prompt steering admission
+26ca49e fix(rin): let restart activation interrupt active turns
+5ad7544 fix(chat): retry externally aborted inbound turns
+0d61073 refactor(chat): unify editable progress adapters
+ebf72ab Merge branch 'feat/shared-editable-progress-sections'
+4783e2c fix(frontend): resolve finals after compaction rewrites turn baseline
+e3e85fd fix(chat): make rpc finals explicit
+215aa97 fix(chat): treat frontend aborts as lifecycle retries
+2169aca fix(frontend): recover chat turns after update disconnect
+e048314 chore(pi): sync 0.80.5
+67bbe08 chore(pi): sync 0.80.6
+e8cd460 fix(chat): preserve turns during daemon shutdown
+7a69fea fix(chat): reclaim restored active inbox turns
+f047e11 fix(chat): rejoin restarted turns in backend
+87ff206 fix(tui): restore Pi session rendering contract
+d79769f fix(chat): bypass Lark member lookup for mentions
+8ad6913 Revert "fix(chat): bypass Lark member lookup for mentions"
+9771e01 fix(chat): keep errors outside editable progress
+b39ca51 fix(chat): preserve Discord working continuity
+ffd6ebb fix(chat): preserve first-seen time in chat log
+1b018a6 fix(chat): remove session command handling
+7b6629b fix(chat): reuse restored frontend sessions
+36ec80f chore(upstream): remove unused prompt-engineer mirror
+0cbf517 fix(tui): restore custom entry rendering
+2dbbba0 test(runtime): pin compaction threshold model fixture
+43541f5 fix: remove obsolete restart quiescing
+555ab4d fix: retry daemon restart snapshot
+af7d5b5 fix: preserve restart status query failures
+008cf3f fix: simplify daemon restart readiness
+c9a4d07 fix: replace stale macOS daemon on restart
+bd1f90e revert: preserve atomic macOS daemon restart
+dcbc461 fix: restore macOS launchd reload on restart
+07975c1 fix: wait for macOS daemon shutdown before restart
+f731d6c fix: allow macOS daemon shutdown to finish
+75c50cf fix: replace stuck macOS daemon ownership
+d54e0b8 fix: bound daemon shutdown before restart
+d2d8187 refactor: remove obsolete macOS daemon migration
+1b81ec3 fix(chat): send native Lark images
+ca1a6ca fix(chat): preserve outbound Markdown indentation
+9b271a6 feat(chat): show completed summaries while working
+7feb586 fix(chat): simplify working summaries
+0a47b4e fix(chat): send Lark finals as native post paragraphs
+c6c0249 fix(sdk): preserve chat send compatibility
+f2dc6a6 fix(frontend): derive steering from Pi active runs
+2199bd0 refactor(chat): remove qq adapter and use onebot base64 media
+9a9952a fix(chat): treat Lark as non-editable
+b097a88 fix(tui): restore Working after compaction
+131415d fix(chat): submit prompts without waiting for progress
+4de7bc3 fix(tui): unify status component ownership
+309e566 fix(chat): recover missed inbound messages
+31c0636 fix(tui): confirm durable rpc settings
+f640642 fix(daemon): contain worker OOM failures
+d69c909 fix(chat): align Working edit cadence
+d8f51f3 fix: recover interrupted turns with one terminal outcome
+955e42e fix(chat): unify progress layout and todo delivery
+91537fe fix(chat): restore inbox only after bridge readiness
+ada8361 fix(chat): preserve frontend recovery ownership
+5d50f78 fix(chat): migrate active inbox recovery owners
+3374adc fix(daemon): harden recovered turn ownership
+-->
+
 ## 0.7.0
 
 - Chat integrations now use stricter bot-qualified chat keys, clearer slash-command surfaces, simpler Discord command acknowledgements, non-blocking platform acknowledgements, and channel-aware Discord metadata while retiring the Matrix adapter path.
