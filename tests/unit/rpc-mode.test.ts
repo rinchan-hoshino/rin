@@ -3215,7 +3215,7 @@ test(
 );
 
 test(
-  "rpc mode does not reuse a stale pre-turn final after session compaction",
+  "rpc mode rejects nonempty branch fallback without a manager leaf api",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3265,8 +3265,20 @@ test(
         bindExtensions: async () => {},
         subscribe: () => () => {},
         prompt: async () => {
-          session.messages = [oldAssistant];
-          latestAssistantText = "stale previous final";
+          const currentAssistant = {
+            role: "assistant",
+            content: [
+              { type: "text", text: "must not recover from invalid baseline" },
+            ],
+          };
+          session.messages = [oldAssistant, currentAssistant];
+          durableEntries.push({
+            id: "current-final-entry",
+            parentId: "actual-baseline-leaf",
+            type: "message",
+            message: currentAssistant,
+          });
+          latestAssistantText = "must not recover from invalid baseline";
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
@@ -3276,7 +3288,7 @@ test(
         sessionManager: {
           ...testSessionManager(() => session.messages || []),
           getBranch: () => durableEntries,
-          getLeafId: () => "older-entry",
+          getLeafId: undefined,
         },
         messages: [],
         getSessionStats: () => ({}),
@@ -3511,7 +3523,7 @@ test(
 );
 
 test(
-  "rpc mode rejects a branch fallback when the manager leaf remains stale",
+  "rpc mode compares settlement branch leaf ids as opaque strings",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3521,7 +3533,7 @@ test(
     const sessionSubscribers = new Set();
     const durableEntries: any[] = [
       {
-        id: "baseline-entry",
+        id: " baseline-entry ",
         parentId: null,
         type: "message",
         message: {
@@ -3530,6 +3542,7 @@ test(
         },
       },
     ];
+    let managerLeafId = " baseline-entry ";
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3564,14 +3577,15 @@ test(
             handler({ type: "message_end", message: assistantMessage });
           }
           durableEntries.push({
-            id: "unselected-final-entry",
-            parentId: "baseline-entry",
+            id: " unselected-final-entry ",
+            parentId: " baseline-entry ",
             type: "message",
             message: {
               role: "assistant",
               content: [{ type: "text", text: "not on the manager leaf" }],
             },
           });
+          managerLeafId = "unselected-final-entry";
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
@@ -3581,7 +3595,7 @@ test(
         sessionManager: {
           ...testSessionManager(() => session.messages || []),
           getBranch: () => durableEntries,
-          getLeafId: () => "baseline-entry",
+          getLeafId: () => managerLeafId,
         },
         messages: [],
         getSessionStats: () => ({}),

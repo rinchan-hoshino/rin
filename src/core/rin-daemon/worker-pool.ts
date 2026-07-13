@@ -423,9 +423,15 @@ export class WorkerPool {
       worker.isCompacting ||
       worker.rinWorking,
     );
-    const canRejoinFrontendTurn = Boolean(
+    const canRejoinPendingFrontendTurn = Boolean(
       worker.activeLifecycleFrontendOwner &&
-      (workerHasLiveTurn || worker.turnRecoveryPending),
+      commandRequestTag === worker.activeLifecycleRequestTag &&
+      worker.turnRecoveryPending,
+    );
+    const canSubmitPromptToOwnedLifecycle = Boolean(
+      commandType === "prompt" &&
+      worker.activeLifecycleFrontendOwner &&
+      (workerHasLiveTurn || canRejoinPendingFrontendTurn),
     );
     let lifecycleAdmissionError = "";
     if (
@@ -438,9 +444,7 @@ export class WorkerPool {
     } else if (
       terminalLifecycleCommand &&
       worker.activeLifecycleRequestTag !== undefined &&
-      (commandType !== "prompt" ||
-        commandRequestTag !== worker.activeLifecycleRequestTag ||
-        !canRejoinFrontendTurn)
+      !canSubmitPromptToOwnedLifecycle
     ) {
       lifecycleAdmissionError = "rin_turn_recovery_in_progress";
     } else if (
@@ -2104,6 +2108,10 @@ export class WorkerPool {
     source = "worker-exit",
   ) {
     const resumeTurn = hasResumableWorkerActivity(worker);
+    const recoveryRequestTag = worker.activeLifecycleRequestTag;
+    const recoveryFrontendOwner = Boolean(
+      recoveryRequestTag !== undefined && worker.activeLifecycleFrontendOwner,
+    );
     for (const connection of liveConnections) {
       this.rememberSessionSelection(connection, selector);
       writeLine(connection.socket, {
@@ -2140,10 +2148,17 @@ export class WorkerPool {
           this.attachWorker(connection, recovered);
         }
         if (resumeTurn && !this.isWorkerRunning(recovered)) {
-          await this.sendInternalCommand(recovered, {
-            type: "resume_interrupted_turn",
-            source,
-          });
+          await this.sendInternalCommand(
+            recovered,
+            {
+              type: "resume_interrupted_turn",
+              source,
+              ...(recoveryRequestTag !== undefined
+                ? { requestTag: recoveryRequestTag }
+                : {}),
+            },
+            { frontendOwner: recoveryFrontendOwner },
+          );
         }
         for (const connection of liveConnections) {
           writeLine(connection.socket, {
@@ -2293,7 +2308,10 @@ export class WorkerPool {
   private sendInternalCommand(
     worker: WorkerHandle,
     command: any,
-    options: { lifecycleRecoveryProbe?: boolean } = {},
+    options: {
+      lifecycleRecoveryProbe?: boolean;
+      frontendOwner?: boolean;
+    } = {},
   ) {
     const id = `rin_internal_${++this.internalRequestSeq}`;
     const commandType = String(command?.type || "unknown");
@@ -2347,7 +2365,13 @@ export class WorkerPool {
       if (keepUntilTerminalTurnEvent && requestTag !== undefined) {
         worker.turnRecoveryPending = true;
         if (worker.activeLifecycleRequestTag === undefined) {
-          this.setLifecycleOwner(worker, requestTag, selector, id);
+          this.setLifecycleOwner(
+            worker,
+            requestTag,
+            selector,
+            id,
+            options.frontendOwner === true,
+          );
         } else if (
           worker.activeLifecycleOwnerCommandId === undefined &&
           worker.activeLifecycleRequestTag === requestTag

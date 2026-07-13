@@ -737,11 +737,16 @@ setInterval(() => {}, 1000);
       finalText: "late recovered final",
     })}\n`,
   );
-  await sleep(10);
+  let durableState: any;
+  for (let index = 0; index < 100; index += 1) {
+    durableState = JSON.parse(await fs.readFile(statePath, "utf8"));
+    if (durableState.sessionFiles.length === 0) break;
+    await sleep(10);
+  }
 
   assert.equal(worker.turnActive, false);
   assert.equal(worker.turnRecoveryPending, false);
-  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+  assert.deepEqual(durableState, {
     schemaVersion: 1,
     sessionFiles: [],
   });
@@ -972,7 +977,11 @@ setInterval(() => {}, 1000);
   );
   await sleep(20);
 
-  assert.deepEqual(await readCommandLog(logPath), ["get_state", "prompt"]);
+  assert.deepEqual(await readCommandLog(logPath), [
+    "get_state",
+    "prompt",
+    "prompt",
+  ]);
   assert.equal(
     writes.some(
       (value) =>
@@ -987,8 +996,22 @@ setInterval(() => {}, 1000);
         value.includes('"id":"different-inbox-prompt"') &&
         value.includes('"error":"rin_turn_recovery_in_progress"'),
     ),
-    true,
+    false,
   );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "different-inbox-prompt",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: { acceptedAs: "steer", turnActive: true },
+      sessionFile,
+    })}\n`,
+  );
+  await sleep(0);
+  assert.equal(worker.activeLifecycleRequestTag, "chat-inbox-stable");
+  assert.equal(worker.activeLifecycleFrontendOwner, true);
 
   pool.continueInterruptedTurnSessionWorker({
     sessionFile,
@@ -1011,7 +1034,11 @@ setInterval(() => {}, 1000);
     true,
   );
   await sleep(10);
-  assert.deepEqual(await readCommandLog(logPath), ["get_state", "prompt"]);
+  assert.deepEqual(await readCommandLog(logPath), [
+    "get_state",
+    "prompt",
+    "prompt",
+  ]);
   assert.equal(
     writes.some(
       (value) =>
@@ -1098,12 +1125,12 @@ setInterval(() => {}, 1000);
     },
     true,
   );
-  await sleep(20);
-
-  assert.deepEqual(await readCommandLog(logPath), [
+  const commands = await waitForCommandLogPrefix(logPath, [
     "first-prompt:prompt",
     "same-tag-rejoin:prompt",
   ]);
+
+  assert.deepEqual(commands, ["first-prompt:prompt", "same-tag-rejoin:prompt"]);
   assert.equal(
     writes.some(
       (value) =>
@@ -1688,7 +1715,15 @@ test("a duplicate in-flight spaced command id cannot replace the lifecycle owner
     writes.some((value) => value.includes("rin_duplicate_command_id")),
     true,
   );
-  const loggedCommands = await readCommandLog(commandLogPath);
+  const loggedCommands = await waitForCommandLogPrefix(commandLogPath, [
+    JSON.stringify({
+      id: " duplicate-id ",
+      type: "prompt",
+      message: "owner",
+      requestTag: "owner-tag",
+      sessionFile,
+    }),
+  ]);
   assert.equal(loggedCommands.length, 1);
   assert.equal(JSON.parse(loggedCommands[0]).message, "owner");
 
@@ -1916,7 +1951,15 @@ test("a delayed recovery intent cannot overwrite an owner installed while worker
     },
     ownerBefore,
   );
-  const commands = await readCommandLog(commandLogPath);
+  const commands = await waitForCommandLogPrefix(commandLogPath, [
+    JSON.stringify({
+      id: "new-prompt-owner",
+      type: "prompt",
+      message: "new owner",
+      requestTag: "new-owner",
+      sessionFile,
+    }),
+  ]);
   assert.deepEqual(
     commands.map((value) => JSON.parse(value).type),
     ["prompt"],
@@ -2093,7 +2136,7 @@ test("an overlapping get_state response cannot clear a prompt lifecycle owner", 
   );
 });
 
-test("overlapping terminal prompts are rejected without disturbing the active owner", async () => {
+test("overlapping prompt responses preserve the active lifecycle owner", async () => {
   for (const protocol of ["legacy", "versioned"]) {
     for (const secondResponseSuccess of [true, false]) {
       const dir = await makeTempDir(
@@ -2255,7 +2298,7 @@ test("overlapping terminal prompts are rejected without disturbing the active ow
             value.includes(`"id":"${protocol}-second-command"`) &&
             value.includes('"error":"rin_turn_recovery_in_progress"'),
         ),
-        true,
+        false,
       );
 
       worker.child.stdout.emit(
@@ -2317,10 +2360,16 @@ test("explicit empty recovery tags remain empty through command ownership and du
     source: "scheduled-task",
     requestTag: "",
   });
-  await sleep(20);
+  const commands = await waitForCommandLogPrefix(commandLogPath, [
+    JSON.stringify({
+      type: "resume_interrupted_turn",
+      source: "scheduled-task",
+      requestTag: "",
+      id: "rin_internal_1",
+    }),
+  ]);
 
   assert.equal(worker.activeLifecycleRequestTag, "");
-  const commands = await readCommandLog(commandLogPath);
   assert.equal(commands.length, 1);
   const command = JSON.parse(commands[0]);
   assert.equal(command.type, "resume_interrupted_turn");
@@ -3734,9 +3783,14 @@ setInterval(() => {}, 1000);
     frontendOwners: { [sessionFile]: true },
   });
 
-  await sleep(180);
+  let terminalState: any;
+  for (let index = 0; index < 100; index += 1) {
+    terminalState = JSON.parse(await fs.readFile(statePath, "utf8"));
+    if (terminalState.sessionFiles.length === 0) break;
+    await sleep(10);
+  }
 
-  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+  assert.deepEqual(terminalState, {
     schemaVersion: 1,
     sessionFiles: [],
   });
@@ -4870,6 +4924,272 @@ setInterval(() => {}, 1000);
   assert.equal(payloads[1].error, "rin_session_recovering");
   assert.equal(payloads[2].sessionFile, "/tmp/recovered.jsonl");
   assert.equal(pool.getStatusSnapshot().workerCount, 1);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("worker crash recovery preserves missing and explicit empty request tags", async () => {
+  for (const scenario of [
+    {
+      name: "missing",
+      requestTag: undefined,
+      hasRequestTag: false,
+      frontendOwner: false,
+    },
+    {
+      name: "empty",
+      requestTag: "",
+      hasRequestTag: true,
+      frontendOwner: true,
+    },
+  ]) {
+    const dir = await makeTempDir(
+      `rin-worker-pool-crash-${scenario.name}-tag-`,
+    );
+    const workerPath = path.join(dir, "worker-source");
+    const firstRunMarker = path.join(dir, "first-run.txt");
+    const commandLogPath = path.join(dir, "commands.log");
+    const sessionFile = path.join(dir, "session.jsonl");
+    await fs.writeFile(
+      workerPath,
+      String.raw`import fs from 'node:fs';
+const marker = ${JSON.stringify(firstRunMarker)};
+const logPath = ${JSON.stringify(commandLogPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+const firstRun = !fs.existsSync(marker);
+if (firstRun) fs.writeFileSync(marker, 'done');
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, JSON.stringify({
+      type: command.type,
+      hasRequestTag: Object.prototype.hasOwnProperty.call(command, 'requestTag'),
+      requestTag: command.requestTag,
+    }) + '\n');
+    if (firstRun) {
+      process.exit(9);
+    }
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { sessionFile, sessionId: 'crash-tag-session' },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+    );
+
+    const connection = {
+      socket: { destroyed: false, write() {} },
+      clientBuffer: "",
+    };
+    const pool = new WorkerPool({
+      workerPath,
+      cwd: dir,
+      agentDir: dir,
+      gcIdleMs: 1000,
+    });
+    const worker = pool.resolveWorkerForCommand(connection, {
+      type: "new_session",
+    });
+    pool.setWorkerSessionRefs(worker, {
+      sessionFile,
+      sessionId: "crash-tag-session",
+    });
+    worker.turnActive = true;
+    worker.rpcTurnActive = true;
+    if (scenario.requestTag !== undefined) {
+      worker.activeLifecycleRequestTag = scenario.requestTag;
+      worker.activeLifecycleSelector = { sessionFile };
+      worker.activeLifecycleFrontendOwner = scenario.frontendOwner;
+    } else {
+      worker.activeRequestTag = "unrelated-active-tag";
+    }
+    pool.forwardToWorker(connection, worker, {
+      id: "crash-trigger",
+      type: "get_state",
+      sessionFile,
+    });
+
+    let commands: any[] = [];
+    for (let index = 0; index < 100; index += 1) {
+      commands = (await readCommandLog(commandLogPath)).map((value) =>
+        JSON.parse(value),
+      );
+      if (commands.length >= 2) break;
+      await sleep(20);
+    }
+    assert.deepEqual(
+      commands.map((command) => command.type),
+      ["get_state", "resume_interrupted_turn"],
+      scenario.name,
+    );
+    assert.equal(commands[1]?.hasRequestTag, scenario.hasRequestTag);
+    assert.equal(commands[1]?.requestTag, scenario.requestTag);
+    const recoveredWorker = (pool as any).findWorkerBySelector({ sessionFile });
+    assert.ok(recoveredWorker);
+    assert.equal(
+      recoveredWorker.activeLifecycleRequestTag,
+      scenario.requestTag,
+    );
+    assert.equal(
+      recoveredWorker.activeLifecycleFrontendOwner,
+      scenario.frontendOwner,
+    );
+
+    pool.destroyAll();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("worker crash recovery preserves the active lifecycle request tag", async () => {
+  const dir = await makeTempDir("rin-worker-pool-crash-turn-owner-");
+  const workerPath = path.join(dir, "worker-source");
+  const firstRunMarker = path.join(dir, "first-run.txt");
+  const commandLogPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+const marker = ${JSON.stringify(firstRunMarker)};
+const logPath = ${JSON.stringify(commandLogPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+const firstRun = !fs.existsSync(marker);
+if (firstRun) fs.writeFileSync(marker, 'done');
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, JSON.stringify({ type: command.type, requestTag: command.requestTag }) + '\n');
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: { sessionFile, sessionId: 'crash-turn-session' },
+    }) + '\n');
+    if (firstRun && command.type === 'prompt') {
+      process.stdout.write(JSON.stringify({
+        type: 'rpc_turn_event',
+        event: 'start',
+        requestTag: command.requestTag,
+        sessionFile,
+        sessionId: 'crash-turn-session',
+      }) + '\n');
+      setTimeout(() => process.exit(9), 20);
+    }
+    if (!firstRun && command.type === 'resume_interrupted_turn') {
+      process.stdout.write(JSON.stringify({
+        type: 'rpc_turn_event',
+        event: 'start',
+        requestTag: command.requestTag,
+        sessionFile,
+        sessionId: 'crash-turn-session',
+      }) + '\n');
+      process.stdout.write(JSON.stringify({
+        type: 'rpc_turn_event',
+        event: 'complete',
+        requestTag: command.requestTag,
+        sessionFile,
+        sessionId: 'crash-turn-session',
+        finalText: 'recovered crash final',
+      }) + '\n');
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 1000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(worker, {
+    sessionFile,
+    sessionId: "crash-turn-session",
+  });
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "crashing-prompt",
+      type: "prompt",
+      message: "crash",
+      requestTag: " crash-owner ",
+      sessionFile,
+      sessionId: "crash-turn-session",
+    },
+    true,
+  );
+
+  let recoveredFinal: any;
+  for (let index = 0; index < 100; index += 1) {
+    recoveredFinal = writes
+      .flatMap((value) => value.trim().split("\n"))
+      .filter(Boolean)
+      .map((value) => JSON.parse(value))
+      .find(
+        (payload) =>
+          payload.type === "rpc_turn_event" &&
+          payload.event === "complete" &&
+          payload.finalText === "recovered crash final",
+      );
+    if (recoveredFinal) break;
+    await sleep(20);
+  }
+
+  assert.equal(recoveredFinal?.requestTag, " crash-owner ");
+  const commands = (await readCommandLog(commandLogPath)).map((value) =>
+    JSON.parse(value),
+  );
+  assert.deepEqual(
+    commands.map((command) => [command.type, command.requestTag]),
+    [
+      ["prompt", " crash-owner "],
+      ["resume_interrupted_turn", " crash-owner "],
+    ],
+  );
+  const recoveredWorker = pool
+    .getStatusSnapshot()
+    .workers.find((item) => item.sessionFile === sessionFile);
+  assert.ok(recoveredWorker);
+  const liveWorker = (pool as any).findWorkerBySelector({ sessionFile });
+  assert.equal(liveWorker.activeLifecycleRequestTag, undefined);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

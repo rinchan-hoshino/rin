@@ -371,18 +371,23 @@ type TurnBranchCursor = {
   leafId: string | null;
 };
 
+function sessionEntryId(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function captureTurnBranchCursor(session: any): TurnBranchCursor | null {
   const sessionManager = session?.sessionManager;
   if (typeof sessionManager?.getBranch !== "function") return null;
   const branch = sessionManager.getBranch();
   if (!Array.isArray(branch)) return null;
-  const managerLeafId = safeString(sessionManager.getLeafId?.()).trim();
+  const hasManagerLeafApi = typeof sessionManager.getLeafId === "function";
+  const managerLeafId = sessionEntryId(sessionManager.getLeafId?.());
   if (branch.length === 0) {
     return managerLeafId ? null : { sessionManager, leafId: null };
   }
-  const branchLeafId = safeString(branch.at(-1)?.id).trim();
+  const branchLeafId = sessionEntryId(branch.at(-1)?.id);
   if (!branchLeafId) return null;
-  if (managerLeafId && managerLeafId !== branchLeafId) return null;
+  if (!hasManagerLeafApi || managerLeafId !== branchLeafId) return null;
   return { sessionManager, leafId: branchLeafId };
 }
 
@@ -393,14 +398,14 @@ function resolveTurnCompletionSinceBranchCursor(
   if (!cursor || session?.sessionManager !== cursor.sessionManager) return null;
   const branch = cursor.sessionManager.getBranch?.();
   if (!Array.isArray(branch)) return null;
-  const managerLeafId = safeString(cursor.sessionManager.getLeafId?.()).trim();
+  const managerLeafId = sessionEntryId(cursor.sessionManager.getLeafId?.());
   if (branch.length === 0) {
     if (managerLeafId) return null;
   } else {
-    const branchLeafId = safeString(branch.at(-1)?.id).trim();
+    const branchLeafId = sessionEntryId(branch.at(-1)?.id);
     if (!branchLeafId) return null;
     if (
-      typeof cursor.sessionManager.getLeafId === "function" &&
+      typeof cursor.sessionManager.getLeafId !== "function" ||
       managerLeafId !== branchLeafId
     ) {
       return null;
@@ -409,7 +414,7 @@ function resolveTurnCompletionSinceBranchCursor(
   let turnEntries = branch;
   if (cursor.leafId) {
     const cursorIndex = branch.findIndex(
-      (entry: any) => safeString(entry?.id).trim() === cursor.leafId,
+      (entry: any) => sessionEntryId(entry?.id) === cursor.leafId,
     );
     if (cursorIndex < 0) return null;
     turnEntries = branch.slice(cursorIndex + 1);
