@@ -34,6 +34,22 @@ test("running worker records preserve legacy session-only state and durable requ
 
   assert.deepEqual(listRunningWorkerSessions(agentDir), [{ sessionFile }]);
 
+  await fs.writeFile(
+    statePath,
+    `${JSON.stringify({
+      schemaVersion: 1,
+      sessionFiles: [sessionFile],
+      requestTags: { [sessionFile]: "chat-inbox-legacy" },
+    })}\n`,
+  );
+  assert.deepEqual(listRunningWorkerSessions(agentDir), [
+    {
+      sessionFile,
+      requestTag: "chat-inbox-legacy",
+      frontendOwner: true,
+    },
+  ]);
+
   setRunningWorkerSession(
     agentDir,
     sessionFile,
@@ -47,6 +63,17 @@ test("running worker records preserve legacy session-only state and durable requ
       requestTag: "chat-inbox-stable",
       frontendOwner: true,
     },
+  ]);
+
+  setRunningWorkerSession(
+    agentDir,
+    sessionFile,
+    true,
+    "chat-inbox-explicit-non-owner",
+    false,
+  );
+  assert.deepEqual(listRunningWorkerSessions(agentDir), [
+    { sessionFile, requestTag: "chat-inbox-explicit-non-owner" },
   ]);
 
   setRunningWorkerSession(agentDir, sessionFile, true, "");

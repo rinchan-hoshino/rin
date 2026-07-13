@@ -10,7 +10,7 @@ type RunningWorkerState = {
   schemaVersion: 1;
   sessionFiles: string[];
   requestTags?: Record<string, string>;
-  frontendOwners?: Record<string, true>;
+  frontendOwners?: Record<string, boolean>;
 };
 
 export type RunningWorkerSession = {
@@ -37,14 +37,16 @@ function readState(filePath: string): RunningWorkerState {
       parsed?.requestTags && typeof parsed.requestTags === "object"
         ? parsed.requestTags
         : {};
-    const rawFrontendOwners =
-      parsed?.frontendOwners && typeof parsed.frontendOwners === "object"
-        ? parsed.frontendOwners
-        : {};
+    const hasExplicitFrontendOwners = Boolean(
+      parsed?.frontendOwners && typeof parsed.frontendOwners === "object",
+    );
+    const rawFrontendOwners = hasExplicitFrontendOwners
+      ? parsed.frontendOwners
+      : {};
     const seen = new Set<string>();
     const sessionFiles: string[] = [];
     const requestTags: Record<string, string> = {};
-    const frontendOwners: Record<string, true> = {};
+    const frontendOwners: Record<string, boolean> = {};
     for (const value of rawSessionFiles) {
       const sessionFile = normalizeSessionFile(value);
       if (!sessionFile || seen.has(sessionFile)) continue;
@@ -54,7 +56,12 @@ function readState(filePath: string): RunningWorkerState {
       if (typeof requestTag === "string" && requestTag.length > 0) {
         requestTags[sessionFile] = requestTag;
       }
-      if (rawFrontendOwners[sessionFile] === true) {
+      if (hasExplicitFrontendOwners) {
+        frontendOwners[sessionFile] = rawFrontendOwners[sessionFile] === true;
+      } else if (
+        typeof requestTag === "string" &&
+        requestTag.startsWith("chat-inbox-")
+      ) {
         frontendOwners[sessionFile] = true;
       }
     }
@@ -120,8 +127,12 @@ export function setRunningWorkerSession(
     } else {
       delete requestTags[normalized];
     }
-    if (frontendOwner) {
-      frontendOwners[normalized] = true;
+    if (
+      frontendOwner ||
+      requestTag?.startsWith("chat-inbox-") ||
+      normalized in frontendOwners
+    ) {
+      frontendOwners[normalized] = frontendOwner;
     } else {
       delete frontendOwners[normalized];
     }
