@@ -1299,6 +1299,79 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("resumeInterruptedTurnSession consumes its pending terminal without resuming again", async () => {
+  const dir = await makeTempDir("rin-worker-pool-pending-terminal-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+  const pendingMod = await import(
+    pathToFileURL(
+      path.join(
+        rootDir,
+        "dist",
+        "core",
+        "rin-daemon",
+        "pending-turn-events.js",
+      ),
+    ).href
+  );
+  pendingMod.rememberPendingTerminalTurnEvent(dir, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "scheduled:run-1",
+    sessionFile,
+    sessionId: "session-1",
+    finalText: "already completed",
+    result: { messages: [{ type: "text", text: "already completed" }] },
+  });
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 1000,
+  });
+  const result = await pool.resumeInterruptedTurnSession({
+    sessionFile,
+    source: "scheduled-task",
+    requestTag: "scheduled:run-1",
+  });
+
+  assert.equal(result.finalText, "already completed");
+  assert.equal(result.sessionFile, sessionFile);
+  assert.deepEqual(await readCommandLog(logPath), []);
+  assert.equal(
+    pendingMod.takePendingTerminalTurnEvent(dir, { sessionFile }),
+    null,
+  );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("resumeInterruptedTurnSession drops unowned terminals before forwarding or resolving", async () => {
   const dir = await makeTempDir("rin-worker-pool-active-terminal-");
   const workerPath = path.join(dir, "worker-source");

@@ -94,6 +94,7 @@ export function clearPendingTerminalTurnEvent(
 export function takePendingTerminalTurnEvent(
   agentDir: string | undefined,
   selector: SessionRef,
+  options: { requestTag?: string } = {},
 ) {
   if (!agentDir) return null;
   const sessionFile = normalizeSessionRef(selector).sessionFile;
@@ -102,6 +103,12 @@ export function takePendingTerminalTurnEvent(
   const state = readState(filePath);
   const event = state.eventsBySessionFile[sessionFile];
   if (!event) return null;
+  if (
+    options.requestTag !== undefined &&
+    String(event?.requestTag) !== options.requestTag
+  ) {
+    return null;
+  }
   delete state.eventsBySessionFile[sessionFile];
   writeState(filePath, state);
   return event;

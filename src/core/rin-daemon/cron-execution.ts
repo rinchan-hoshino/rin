@@ -16,7 +16,11 @@ import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
 import { resolveStoredSessionFile } from "../session/ref.js";
-import type { CronTaskFrontendBinding, CronTaskRecord } from "./cron.js";
+import type {
+  CronSessionInvocation,
+  CronTaskFrontendBinding,
+  CronTaskRecord,
+} from "./cron.js";
 
 type CronChatCapability = {
   send?: (payload: ChatOutboxPayload) => Promise<any>;
@@ -157,7 +161,7 @@ export async function executeCronShellTask(
   });
 }
 
-function resolveCronTaskFrontend(task: CronTaskRecord) {
+function resolveCronTaskFrontend(task: Pick<CronTaskRecord, "frontend">) {
   const frontend = (task as any).frontend as
     | CronTaskFrontendBinding
     | undefined;
@@ -202,12 +206,15 @@ async function setCronTaskFrontendWorking(
   return true;
 }
 
-function buildCronTaskPromptContext(task: CronTaskRecord) {
+export function buildCronTaskPromptContext(
+  task: Pick<CronTaskRecord, "id" | "name" | "frontend">,
+  sentAt = Date.now(),
+) {
   const taskName = String(task.name || "").trim();
   const frontend = resolveCronTaskFrontend(task);
   return {
     source: "scheduled-task",
-    sentAt: Date.now(),
+    sentAt,
     ...(frontend?.kind === "chat" ? { chatKey: frontend.key } : {}),
     frontend,
     taskId: task.id,
@@ -257,10 +264,26 @@ async function appendCronMaintenanceHistoryRecord(
   if (!isSelfImproveDistillationTask(task)) return;
   const filePath = maintenanceHistoryPath(agentDir);
   await mkdir(path.dirname(filePath), { recursive: true });
+  const recordId = `${task.id}:${task.runCount}`;
+  const existing = await readFile(filePath, "utf8").catch(() => "");
+  if (
+    existing
+      .split("\n")
+      .filter(Boolean)
+      .some((line) => {
+        try {
+          return JSON.parse(line)?.id === recordId;
+        } catch {
+          return false;
+        }
+      })
+  ) {
+    return;
+  }
   await appendFile(
     filePath,
     `${JSON.stringify({
-      id: `${task.id}:${task.runCount}`,
+      id: recordId,
       kind: "self_improve_review",
       status: record.status,
       trigger: `cron:${task.id}`,
@@ -284,6 +307,10 @@ export async function executeCronAgentTask(
     additionalExtensionPaths?: string[];
     chat?: CronChatCapability;
     runId?: string;
+    sessionFile?: string;
+    promptMeta?: Record<string, unknown> & { sentAt: number };
+    deliveryIdempotencyKey?: string;
+    continuing?: boolean;
   },
 ) {
   if (task.target.kind !== "agent_prompt")
@@ -301,10 +328,16 @@ export async function executeCronAgentTask(
   const frontend = resolveCronTaskFrontend(task);
   const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
   const controllerKey = cronTaskRunControllerKey(task);
-  const sessionFile = await resolveCronSessionFile(task);
-  const continuing = Boolean(
-    sessionMode === "dedicated" && (sessionFile || task.runCount > 1),
-  );
+  const sessionFile =
+    String(options.sessionFile || "").trim() ||
+    (await resolveCronSessionFile(task));
+  const continuing =
+    typeof options.continuing === "boolean"
+      ? options.continuing
+      : Boolean(
+          sessionMode === "dedicated" &&
+          ((sessionFile && existsSync(sessionFile)) || task.runCount > 1),
+        );
   const basePrompt = continuing
     ? String(task.target.continuationPrompt || "").trim()
     : String(task.target.prompt || "").trim();
@@ -324,7 +357,12 @@ export async function executeCronAgentTask(
     shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(sessionMode),
     text: prompt,
     sessionFile: sessionFile || dedicatedSessionFile,
-    ...(sessionMode === "dedicated" && dedicatedSessionFile && !sessionFile
+    ...(options.runId ? { requestTag: options.runId } : {}),
+    ...(options.deliveryIdempotencyKey
+      ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
+      : {}),
+    ...((sessionFile || dedicatedSessionFile) &&
+    !existsSync(String(sessionFile || dedicatedSessionFile))
       ? { createSessionFileIfMissing: true }
       : {}),
     ...(sessionMode === "none"
@@ -341,7 +379,7 @@ export async function executeCronAgentTask(
           key: frontend.key,
         }
       : { kind: "scheduled-task", key: task.id },
-    promptMeta: buildCronTaskPromptContext(task),
+    promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
   });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
@@ -395,7 +433,8 @@ export async function executeCronSessionContinueTask(
   const result = await options.resumeSessionTurn({
     sessionFile,
     source: "scheduled-task",
-    requestTag: options.runId || cronTaskRunId(task),
+    requestTag:
+      options.runId || cronTaskRunId(task, task.lastStartedAt || nowIso()),
   });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
@@ -407,6 +446,187 @@ export async function executeCronSessionContinueTask(
   };
 }
 
+export type CronTaskTerminal = {
+  status: "completed" | "failed";
+  text?: string;
+  error?: string;
+  sessionFile?: string;
+};
+
+export function createCronSessionInvocation(
+  task: CronTaskRecord,
+  agentDir: string,
+): CronSessionInvocation {
+  if (
+    task.target.kind !== "agent_prompt" &&
+    task.target.kind !== "session_continue"
+  ) {
+    throw new Error("cron_invalid_agent_task");
+  }
+  const startedAt = task.lastStartedAt || nowIso();
+  const id = cronTaskRunId(task, startedAt);
+  const sessionMode = normalizeScheduledTaskSessionMode(task.session.mode);
+  const sessionFile =
+    sessionMode === "session_continue"
+      ? String(task.session.sessionFile || "").trim()
+      : sessionMode === "dedicated"
+        ? String(task.dedicatedSessionFile || "").trim() ||
+          getManagedTaskSessionFile(agentDir, task.id)
+        : getManagedTaskSessionFile(agentDir, id);
+  return {
+    id,
+    requestTag: `scheduled:${id}`,
+    taskId: task.id,
+    runCount: task.runCount,
+    startedAt,
+    scheduledNextRunAt: task.nextRunAt,
+    sessionFile,
+    continuing:
+      sessionMode === "dedicated" &&
+      (existsSync(sessionFile) || task.runCount > 1),
+    name: task.name,
+    frontend: task.frontend ? { ...task.frontend } : undefined,
+    deliverFinal: task.deliverFinal,
+    quiet: task.quiet,
+    model: task.model,
+    thinkingLevel: task.thinkingLevel,
+    disabledRinCapabilities: task.disabledRinCapabilities
+      ? [...task.disabledRinCapabilities]
+      : undefined,
+    session: { ...task.session },
+    target: { ...task.target },
+    promptMeta: buildCronTaskPromptContext(
+      task,
+      Date.parse(startedAt) || Date.now(),
+    ),
+  };
+}
+
+function taskFromSessionInvocation(
+  invocation: CronSessionInvocation,
+): CronTaskRecord {
+  return {
+    id: invocation.taskId,
+    createdAt: invocation.startedAt,
+    updatedAt: invocation.startedAt,
+    name: invocation.name,
+    enabled: true,
+    frontend: invocation.frontend,
+    deliverFinal: invocation.deliverFinal,
+    quiet: invocation.quiet,
+    model: invocation.model,
+    thinkingLevel: invocation.thinkingLevel,
+    disabledRinCapabilities: invocation.disabledRinCapabilities,
+    trigger: {},
+    session: invocation.session,
+    target: invocation.target,
+    dedicatedSessionFile:
+      invocation.session.mode === "dedicated"
+        ? invocation.sessionFile
+        : undefined,
+    dedicatedSessionPersistent:
+      invocation.session.mode === "dedicated" ? true : undefined,
+    nextRunAt: invocation.scheduledNextRunAt,
+    lastStartedAt: invocation.startedAt,
+    runCount: invocation.runCount,
+    running: true,
+  };
+}
+
+export async function executeCronSessionInvocation(
+  invocation: CronSessionInvocation,
+  options: {
+    agentDir: string;
+    additionalExtensionPaths?: string[];
+    chat?: CronChatCapability;
+    resumeSessionTurn?: CronSessionResumeCapability;
+  },
+) {
+  const task = taskFromSessionInvocation(invocation);
+  if (invocation.target.kind === "session_continue") {
+    return await executeCronSessionContinueTask(task, {
+      ...options,
+      runId: invocation.requestTag,
+    });
+  }
+  return await executeCronAgentTask(task, {
+    ...options,
+    runId: invocation.requestTag,
+    sessionFile: invocation.sessionFile,
+    promptMeta: invocation.promptMeta,
+    deliveryIdempotencyKey: `scheduled-final:${invocation.id}`,
+    continuing: invocation.continuing,
+  });
+}
+
+export function applyCronTaskTerminalProjection(
+  task: CronTaskRecord,
+  terminal: CronTaskTerminal,
+) {
+  if (terminal.status === "completed") {
+    task.lastResultText = terminal.text;
+    task.lastError = undefined;
+  } else {
+    task.lastError = terminal.error || "cron_task_failed";
+  }
+  task.lastFinishedAt = nowIso();
+  task.updatedAt = nowIso();
+  if (
+    !task.completedAt &&
+    !task.trigger.expression &&
+    task.runCount >= 1 &&
+    !task.nextRunAt
+  ) {
+    task.completedAt = nowIso();
+    task.completionReason = "once_completed";
+    task.enabled = false;
+    task.nextRunAt = undefined;
+  }
+  if (
+    !task.completedAt &&
+    task.termination?.maxRuns &&
+    task.runCount >= task.termination.maxRuns
+  ) {
+    task.completedAt = nowIso();
+    task.completionReason = "max_runs_reached";
+    task.enabled = false;
+    task.nextRunAt = undefined;
+  }
+  if (!task.completedAt && task.termination?.stopAt) {
+    const stopTs = Date.parse(task.termination.stopAt);
+    if (Number.isFinite(stopTs) && Date.now() >= stopTs) {
+      task.completedAt = nowIso();
+      task.completionReason = "stop_time_reached";
+      task.enabled = false;
+      task.nextRunAt = undefined;
+    }
+  }
+}
+
+export async function appendCronTaskTerminalHistory(
+  task: CronTaskRecord,
+  terminal: CronTaskTerminal,
+  options: { agentDir: string; startedAt?: string },
+) {
+  await appendCronMaintenanceHistoryRecord(options.agentDir, task, {
+    status: terminal.status,
+    outputPreview: terminal.text,
+    error: terminal.error,
+    sessionFile: terminal.sessionFile,
+    startedAt: options.startedAt,
+    finishedAt: task.lastFinishedAt || nowIso(),
+  }).catch(() => {});
+}
+
+export async function projectCronTaskTerminal(
+  task: CronTaskRecord,
+  terminal: CronTaskTerminal,
+  options: { agentDir: string; startedAt?: string },
+) {
+  applyCronTaskTerminalProjection(task, terminal);
+  await appendCronTaskTerminalHistory(task, terminal, options);
+}
+
 export async function executeCronTask(
   task: CronTaskRecord,
   options: {
@@ -416,20 +636,12 @@ export async function executeCronTask(
     resumeSessionTurn?: CronSessionResumeCapability;
   },
 ) {
-  const runId = cronTaskRunId(task);
   const startedAt = task.lastStartedAt || nowIso();
-  let maintenanceHistoryRecord:
-    | {
-        status: "completed" | "failed";
-        outputPreview?: string;
-        error?: string;
-        sessionFile?: string;
-      }
-    | undefined;
-  const isSessionContinueTask =
-    (task.session as any)?.mode === "session_continue";
+  const runId = cronTaskRunId(task, startedAt);
+  const isSessionContinueTask = task.session.mode === "session_continue";
   const showExternalWorking =
     task.target.kind === "shell_command" && !isSessionContinueTask;
+  let terminal: CronTaskTerminal;
   try {
     if (showExternalWorking) {
       await setCronTaskFrontendWorking(task, options, true);
@@ -439,21 +651,16 @@ export async function executeCronTask(
         ...options,
         runId,
       });
-      task.lastResultText = result.text;
-      maintenanceHistoryRecord = {
+      terminal = {
         status: "completed",
-        outputPreview: result.text,
+        text: result.text,
         sessionFile: result.sessionFile,
       };
     } else if (task.target.kind === "shell_command") {
       const text = await executeCronShellTask(task, {
         agentDir: options.agentDir,
       });
-      task.lastResultText = text;
-      maintenanceHistoryRecord = {
-        status: "completed",
-        outputPreview: text,
-      };
+      terminal = { status: "completed", text };
       const frontend = resolveCronTaskFrontend(task);
       const chatKey = shouldDeliverCronTaskFinal(task, frontend)
         ? frontend?.key
@@ -468,63 +675,24 @@ export async function executeCronTask(
       }
     } else {
       const result = await executeCronAgentTask(task, { ...options, runId });
-      task.lastResultText = result.text;
-      maintenanceHistoryRecord = {
+      terminal = {
         status: "completed",
-        outputPreview: result.text,
+        text: result.text,
         sessionFile: result.sessionFile,
       };
     }
   } catch (error: any) {
-    task.lastError = String(
-      error?.message || error || "cron_task_failed",
-    ).trim();
-    maintenanceHistoryRecord = {
+    terminal = {
       status: "failed",
-      error: task.lastError,
+      error: String(error?.message || error || "cron_task_failed").trim(),
     };
   } finally {
     if (showExternalWorking) {
       await setCronTaskFrontendWorking(task, options, false);
     }
-    task.lastFinishedAt = nowIso();
-    task.updatedAt = nowIso();
-    if (maintenanceHistoryRecord) {
-      await appendCronMaintenanceHistoryRecord(options.agentDir, task, {
-        ...maintenanceHistoryRecord,
-        startedAt,
-        finishedAt: task.lastFinishedAt,
-      }).catch(() => {});
-    }
-    if (
-      !task.completedAt &&
-      !task.trigger.expression &&
-      task.runCount >= 1 &&
-      !task.nextRunAt
-    ) {
-      task.completedAt = nowIso();
-      task.completionReason = "once_completed";
-      task.enabled = false;
-      task.nextRunAt = undefined;
-    }
-    if (
-      !task.completedAt &&
-      task.termination?.maxRuns &&
-      task.runCount >= task.termination.maxRuns
-    ) {
-      task.completedAt = nowIso();
-      task.completionReason = "max_runs_reached";
-      task.enabled = false;
-      task.nextRunAt = undefined;
-    }
-    if (!task.completedAt && task.termination?.stopAt) {
-      const stopTs = Date.parse(task.termination.stopAt);
-      if (Number.isFinite(stopTs) && Date.now() >= stopTs) {
-        task.completedAt = nowIso();
-        task.completionReason = "stop_time_reached";
-        task.enabled = false;
-        task.nextRunAt = undefined;
-      }
-    }
   }
+  await projectCronTaskTerminal(task, terminal!, {
+    agentDir: options.agentDir,
+    startedAt,
+  });
 }

@@ -160,6 +160,30 @@ function expectsTerminalTurnEvent(commandType: string, command: any) {
   return requestTag !== undefined && requestTag.length > 0;
 }
 
+function terminalTurnResult(payload: any, selector: SessionSelector) {
+  if (payload?.event === "error") {
+    const error = new Error(
+      String(payload.error || "rin_turn_failed"),
+    ) as Error & {
+      sessionId?: string;
+      sessionFile?: string;
+      rinTurnTerminal?: boolean;
+    };
+    error.sessionId = String(payload.sessionId || selector.sessionId || "");
+    error.sessionFile = String(
+      payload.sessionFile || selector.sessionFile || "",
+    );
+    error.rinTurnTerminal = true;
+    throw error;
+  }
+  return {
+    finalText: String(payload?.finalText || ""),
+    result: payload?.result,
+    sessionFile: String(payload?.sessionFile || selector.sessionFile),
+    sessionId: String(payload?.sessionId || selector.sessionId || ""),
+  };
+}
+
 function hasResumableWorkerActivity(worker: WorkerHandle) {
   if (
     worker.turnActive ||
@@ -659,11 +683,27 @@ export class WorkerPool {
   }) {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) throw new Error("rin_session_file_required");
-    const worker = await this.ensureWorkerForSession(selector);
     const requestTag =
       typeof item.requestTag === "string"
         ? item.requestTag
         : `rin_resume_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const pendingTerminal = takePendingTerminalTurnEvent(
+      this.options.agentDir,
+      selector,
+      { requestTag },
+    );
+    if (pendingTerminal) {
+      return terminalTurnResult(pendingTerminal, selector);
+    }
+    const worker = await this.ensureWorkerForSession(selector);
+    const pendingAfterSelection = takePendingTerminalTurnEvent(
+      this.options.agentDir,
+      selector,
+      { requestTag },
+    );
+    if (pendingAfterSelection) {
+      return terminalTurnResult(pendingAfterSelection, selector);
+    }
     const followActiveTurn = Boolean(
       worker.turnActive ||
       worker.rpcTurnActive ||
@@ -687,16 +727,7 @@ export class WorkerPool {
         throw error;
       }
     }
-    const payload = await terminalEvent;
-    if (payload?.event === "error") {
-      throw new Error(String(payload.error || "rin_turn_failed"));
-    }
-    return {
-      finalText: String(payload?.finalText || ""),
-      result: payload?.result,
-      sessionFile: String(payload?.sessionFile || selector.sessionFile),
-      sessionId: String(payload?.sessionId || selector.sessionId || ""),
-    };
+    return terminalTurnResult(await terminalEvent, selector);
   }
 
   getStatusSnapshot() {

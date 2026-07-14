@@ -989,9 +989,11 @@ export class RinFrontendTurnDriver {
       const error = new Error(errorMessage) as Error & {
         sessionId?: string;
         sessionFile?: string;
+        rinTurnTerminal?: boolean;
       };
       error.sessionId = safeString(resolved.sessionId).trim() || undefined;
       error.sessionFile = safeString(resolved.sessionFile).trim() || undefined;
+      error.rinTurnTerminal = true;
       throw error;
     }
     if (resolved.submitted) return { submitted: true };
@@ -1655,9 +1657,11 @@ export class RinFrontendTurnDriver {
         const error = new Error(event.error) as Error & {
           sessionId?: string;
           sessionFile?: string;
+          rinTurnTerminal?: boolean;
         };
         error.sessionId = event.sessionId;
         error.sessionFile = event.sessionFile;
+        error.rinTurnTerminal = true;
         this.failLiveTurn(error);
         return;
       }

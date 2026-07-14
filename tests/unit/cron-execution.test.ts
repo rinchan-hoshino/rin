@@ -135,6 +135,390 @@ test("cron scheduler preserves finish metadata when a running once task self-res
   }
 });
 
+test("cron scheduler resumes one durable agent invocation after restart", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_restart_durable_turn";
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  const firstCalls = [];
+  const secondCalls = [];
+  const firstScheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async (payload) => {
+        firstCalls.push(payload);
+        return await new Promise(() => {});
+      },
+    },
+  });
+  let secondScheduler;
+  try {
+    firstScheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      frontend: { kind: "chat", key: "discord/1:2" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "original prompt" },
+    });
+
+    firstScheduler.runTaskNow(taskId);
+    for (let i = 0; i < 50 && firstCalls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(firstCalls.length, 1);
+
+    firstScheduler.upsertTask({
+      id: taskId,
+      target: { kind: "agent_prompt", prompt: "future prompt" },
+    });
+    firstScheduler.stop();
+
+    const startedRows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    const startedRow = startedRows.find((item) => item.id === taskId);
+    assert.equal(startedRow.runCount, 1);
+    assert.equal(startedRow.activeInvocation?.taskId, taskId);
+    assert.equal(startedRow.activeInvocation?.target.prompt, "original prompt");
+    assert.equal(
+      firstCalls[0].requestTag,
+      startedRow.activeInvocation?.requestTag,
+    );
+    assert.equal(
+      firstCalls[0].deliveryIdempotencyKey,
+      `scheduled-final:${startedRow.activeInvocation?.id}`,
+    );
+    assert.equal(
+      firstCalls[0].sessionFile,
+      startedRow.activeInvocation?.sessionFile,
+    );
+
+    secondScheduler = new cronMod.CronScheduler({
+      agentDir,
+      chat: {
+        runTurn: async (payload) => {
+          secondCalls.push(payload);
+          return {
+            finalText: "recovered final",
+            sessionFile: payload.sessionFile,
+          };
+        },
+      },
+    });
+    secondScheduler.start();
+    for (
+      let i = 0;
+      i < 100 &&
+      secondScheduler.getTask(taskId)?.lastResultText !== "recovered final";
+      i += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const finished = secondScheduler.getTask(taskId);
+    assert.equal(secondCalls.length, 1);
+    assert.equal(secondCalls[0].requestTag, firstCalls[0].requestTag);
+    assert.equal(secondCalls[0].text, "original prompt");
+    assert.equal(
+      secondCalls[0].promptMeta.sentAt,
+      firstCalls[0].promptMeta.sentAt,
+    );
+    assert.equal(secondCalls[0].sessionFile, firstCalls[0].sessionFile);
+    assert.equal(
+      secondCalls[0].deliveryIdempotencyKey,
+      firstCalls[0].deliveryIdempotencyKey,
+    );
+    assert.equal(finished.runCount, 1);
+    assert.equal(finished.running, false);
+    assert.equal(finished.lastResultText, "recovered final");
+    assert.match(finished.lastFinishedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(finished.enabled, false);
+    assert.match(finished.completedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(finished.nextRunAt, undefined);
+
+    const finishedRows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    const finishedRow = finishedRows.find((item) => item.id === taskId);
+    assert.equal(finishedRow.activeInvocation, undefined);
+  } finally {
+    firstScheduler.stop();
+    secondScheduler?.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler does not relaunch a live durable invocation on tick", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_live_invocation_single_launch";
+  let calls = 0;
+  let resolveTurn;
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        calls += 1;
+        return await new Promise((resolve) => {
+          resolveTurn = resolve;
+        });
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { expression: "0 0 1 1 *" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "run once" },
+    });
+    scheduler.runTaskNow(taskId);
+    for (let i = 0; i < 50 && !resolveTurn; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    await scheduler.tick();
+    assert.equal(calls, 1);
+
+    resolveTurn({ finalText: "done once" });
+    for (
+      let i = 0;
+      i < 50 && scheduler.tasks.get(taskId).activeInvocation;
+      i += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(scheduler.getTask(taskId).lastResultText, "done once");
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler keeps a durable invocation after infrastructure failure", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_retry_infrastructure_failure";
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        throw new Error("chat transport unavailable");
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "retry me" },
+    });
+    scheduler.runTaskNow(taskId);
+    for (let i = 0; i < 50 && scheduler.activeExecutions.has(taskId); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const row = scheduler.tasks.get(taskId);
+    assert.equal(row.activeInvocation?.taskId, taskId);
+    assert.equal(row.lastFinishedAt, undefined);
+    assert.equal(row.lastError, undefined);
+    assert.equal(scheduler.getTask(taskId).running, true);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler does not resume a disabled durable invocation", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_disabled_durable_invocation";
+  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
+  let firstStarted = false;
+  const firstScheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        firstStarted = true;
+        return await new Promise(() => {});
+      },
+    },
+  });
+  let secondScheduler;
+  try {
+    firstScheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "do not resume" },
+    });
+    firstScheduler.runTaskNow(taskId);
+    for (let i = 0; i < 50 && !firstStarted; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    firstScheduler.stop();
+
+    const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    const row = rows.find((item) => item.id === taskId);
+    row.enabled = false;
+    await fs.writeFile(tasksFile, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+
+    let resumed = false;
+    secondScheduler = new cronMod.CronScheduler({
+      agentDir,
+      chat: {
+        runTurn: async () => {
+          resumed = true;
+          return { finalText: "must not run" };
+        },
+      },
+    });
+    secondScheduler.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(resumed, false);
+    assert.equal(secondScheduler.getTask(taskId).running, false);
+    const stored = JSON.parse(await fs.readFile(tasksFile, "utf8")).find(
+      (item) => item.id === taskId,
+    );
+    assert.equal(stored.activeInvocation, undefined);
+  } finally {
+    firstScheduler.stop();
+    secondScheduler?.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler projects only a canonical terminal error", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_canonical_terminal_error";
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        const error = new Error("model terminal failure") as Error & {
+          rinTurnTerminal?: boolean;
+        };
+        error.rinTurnTerminal = true;
+        throw error;
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "fail canonically" },
+    });
+    scheduler.runTaskNow(taskId);
+    for (
+      let i = 0;
+      i < 50 && scheduler.tasks.get(taskId)?.activeInvocation;
+      i += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const row = scheduler.tasks.get(taskId);
+    assert.equal(row.activeInvocation, undefined);
+    assert.equal(row.lastError, "model terminal failure");
+    assert.match(row.lastFinishedAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler projects a live terminal after pausing its invocation", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_pause_live_invocation";
+  let resolveTurn;
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () =>
+        await new Promise((resolve) => {
+          resolveTurn = resolve;
+        }),
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { expression: "0 0 1 1 *" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "pause while running" },
+    });
+    scheduler.runTaskNow(taskId);
+    for (let i = 0; i < 50 && !resolveTurn; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    scheduler.pauseTask(taskId);
+    assert.ok(scheduler.tasks.get(taskId).activeInvocation);
+    resolveTurn({ finalText: "terminal after pause" });
+    for (
+      let i = 0;
+      i < 50 && scheduler.tasks.get(taskId).activeInvocation;
+      i += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const task = scheduler.getTask(taskId);
+    assert.equal(task.running, false);
+    assert.equal(task.enabled, false);
+    assert.match(task.pausedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(task.lastResultText, "terminal after pause");
+    assert.match(task.lastFinishedAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler preserves explicit completion while projecting its live terminal", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_complete_live_invocation";
+  let resolveTurn;
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () =>
+        await new Promise((resolve) => {
+          resolveTurn = resolve;
+        }),
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: taskId,
+      trigger: { expression: "0 0 1 1 *" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "complete while running" },
+    });
+    scheduler.runTaskNow(taskId);
+    for (let i = 0; i < 50 && !resolveTurn; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    scheduler.completeTask(taskId, "stopped_by_owner");
+    assert.ok(scheduler.tasks.get(taskId).activeInvocation);
+    resolveTurn({ finalText: "terminal after completion" });
+    for (
+      let i = 0;
+      i < 50 && scheduler.tasks.get(taskId).activeInvocation;
+      i += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const task = scheduler.getTask(taskId);
+    assert.equal(task.running, false);
+    assert.equal(task.enabled, false);
+    assert.equal(task.completionReason, "stopped_by_owner");
+    assert.equal(task.lastResultText, "terminal after completion");
+    assert.match(task.lastFinishedAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron scheduler reloads task file edits only when requested", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
@@ -405,6 +789,42 @@ test("cron scheduler assigns task-id-named dedicated session files before first 
     );
     assert.equal(task.dedicatedSessionPersistent, true);
   } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler durable invocation keeps the first dedicated prompt initial", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const calls = [];
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async (payload) => {
+        calls.push(payload);
+        return { finalText: "done", sessionFile: payload.sessionFile };
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: "cron_durable_dedicated_initial",
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "dedicated" },
+      target: {
+        kind: "agent_prompt",
+        prompt: "initial prompt",
+        continuationPrompt: "continuation prompt",
+      },
+    });
+    scheduler.runTaskNow("cron_durable_dedicated_initial");
+    for (let i = 0; i < 50 && calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].text, "initial prompt");
+    assert.equal(calls[0].createSessionFileIfMissing, true);
+  } finally {
+    scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

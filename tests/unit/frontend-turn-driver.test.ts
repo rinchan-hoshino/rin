@@ -1343,7 +1343,8 @@ test("frontend SDK turn driver surfaces restored submitted provider errors", asy
             sentAt: 1778774580000,
           },
         }),
-      /WebSocket error/,
+      (error: any) =>
+        error?.message === "WebSocket error" && error?.rinTurnTerminal === true,
     );
     assert.equal(
       client.calls.some((call: any) => call.type === "prompt"),

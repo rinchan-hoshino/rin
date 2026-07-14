@@ -16,7 +16,14 @@ import {
 } from "../scheduled-task-options.js";
 import { getManagedTaskSessionFile } from "../session/managed-paths.js";
 import { evaluateCronTaskCondition } from "./cron-condition.js";
-import { executeCronTask } from "./cron-execution.js";
+import {
+  appendCronTaskTerminalHistory,
+  applyCronTaskTerminalProjection,
+  createCronSessionInvocation,
+  executeCronSessionInvocation,
+  executeCronTask,
+  type CronTaskTerminal,
+} from "./cron-execution.js";
 import {
   computeNextRunAt,
   createCronTaskId,
@@ -72,6 +79,30 @@ export type CronTaskFrontendBinding = {
 
 export type CronTaskThinkingLevel = AvailableThinkingLevel;
 
+export type CronSessionInvocation = {
+  id: string;
+  requestTag: string;
+  taskId: string;
+  runCount: number;
+  startedAt: string;
+  scheduledNextRunAt?: string;
+  sessionFile: string;
+  continuing?: boolean;
+  name?: string;
+  frontend?: CronTaskFrontendBinding;
+  deliverFinal?: boolean;
+  quiet?: boolean;
+  model?: string;
+  thinkingLevel?: CronTaskThinkingLevel;
+  disabledRinCapabilities?: string[];
+  session: CronTaskSessionBinding;
+  target: Extract<
+    CronTaskTarget,
+    { kind: "agent_prompt" | "session_continue" }
+  >;
+  promptMeta: Record<string, unknown> & { sentAt: number };
+};
+
 export type CronTaskRecord = {
   id: string;
   createdAt: string;
@@ -111,6 +142,7 @@ export type CronTaskRecord = {
   running: boolean;
   activeStartedAt?: string;
   activeDurationMs?: number;
+  activeInvocation?: CronSessionInvocation;
 };
 
 export type CronTaskInput = {
@@ -438,6 +470,80 @@ function readCronTaskRows(file: string) {
   }
 }
 
+function normalizeCronSessionInvocation(
+  value: unknown,
+  taskId: string,
+): CronSessionInvocation | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!value || typeof value !== "object") {
+    throw new Error("cron_tasks_file_invalid");
+  }
+  const raw = value as any;
+  const id = requireNonEmptyString(raw.id, "cron_tasks_file_invalid");
+  const requestTag = requireNonEmptyString(
+    raw.requestTag,
+    "cron_tasks_file_invalid",
+  );
+  const invocationTaskId = requireNonEmptyString(
+    raw.taskId,
+    "cron_tasks_file_invalid",
+  );
+  if (invocationTaskId !== taskId) {
+    throw new Error("cron_tasks_file_invalid");
+  }
+  const startedAt =
+    normalizeIso(raw.startedAt, "startedAt") ||
+    failCronTaskValidation("cron_tasks_file_invalid");
+  const runCount = Number(raw.runCount);
+  if (!Number.isInteger(runCount) || runCount < 1) {
+    throw new Error("cron_tasks_file_invalid");
+  }
+  const { normalizedSession: session } = normalizeTaskSession(raw.session);
+  const target = normalizeTaskTarget(raw.target);
+  if (target.kind !== "agent_prompt" && target.kind !== "session_continue") {
+    throw new Error("cron_tasks_file_invalid");
+  }
+  if (
+    (session.mode === "session_continue") !==
+    (target.kind === "session_continue")
+  ) {
+    throw new Error("cron_tasks_file_invalid");
+  }
+  const sessionFile = requireNonEmptyString(
+    raw.sessionFile,
+    "cron_tasks_file_invalid",
+  );
+  const sentAt = Number(raw.promptMeta?.sentAt);
+  if (!Number.isFinite(sentAt) || sentAt <= 0) {
+    throw new Error("cron_tasks_file_invalid");
+  }
+  return {
+    id,
+    requestTag,
+    taskId: invocationTaskId,
+    runCount,
+    startedAt,
+    scheduledNextRunAt: safeString(raw.scheduledNextRunAt).trim() || undefined,
+    sessionFile,
+    continuing:
+      raw.continuing === undefined ? undefined : Boolean(raw.continuing),
+    name: safeString(raw.name).trim() || undefined,
+    frontend: normalizeTaskFrontend(raw.frontend, undefined),
+    deliverFinal:
+      raw.deliverFinal === undefined ? undefined : Boolean(raw.deliverFinal),
+    quiet: raw.quiet === undefined ? undefined : Boolean(raw.quiet),
+    model: normalizeModelOverride(raw.model),
+    thinkingLevel: normalizeThinkingLevel(raw.thinkingLevel),
+    disabledRinCapabilities: normalizeDisabledRinCapabilities(
+      raw.disabledRinCapabilities,
+      undefined,
+    ),
+    session,
+    target,
+    promptMeta: { ...raw.promptMeta, sentAt },
+  };
+}
+
 export class CronScheduler {
   private tasks = new Map<string, CronTaskRecord>();
   private activeExecutions = new Map<string, { startedAt: number }>();
@@ -474,6 +580,7 @@ export class CronScheduler {
       this.installBuiltInTasks();
       this.save();
     }
+    this.resumeActiveInvocations();
     this.timer = setInterval(() => {
       void this.tick().catch(() => {});
     }, 1000);
@@ -645,9 +752,13 @@ export class CronScheduler {
       lastError: existing?.lastError,
       runCount: existing?.runCount ?? 0,
       running: false,
+      activeInvocation: existing?.activeInvocation,
     };
 
-    task.nextRunAt = computeNextRunAt(task, Date.now());
+    task.nextRunAt =
+      existing?.activeInvocation && input.trigger === undefined
+        ? existing.nextRunAt
+        : computeNextRunAt(task, Date.now());
 
     if (task.completedAt) {
       task.enabled = false;
@@ -679,6 +790,7 @@ export class CronScheduler {
     task.enabled = false;
     task.nextRunAt = undefined;
     task.updatedAt = nowIso();
+    if (!this.activeExecutions.has(taskId)) delete task.activeInvocation;
     this.terminateTaskSession(task);
     this.save();
     return this.publicTask(task);
@@ -692,6 +804,7 @@ export class CronScheduler {
     task.pausedAt = nowIso();
     task.nextRunAt = undefined;
     task.updatedAt = nowIso();
+    if (!this.activeExecutions.has(taskId)) delete task.activeInvocation;
     this.terminateTaskSession(task);
     this.save();
     return this.publicTask(task);
@@ -747,7 +860,7 @@ export class CronScheduler {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
     if (task.completedAt) throw new Error(`cron_task_completed:${taskId}`);
-    if (this.activeExecutions.has(taskId)) {
+    if (this.activeExecutions.has(taskId) || task.activeInvocation) {
       throw new Error(`cron_task_already_running:${taskId}`);
     }
     if (!this.evaluateCondition(task)) {
@@ -765,8 +878,26 @@ export class CronScheduler {
     } else {
       task.nextRunAt = undefined;
     }
+    if (
+      task.target.kind === "agent_prompt" ||
+      task.target.kind === "session_continue"
+    ) {
+      task.activeInvocation = createCronSessionInvocation(
+        task,
+        this.options.agentDir,
+      );
+    }
     this.save();
-    void this.executeTask(task).catch(() => {});
+    if (task.activeInvocation) {
+      this.activeExecutions.set(task.id, {
+        startedAt: Date.parse(task.activeInvocation.startedAt) || Date.now(),
+      });
+      void this.executeSessionInvocation(task.id, task.activeInvocation).catch(
+        () => {},
+      );
+    } else {
+      void this.executeTask(task).catch(() => {});
+    }
     return this.publicTask(task);
   }
 
@@ -812,6 +943,10 @@ export class CronScheduler {
         row.trigger = normalizeTaskTrigger(row.trigger);
         row.condition = normalizeTaskCondition(row.condition, undefined);
         row.target = normalizeTaskTarget(row.target);
+        row.activeInvocation = normalizeCronSessionInvocation(
+          row.activeInvocation,
+          String(row.id),
+        );
         if (row.session.mode === "session_continue") {
           if (row.frontend) {
             throw new Error("cron_session_continue_frontend_forbidden");
@@ -834,7 +969,9 @@ export class CronScheduler {
         }
         row.nextRunAt = row.completedAt
           ? undefined
-          : row.nextRunAt || computeNextRunAt(row, Date.now());
+          : row.activeInvocation
+            ? safeString(row.nextRunAt).trim() || undefined
+            : row.nextRunAt || computeNextRunAt(row, Date.now());
         loadedTasks.set(String(row.id), row);
       }
     } catch {
@@ -848,7 +985,12 @@ export class CronScheduler {
       for (const [taskId, previousTask] of previousTasks) {
         if (!this.activeExecutions.has(taskId)) continue;
         const currentTask = this.tasks.get(taskId);
-        if (!currentTask || currentTask.completedAt || !currentTask.enabled) {
+        if (
+          !currentTask ||
+          currentTask.completedAt ||
+          !currentTask.enabled ||
+          currentTask.activeInvocation?.id !== previousTask.activeInvocation?.id
+        ) {
           this.terminateTaskSession(previousTask);
         }
       }
@@ -862,7 +1004,7 @@ export class CronScheduler {
     const activeExecution = this.activeExecutions.get(task.id);
     return {
       ...task,
-      running: Boolean(activeExecution),
+      running: Boolean(activeExecution || task.activeInvocation),
       activeStartedAt: activeExecution
         ? new Date(activeExecution.startedAt).toISOString()
         : undefined,
@@ -882,7 +1024,9 @@ export class CronScheduler {
   }
 
   private publicTask(task: CronTaskRecord): CronTaskRecord {
-    return cloneJson(this.snapshotTask(task));
+    const { activeInvocation, ...publicTask } = this.snapshotTask(task);
+    void activeInvocation;
+    return cloneJson(publicTask as CronTaskRecord);
   }
 
   private statusTask(task: CronTaskRecord) {
@@ -894,12 +1038,14 @@ export class CronScheduler {
       lastError,
       lastResultText,
       target,
+      activeInvocation,
       ...safeTask
     } = snapshot;
     void createdFrom;
     void dedicatedSessionFile;
     void lastError;
     void lastResultText;
+    void activeInvocation;
     return cloneJson({
       ...safeTask,
       hasFrontendBinding: Boolean(frontend),
@@ -913,6 +1059,7 @@ export class CronScheduler {
     if (!this.load({ persist: true, terminateRemovedActiveTasks: true })) {
       throw new Error("cron_tasks_file_invalid");
     }
+    this.resumeActiveInvocations();
     return this.getStatusSnapshot();
   }
 
@@ -968,8 +1115,85 @@ export class CronScheduler {
     }
   }
 
+  private resumeActiveInvocations() {
+    let changed = false;
+    for (const task of this.tasks.values()) {
+      const invocation = task.activeInvocation;
+      if (!invocation || this.activeExecutions.has(task.id)) continue;
+      if (!task.enabled || task.completedAt) {
+        delete task.activeInvocation;
+        changed = true;
+        continue;
+      }
+      this.activeExecutions.set(task.id, {
+        startedAt: Date.parse(invocation.startedAt) || Date.now(),
+      });
+      void this.executeSessionInvocation(task.id, invocation).catch(() => {});
+    }
+    if (changed) this.save();
+  }
+
+  private async executeSessionInvocation(
+    taskId: string,
+    invocation: CronSessionInvocation,
+  ) {
+    let terminal: CronTaskTerminal;
+    try {
+      const result = await executeCronSessionInvocation(
+        invocation,
+        this.options,
+      );
+      terminal = {
+        status: "completed",
+        text: result.text,
+        sessionFile: result.sessionFile || invocation.sessionFile,
+      };
+    } catch (error: any) {
+      if (error?.rinTurnTerminal !== true) {
+        this.activeExecutions.delete(taskId);
+        const current = this.tasks.get(taskId);
+        if (
+          current?.activeInvocation?.id === invocation.id &&
+          (!current.enabled || current.completedAt)
+        ) {
+          delete current.activeInvocation;
+          this.save();
+        }
+        return;
+      }
+      terminal = {
+        status: "failed",
+        error: safeString(error?.message || error || "cron_task_failed").trim(),
+      };
+    }
+
+    const current = this.tasks.get(taskId);
+    try {
+      if (current?.activeInvocation?.id !== invocation.id) return;
+      if (
+        !current.completedAt &&
+        current.trigger.expression &&
+        (safeString(current.nextRunAt).trim() || undefined) ===
+          invocation.scheduledNextRunAt
+      ) {
+        current.nextRunAt = computeNextRunAt(current, Date.now());
+      }
+      applyCronTaskTerminalProjection(current, terminal);
+      delete current.activeInvocation;
+      if (current.completedAt) this.terminateTaskSession(current);
+      this.save();
+      await appendCronTaskTerminalHistory(current, terminal, {
+        agentDir: this.options.agentDir,
+        startedAt: invocation.startedAt,
+      });
+    } finally {
+      this.activeExecutions.delete(taskId);
+    }
+  }
+
   private async tick() {
     if (this.dispatching) return;
+    this.resumeActiveInvocations();
     this.dispatching = true;
     try {
       const now = Date.now();
@@ -1044,6 +1268,7 @@ export class CronScheduler {
       await executeCronTask(task, this.options);
       if (
         !task.completedAt &&
+        task.trigger.expression &&
         (safeString(task.nextRunAt).trim() || undefined) === scheduledNextRunAt
       ) {
         task.nextRunAt = computeNextRunAt(task, Date.now());

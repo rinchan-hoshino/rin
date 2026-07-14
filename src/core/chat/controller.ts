@@ -1733,6 +1733,7 @@ export class ChatController {
     clearProcessing?: boolean;
     bindSession?: boolean;
     deliveryKind?: "final" | "error";
+    idempotencyKey?: string;
   }) {
     const bindSession = input.bindSession !== false && this.affectChatBinding;
     const text = this.stageAssistantDelivery({ ...input, bindSession });
@@ -1741,15 +1742,17 @@ export class ChatController {
       input.replyToMessageId || input.incomingMessageId,
     ).trim();
     const deliveryKind = input.deliveryKind || "final";
-    const idempotencyKey = incomingMessageId
-      ? JSON.stringify([
-          deliveryKind,
-          this.chatKey,
-          incomingMessageId,
-          replyToMessageId,
-          sha256Hex(JSON.stringify({ text, parts: input.parts || [] })),
-        ])
-      : "";
+    const idempotencyKey =
+      safeString(input.idempotencyKey).trim() ||
+      (incomingMessageId
+        ? JSON.stringify([
+            deliveryKind,
+            this.chatKey,
+            incomingMessageId,
+            replyToMessageId,
+            sha256Hex(JSON.stringify({ text, parts: input.parts || [] })),
+          ])
+        : "");
     const id = idempotencyKey
       ? `${deliveryKind}-${sha256Hex(idempotencyKey)}`
       : "";
@@ -2474,6 +2477,8 @@ export class ChatController {
         sessionFile?: string;
         sessionName?: string;
         promptMeta?: PromptContextMeta;
+        requestTag?: string;
+        deliveryIdempotencyKey?: string;
         model?: string;
         thinkingLevel?: string;
         managedSessionLeaf?: string;
@@ -2536,7 +2541,9 @@ export class ChatController {
         thinkingLevel: input.thinkingLevel,
         promptContext: input.promptMeta,
         source: "chat-bridge",
-        requestTag: this.requestTagForInboundMessage(input.incomingMessageId),
+        requestTag:
+          safeString(input.requestTag).trim() ||
+          this.requestTagForInboundMessage(input.incomingMessageId),
       });
       this.assertRestoredTurnStayedOnSession(
         restoreSessionFile,
@@ -2580,6 +2587,7 @@ export class ChatController {
           replyToMessageId: deliveryTarget.replyToMessageId,
           sessionFile: result.sessionFile,
           incomingMessageId: deliveryTarget.incomingMessageId,
+          idempotencyKey: input.deliveryIdempotencyKey,
           clearProcessing: true,
         });
         this.markOriginalProcessedIfRetargeted(
@@ -2662,7 +2670,9 @@ export class ChatController {
           thinkingLevel: input.thinkingLevel,
           promptContext: input.promptMeta,
           source: "chat-bridge",
-          requestTag: this.requestTagForInboundMessage(input.incomingMessageId),
+          requestTag:
+            safeString(input.requestTag).trim() ||
+            this.requestTagForInboundMessage(input.incomingMessageId),
         });
         this.assertRestoredTurnStayedOnSession(
           restoreSessionFile,
@@ -2702,6 +2712,7 @@ export class ChatController {
             replyToMessageId: deliveryTarget.replyToMessageId,
             sessionFile: result.sessionFile,
             incomingMessageId: deliveryTarget.incomingMessageId,
+            idempotencyKey: input.deliveryIdempotencyKey,
             clearProcessing: true,
           });
           this.markOriginalProcessedIfRetargeted(
@@ -2767,6 +2778,7 @@ export class ChatController {
               replyToMessageId: deliveryTarget.replyToMessageId,
               incomingMessageId: deliveryTarget.incomingMessageId,
               sessionFile: errorSessionFile || this.currentSessionFile(),
+              idempotencyKey: input.deliveryIdempotencyKey,
               clearProcessing: true,
               deliveryKind: "error",
             });

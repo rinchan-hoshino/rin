@@ -158,6 +158,8 @@ type Task = {
 
 `upsert()` merges with an existing task when `id` matches. Include the fields you intend to change. Use `frontend: null`, `termination: null`, or `condition: null` to remove those optional fields. The daemon loads the persisted task file at startup and when explicitly requested through `rin tasks reload` or `rin.tasks.reload()`: valid JSON edits, additions, and removals take effect without restarting the daemon only after that reload command. Invalid JSON leaves the running daemon schedule unchanged and makes the reload fail, so a partial manual edit does not silently replace the in-memory schedule.
 
+For agent-backed tasks, the scheduler owns the trigger and a durable invocation receipt, while the ordinary session/turn runtime remains authoritative for execution and terminal completion. The receipt snapshots the submitted prompt, session target, frontend policy, and stable turn identity before dispatch. After a daemon restart, Rin attaches to that same turn instead of submitting the prompt again. `running` and the `last*` fields are scheduler projections of this lifecycle; the internal receipt is intentionally omitted from task APIs.
+
 ## Trigger contract
 
 ### One-time trigger

@@ -326,6 +326,8 @@ export type ChatBridgeTurnPayload = RinToolStartupOptions &
     model?: string;
     thinkingLevel?: string;
     promptMeta?: PromptContextMeta;
+    requestTag?: string;
+    deliveryIdempotencyKey?: string;
     frontend?: RinFrontendIdentity;
     disabledRinCapabilities?: string[];
   };
@@ -1257,6 +1259,8 @@ export async function startChatBridge(
           chatModelOptions.thinkingLevel,
         piStartupOptions: payload?.piStartupOptions,
         promptMeta: payload?.promptMeta,
+        requestTag: payload?.requestTag,
+        deliveryIdempotencyKey: payload?.deliveryIdempotencyKey,
         deliverFinal: payload?.deliverFinal,
         quietMode: payload?.quietMode,
       });

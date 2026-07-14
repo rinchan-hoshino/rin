@@ -229,6 +229,35 @@ test("chat controller keeps the inbox request tag stable across frontend recreat
   assert.match(seen[0], /^chat-inbox-[a-f0-9]{64}$/);
 });
 
+test("chat controller preserves an explicit durable turn identity through delivery", async () => {
+  const controller = await createController("discord/1:2");
+  const driverCalls = [];
+  const deliveries = [];
+  controller.driver.runTurn = async (input) => {
+    driverCalls.push(input);
+    return {
+      finalText: "scheduled final",
+      sessionFile: "/tmp/scheduled-turn.jsonl",
+    };
+  };
+  controller.deliverAssistantReply = async (input) => {
+    deliveries.push(input);
+  };
+
+  const runTurn = controller.runTurn.bind(controller) as any;
+  await runTurn({
+    text: "scheduled prompt",
+    attachments: [],
+    requestTag: "scheduled:task-1:run-1",
+    deliveryIdempotencyKey: "scheduled-final:task-1:run-1",
+  });
+
+  assert.equal(driverCalls.length, 1);
+  assert.equal(driverCalls[0].requestTag, "scheduled:task-1:run-1");
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].idempotencyKey, "scheduled-final:task-1:run-1");
+});
+
 test("detached non-chat controllers do not synthesize a chat frontend identity", async () => {
   const controller = await createController("cron:cli-123", {
     useChatFrontendIdentity: false,

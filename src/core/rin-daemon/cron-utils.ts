@@ -84,8 +84,13 @@ export function createCronTaskId() {
   return `cron_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function cronTaskRunId(task: CronTaskRecord) {
-  return `${task.id}:${task.runCount}:${Date.now()}`;
+export function cronTaskRunId(
+  task: Pick<CronTaskRecord, "id" | "runCount" | "lastStartedAt">,
+  startedAt = task.lastStartedAt,
+) {
+  const stableStartedAt = safeString(startedAt).trim();
+  if (!stableStartedAt) throw new Error("cron_tasks_file_invalid");
+  return `${task.id}:${task.runCount}:${stableStartedAt}`;
 }
 
 export function summarizeText(value: string, max = 1200) {
