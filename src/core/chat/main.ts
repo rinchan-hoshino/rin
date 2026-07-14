@@ -109,7 +109,10 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "../rin-frontend-sdk/frontend-identity.js";
-import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
+import {
+  createRinFrontendTurnCancelledError,
+  isRinFrontendTurnCancelledError,
+} from "../rin-frontend-sdk/lifecycle-errors.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
@@ -511,6 +514,7 @@ export async function startChatBridge(
     ChatController,
     "dispose" | "shutdown"
   >();
+  let chatBridgeStopping = false;
   let inboxPollTimer: NodeJS.Timeout | null = null;
   let outboxPollTimer: NodeJS.Timeout | null = null;
   let outboxHistoryCleanupTimer: NodeJS.Timeout | null = null;
@@ -545,6 +549,7 @@ export async function startChatBridge(
   const frontendClientFactory = options.frontendClientFactory;
   const getIdentity = () => loadIdentity(dataDir);
   const getController = (chatKey: string) => {
+    if (chatBridgeStopping) throw createRinFrontendTurnCancelledError();
     let controller = controllers.get(chatKey);
     if (!controller) {
       controller = new ChatController(app, dataDir, chatKey, {
@@ -565,6 +570,7 @@ export async function startChatBridge(
       frontendIdentity?: RinFrontendIdentity;
     },
   ) => {
+    if (chatBridgeStopping) throw createRinFrontendTurnCancelledError();
     const controllerChatKey =
       safeString(detachedOptions?.chatKey).trim() || `cron:${controllerKey}`;
     const affectChatBinding = detachedOptions?.affectChatBinding !== false;
@@ -1061,7 +1067,6 @@ export async function startChatBridge(
     }
   };
 
-  let chatBridgeStopping = false;
   const finishClaimedInboxJob = (
     job: ClaimedChatInboxJob,
     result?: ChatInboxJobResult,

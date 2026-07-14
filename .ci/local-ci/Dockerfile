@@ -1,9 +1,9 @@
-FROM node:22-bookworm-slim
+FROM node:22.19.0-bookworm-slim
 
 WORKDIR /opt/rin
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git python3 make g++ util-linux \
+  && apt-get install -y --no-install-recommends curl git python3 make g++ util-linux \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
@@ -12,5 +12,7 @@ RUN npm ci
 
 COPY .ci/local-ci/run-checks.sh /usr/local/bin/rin-local-ci-runner
 RUN chmod +x /usr/local/bin/rin-local-ci-runner
+
+USER node
 
 ENTRYPOINT ["/usr/local/bin/rin-local-ci-runner"]

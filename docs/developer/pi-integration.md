@@ -13,7 +13,8 @@ still be upgraded intentionally.
 - Product modules such as memory, self-improve, chat, daemon, and token usage
   should depend on Rin facades, not Pi private fields.
 - When adding a new Pi private seam, add a semantic helper in `src/core/pi/`,
-  document it below, and update the guard test in `tests/unit/pi-dependencies.test.ts`.
+  document it below, and update the guard test in
+  `tests/architecture/pi-dependencies.test.ts`.
 
 ## Current seams
 
@@ -56,10 +57,11 @@ Finite entrypoints for non-passthrough follow-up:
 2. Read the Pi delta and classify each behavior change as either passthrough,
    finite-entrypoint follow-up, intentional Rin difference, or missing upstream
    hook.
-3. Run `npm run build` and the focused Pi integration tests:
-   - `tests/unit/pi-dependencies.test.ts`
-   - `tests/unit/tui-overrides.test.ts`
-   - `tests/unit/rin-runtime.test.ts`
-   - `tests/unit/rpc-mode.test.ts`
+3. Run `npm run build`, `npm run test:architecture`, and the focused Pi
+   characterization checks:
+   - `tests/architecture/pi-dependencies.test.ts`
+   - `tests/characterization/tui-overrides.test.ts`
+   - `tests/characterization/rin-runtime.test.ts`
+   - `tests/characterization/rpc-mode.test.ts`
 4. If a private seam breaks, fix the helper in `src/core/pi/` first. Do not
    scatter fallback accesses through product code.

@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "policy": "Each file is one concrete escaped failure family. Feature matrices and migration-only behavior checks belong elsewhere.",
+  "files": [
+    {
+      "file": "tests/regression/chat-controller-abort.test.ts",
+      "introducedBy": "0ed7725b",
+      "subject": "fix: handle chat aborts as terminal turns (#161)",
+      "failure": "A chat abort must finish as a terminal turn and release its worker instead of hanging."
+    },
+    {
+      "file": "tests/regression/chat-inbound-acceptance.test.ts",
+      "introducedBy": "a5183165",
+      "subject": "fix(chat): defer inbound acceptance until turn start",
+      "failure": "Inbound chat delivery must not be acknowledged before the turn actually starts."
+    },
+    {
+      "file": "tests/regression/chat-runtime-inbound-recovery.test.ts",
+      "introducedBy": "309e5662",
+      "subject": "fix(chat): recover missed inbound messages",
+      "failure": "Persisted inbound chat events must recover after runtime interruption without being lost."
+    },
+    {
+      "file": "tests/regression/daemon-restart-chat-recovery.test.ts",
+      "introducedBy": "2026-07-14-normal-restart-incident",
+      "subject": "fix(daemon): preserve chat turns across normal restart",
+      "failure": "A managed daemon restart must not classify its active chat worker as a terminal worker exit."
+    },
+    {
+      "file": "tests/regression/restart-activation-policy.test.ts",
+      "introducedBy": "26ca49ee",
+      "subject": "fix(rin): let restart activation interrupt active turns",
+      "failure": "Restart activation must interrupt an active turn instead of waiting behind it."
+    },
+    {
+      "file": "tests/regression/rin-daemon-lock.test.ts",
+      "introducedBy": "a208674e",
+      "subject": "fix: prevent multiple rin daemons (#409)",
+      "failure": "A second daemon process must fail while the owning daemon lock is live."
+    },
+    {
+      "file": "tests/regression/rpc-mode-interrupted-turn.test.ts",
+      "introducedBy": "ec6ff946",
+      "subject": "fix(rin): avoid resuming incomplete assistant tool calls",
+      "failure": "RPC resume must not continue an assistant message that ended with an incomplete tool call."
+    },
+    {
+      "file": "tests/regression/rpc-mode-recoverable-throw.test.ts",
+      "introducedBy": "f8ff063b",
+      "subject": "fix(rpc): wait through websocket recovery after thrown errors",
+      "failure": "RPC mode must wait through recoverable websocket errors instead of terminating the turn."
+    }
+  ]
+}

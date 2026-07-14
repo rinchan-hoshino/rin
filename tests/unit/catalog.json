@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "thresholds": {
+    "lines": 90,
+    "functions": 90,
+    "branches": 85
+  },
+  "modules": [
+    {
+      "test": "tests/unit/chat-date.test.ts",
+      "source": "src/core/chat/date.ts",
+      "built": "dist/core/chat/date.js"
+    },
+    {
+      "test": "tests/unit/cron-utils.test.ts",
+      "source": "src/core/rin-daemon/cron-utils.ts",
+      "built": "dist/core/rin-daemon/cron-utils.js"
+    },
+    {
+      "test": "tests/unit/json-utils.test.ts",
+      "source": "src/core/json-utils.ts",
+      "built": "dist/core/json-utils.js"
+    },
+    {
+      "test": "tests/unit/message-content.test.ts",
+      "source": "src/core/message-content.ts",
+      "built": "dist/core/message-content.js"
+    },
+    {
+      "test": "tests/unit/rpc-state-utils.test.ts",
+      "source": "src/core/rin-frontend-sdk/state-utils.ts",
+      "built": "dist/core/rin-frontend-sdk/state-utils.js"
+    },
+    {
+      "test": "tests/unit/text-utils.test.ts",
+      "source": "src/core/text-utils.ts",
+      "built": "dist/core/text-utils.js"
+    },
+    {
+      "test": "tests/unit/turn-completion.test.ts",
+      "source": "src/core/rin-frontend-sdk/turn-completion.ts",
+      "built": "dist/core/rin-frontend-sdk/turn-completion.js"
+    },
+    {
+      "test": "tests/unit/turn-result.test.ts",
+      "source": "src/core/session/turn-result.ts",
+      "built": "dist/core/session/turn-result.js"
+    },
+    {
+      "test": "tests/unit/usage-metrics.test.ts",
+      "source": "src/core/usage-metrics.ts",
+      "built": "dist/core/usage-metrics.js"
+    }
+  ]
+}

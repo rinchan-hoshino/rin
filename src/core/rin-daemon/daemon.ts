@@ -760,21 +760,25 @@ export async function startDaemon(
     if (shuttingDown) return;
     shuttingDown = true;
     cronScheduler.stop();
-    workerPool.beginShutdown();
     const shutdownDeadline = Date.now() + shutdownGraceMs;
     const settleBeforeShutdownDeadline = async (
       task: () => unknown | Promise<unknown>,
     ) => {
       const remainingMs = Math.max(0, shutdownDeadline - Date.now());
+      const pending = new Promise<unknown>((resolve) => resolve(task())).catch(
+        () => {},
+      );
       if (remainingMs === 0) return;
       await Promise.race([
-        Promise.resolve()
-          .then(task)
-          .catch(() => {}),
+        pending,
         new Promise<void>((resolve) => setTimeout(resolve, remainingMs)),
       ]);
     };
-    await settleBeforeShutdownDeadline(() => options.onShutdown?.());
+    const hostedShutdown = settleBeforeShutdownDeadline(() =>
+      options.onShutdown?.(),
+    );
+    workerPool.beginShutdown();
+    await hostedShutdown;
     await settleBeforeShutdownDeadline(() => backgroundExtensionManager.stop());
     await workerPool.shutdown(Math.max(0, shutdownDeadline - Date.now()));
     for (const socket of Array.from(activeSockets)) {

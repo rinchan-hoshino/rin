@@ -1,0 +1,2073 @@
+{
+  "schemaVersion": 1,
+  "baselineRef": "fa644064",
+  "files": [
+    {
+      "file": "tests/characterization/changelog.test.ts",
+      "cases": [
+        "\"changelog parser ignores intro text, skips empty sections, and normalizes BOM/CRLF\"",
+        "\"changelog parser returns empty entries for missing paths\"",
+        "\"changelog path prefers runtime release docs when that file exists\"",
+        "\"changelog path falls back to home release docs when runtime file is missing\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-boot.test.ts",
+      "cases": [
+        "\"chat boot exposes the dedicated chat command registry\"",
+        "\"chat boot localizes command descriptions for Chinese runtimes\"",
+        "\"chat boot builds and syncs Discord application commands\"",
+        "\"chat boot clears common telegram scopes before syncing default commands\"",
+        "\"chat boot claims outbox files before sending so concurrent drains do not duplicate delivery\"",
+        "\"chat boot drains a target chat without waiting for a slow different chat\"",
+        "\"chat boot releases a timed out outbox send without retrying before its lease\"",
+        "\"chat boot keeps retryable outbox delivery failures queued\"",
+        "\"chat boot gives OneBot media outbox items the extended send timeout\"",
+        "\"chat boot dispatches media outbox items asynchronously after starting delivery\"",
+        "\"chat boot dispatches non-media outbox items asynchronously by platform list\"",
+        "\"chat boot does not retry ambiguous timeout after dispatch\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-bridge-adapters.test.ts",
+      "cases": [
+        "\"chat bridge adapter labels and defaults come from shared built-in specs\"",
+        "\"chat bridge adapter config materialization covers built-in adapters\"",
+        "\"chat bridge adapter config materialization applies minimal setup defaults\"",
+        "\"chat bridge runtime adapter entries expose only configured built-in adapter keys\"",
+        "\"chat runtime config expands multi-entry built-in adapters and strips setup-only metadata\"",
+        "\"chat runtime normalization expands named built-in adapter maps\"",
+        "\"chat runtime normalization skips disabled built-in entries\"",
+        "\"chat runtime package has no generated dependencies\"",
+        "\"chat support re-exports chat runtime config helpers\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-bridge-eval.test.ts",
+      "cases": [
+        "\"chat bridge eval runs constrained code with bot, internal, helpers, store, and identity\"",
+        "\"chat bridge send requires structured at parts to include ids\"",
+        "\"chat bridge eval reports the actual omitted string length\"",
+        "\"chat bridge eval serializes thrown errors\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-bridge-tool.test.ts",
+      "cases": [
+        "\"chat capability no longer exposes chat helper tools or interactive setup commands\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-command-responses.test.ts",
+      "cases": [
+        "\"chat command responses default to English when local i18n file is absent\"",
+        "\"chat command responses can be overridden from the generic i18n catalog\"",
+        "\"chat compaction defaults keep shared line copy but omit wrapper chrome\"",
+        "\"generic i18n catalog accepts nested message keys\"",
+        "\"chat i18n exposes only chat-sent compaction templates\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-controller.test.ts",
+      "cases": [
+        "\"chat controller tells the frontend driver not to reconnect for an idle command\"",
+        "\"chat controller tells the frontend driver not to reconnect for a prompt\"",
+        "\"chat controller does not assume session readiness after an ineffective restore\"",
+        "\"chat controller keeps the inbox request tag stable across frontend recreation\"",
+        "\"chat controller preserves an explicit durable turn identity through delivery\"",
+        "\"detached non-chat controllers do not synthesize a chat frontend identity\"",
+        "\"chat controller delivers compact collapsed notice without summary text\"",
+        "\"chat controller does not deliver compact summary when token count is unavailable\"",
+        "\"chat controller terminates the frontend session before disposing\"",
+        "\"chat controller daemon shutdown detach preserves visible turn state\"",
+        "\"detached chat controllers persist their session file for later termination\"",
+        "\"chat controller bootstraps a fresh session before the first command\"",
+        "\"chat controller allocates fresh prompt sessions under managed chat\"",
+        "\"chat controller forwards startup session names to the frontend turn driver\"",
+        "\"chat controller delivers Pi-native overflow recovery finals\"",
+        "\"chat controller resets chat prompt sessions through the session settings reload path\"",
+        "\"chat controller applies turn model options after settings reload\"",
+        "\"chat controller does not bind a transient default session before managed prompt creation\"",
+        "\"chat controller skips recovery bootstrap and uses configured copy for /new\"",
+        "\"chat controller does not send working notices before deterministic non-compact command acknowledgements\"",
+        "\"chat controller can deliver image-only builtin command parts\"",
+        "\"chat controller starts command reactions from frontend working status\"",
+        "\"chat controller sends compaction start notice and reacts on that notice\"",
+        "\"chat controller coalesces automatic compaction completion into the active chat turn\"",
+        "\"chat controller lets editable compaction temporarily own the Working head\"",
+        "\"chat controller delivers non-deferred passive notices during active turns\"",
+        "\"chat controller renders todo notices as markdown for markdown chats\"",
+        "\"chat controller sends the active non-empty todo once after each new user message\"",
+        "\"chat controller cancels a pending todo branch read when the turn settles\"",
+        "\"chat controller keeps todo errors outside editable progress\"",
+        "\"chat controller attempts independent todo errors when progress delivery fails\"",
+        "\"chat controller renders todo notices as character fallback for plain chats\"",
+        "\"chat controller sends structured todo nodes to native todo chats\"",
+        "\"chat controller binds passive notices to the current session for quote resume\"",
+        "\"chat controller quiet mode suppresses progress deliveries\"",
+        "\"chat controller quiet mode still sends final replies by delivery kind\"",
+        "\"chat controller quiet mode still sends independent errors\"",
+        "\"chat controller runTurn quiet mode option overrides stored chat settings\"",
+        "\"chat controller drops deferred passive notices at the final boundary\"",
+        "\"chat controller does not create processing turns for slash commands\"",
+        "\"chat controller ignores replied session files for /new\"",
+        "\"chat controller ignores replied session files for non-new commands\"",
+        "\"chat controller uses configured command response overrides\"",
+        "\"chat controller starts /new immediately through the TUI new-session path\"",
+        "\"chat controller leaves externally aborted inbound unprocessed for retry\"",
+        "\"chat controller rethrows lifecycle cancellation without delivering an error final\"",
+        "\"chat controller /new cleans up editable Working that settles after abort\"",
+        "\"chat controller suppresses /compact acknowledgement but keeps configured /reload response\"",
+        "\"chat controller marks /compact processed from compaction completion notice\"",
+        "\"chat controller keeps working reaction on current message while steer is queued\"",
+        "\"chat controller keeps steering open after assistant tool-call interim\"",
+        "\"chat controller delivers visible non-transient command errors\"",
+        "\"chat controller reports daemon command errors without frontend retry classification\"",
+        "\"chat controller can expose external working indicators\"",
+        "\"chat controller preserves active turn typing when external working ends\"",
+        "\"chat controller replaces editable Working with a completed assistant summary\"",
+        "\"chat controller keeps editable summary and compaction refreshes suppressed when progress is hidden\"",
+        "\"chat controller polls typing and rotating reactions while a turn is active\"",
+        "\"chat controller keeps typing heartbeat frequent while throttling editable Working animation to reaction interval\"",
+        "\"chat controller clears typing and working reactions after canonical completion\"",
+        "\"chat controller keeps typing and working reaction until dispatched final delivery finishes\"",
+        "\"chat controller uses adapter reaction capability for lark working indicators\"",
+        "\"chat controller uses discord typing and reaction capabilities together\"",
+        "\"chat controller logs failed discord typing without changing its cadence\"",
+        "\"chat controller starts typing immediately after creating editable progress\"",
+        "\"chat controller prioritizes reaction over marker while keeping typing independent\"",
+        "\"chat controller does not deliver text-only assistant messages as interim\"",
+        "\"chat controller restores inbound reply identity before connect replays an interim\"",
+        "\"chat controller starts reply-scoped editable Working before a cold frontend connection resolves\"",
+        "\"chat controller invalidates early Working when a cold frontend connection fails\"",
+        "\"chat controller ends settled early Working when a later cold connection fails\"",
+        "\"chat controller clears a primed reply identity when connect fails\"",
+        "\"chat controller delivers leading tool-call text as the only interim source\"",
+        "\"chat controller treats delivered interim assistant text as an inbound reply boundary\"",
+        "\"chat controller does not treat assistant message updates as interim when a tool boundary follows\"",
+        "\"chat controller does not leak a buffered preview as interim before the final reply\"",
+        "\"chat controller does not emit growing final-answer prefixes as interim replies\"",
+        "\"chat controller uses no implicit Working notice for onebot private chats\"",
+        "\"chat controller treats a stale working frontend phase as a new onebot private prompt\"",
+        "\"chat controller sends no onebot Working notice when polls overlap\"",
+        "\"chat controller ignores dynamic onebot private working actions without explicit marker\"",
+        "\"chat controller does not type from local live turn state without worker activity\"",
+        "\"chat controller does not keep typing from stale currentTurn metadata alone\"",
+        "\"chat controller does not keep ordinary typing from standalone remote-working states\"",
+        "\"chat controller clears the working reaction before dropping processing state\"",
+        "\"chat controller treats rpc completion as the canonical final reply for prompt turns\"",
+        "\"chat controller sends a session-file prompt through conversation binding\"",
+        "\"chat controller can run a session-file prompt without final delivery\"",
+        "\"chat controller delivers prompt turn errors through conversation binding\"",
+        "\"chat controller leaves inbound unprocessed when final reply delivery fails\"",
+        "\"chat controller keeps the turn active while final reply delivery is still in flight\"",
+        "\"chat controller rejects rpc completion without finalText instead of reusing observed assistant text\"",
+        "\"chat controller rejects rpc completion without finalText instead of scanning session messages\"",
+        "\"chat controller switches to a linked reply session before sending the prompt\"",
+        "\"chat controller steers an already streaming session instead of waiting for a new owned turn\"",
+        "\"chat controller lets steer bypass the owned turn queue while the current turn is still streaming\"",
+        "\"chat controller marks superseded restored inbox turns processed without duplicate final delivery\"",
+        "\"chat controller queues follow-up after an assistant reply is committed\"",
+        "\"chat controller fails fast when prompt submission is queued offline instead of hanging forever\"",
+        "\"chat controller reports prompt timeout without transient retry classification\"",
+        "\"chat controller clears a stale bound session so ordinary chat can start fresh\"",
+        "\"chat controller reports an explicit missing resume target\"",
+        "\"chat controller terminate does not clear an existing durable chat binding\"",
+        "\"chat controller submits the prompt without waiting for editable Working and keeps polling\"",
+        "\"chat controller does not let presentation polling block prompt submission\"",
+        "\"chat controller does not persist transient processing state to chat state.json\"",
+        "\"chat controller does not resend an already delivered final after restart recovery\"",
+        "\"chat controller reuses a queued final outbox item on restart recovery\"",
+        "\"chat controller leaves an in-flight final outbox item pending on restart recovery\"",
+        "\"chat controller surfaces a failed final outbox item on restart recovery\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-decision.test.ts",
+      "cases": [
+        "\"chat decision keeps slash-containing owner text routable\"",
+        "\"chat decision only enforces access policy, not custom slash-command guessing\"",
+        "\"chat decision allows trusted private messages\"",
+        "\"chat decision lets two-member owner groups skip mention without changing chat type\"",
+        "\"chat decision lets Feishu owner-only groups skip mention without changing chat type\"",
+        "\"chat decision caches private-like group member counts by platform bot and chat\"",
+        "\"chat decision lets Discord owner-only channels skip mention when the adapter proves no other users\"",
+        "\"chat decision still requires mention in Discord channels when another user is present\"",
+        "\"chat decision keeps image-only owner messages routable\"",
+        "\"chat decision allows owner group messages that explicitly at the bot even when stripped.appel is missing\"",
+        "\"chat decision rejects other group mentions before owner membership lookup\"",
+        "\"chat decision requires owner presence before trusted group mentions can trigger\"",
+        "\"chat decision rejects trusted group mentions when owner membership is unverifiable\"",
+        "\"chat decision allows trusted group mentions when an owner is present\"",
+        "\"chat decision ignores owner group messages that only at other users\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-file-utils.test.ts",
+      "cases": [
+        "\"chat file helpers stay consistent across shared and re-exported surfaces\"",
+        "\"chat file helpers keep filename fallback, decoding, and extension rules stable\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-get-message-tool.test.ts",
+      "cases": [
+        "\"chat message and log helpers are documentation-driven instead of tools\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-helpers.test.ts",
+      "cases": [
+        "\"chat chat helpers extract chat metadata\"",
+        "\"chat chat helpers treat explicit at-elements as mentions even when stripped.appel is missing\"",
+        "\"chat chat helpers extract reply ids and quote text from canonical chat quote\"",
+        "\"chat chat helpers pick only own unsessioned quote text\"",
+        "\"chat chat helpers derive incoming text from elements\"",
+        "\"chat chat helpers synthesize text elements only when upstream omitted elements\"",
+        "\"chat chat helpers treat final assistant delivery as a replay boundary\"",
+        "\"chat chat helpers persist duplicate inbound messages without rewriting first-seen state\"",
+        "\"chat chat helpers persist outbound image parts\"",
+        "\"chat chat helpers report unresolved media placeholders clearly\"",
+        "\"chat chat helpers save inbound media when a standard resource is present\"",
+        "\"chat chat helpers render saved media as markdown local paths for prompts\"",
+        "\"chat chat helpers do not shift saved media onto unmatched same-kind nodes\"",
+        "\"chat chat helpers keep extractor media indexes aligned when rendering prompts\"",
+        "\"chat chat helpers report fetch failures consistently across media sources\"",
+        "\"chat chat helpers only auto-attach explicit file URLs, not plain paths\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-inbox.test.ts",
+      "cases": [
+        "\"chat inbox enqueues a durable inbound envelope keyed by chat and message id\"",
+        "\"chat inbox duplicate enqueue preserves pending progress timestamps\"",
+        "\"chat inbox rejects legacy unqualified keys before controller selection\"",
+        "\"chat inbox enqueue refuses legacy unqualified chat keys\"",
+        "\"chat inbox preserves normalized mention routing hints needed for queued group turns\"",
+        "\"chat inbox restore backfills routing hints without clobbering existing session metadata\"",
+        "\"chat inbox restores stranded processing envelopes back to pending on startup\"",
+        "\"chat inbox restores orphaned accepted messages without a reply boundary\"",
+        "\"chat inbox restores orphaned accepted messages after legacy interim replies\"",
+        "\"chat inbox restores multiple accepted unprocessed orphaned messages\"",
+        "\"chat inbox recovery reconciler restores processing and orphaned work together\"",
+        "\"chat inbox recovery reconciler is idempotent for existing orphan envelopes\"",
+        "\"chat inbox does not restore orphaned accepted messages after a later handled user turn\"",
+        "\"chat inbox keeps fresh processing envelopes until they become stale\"",
+        "\"chat inbox restores processing envelopes without inspecting delivered replies\"",
+        "\"chat inbox restores processing envelopes without inspecting interim replies\"",
+        "\"chat inbox restores processing envelopes without inspecting later /new boundaries\"",
+        "\"chat inbox restores stranded items after only a working notice\"",
+        "\"chat inbox restores processing envelopes without inspecting previous working notices\"",
+        "\"chat inbox can claim, restore, and reschedule a queued envelope\"",
+        "\"chat inbox moves failed envelopes into failed storage with updated metadata\"",
+        "\"chat inbox processing restore honors a per-drain limit\"",
+        "\"chat inbox drain does not cap active chat-key workers\"",
+        "\"chat inbox drain does not cap pending claims at eight\"",
+        "\"chat inbox drain leaves same-chat backlog pending instead of processing-queueing it\"",
+        "\"chat inbox drain does not let slow busy-chat admission block other chats\"",
+        "\"chat inbox drain serializes async active admission per chat key\"",
+        "\"chat inbox drain redrains after async admission consumes an already handled item\"",
+        "\"chat inbox drain only bypasses a busy chat-key worker for active-turn work\"",
+        "\"chat inbox drain lets active-turn work bypass a busy chat-key worker\"",
+        "\"chat inbox drain drops duplicate envelopes already owned by active steering\"",
+        "\"chat inbox drain leaves processing recovery to startup instead of stale polling\"",
+        "\"chat inbox retry helper isolates envelopes after repeated failures\"",
+        "\"chat inbox claim refreshes old envelopes before stale recovery checks\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-key-migration.test.ts",
+      "cases": [
+        "\"chat key migration infers configured bot ids without adapter-specific key shapes\"",
+        "\"chat key migration canonicalizes legacy unqualified keys through a single bot-qualified shape\"",
+        "\"chat key migration rewrites byChatKey entries without losing settings\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-key-worker.test.ts",
+      "cases": [
+        "\"chat key worker prepares same-chat jobs concurrently while preserving run order\"",
+        "\"chat key worker reports prepare errors in queue order\"",
+        "\"chat key worker reports synchronous prepare throws in queue order\"",
+        "\"chat key worker treats undefined prepare rejection as an error\"",
+        "\"chat key worker releases queued jobs immediately after submission starts\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-log.test.ts",
+      "cases": [
+        "\"chat chat log appends into unified message store and reads one day chat history\"",
+        "\"chat chat log preserves first-seen inbound timing after duplicate delivery\"",
+        "\"chat chat log reuses message-store projection for fallback text and timestamp fields\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-main-logging.test.ts",
+      "cases": [
+        "\"chat bridge treats missing runtime adapters as a quiet idle state\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-main-prompt-context.test.ts",
+      "cases": [
+        "\"chat main carries sender metadata to the controller with the prompt body\"",
+        "\"chat controller passes sender metadata through the frontend prompt context\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-main-queue.test.ts",
+      "cases": [
+        "\"chat main consumes inbound localized help messages through the inbox path only once\"",
+        "\"telegram topic commands use the thread-scoped chat key\"",
+        "\"chat main ignores private help commands from untrusted senders\"",
+        "\"chat startup does not restore inbox work before adapters are ready\"",
+        "\"chat main restores every stranded processing inbox item on startup\"",
+        "\"chat main records record-only chat messages without starting an agent turn\"",
+        "\"chat main records record-only chat commands without running command handlers\"",
+        "\"chat main applies per-chat model options to inbound prompt turns\"",
+        "\"chat runTurn lets explicit model options override per-chat defaults\"",
+        "\"chat main silently drops the removed private /session command\"",
+        "\"chat main reports unmatched owner-only group slash commands like private chats\"",
+        "\"chat main silently consumes unmatched group slash commands\"",
+        "\"chat main lets trusted group commands run without owner-present checks or command whitelists\"",
+        "\"chat main forwards command sender identity without reply session binding\"",
+        "\"chat main ignores removed /auth private commands from untrusted senders without mutating chat identity\"",
+        "\"chat main does not retry a queued prompt while the controller is already handling that inbound message\"",
+        "\"chat main routes active-turn /new through the chatKey worker immediately\"",
+        "\"chat main submits /abort without waiting for a same-chat prompt to finish\"",
+        "\"chat main submits same-chat follow-up plainly before backend steer admission\"",
+        "\"chat main completes a steered inbox item after the inbound message is processed\"",
+        "\"chat main reports daemon startup failure without retrying\"",
+        "\"hosted chat bridge shutdown detaches active frontends without aborting sessions\"",
+        "\"chat main requeues frontend lifecycle aborts without delivering an error\"",
+        "\"chat main commits one terminal error so restart recovery cannot replay the same inbound\"",
+        "\"chat startup honors terminal outbox ownership before orphan inbox recovery\"",
+        "\"chat main reports an offline-queued frontend turn without retrying\"",
+        "\"chat main passes quoted reply session metadata through one normal prompt submission\"",
+        "\"chat main omits reply metadata when quoting the latest assistant message\"",
+        "\"chat main prepends own unsessioned quoted message to trigger text\"",
+        "\"chat main uses own unsessioned quoted message as mention-only trigger text\"",
+        "\"chat main does not downgrade a quoted reply to a plain turn when linked session selection times out\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-message-store-index.test.ts",
+      "cases": [
+        "\"message store eagerly maintains chat-date indexes while preserving chat-day reads\"",
+        "\"message store backfills a missing chat-date index from existing records\"",
+        "\"message store removes stale chat-date index entries when indexed records move to another day\"",
+        "\"message store upsert keeps existing metadata while moving a record to a new day\"",
+        "\"message store inbound duplicate keeps the existing first-seen timestamp even if incoming is earlier\"",
+        "\"message store always uses the preferred root even if a previous root still exists\"",
+        "\"message store record formatters stay aligned across detail and summary output\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-message-store-layout.test.ts",
+      "cases": [
+        "\"message store layout defaults to the preferred root\"",
+        "\"message store layout keeps using the preferred root when a previous root exists\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-outbox-and-binding.test.ts",
+      "cases": [
+        "\"chat outbox enqueues payload on disk\"",
+        "\"chat outbox rejects SDK-style text and accepts only parts payloads\"",
+        "\"chat outbox async dispatch is selected by platform list\"",
+        "\"chat outbox rejects SDK-style empty payloads before enqueue\"",
+        "\"chat outbox archives legacy completed items out of the active queue\"",
+        "\"chat outbox retries queued payloads after send failure\"",
+        "\"chat outbox expires stale queued payloads instead of delivering old messages\"",
+        "\"chat outbox fails partial delivery errors without retrying\"",
+        "\"chat outbox stops retrying after repeated transient failures\"",
+        "\"chat outbox fails permanent delivery errors without retrying\"",
+        "\"chat outbox treats platform permission errors as permanent\"",
+        "\"chat assistant delivery stores session only for conversation binding\"",
+        "\"chat state paths stay stable\"",
+        "\"chat state rejects unqualified telegram chat keys\"",
+        "\"chat state discovery only includes bot-qualified state dirs\"",
+        "\"chat outbox history cleanup applies 7 day delivered and 14 day failed retention\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-policy.test.ts",
+      "cases": [
+        "\"chat policy allows owners and trusted users to run chat commands\"",
+        "\"chat policy blocks command execution for untrusted or blank command inputs\"",
+        "\"chat policy normalizes trust values for input access and command checks\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-prompt-context.test.ts",
+      "cases": [
+        "\"chat prompt context persists dynamic sender metadata in the prompt text\"",
+        "\"chat prompt context omits privacy reminder when the chat does not require mentions\"",
+        "\"chat prompt context includes reply id in prompt text without quoted message payload\"",
+        "\"prompt context header injection is idempotent for runtime-generated headers\"",
+        "\"scheduled task prompt context renders a task block without pretending to be chat\"",
+        "\"scheduled task prompt context can describe a non-chat frontend binding\"",
+        "\"chat prompt context preserves sender-authored header-shaped text as body content\"",
+        "\"prompt context system blocks are persisted instead of used only for active turns\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-runtime-common.test.ts",
+      "cases": [
+        "\"chat runtime common helpers normalize and render nodes consistently\"",
+        "\"chat runtime renderers preserve shared whitespace semantics\"",
+        "\"chat runtime common helpers expand markdown rich object syntax\"",
+        "\"chat runtime common helpers do not expand rich syntax inside markdown code\"",
+        "\"chat runtime common helpers preserve binary payload naming for buffers and file urls\"",
+        "\"chat runtime common helper utilities share adapter concerns\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-runtime-discord.test.ts",
+      "cases": [
+        "\"discord adapter catches up native history before buffered live messages\"",
+        "\"discord adapter syncs application commands through the Discord client\"",
+        "\"discord adapter falls back to Discord REST for command sync\"",
+        "\"discord adapter treats command sync before ready as a no-op\"",
+        "\"discord adapter maps chat input interactions to Rin slash messages\"",
+        "\"discord adapter edits one quoted non-final message and deletes it only on matching final\"",
+        "\"discord adapter acknowledges chat input interactions with callback endpoint before emitting\"",
+        "\"discord adapter treats guilds with only owner and bots as owner-only\"",
+        "\"discord adapter proves owner-only channels from private permission overwrites\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-runtime-ingress.test.ts",
+      "cases": [
+        "\"chat runtime persists inbound sessions before emitting message events\"",
+        "\"chat runtime qualifies second bot keys for the same platform\"",
+        "\"discord runtime persists guild channel paths as chat names\"",
+        "\"discord slash interactions emit after acknowledgement\"",
+        "\"chat runtime derives the durable chat key from normalized chat identity\"",
+        "\"onebot group sessions preserve both group card and account nickname\"",
+        "\"onebot runtime catches up native history before buffered live messages\"",
+        "\"onebot runtime requeues buffered ingress when durable emit fails\"",
+        "\"telegram runtime reports ready only after native cursor catch-up\"",
+        "\"telegram runtime advances the poll cursor only after the update is handled\"",
+        "\"telegram runtime does not advance the poll cursor when update handling fails\"",
+        "\"slack runtime acks only after the inbound event is emitted\"",
+        "\"lark runtime paginates native history before releasing buffered events\"",
+        "\"lark websocket events settle only after durable message handling\"",
+        "\"lark runtime reads merged forward messages into inbound text\"",
+        "\"lark runtime maps reply parent ids to canonical quote metadata\"",
+        "\"lark adapter reports Feishu group member count including the bot\"",
+        "\"lark runtime downloads image message resources before inbox persistence\"",
+        "\"onebot runtime reads merged forward messages into inbound text\"",
+        "\"onebot runtime maps the working thinking reaction to a QQ desktop-visible face\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-runtime-send.test.ts",
+      "cases": [
+        "\"telegram adapter separates long-poll and outbound API fetch dispatchers\"",
+        "\"telegram adapter includes explicit topic thread id when sending media\"",
+        "\"discord adapter deletes visible progress before final text\"",
+        "\"discord adapter replaces editable Working with assistant summary\"",
+        "\"discord adapter preserves markdown indentation\"",
+        "\"discord adapter preserves indentation after a text split\"",
+        "\"discord adapter waits for in-flight editable progress before final cleanup\"",
+        "\"discord editable Working end removes settled progress\"",
+        "\"discord adapter keeps working, content, and todo editable before final text\"",
+        "\"discord adapter sends errors beside editable progress\"",
+        "\"discord adapter uses neutral working frames without custom config\"",
+        "\"discord adapter sends a new Working message when the cached progress is no longer editable\"",
+        "\"discord adapter deletes visible progress before final media\"",
+        "\"slack adapter deletes visible progress before final text\"",
+        "\"slack adapter deletes visible progress before final media\"",
+        "\"lark adapter sends progress as new messages without edit capability\"",
+        "\"telegram adapter keeps working and todo editable before final text\"",
+        "\"telegram adapter replaces editable Working with assistant summary\"",
+        "\"telegram adapter sends errors beside editable progress\"",
+        "\"telegram adapter keeps todo below repeated working ticks from context\"",
+        "\"telegram adapter keeps todo below interim text before final reply\"",
+        "\"telegram adapter edits one progress message from Working through interim before final\"",
+        "\"telegram adapter uses custom working frame list from i18n\"",
+        "\"telegram adapter scopes forum topic sessions and outbound payloads\"",
+        "\"telegram adapter blocks late summary ticks while final text clears progress\"",
+        "\"telegram adapter clears coalesced todo when final reply is media-only\"",
+        "\"telegram adapter end handler clears visible working text without todo context\"",
+        "\"telegram adapter deletes progress before oversized final text chunks\"",
+        "\"telegram adapter splits oversized direct text and keeps the reply on the first send\"",
+        "\"telegram adapter renders markdown nodes through Telegram HTML parse mode\"",
+        "\"telegram adapter preserves shared markdown indentation semantics\"",
+        "\"telegram adapter renders structured at as a native mention link\"",
+        "\"telegram adapter splits text and image rich parts in order\"",
+        "\"telegram adapter reports a failed rich segment and continues later segments\"",
+        "\"telegram adapter sends media before following text\"",
+        "\"telegram adapter clears stale working text after media-only final replies\"",
+        "\"telegram adapter retries local photos as documents when Telegram rejects dimensions\"",
+        "\"telegram adapter retries remote photos as documents when Telegram rejects dimensions\"",
+        "\"telegram adapter sends sticker media without dropping following text\"",
+        "\"onebot adapter renders merged-forward records as readable text\"",
+        "\"onebot inbound merged-forward segments are fetched and stored in session text\"",
+        "\"onebot adapter degrades markdown formatting instead of exposing raw markdown\"",
+        "\"onebot adapter renders structured at as native CQ mention\"",
+        "\"onebot adapter embeds all local media as base64\"",
+        "\"onebot adapter exposes media send dispatch before the OneBot echo\"",
+        "\"onebot media actions use the extended action timeout\"",
+        "\"onebot send and upload actions pass bounded timeouts into NapCat payloads\"",
+        "\"onebot action failures preserve the adapter error without path hints\"",
+        "\"onebot generic file-word failures preserve the adapter error\"",
+        "\"discord adapter splits text and media into ordered messages\"",
+        "\"discord adapter keeps media before following text\"",
+        "\"discord adapter reports a failed rich segment and continues later segments\"",
+        "\"lark adapter sends text and structured at as native post elements\"",
+        "\"lark adapter rejects a nonzero API response even when the SDK resolves\"",
+        "\"lark adapter sends quote nodes through the native reply endpoint\"",
+        "\"lark adapter uploads images and preserves surrounding text order\"",
+        "\"lark adapter downloads remote images and uses the native reply endpoint\"",
+        "\"lark adapter reports image download failures and continues later text\"",
+        "\"lark adapter rejects oversized local image files before reading or upload\"",
+        "\"lark adapter aborts remote images declared over the upload limit\"",
+        "\"telegram working indicator sends typing and visible working text without reactions\"",
+        "\"onebot group working indicator retries clearing a stale reaction without current message metadata\"",
+        "\"onebot private working indicator is a one-shot marker\"",
+        "\"onebot private marker picks a custom working frame\"",
+        "\"discord working indicator replaces the previous reaction frame\"",
+        "\"slack working indicator replaces the previous reaction frame\"",
+        "\"lark working indicator replaces the previous reaction frame\"",
+        "\"lark adapter maps fire working reaction to the supported emoji type\"",
+        "\"lark adapter maps markdown inline styles and mentions to native elements\"",
+        "\"lark adapter falls back when mention markup is not structurally native\"",
+        "\"lark adapter serializes simple markdown as native post paragraphs\"",
+        "\"lark adapter preserves unsupported link content by falling back to markdown\"",
+        "\"lark adapter emits fenced code through the native code block tag\"",
+        "\"lark adapter preserves blockquotes and indented code blocks\"",
+        "\"lark adapter resolves cross-paragraph reference links into native links\"",
+        "\"lark adapter preserves nested markdown list indentation and links\"",
+        "\"slack adapter keeps media before following text\"",
+        "\"slack adapter sends todo nodes as Block Kit checkboxes\"",
+        "\"slack adapter reports a failed rich segment and continues later segments\"",
+        "\"slack adapter splits leading text before local file uploads\"",
+        "\"slack adapter splits oversized text posts into multiple threaded messages\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-scheduled-task-prompt-context.test.ts",
+      "cases": [
+        "\"chat prompt context keeps adapter-provided runtime metadata in the system prompt block\"",
+        "\"scheduled chat-bound prompt context renders task and chat binding blocks\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-settings.test.ts",
+      "cases": [
+        "\"chat settings normalization can force a writable chat object\"",
+        "\"chat settings helper drops stray legacy adapter settings without creating chat\"",
+        "\"chat turn policy defaults to starting turns on incoming messages\"",
+        "\"chat turn policy supports record-only per chat key\"",
+        "\"chat turn policy accepts object entries inside the per-chat config\"",
+        "\"chat quiet mode supports per-chat entries\"",
+        "\"chat model options resolve from per-chat entries only\"",
+        "\"chat support ignores removed legacy adapter settings keys\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-support.test.ts",
+      "cases": [
+        "\"chat support infers chat types from normalized targets\"",
+        "\"chat support parses shared chat targets for private detection\"",
+        "\"chat support keeps compose, parse, and normalize symmetric for the single canonical bot-qualified shape\"",
+        "\"updateIdentityTrust bootstraps the first owner as a self-claim\"",
+        "\"updateIdentityTrust lets an owner grant trusted and owner roles\"",
+        "\"updateIdentityTrust rejects non-owner role changes after bootstrap\"",
+        "\"updateIdentityTrust refuses to remove the last remaining owner\"",
+        "\"chat support normalizes trust lookup and bot selection over dirty metadata\""
+      ]
+    },
+    {
+      "file": "tests/characterization/chat-transport.test.ts",
+      "cases": [
+        "\"chat transport buildPromptText keeps the original text intact\"",
+        "\"chat transport keeps image-only prompts native\"",
+        "\"chat transport compresses only the model image payload and keeps the source file intact\"",
+        "\"chat transport keeps small model image payloads unchanged\"",
+        "\"chat transport restorePromptParts keeps attachments out of Pi image payloads\"",
+        "\"chat transport forwards mixed parts as a single native chat send\"",
+        "\"chat transport prepends payload reply quote for parts deliveries\"",
+        "\"chat transport stores summarized content for non-text part deliveries\"",
+        "\"chat transport forwards outbound message delivery kind to adapters\"",
+        "\"chat transport treats task-list todo deliveries as markdown\"",
+        "\"chat transport defaults outbound message delivery kind to final\"",
+        "\"chat transport keeps tool and task text deliveries sessionless\"",
+        "\"chat transport keeps local image and file parts as file urls\"",
+        "\"chat transport direct send helpers prepend quotes and reuse file urls\"",
+        "\"chat transport rejects invalid parts and empty deliveries early\"",
+        "\"chat transport prefers internal telegram reaction calls for working reactions\"",
+        "\"chat transport sends the fixed Telegram working pair without checking chat reaction compatibility\"",
+        "\"chat transport uses bot reaction helpers for onebot working reactions\"",
+        "\"chat transport skips onebot working reactions in private chats\""
+      ]
+    },
+    {
+      "file": "tests/characterization/cron-execution.test.ts",
+      "cases": [
+        "\"cron execution resolves only existing dedicated session files\"",
+        "\"cron scheduler derives one-time triggers when no interval is set\"",
+        "\"cron scheduler keeps future one-time reschedules across task upserts\"",
+        "\"cron scheduler preserves finish metadata when a running once task self-reschedules\"",
+        "\"cron scheduler resumes one durable agent invocation after restart\"",
+        "\"cron scheduler does not relaunch a live durable invocation on tick\"",
+        "\"cron scheduler keeps a durable invocation after infrastructure failure\"",
+        "\"cron scheduler does not resume a disabled durable invocation\"",
+        "\"cron scheduler projects only a canonical terminal error\"",
+        "\"cron scheduler projects a live terminal after pausing its invocation\"",
+        "\"cron scheduler preserves explicit completion while projecting its live terminal\"",
+        "\"cron scheduler reloads task file edits only when requested\"",
+        "\"cron scheduler reloads task file deletions only when requested\"",
+        "\"cron scheduler keeps the in-memory schedule when explicit reload finds an invalid file\"",
+        "\"cron scheduler ticks against explicitly reloaded due times\"",
+        "\"cron scheduler does not resurrect a running task disabled by file edit\"",
+        "\"cron scheduler rejects removed specific session mode\"",
+        "\"cron scheduler always derives dedicated session files from task ids\"",
+        "\"cron scheduler assigns task-id-named dedicated session files before first run\"",
+        "\"cron scheduler durable invocation keeps the first dedicated prompt initial\"",
+        "\"cron dedicated agent task creates and then preserves its bound session\"",
+        "\"cron dedicated agent task resumes an existing canonical session\"",
+        "\"cron unbound no-session agent task shuts down and preserves its session file for review\"",
+        "\"cron frontend-bound no-session agent task uses frontend controller without controller auto-delivery\"",
+        "\"cron scheduler persists generic frontend bindings\"",
+        "\"cron scheduler persists disabled Rin capabilities\"",
+        "\"cron scheduler rejects explicit frontend bindings for session continuations\"",
+        "\"cron chat-bound no-session agent task preserves session file for quote resume\"",
+        "\"cron current-session continuation resumes the stored session through daemon callback\"",
+        "\"cron current-session continuation does not use chat delivery\"",
+        "\"cron current-session continuation rejects command targets before shell execution\"",
+        "\"cron scheduler defaults task quiet mode on and preserves explicit off\"",
+        "\"cron scheduler preserves old task records without quiet on unrelated updates\"",
+        "\"cron agent tasks pass quiet mode to chat turns\"",
+        "\"cron scheduler validates current-session continuation bindings\"",
+        "\"cron scheduler rejects legacy session instruction task files\"",
+        "\"cron scheduler rejects invalid current-session continuation task files\"",
+        "\"cron agent task falls back to canonical turn result text\"",
+        "\"cron dedicated agent task uses separate initial and continuation prompts\"",
+        "\"cron chat-bound agent task uses chat turn delivery\"",
+        "\"cron chat-bound task can bind frontend without final delivery\"",
+        "\"cron chat-bound shell task toggles frontend working while running\"",
+        "\"built-in self-improve cron task disables nested self-improve and writes distillation history\"",
+        "\"cron scheduler terminates task sessions when tasks stop\"",
+        "\"cron execution shell task returns summarized success body\"",
+        "\"cron task condition false skips execution and schedules the next tick\"",
+        "\"cron task condition true allows TypeScript execution\"",
+        "\"cron task condition accepts function bodies with return\"",
+        "\"cron scheduler installs built-in daily memory and self-improve distillation tasks\"",
+        "\"cron scheduler migrates persisted chatKey tasks to frontend chat bindings\"",
+        "\"cron scheduler persists built-in task state across restarts while hiding it publicly\"",
+        "\"cron scheduler protects built-in tasks from public mutation\"",
+        "\"cron scheduler can reschedule and activate a one-time task while it is running\"",
+        "\"cron scheduler can set the next run for a recurring task\"",
+        "\"cron scheduler preserves an agent-chosen recurring next run after execution\"",
+        "\"cron scheduler can manually run an existing built-in task\"",
+        "\"cron scheduler derives running from live execution without persisting it\""
+      ]
+    },
+    {
+      "file": "tests/characterization/cron-hidden-builtin.test.ts",
+      "cases": [
+        "\"hidden builtin tasks run internally without appearing in ordinary task views\""
+      ]
+    },
+    {
+      "file": "tests/characterization/daemon-worker-pool.test.ts",
+      "cases": [
+        "\"daemon workers hide Windows console windows\"",
+        "\"worker cgroup attachment completes before the worker is returned\"",
+        "\"worker creation fails closed when cgroup attachment fails\"",
+        "\"new session workers receive rpc resource options through a private file\"",
+        "\"getRestorableSessionSelectors keeps live session workers and remembers turn state\"",
+        "\"getRestorableSessionSelectors normalizes duplicate session files and preserves resume intent\"",
+        "\"restoreSessionWorker only attaches the session worker\"",
+        "\"continueInterruptedTurnSessionWorker attaches then continues the turn\"",
+        "\"restart recovery follows a live Pi run without issuing another resume\"",
+        "\"restart recovery waits for an unowned Pi run before resuming\"",
+        "\"restart recovery does not resume after a terminal settles its probe\"",
+        "\"restart preflight failure preserves recovery ownership for a late terminal\"",
+        "\"a new prompt is not forwarded without ownership during restart preflight\"",
+        "\"restart recovery restores frontend ownership for the same inbox prompt\"",
+        "\"a same-tag prompt can rejoin a frontend-owned turn before start\"",
+        "\"restart recovery retries a transient preflight failure before resuming\"",
+        "\"resumeInterruptedTurnSession resumes selected session and returns terminal result\"",
+        "\"resumeInterruptedTurnSession consumes its pending terminal without resuming again\"",
+        "\"resumeInterruptedTurnSession drops unowned terminals before forwarding or resolving\"",
+        "\"legacy lifecycle accepts consecutive command-owned turns without admitting late terminals\"",
+        "\"a duplicate in-flight spaced command id cannot replace the lifecycle owner epoch\"",
+        "\"a failed owner command with a spaced id clears only its installed lifecycle\"",
+        "\"a delayed recovery intent cannot overwrite an owner installed while worker selection waits\"",
+        "\"an overlapping get_state response cannot clear a prompt lifecycle owner\"",
+        "\"overlapping prompt responses preserve the active lifecycle owner\"",
+        "\"explicit empty recovery tags remain empty through command ownership and durability\"",
+        "\"lifecycle request tags use exact raw string ownership\"",
+        "\"owned lifecycle events reject malformed generation fields without side effects\"",
+        "\"an idle worker rejects an unowned versioned start without metadata changes\"",
+        "\"legacy terminals with an empty tag cannot cross the owned session selector\"",
+        "\"an unowned versioned heartbeat cannot supersede active legacy lifecycle\"",
+        "\"an owned versioned start supersedes legacy lifecycle before switching protocols\"",
+        "\"selectSession shares daemon-restart recovery without owning the resume\"",
+        "\"frontend session selection does not wait for restart resume completion\"",
+        "\"backend restart recovery intent survives a concurrent session selection claim\"",
+        "\"backend restart recovery intent survives unrelated active worker work\"",
+        "\"daemon-restart recovery replays an undelivered canonical terminal turn event only after the frontend asks\"",
+        "\"non-turn resumable worker commands persist a running record until they finish\"",
+        "\"prompt turns persist running-worker recovery from command session until terminal turn event\"",
+        "\"prompt running record survives shutdown after submission response before turn event\"",
+        "\"rpc turn start keeps a running record after an agent segment ends\"",
+        "\"stale terminal events do not clear a newer tagged active turn\"",
+        "\"older turn events cannot overwrite or reactivate a newer generation\"",
+        "\"detached worker survives eviction while response is pending\"",
+        "\"attached idle worker sleeps while preserving the selected session\"",
+        "\"selected session recovery ignores workers that are already stopping\"",
+        "\"detached idle worker sleeps instead of terminating the session\"",
+        "\"detached worker stays alive while turnActive is true even if streaming is false\"",
+        "\"remembered session selection can pull a replacement worker without an explicit switch\"",
+        "\"selectSession shuts down the previous session before resuming another session\"",
+        "\"selectSession keeps a previous session alive while another connection is still attached\"",
+        "\"selectSession lazily restores the chosen session worker\"",
+        "\"concurrent selectSession calls reuse one worker for the same session\"",
+        "\"duplicate restoreSessionWorker calls converge to one session worker\"",
+        "\"restoreSessionWorker indexes the session when creating an initial-session worker\"",
+        "\"attached session worker auto-recovers without dropping the daemon connection\"",
+        "\"worker crash recovery preserves missing and explicit empty request tags\"",
+        "\"worker crash recovery preserves the active lifecycle request tag\"",
+        "\"worker crash recovery restores one selected session worker\"",
+        "\"worker events are forwarded only to matching selected session\"",
+        "\"selectSession with only sessionId ignores stale remembered sessionFile\"",
+        "\"worker session ref updates clear stale attached connection selectors\"",
+        "\"client worker commands fail closed stdin without daemon stream errors\"",
+        "\"worker OOM is reported without turning it into an ordinary exit\"",
+        "\"OOM worker recovery resumes only the affected session with an OOM source\"",
+        "\"graceful worker commands destroy workers with closed stdin\"",
+        "\"internal worker commands time out cleanly without leaking late responses\"",
+        "\"internal worker commands reject closed stdin without unhandled stream errors\"",
+        "\"internal worker commands handle async stdin write errors\"",
+        "\"switch_session internal commands can outlive the generic internal timeout\"",
+        "\"worker status snapshot treats Rin pre-compaction work as working\"",
+        "\"worker status snapshot exposes graceful shutdown state\""
+      ]
+    },
+    {
+      "file": "tests/characterization/data-layout.test.ts",
+      "cases": [
+        "\"data layout helpers group runtime state by owner\"",
+        "\"legacy data layout moves are installer-owned and keep migrations global\""
+      ]
+    },
+    {
+      "file": "tests/characterization/final-system-prompt.test.ts",
+      "cases": [
+        "\"createConfiguredAgentSession keeps system prompt empty until first turn\"",
+        "\"buildFinalAppSystemPrompt includes app-level prompt layers\"",
+        "\"buildFinalAppSystemPrompt injects configured language from settings\"",
+        "\"Pi system prompt options track Rin lazy prompt tool changes\"",
+        "\"system prompt stays frozen until reload\"",
+        "\"persisted system prompt restores across resume and refreshes on reload\"",
+        "\"stored system prompt blocks participate in frozen prompts\"",
+        "\"temporary cache-equivalent forks disable routine auto compaction through runtime setup\"",
+        "\"forked sessions restore the source persisted system prompt\"",
+        "\"buildFinalAppSystemPrompt keeps self-improve prompts before skills\""
+      ]
+    },
+    {
+      "file": "tests/characterization/frontend-backend-events.test.ts",
+      "cases": [
+        "\"frontend backend event translator preserves the persisted user leaf\"",
+        "\"frontend backend event translator exposes status as a shared frontend event\"",
+        "\"frontend backend event translator exposes Pi working and compaction events\"",
+        "\"frontend backend event translator exposes compact collapsed notice without summary text\"",
+        "\"frontend backend event translator adds expand hint only when the caller supplies one\"",
+        "\"frontend backend event translator does not expose compact summary when token count is unavailable\"",
+        "\"frontend backend event translator emits only completed assistant summaries\"",
+        "\"frontend backend event translator classifies assistant tool preface as interim\"",
+        "\"frontend backend event translator does not complete turns from interim text before compaction\"",
+        "\"frontend backend event translator emits todo notice for single todo execution\"",
+        "\"frontend backend event translator suppresses empty todo notices\"",
+        "\"frontend backend event translator waits for the active tool batch before todo notice\"",
+        "\"frontend backend event translator emits nested multi-tool todo notice when wrapper ends\"",
+        "\"frontend backend event translator treats overflow compaction as ordinary backend progress\"",
+        "\"frontend backend event translator returns final typed turn events after completion\""
+      ]
+    },
+    {
+      "file": "tests/characterization/frontend-command-dispatcher.test.ts",
+      "cases": [
+        "\"frontend command dispatcher owns session command classification\"",
+        "\"non-interactive command exposure and degraded interaction policy live in frontend SDK\""
+      ]
+    },
+    {
+      "file": "tests/characterization/frontend-command-responses.test.ts",
+      "cases": [
+        "\"frontend SDK owns shared command parsing and builtin response text\"",
+        "\"chat command responses share frontend SDK shape with chat-specific wrapper chrome\"",
+        "\"frontend SDK owns shared frontend implementations without chat or TUI imports\"",
+        "\"chat does not depend on TUI implementation modules\"",
+        "\"TUI shared runtime code does not import chat implementation modules\"",
+        "\"old TUI shared frontend module paths do not exist\""
+      ]
+    },
+    {
+      "file": "tests/characterization/frontend-runtime-wrapper.test.ts",
+      "cases": [
+        "\"frontend SDK runtime wrapper keeps TUI prompt on the native session path\""
+      ]
+    },
+    {
+      "file": "tests/characterization/frontend-turn-driver.test.ts",
+      "cases": [
+        "\"frontend SDK turn driver preserves the persisted user leaf\"",
+        "\"Pi working and compaction events drive the frontend working phase\"",
+        "\"frontend SDK turn driver runs turns through a frontend client\"",
+        "\"frontend SDK turn driver persists sender prompt context in submitted prompt text\"",
+        "\"frontend SDK turn driver applies startup session names before prompt submission\"",
+        "\"frontend SDK turn driver applies Pi startup options before prompt submission\"",
+        "\"frontend SDK turn driver reuses the controller-restored command session\"",
+        "\"frontend SDK turn driver reuses the controller-restored prompt session\"",
+        "\"frontend SDK turn driver routes compact through the native compact client method\"",
+        "\"frontend SDK turn driver handles /resume without worker run_command\"",
+        "\"frontend SDK turn driver reports missing /resume targets as errors\"",
+        "\"frontend SDK turn driver uses configured built-in command responses\"",
+        "\"frontend SDK dispose settles an active turn with internal lifecycle cancellation\"",
+        "\"frontend SDK daemon shutdown detach leaves an active turn recoverable without reconnecting\"",
+        "\"frontend SDK daemon shutdown detach stops an in-flight recovery reconnect\"",
+        "\"frontend SDK daemon shutdown detach closes a connection that finishes late\"",
+        "\"frontend SDK daemon shutdown detach stops a session restore continuation\"",
+        "\"frontend SDK shutdown session follows TUI shutdown without lifecycle cancellation\"",
+        "\"frontend SDK /new interrupts an active turn before creating the new session\"",
+        "\"frontend SDK /new does not wait for backend abort before creating the new session\"",
+        "\"frontend SDK /new aborts a turn that has not submitted its prompt yet\"",
+        "\"frontend SDK ignores stale terminal events from the aborted turn after /new\"",
+        "\"frontend SDK keeps non-reset commands from interrupting active turns\"",
+        "\"frontend SDK turn driver reports an explicit missing session target\"",
+        "\"frontend SDK turn driver can create an explicit missing session target\"",
+        "\"frontend SDK turn driver terminates the attached daemon session\"",
+        "\"frontend SDK turn driver clears active state after terminating the attached daemon session\"",
+        "\"frontend SDK turn driver applies turn-scoped model without persisting defaults\"",
+        "\"frontend SDK turn driver can reset model options from settings before prompting\"",
+        "\"frontend SDK turn driver applies turn-scoped thinking without persisting defaults\"",
+        "\"frontend SDK turn driver resolves an already submitted restored turn without resubmitting\"",
+        "\"frontend SDK turn driver clears active state when recovered submitted turn has final text\"",
+        "\"frontend SDK visible chat working excludes standalone compaction and recovery state\"",
+        "\"submitted turn resolution treats earlier steered inputs as superseded by the latest pre-final user input\"",
+        "\"submitted turn resolution preserves provider failure instead of final-missing\"",
+        "\"submitted turn resolution does not surface provider failure while the submitted turn is active\"",
+        "\"frontend SDK turn driver surfaces restored submitted provider errors\"",
+        "\"frontend SDK turn driver reselects a restored session even when cached state matches\"",
+        "\"frontend SDK turn driver carries sessionFile on restored turn RPCs\"",
+        "\"frontend SDK turn driver carries sessionFile on restored commands\"",
+        "\"frontend SDK turn driver submits already active messages for backend admission\"",
+        "\"frontend SDK turn driver keeps backend admission authoritative across stale active state\"",
+        "\"frontend SDK turn driver steers while the rpc turn is active between streaming segments\"",
+        "\"frontend SDK turn driver defers steering until active compaction finishes\"",
+        "\"frontend SDK turn driver waits for standalone compaction before prompting\"",
+        "\"frontend SDK turn driver leaves active-turn steering admission to the backend\"",
+        "\"frontend SDK turn driver trusts backend prompt admission over stale local state\"",
+        "\"frontend SDK turn driver forwards a completed summary without assistant content\"",
+        "\"frontend SDK turn driver does not leak growing final-answer prefixes as interim\"",
+        "\"frontend SDK turn driver does not treat a preview as interim when a tool boundary follows\"",
+        "\"frontend SDK turn driver emits leading tool-call text as the only interim source\"",
+        "\"frontend SDK turn driver waits for real final after interim and compaction events\"",
+        "\"frontend SDK turn driver starts managed leaf sessions even after connect reports a default session\"",
+        "\"frontend SDK turn driver forwards disabled Rin capabilities to managed sessions\"",
+        "\"frontend SDK turn driver asks the daemon to replay pending terminal events after joining a submitted turn\"",
+        "\"frontend SDK turn driver lets backend rejoin a restored active inbox turn\"",
+        "\"frontend SDK turn driver follows active turn across transient reconnect before rpc final\"",
+        "\"frontend SDK turn driver does not complete from agent_end before rpc final\"",
+        "\"frontend SDK turn driver rejects empty rpc completion as a terminal-result invariant failure\"",
+        "\"frontend SDK turn driver rejects terminal-result invariant rpc errors without session-message fallback\"",
+        "\"frontend SDK turn driver does not emit text-only assistant messages as interim\"",
+        "\"frontend SDK turn driver keeps steering open across failed assistant messages\"",
+        "\"frontend SDK turn driver completes Pi-native overflow recovery\"",
+        "\"frontend SDK turn driver waits for an already submitted restored prompt instead of resubmitting\"",
+        "\"frontend SDK turn driver keeps waiting for restored prompts while the session is active\"",
+        "\"frontend SDK turn driver recovers disconnected prompt errors through daemon terminal replay\"",
+        "\"frontend SDK turn driver does not reuse an older final when the current turn has no final yet\"",
+        "\"frontend SDK turn driver does not recover interrupted prompt errors from session state\""
+      ]
+    },
+    {
+      "file": "tests/characterization/install-git-hooks-script.test.ts",
+      "cases": [
+        "\"install git hooks configures fresh worktrees\"",
+        "\"install git hooks resolves the worktree root from nested directories\"",
+        "\"install git hooks is a no-op outside a worktree\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-apply-plan.test.ts",
+      "cases": [
+        "\"installer apply-plan writes a private terminal handoff plan and command\"",
+        "\"runFinalizeInstallPlanInChild inherits stdio so sudo prompts stay interactive\"",
+        "\"runFinalizeInstallPlanInChild wires parent signal forwarding\"",
+        "\"runFinalizeInstallPlanInChild surfaces child error output on failure\"",
+        "\"runFinalizeInstallPlanInChild suppresses parent duplicate when child cannot write error handoff\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-common.test.ts",
+      "cases": ["\"installer runCommand uses shell for Windows cmd launchers\""]
+    },
+    {
+      "file": "tests/characterization/installer-finalize.test.ts",
+      "cases": [
+        "\"core update launcher refresh rewrites the target user's launchers\"",
+        "\"core update launcher refresh avoids unrelated current-user launchers\"",
+        "\"core update launcher refresh preserves a current-user launcher bound to the target\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-fs-utils.test.ts",
+      "cases": [
+        "\"installer fs utils compute launcher targets and require managed node\"",
+        "\"Windows PATH helpers add the launcher directory once\"",
+        "\"writeLaunchersForUser uses the managed node runtime when present\"",
+        "\"writeLaunchersForUser writes native Windows rin command launchers\"",
+        "\"commandAsUserInvocation prefers runuser for root\"",
+        "\"commandAsUserInvocation uses sudo style user switch when needed\"",
+        "\"commandAsUserInvocation falls back to plain privilege shell command\"",
+        "\"installer fs utils prefer Rin temp roots deterministically\"",
+        "\"elevated install writes create target-owned parent directories\"",
+        "\"syncTree warns when a replaced backup cannot be removed\"",
+        "\"syncInstalledDocs installs Rin-owned and selected upstream builtin skills\"",
+        "\"installedRuntimeReleaseId names git releases from a short commit hash\"",
+        "\"publishInstalledRuntime names releases from release version metadata\"",
+        "\"publishManagedNodeRuntime provisions current node for source installs\"",
+        "\"publishInstalledRuntime prunes exact duplicate Pi shrinkwrap dependencies\"",
+        "\"publishInstalledRuntime no longer requires vendored pi-coding-agent sources\"",
+        "\"pruneInstalledReleases keeps current plus newest releases within the limit\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-gui.test.ts",
+      "cases": [
+        "\"installer GUI startup is disabled while the desktop UI is redesigned\"",
+        "\"disabled desktop GUI host does not make Electron a production install dependency\"",
+        "\"installer GUI launcher resolves the bundled desktop host directly\"",
+        "\"installer GUI args expose no browser server switches\"",
+        "\"installer GUI plan reuses installer plan text and escapes the HTML shell\"",
+        "\"installer GUI saves API key provider auth for desktop install\"",
+        "\"installer GUI builds final apply options from auth-ready selections\"",
+        "\"installer GUI rejects final apply when provider auth is missing\"",
+        "\"installer GUI normalizes local model choices for desktop selection\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-interactive.test.ts",
+      "cases": [
+        "\"installer interactive helpers describe dir state and plan text\"",
+        "\"installer interactive helpers compute final requirements\"",
+        "\"installer target menu hides cross-user local install on Windows\"",
+        "\"promptTargetInstall falls back to all users when no other user exists\"",
+        "\"promptDefaultTargetUser returns the installer choice\"",
+        "\"promptInstallerLanguage supports custom locale codes\"",
+        "\"promptInstallerLanguage uses English-only copy for non-Chinese locales\"",
+        "\"promptInstallerLanguage localizes the picker copy for Chinese locales\"",
+        "\"createInstallerI18n exposes localized post-install and update copy\"",
+        "\"installer steps show progress after user input before work runs\"",
+        "\"core update restarts runtime only after manifest persistence\"",
+        "\"installer i18n source keeps localized copy in one display table\"",
+        "\"update mode skips language prompt and reuses installer note renderer\"",
+        "\"installer no longer prompts for bundled extension selection\"",
+        "\"promptProviderSetup reuses complete existing provider config\"",
+        "\"promptProviderSetup does not reuse stale installer manifest provider config\"",
+        "\"promptProviderSetup labels subscription and API providers with subscriptions first\"",
+        "\"promptProviderSetup avoids repeating subscription in provider labels\"",
+        "\"promptProviderSetup prompts when no reusable provider config exists\"",
+        "\"promptProviderSetup fails when no models are available\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-modules.test.ts",
+      "cases": [
+        "\"finalize uses a 30 second default daemon readiness timeout\"",
+        "\"finalize does not treat a non-empty install dir as initialized without init state\"",
+        "\"finalize preserves completed initialization state on reinstall\"",
+        "\"finalize treats legacy completedAt initialization state as complete\"",
+        "\"updater renders install-style note boxes\"",
+        "\"provider-auth computes available thinking levels deterministically\"",
+        "\"provider-auth loads installer model choices through the shared model registry\"",
+        "\"provider-auth forwards OAuth device-code callbacks during installer login\"",
+        "\"provider-auth honors OAuth prompts that allow empty input\"",
+        "\"provider-auth forwards OAuth select prompts during installer login\"",
+        "\"install-record normalizes launcher metadata and installer manifests\"",
+        "\"persist reconcileInstallerManifest writes only install metadata for non-home Rin paths\"",
+        "\"persist reconcileInstallerManifest migrates managed files into installer manifest\"",
+        "\"persist reconcileInstallerManifest stores release metadata on currentRelease only\"",
+        "\"persist reconcileInstallerManifest records current and previous release rollback metadata\"",
+        "\"persist reconcileInstallerManifest reuses only currentRelease state from prior manifests\"",
+        "\"persist reconcileInstallerManifest avoids duplicate writes for default Rin paths\"",
+        "\"persist reconcileInstallerManifest records the managed runtime service\"",
+        "\"persist reconcileInstallerManifest keeps runtime defaults out of installer manifests\"",
+        "\"persist reconcileInstallerManifest removes chat settings from installer manifests\"",
+        "\"persistInstallerOutputs creates the runtime user skill directory\"",
+        "\"persistInstallerOutputs creates elevated runtime user skill directory as target user\"",
+        "\"persistInstallerOutputs stores language and strips removed built-in extensions\"",
+        "\"persist normalizeInstalledChatSettings drops removed adapter settings without reusing them\"",
+        "\"persist normalizeInstalledChatSettings applies install upgrade migrations\"",
+        "\"persist normalizeInstalledChatSettings migrates legacy working frame i18n\"",
+        "\"persist normalizeInstalledChatSettings migrates assistant delivery kinds from outbox history\"",
+        "\"persist normalizeInstalledChatSettings removes old browse runtime data\"",
+        "\"persist normalizeInstalledChatSettings migrates previous chat state session files\"",
+        "\"persist normalizeInstalledChatSettings moves chat-bound root sessions under managed chat\"",
+        "\"persist normalizeInstalledChatSettings runs elevated migrations as target user\"",
+        "\"persistInstallerOutputs does not install chat bridge adapter config\"",
+        "\"persistInstallerOutputs marks fresh installs as needing initialization\"",
+        "\"persist persistInstallerOutputs applies install upgrade migrations before finishing install state\"",
+        "\"persist persistInstallerOutputs forwards release metadata into currentRelease\"",
+        "\"persist reconcileInstallerManifest does not store git branch selectors as versions\"",
+        "\"persist persistInstallerOutputs can skip saving a launcher default target\"",
+        "\"persist persistInstallerOutputs can skip launcher metadata and executable shims\"",
+        "\"persist persistInstallerOutputs writes launchers for current and target users\"",
+        "\"persist persistInstallerOutputs normalizes malformed auth and launcher metadata roots\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-paths.test.ts",
+      "cases": [
+        "\"installer path helpers keep installed runtime roots stable\"",
+        "\"installer path helpers centralize installed entrypoints\"",
+        "\"installer path helpers centralize home, manifest, config, service, doc, and log locations\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-progress.test.ts",
+      "cases": ["\"installer progress failure keeps the failed step specific\""]
+    },
+    {
+      "file": "tests/characterization/installer-quick-run.test.ts",
+      "cases": [
+        "\"quick run targets only the current user's ~/.rin directory\"",
+        "\"quick run reuses an existing configured subscription without prompting\"",
+        "\"quick run honors an available configured default model even when auth is external\"",
+        "\"quick run defaults to an available existing subscription when settings are incomplete\"",
+        "\"quick run finalizes prepare-only state then launches temporary daemon and TUI\"",
+        "\"quick run runtime env targets ~/.rin and skips update version checks\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-service.test.ts",
+      "cases": [
+        "\"waitForSocket probes a cross-user daemon with the target runtime node\"",
+        "\"installer service helpers prefer current daemon entry, quote systemd values, and escape plist XML\"",
+        "\"core update can write a launchd service without activating it early\"",
+        "\"installer service uses managed node runtime when present\"",
+        "\"resolveDaemonEntryForInstall falls back to legacy installed daemon entry and fails without an installed runtime\"",
+        "\"refreshManagedServiceFiles updates existing managed units without creating missing candidates\"",
+        "\"systemdUserContext keeps managed unit candidates ordered\"",
+        "\"systemd user command helpers use direct local args for self and machine-host args for other users\"",
+        "\"managed systemd helpers prefer richer successful snapshots while keeping action probe order\"",
+        "\"daemonSocketPathForUser prefers runtime dir and falls back to home cache\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-update-workflow.test.ts",
+      "cases": [
+        "\"update workflow removes exact duplicate Pi shrinkwrap dependencies\""
+      ]
+    },
+    {
+      "file": "tests/characterization/installer-users.test.ts",
+      "cases": [
+        "\"installer users keep system user lists deterministically sorted\"",
+        "\"installer users normalize lookup and home fallback behavior\"",
+        "\"installer users keep macOS dscl users when home key is missing\"",
+        "\"installer users compare Windows account aliases case-insensitively\"",
+        "\"installer users prefer the current system profile home\"",
+        "\"installer users avoid elevated writes for Windows current-user aliases\"",
+        "\"installer users describe ownership and elevated write decisions consistently\""
+      ]
+    },
+    {
+      "file": "tests/characterization/language.test.ts",
+      "cases": [
+        "\"language helpers canonicalize regioned tags to locale codes and reject invalid input\"",
+        "\"resolveInstallerDisplayLanguage treats all zh locales as Chinese\"",
+        "\"detectLocalLanguageTag uses Windows UI culture when locale env is absent\"",
+        "\"detectLocalLanguageTag falls back to Intl locale when native Windows probe fails\"",
+        "\"detectLocalLanguageTag prefers LC_ALL then LC_MESSAGES then LANG\"",
+        "\"configured language helpers read settings and build prompt text\""
+      ]
+    },
+    {
+      "file": "tests/characterization/managed-launchd-restart.test.ts",
+      "cases": [
+        "\"launchd restart waits for the old daemon to stop before bootstrapping\"",
+        "\"launchd restart fails before bootstrap when the old daemon remains live\"",
+        "\"launchd restart bootstraps an unloaded job when no daemon is live\"",
+        "\"launchd restart fails when an unowned daemon remains live\"",
+        "\"launchd restart propagates bootstrap failures\""
+      ]
+    },
+    {
+      "file": "tests/characterization/managed-session-paths.test.ts",
+      "cases": [
+        "\"managed session paths normalize leaves into dedicated directories\"",
+        "\"managed session files stay under normalized leaves with unique jsonl names\""
+      ]
+    },
+    {
+      "file": "tests/characterization/memory-format-and-onboarding.test.ts",
+      "cases": [
+        "\"self-improve format builds compact compiled prompt\"",
+        "\"self-improve system prompt prefers full docs over preview docs\"",
+        "\"self-improve format renders stable result variants\"",
+        "\"memory onboarding helper points initialization to dedicated docs\""
+      ]
+    },
+    {
+      "file": "tests/characterization/memory-relevance.test.ts",
+      "cases": [
+        "\"memory relevance scores docs, events, and relations consistently\"",
+        "\"activeDocsOnly tolerates non-array inputs and skips non-active entries\"",
+        "\"self-improve compile renders prompt slots\""
+      ]
+    },
+    {
+      "file": "tests/characterization/memory-schema.test.ts",
+      "cases": [
+        "\"memory schema parses and renders markdown docs consistently\"",
+        "\"memory schema normalizes defaults for memory prompt docs\""
+      ]
+    },
+    {
+      "file": "tests/characterization/memory-task-config.test.ts",
+      "cases": ["\"memory task config fixes recall-related thinking at low\""]
+    },
+    {
+      "file": "tests/characterization/memory.test.ts",
+      "cases": [
+        "\"memory transcripts archive entries under memory/transcripts\"",
+        "\"recall returns session-level archived transcript matches and creates persistent index\"",
+        "\"recall does not match session file paths\"",
+        "\"recall index stays in sync when an archived session file grows\"",
+        "\"recall indexes numeric millisecond timestamps for recent ordering\"",
+        "\"memory transcripts preserve assistant tool calls and thinking for recall\"",
+        "\"memory can browse recent sessions without a query\"",
+        "\"presentSessionResult shares ranked preview and message ordering while keeping latest timestamp\"",
+        "\"recall merges multiple message hits from the same session\"",
+        "\"recall avoids full entries-table exact scans before FTS lookup\"",
+        "\"recall handles structured identifiers beyond exact raw substrings\"",
+        "\"recall requires explicit repair for transcript files written outside incremental indexing\"",
+        "\"recall repair refreshes rewritten transcript archives without stale rows\"",
+        "\"memory transcript session loads can bypass search.db when result path is known\"",
+        "\"memory transcripts ignore transient in-memory sessions without a session file\"",
+        "\"memory transcripts reject legacy synthetic session summaries\"",
+        "\"recall uses the first user message as the session display fallback\"",
+        "\"recall derives the display name without a full readFileSync slurp\"",
+        "\"executeRecall emits an initial status update before finishing\"",
+        "\"recall includes external provider results without local transcript paths\"",
+        "\"memory message hook publishes transcript archive writes to external memory providers\"",
+        "\"recall user formatting omits duplicate header and shows raw messages\"",
+        "\"recall agent formatting uses archive path and line-numbered raw messages\"",
+        "\"recall call formatting keeps tool name and query in the TUI tool title\"",
+        "\"recall rendered result appends timing info\""
+      ]
+    },
+    {
+      "file": "tests/characterization/pi-session-host.test.ts",
+      "cases": [
+        "\"Pi session host prefers public resource and extension getters\""
+      ]
+    },
+    {
+      "file": "tests/characterization/pi-tools.test.ts",
+      "cases": [
+        "\"preparePiManagedToolsForInstall prepares fd and rg in the target Rin agent dir for the current user\"",
+        "\"preparePiManagedToolsForInstall runs managed-tool preparation as the target Unix user\"",
+        "\"preparePiManagedToolsForInstall refuses ambient process.execPath for cross-user preparation\"",
+        "\"preparePiManagedToolsForInstall does not fail install when managed tools cannot be prepared\"",
+        "\"applyRuntimeProfileEnvironment pins Pi managed binaries to the Rin agent dir\""
+      ]
+    },
+    {
+      "file": "tests/characterization/platform.test.ts",
+      "cases": [
+        "\"platform/fs prefer Rin temp roots deterministically\"",
+        "\"platform/fs writeJsonAtomic and readJsonFile roundtrip\"",
+        "\"platform/fs writeJsonFile writes pretty JSON with trailing newline\"",
+        "\"platform/fs appendJsonLine helpers append compact jsonl entries\"",
+        "\"platform/fs listJsonFiles only returns sorted json files\"",
+        "\"platform/fs move helpers move files into target directories\"",
+        "\"platform/fs moveFileToDir falls back to copy on EXDEV\"",
+        "\"platform/process helpers behave as expected\""
+      ]
+    },
+    {
+      "file": "tests/characterization/practices-sync.test.ts",
+      "cases": [
+        "\"agent practices sync writes manifest files to installed docs path\"",
+        "\"agent practices sync rejects unsafe manifest paths\"",
+        "\"agent practices sync replaces stale installed practice files\""
+      ]
+    },
+    {
+      "file": "tests/characterization/provider-context.test.ts",
+      "cases": [
+        "\"provider-bound context leaves non-tool rich content unchanged\"",
+        "\"provider-bound context policy omits old tool results\"",
+        "\"provider-bound context keeps recent four user turns' tool results\"",
+        "`provider-bound context keeps ${stopReason} assistant tool calls and their tool results`",
+        "\"provider-bound context keeps incomplete assistant messages without tool calls\"",
+        "\"provider-bound context keeps orphan tool results\"",
+        "\"provider-bound context maps compaction slices without dropping messages\"",
+        "\"provider-bound context policy maps compaction slices through the full context view\"",
+        "\"provider-bound context policy owns token estimates\"",
+        "\"provider-bound context event uses the same policy surface\""
+      ]
+    },
+    {
+      "file": "tests/characterization/release.test.ts",
+      "cases": [
+        "\"package build scripts stay cross-platform for git installs\"",
+        "\"resolveParsedArgs marks omitted update channel as inherited\"",
+        "\"readInstalledUpdateReleasePreference inherits installed channel\"",
+        "\"readInstalledUpdateReleasePreference reads cross-user channel with privilege\"",
+        "\"rin update handoff requires installed managed Node\"",
+        "\"rin update handoff prefers installed managed Node over current process\"",
+        "\"readInstalledUpdateReleasePreference requires an installed channel\"",
+        "\"resolveParsedArgs accepts beta, nightly, and git selectors\"",
+        "\"resolveParsedArgs rejects conflicting release selectors\"",
+        "\"release platform helpers select current bundle assets\"",
+        "\"resolveReleaseRequest resolves stable beta nightly and git sources\"",
+        "\"readBundledReleaseManifest falls back to bundled defaults\"",
+        "\"release helpers keep trimmed env and manifest fallback precedence\"",
+        "\"releaseInfoFromFile tolerates BOM release handoff files\"",
+        "\"releaseInfoFromObject keeps git branch selectors out of version identity\"",
+        "\"releaseInfoFromObject normalizes installer bootstrap metadata\"",
+        "\"releaseInfoFromObject rejects incorrectly cased bootstrap metadata\""
+      ]
+    },
+    {
+      "file": "tests/characterization/render-utils.test.ts",
+      "cases": [
+        "\"render utils format shared truncation warnings and notices\"",
+        "\"render utils format shared tool durations\"",
+        "\"render utils format shared hidden result notices\"",
+        "\"render utils style structured tool output lines\"",
+        "\"render utils format tool call headers with single-word titles\"",
+        "\"render utils render shared text tool previews\"",
+        "\"render utils render expanded tool warnings\"",
+        "\"render utils normalize shared user-facing text fallbacks\"",
+        "\"render utils sanitize shared text output blocks in order\"",
+        "\"render utils user text fallback ignores non-string overrides\"",
+        "\"prepareTruncatedText leaves short text unchanged\"",
+        "\"prepareTruncatedText appends a truncation notice when limits are exceeded\"",
+        "\"prepareTruncatedAgentUserText reuses one truncation result for identical text\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-capability-session.test.ts",
+      "cases": [
+        "\"Rin core capability events reach session subscribers without extension UI\"",
+        "\"Rin context hooks transform provider-bound messages after Pi emitContext\"",
+        "\"Rin capability context exposes Pi extension mode and prompt options\"",
+        "\"Rin compaction hook errors propagate instead of falling back to Pi summarization\"",
+        "\"Rin compaction hooks are exposed through Pi's native before-compact span\"",
+        "\"Rin capability bridge is reattached to Pi extension runner after reload\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-cli.test.ts",
+      "cases": [
+        "\"version subcommand reports unknown without installed release metadata\"",
+        "\"light CLI commands do not load the Pi runtime\"",
+        "\"version reader rejects git branch selectors as runtime identity\"",
+        "\"version reader prefers installed release metadata\"",
+        "\"version reader reports unknown installed runtime without release metadata\"",
+        "\"rin update --yes enables non-interactive updater confirmation\"",
+        "\"rin update pre-installer progress uses installed language\"",
+        "\"rin update can read target language through the privileged cross-user path\"",
+        "\"rin-install update reads target language through elevated installer JSON\"",
+        "\"rin update is a thin wrapper around rin-install update\"",
+        "\"rin-install update release comparison supports current-version fast path\"",
+        "\"rin lifecycle control uses the shared recorded managed service boundary\"",
+        "`rin lifecycle manifest accepts ${kind} managed service records`",
+        "\"rin updater waits longer for daemon readiness than first install\"",
+        "\"installer target-user helpers do not execute the staging process Node across users\"",
+        "\"cli help omits removed run command and exposes Pi-style non-interactive flags\"",
+        "\"print help shows the Pi-style non-interactive CLI contract\"",
+        "\"run parser recognizes legacy chatKey but print mode rejects chat delivery\"",
+        "\"run parser supports managed session leaves for delegated non-interactive sessions\"",
+        "\"usage, status, self-improve, and memory-index parsers ignore wrapper args around the subcommand\"",
+        "\"self-improve report renders recent distillation history\"",
+        "\"captureInternalRinCommand forwards only subcommand args\"",
+        "\"status report renders running session activity\"",
+        "\"usage and status parsers reject invalid syntax\"",
+        "\"resolveInternalRinDispatch detects internal markers and wrapped subcommand help\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-daemon-catalog-helpers.test.ts",
+      "cases": [
+        "\"catalog helpers normalize direct slash-command collectors consistently\"",
+        "\"catalog helpers normalize and dedupe slash commands\"",
+        "\"catalog helpers collect runtime slash commands in source order\"",
+        "\"catalog helpers read oauth state from auth storage\"",
+        "\"catalog helpers include backend provider display names and auth status\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-daemon-catalog.test.ts",
+      "cases": [
+        "\"daemon catalog lists builtin and extension commands without session worker\"",
+        "\"daemon catalog honors command-level extension resource options\"",
+        "\"daemon catalog lists available models directly\"",
+        "\"daemon catalog reads oauth state directly\"",
+        "\"daemon catalog restores process cwd after read-only queries\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-daemon-resume-claim.test.ts",
+      "cases": [
+        "\"daemon serves sessionless catalog commands locally without spawning a worker\"",
+        "\"daemon serves initial state and session listing locally without spawning a worker\"",
+        "\"daemon routes cron lifecycle commands locally through the scheduler\"",
+        "\"daemon shuts down the previous selected session when starting a new session before state sync\"",
+        "\"daemon attaches a selected session without a frontend switch_session round-trip\"",
+        "\"daemon switch_session reuses an already-open session worker\"",
+        "\"daemon auto-resumes sessions recorded as running before restart\"",
+        "\"daemon discards a recorded running turn when the restored session is already terminal\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-daemon-shutdown-grace.test.ts",
+      "cases": [
+        "\"daemon waits for the current worker step to finish before exiting\"",
+        "\"daemon stops waiting once the graceful shutdown timeout is reached\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-daemon-shutdown.test.ts",
+      "cases": [
+        "\"daemon preserves command identity when a local command throws\"",
+        "\"daemon shutdown stops hosted services before background extension wait\"",
+        "\"daemon bounds a hosted shutdown hook that never settles\"",
+        "\"daemon exits promptly on SIGTERM even with connected rpc clients\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-daemon-worker.test.ts",
+      "cases": [
+        "\"daemon worker starts from a temporary session manager with a durable target dir\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-doctor.test.ts",
+      "cases": [
+        "\"rin doctor skips missing managed systemd unit candidates\"",
+        "\"rin doctor renderers report default daemon capability status\"",
+        "\"rin doctor renderers format daemon status details consistently\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-extension-loader.test.ts",
+      "cases": [
+        "\"Rin agent runtime owns the composed resource loading boundary\"",
+        "\"Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface\"",
+        "\"Rin agent services pass Pi resource loader reload options\"",
+        "\"configured Rin sessions use the Rin extension loader through agent services\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-extension-stage-b.test.ts",
+      "cases": [
+        "\"removed browser and computer use tools stay absent by default\"",
+        "\"core todo loads from configured runtime without extension paths\"",
+        "\"core todo reconstructs from custom entries around interrupted tool results\"",
+        "\"core todo remains enabled when optional extensions are disabled\"",
+        "\"stage B built-in extension controls expose no bundled foreground extensions\"",
+        "`stage B removed built-in extension alias is not expanded: ${removedAlias}`",
+        "\"stage B built-in extension entrypoints stay self-contained\"",
+        "\"stage B removed browse alias does not load a tool\"",
+        "\"stage B background extension manager stays lightweight without configured background extensions\"",
+        "\"stage B background extension manager contributes chat runtime adapters\"",
+        "\"stage B background extension manager loads local pi packages from settings.packages\"",
+        "\"stage B background extension manager honors pi package extension filters\"",
+        "\"stage B background extension manager loads auto-discovered pi extensions\"",
+        "\"stage B background extension manager exposes memory provider API for non-local originals\"",
+        "\"stage B background extension manager ignores direct extensions without background parts\"",
+        "\"stage B background extension manager starts async services and stops them\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-gui.test.ts",
+      "cases": [
+        "\"GUI args expose no compatibility fallback switches\"",
+        "\"native desktop launcher resolves the bundled stdio host directly\"",
+        "\"Electron desktop host is the concrete GUI framework behind the host contract\"",
+        "\"default rin launch mode is TUI on every platform\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-lib-system.test.ts",
+      "cases": [
+        "\"rin system normalizes current-user shell launches\"",
+        "\"rin system treats current user aliases as the current runtime\"",
+        "\"rin system falls back safely for unknown user runtime paths\"",
+        "\"common helpers build stable Windows named pipe paths\"",
+        "\"defaultDaemonSocketPath keeps runtime dir precedence stable\"",
+        "\"rin system trims user lookup inputs consistently\"",
+        "\"shellQuote preserves embedded single quotes for sh -lc\"",
+        "\"shellQuote round-trips paths and event names used by daemon probes\"",
+        "\"buildUserShell leaves returned env isolated from later mutations\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-runtime.test.ts",
+      "cases": [
+        "\"getManagedSkillPaths includes agent memory skills and builtin skills\"",
+        "\"Rin compaction prompts keep continuation handoff contract\"",
+        "\"compaction reason tracking annotates native before-compact hooks\"",
+        "\"configured Rin sessions disable completion-time threshold compaction only\"",
+        "\"Rin percent compaction defaults to 85 percent\"",
+        "\"Rin percent compaction respects the earlier Pi reserve-token threshold\"",
+        "\"Rin percent compaction estimates error contexts from pruned provider context\"",
+        "\"Rin context usage reports the pruned provider-bound estimate\"",
+        "\"Rin 85% provider preflight calls Pi overflow auto-compaction before the provider call\"",
+        "\"Rin provider preflight ignores stale assistant usage kept after compaction\"",
+        "\"Rin provider preflight still uses post-compaction assistant usage\"",
+        "\"Rin 85% provider preflight can run again after a new tail message\"",
+        "\"Rin 85% mid-turn threshold compacts between tool-use turns\"",
+        "\"Rin 85% provider preflight does not compact from an assistant-final context\"",
+        "\"runtime session shutdown emits Rin capability hooks without extension-runner bridging\"",
+        "\"applyAutoReloadAfterCompaction reloads after successful compaction only once per session\"",
+        "\"applyAutoReloadAfterCompaction queues one extra reload while a reload is in flight\"",
+        "\"Rin runtime no longer exposes todo compaction summary injection\"",
+        "\"Rin compaction summary chunks oversized history before calling the model\"",
+        "\"Rin compaction summary truncates a single oversized serialized message to the prompt budget\"",
+        "\"manual compaction waits for refresh before returning\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-targets.test.ts",
+      "cases": [
+        "\"rin target store upserts, defaults, and removes targets\"",
+        "\"rin target registry lists only closed-loop deployment providers\"",
+        "\"rin target runner strips target wrapper args before delegation\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rin-tui-report.test.ts",
+      "cases": ["\"renderReportSection keeps compact note-friendly text\""]
+    },
+    {
+      "file": "tests/characterization/rpc-and-shared.test.ts",
+      "cases": [
+        "\"rpc helpers build success and failure envelopes\"",
+        "\"rpc builtin slash commands compose Pi commands with Rin-only overlay\"",
+        "\"rpc helpers normalize scoped commands and return fresh empty session state\"",
+        "\"shared resolveParsedArgs keeps passthrough and install defaults coherent\"",
+        "\"ensureDaemonAvailable uses the managed service without spawning an unmanaged daemon\"",
+        "\"ensureDaemonAvailable does not spawn unmanaged daemon without a managed service\"",
+        "\"target execution context ignores current RIN_DIR for cross-user commands\"",
+        "\"managed runtime service manifest reads cross-user installer metadata with privilege\"",
+        "\"shared reuses installer common repo helpers\"",
+        "\"shared loadInstallConfigForHome prefers launcher metadata and ignores retired config manifests\"",
+        "\"tui launch helpers target the direct TUI runner\"",
+        "\"TUI launch environment reports maintenance notice when the daemon is unavailable\"",
+        "\"tui runtime env targets only the Rin runtime root\"",
+        "\"tui runtime env preserves explicit Rin dir override only\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-auth.test.ts",
+      "cases": [
+        "\"rpc auth proxy normalizes oauth state snapshots\"",
+        "\"rpc auth proxy responds to oauth login events and applies completion state\"",
+        "\"rpc auth proxy stores API keys through the daemon\"",
+        "\"rpc auth proxy rolls back failed logout and cancels aborted logins\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-client-reconnect.test.ts",
+      "cases": [
+        "\"rpc client ignores stale socket disconnect after reconnect\"",
+        "\"rpc client retries after a socket connect attempt stalls\"",
+        "\"rpc client supports injected in-process transport connectors\"",
+        "\"rpc client applies configured frontend identity to scoped frontend commands\"",
+        "\"rpc client runs compact through a shared single-flight request\"",
+        "\"rpc client exposes typed extension UI events and responses\"",
+        "\"rpc client typed request unwraps daemon response data\"",
+        "\"rpc client normalizes session list display metadata from daemon responses\"",
+        "\"rpc interactive session startup fails when the daemon is unavailable\"",
+        "\"rpc interactive session keeps a recovering turn busy while reconnecting after disconnect\"",
+        "\"rpc interactive session replays the current frontend status to new subscribers\"",
+        "\"rpc interactive session stays in connecting until session recovery succeeds\"",
+        "\"rpc interactive session exposes compaction as a distinct frontend phase\"",
+        "\"rpc interactive session keeps working status from authoritative turnActive snapshots\"",
+        "\"rpc interactive session clears recovering turn state after an idle recovery snapshot\"",
+        "\"rpc interactive session clears stale local turn state when the worker reports turn inactive\"",
+        "\"rpc interactive session reconnect loop restores transport and session in one pipeline\"",
+        "\"rpc interactive session waitForDaemonAvailable reuses the reconnect pipeline\"",
+        "\"rpc interactive session reconnect loop re-runs restore while stuck in recovery without a fresh disconnect\"",
+        "\"rpc interactive session keeps the daemon connection while a worker exits mid-turn\"",
+        "\"rpc interactive session does not self-deadlock when restore sees a disconnected request\"",
+        "\"rpc interactive session preserves native prompt payloads through the shared frontend SDK helper\"",
+        "\"rpc interactive session attaches a request tag to prompt turns by default\"",
+        "\"rpc interactive session recovers prompt submission timeout without surfacing an editor exception\"",
+        "\"rpc interactive session recovers steer prompt timeout without surfacing an editor exception\"",
+        "\"rpc interactive session preserves raw runtime error markers inside session logic\"",
+        "\"rpc interactive session can shut down or terminate an attached worker without local session selectors\"",
+        "\"rpc interactive session shows locally queued prompts while recovery is pending\"",
+        "\"rpc interactive session exits connecting after get_state succeeds and delays resync until history refresh finishes\"",
+        "\"rpc interactive session finishes daemon-side session recovery without dropping transport\"",
+        "\"rpc interactive session clears the busy state immediately when abort is requested\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-events.test.ts",
+      "cases": [
+        "\"rpc session events do not refresh whole state on every stream update\"",
+        "\"rpc compaction refresh redraws footer after the session snapshot lands\"",
+        "\"rpc session events keep turns alive until explicit rpc completion\"",
+        "\"rpc session events ignore Rin-private working events as frontend working truth\"",
+        "\"rpc session events delegate worker exit recovery to the runtime when available\"",
+        "\"rpc session recovery events are delegated without fake turn termination\"",
+        "\"tui recovery asks daemon to replay pending terminal turn events\"",
+        "\"rpc session listeners added during dispatch do not receive the current event\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-mode.test.ts",
+      "cases": [
+        "\"rpc mode exposes Pi-compatible session entries and tree\"",
+        "\"rpc mode correlates user start with its exact append result\"",
+        "\"rpc mode sleep_session disposes without terminalizing an active turn\"",
+        "\"rpc mode sleep_session delivers a final committed during graceful abort\"",
+        "\"rpc mode shutdown_session disposes runtime with stable frontend identity\"",
+        "\"rpc mode abort cancels active compaction before aborting the agent\"",
+        "\"rpc mode bridges extension UI dialog requests and responses\"",
+        "\"rpc mode command context does not expose worker-local session replacement\"",
+        "\"rpc mode exposes daemon session tools and extension message actions\"",
+        "\"rpc mode applies non-persistent model changes without calling the settings-backed setter or extension events\"",
+        "\"rpc mode resets model options from settings without full session reload or extension events\"",
+        "\"rpc mode confirms persistent thinking changes only after the settings write finishes\"",
+        "\"rpc mode applies non-persistent thinking level changes without calling the settings-backed setter\"",
+        "\"rpc mode executes extension slash commands on the daemon session\"",
+        "\"rpc mode refuses worker-local session replacement commands\"",
+        "\"rpc mode executes /usage through the daemon builtin command path\"",
+        "\"rpc mode returns extension command argument completions from daemon session\"",
+        "\"rpc mode emits canonical finalText on turn completion\"",
+        "\"rpc mode waits for prompt lifecycle before resolving turn messages\"",
+        "\"rpc mode emits agent failure messages instead of missing-final sentinels\"",
+        "\"rpc mode includes retry exhaustion in terminal provider failures\"",
+        "\"rpc mode includes retry exhaustion when provider failure is thrown\"",
+        "\"rpc mode surfaces websocket errors instead of waiting for continuation\"",
+        "\"rpc mode waits for Pi-native overflow recovery inside prompt lifecycle\"",
+        "\"rpc mode completes the original prompt without hidden todo continuation\"",
+        "\"rpc mode rejects nonempty branch fallback without a manager leaf api\"",
+        "\"rpc mode completes prompt turns from observed current assistant message_end\"",
+        "\"rpc mode compares settlement branch leaf ids as opaque strings\"",
+        "\"rpc mode resolves final text from current assistant message_end instead of durable entries\"",
+        "\"rpc mode resolves a first-turn branch final when prompt settles without message_end\"",
+        "\"rpc mode routes steer through session.steer\"",
+        "\"rpc mode prompt streamingBehavior keeps Pi prompt queue path during active-run non-streaming gaps\"",
+        "\"rpc mode prompt admission steers during tracked-turn signal gaps\"",
+        "\"rpc mode prompt admission trusts the Pi active run during an untracked recovery gap\"",
+        "\"rpc mode prompt streamingBehavior uses native queue without starting a second tracked turn\"",
+        "\"rpc mode does not implement worker-local new_session commands\"",
+        "\"rpc mode does not create persisted sessions from worker-local new_session\"",
+        "\"rpc mode does not honor managed session leaf inside a worker\"",
+        "\"rpc mode keeps session selector unchanged for worker-local new_session\"",
+        "\"rpc mode keeps the current session for worker-local new_session\"",
+        "\"rpc mode explicit interrupted-turn resume still persists interruption context before continuing\"",
+        "\"rpc mode resume_interrupted_turn does not re-emit a persisted assistant final\"",
+        "\"rpc mode resume_interrupted_turn terminates when no resumable result exists\"",
+        "\"rpc mode session bind does not auto-resume an interrupted turn\"",
+        "\"rpc mode does not implement worker-local switch_session commands\"",
+        "\"rpc mode rejoins an active turn with the same durable request tag\"",
+        "\"rpc mode get_state keeps turnActive true across internal non-streaming gaps\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-restore.test.ts",
+      "cases": [
+        "\"rpc restore reattaches once and avoids duplicate restore work\"",
+        "\"rpc restore flushes queued offline ops after reattach\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-runtime-binding.test.ts",
+      "cases": [
+        "\"rpc prompt routes extension slash commands using daemon catalog authority\"",
+        "\"rpc bash forwards Pi exclude-from-context option to daemon\"",
+        "\"rpc prompt routes frontend /new command to local new session\"",
+        "\"rpc prompt routes run-command builtin slash commands from command metadata\"",
+        "\"rpc prompt does not route non-runnable slash catalog entries as commands\"",
+        "\"rpc frontend exposes local Rin capability renderers for tool cards\"",
+        "\"rpc zero-extension frontend provides Pi's custom entry renderer lookup\"",
+        "\"rpc extension command facade is backed by the daemon catalog\"",
+        "\"rpc reload delegates to the daemon session and refreshes catalog\"",
+        "\"rpc model registry exposes all models for login provider selection\"",
+        "\"rpc runtime answers daemon extension UI requests through the bound UI context\"",
+        "\"rpc runtime keeps control methods bound and leaves settings persistence to the daemon\"",
+        "\"rpc runtime loads worker resource diagnostics after remote session setup\"",
+        "\"rpc runtime routes run-command builtin slash commands from prompt to daemon\"",
+        "\"rpc runtime lets daemon admission decide ordinary steer prompt mode\"",
+        "\"rpc runtime routes session-scoped commands by current session file\"",
+        "\"rpc runtime switches sessions through the daemon worker\"",
+        "\"rpc runtime refreshes switched session state using the rebound session file\"",
+        "\"rpc runtime refreshes new session state using the created session file\"",
+        "\"rpc runtime restores active session history from one daemon snapshot\"",
+        "\"rpc runtime normalizes daemon session listings into canonical session metadata\"",
+        "\"rpc runtime rebuilds Pi session context and active entries from snapshot state\"",
+        "\"rpc runtime promotes a temporary worker session before the first prompt\"",
+        "\"rpc runtime keeps local steer prompt state while daemon admits the message\"",
+        "\"rpc runtime defers prompt submission until compaction ends\"",
+        "\"rpc runtime applies daemon queue updates before the user message starts\"",
+        "\"rpc runtime shows a connecting prompt only as steering queue\"",
+        "\"rpc runtime marks a connected prompt as sending before remote session setup finishes\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-runtime-host.test.ts",
+      "cases": [
+        "\"rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-settings-persistence.test.ts",
+      "cases": [
+        "\"rpc setting writes serialize flush and error attribution\"",
+        "\"rpc thinking acknowledgement repairs a stale same-level persisted default\""
+      ]
+    },
+    {
+      "file": "tests/characterization/rpc-startup-status.test.ts",
+      "cases": [
+        "\"rpc frontend reports Starting during initial TUI startup\"",
+        "\"rpc session manager exposes Pi persistence helpers\"",
+        "\"rpc frontend stays idle while loading resume sessions\"",
+        "\"rpc frontend status labels follow phase priority\""
+      ]
+    },
+    {
+      "file": "tests/characterization/run-format-check-script.test.ts",
+      "cases": [
+        "\"run-format-check builds default prettier check arguments\"",
+        "\"run-format-check preserves explicit prettier check targets\"",
+        "\"run-format-check builds prettier write arguments\"",
+        "\"run-format-check parses explicit formatter modes\""
+      ]
+    },
+    {
+      "file": "tests/characterization/running-workers.test.ts",
+      "cases": [
+        "\"running worker records preserve legacy session-only state and durable request tags\""
+      ]
+    },
+    {
+      "file": "tests/characterization/self-improve.test.ts",
+      "cases": [
+        "\"self-improve paths resolve under the agent root\"",
+        "\"self-improve skill usage stats detect and record read skill files\"",
+        "\"self-improve module records read-tool skill usage\"",
+        "\"self-improve agent dir resolution follows Rin runtime profile precedence\"",
+        "\"buildOnboardingPrompt points initialization to dedicated docs without duplicating mode steps\"",
+        "\"processing describes prompt slots with content and limits\"",
+        "\"processing normalizes revised full-slot content and enforces limits\"",
+        "\"automatic self-improve handlers run periodic reviews synchronously\"",
+        "\"automatic self-improve review interval is configurable\"",
+        "\"automatic self-improve review counts agent final messages, not user turns\"",
+        "\"automatic self-improve review reuses chat final-message detection for tool-call messages\"",
+        "\"automatic self-improve review records its watermark before awaiting distillation\"",
+        "\"automatic self-improve review resumes from persisted session count after restart\"",
+        "\"automatic self-improve review ignores the never-shipped nested interval path\"",
+        "\"automatic self-improve requires explicit eligible producer\"",
+        "\"automatic self-improve allows scheduled-task turns delivered through chat\"",
+        "\"automatic self-improve allows scheduled-task source with explicit eligibility\"",
+        "\"automatic self-improve ignores scheduled-task source without explicit eligibility\"",
+        "\"self-improve review prompt keeps a strong manual-backed wrapper\"",
+        "\"self-improve distillation manual codifies review rules\"",
+        "\"automatic self-improve handlers require persisted sessions\"",
+        "\"session reload does not trigger self-improve shutdown distillation\"",
+        "\"real session shutdown queues self-improve review distillation without a core notice\"",
+        "\"self-improve module does not expose save_prompts as a user-facing tool\"",
+        "\"store executeSelfImproveAction compiles saved self-improve prompts\"",
+        "\"queued self-improve distillation jobs deduplicate by session file\"",
+        "\"queued distillation jobs use core self-improve trigger names by default\"",
+        "\"queued distillation refresh clears stale retry metadata and normalizes extension paths\"",
+        "\"queued distillation drops invalid session jobs into history instead of blocking the queue\"",
+        "\"queued distillation reclaims expired worker locks\"",
+        "\"queued distillation keeps live worker locks fresh by updatedAt\"",
+        "\"queued distillation ignores blank agent dir inputs\"",
+        "\"synchronous self-improve distillation records terminal result without queueing\"",
+        "\"compaction snapshot jobs stay distinct for the same session\"",
+        "\"self-improve save action is unsupported\"",
+        "\"compileSelfImprove includes saved self-improve prompts from markdown source\"",
+        "\"self-improve doc loading uses prompt slot filenames and ignores skill docs\"",
+        "\"saveSelfImprovePromptDoc accepts only active prompt baseline slots\"",
+        "\"removeSelfImprovePromptDoc deletes prompt slot files\""
+      ]
+    },
+    {
+      "file": "tests/characterization/session-factory.test.ts",
+      "cases": [
+        "\"listBoundSessions does not create cwd-encoded empty session dirs\"",
+        "\"listBoundSessions reads only canonical root sessions\"",
+        "\"listBoundSessionPage returns a bounded recent page from root session records\"",
+        "\"listBoundSessionPage uses a built catalog without reparsing session jsonl files\"",
+        "\"session catalog updates from a session manager without deleting sessions\"",
+        "\"listBoundSessions uses the fast page path when pagination is requested\"",
+        "\"listBoundSessions normalizes legacy session metadata into canonical fields\"",
+        "\"openBoundSession reports an explicit missing session file\"",
+        "\"renameBoundSession delegates to SessionManager.open once\"",
+        "\"renameBoundSession rejects missing session file selectors\"",
+        "\"session listing helpers derive presentation and active state consistently\"",
+        "\"session listing normalization trims legacy values and preserves normalized items\""
+      ]
+    },
+    {
+      "file": "tests/characterization/session-fork.test.ts",
+      "cases": [
+        "\"session fork compat uses native option-aware fork APIs when available\"",
+        "\"session fork compat uses legacy persisted fork when option-aware native fork is unavailable\"",
+        "\"session fork compat rebuilds ephemeral forks from the selected branch\"",
+        "\"session fork compat falls back to full entries when the requested branch is unavailable\"",
+        "\"session fork compat can mark temporary cache-equivalent forks to skip routine compaction\"",
+        "\"session fork compat can preserve source session id for temporary cache-equivalent forks\"",
+        "\"session fork compat reports unsupported persisted and ephemeral capabilities clearly\""
+      ]
+    },
+    {
+      "file": "tests/characterization/session-helpers.test.ts",
+      "cases": [
+        "\"session helpers share deterministic thinking-level availability\"",
+        "\"getLastAssistantText scans backward without requiring a copied array\"",
+        "\"estimateContextTokens reuses the latest successful usage and estimates only trailing messages\"",
+        "\"estimateContextTokens falls back to estimating every message when no usage is reusable\"",
+        "\"estimateContextTokens uses Pi message estimates for image content\"",
+        "\"session helpers guard against non-array and malformed message inputs\""
+      ]
+    },
+    {
+      "file": "tests/characterization/session-metadata.test.ts",
+      "cases": [
+        "\"session metadata normalizes explicit and manager-backed values\"",
+        "\"session identity falls back from file to id to cwd\"",
+        "\"session metadata keeps non-persisted sessions detached from blank files\"",
+        "\"session metadata falls back when explicit values normalize to empty\""
+      ]
+    },
+    {
+      "file": "tests/characterization/session-names.test.ts",
+      "cases": [
+        "\"readSessionDisplayNameParts combines latest rename with first user message\"",
+        "\"readSessionDisplayNameParts handles chunk-spanning lines without a trailing newline\"",
+        "\"readSessionDisplayNameParts extracts first user text from structured rich content\"",
+        "\"readSessionDisplayNameParts handles object-shaped rich message content\"",
+        "\"readSessionDisplayNameParts ignores blank later renames\"",
+        "\"readSessionDisplayNameParts keeps the first user message once captured\"",
+        "\"session display readers return empty parts for blank or missing paths\"",
+        "\"session display helpers keep name fallback rules consistent\""
+      ]
+    },
+    {
+      "file": "tests/characterization/session-pruning.test.ts",
+      "cases": [
+        "\"session pruning omits old tool results while preserving the recent four turns\"",
+        "\"session pruning is a no-op until more than four user turns exist\"",
+        "\"session pruning does not omit rich image content\"",
+        "\"session pruning keeps tool-result content shape stable and is idempotent\"",
+        "\"session pruning preserves old skill read results\"",
+        "\"session pruning maps compaction slices through the full provider-bound context\""
+      ]
+    },
+    {
+      "file": "tests/characterization/session-ref.test.ts",
+      "cases": [
+        "\"session ref helpers normalize shared command/state shapes and resolve consistently\"",
+        "\"session ref helpers store session files relative to agent sessions dir and resolve them back\""
+      ]
+    },
+    {
+      "file": "tests/characterization/sidecar-common.test.ts",
+      "cases": [
+        "\"sidecar common writes, reads and lists instance state\"",
+        "\"sidecar common ignores malformed instance state payloads\""
+      ]
+    },
+    {
+      "file": "tests/characterization/std-mode-runtime.test.ts",
+      "cases": [
+        "\"configured session persists once a user starts a real conversation\"",
+        "\"configured sessions forward Pi tool startup options\"",
+        "\"std configured session strips removed browse extension alias\"",
+        "\"std configured session registration does not require daemon-only tools to connect\""
+      ]
+    },
+    {
+      "file": "tests/characterization/task-tools.test.ts",
+      "cases": [
+        "\"task capability no longer exposes model task tools\"",
+        "\"agent SDK maps task helpers to daemon task commands\"",
+        "\"agent SDK maps chat helpers to daemon chat commands\""
+      ]
+    },
+    {
+      "file": "tests/characterization/todo-state.test.ts",
+      "cases": [
+        "\"todo state reads the latest branch-aware custom entry\"",
+        "\"todo state reads the latest todo from the active session-file branch\"",
+        "\"todo state retries an expected user leaf with an incomplete ancestor chain\"",
+        "\"todo state leaves unavailable session files distinguishable from empty todo\"",
+        "\"todo state treats a partially written JSONL tail as retryable\"",
+        "\"todo state ignores context-visible todo tool-result details\"",
+        "\"todo state formats checklist content without markdown list markers\"",
+        "\"todo state formats markdown chat fallback with markdown strikethrough\"",
+        "\"todo state preserves visible strikethrough in character-only chat fallback\"",
+        "\"todo state does not expose hidden final-continuation helpers\""
+      ]
+    },
+    {
+      "file": "tests/characterization/todo-tool.test.ts",
+      "cases": [
+        "\"todo tool replaces the whole checklist in one write\"",
+        "\"todo tool reads current checklist when todos is omitted\"",
+        "\"todo tool clears only when todos is an empty array\"",
+        "\"todo tool errors when session custom entries are unavailable\"",
+        "\"todo tool writes session custom entry checkpoints\""
+      ]
+    },
+    {
+      "file": "tests/characterization/token-usage-store.test.ts",
+      "cases": [
+        "\"token usage store aggregates by session and capability\"",
+        "\"token usage store normalizes telemetry events in one place\"",
+        "\"token usage store formats provider_model labels from one shared rule\"",
+        "\"token usage store ignores duplicate event ids\"",
+        "\"token usage store writes structured event fields through one DB mapping\"",
+        "\"token usage store derives stable ids and tolerates unserializable metadata\"",
+        "\"token usage store canonicalizes tool names before deriving stable ids\"",
+        "\"token usage overview normalizes empty sums to zeros\"",
+        "\"token usage store returns recent events in reverse time order\"",
+        "\"token usage store exposes a human-oriented session dimension\"",
+        "\"token usage hooks keep session metadata and frontend source on later events\"",
+        "\"token usage store supports shared provider_model and yes/no dimensions\"",
+        "\"token usage store handles repeated cached queries with varying limits\"",
+        "\"usage report keeps provider_model labels consistent in raw event tables\"",
+        "\"usage trend series fills 7d 3h buckets for line charts\"",
+        "\"usage report renders a compact 7d text line chart\"",
+        "\"usage trend image writer produces a PNG chart artifact\"",
+        "\"usage dashboard renders Codex subscription quota and token charts\"",
+        "\"Codex subscription usage parser accepts current wham usage shape\"",
+        "\"Anthropic subscription usage parser accepts OAuth usage shape\""
+      ]
+    },
+    {
+      "file": "tests/characterization/tui-launcher.test.ts",
+      "cases": [
+        "\"tui launcher exports frontend SDK wrappers for both rpc and std TUI paths\"",
+        "\"tui launcher resolves interactive startup options\"",
+        "\"tui launcher formats its own maintenance mode warning\"",
+        "\"tui launcher parses pi extension resource options without leaking paths into prompts\"",
+        "\"rpc tui reuses a pre-initialized interactive mode without starting it twice\"",
+        "\"rpc startup prepares the daemon worker before UI init\"",
+        "\"rpc startup initializes interactive mode without extra notice flush\"",
+        "\"tui waits for pending terminal replies before stopping after startup failure\"",
+        "\"tui launcher clears the visible viewport before taking over the terminal\"",
+        "\"rpc startup shows a Starting animation before the full TUI takes over\"",
+        "\"tui cli options stay lightweight without onboarding imports\"",
+        "\"tui cli has no dedicated init flag handling\"",
+        "\"tui startup treats missing initialization state as incomplete\"",
+        "\"tui startup enters initialization from persisted state and waits for document-driven completion\"",
+        "\"tui launcher maps quiet startup to Pi version-check skip env\"",
+        "\"tui launcher preserves startup errors until the entrypoint display boundary\"",
+        "\"tui launcher classifies transient rpc startup failures as maintenance fallbacks\"",
+        "\"tui launcher startup timeout rejects with a bounded startup error\"",
+        "\"tui launcher waits for delayed daemon status before maintenance mode\"",
+        "\"tui launcher treats daemon status as the rpc startup health check\""
+      ]
+    },
+    {
+      "file": "tests/characterization/tui-model-settings.test.ts",
+      "cases": [
+        "\"tui model settings update local state after rpc acknowledgement\"",
+        "\"tui thinking level stays unchanged until the daemon confirms persistence\"",
+        "\"tui thinking mutations preserve user order when acknowledgements are delayed\"",
+        "\"tui model settings refresh models after rpc model mutations\"",
+        "\"rpc interactive session reports setting persistence failures\"",
+        "\"tui model settings reject rpc failures without optimistic local state\""
+      ]
+    },
+    {
+      "file": "tests/characterization/tui-overrides.test.ts",
+      "cases": [
+        "\"terminal title override shows only session name\"",
+        "\"shutdown resume hint uses rin command name\"",
+        "\"fatal runtime errors restore the terminal before writing a readable error\"",
+        "\"fatal runtime output survives terminal cleanup failures\"",
+        "\"startup header override replaces upstream Pi branding with Rin\"",
+        "\"Rin update notice appends like the upstream Pi update notification\"",
+        "\"Rin update notice is transient when chat redraw clears startup chrome\"",
+        "\"chat rebuild preserves loaded resources while clearing Rin update notice\"",
+        "\"direct initial-message redraw preserves loaded resources while clearing Rin update notice\"",
+        "\"session rebind does not own chat startup decoration rendering\"",
+        "\"session rebind preserves render-before-bind replacement redraw\"",
+        "\"session replacement final render owns startup decorations for empty sessions\"",
+        "\"session replacement final render does not inject startup decorations into history\"",
+        "\"zero-extension session replacement renders history after Rin core custom entries\"",
+        "\"update overrides replace startup update path and keep single changelog version state\"",
+        "\"startup header branding replaces upstream Pi name and version\"",
+        "\"TUI exits when the input terminal closes\"",
+        "\"quick run startup header hides Rin version\"",
+        "\"footer appends runtime mode to the model label before rendering\"",
+        "\"full redraw override preserves terminal scrollback\"",
+        "\"loader stop clears render interval\"",
+        "\"rpc frontend startup statuses use one animated loader until working starts\"",
+        "\"rpc transport status remains visible after ordinary events while reconnecting\"",
+        "\"rpc transport statuses use Pi's status API as the only component owner\"",
+        "\"Rin status coordination does not read Pi private component fields\"",
+        "\"rpc transport-to-working transition stays within Pi's status API\"",
+        "\"rpc retry phase preserves Pi retry status before returning to Working\"",
+        "\"local session selector reuses bound session helpers for canonicalized list and rename\"",
+        "\"rpc session selector loads sessions through the daemon instead of local SessionManager\"",
+        "\"rpc session selector can append additional session pages\"",
+        "\"session selector rename ignores blank names\"",
+        "\"rpc session resync rebinds runtime state and redraws history directly\"",
+        "\"rpc session resync redraw does not replay initial compaction status notice\"",
+        "\"rpc startup submissions are buffered until the input loop starts\"",
+        "\"rpc startup submission uses an already waiting input callback\"",
+        "\"rpc local user echo suppresses the matching daemon echo\"",
+        "\"rpc session resync clears pending local user echo\"",
+        "\"rpc compaction start keeps the dedicated compaction status indicator\"",
+        "\"async TUI event failures route through the fatal runtime error boundary\"",
+        "\"zero-extension compaction end rebuilds history containing Rin core custom entries\"",
+        "\"rpc compaction end renders Pi Working from the still-active turn\"",
+        "\"local compaction end renders Pi Working from the streaming session\"",
+        "\"rpc agent end does not leave a stale working status indicator after the turn is done\"",
+        "\"rpc thinking cycle shows success only after daemon acknowledgement\"",
+        "\"rpc setting mutation failures are surfaced in the TUI\"",
+        "\"signal handler override routes SIGINT through interactive Ctrl+C handling\"",
+        "\"signal handler override ignores SIGINT while the TUI is stopped\""
+      ]
+    },
+    {
+      "file": "tests/characterization/tui-settings-read-write.test.ts",
+      "cases": [
+        "\"explicit rpc ui persistence writes settings without needing a session\""
+      ]
+    },
+    {
+      "file": "tests/characterization/tui-startup-tools.test.ts",
+      "cases": [
+        "\"Rin TUI startup override does not call Pi managed-tool ensure\""
+      ]
+    },
+    {
+      "file": "tests/characterization/tui-stats.test.ts",
+      "cases": [
+        "\"tui stats compute session stats from entries\"",
+        "\"tui stats get context usage estimates the pruned provider-bound context\"",
+        "\"tui stats get context usage preserves post-compaction unknown state\""
+      ]
+    },
+    {
+      "file": "tests/characterization/update-cleanup.test.ts",
+      "cases": [
+        "\"cleanupStaleUpdateWorkDirs prunes only stale work dirs\"",
+        "\"updateWorkRoot uses the platform cache root\"",
+        "\"createUpdateRuntimeSourceWorkspace writes the release handoff\"",
+        "\"disablePackageRootPrepareScript removes only the package prepare hook\""
+      ]
+    },
+    {
+      "file": "tests/characterization/update-notices.test.ts",
+      "cases": [
+        "\"Rin update notices compare package versions with prerelease precedence\"",
+        "\"current Rin version reads only installed release metadata\"",
+        "\"current Rin version is unknown without installed release metadata\"",
+        "\"Rin update check uses Rin release manifest instead of Pi latest-version\"",
+        "\"Rin update check follows installed release channel metadata\"",
+        "\"Rin update notices ignore top-level release metadata\"",
+        "\"Rin git branch selector metadata does not trigger update notices\"",
+        "\"Rin git installs do not receive stable package update notices\"",
+        "\"Rin update notice follows the installed release channel\"",
+        "\"Rin update notice reads installed release metadata\"",
+        "\"Rin git update notice follows the installed git branch\"",
+        "\"Rin git update check returns before the git probe completes\"",
+        "\"Rin update check preserves Rin version-check skip env\"",
+        "\"Rin changelog entries read docs/release without settings state\"",
+        "\"Rin changelog entry comparison handles prerelease and build metadata versions\""
+      ]
+    },
+    {
+      "file": "tests/characterization/update-targets.test.ts",
+      "cases": [
+        "\"discoverInstalledTargets scans manifest, launcher, systemd, and launchd homes deterministically\"",
+        "\"discoverInstalledTargets dedupes identical targets with explicit source precedence\"",
+        "\"discoverInstalledTargets ignores invalid managed entries and non-file lookalikes\""
+      ]
+    },
+    {
+      "file": "tests/characterization/update-workflow.test.ts",
+      "cases": [
+        "\"preparedRuntimeNodeExecutable rejects missing executable managed node\"",
+        "\"provisionPreparedCurrentNodeRuntime makes source updates launch managed node\"",
+        "\"prepareUpdateRuntimeSource rejects platform bundle assets without checksum\"",
+        "\"prepareUpdateRuntimeSource rejects platform bundle checksum mismatch\"",
+        "\"prepareUpdateRuntimeSource uses platform bundle assets without npm build\""
+      ]
+    },
+    {
+      "file": "tests/characterization/updater.test.ts",
+      "cases": [
+        "\"buildPreparedUpdaterCommand launches prepared managed node\"",
+        "\"buildPreparedUpdaterCommand requires prepared managed node\"",
+        "\"startUpdater does not write language during core updates\"",
+        "\"startUpdater uses installed language for UI without rewriting settings\"",
+        "\"startUpdater skips repeated plan and confirmation when preconfirmed\"",
+        "\"startUpdater localizes zh_CN update notes beyond the confirm prompt\""
+      ]
+    },
+    {
+      "file": "tests/characterization/user-facing-errors.test.ts",
+      "cases": [
+        "\"runtime error formatter keeps human messages\"",
+        "\"runtime error formatter maps system errno messages through platform descriptions\"",
+        "\"frontend display error formatter keeps terse marker-derived errors\"",
+        "\"chat error formatter prefixes terse Rin errors\"",
+        "\"runtime error formatter maps known internal markers to actionable messages\"",
+        "\"runtime error formatter keeps unmapped internal marker detail readable\"",
+        "\"runtime error formatter does not leak Rin-owned marker literals\"",
+        "\"runtime error formatter does not add generic recovery advice\"",
+        "\"tui entrypoints delegate caught-error display to the shared frontend boundary\"",
+        "\"shared frontend entrypoint formats caught errors exactly at display\"",
+        "\"non-tui app entrypoints format caught errors before printing\""
+      ]
+    },
+    {
+      "file": "tests/characterization/worker-cgroup-isolation.test.ts",
+      "cases": [
+        "\"delegated worker cgroups isolate ownership without memory budgets\"",
+        "\"delegated isolation moves an older-systemd daemon into a leaf subgroup\"",
+        "\"worker cgroup isolation reports when daemon OOM preference is already maximal\"",
+        "\"worker cgroup attach fails closed when OOM preference cannot be written\"",
+        "\"worker cgroup cleanup waits for the worker subtree to empty\"",
+        "\"managed worker cgroup isolation fails closed without delegation\"",
+        "\"worker cgroup isolation stays disabled outside the managed service\""
+      ]
+    },
+    {
+      "file": "tests/characterization/worker-helpers.test.ts",
+      "cases": [
+        "\"worker helpers split command args and format stats\"",
+        "\"worker helpers expose resource diagnostics from the active session\"",
+        "\"worker helpers expose extension runner diagnostics\"",
+        "\"worker helpers expose extension command argument completions\"",
+        "\"worker helpers expose normalized slash commands and oauth state\"",
+        "\"getSessionState exposes worker-owned turn activity separately from streaming\"",
+        "\"runBuiltinCommand lists available sessions and reports missing session ids\"",
+        "\"runBuiltinCommand lists available models before selection\"",
+        "\"runBuiltinCommand shows compact usage status\"",
+        "\"runBuiltinCommand reports Codex usage fetch failures instead of sending partial image\"",
+        "\"runBuiltinCommand reports command errors by throwing\"",
+        "\"runBuiltinCommand no longer handles the removed todos slash command\"",
+        "\"runBuiltinCommand uses runtime for session replacement commands\""
+      ]
+    }
+  ]
+}

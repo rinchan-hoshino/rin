@@ -53,6 +53,9 @@ jobs:
       - name: Build candidate
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm run build
+      - name: Build isolated system-test image
+        working-directory: ${{ runner.temp }}/hotfix-candidate
+        run: docker build -f .ci/local-ci/Dockerfile -t rin-local-ci:latest .
       - name: Validate candidate
         working-directory: ${{ runner.temp }}/hotfix-candidate
         run: npm run test:release

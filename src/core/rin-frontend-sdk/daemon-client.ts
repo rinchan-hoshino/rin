@@ -211,16 +211,17 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
 
   async disconnect() {
     const socket = this.socket;
-    this.socket = null;
-    this.connectPromise = null;
-    if (!socket) return;
+    if (!socket) {
+      this.connectPromise = null;
+      return;
+    }
+    this.handleDisconnect(false, socket);
     try {
       socket.end();
     } catch {}
     try {
       socket.destroy();
     } catch {}
-    this.handleDisconnect(false, socket);
   }
 
   subscribe(listener: (event: InteractiveFrontendEvent) => void) {

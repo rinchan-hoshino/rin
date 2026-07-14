@@ -1,16 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
 const {
   resolveRinTurnCompletionFromAssistantMessage,
+  resolveRinTurnCompletionFromMessages,
   resolveRinTurnCompletionFromTurnResult,
+  resolveRinTurnFailureMessage,
 } = await import(
   pathToFileURL(
     path.join(
@@ -50,4 +52,53 @@ test("Rin turn completion does not treat assistant tool-call prefaces as finals"
   });
 
   assert.equal(resolution?.completion.finalText, "");
+  assert.equal(
+    resolveRinTurnCompletionFromAssistantMessage({
+      role: "user",
+      content: [{ type: "text", text: "not an assistant" }],
+    }),
+    null,
+  );
+});
+
+test("Rin turn completion preserves the supplied message list", () => {
+  const messages = [
+    { role: "user", content: [{ type: "text", text: "question" }] },
+    { role: "assistant", content: [{ type: "text", text: "answer" }] },
+  ];
+
+  const resolution = resolveRinTurnCompletionFromMessages(messages);
+
+  assert.equal(resolution.messages, messages);
+  assert.equal(resolution.completion.finalText, "answer");
+});
+
+test("Rin turn failure messages follow explicit, state, and assistant error priority", () => {
+  const messages = [
+    { role: "assistant", errorMessage: "older failure" },
+    { role: "user", errorMessage: "ignored user failure" },
+    { role: "assistant", errorMessage: "latest failure" },
+  ];
+
+  assert.equal(
+    resolveRinTurnFailureMessage({}, messages, {
+      retryFailureMessage: " retry failed ",
+    }),
+    "retry failed",
+  );
+  assert.equal(
+    resolveRinTurnFailureMessage(
+      { agent: { state: { errorMessage: " state failed " } } },
+      messages,
+    ),
+    "state failed",
+  );
+  assert.equal(resolveRinTurnFailureMessage({}, messages), "latest failure");
+  assert.equal(
+    resolveRinTurnFailureMessage({}, [
+      { role: "user", errorMessage: "ignored" },
+      { role: "assistant", errorMessage: "  " },
+    ]),
+    "",
+  );
 });
