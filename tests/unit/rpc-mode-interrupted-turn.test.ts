@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isRetryableAssistantError } from "@earendil-works/pi-ai/compat";
 
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -17,12 +18,24 @@ function wait(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function exerciseResumeInterruptedTurn(stateMessages: any[]) {
+async function exerciseResumeInterruptedTurn(
+  stateMessages: any[],
+  options: {
+    onRunAgentPrompt?: (context: {
+      emit: (event: any) => void;
+      stateMessages: any[];
+    }) => Promise<void> | void;
+  } = {},
+) {
   const stdinOn = process.stdin.on;
   const stdoutWrite = process.stdout.write;
   const handlers = new Map();
   const lines: string[] = [];
   const calls: any[] = [];
+  const sessionSubscribers = new Set<(event: any) => void>();
+  const emit = (event: any) => {
+    for (const handler of sessionSubscribers) handler(event);
+  };
 
   process.stdin.on = function (event, handler) {
     handlers.set(event, handler);
@@ -46,7 +59,14 @@ async function exerciseResumeInterruptedTurn(stateMessages: any[]) {
         },
       },
       bindExtensions: async () => {},
-      subscribe: () => {},
+      subscribe: (handler: (event: any) => void) => {
+        sessionSubscribers.add(handler);
+        return () => sessionSubscribers.delete(handler);
+      },
+      _runAgentPrompt: async (messages: any[]) => {
+        calls.push(["runAgentPrompt", messages]);
+        await options.onRunAgentPrompt?.({ emit, stateMessages });
+      },
       prompt: async () => {},
       steer: async () => {},
       followUp: async () => {},
@@ -145,7 +165,7 @@ test(
       normal.calls[1][1].content[0].text,
       "The tool was interrupted because the daemon exited.",
     );
-    assert.deepEqual(normal.calls[2], ["continue"]);
+    assert.deepEqual(normal.calls[2], ["runAgentPrompt", []]);
     assert.equal(normalStateMessages.length, 2);
     assert.equal(normalStateMessages[1].role, "toolResult");
     assert.ok(
@@ -177,5 +197,99 @@ test(
         result.lines.join("").includes('"command":"resume_interrupted_turn"'),
       );
     }
+  },
+);
+
+test(
+  "rpc interrupted-turn recovery reports Codex header timeout retry exhaustion",
+  { concurrency: false },
+  async () => {
+    const providerError = "Codex SSE response headers timed out after 300000ms";
+    assert.equal(
+      isRetryableAssistantError({
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: providerError,
+      } as any),
+      true,
+    );
+
+    const stateMessages = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tool-timeout",
+            name: "bash",
+            arguments: { command: "sleep 1" },
+          },
+        ],
+      },
+    ];
+    const result = await exerciseResumeInterruptedTurn(stateMessages, {
+      onRunAgentPrompt: ({ emit, stateMessages: messages }) => {
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          emit({
+            type: "auto_retry_start",
+            attempt,
+            maxAttempts: 3,
+            delayMs: 0,
+            errorMessage: providerError,
+          });
+        }
+        const finalMessage = {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: providerError,
+        };
+        messages.push(finalMessage);
+        emit({ type: "message_end", message: finalMessage });
+        emit({
+          type: "auto_retry_end",
+          success: false,
+          attempt: 3,
+          finalError: providerError,
+        });
+      },
+    });
+
+    const events = result.lines
+      .join("")
+      .trim()
+      .split(/\n+/)
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+    assert.deepEqual(
+      events
+        .filter((event) => event.type === "auto_retry_start")
+        .map((event) => event.attempt),
+      [1, 2, 3],
+    );
+    assert.equal(
+      events.some(
+        (event) =>
+          event.type === "auto_retry_end" &&
+          event.success === false &&
+          event.attempt === 3,
+      ),
+      true,
+    );
+    const terminalError = events.find(
+      (event) => event.type === "rpc_turn_event" && event.event === "error",
+    );
+    assert.equal(
+      terminalError?.error,
+      `Retry failed after 3 attempts: ${providerError}`,
+    );
   },
 );

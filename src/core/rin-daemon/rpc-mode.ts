@@ -25,6 +25,7 @@ import {
 import {
   emitPiSessionEvent,
   refreshPiSessionToolRegistry,
+  resumePiSessionTurn,
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
 import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
@@ -482,9 +483,8 @@ async function resumeInterruptedTurn(
     });
     if (!appendedInterruption) return null;
   }
-  const result = await session.agent.continue();
-  const direct = resolveRinTurnCompletionFromTurnResult(result);
-  return direct.completion.finalText ? direct : null;
+  await resumePiSessionTurn(session);
+  return null;
 }
 
 function isWorkerLocalSessionReplacementCommand(commandLine: string) {

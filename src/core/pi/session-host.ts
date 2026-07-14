@@ -24,6 +24,7 @@ const PI_SESSION_PRIVATE = {
   rebuildSystemPrompt: "_rebuildSystemPrompt",
   refreshToolRegistry: "_refreshToolRegistry",
   resourceLoader: "_resourceLoader",
+  runAgentPrompt: "_runAgentPrompt",
   rewriteFile: "_rewriteFile",
   runAutoCompaction: "_runAutoCompaction",
   toolPromptGuidelines: "_toolPromptGuidelines",
@@ -208,6 +209,21 @@ export function refreshPiSessionToolRegistry(session: any) {
 
 export function emitPiSessionEvent(session: any, event: any) {
   return session?.[PI_SESSION_PRIVATE.emit]?.(event);
+}
+
+export async function resumePiSessionTurn(session: any) {
+  const runAgentPrompt = bindMethod(session, PI_SESSION_PRIVATE.runAgentPrompt);
+  if (!runAgentPrompt) {
+    throw new Error("Pi AgentSession continuation runner is unavailable");
+  }
+  const messages = session?.agent?.state?.messages;
+  const lastMessage = Array.isArray(messages) ? messages.at(-1) : undefined;
+  if (lastMessage?.role !== "user" && lastMessage?.role !== "toolResult") {
+    throw new Error("Pi AgentSession transcript is not continuable");
+  }
+  // Pi has no public session-level continuation. An empty message list starts
+  // its session runner without persisting synthetic user or custom history.
+  await runAgentPrompt([]);
 }
 
 export function getPiExtensionRunner(session: any) {

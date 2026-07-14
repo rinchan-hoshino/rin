@@ -5293,6 +5293,9 @@ test(
         },
         bindExtensions: async () => {},
         subscribe: () => {},
+        _runAgentPrompt: async (messages) => {
+          calls.push(["runAgentPrompt", messages]);
+        },
         prompt: async () => {},
         steer: async () => {},
         followUp: async () => {},
@@ -5382,7 +5385,7 @@ test(
         interrupted: true,
         reason: "daemon_exit",
       });
-      assert.deepEqual(calls[2], ["continue"]);
+      assert.deepEqual(calls[2], ["runAgentPrompt", []]);
       assert.equal(stateMessages.length, 2);
       assert.equal(stateMessages[1].role, "toolResult");
       assert.ok(lines.join("").includes('"command":"resume_interrupted_turn"'));
