@@ -197,6 +197,8 @@ if ($mode -eq "update") {
 }
 if ($quickRun) { $launchLabel = "Launching Rin quick run..." }
 $minimumNodeVersion = [version]"22.19.0"
+$managedNpmVersion = "10.9.3"
+$managedNpmSha512 = "e84875bb943e908557780f1eee5d9cfc7a67145730ae4b77ef10ccba30f96ded6096859af69ea3dc5b2fde60725d79aa247cbed9c12544c30bf28a4d4fbc4825"
 
 $repoUrl = if ($env:RIN_INSTALL_REPO_URL) { $env:RIN_INSTALL_REPO_URL } else { "https://github.com/rinchan-hoshino/rin" }
 $bootstrapBranch = if ($env:RIN_BOOTSTRAP_BRANCH) { $env:RIN_BOOTSTRAP_BRANCH } else { "bootstrap" }
@@ -444,6 +446,104 @@ function Write-Release-Handoff($Release) {
   } | ConvertTo-Json -Compress | Set-Content -LiteralPath $script:releaseFile -Encoding UTF8
 }
 
+function Provision-SourceManagedNode {
+  $sourceNode = (Get-Command node -ErrorAction Stop).Source
+  $sourceNodeRoot = Split-Path -Parent $sourceNode
+  $sourceNpmRoot = Join-Path $sourceNodeRoot "node_modules/npm"
+
+  $managedRoot = Join-Path $script:srcDir "runtime/node/current"
+  $managedNode = Join-Path $managedRoot "node.exe"
+  $managedNpmRoot = Join-Path $managedRoot "node_modules/npm"
+  $managedNpmCli = Join-Path $managedNpmRoot "bin/npm-cli.js"
+  $managedNodeExists = Test-Path -LiteralPath $managedNode -PathType Leaf
+  $copiedSourceNode = $false
+  if (-not $managedNodeExists) {
+    Remove-Item -LiteralPath $managedRoot -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $managedRoot | Out-Null
+    Copy-Item -LiteralPath $sourceNode -Destination $managedNode -Force
+    $copiedSourceNode = $true
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $managedNpmRoot) | Out-Null
+  if ($copiedSourceNode -and (Test-Path -LiteralPath (Join-Path $sourceNpmRoot "bin/npm-cli.js"))) {
+    Copy-Item -LiteralPath $sourceNpmRoot -Destination $managedNpmRoot -Recurse -Force
+  }
+
+  $previousPath = $env:PATH
+  $previousNodePath = $env:NODE_PATH
+  $managedNpmValid = $false
+  try {
+    $env:PATH = $managedRoot
+    $env:NODE_PATH = ""
+    if (Test-Path -LiteralPath $managedNpmCli) {
+      & $managedNode $managedNpmCli --version *> $null
+      $managedNpmValid = $LASTEXITCODE -eq 0
+    }
+  } finally {
+    $env:PATH = $previousPath
+    $env:NODE_PATH = $previousNodePath
+  }
+
+  if (-not $managedNpmValid) {
+    Remove-Item -LiteralPath $managedNpmRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $npmCacheDir = Join-Path $script:cacheBase "rin/node-toolchain"
+    $npmArchive = Join-Path $npmCacheDir "npm-$script:managedNpmVersion.tgz"
+    New-Item -ItemType Directory -Force -Path $npmCacheDir | Out-Null
+    $archiveValid = $false
+    if (Test-Path -LiteralPath $npmArchive) {
+      $archiveHash = (Get-FileHash -LiteralPath $npmArchive -Algorithm SHA512).Hash.ToLowerInvariant()
+      $archiveValid = $archiveHash -eq $script:managedNpmSha512
+      if (-not $archiveValid) {
+        Remove-Item -LiteralPath $npmArchive -Force -ErrorAction SilentlyContinue
+      }
+    }
+    if (-not $archiveValid) {
+      $temporaryArchive = "$npmArchive.$PID.tmp"
+      try {
+        Invoke-WebRequest -UseBasicParsing -Uri "https://registry.npmjs.org/npm/-/npm-$script:managedNpmVersion.tgz" -OutFile $temporaryArchive
+        $archiveHash = (Get-FileHash -LiteralPath $temporaryArchive -Algorithm SHA512).Hash.ToLowerInvariant()
+        if ($archiveHash -ne $script:managedNpmSha512) {
+          throw "rin managed npm checksum mismatch"
+        }
+        Move-Item -LiteralPath $temporaryArchive -Destination $npmArchive -Force
+      } finally {
+        Remove-Item -LiteralPath $temporaryArchive -Force -ErrorAction SilentlyContinue
+      }
+    }
+    $npmExtract = Join-Path $script:workDir "managed-npm"
+    Remove-Item -LiteralPath $npmExtract -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $npmExtract | Out-Null
+    tar -xzf $npmArchive -C $npmExtract
+    if ($LASTEXITCODE -ne 0) { throw "managed npm extraction failed with exit code $LASTEXITCODE" }
+    Copy-Item -LiteralPath (Join-Path $npmExtract "package") -Destination $managedNpmRoot -Recurse -Force
+  }
+
+  @"
+@ECHO off
+"%~dp0\node.exe" "%~dp0\node_modules\npm\bin\npm-cli.js" %*
+"@ | Set-Content -LiteralPath (Join-Path $managedRoot "npm.cmd") -Encoding ASCII
+  @"
+@ECHO off
+"%~dp0\node.exe" "%~dp0\node_modules\npm\bin\npx-cli.js" %*
+"@ | Set-Content -LiteralPath (Join-Path $managedRoot "npx.cmd") -Encoding ASCII
+
+  $previousPath = $env:PATH
+  $previousNodePath = $env:NODE_PATH
+  try {
+    $env:PATH = $managedRoot
+    $env:NODE_PATH = ""
+    & $managedNode $managedNpmCli --version *> $null
+    if ($LASTEXITCODE -ne 0) { throw "rin managed node runtime is missing a self-contained npm" }
+  } finally {
+    $env:PATH = $previousPath
+    $env:NODE_PATH = $previousNodePath
+  }
+  return [pscustomobject]@{
+    Root = $managedRoot
+    Node = $managedNode
+    NpmCli = $managedNpmCli
+  }
+}
+
 try {
   Assert-NodeVersion
   Invoke-WithSpinner "Fetching release manifest" {
@@ -468,6 +568,11 @@ try {
     tar -xzf $using:archive -C $using:srcDir --strip-components=1
     if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }
   }
+  $managedToolchain = Provision-SourceManagedNode
+  $managedNode = $managedToolchain.Node
+  $managedNpmCli = $managedToolchain.NpmCli
+  $env:PATH = "$($managedToolchain.Root);$env:PATH"
+  $env:NODE_PATH = ""
   Push-Location $srcDir
   try {
     if ($release.Channel -eq "stable") {
@@ -481,39 +586,44 @@ try {
             $packageJson | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding UTF8
           }
         } catch {}
-        npm install --omit=dev --no-fund --no-audit
+        & $using:managedNode $using:managedNpmCli install --omit=dev --no-fund --no-audit
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
       }
     } elseif (Test-Path -LiteralPath "package-lock.json") {
       Invoke-WithSpinner "Installing dependencies" {
         Set-Location $using:srcDir
-        npm ci --no-fund --no-audit
+        & $using:managedNode $using:managedNpmCli ci --no-fund --no-audit
         if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
       }
     } else {
       Invoke-WithSpinner "Installing dependencies" {
         Set-Location $using:srcDir
-        npm install --no-fund --no-audit
+        & $using:managedNode $using:managedNpmCli install --no-fund --no-audit
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
       }
     }
     if ($release.Channel -ne "stable") {
       Invoke-WithSpinner $buildLabel {
         Set-Location $using:srcDir
-        npm run build
+        & $using:managedNode $using:managedNpmCli run build
         if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
       }
       Invoke-WithSpinner "Pruning dependencies" {
         Set-Location $using:srcDir
-        npm prune --omit=dev --no-fund --no-audit
+        & $using:managedNode $using:managedNpmCli prune --omit=dev --no-fund --no-audit
         if ($LASTEXITCODE -ne 0) { throw "npm prune failed with exit code $LASTEXITCODE" }
       }
+    }
+    Invoke-WithSpinner "Verifying native dependencies" {
+      Set-Location $using:srcDir
+      & $using:managedNode -e "const Database=require('better-sqlite3');const db=new Database(':memory:');db.prepare('select 1').get();db.close();"
+      if ($LASTEXITCODE -ne 0) { throw "native dependency verification failed with exit code $LASTEXITCODE" }
     }
     Say $launchLabel
     $installerArgs = @("dist/app/rin-install/main.js", "--release-file", $releaseFile)
     if ($quickRun) { $installerArgs += "--quick-run" }
     if ($mode -eq "update") { $installerArgs += "--update" }
-    node @installerArgs
+    & $managedNode @installerArgs
     exit $LASTEXITCODE
   } finally {
     Pop-Location

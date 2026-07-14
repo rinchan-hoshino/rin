@@ -8,8 +8,17 @@
 - Installer and update handling now preserves initialization and PowerShell failure state, uses the target runtime for cross-user helpers, and reports system and restart errors more clearly.
 - Telegram topics, Discord working continuity, native Lark images, Markdown indentation, OneBot media, and shared editable progress adapters now follow stricter platform-specific delivery contracts.
 - macOS daemon restart handling now replaces stale launchd-owned processes while bounding shutdown waits and preserving atomic restart behavior.
-- Runtime usage and maintenance surfaces now include quota-aware trend charts, dedicated first-run scheduler sessions, updated Pi integrations, and removal of obsolete adapter and mirror paths.
+- Runtime usage and maintenance surfaces now include quota-aware trend charts, bounded dashboard queries, dedicated scheduler turn ownership, updated Pi integrations, and removal of obsolete adapter and mirror paths.
+- TUI resync now restores visible history, editable chat progress remains until the final reply, recovered provider failures retry safely, and managed Node bundles include npm for installer handoffs.
 <!-- rin-changelog-coverage
+8b84a8e fix(tui): restore history after rpc resync
+e6a3a2e fix(usage): bound dashboard query cost
+9ab9e6d fix(chat): keep editable progress until final
+7ceb0cb fix(installer): bundle npm with managed node
+d485c0e fix(daemon): retry recovered turn provider failures
+fa64406 refactor(cron): unify scheduled turn lifecycle ownership
+2bd1b86 fix(chat): show Working before frontend connect
+eae70b6 docs(agent): generalize prompt engineering guidance
 13332bd fix(installer): preserve init completion state
 1d99d58 fix(chat-runtime): clean up progress before final replies
 bbf6402 fix(tui): mount loaded resources on startup

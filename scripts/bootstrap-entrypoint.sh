@@ -12,7 +12,6 @@ case "$MODE" in
     BUILD_LABEL='Building installer'
     LAUNCH_LABEL='Launching installer...'
     FETCH_ERROR='rin installer requires curl or wget'
-    NPM_ERROR='rin installer requires npm'
     NODE_ERROR='rin installer requires Node.js >= 22.19.0'
     ;;
   update)
@@ -24,7 +23,6 @@ case "$MODE" in
     BUILD_LABEL='Building updater'
     LAUNCH_LABEL='Launching updater...'
     FETCH_ERROR='rin updater requires curl or wget'
-    NPM_ERROR='rin updater requires npm'
     NODE_ERROR='rin updater requires Node.js >= 22.19.0'
     ;;
   *)
@@ -54,6 +52,8 @@ ARCHIVE_URL=
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 LOCAL_MANIFEST_PATH="$REPO_ROOT/release-manifest.json"
+MANAGED_NPM_VERSION=10.9.3
+MANAGED_NPM_SHA512=e84875bb943e908557780f1eee5d9cfc7a67145730ae4b77ef10ccba30f96ded6096859af69ea3dc5b2fde60725d79aa247cbed9c12544c30bf28a4d4fbc4825
 
 usage() {
   cat <<'EOF'
@@ -533,6 +533,22 @@ verify_archive_sha256() {
   fi
 }
 
+verify_managed_npm_archive() {
+  file=$1
+  if command -v sha512sum >/dev/null 2>&1; then
+    actual=$(sha512sum "$file" | awk '{print $1}')
+  elif command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 512 "$file" | awk '{print $1}')
+  else
+    echo "rin bootstrap requires sha512sum or shasum to verify managed npm" >&2
+    exit 1
+  fi
+  if [ "$actual" != "$MANAGED_NPM_SHA512" ]; then
+    echo "rin managed npm checksum mismatch" >&2
+    return 1
+  fi
+}
+
 extract_archive() {
   archive=$1
   dest=$2
@@ -577,18 +593,98 @@ find_bundled_node() {
   exit 1
 }
 
+find_bundled_npm_cli() {
+  for candidate in \
+    "$SRC_DIR/runtime/node/current/lib/node_modules/npm/bin/npm-cli.js" \
+    "$SRC_DIR/runtime/node/current/node_modules/npm/bin/npm-cli.js"
+  do
+    if [ -f "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  echo "rin managed node runtime is missing npm" >&2
+  exit 1
+}
+
 provision_source_managed_node() {
-  if [ -x "$SRC_DIR/runtime/node/current/bin/node" ] || [ -x "$SRC_DIR/runtime/node/current/node.exe" ]; then
+  target_root="$SRC_DIR/runtime/node/current"
+  target_node="$target_root/bin/node"
+  target_npm_root="$target_root/lib/node_modules/npm"
+  target_npm_cli="$target_npm_root/bin/npm-cli.js"
+  if [ -x "$target_node" ] && [ -f "$target_npm_cli" ] &&
+    NODE_PATH= PATH="$target_root/bin" "$target_node" "$target_npm_cli" --version >/dev/null 2>&1
+  then
     return 0
   fi
-  node_path=$(command -v node 2>/dev/null || true)
-  if [ -z "$node_path" ] || [ ! -x "$node_path" ]; then
-    echo "$NODE_ERROR" >&2
+  copied_source_node=
+  if [ ! -x "$target_node" ]; then
+    node_path=$(command -v node 2>/dev/null || true)
+    if [ -z "$node_path" ] || [ ! -x "$node_path" ]; then
+      echo "$NODE_ERROR" >&2
+      exit 1
+    fi
+    rm -rf "$target_root"
+    mkdir -p "$target_root/bin" "$target_root/lib/node_modules"
+    cp "$node_path" "$target_node"
+    chmod 0755 "$target_node"
+    copied_source_node=1
+  else
+    mkdir -p "$target_root/bin" "$target_root/lib/node_modules"
+  fi
+
+  if [ -n "$copied_source_node" ]; then
+    node_bin_dir=$(dirname "$node_path")
+    if [ "$(basename "$node_bin_dir")" = bin ]; then
+      node_root=$(dirname "$node_bin_dir")
+    else
+      node_root=$node_bin_dir
+    fi
+    npm_root="$node_root/lib/node_modules/npm"
+    if [ -d "$npm_root" ]; then
+      cp -RL "$npm_root" "$target_npm_root"
+      ln -s ../lib/node_modules/npm/bin/npm-cli.js "$target_root/bin/npm"
+      ln -s ../lib/node_modules/npm/bin/npx-cli.js "$target_root/bin/npx"
+    fi
+  fi
+
+  if [ ! -f "$target_npm_cli" ] ||
+    ! NODE_PATH= PATH="$target_root/bin" "$target_node" "$target_npm_cli" --version >/dev/null 2>&1
+  then
+    rm -rf "$target_npm_root" "$target_root/bin/npm" "$target_root/bin/npx"
+    npm_archive="$CACHE_BASE/rin/node-toolchain/npm-$MANAGED_NPM_VERSION.tgz"
+    mkdir -p "$(dirname "$npm_archive")"
+    if [ -f "$npm_archive" ]; then
+      if ! verify_managed_npm_archive "$npm_archive"; then
+        rm -f "$npm_archive"
+      fi
+    fi
+    if [ ! -f "$npm_archive" ]; then
+      temporary_archive="$npm_archive.$$.tmp"
+      if ! fetch "https://registry.npmjs.org/npm/-/npm-$MANAGED_NPM_VERSION.tgz" "$temporary_archive"; then
+        rm -f "$temporary_archive"
+        exit 1
+      fi
+      if ! verify_managed_npm_archive "$temporary_archive"; then
+        rm -f "$temporary_archive"
+        exit 1
+      fi
+      mv -f "$temporary_archive" "$npm_archive"
+    fi
+    verify_managed_npm_archive "$npm_archive"
+    npm_extract="$WORKDIR/managed-npm"
+    rm -rf "$npm_extract"
+    mkdir -p "$npm_extract"
+    tar -xzf "$npm_archive" -C "$npm_extract"
+    cp -R "$npm_extract/package" "$target_npm_root"
+    ln -s ../lib/node_modules/npm/bin/npm-cli.js "$target_root/bin/npm"
+    ln -s ../lib/node_modules/npm/bin/npx-cli.js "$target_root/bin/npx"
+  fi
+
+  if ! NODE_PATH= PATH="$target_root/bin" "$target_node" "$target_npm_cli" --version >/dev/null 2>&1; then
+    echo "rin managed node runtime is missing a self-contained npm" >&2
     exit 1
   fi
-  mkdir -p "$SRC_DIR/runtime/node/current/bin"
-  cp "$node_path" "$SRC_DIR/runtime/node/current/bin/node"
-  chmod 0755 "$SRC_DIR/runtime/node/current/bin/node"
 }
 
 resolve_release() {
@@ -814,7 +910,13 @@ if select_platform_asset_release; then
   mkdir -p "$SRC_DIR"
   run_step "$PREP_LABEL" extract_archive "$PLATFORM_ARCHIVE" "$SRC_DIR"
   NODE_COMMAND=$(find_bundled_node)
+  NPM_CLI=$(find_bundled_npm_cli)
+  PATH="$(dirname "$NODE_COMMAND"):$PATH"
+  NODE_PATH=
+  export PATH NODE_PATH
   cd "$SRC_DIR"
+  run_step "Verifying managed npm" "$NODE_COMMAND" "$NPM_CLI" --version
+  run_step "Verifying native dependencies" "$NODE_COMMAND" -e "const Database=require('better-sqlite3');const db=new Database(':memory:');db.prepare('select 1').get();db.close();"
   say "$LAUNCH_LABEL"
   if has_tty; then
     launch_installer_entry </dev/tty >/dev/tty 2>&1
@@ -853,9 +955,14 @@ mkdir -p "$SRC_DIR"
 run_step "$PREP_LABEL" extract_archive "$ARCHIVE" "$SRC_DIR"
 
 cd "$SRC_DIR"
-if command -v npm >/dev/null 2>&1; then
-  if [ "$CHANNEL" = stable ]; then
-    node - <<'NODE'
+provision_source_managed_node
+NODE_COMMAND=$(find_bundled_node)
+NPM_CLI=$(find_bundled_npm_cli)
+PATH="$(dirname "$NODE_COMMAND"):$PATH"
+NODE_PATH=
+export PATH NODE_PATH
+if [ "$CHANNEL" = stable ]; then
+  "$NODE_COMMAND" - <<'NODE'
 const fs = require('node:fs');
 const file = 'package.json';
 try {
@@ -866,23 +973,18 @@ try {
   }
 } catch {}
 NODE
-    run_step "Installing dependencies" npm install --omit=dev --no-fund --no-audit
-  elif [ -f package-lock.json ]; then
-    run_step "Installing dependencies" npm ci --no-fund --no-audit
-  else
-    run_step "Installing dependencies" npm install --no-fund --no-audit
-  fi
+  run_step "Installing dependencies" "$NODE_COMMAND" "$NPM_CLI" install --omit=dev --no-fund --no-audit
+elif [ -f package-lock.json ]; then
+  run_step "Installing dependencies" "$NODE_COMMAND" "$NPM_CLI" ci --no-fund --no-audit
 else
-  echo "$NPM_ERROR" >&2
-  exit 1
+  run_step "Installing dependencies" "$NODE_COMMAND" "$NPM_CLI" install --no-fund --no-audit
 fi
 
 if [ "$CHANNEL" != stable ]; then
-  run_step "$BUILD_LABEL" npm run build
-  run_step "Pruning dependencies" npm prune --omit=dev --no-fund --no-audit
+  run_step "$BUILD_LABEL" "$NODE_COMMAND" "$NPM_CLI" run build
+  run_step "Pruning dependencies" "$NODE_COMMAND" "$NPM_CLI" prune --omit=dev --no-fund --no-audit
 fi
-provision_source_managed_node
-NODE_COMMAND=$(find_bundled_node)
+run_step "Verifying native dependencies" "$NODE_COMMAND" -e "const Database=require('better-sqlite3');const db=new Database(':memory:');db.prepare('select 1').get();db.close();"
 say "$LAUNCH_LABEL"
 
 if has_tty; then
