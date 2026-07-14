@@ -611,6 +611,7 @@ export class ChatController {
     this.todoNoticeOperation?.abort.abort();
     this.todoNoticeOperation = null;
     this.latestTodoNoticeText = "";
+    this.latestAssistantSummaryText = "";
     const nextIncomingMessageId =
       safeString(input.incomingMessageId || "").trim() || undefined;
     const nextReplyToMessageId =
@@ -633,8 +634,11 @@ export class ChatController {
       replyToMessageId?: string;
     },
     deliverFinal: boolean,
+    startVisibleBeforeConnect = false,
   ) {
     let primedTurn: ChatTurnMeta | null = null;
+    let visibleProcessingStarted = false;
+    let visibleProcessingSettled = false;
     if (deliverFinal && !this.currentTurn) {
       // Reconnecting a recovered frontend can replay progress before connect()
       // resolves. Install the inbox identity first so those updates reuse the
@@ -643,6 +647,15 @@ export class ChatController {
       this.setCurrentTurn(input);
       primedTurn = this.currentTurn;
       this.awaitingTurnSettle = true;
+      if (startVisibleBeforeConnect) {
+        visibleProcessingStarted = true;
+        const turnGeneration = this.turnAbortGeneration;
+        void this.presentVisibleProcessingTurn(input, turnGeneration)
+          .catch(() => false)
+          .finally(() => {
+            visibleProcessingSettled = true;
+          });
+      }
     }
     try {
       const frontendReady = await this.connect();
@@ -653,9 +666,21 @@ export class ChatController {
           startedAt: Date.now(),
         })),
         frontendReady,
+        visibleProcessingStarted,
       };
     } catch (error) {
       if (primedTurn && this.currentTurn === primedTurn) {
+        if (visibleProcessingStarted) {
+          this.turnAbortGeneration += 1;
+          if (visibleProcessingSettled) {
+            const indicators = this.activeWorkingIndicators.length
+              ? [...this.activeWorkingIndicators]
+              : this.getWorkingIndicators();
+            void this.endWorkingIndicatorsForTurn(indicators, input).catch(
+              () => false,
+            );
+          }
+        }
         this.awaitingTurnSettle = false;
         this.clearCurrentTurn();
       }
@@ -1111,26 +1136,13 @@ export class ChatController {
     return Boolean(result);
   }
 
-  private async beginVisibleProcessingTurn(input: {
-    incomingMessageId?: string;
-    replyToMessageId?: string;
-  }) {
-    const turnGeneration = this.turnAbortGeneration;
-    const previousIncomingMessageId = this.currentIncomingMessageId();
-    const nextIncomingMessageId = safeString(
-      input.incomingMessageId || "",
-    ).trim();
-    if (
-      previousIncomingMessageId &&
-      nextIncomingMessageId &&
-      previousIncomingMessageId !== nextIncomingMessageId
-    ) {
-      await this.clearWorkingReaction().catch(() => {});
-    }
-    this.setCurrentTurn(input);
-    this.latestTodoNoticeText = "";
-    this.latestAssistantSummaryText = "";
-    this.awaitingTurnSettle = true;
+  private async presentVisibleProcessingTurn(
+    input: {
+      incomingMessageId?: string;
+      replyToMessageId?: string;
+    },
+    turnGeneration: number,
+  ) {
     const indicators = this.getWorkingIndicators();
     const editableStarted = await this.startEditableWorkingNotice(
       indicators,
@@ -1156,6 +1168,27 @@ export class ChatController {
       presentation,
       new Promise((resolve) => setImmediate(resolve)),
     ]);
+  }
+
+  private async beginVisibleProcessingTurn(input: {
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+  }) {
+    const turnGeneration = this.turnAbortGeneration;
+    const previousIncomingMessageId = this.currentIncomingMessageId();
+    const nextIncomingMessageId = safeString(
+      input.incomingMessageId || "",
+    ).trim();
+    if (
+      previousIncomingMessageId &&
+      nextIncomingMessageId &&
+      previousIncomingMessageId !== nextIncomingMessageId
+    ) {
+      await this.clearWorkingReaction().catch(() => {});
+    }
+    this.setCurrentTurn(input);
+    this.awaitingTurnSettle = true;
+    await this.presentVisibleProcessingTurn(input, turnGeneration);
   }
 
   private currentDeliveryTarget(input: {
@@ -2584,11 +2617,9 @@ export class ChatController {
           ? safeString(input.managedSessionLeaf).trim() ||
             this.managedSessionLeafForFreshChat()
           : undefined;
-      const { text, images, frontendReady } = await this.prepareTurnPrompt(
-        input,
-        deliverFinal,
-      );
-      if (deliverFinal) {
+      const { text, images, frontendReady, visibleProcessingStarted } =
+        await this.prepareTurnPrompt(input, deliverFinal, true);
+      if (deliverFinal && !visibleProcessingStarted) {
         // Progress delivery is presentation, not admission. Editable adapters
         // serialize their own working/final operations, so a slow platform send
         // must not postpone prompt submission.

@@ -109,7 +109,14 @@ export class EditableTextMessageGroup {
         });
         return ids.length > 0;
       },
-      end: async (_context: any) => false,
+      end: async (context: any) => {
+        const chatId = safeString(context?.chatId).trim();
+        if (!chatId) return false;
+        const replyToMessageId = safeString(
+          context?.replyToMessageId || context?.messageId,
+        ).trim();
+        return await this.deleteProgress(chatId, replyToMessageId || undefined);
+      },
     };
   }
 

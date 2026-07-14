@@ -2638,7 +2638,8 @@ test("chat controller /new cleans up editable Working that settles after abort",
 
   assert.equal(newCommand.text, "Started a new session.");
   assert.equal(abortCalled, true);
-  assert.equal(promptCalled, true);
+  // Early Working lets /new cancel this turn before prompt submission.
+  assert.equal(promptCalled, false);
   assert.equal(aborted.aborted, true);
   assert.deepEqual(deliveries, ["Started a new session."]);
   assert.deepEqual(visibleEvents, [
@@ -3974,6 +3975,221 @@ test("chat controller restores inbound reply identity before connect replays an 
     { text: "… Recovered progress", replyToMessageId: "m-restarted-turn" },
     { text: "Final answer", replyToMessageId: "m-restarted-turn" },
   ]);
+});
+
+test("chat controller starts reply-scoped editable Working before a cold frontend connection resolves", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  const calls: string[] = [];
+  let releaseConnect!: () => void;
+  const connectMayFinish = new Promise<void>((resolve) => {
+    releaseConnect = resolve;
+  });
+  let markConnectStarted!: () => void;
+  const connectStarted = new Promise<void>((resolve) => {
+    markConnectStarted = resolve;
+  });
+  let releaseWorking!: () => void;
+  const workingMayFinish = new Promise<void>((resolve) => {
+    releaseWorking = resolve;
+  });
+  controller.app = {
+    bots: [
+      {
+        platform: "discord",
+        selfId: "bot-1",
+        workingIndicators: [
+          {
+            type: "polling",
+            presentation: "editable-message",
+            async tick(context) {
+              assert.equal(context?.assistantSummaryText, undefined);
+              calls.push(`working:${context?.replyToMessageId}`);
+              await workingMayFinish;
+              return true;
+            },
+          },
+        ],
+      },
+    ],
+  };
+  controller.latestAssistantSummaryText = "stale summary";
+  controller.connect = async () => {
+    calls.push("connect");
+    markConnectStarted();
+    await connectMayFinish;
+    return true;
+  };
+  controller.driver.runTurn = async () => {
+    calls.push("prompt");
+    return { finalText: "ok" };
+  };
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    calls.push("final");
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+  };
+
+  const turn = controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-cold-connect",
+    replyToMessageId: "m-cold-connect",
+  });
+  await connectStarted;
+  await new Promise((resolve) => setImmediate(resolve));
+  const callsBeforeConnectFinished = [...calls];
+  releaseConnect();
+  while (!calls.includes("prompt")) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const promptStartedBeforeWorkingFinished = calls.includes("prompt");
+  releaseWorking();
+  const result = await turn;
+
+  assert.deepEqual(callsBeforeConnectFinished, [
+    "working:m-cold-connect",
+    "connect",
+  ]);
+  assert.equal(promptStartedBeforeWorkingFinished, true);
+  assert.equal(result.finalText, "ok");
+  assert.deepEqual(calls, [
+    "working:m-cold-connect",
+    "connect",
+    "prompt",
+    "final",
+  ]);
+});
+
+test("chat controller invalidates early Working when a cold frontend connection fails", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  const calls: string[] = [];
+  let releaseWorking!: () => void;
+  const workingMayFinish = new Promise<void>((resolve) => {
+    releaseWorking = resolve;
+  });
+  controller.app = {
+    bots: [
+      {
+        platform: "discord",
+        selfId: "bot-1",
+        workingIndicators: [
+          {
+            type: "polling",
+            presentation: "editable-message",
+            async tick(context) {
+              calls.push(`working:${context?.replyToMessageId}`);
+              await workingMayFinish;
+              return true;
+            },
+            async end(context) {
+              calls.push(`end:${context?.replyToMessageId}`);
+              return true;
+            },
+          },
+        ],
+      },
+    ],
+  };
+  controller.connect = async () => {
+    calls.push("connect");
+    throw new Error("connect failed");
+  };
+
+  const turn = controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-connect-failed-early-working",
+    replyToMessageId: "m-connect-failed-early-working",
+  });
+  await assert.rejects(turn, /connect failed/);
+  const callsBeforeWorkingFinished = [...calls];
+  releaseWorking();
+  for (
+    let index = 0;
+    index < 20 && !calls.some((item) => item.startsWith("end:"));
+    index += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.deepEqual(callsBeforeWorkingFinished, [
+    "working:m-connect-failed-early-working",
+    "connect",
+  ]);
+  assert.deepEqual(calls, [
+    "working:m-connect-failed-early-working",
+    "connect",
+    "end:m-connect-failed-early-working",
+  ]);
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.awaitingTurnSettle, false);
+});
+
+test("chat controller ends settled early Working when a later cold connection fails", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  const calls: string[] = [];
+  let markWorkingSettled!: () => void;
+  const workingSettled = new Promise<void>((resolve) => {
+    markWorkingSettled = resolve;
+  });
+  let releaseConnect!: () => void;
+  const connectMayFail = new Promise<void>((resolve) => {
+    releaseConnect = resolve;
+  });
+  controller.app = {
+    bots: [
+      {
+        platform: "discord",
+        selfId: "bot-1",
+        workingIndicators: [
+          {
+            type: "polling",
+            presentation: "editable-message",
+            async tick(context) {
+              calls.push(`working:${context?.replyToMessageId}`);
+              markWorkingSettled();
+              return true;
+            },
+            async end(context) {
+              calls.push(`end:${context?.replyToMessageId}`);
+              return true;
+            },
+          },
+        ],
+      },
+    ],
+  };
+  controller.connect = async () => {
+    calls.push("connect");
+    await connectMayFail;
+    throw new Error("connect failed later");
+  };
+
+  const turn = controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-connect-failed-after-working",
+    replyToMessageId: "m-connect-failed-after-working",
+  });
+  await workingSettled;
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseConnect();
+  await assert.rejects(turn, /connect failed later/);
+  for (
+    let index = 0;
+    index < 20 && !calls.some((item) => item.startsWith("end:"));
+    index += 1
+  ) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.deepEqual(calls, [
+    "working:m-connect-failed-after-working",
+    "connect",
+    "end:m-connect-failed-after-working",
+  ]);
+  assert.equal(controller.currentTurn, null);
+  assert.equal(controller.awaitingTurnSettle, false);
 });
 
 test("chat controller clears a primed reply identity when connect fails", async () => {

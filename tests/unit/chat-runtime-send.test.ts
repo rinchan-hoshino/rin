@@ -379,6 +379,57 @@ test("discord adapter waits for in-flight editable progress before final cleanup
   });
 });
 
+test("discord editable Working end removes settled progress", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    const channel = {
+      send: async (payload: any) => {
+        const message = {
+          id: "1",
+          payload,
+          edit: async () => message,
+        };
+        messages.set(message.id, message);
+        calls.push({ method: "send", id: message.id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => {
+          calls.push({ method: "delete", id });
+          messages.delete(id);
+        },
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const editable = requireEditableIndicator(app.bots[0]);
+    await editable.tick({
+      chatId: "C1",
+      tick: 0,
+      replyToMessageId: "m-owner",
+    });
+    const ended = await editable.end({
+      chatId: "C1",
+      replyToMessageId: "m-owner",
+    });
+
+    assert.equal(ended, true);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "delete"],
+    );
+    assert.equal(calls[0].payload.reply?.messageReference, "m-owner");
+  });
+});
+
 test("discord adapter keeps working, content, and todo editable before final text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
