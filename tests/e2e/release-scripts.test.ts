@@ -688,16 +688,28 @@ test(
       const fakeRepo = path.join(tempDir, "repo");
       const outputDir = path.join(tempDir, "out");
       const nodeRuntime = path.join(tempDir, "node-runtime");
+      const hostileBin = path.join(tempDir, "hostile-bin");
+      const invocationLog = path.join(tempDir, "managed-node.log");
       fs.mkdirSync(path.join(fakeRepo, "dist", "app", "rin-install"), {
         recursive: true,
       });
       fs.mkdirSync(path.join(fakeRepo, "dist", "app", "rin"), {
         recursive: true,
       });
-      fs.mkdirSync(path.join(fakeRepo, "node_modules"), { recursive: true });
+      fs.mkdirSync(path.join(fakeRepo, "node_modules", "better-sqlite3"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(fakeRepo, "node_modules", "better-sqlite3", "package.json"),
+        JSON.stringify({ name: "better-sqlite3", version: "12.11.1" }),
+      );
       fs.writeFileSync(
         path.join(fakeRepo, "package.json"),
-        JSON.stringify({ name: "@hoshinorin/rin", version: "1.2.3" }),
+        JSON.stringify({
+          name: "@hoshinorin/rin",
+          version: "1.2.3",
+          dependencies: { "better-sqlite3": "12.11.1" },
+        }),
       );
       fs.writeFileSync(
         path.join(fakeRepo, "dist", "app", "rin-install", "main.js"),
@@ -711,24 +723,62 @@ test(
       const nodePath = path.join(nodeRuntime, "bin", "node");
       fs.writeFileSync(
         nodePath,
-        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo v24.18.0; exit 0; fi\nexit 0\n',
+        `#!/bin/sh
+echo "$*" >>"$RIN_RELEASE_TEST_LOG"
+if [ "$1" = "--version" ]; then echo v24.18.0; exit 0; fi
+case "$1" in
+  *npm-cli.js)
+    if [ "\${PATH%%:*}" != "$(dirname "$0")" ]; then exit 91; fi
+    echo 10.9.3
+    exit 0
+    ;;
+  -e)
+    test -f node_modules/better-sqlite3/package.json || exit 92
+    exit 0
+    ;;
+esac
+exit 0
+`,
       );
       fs.chmodSync(nodePath, 0o755);
-
-      const output = runReleaseScript("build-platform-bundle.ts", [
-        "--repo-root",
-        fakeRepo,
-        "--output",
-        outputDir,
-        "--platform",
-        "linux-x64",
-        "--version",
-        "1.2.4-beta.20260420",
-        "--node-runtime",
+      const npmCliPath = path.join(
         nodeRuntime,
-        "--node-version",
-        "24.18.0",
-      ]);
+        "lib",
+        "node_modules",
+        "npm",
+        "bin",
+        "npm-cli.js",
+      );
+      fs.mkdirSync(path.dirname(npmCliPath), { recursive: true });
+      fs.writeFileSync(npmCliPath, "export {};\n");
+      fs.mkdirSync(hostileBin, { recursive: true });
+      const hostileNode = path.join(hostileBin, "node");
+      fs.writeFileSync(hostileNode, "#!/bin/sh\nexit 93\n", { mode: 0o755 });
+
+      const output = runReleaseScript(
+        "build-platform-bundle.ts",
+        [
+          "--repo-root",
+          fakeRepo,
+          "--output",
+          outputDir,
+          "--platform",
+          "linux-x64",
+          "--version",
+          "1.2.4-beta.20260420",
+          "--node-runtime",
+          nodeRuntime,
+          "--node-version",
+          "24.18.0",
+        ],
+        {
+          env: {
+            ...process.env,
+            PATH: `${hostileBin}${path.delimiter}${process.env.PATH}`,
+            RIN_RELEASE_TEST_LOG: invocationLog,
+          },
+        },
+      );
       const result = JSON.parse(output);
       assert.equal(result.platform, "linux-x64");
       assert.equal(result.nodeVersion, "24.18.0");
@@ -737,6 +787,10 @@ test(
         path.basename(result.bundlePath),
         "rin-1.2.4-beta.20260420-linux-x64.tar.gz",
       );
+      const managedInvocations = fs.readFileSync(invocationLog, "utf8");
+      assert.match(managedInvocations, /npm-cli\.js prune/);
+      assert.match(managedInvocations, /npm-cli\.js --version/);
+      assert.match(managedInvocations, /better-sqlite3/);
       const extractDir = path.join(tempDir, "extract");
       fs.mkdirSync(extractDir, { recursive: true });
       execFileSync("tar", ["-xzf", result.bundlePath, "-C", extractDir]);
@@ -758,6 +812,16 @@ test(
         "node_modules",
         "package.json",
         path.join("runtime", "node", "current", "bin", "node"),
+        path.join(
+          "runtime",
+          "node",
+          "current",
+          "lib",
+          "node_modules",
+          "npm",
+          "bin",
+          "npm-cli.js",
+        ),
       ]) {
         assert.equal(
           fs.existsSync(path.join(bundleRoot, relativePath)),

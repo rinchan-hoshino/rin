@@ -222,16 +222,6 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
   await fs.mkdir(agentDir, { recursive: true });
   await fs.mkdir(runtimeDir, { recursive: true });
   const managedNodeSourceRoot = path.join(tempDir, "managed-node-source");
-  const sourceNodeExecutable = path.join(
-    managedNodeSourceRoot,
-    "runtime",
-    "node",
-    "current",
-    process.platform === "win32" ? "node.exe" : "bin/node",
-  );
-  await fs.mkdir(path.dirname(sourceNodeExecutable), { recursive: true });
-  await fs.copyFile(process.execPath, sourceNodeExecutable);
-  await fs.chmod(sourceNodeExecutable, 0o755);
 
   const release = {
     channel: "git",

@@ -98,9 +98,15 @@ function sha256(filePath: string) {
   return hash.digest("hex");
 }
 
-function run(command: string, args: string[], cwd: string) {
+function run(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+) {
   const result = spawnSync(command, args, {
     cwd,
+    env,
     stdio: ["ignore", "ignore", "inherit"],
   });
   if (result.error) throw result.error;
@@ -109,7 +115,47 @@ function run(command: string, args: string[], cwd: string) {
   }
 }
 
-function pruneBundleDependencies(sourceRoot: string, bundleRoot: string) {
+function nodeToolchainPaths(nodeRoot: string, platform: string) {
+  return platform.startsWith("win32-")
+    ? {
+        nodeExecutable: path.join(nodeRoot, "node.exe"),
+        npmCli: path.join(nodeRoot, "node_modules", "npm", "bin", "npm-cli.js"),
+      }
+    : {
+        nodeExecutable: path.join(nodeRoot, "bin", "node"),
+        npmCli: path.join(
+          nodeRoot,
+          "lib",
+          "node_modules",
+          "npm",
+          "bin",
+          "npm-cli.js",
+        ),
+      };
+}
+
+function managedToolchainEnvironment(
+  toolchain: ReturnType<typeof nodeToolchainPaths>,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const inheritedPath = String(env.PATH || "").trim();
+  return {
+    ...env,
+    PATH: [path.dirname(toolchain.nodeExecutable), inheritedPath]
+      .filter(Boolean)
+      .join(path.delimiter),
+    NODE_PATH: "",
+    npm_node_execpath: toolchain.nodeExecutable,
+    npm_execpath: toolchain.npmCli,
+  };
+}
+
+function pruneBundleDependencies(
+  sourceRoot: string,
+  bundleRoot: string,
+  nodeRuntimeRoot: string,
+  platform: string,
+) {
   const nodeModules = path.join(bundleRoot, "node_modules");
   if (!fs.existsSync(nodeModules)) return;
   const sourceLockfile = path.join(sourceRoot, "package-lock.json");
@@ -117,10 +163,15 @@ function pruneBundleDependencies(sourceRoot: string, bundleRoot: string) {
   if (fs.existsSync(sourceLockfile)) {
     fs.copyFileSync(sourceLockfile, bundleLockfile);
   }
+  const toolchain = nodeToolchainPaths(nodeRuntimeRoot, platform);
+  if (!fs.existsSync(toolchain.npmCli)) {
+    throw new Error("bundle_missing:managed npm");
+  }
   try {
     run(
-      "npm",
+      toolchain.nodeExecutable,
       [
+        toolchain.npmCli,
         "prune",
         "--omit=dev",
         "--no-fund",
@@ -129,6 +180,7 @@ function pruneBundleDependencies(sourceRoot: string, bundleRoot: string) {
         "--package-lock=false",
       ],
       bundleRoot,
+      managedToolchainEnvironment(toolchain),
     );
   } finally {
     fs.rmSync(bundleLockfile, { force: true });
@@ -149,9 +201,11 @@ function validateBundleLayout(bundleRoot: string, platform: string) {
       throw new Error(`bundle_missing:${relativePath}`);
     }
   }
-  const nodeExecutable = platform.startsWith("win32-")
-    ? path.join(bundleRoot, "runtime", "node", "current", "node.exe")
-    : path.join(bundleRoot, "runtime", "node", "current", "bin", "node");
+  const toolchain = nodeToolchainPaths(
+    path.join(bundleRoot, "runtime", "node", "current"),
+    platform,
+  );
+  const { nodeExecutable, npmCli } = toolchain;
   fs.accessSync(nodeExecutable, fs.constants.X_OK);
   const result = spawnSync(nodeExecutable, ["--version"], {
     cwd: bundleRoot,
@@ -165,6 +219,43 @@ function validateBundleLayout(bundleRoot: string, platform: string) {
   const version = String(result.stdout || "").trim();
   if (!/^v?\d+\.\d+\.\d+/.test(version)) {
     throw new Error(`bundled_node_invalid_version:${version || "empty"}`);
+  }
+
+  if (!fs.existsSync(npmCli)) throw new Error("bundle_missing:managed npm");
+  const managedEnv = managedToolchainEnvironment(toolchain);
+  const npmResult = spawnSync(nodeExecutable, [npmCli, "--version"], {
+    cwd: bundleRoot,
+    env: managedEnv,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  if (npmResult.error) throw npmResult.error;
+  if (npmResult.status !== 0) {
+    throw new Error(`bundled_npm_failed:${npmResult.status ?? 1}`);
+  }
+  const npmVersion = String(npmResult.stdout || "").trim();
+  if (!/^\d+\.\d+\.\d+/.test(npmVersion)) {
+    throw new Error(`bundled_npm_invalid_version:${npmVersion || "empty"}`);
+  }
+
+  const nativeResult = spawnSync(
+    nodeExecutable,
+    [
+      "-e",
+      "const Database=require('better-sqlite3');const db=new Database(':memory:');db.prepare('select 1').get();db.close();",
+    ],
+    {
+      cwd: bundleRoot,
+      env: managedEnv,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+  if (nativeResult.error) throw nativeResult.error;
+  if (nativeResult.status !== 0) {
+    throw new Error(
+      `bundled_native_dependency_failed:${nativeResult.status ?? 1}`,
+    );
   }
 }
 
@@ -192,10 +283,10 @@ try {
     path.join(bundleRoot, "package.json"),
     `${JSON.stringify(packageJson, null, 2)}\n`,
   );
-  pruneBundleDependencies(repoRoot, bundleRoot);
   const nodeRuntimeRoot = path.resolve(
     args.nodeRuntime || inferNodeRuntimeRoot(),
   );
+  pruneBundleDependencies(repoRoot, bundleRoot, nodeRuntimeRoot, args.platform);
   const targetNodeRoot = path.join(bundleRoot, "runtime", "node", "current");
   fs.mkdirSync(path.dirname(targetNodeRoot), { recursive: true });
   fs.cpSync(nodeRuntimeRoot, targetNodeRoot, {

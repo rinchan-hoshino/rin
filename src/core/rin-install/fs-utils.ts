@@ -27,12 +27,12 @@ import {
   launcherPathForHome,
   localBinDirForHome,
   managedNodeBinDir,
-  managedNodeCurrentRoot,
   managedNodeExecutablePath,
   managedNodeRoot,
   windowsLauncherPathForHome,
 } from "./paths.js";
 import { pruneDuplicatePiCodingAgentDependencies } from "./runtime-dependency-prune.js";
+import { provisionPreparedCurrentNodeRuntime } from "./update-workflow.js";
 
 export { ensureDir, readJsonFile, writeJsonFile };
 
@@ -891,47 +891,17 @@ export function publishManagedNodeRuntime(
   elevated = false,
   deps: { findSystemUser: (user: string) => any },
 ) {
+  provisionPreparedCurrentNodeRuntime(sourceRoot);
   const sourceNodeRoot = path.join(sourceRoot, "runtime", "node");
   const sourceNodeExecutable =
     managedNodeExecutableInsideNodeRoot(sourceNodeRoot);
   const targetNodeRoot = managedNodeRoot(installDir);
-  const targetCurrentRoot = managedNodeCurrentRoot(installDir);
   const targetExecutable = managedNodeExecutablePath(installDir);
   if (elevated && process.platform === "win32") {
     throw new Error("rin_elevated_install_unsupported_on_windows");
   }
-  if (isExecutableFile(sourceNodeExecutable)) {
-    if (elevated) {
-      const target = deps.findSystemUser(targetUser) as any;
-      const targetGroup = target?.name ? String(target?.gid ?? "") : "";
-      const owner = ownerSpec(target?.name, targetGroup);
-      ensurePrivilegedOwnedDir(
-        path.dirname(targetNodeRoot),
-        target?.name,
-        targetGroup,
-      );
-      runPrivileged("rm", ["-rf", targetNodeRoot]);
-      runPrivileged("cp", ["-a", sourceNodeRoot, targetNodeRoot]);
-      if (owner) runPrivileged("chown", ["-R", owner, targetNodeRoot]);
-    } else {
-      syncTree(sourceNodeRoot, targetNodeRoot);
-    }
-    return {
-      nodeRoot: targetNodeRoot,
-      nodeExecutable: targetExecutable,
-    };
-  }
-
-  if (isExecutableFile(targetExecutable)) {
-    return {
-      nodeRoot: targetNodeRoot,
-      nodeExecutable: targetExecutable,
-    };
-  }
-
-  const currentNodeExecutable = process.execPath;
-  if (!currentNodeExecutable || !fs.existsSync(currentNodeExecutable)) {
-    return null;
+  if (!isExecutableFile(sourceNodeExecutable)) {
+    throw new Error(`rin_managed_node_runtime_missing:${sourceNodeExecutable}`);
   }
   if (elevated) {
     const target = deps.findSystemUser(targetUser) as any;
@@ -942,16 +912,11 @@ export function publishManagedNodeRuntime(
       target?.name,
       targetGroup,
     );
-    runPrivileged("rm", ["-rf", targetCurrentRoot]);
-    runPrivileged("mkdir", ["-p", path.dirname(targetExecutable)]);
-    runPrivileged("cp", [currentNodeExecutable, targetExecutable]);
-    runPrivileged("chmod", ["0755", targetExecutable]);
+    runPrivileged("rm", ["-rf", targetNodeRoot]);
+    runPrivileged("cp", ["-a", sourceNodeRoot, targetNodeRoot]);
     if (owner) runPrivileged("chown", ["-R", owner, targetNodeRoot]);
   } else {
-    fs.rmSync(targetCurrentRoot, { recursive: true, force: true });
-    ensureDir(path.dirname(targetExecutable));
-    fs.copyFileSync(currentNodeExecutable, targetExecutable);
-    fs.chmodSync(targetExecutable, 0o755);
+    syncTree(sourceNodeRoot, targetNodeRoot);
   }
   return {
     nodeRoot: targetNodeRoot,

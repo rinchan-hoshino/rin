@@ -359,6 +359,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "This Rin install does not support that lifecycle command on this platform.",
   rin_managed_node_runtime_missing: () =>
     "Rin could not find its managed Node runtime. Repair or reinstall Rin before starting managed services or updating.",
+  rin_managed_node_npm_missing: () =>
+    "Rin could not find npm in its managed Node runtime.",
+  rin_managed_npm_cache_write_failed: () =>
+    "Rin could not save the verified managed npm archive to its download cache.",
+  rin_managed_npm_checksum_mismatch: () =>
+    "Rin stopped because the managed npm archive checksum did not match.",
   rin_missing_required_tool: (detail) =>
     withDetail(
       "Rin is missing a required system tool",

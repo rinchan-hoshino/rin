@@ -574,19 +574,30 @@ test("publishManagedNodeRuntime provisions current node for source installs", as
   const copied = await fs.readFile(published.nodeExecutable);
   const current = await fs.readFile(process.execPath);
   assert.deepEqual(copied, current);
+  await fs.access(
+    path.join(
+      installDir,
+      "runtime",
+      "node",
+      "current",
+      process.platform === "win32"
+        ? path.join("node_modules", "npm", "bin", "npm-cli.js")
+        : path.join("lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    ),
+  );
 
-  await fs.writeFile(published.nodeExecutable, "existing-managed-node\n");
-  const preserved = fsUtils.publishManagedNodeRuntime(
+  await fs.writeFile(published.nodeExecutable, "stale-managed-node\n");
+  const refreshed = fsUtils.publishManagedNodeRuntime(
     sourceRoot,
     installDir,
     "rin",
     false,
     { findSystemUser: () => null },
   );
-  assert.equal(preserved.nodeExecutable, published.nodeExecutable);
-  assert.equal(
-    await fs.readFile(published.nodeExecutable, "utf8"),
-    "existing-managed-node\n",
+  assert.equal(refreshed.nodeExecutable, published.nodeExecutable);
+  assert.deepEqual(
+    await fs.readFile(published.nodeExecutable),
+    await fs.readFile(process.execPath),
   );
 
   if (process.platform !== "win32") {

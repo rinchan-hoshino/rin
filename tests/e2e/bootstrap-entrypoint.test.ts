@@ -35,7 +35,7 @@ async function createSourceArchive(tempDir) {
     JSON.stringify(
       {
         scripts: { prepare: "node ./scripts/prepare.js" },
-        dependencies: { chalk: "^5.6.2" },
+        dependencies: { "better-sqlite3": "12.11.1", chalk: "^5.6.2" },
       },
       null,
       2,
@@ -61,7 +61,7 @@ async function createSourceArchive(tempDir) {
   return archivePath;
 }
 
-async function createPlatformBundleArchive(tempDir) {
+async function createPlatformBundleArchive(tempDir, options: any = {}) {
   const bundleRoot = path.join(tempDir, "rin-platform-bundle");
   const nodePath = path.join(
     bundleRoot,
@@ -79,12 +79,39 @@ async function createPlatformBundleArchive(tempDir) {
     nodePath,
     `#!/bin/sh
 echo "bundled-node:$PWD:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+case "$1" in
+  *npm-cli.js)
+    if [ "\${PATH%%:*}" != "$(dirname "$0")" ]; then exit 46; fi
+    exit ${options.failNpm ? 44 : 0}
+    ;;
+  -e) exit ${options.failNative ? 45 : 0} ;;
+esac
 if [ ! -f "$1" ]; then
   echo "missing-entry:$PWD:$1" >>"$RIN_BOOTSTRAP_TEST_LOG"
   exit 43
 fi
 exit 0
 `,
+  );
+  const npmCliPath = path.join(
+    bundleRoot,
+    "runtime",
+    "node",
+    "current",
+    "lib",
+    "node_modules",
+    "npm",
+    "bin",
+    "npm-cli.js",
+  );
+  await fs.mkdir(path.dirname(npmCliPath), { recursive: true });
+  await fs.writeFile(npmCliPath, "export {};\n");
+  await fs.mkdir(path.join(bundleRoot, "node_modules", "better-sqlite3"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(bundleRoot, "node_modules", "better-sqlite3", "package.json"),
+    JSON.stringify({ name: "better-sqlite3", version: "12.11.1" }),
   );
   await fs.writeFile(
     path.join(bundleRoot, "dist", "app", "rin-install", "main.js"),
@@ -172,17 +199,26 @@ case "$URL" in
 esac
 `,
   );
-  await writeExecutable(
+  const fakeNpmRoot = path.join(
+    path.dirname(fakeBin),
+    "lib",
+    "node_modules",
+    "npm",
+  );
+  const fakeNpmCli = path.join(fakeNpmRoot, "bin", "npm-cli.js");
+  await fs.mkdir(path.dirname(fakeNpmCli), { recursive: true });
+  await fs.writeFile(
+    path.join(fakeNpmRoot, "package.json"),
+    JSON.stringify({ name: "npm", version: "10.0.0" }),
+  );
+  await writeExecutable(fakeNpmCli, "export {};\n");
+  await fs.writeFile(
+    path.join(fakeNpmRoot, "bin", "npx-cli.js"),
+    "export {};\n",
+  );
+  await fs.symlink(
+    path.relative(fakeBin, fakeNpmCli),
     path.join(fakeBin, "npm"),
-    `#!/bin/sh
-echo "npm:$PWD:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
-if [ "$1" = "run" ] && [ "$2" = "build" ]; then
-  mkdir -p dist/app/rin-install
-  printf 'export {};\n' > dist/app/rin-install/main.js
-  exit 0
-fi
-exit 0
-`,
   );
   await writeExecutable(
     path.join(fakeBin, "node"),
@@ -198,6 +234,23 @@ const fields = [
   args.join(" "),
 ];
 fs.appendFileSync(logPath, fields.join(":") + "\\n", "utf8");
+
+if (String(args[0] || "").endsWith("npm-cli.js")) {
+  const npmArgs = args.slice(1);
+  fs.appendFileSync(logPath, "npm:" + process.cwd() + ":" + npmArgs.join(" ") + "\\n", "utf8");
+  if (npmArgs[0] === "install" || npmArgs[0] === "ci") {
+    fs.mkdirSync("node_modules/better-sqlite3", { recursive: true });
+    fs.writeFileSync(
+      "node_modules/better-sqlite3/package.json",
+      JSON.stringify({ name: "better-sqlite3", version: "12.11.1" }),
+    );
+  }
+  if (npmArgs[0] === "run" && npmArgs[1] === "build") {
+    fs.mkdirSync("dist/app/rin-install", { recursive: true });
+    fs.writeFileSync("dist/app/rin-install/main.js", "export {};\\n");
+  }
+  process.exit(0);
+}
 
 if (args[0] === "-" && String(args[1] || "").endsWith("install.json")) {
   const record = JSON.parse(fs.readFileSync(args[1], "utf8"));
@@ -516,6 +569,32 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   assert.match(entrypoint, /if \(\$job\.State -eq "Failed"\)/);
   assert.match(entrypoint, /Rin bootstrap debug directory preserved:/);
   assert.match(entrypoint, /ERROR: \$message/);
+  assert.match(entrypoint, /function Provision-SourceManagedNode/);
+  const powerShellProvision = entrypoint.slice(
+    entrypoint.indexOf("function Provision-SourceManagedNode"),
+    entrypoint.indexOf(
+      "\ntry {",
+      entrypoint.indexOf("function Provision-SourceManagedNode"),
+    ),
+  );
+  assert.match(
+    powerShellProvision,
+    /\$managedNodeExists = Test-Path -LiteralPath \$managedNode -PathType Leaf/,
+  );
+  assert.match(
+    powerShellProvision,
+    /if \(-not \$managedNodeExists\) \{[\s\S]*Remove-Item -LiteralPath \$managedRoot[\s\S]*Copy-Item -LiteralPath \$sourceNode -Destination \$managedNode[\s\S]*\$copiedSourceNode = \$true[\s\S]*\}/,
+  );
+  assert.match(
+    powerShellProvision,
+    /if \(\$copiedSourceNode -and \(Test-Path[\s\S]*\$sourceNpmRoot[\s\S]*Copy-Item -LiteralPath \$sourceNpmRoot/,
+  );
+  assert.match(
+    entrypoint,
+    /& \$using:managedNode \$using:managedNpmCli (?:install|ci)/,
+  );
+  assert.match(entrypoint, /& \$managedNode @installerArgs/);
+  assert.doesNotMatch(entrypoint, /^\s*npm (?:install|ci|run|prune)/m);
   assert.doesNotMatch(
     entrypoint,
     /Receive-Job -Job \$job -Wait -ErrorAction Stop/,
@@ -541,6 +620,21 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   assert.match(shell, /resolveGitCommit/);
   assert.match(shell, /git', \['ls-remote'/);
   assert.match(shell, /rin_git_ref_not_resolved/);
+  const shellProvision = shell.slice(
+    shell.indexOf("provision_source_managed_node()"),
+    shell.indexOf(
+      "\nresolve_release()",
+      shell.indexOf("provision_source_managed_node()"),
+    ),
+  );
+  assert.match(
+    shellProvision,
+    /if \[ ! -x "\$target_node" \]; then[\s\S]*rm -rf "\$target_root"[\s\S]*cp "\$node_path" "\$target_node"[\s\S]*copied_source_node=1/,
+  );
+  assert.match(
+    shellProvision,
+    /if \[ -n "\$copied_source_node" \]; then[\s\S]*npm_root="\$node_root\/lib\/node_modules\/npm"[\s\S]*cp -RL "\$npm_root" "\$target_npm_root"/,
+  );
 });
 
 test("install wrapper can launch a platform bundle without system node or npm", async (t) => {
@@ -631,6 +725,11 @@ exit 42
     const log = await fs.readFile(logPath, "utf8");
     assert.match(log, /release-assets\.env/);
     assert.match(log, /rin-1\.2\.3-linux-x64\.tar\.gz/);
+    assert.match(log, /bundled-node:.*npm-cli\.js --version/);
+    assert.match(
+      log,
+      /bundled-node:.*-e const Database=require\('better-sqlite3'\)/,
+    );
     assert.match(
       log,
       /bundled-node:.*dist\/app\/rin-install\/main\.js --release-file /,
@@ -639,6 +738,92 @@ exit 42
     assert.doesNotMatch(log, /npm:/);
     assert.deepEqual(await fs.readdir(workRoot), []);
   });
+});
+
+test("platform bundle bootstrap rejects broken managed npm and native dependencies before launch", async (t) => {
+  if (process.platform !== "linux" || process.arch !== "x64") {
+    t.skip("fixture targets linux-x64 bootstrap detection");
+    return;
+  }
+  for (const failure of ["npm", "native"]) {
+    await withTempDir(async (tempDir) => {
+      const archivePath = await createPlatformBundleArchive(tempDir, {
+        failNpm: failure === "npm",
+        failNative: failure === "native",
+      });
+      const archiveSha256 = createHash("sha256")
+        .update(await fs.readFile(archivePath))
+        .digest("hex");
+      const manifestPath = await createReleaseManifest(tempDir);
+      const assetsPath = path.join(tempDir, "release-assets.env");
+      const fakeBin = path.join(tempDir, "bin");
+      const logPath = path.join(tempDir, "invocations.log");
+      const workRoot = path.join(tempDir, "work");
+      await fs.mkdir(fakeBin, { recursive: true });
+      await fs.mkdir(workRoot, { recursive: true });
+      await fs.writeFile(logPath, "", "utf8");
+      await fs.writeFile(
+        assetsPath,
+        [
+          "RIN_ASSET_STABLE_LINUX_X64_URL='https://example.invalid/releases/rin-1.2.3-linux-x64.tar.gz'",
+          `RIN_ASSET_STABLE_LINUX_X64_SHA256='${archiveSha256}'`,
+          "RIN_ASSET_STABLE_LINUX_X64_VERSION='1.2.3'",
+          "RIN_ASSET_STABLE_LINUX_X64_BRANCH='stable'",
+          "RIN_ASSET_STABLE_LINUX_X64_REF='abc1234'",
+          "RIN_ASSET_STABLE_LINUX_X64_SOURCE_LABEL='stable 1.2.3'",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeExecutable(
+        path.join(fakeBin, "curl"),
+        `#!/bin/sh
+OUT=
+URL=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT=$2; shift 2 ;;
+    -*) shift ;;
+    *) URL=$1; shift ;;
+  esac
+done
+case "$URL" in
+  *scripts/bootstrap-entrypoint.sh) cp "$RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT" "$OUT" ;;
+  *release-manifest.json) cp "$RIN_BOOTSTRAP_TEST_MANIFEST" "$OUT" ;;
+  *release-assets.env) cp "$RIN_BOOTSTRAP_TEST_ASSETS" "$OUT" ;;
+  *) cp "$RIN_BOOTSTRAP_TEST_ARCHIVE" "$OUT" ;;
+esac
+`,
+      );
+
+      await assert.rejects(
+        runBootstrapWrapper("install.sh", [], {
+          ...process.env,
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+          RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+          TMPDIR: workRoot,
+          RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
+          RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
+          RIN_BOOTSTRAP_TEST_ASSETS: assetsPath,
+          RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
+            rootDir,
+            "scripts",
+            "bootstrap-entrypoint.sh",
+          ),
+          RIN_BOOTSTRAP_TEST_LOG: logPath,
+        }),
+      );
+      const log = await fs.readFile(logPath, "utf8");
+      assert.doesNotMatch(
+        log,
+        /dist\/app\/rin-install\/main\.js --release-file /,
+      );
+      assert.match(log, /npm-cli\.js --version/);
+      if (failure === "native") {
+        assert.match(log, /-e const Database=require\('better-sqlite3'\)/);
+      }
+    });
+  }
 });
 
 test("platform bundle bootstrap rejects missing or mismatched checksums", async (t) => {
@@ -771,6 +956,7 @@ test("stable install and update wrappers resolve release metadata then npm-insta
     assert.equal(/npm:.*:run build/.test(log), false);
     assert.equal(/npm:.*:exec --yes --package/.test(log), false);
     assert.match(log, /npm:.*:install --omit=dev --no-fund --no-audit\n/);
+    assert.match(log, /node:.*:-e const Database=require\('better-sqlite3'\)/);
 
     assert.deepEqual(await fs.readdir(workRoot), []);
   });

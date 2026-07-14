@@ -62,6 +62,9 @@ async function downloadFile(url: string, outFile: string) {
 }
 
 const FORWARDED_UPDATE_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+const MANAGED_NPM_VERSION = "10.9.3";
+const MANAGED_NPM_SHA512 =
+  "e84875bb943e908557780f1eee5d9cfc7a67145730ae4b77ef10ccba30f96ded6096859af69ea3dc5b2fde60725d79aa247cbed9c12544c30bf28a4d4fbc4825";
 
 function signalExitCode(signal: NodeJS.Signals) {
   if (signal === "SIGINT") return 130;
@@ -319,10 +322,14 @@ function isExecutableFile(filePath: string) {
   }
 }
 
+function preparedRuntimeNodeCurrentRoot(sourceRoot: string) {
+  return path.join(sourceRoot, "runtime", "node", "current");
+}
+
 function findPreparedRuntimeNodeExecutable(sourceRoot: string) {
   for (const candidate of [
-    path.join(sourceRoot, "runtime", "node", "current", "bin", "node"),
-    path.join(sourceRoot, "runtime", "node", "current", "node.exe"),
+    path.join(preparedRuntimeNodeCurrentRoot(sourceRoot), "bin", "node"),
+    path.join(preparedRuntimeNodeCurrentRoot(sourceRoot), "node.exe"),
   ]) {
     if (isExecutableFile(candidate)) return candidate;
   }
@@ -331,8 +338,139 @@ function findPreparedRuntimeNodeExecutable(sourceRoot: string) {
 
 function preparedRuntimeNodeExecutablePath(sourceRoot: string) {
   return process.platform === "win32"
-    ? path.join(sourceRoot, "runtime", "node", "current", "node.exe")
-    : path.join(sourceRoot, "runtime", "node", "current", "bin", "node");
+    ? path.join(preparedRuntimeNodeCurrentRoot(sourceRoot), "node.exe")
+    : path.join(preparedRuntimeNodeCurrentRoot(sourceRoot), "bin", "node");
+}
+
+function preparedRuntimeNpmCliPath(sourceRoot: string) {
+  return process.platform === "win32"
+    ? path.join(
+        preparedRuntimeNodeCurrentRoot(sourceRoot),
+        "node_modules",
+        "npm",
+        "bin",
+        "npm-cli.js",
+      )
+    : path.join(
+        preparedRuntimeNodeCurrentRoot(sourceRoot),
+        "lib",
+        "node_modules",
+        "npm",
+        "bin",
+        "npm-cli.js",
+      );
+}
+
+function processNpmPackageRoot() {
+  const nodeRoot =
+    process.platform === "win32"
+      ? path.dirname(process.execPath)
+      : path.dirname(path.dirname(process.execPath));
+  return process.platform === "win32"
+    ? path.join(nodeRoot, "node_modules", "npm")
+    : path.join(nodeRoot, "lib", "node_modules", "npm");
+}
+
+function managedNpmArchivePath() {
+  const cacheRoot =
+    safeString(process.env.XDG_CACHE_HOME).trim() ||
+    path.join(os.homedir(), ".cache");
+  return path.join(
+    cacheRoot,
+    "rin",
+    "node-toolchain",
+    `npm-${MANAGED_NPM_VERSION}.tgz`,
+  );
+}
+
+function verifyManagedNpmArchive(archivePath: string) {
+  const actual = createHash("sha512")
+    .update(fs.readFileSync(archivePath))
+    .digest("hex");
+  if (actual !== MANAGED_NPM_SHA512) {
+    throw new Error("rin_managed_npm_checksum_mismatch");
+  }
+}
+
+function downloadManagedNpmPackage(targetNpmPackageRoot: string) {
+  const archivePath = managedNpmArchivePath();
+  if (fs.existsSync(archivePath)) {
+    try {
+      verifyManagedNpmArchive(archivePath);
+    } catch {
+      fs.rmSync(archivePath, { force: true });
+    }
+  }
+  if (!fs.existsSync(archivePath)) {
+    const curl = requireTool("curl", ["/usr/bin/curl", "/bin/curl"]);
+    fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+    const temporaryArchive = `${archivePath}.${process.pid}.tmp`;
+    try {
+      execFileSync(
+        curl,
+        [
+          "-fsSL",
+          `https://registry.npmjs.org/npm/-/npm-${MANAGED_NPM_VERSION}.tgz`,
+          "-o",
+          temporaryArchive,
+        ],
+        { stdio: "ignore" },
+      );
+      verifyManagedNpmArchive(temporaryArchive);
+      try {
+        fs.renameSync(temporaryArchive, archivePath);
+      } catch {
+        if (!fs.existsSync(archivePath))
+          throw new Error("rin_managed_npm_cache_write_failed");
+      }
+    } finally {
+      fs.rmSync(temporaryArchive, { force: true });
+    }
+  }
+  verifyManagedNpmArchive(archivePath);
+  const extractRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-managed-npm-"),
+  );
+  try {
+    const tar = requireTool("tar", ["/usr/bin/tar", "/bin/tar"]);
+    execFileSync(tar, ["-xzf", archivePath, "-C", extractRoot], {
+      stdio: "ignore",
+    });
+    fs.cpSync(path.join(extractRoot, "package"), targetNpmPackageRoot, {
+      recursive: true,
+      force: true,
+      dereference: true,
+      verbatimSymlinks: false,
+    });
+  } finally {
+    fs.rmSync(extractRoot, { recursive: true, force: true });
+  }
+}
+
+function writePreparedNpmLaunchers(sourceRoot: string) {
+  const currentRoot = preparedRuntimeNodeCurrentRoot(sourceRoot);
+  if (process.platform === "win32") {
+    for (const [name, cli] of [
+      ["npm", "npm-cli.js"],
+      ["npx", "npx-cli.js"],
+    ] as const) {
+      fs.writeFileSync(
+        path.join(currentRoot, `${name}.cmd`),
+        `@ECHO off\r\n"%~dp0\\node.exe" "%~dp0\\node_modules\\npm\\bin\\${cli}" %*\r\n`,
+      );
+    }
+    return;
+  }
+  const binDir = path.join(currentRoot, "bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  for (const [name, target] of [
+    ["npm", "../lib/node_modules/npm/bin/npm-cli.js"],
+    ["npx", "../lib/node_modules/npm/bin/npx-cli.js"],
+  ] as const) {
+    const launcher = path.join(binDir, name);
+    fs.rmSync(launcher, { force: true });
+    fs.symlinkSync(target, launcher);
+  }
 }
 
 export function preparedRuntimeNodeExecutable(sourceRoot: string) {
@@ -343,19 +481,114 @@ export function preparedRuntimeNodeExecutable(sourceRoot: string) {
   );
 }
 
-export function provisionPreparedCurrentNodeRuntime(sourceRoot: string) {
-  const existing = findPreparedRuntimeNodeExecutable(sourceRoot);
-  if (existing) return existing;
-  const targetExecutable = preparedRuntimeNodeExecutablePath(sourceRoot);
-  if (!process.execPath || !fs.existsSync(process.execPath)) {
-    throw new Error(`rin_managed_node_runtime_missing:${targetExecutable}`);
-  }
-  fs.mkdirSync(path.dirname(targetExecutable), { recursive: true });
-  fs.copyFileSync(process.execPath, targetExecutable);
+function verifyPreparedManagedNpm(sourceRoot: string) {
+  const nodeExecutable = preparedRuntimeNodeExecutable(sourceRoot);
+  const npmCli = preparedRuntimeNpmCliPath(sourceRoot);
+  if (!fs.existsSync(npmCli)) return false;
   try {
-    fs.chmodSync(targetExecutable, 0o755);
-  } catch {}
+    execFileSync(nodeExecutable, [npmCli, "--version"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: path.dirname(nodeExecutable),
+        NODE_PATH: "",
+        npm_node_execpath: nodeExecutable,
+        npm_execpath: npmCli,
+      },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function provisionPreparedCurrentNodeRuntime(sourceRoot: string) {
+  const targetExecutable = preparedRuntimeNodeExecutablePath(sourceRoot);
+  const targetNpmCli = preparedRuntimeNpmCliPath(sourceRoot);
+  let copiedProcessNode = false;
+  if (!findPreparedRuntimeNodeExecutable(sourceRoot)) {
+    if (!process.execPath || !fs.existsSync(process.execPath)) {
+      throw new Error(`rin_managed_node_runtime_missing:${targetExecutable}`);
+    }
+    fs.mkdirSync(path.dirname(targetExecutable), { recursive: true });
+    fs.copyFileSync(process.execPath, targetExecutable);
+    copiedProcessNode = true;
+    try {
+      fs.chmodSync(targetExecutable, 0o755);
+    } catch {}
+  }
+  if (!verifyPreparedManagedNpm(sourceRoot)) {
+    const targetNpmPackageRoot = path.dirname(path.dirname(targetNpmCli));
+    fs.rmSync(targetNpmPackageRoot, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(targetNpmPackageRoot), { recursive: true });
+    const localNpmPackageRoot = processNpmPackageRoot();
+    if (copiedProcessNode && fs.existsSync(localNpmPackageRoot)) {
+      fs.cpSync(localNpmPackageRoot, targetNpmPackageRoot, {
+        recursive: true,
+        force: true,
+        dereference: true,
+        verbatimSymlinks: false,
+      });
+      writePreparedNpmLaunchers(sourceRoot);
+    }
+    if (!verifyPreparedManagedNpm(sourceRoot)) {
+      fs.rmSync(targetNpmPackageRoot, { recursive: true, force: true });
+      downloadManagedNpmPackage(targetNpmPackageRoot);
+      writePreparedNpmLaunchers(sourceRoot);
+    }
+  }
+  if (!verifyPreparedManagedNpm(sourceRoot)) {
+    throw new Error(`rin_managed_node_npm_missing:${targetNpmCli}`);
+  }
   return targetExecutable;
+}
+
+export function preparedRuntimeNpmCommand(
+  sourceRoot: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const nodeExecutable = preparedRuntimeNodeExecutable(sourceRoot);
+  const npmCli = preparedRuntimeNpmCliPath(sourceRoot);
+  if (!fs.existsSync(npmCli)) {
+    throw new Error(`rin_managed_node_npm_missing:${npmCli}`);
+  }
+  const managedBin = path.dirname(nodeExecutable);
+  const inheritedPath = safeString(env.PATH).trim();
+  return {
+    command: nodeExecutable,
+    args: [npmCli, ...args],
+    options: {
+      env: {
+        ...env,
+        PATH: [managedBin, inheritedPath].filter(Boolean).join(path.delimiter),
+        NODE_PATH: "",
+        npm_node_execpath: nodeExecutable,
+        npm_execpath: npmCli,
+      },
+    },
+  };
+}
+
+async function verifyPreparedRuntimeNativeDependencies(options: {
+  sourceRoot: string;
+  env: NodeJS.ProcessEnv;
+  label: string;
+  logFile: string;
+  buildFailureHeader: (label: string) => string;
+}) {
+  await runLoggedUpdateCommandSync(
+    preparedRuntimeNodeExecutable(options.sourceRoot),
+    [
+      "-e",
+      "const Database=require('better-sqlite3');const db=new Database(':memory:');db.prepare('select 1').get();db.close();",
+    ],
+    options.label,
+    options.logFile,
+    { cwd: options.sourceRoot, env: options.env },
+    options.buildFailureHeader,
+  );
 }
 
 export function isInstalledReleaseCurrent(
@@ -474,6 +707,26 @@ export async function prepareUpdateRuntimeSource(options: {
         i18n,
       }),
     );
+    const npmCommand = preparedRuntimeNpmCommand(
+      workspace.sourceRoot,
+      ["--version"],
+      buildEnv,
+    );
+    await runLoggedUpdateCommandSync(
+      npmCommand.command,
+      npmCommand.args,
+      i18n.preparingUpdateSourceMessage,
+      workspace.logFile,
+      { cwd: workspace.sourceRoot, ...npmCommand.options },
+      i18n.buildUpdateCommandFailureHeader,
+    );
+    await verifyPreparedRuntimeNativeDependencies({
+      sourceRoot: workspace.sourceRoot,
+      env: npmCommand.options.env,
+      label: i18n.preparingUpdateSourceMessage,
+      logFile: workspace.logFile,
+      buildFailureHeader: i18n.buildUpdateCommandFailureHeader,
+    });
     return workspace;
   }
 
@@ -489,14 +742,28 @@ export async function prepareUpdateRuntimeSource(options: {
     }),
   );
 
-  const npm = requireTool("npm", ["/usr/bin/npm", "/bin/npm"]);
+  provisionPreparedCurrentNodeRuntime(workspace.sourceRoot);
+  const runPreparedNpm = (args: string[], label: string) => {
+    const command = preparedRuntimeNpmCommand(
+      workspace.sourceRoot,
+      args,
+      buildEnv,
+    );
+    return runLoggedUpdateCommandSync(
+      command.command,
+      command.args,
+      label,
+      workspace.logFile,
+      { cwd: workspace.sourceRoot, ...command.options },
+      i18n.buildUpdateCommandFailureHeader,
+    );
+  };
   await runInstallerProgress(
     i18n.installingUpdateDependenciesMessage,
     async () => {
       if (release.channel === "stable") {
         disablePackageRootPrepareScript(workspace.sourceRoot);
-        await runLoggedUpdateCommandSync(
-          npm,
+        await runPreparedNpm(
           [
             "install",
             "--omit=dev",
@@ -505,52 +772,33 @@ export async function prepareUpdateRuntimeSource(options: {
             "--loglevel=error",
           ],
           i18n.installingUpdateDependenciesMessage,
-          workspace.logFile,
-          { cwd: workspace.sourceRoot, env: buildEnv },
-          i18n.buildUpdateCommandFailureHeader,
         );
       } else if (
         fs.existsSync(path.join(workspace.sourceRoot, "package-lock.json"))
       ) {
-        await runLoggedUpdateCommandSync(
-          npm,
+        await runPreparedNpm(
           ["ci", "--no-fund", "--no-audit", "--loglevel=error"],
           i18n.installingUpdateDependenciesMessage,
-          workspace.logFile,
-          { cwd: workspace.sourceRoot, env: buildEnv },
-          i18n.buildUpdateCommandFailureHeader,
         );
       } else {
-        await runLoggedUpdateCommandSync(
-          npm,
+        await runPreparedNpm(
           ["install", "--no-fund", "--no-audit", "--loglevel=error"],
           i18n.installingUpdateDependenciesMessage,
-          workspace.logFile,
-          { cwd: workspace.sourceRoot, env: buildEnv },
-          i18n.buildUpdateCommandFailureHeader,
         );
       }
     },
   );
   if (release.channel !== "stable") {
     await runInstallerProgress(i18n.buildingUpdateRuntimeMessage, () =>
-      runLoggedUpdateCommandSync(
-        npm,
+      runPreparedNpm(
         ["run", "build", "--silent"],
         i18n.buildingUpdateRuntimeMessage,
-        workspace.logFile,
-        { cwd: workspace.sourceRoot, env: buildEnv },
-        i18n.buildUpdateCommandFailureHeader,
       ),
     );
     await runInstallerProgress(i18n.pruningUpdateDependenciesMessage, () =>
-      runLoggedUpdateCommandSync(
-        npm,
+      runPreparedNpm(
         ["prune", "--omit=dev", "--no-fund", "--no-audit", "--loglevel=error"],
         i18n.pruningUpdateDependenciesMessage,
-        workspace.logFile,
-        { cwd: workspace.sourceRoot, env: buildEnv },
-        i18n.buildUpdateCommandFailureHeader,
       ),
     );
   }
@@ -559,7 +807,18 @@ export async function prepareUpdateRuntimeSource(options: {
     workspace.logFile,
     pruneDuplicatePiCodingAgentDependencies(workspace.sourceRoot),
   );
-  provisionPreparedCurrentNodeRuntime(workspace.sourceRoot);
+  const verificationCommand = preparedRuntimeNpmCommand(
+    workspace.sourceRoot,
+    [],
+    buildEnv,
+  );
+  await verifyPreparedRuntimeNativeDependencies({
+    sourceRoot: workspace.sourceRoot,
+    env: verificationCommand.options.env,
+    label: i18n.preparingUpdateSourceMessage,
+    logFile: workspace.logFile,
+    buildFailureHeader: i18n.buildUpdateCommandFailureHeader,
+  });
 
   return workspace;
 }
