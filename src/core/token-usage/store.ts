@@ -363,28 +363,12 @@ const PROVIDER_MODEL_VALUE_EXPR = [
 const PROVIDER_MODEL_DIMENSION_EXPR = coalescedTextDimensionExpr(
   PROVIDER_MODEL_VALUE_EXPR,
 );
-const KNOWN_SESSION_NAME_EXPR = `(
-  SELECT session_lookup.session_name
-  FROM telemetry_events AS session_lookup
-  WHERE session_lookup.session_id = telemetry_events.session_id
-    AND COALESCE(session_lookup.session_name, '') <> ''
-  ORDER BY session_lookup.timestamp DESC
-  LIMIT 1
-)`;
-const KNOWN_SESSION_FILE_EXPR = `(
-  SELECT session_lookup.session_file
-  FROM telemetry_events AS session_lookup
-  WHERE session_lookup.session_id = telemetry_events.session_id
-    AND COALESCE(session_lookup.session_file, '') <> ''
-  ORDER BY session_lookup.timestamp DESC
-  LIMIT 1
-)`;
 const SESSION_VALUE_EXPR = [
   `CASE`,
   `  WHEN COALESCE(session_name, '') <> '' THEN session_name`,
-  `  WHEN COALESCE(${KNOWN_SESSION_NAME_EXPR}, '') <> '' THEN ${KNOWN_SESSION_NAME_EXPR}`,
+  `  WHEN COALESCE(session_labels.resolved_session_name, '') <> '' THEN session_labels.resolved_session_name`,
   `  WHEN COALESCE(session_file, '') <> '' THEN session_file`,
-  `  WHEN COALESCE(${KNOWN_SESSION_FILE_EXPR}, '') <> '' THEN ${KNOWN_SESSION_FILE_EXPR}`,
+  `  WHEN COALESCE(session_labels.resolved_session_file, '') <> '' THEN session_labels.resolved_session_file`,
   `  WHEN COALESCE(session_id, '') <> '' THEN session_id`,
   `  ELSE ''`,
   `END`,
@@ -750,6 +734,114 @@ function buildWhereClause(
   };
 }
 
+function queryUsesSessionLabels(
+  options: TokenUsageQueryOptions,
+  groupBy: string[] = [],
+) {
+  return (
+    groupBy.some((key) => normalizeText(key) === "session") ||
+    (options.filters || []).some(
+      (filter) => normalizeText(filter.key) === "session",
+    )
+  );
+}
+
+function aggregateTelemetrySource(options: TokenUsageQueryOptions) {
+  if ((options.filters || []).length > 0) return "telemetry_events";
+  if (safeString(options.from).trim() || safeString(options.to).trim()) {
+    return "telemetry_events INDEXED BY telemetry_events_timestamp_idx";
+  }
+  if (!options.includeZero) return "telemetry_events NOT INDEXED";
+  return "telemetry_events";
+}
+
+function buildSessionLabelsQueryParts(
+  options: TokenUsageQueryOptions,
+  enabled: boolean,
+  forAggregate: boolean,
+) {
+  const eventSource = forAggregate
+    ? aggregateTelemetrySource(options)
+    : "telemetry_events";
+  if (!enabled) {
+    return { withSql: "", fromSql: eventSource };
+  }
+  const scopeClauses = [`COALESCE(session_id, '') <> ''`];
+  if (safeString(options.from).trim()) {
+    scopeClauses.push(`timestamp >= @from`);
+  }
+  if (safeString(options.to).trim()) {
+    scopeClauses.push(`timestamp <= @to`);
+  }
+  if (forAggregate && !options.includeZero) {
+    scopeClauses.push(`total_tokens > 0`);
+  }
+  const hasTimeRange = Boolean(
+    safeString(options.from).trim() || safeString(options.to).trim(),
+  );
+  const scopeIndex = hasTimeRange
+    ? " INDEXED BY telemetry_events_timestamp_idx"
+    : forAggregate && !options.includeZero
+      ? " NOT INDEXED"
+      : "";
+  const labelEventsIndex = hasTimeRange
+    ? " INDEXED BY telemetry_events_session_idx"
+    : " NOT INDEXED";
+  return {
+    withSql: `
+      WITH scoped_session_ids AS MATERIALIZED (
+        SELECT session_id
+        FROM telemetry_events${scopeIndex}
+        WHERE ${scopeClauses.join(" AND ")}
+      ),
+      session_ids AS MATERIALIZED (
+        SELECT DISTINCT session_id AS label_session_id
+        FROM scoped_session_ids
+      ),
+      session_label_times AS MATERIALIZED (
+        SELECT
+          events.session_id AS label_session_id,
+          MAX(
+            CASE WHEN COALESCE(events.session_name, '') <> ''
+              THEN events.timestamp END
+          ) AS name_timestamp,
+          MAX(
+            CASE WHEN COALESCE(events.session_file, '') <> ''
+              THEN events.timestamp END
+          ) AS file_timestamp
+        FROM session_ids
+        INNER JOIN telemetry_events AS events${labelEventsIndex}
+          ON events.session_id = session_ids.label_session_id
+        GROUP BY events.session_id
+      ),
+      session_labels AS MATERIALIZED (
+        SELECT
+          label_session_id,
+          (
+            SELECT session_lookup.session_name
+            FROM telemetry_events AS session_lookup
+            WHERE session_lookup.session_id = session_label_times.label_session_id
+              AND session_lookup.timestamp = session_label_times.name_timestamp
+              AND COALESCE(session_lookup.session_name, '') <> ''
+            LIMIT 1
+          ) AS resolved_session_name,
+          (
+            SELECT session_lookup.session_file
+            FROM telemetry_events AS session_lookup
+            WHERE session_lookup.session_id = session_label_times.label_session_id
+              AND session_lookup.timestamp = session_label_times.file_timestamp
+              AND COALESCE(session_lookup.session_file, '') <> ''
+            LIMIT 1
+          ) AS resolved_session_file
+        FROM session_label_times
+      )
+    `,
+    fromSql: `${eventSource}
+      LEFT JOIN session_labels
+        ON session_labels.label_session_id = telemetry_events.session_id`,
+  };
+}
+
 export function queryTokenUsageAggregate(options: TokenUsageQueryOptions = {}) {
   const db = openTokenUsageDb(options.agentDir || "");
   const groupBy = Array.isArray(options.groupBy) ? options.groupBy : [];
@@ -758,6 +850,11 @@ export function queryTokenUsageAggregate(options: TokenUsageQueryOptions = {}) {
     ...resolveDimensionDef(key, "unsupported_group_by"),
   }));
   const { whereSql, params } = buildWhereClause(options, true);
+  const sessionQuery = buildSessionLabelsQueryParts(
+    options,
+    queryUsesSessionLabels(options, groupBy),
+    true,
+  );
   const selectDims = dims.map((dim) => `${dim.select} AS "${dim.key}"`);
   const groupSql = dims.length
     ? `GROUP BY ${dims.map((dim) => dim.select).join(", ")}`
@@ -776,10 +873,11 @@ export function queryTokenUsageAggregate(options: TokenUsageQueryOptions = {}) {
     : `"total_tokens"`;
   const limit = clampQueryLimit(options.limit, DEFAULT_AGGREGATE_LIMIT);
   const sql = `
+    ${sessionQuery.withSql}
     SELECT
       ${selectDims.length ? `${selectDims.join(",\n      ")},` : ""}
       ${AGGREGATE_METRICS.map((metric) => `${metric.select} AS ${metric.key}`).join(",\n      ")}
-    FROM telemetry_events
+    FROM ${sessionQuery.fromSql}
     ${whereSql}
     ${groupSql}
     ORDER BY ${orderExpr} ${direction}
@@ -791,13 +889,19 @@ export function queryTokenUsageAggregate(options: TokenUsageQueryOptions = {}) {
 export function queryTokenUsageEvents(options: TokenUsageQueryOptions = {}) {
   const db = openTokenUsageDb(options.agentDir || "");
   const { whereSql, params } = buildWhereClause(options, false);
+  const sessionQuery = buildSessionLabelsQueryParts(
+    options,
+    queryUsesSessionLabels(options),
+    false,
+  );
   const limit = clampQueryLimit(options.limit, DEFAULT_EVENTS_LIMIT);
   return prepareCached(
     db,
     `
+      ${sessionQuery.withSql}
       SELECT
         ${RECENT_EVENT_SELECT_COLUMNS.join(",\n        ")}
-      FROM telemetry_events
+      FROM ${sessionQuery.fromSql}
       ${whereSql}
       ORDER BY timestamp DESC
       LIMIT @limit

@@ -44,6 +44,7 @@ export type UsageCliOptions = {
   includeZero: boolean;
   dimensions: boolean;
   json: boolean;
+  allTime?: boolean;
   help: boolean;
 };
 
@@ -139,12 +140,15 @@ function printUsageHelp() {
       "  --include-zero        include zero-token rows in aggregates",
       "  --dimensions          list supported dimensions",
       "  --json                print an agent backend JSON report with quota and queried data",
+      "  --all-time            query all stored history instead of the default 7d JSON range",
       "  --help                show this help",
       "",
-      "Default view: quota plus a compact 7d line chart (3h buckets).",
+      "The default frontend and range-less JSON report use the most recent 7d. Pass --all-time with --json to query all stored history.",
       "",
       "Examples:",
       "  rin usage",
+      "  rin usage --json",
+      "  rin usage --json --all-time",
       "  rin usage --group-by provider_model,capability --from 7d",
       "  rin usage --group-by session,capability --from 48h",
       "  rin usage --events --limit 50 --filter session_id=abc123",
@@ -226,6 +230,7 @@ export function createDefaultUsageOptions(): UsageCliOptions {
     includeZero: false,
     dimensions: false,
     json: false,
+    allTime: false,
     help: false,
   };
 }
@@ -253,6 +258,10 @@ export function parseUsageArgs(argv: string[]): UsageCliOptions {
     }
     if (arg === "--json") {
       result.json = true;
+      continue;
+    }
+    if (arg === "--all-time") {
+      result.allTime = true;
       continue;
     }
     if (arg === "--from") {
@@ -284,6 +293,21 @@ export function parseUsageArgs(argv: string[]): UsageCliOptions {
       continue;
     }
     throw new Error(`unknown_usage_arg:${arg}`);
+  }
+  if (result.allTime && !result.json) {
+    throw new Error("--all-time requires --json");
+  }
+  if (result.allTime && (result.from || result.to)) {
+    throw new Error("--all-time cannot be combined with --from or --to");
+  }
+  if (
+    result.json &&
+    !result.dimensions &&
+    !result.allTime &&
+    !result.from &&
+    !result.to
+  ) {
+    result.from = normalizeTimeArg("7d", "start");
   }
   return result;
 }
@@ -1001,6 +1025,7 @@ function buildUsageBackendJson(
       orderBy: options.orderBy,
       direction: options.direction,
       includeZero: options.includeZero,
+      allTime: options.allTime,
     },
     providerQuotas: providerQuotas || [],
     dimensions: listTokenUsageDimensions(),

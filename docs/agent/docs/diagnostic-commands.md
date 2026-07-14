@@ -87,13 +87,14 @@ Frontend:
 rin usage
 ```
 
-The default view shows configured accounts/quota and a recent 7d line chart using 3-hour buckets. Use backend filters when exact 5h/1d/7d tables or grouped totals are needed.
+The default view shows configured accounts/quota and a recent 7d line chart using 3-hour buckets. JSON reports without an explicit time range also default to the most recent 7 days. Use `--all-time` when the report must cover all stored history, or use backend filters for exact 5h/1d/7d tables and grouped totals.
 
 Backend examples:
 
 ```sh
 rin usage --dimensions
 rin usage --json
+rin usage --json --all-time
 rin usage --json --events --from 24h --limit 100
 rin usage --json --group-by provider_model,capability --from 7d
 rin usage --group-by session,capability --filter provider=openai-codex --from 30d

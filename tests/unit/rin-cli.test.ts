@@ -610,6 +610,30 @@ test("run parser supports managed session leaves for delegated non-interactive s
   );
 });
 
+test("usage JSON defaults to seven days unless all history is explicit", () => {
+  const before = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const bounded = usage.parseUsageArgs(["usage", "--json"]);
+  const after = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  assert.equal(bounded.allTime, false);
+  assert.ok(bounded.from);
+  assert.ok(Date.parse(bounded.from) >= before);
+  assert.ok(Date.parse(bounded.from) <= after);
+
+  const allTime = usage.parseUsageArgs(["usage", "--json", "--all-time"]);
+  assert.equal(allTime.allTime, true);
+  assert.equal(allTime.from, undefined);
+  assert.equal(allTime.to, undefined);
+  assert.throws(
+    () =>
+      usage.parseUsageArgs(["usage", "--json", "--all-time", "--from", "7d"]),
+    /--all-time cannot be combined with --from or --to/,
+  );
+  assert.throws(
+    () => usage.parseUsageArgs(["usage", "--all-time"]),
+    /--all-time requires --json/,
+  );
+});
+
 test("usage, status, self-improve, and memory-index parsers ignore wrapper args around the subcommand", () => {
   assert.deepEqual(
     usage.parseUsageArgs(["-u", "rin", "usage", "--events", "--limit", "5"]),
@@ -623,6 +647,7 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
       includeZero: false,
       dimensions: false,
       json: false,
+      allTime: false,
       help: false,
     },
   );
@@ -639,6 +664,7 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
       includeZero: false,
       dimensions: false,
       json: false,
+      allTime: false,
       help: false,
     },
   );
@@ -663,6 +689,7 @@ test("usage, status, self-improve, and memory-index parsers ignore wrapper args 
       includeZero: false,
       dimensions: false,
       json: false,
+      allTime: false,
       help: false,
     },
   );

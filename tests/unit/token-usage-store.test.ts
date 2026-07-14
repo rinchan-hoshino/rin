@@ -434,6 +434,81 @@ test("token usage store exposes a human-oriented session dimension", async () =>
   });
 });
 
+test("session aggregation resolves sparse labels once per session", async () => {
+  await withTempRoot(async (root) => {
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-labeled",
+        timestamp: "2026-04-10T08:00:00.000Z",
+        sessionId: "s1",
+        sessionName: "named chat",
+        eventType: "message_end",
+        totalTokens: 30,
+      },
+      root,
+    );
+    store.appendTokenTelemetryEvent(
+      {
+        id: "evt-sparse",
+        timestamp: "2026-04-10T08:01:00.000Z",
+        sessionId: "s1",
+        eventType: "message_end",
+        totalTokens: 20,
+      },
+      root,
+    );
+
+    const db = store.openTokenUsageDb(root);
+    const originalPrepare = db.prepare;
+    let aggregateSql = "";
+    let allTimeAggregateSql = "";
+    let boundedAggregateSql = "";
+    db.prepare = (sql) => {
+      if (String(sql).includes("GROUP BY")) aggregateSql = String(sql);
+      return originalPrepare.call(db, sql);
+    };
+    try {
+      const rows = store.queryTokenUsageAggregate({
+        agentDir: root,
+        groupBy: ["session"],
+        limit: 10,
+      });
+      assert.deepEqual(
+        rows.map((row) => ({ session: row.session, total: row.total_tokens })),
+        [{ session: "named chat", total: 50 }],
+      );
+      allTimeAggregateSql = aggregateSql;
+      aggregateSql = "";
+      store.queryTokenUsageAggregate({
+        agentDir: root,
+        groupBy: ["session"],
+        from: "2026-04-10T00:00:00.000Z",
+        limit: 10,
+      });
+      boundedAggregateSql = aggregateSql;
+      const filteredEvents = store.queryTokenUsageEvents({
+        agentDir: root,
+        filters: [{ key: "session", value: "named chat" }],
+        limit: 10,
+      });
+      assert.equal(filteredEvents.length, 2);
+    } finally {
+      db.prepare = originalPrepare;
+    }
+
+    assert.match(allTimeAggregateSql, /session_label_times/);
+    assert.match(allTimeAggregateSql, /FROM telemetry_events NOT INDEXED/);
+    assert.doesNotMatch(
+      allTimeAggregateSql,
+      /ORDER BY session_lookup\.timestamp/,
+    );
+    assert.match(
+      boundedAggregateSql,
+      /FROM telemetry_events INDEXED BY telemetry_events_timestamp_idx/,
+    );
+  });
+});
+
 test("token usage hooks keep session metadata and frontend source on later events", async () => {
   await withTempRoot(async (root) => {
     const previousDir = process.env.RIN_DIR;
