@@ -18,7 +18,6 @@ import {
   compactObject,
   createPrefixedLogger,
   editableIntermediateHeadText,
-  editableWorkingText,
   emitBotStatus,
   ensureDir,
   ensureExtension,
@@ -38,7 +37,10 @@ import {
   sleep,
   splitPlainText,
 } from "./common.js";
-import { EditableTextMessageGroup } from "./editable-text-message-group.js";
+import {
+  EditableTextMessageGroup,
+  type EditableTextMessageIndicatorTickInput,
+} from "./editable-text-message-group.js";
 import {
   DiscordAdapter,
   LarkAdapter,
@@ -484,13 +486,10 @@ class TelegramAdapter {
       name: "",
       user: {},
       workingIndicators: [
-        {
-          type: "polling",
-          presentation: "editable-message",
-          tick: async (context: any) =>
-            await this.tickWorkingIndicator(context),
-          end: async (context: any) => await this.endWorkingIndicator(context),
-        },
+        this.editableWorking.indicator({
+          prepareTick: (context, input) =>
+            this.prepareEditableWorkingTick(context, input),
+        }),
         {
           type: "polling",
           presentation: "typing",
@@ -1107,28 +1106,6 @@ class TelegramAdapter {
     );
   }
 
-  private async updateWorkingMessage(input: {
-    chatId?: string;
-    text?: string;
-    replyToMessageId?: string;
-    key?: string;
-    kind?: string;
-    todoText?: string;
-  }) {
-    const todoText = safeString(input?.todoText).trim();
-    const ids = await this.editableWorking.updateText({
-      chatId: safeString(input?.chatId).trim(),
-      text: safeString(input?.text),
-      replyToMessageId: safeString(input?.replyToMessageId).trim() || undefined,
-      key: safeString(input?.key).trim() || undefined,
-      kind: safeString(input?.kind).trim() || undefined,
-      todoTextChunks: todoText
-        ? [renderTelegramHtmlFromNodes([{ type: "markdown", text: todoText }])]
-        : [],
-    });
-    return ids[0] || "";
-  }
-
   private async updateWorkingMessageGroup(input: {
     chatId?: string;
     textChunks?: string[];
@@ -1289,11 +1266,6 @@ class TelegramAdapter {
     throw new Error("telegram_send_message_empty");
   }
 
-  private workingMessageText(context: any) {
-    const copy = resolveChatRuntimeWorkingCopy(this.app?.agentDir);
-    return editableWorkingText(context?.tick, copy.frames);
-  }
-
   async tickTypingIndicator(context: any) {
     const target = splitTelegramChatThread(
       context?.chatId,
@@ -1308,51 +1280,38 @@ class TelegramAdapter {
     return true;
   }
 
-  async tickWorkingIndicator(context: any) {
+  private prepareEditableWorkingTick(
+    context: any,
+    input: EditableTextMessageIndicatorTickInput,
+  ): EditableTextMessageIndicatorTickInput | null {
     const target = splitTelegramChatThread(
       context?.chatId,
       context?.messageThreadId || context?.threadId,
     );
-    const chatId = target.scopedChatId;
-    if (!target.chatId) return false;
+    if (!target.chatId) return null;
     const statusText = safeString(context?.workingStatusText).trim();
     const summaryText = safeString(context?.assistantSummaryText).trim();
-    const sourceMessageId = safeString(context?.messageId).trim();
+    const todoText = safeString(context?.todoNoticeText).trim();
     const replyToMessageId = safeString(
-      context?.replyToMessageId || sourceMessageId,
+      context?.replyToMessageId || context?.messageId,
     ).trim();
-    const key = this.workingMessageKey(chatId, "chat");
-    await this.updateWorkingMessage({
-      chatId,
+    return {
+      ...input,
+      chatId: target.scopedChatId,
       text: renderTelegramHtmlFromNodes([
-        statusText || summaryText
-          ? {
-              type: "markdown",
-              text: editableIntermediateHeadText(statusText || summaryText),
-            }
-          : {
-              type: "text",
-              text: editableIntermediateHeadText(
-                this.workingMessageText(context),
-              ),
-            },
+        {
+          type: statusText || summaryText ? "markdown" : "text",
+          text: input.text,
+        },
       ]),
-      todoText: context?.todoNoticeText,
+      todoText: undefined,
+      todoTextChunks: todoText
+        ? [renderTelegramHtmlFromNodes([{ type: "markdown", text: todoText }])]
+        : [],
       replyToMessageId: replyToMessageId || undefined,
       // This is the same key used by coalesced todo notices and final replies.
-      key,
-      kind: "working",
-    });
-    return true;
-  }
-
-  async endWorkingIndicator(context: any) {
-    const target = splitTelegramChatThread(
-      context?.chatId,
-      context?.messageThreadId || context?.threadId,
-    );
-    if (!target.chatId) return false;
-    return await this.deleteVisibleWorkingMessage(target.scopedChatId);
+      key: this.workingMessageKey(target.scopedChatId, "chat"),
+    };
   }
 
   async createReaction(chatId: string, messageId: string, emoji: string) {

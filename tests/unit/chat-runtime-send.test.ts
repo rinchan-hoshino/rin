@@ -14,6 +14,17 @@ const runtime = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
     .href
 );
+const { EditableTextMessageGroup } = await import(
+  pathToFileURL(
+    path.join(
+      rootDir,
+      "dist",
+      "core",
+      "chat-runtime",
+      "editable-text-message-group.js",
+    ),
+  ).href
+);
 
 async function withTempDir(fn: (dir: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-runtime-"));
@@ -121,6 +132,78 @@ function requireReactionIndicator(bot: any) {
   assert.ok(indicator, "expected a reaction working indicator");
   return indicator;
 }
+
+test("editable progress indicator lets adapters map tick input without owning lifecycle cleanup", async () => {
+  await withTempDir(async (cacheDir) => {
+    const calls: any[] = [];
+    const group = new EditableTextMessageGroup({
+      cacheDir,
+      cacheScope: "mapped-indicator",
+      maxTextLength: 2_000,
+      sendText: async (input: any) => {
+        calls.push({ method: "send", input });
+        return "progress-1";
+      },
+      editText: async (input: any) => {
+        calls.push({ method: "edit", input });
+        return input.messageId;
+      },
+      deleteMessage: async (input: any) => {
+        calls.push({ method: "delete", input });
+      },
+    });
+    const indicator = group.indicator({
+      prepareTick: (context: any, input: any) => ({
+        ...input,
+        chatId: `${context.chatId}:topic:${context.threadId}`,
+        text: `<b>${input.text}</b>`,
+        replyToMessageId: context.replyToMessageId,
+        key: "topic-progress",
+        todoText: undefined,
+        todoTextChunks: context.todoNoticeText
+          ? [`<i>${context.todoNoticeText}</i>`]
+          : [],
+      }),
+    });
+
+    assert.equal(
+      await indicator.tick({
+        chatId: "C1",
+        threadId: "T1",
+        replyToMessageId: "owner-1",
+        todoNoticeText: "todo",
+        tick: 0,
+      }),
+      true,
+    );
+    assert.equal(
+      await indicator.tick({
+        chatId: "C1",
+        threadId: "T1",
+        replyToMessageId: "owner-2",
+        todoNoticeText: "todo",
+        tick: 1,
+      }),
+      true,
+    );
+    assert.equal(await indicator.end({ chatId: "C1" }), false);
+
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "edit"],
+    );
+    assert.deepEqual(calls[0].input, {
+      chatId: "C1:topic:T1",
+      text: "<b>... Working...</b>\n\n────────\n\n<i>todo</i>",
+      replyToMessageId: "owner-1",
+    });
+    assert.deepEqual(calls[1].input, {
+      chatId: "C1:topic:T1",
+      messageId: "progress-1",
+      text: "<b>... Working</b>\n\n────────\n\n<i>todo</i>",
+    });
+  });
+});
 
 test("discord adapter deletes visible progress before final text", async () => {
   await withTempDir(async (agentDir) => {
@@ -379,7 +462,7 @@ test("discord adapter waits for in-flight editable progress before final cleanup
   });
 });
 
-test("discord editable Working end removes settled progress", async () => {
+test("discord lifecycle end preserves editable progress until a fresh final replaces it", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "discord",
@@ -387,17 +470,24 @@ test("discord editable Working end removes settled progress", async () => {
       config: { token: "discord-token" },
     });
     const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
     const calls: any[] = [];
     const messages = new Map<string, any>();
+    let nextId = 1;
     const channel = {
       send: async (payload: any) => {
+        const id = String(nextId++);
         const message = {
-          id: "1",
+          id,
           payload,
-          edit: async () => message,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            message.payload = nextPayload;
+            return message;
+          },
         };
-        messages.set(message.id, message);
-        calls.push({ method: "send", id: message.id, payload });
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
         return message;
       },
       messages: {
@@ -420,13 +510,40 @@ test("discord editable Working end removes settled progress", async () => {
       chatId: "C1",
       replyToMessageId: "m-owner",
     });
+    const error = await app.bots[0].sendMessage(
+      "C1",
+      [h.quote("m-owner"), h.text("rin error: failed")],
+      { deliveryKind: "error", coalesceWithWorkingMessage: true },
+    );
+    const interim = await app.bots[0].sendMessage(
+      "C1",
+      [h.quote("m-owner"), h.text("checking")],
+      { deliveryKind: "interim", coalesceWithWorkingMessage: true },
+    );
+    const final = await app.bots[0].sendMessage("C1", [
+      h.quote("m-owner"),
+      h.text("done"),
+    ]);
 
-    assert.equal(ended, true);
+    assert.equal(ended, false);
+    assert.deepEqual(error, ["2"]);
+    assert.deepEqual(interim, ["1"]);
+    assert.deepEqual(final, ["3"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "delete"],
+      ["send", "send", "edit", "delete", "send"],
     );
+    assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[0].payload.reply?.messageReference, "m-owner");
+    assert.equal(calls[1].payload.content, "rin error: failed");
+    assert.equal(calls[1].payload.reply?.messageReference, "m-owner");
+    assert.equal(
+      calls[2].payload.content,
+      "... Working...\n\n────────\n\nchecking",
+    );
+    assert.equal(calls[3].id, "1");
+    assert.equal(calls[4].payload.content, "done");
+    assert.equal(calls[4].payload.reply?.messageReference, "m-owner");
   });
 });
 
@@ -1333,7 +1450,7 @@ test("telegram adapter clears coalesced todo when final reply is media-only", as
   });
 });
 
-test("telegram adapter end handler clears visible working text without todo context", async () => {
+test("telegram lifecycle end preserves visible progress until final delivery", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -1341,24 +1458,38 @@ test("telegram adapter end handler clears visible working text without todo cont
       config: { token: "123:abc" },
     });
     const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
     const calls: Array<{ method: string; payload: any }> = [];
     adapter.callApi = async (method: string, payload: any) => {
       calls.push({ method, payload });
-      if (method === "sendMessage") return { message_id: "1" };
+      if (method === "sendMessage") {
+        return { message_id: String(calls.length) };
+      }
       return { message_id: payload?.message_id };
     };
 
     await app.bots[0].workingIndicators[0].tick({ chatId: "456", tick: 0 });
-    const cleared = await app.bots[0].workingIndicators[0].end({
+    const ended = await app.bots[0].workingIndicators[0].end({
       chatId: "456",
     });
+    const error = await app.bots[0].sendMessage(
+      "456",
+      [h.text("rin error: failed")],
+      { deliveryKind: "error", coalesceWithWorkingMessage: true },
+    );
+    const final = await app.bots[0].sendMessage("456", [h.text("done")]);
 
-    assert.equal(cleared, true);
+    assert.equal(ended, false);
+    assert.deepEqual(error, ["2"]);
+    assert.deepEqual(final, ["4"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendMessage", "deleteMessage"],
+      ["sendMessage", "sendMessage", "deleteMessage", "sendMessage"],
     );
-    assert.equal(calls[1].payload.message_id, 1);
+    assert.equal(calls[0].payload.text, "... Working...");
+    assert.equal(calls[1].payload.text, "rin error: failed");
+    assert.equal(calls[2].payload.message_id, 1);
+    assert.equal(calls[3].payload.text, "done");
   });
 });
 
@@ -2583,12 +2714,12 @@ test("telegram working indicator sends typing and visible working text without r
     );
     assert.equal(
       await workingIndicator.end({ chatId: "456", messageId: "101" }),
-      true,
+      false,
     );
 
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendChatAction", "sendMessage", "deleteMessage"],
+      ["sendChatAction", "sendMessage"],
     );
     assert.equal(calls[0].payload.action, "typing");
     assert.equal(calls[1].payload.reply_to_message_id, "101");

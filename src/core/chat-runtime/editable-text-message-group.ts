@@ -15,6 +15,22 @@ import {
   updateEditableMessageSections,
 } from "./common.js";
 
+export type EditableTextMessageIndicatorTickInput = {
+  chatId: string;
+  text: string;
+  replyToMessageId?: string;
+  key?: string;
+  todoText?: string;
+  todoTextChunks?: string[];
+};
+
+export type EditableTextMessageIndicatorOptions = {
+  prepareTick?: (
+    context: any,
+    input: EditableTextMessageIndicatorTickInput,
+  ) => EditableTextMessageIndicatorTickInput | null;
+};
+
 export type EditableTextMessageGroupOptions = {
   cacheDir: string;
   cacheScope: string;
@@ -86,17 +102,15 @@ export class EditableTextMessageGroup {
     ensureDir(this.options.cacheDir);
   }
 
-  indicator() {
+  indicator(options: EditableTextMessageIndicatorOptions = {}) {
     return {
       type: "polling",
       presentation: "editable-message",
       tick: async (context: any) => {
-        const chatId = safeString(context?.chatId).trim();
-        if (!chatId) return false;
         const statusText = safeString(context?.workingStatusText).trim();
         const summaryText = safeString(context?.assistantSummaryText).trim();
-        const ids = await this.updateText({
-          chatId,
+        const defaultInput: EditableTextMessageIndicatorTickInput = {
+          chatId: safeString(context?.chatId).trim(),
           text: editableIntermediateHeadText(
             statusText ||
               summaryText ||
@@ -104,18 +118,22 @@ export class EditableTextMessageGroup {
           ),
           replyToMessageId:
             safeString(context?.replyToMessageId).trim() || undefined,
-          kind: "working",
           todoText: context?.todoNoticeText,
+        };
+        const input = options.prepareTick
+          ? options.prepareTick(context, defaultInput)
+          : defaultInput;
+        if (!input || !safeString(input.chatId).trim()) return false;
+        const ids = await this.updateText({
+          ...input,
+          kind: "working",
         });
         return ids.length > 0;
       },
-      end: async (context: any) => {
-        const chatId = safeString(context?.chatId).trim();
-        if (!chatId) return false;
-        const replyToMessageId = safeString(
-          context?.replyToMessageId || context?.messageId,
-        ).trim();
-        return await this.deleteProgress(chatId, replyToMessageId || undefined);
+      end: async (_context: any) => {
+        // Lifecycle end stops polling only. The adapter's fresh final-delivery
+        // path exclusively owns deletion of visible editable progress.
+        return false;
       },
     };
   }
