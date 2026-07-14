@@ -7,7 +7,7 @@ import {
   runInstallToTuiSmokeInContainer,
 } from "../support/install-to-tui-harness.js";
 
-test("installed runtime can reach an isolated interactive TUI user flow", async (t) => {
+test("installed runtime TUI survives isolated daemon replacement and resync", async (t) => {
   if (!isInnerContainerRun()) {
     const result = await runInstallToTuiSmokeInContainer({
       failOnUnavailableRuntime: Boolean(

@@ -74,6 +74,82 @@ function clearStatusIndicatorForTest(kind) {
   this.statusContainer?.clear?.();
 }
 
+function createRealInteractiveModeResyncInstance(overrides = {}) {
+  const entries = [];
+  const prototype = codingAgentModule.InteractiveMode.prototype;
+  const instance = Object.create(prototype);
+  const values = {
+    isInitialized: true,
+    session: {
+      getFrontendStatusEvent() {
+        return null;
+      },
+    },
+    sessionManager: {
+      buildContextEntries() {
+        return entries;
+      },
+      getEntries() {
+        return entries;
+      },
+      getCwd() {
+        return "/tmp";
+      },
+    },
+    settingsManager: {
+      getShowCacheMissNotices() {
+        return false;
+      },
+      getShowTerminalProgress() {
+        return false;
+      },
+      isProjectTrusted() {
+        return true;
+      },
+    },
+    ui: {
+      requestRender() {},
+      terminal: { setProgress() {} },
+    },
+    chatContainer: {
+      children: [],
+      clear() {
+        this.children = [];
+      },
+      addChild(child) {
+        this.children.push(child);
+      },
+      removeChild() {},
+    },
+    pendingMessagesContainer: { clear() {} },
+    pendingTools: new Map(),
+    defaultEditor: { onEscape() {} },
+    footer: { invalidate() {} },
+    statusContainer: { clear() {}, addChild() {} },
+    updateEditorBorderColor() {},
+    flushCompactionQueue() {},
+    showError() {},
+    showStatus() {},
+    handleRuntimeSessionChange: async () => {},
+    ...overrides,
+  };
+  Object.defineProperties(
+    instance,
+    Object.fromEntries(
+      Object.entries(values).map(([name, value]) => [
+        name,
+        {
+          value,
+          writable: true,
+          configurable: true,
+          enumerable: true,
+        },
+      ]),
+    ),
+  );
+  return instance;
+}
+
 function createZeroExtensionCustomEntryRenderInstance() {
   const rpcSession = new RpcInteractiveSession(
     {
@@ -517,19 +593,12 @@ function createResourceChromeInstance() {
       buildContextEntries() {
         return [{ type: "message", message: historyMessage }];
       },
-      buildSessionContext() {
-        return { messages: [historyMessage] };
-      },
     },
     renderSessionEntries(entries) {
-      this.renderSessionContext({
-        messages: entries.flatMap((entry) =>
-          entry.type === "message" ? [entry.message] : [],
-        ),
-      });
-    },
-    renderSessionContext(context) {
-      for (const message of context.messages || []) {
+      const messages = entries.flatMap((entry) =>
+        entry.type === "message" ? [entry.message] : [],
+      );
+      for (const message of messages) {
         const text = Array.isArray(message.content)
           ? message.content.map((part) => part.text || "").join("")
           : String(message.content || "");
@@ -1799,29 +1868,30 @@ test("session selector rename ignores blank names", async () => {
   }
 });
 
-test("rpc session resync rebinds runtime state and redraws history directly", async () => {
+test("rpc session resync uses Pi's real history renderer contract", async () => {
   await overrides.applyRinTuiOverrides();
 
   let runtimeChanges = 0;
+  let contextBuilds = 0;
   let renders = 0;
-  let directHistoryRenders = 0;
   let initialStateRenders = 0;
-  const ui = {
-    requestRender() {
-      renders += 1;
-    },
-  };
-  const instance = {
-    isInitialized: true,
-    ui,
-    session: {
-      getFrontendStatusEvent() {
-        return null;
+  const instance = createRealInteractiveModeResyncInstance({
+    ui: {
+      requestRender() {
+        renders += 1;
       },
+      terminal: { setProgress() {} },
     },
     sessionManager: {
-      buildSessionContext() {
-        return { messages: [] };
+      buildContextEntries() {
+        contextBuilds += 1;
+        return [];
+      },
+      getEntries() {
+        return [];
+      },
+      getCwd() {
+        return "/tmp";
       },
     },
     handleRuntimeSessionChange: async () => {
@@ -1830,24 +1900,13 @@ test("rpc session resync rebinds runtime state and redraws history directly", as
     renderCurrentSessionState() {
       initialStateRenders += 1;
     },
-    renderSessionContext(_context, options) {
-      directHistoryRenders += 1;
-      assert.deepEqual(options, { updateFooter: true, populateHistory: true });
-      this.ui.requestRender();
-    },
-    statusContainer: {
-      clear() {},
-      addChild() {},
-    },
-    chatContainer: { clear() {}, addChild() {}, removeChild() {} },
-    pendingMessagesContainer: { clear() {} },
-    pendingTools: new Map(),
-    defaultEditor: { onEscape() {} },
-    footer: { invalidate() {} },
-    flushCompactionQueue() {},
-    showError() {},
-    showStatus() {},
-  };
+  });
+
+  assert.equal(Object.hasOwn(instance, "renderSessionEntries"), false);
+  assert.equal(
+    instance.renderSessionEntries,
+    codingAgentModule.InteractiveMode.prototype.renderSessionEntries,
+  );
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_session_resynced",
@@ -1855,7 +1914,7 @@ test("rpc session resync rebinds runtime state and redraws history directly", as
 
   assert.equal(runtimeChanges, 1);
   assert.equal(initialStateRenders, 0);
-  assert.equal(directHistoryRenders, 1);
+  assert.equal(contextBuilds, 1);
   assert.equal(renders, 1);
 });
 
@@ -1863,46 +1922,29 @@ test("rpc session resync redraw does not replay initial compaction status notice
   await overrides.applyRinTuiOverrides();
 
   const statusMessages = [];
-  let directHistoryRenders = 0;
-  const instance = {
-    isInitialized: true,
-    ui: { requestRender() {} },
-    session: {
-      getFrontendStatusEvent() {
-        return null;
-      },
-    },
-    handleRuntimeSessionChange: async () => {},
-    renderSessionContext() {
-      directHistoryRenders += 1;
-    },
+  const entries = [{ type: "compaction" }];
+  const instance = createRealInteractiveModeResyncInstance({
     sessionManager: {
       buildContextEntries() {
         return [];
       },
-      buildSessionContext() {
-        return { messages: [] };
-      },
       getEntries() {
-        return [{ type: "compaction" }];
+        return entries;
+      },
+      getCwd() {
+        return "/tmp";
       },
     },
-    renderSessionEntries() {},
     showStatus(message) {
       statusMessages.push(message);
     },
-    chatContainer: { clear() {} },
-    pendingMessagesContainer: { clear() {} },
-    pendingTools: new Map(),
-    statusContainer: { clear() {}, addChild() {} },
-    renderProjectTrustWarningIfNeeded() {},
-  };
+  });
 
+  assert.equal(Object.hasOwn(instance, "renderSessionEntries"), false);
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_session_resynced",
   });
 
-  assert.equal(directHistoryRenders, 1);
   assert.deepEqual(statusMessages, []);
 
   codingAgentModule.InteractiveMode.prototype.renderInitialMessages.call(
@@ -2053,37 +2095,20 @@ test("rpc session resync clears pending local user echo", async () => {
 
   const messages = [];
   let renders = 0;
-  const instance = {
-    isInitialized: true,
+  const instance = createRealInteractiveModeResyncInstance({
     ui: {
       requestRender() {
         renders += 1;
       },
+      terminal: { setProgress() {} },
     },
-    session: {
-      getFrontendStatusEvent() {
-        return null;
-      },
-    },
-    footer: { invalidate() {} },
     addMessageToChat(message) {
       messages.push(message);
     },
     updatePendingMessagesDisplay() {},
-    handleRuntimeSessionChange: async () => {},
-    renderSessionContext() {
-      this.ui.requestRender();
-    },
-    sessionManager: {
-      buildSessionContext() {
-        return { messages: [] };
-      },
-    },
-    chatContainer: { clear() {} },
-    pendingMessagesContainer: { clear() {} },
-    pendingTools: new Map(),
-  };
+  });
 
+  assert.equal(Object.hasOwn(instance, "renderSessionEntries"), false);
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_local_user_message",
     text: "hello",

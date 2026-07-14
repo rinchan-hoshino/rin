@@ -426,7 +426,28 @@ function stripClearScrollback(data: string) {
     : data;
 }
 
-function clearCurrentSessionRenderState(instance: any) {
+type ClearableRenderState = {
+  clear?(): void;
+};
+
+type RpcSessionRenderState = {
+  chatContainer?: ClearableRenderState;
+  pendingMessagesContainer?: ClearableRenderState;
+  compactionQueuedMessages?: unknown[];
+  streamingComponent?: unknown;
+  streamingMessage?: unknown;
+  pendingTools?: ClearableRenderState;
+};
+
+type RpcResyncHistoryRenderer = RpcSessionRenderState & {
+  sessionManager: Pick<SessionManager, "buildContextEntries">;
+  renderSessionEntries(
+    entries: ReturnType<SessionManager["buildContextEntries"]>,
+    options: { updateFooter: boolean; populateHistory: boolean },
+  ): void;
+};
+
+function clearCurrentSessionRenderState(instance: RpcSessionRenderState) {
   instance.chatContainer?.clear?.();
   instance.pendingMessagesContainer?.clear?.();
   instance.compactionQueuedMessages = [];
@@ -476,10 +497,12 @@ async function withoutRebindChatDecorations(
   }
 }
 
-function redrawCurrentSessionHistoryAfterRpcResync(instance: any) {
+function redrawCurrentSessionHistoryAfterRpcResync(
+  instance: RpcResyncHistoryRenderer,
+) {
   clearCurrentSessionRenderState(instance);
-  const context = instance.sessionManager.buildSessionContext();
-  instance.renderSessionContext(context, {
+  const entries = instance.sessionManager.buildContextEntries();
+  instance.renderSessionEntries(entries, {
     updateFooter: true,
     populateHistory: true,
   });
