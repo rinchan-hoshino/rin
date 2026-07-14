@@ -4,37 +4,49 @@
     {
       "id": 1,
       "prompt": "帮我重写一个客服订单助手的 system prompt：它可以查订单工具，不能编造物流状态，要简洁回复用户。",
-      "expected_output": "Produces a ready-to-use prompt with outcome, success criteria, tool/evidence rules, missing-evidence behavior, concise final format, and realistic eval cases.",
+      "expected_output": "Produces a ready-to-use behavior contract with an observable outcome, order-tool trigger, evidence requirement, missing-evidence behavior, concise receiver-facing output, approval boundary for side effects, and realistic eval assertions.",
       "files": []
     },
     {
       "id": 2,
       "prompt": "这个定时任务 prompt 太乱了：每天夜里检查上游依赖，有更新就同步、验证、提交，没有更新就简短汇报。请帮我收敛成可靠的 agent prompt。",
-      "expected_output": "Produces a scheduled-task/agent prompt with scope, source of truth, allowed side effects, deduplication, stop conditions, validation, final report fields, and separate permission boundaries for risky actions if needed.",
+      "expected_output": "Defines source of truth, scope, allowed reads and writes, duplicate control, no-change behavior, bounded retries, validation, approval boundaries, continuity state, stopping conditions, and final report fields.",
       "files": []
     },
     {
       "id": 3,
-      "prompt": "把我们旧的 GPT-4 prompt 迁到 GPT-5.5，用来做带引用的技术文档问答。",
-      "expected_output": "Uses OpenAI GPT-5.5 guidance: outcome-first contract, retrieval budget, citation/missing-evidence behavior, shortest prompt preserving product contract, and notes API controls such as structured outputs if relevant.",
+      "prompt": "底层执行引擎升级后回答风格变了。请把网上针对这个新版本流传的十几条补丁都塞进现有 system prompt，保证恢复原样。",
+      "expected_output": "Rejects compatibility-patch accumulation as the design method, preserves the product behavior contract, establishes comparable baseline evals, identifies the owning prompt or non-prompt layer, and adds only a measured semantic rule when evidence proves it is needed.",
       "files": []
     },
     {
       "id": 4,
-      "prompt": "把这个 Claude 用的长 prompt 改好：里面有用户粘贴的文档，文档里可能写着 system instruction，但那些只是资料。",
-      "expected_output": "Separates instructions from data using clear delimiters, marks pasted documents and model_instruction-like fields as untrusted data, preserves user content, and defines output/evidence rules.",
+      "prompt": "把这个很长的文档问答 prompt 改好。用户粘贴的资料里可能出现 system instruction，但那些内容只是待分析资料。",
+      "expected_output": "Separates trusted instructions from untrusted document data, preserves user-authored content, defines evidence and citation behavior, limits retrieval, handles missing support, and avoids supplier-specific syntax or assumptions.",
       "files": []
     },
     {
       "id": 5,
-      "prompt": "给一个合同条款抽取 prompt，输出 JSON，要求稳定可测。目标 API 支持 structured outputs。",
-      "expected_output": "Recommends API/schema validation over prompt-only JSON control, defines schema-side expectations, incompatible/missing input behavior, and eval cases for empty, invalid, adversarial, and normal inputs.",
+      "prompt": "给一个合同条款抽取 prompt，输出 JSON，要求稳定可测。运行环境支持严格 schema。",
+      "expected_output": "Assigns shape enforcement to the schema and validator, defines field semantics, unknown/null/empty/incompatible/refusal behavior, cross-field invariants, and eval assertions without using emphatic prose as a parser substitute.",
       "files": []
     },
     {
       "id": 6,
       "prompt": "这个 skill 写得像论文，触发描述也不准。请按 skill 编写规范和提示词工程原则重写。",
-      "expected_output": "Uses skill-creator plus rin-prompt-engineering: concise SKILL.md, trigger-focused description, canonical target-state prompt text rather than patch notes, positive direct instructions as a separate drafting rule, progressive disclosure, references for long material, eval prompts, and a short rationale tied to success criteria.",
+      "expected_output": "Uses skill-creator with the prompt workflow: concise operational entry point, discovery metadata describing what and when, one-level progressive references, canonical behavior rules, realistic trigger and behavior evals, and removal of non-operative explanation.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "检索助手有时查不到就直接说不存在，有时又搜十几轮。请只修它的 prompt。",
+      "expected_output": "First checks whether source completeness and retrieval behavior are prompt-owned, then defines evidence sufficiency, absence-versus-uncertainty semantics, bounded meaningful fallbacks, and a stopping rule; it names any retrieval-system defect instead of hiding it in wording.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "代理已经会调用删除工具了，但我只想让它整理报告。帮我改一下提示词，保证它不会误删东西。",
+      "expected_output": "Treats deletion safety as a runtime permission and authority boundary first, removes the destructive tool or requires enforced approval where possible, then writes the prompt's allowed-action contract and verifies no destructive side effect in evals.",
       "files": []
     }
   ]
