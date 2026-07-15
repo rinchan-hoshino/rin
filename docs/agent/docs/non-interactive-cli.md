@@ -49,7 +49,7 @@ Useful options:
 - `-p`, `--print`: run one non-interactive turn and print the final answer.
 - `--mode json`: print a JSON result object; still pair it with `-p`, stdin, or another non-interactive trigger.
 - `--provider <name>` and `--model <provider/model>`: select a provider or model.
-- `--thinking <off|minimal|low|medium|high|xhigh>`: set thinking level.
+- `--thinking <off|minimal|low|medium|high|xhigh|max>`: set thinking level.
 - `--session <file>`: continue an existing session file.
 - `--managed-session <leaf>`: keep a new session under `~/.rin/sessions/managed/<leaf>/`.
 - `--name <name>`: set the child session display name.

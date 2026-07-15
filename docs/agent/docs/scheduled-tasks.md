@@ -116,7 +116,14 @@ type Task = {
   deliverFinal?: boolean;
   quiet?: boolean;
   model?: string;
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  thinkingLevel?:
+    | "off"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "max";
   trigger: {
     expression?: string;
     timezone?: "local";

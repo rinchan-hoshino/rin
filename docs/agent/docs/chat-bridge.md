@@ -267,7 +267,7 @@ Configure a chat-specific model or thinking level under `settings.json -> chat.b
 }
 ```
 
-`model` uses `provider/model` format. `thinkingLevel` uses the normal Rin thinking level strings such as `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Per-chat options are applied to prompt turns after the session reloads global model settings; explicit SDK `rin.chat.runTurn({ model, thinkingLevel })` values override the per-chat defaults for that turn. Chat slash commands are control paths, not prompt turns, and are suppressed when the chat is `record_only`.
+`model` uses `provider/model` format. `thinkingLevel` uses the normal Rin thinking level strings such as `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Per-chat options are applied to prompt turns after the session reloads global model settings; explicit SDK `rin.chat.runTurn({ model, thinkingLevel })` values override the per-chat defaults for that turn. Chat slash commands are control paths, not prompt turns, and are suppressed when the chat is `record_only`.
 
 ## Command acknowledgement text
 
