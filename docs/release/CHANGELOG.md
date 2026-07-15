@@ -11,6 +11,7 @@
 - Runtime usage and maintenance surfaces now include quota-aware trend charts, bounded dashboard queries, dedicated scheduler turn ownership, updated Pi integrations, and removal of obsolete adapter and mirror paths.
 - TUI resync now restores visible history, editable chat progress remains until the final reply, recovered provider failures retry safely, and managed Node bundles include npm for installer handoffs.
 <!-- rin-changelog-coverage
+dd300e6 chore(upstream): sync Pi 0.80.7
 8b84a8e fix(tui): restore history after rpc resync
 e6a3a2e fix(usage): bound dashboard query cost
 9ab9e6d fix(chat): keep editable progress until final
