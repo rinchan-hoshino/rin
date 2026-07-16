@@ -14,6 +14,34 @@ const { createRpcRuntimeHost } = await import(
   ).href
 );
 
+test("rpc runtime host bounds a stalled remote shutdown during TUI exit", async () => {
+  const calls = [];
+  const session = {
+    async shutdownLocalExtensions(event) {
+      calls.push(["shutdownLocalExtensions", event]);
+    },
+    async shutdownSession() {
+      calls.push(["shutdownSession"]);
+      return await new Promise(() => {});
+    },
+    async disconnect() {
+      calls.push(["disconnect"]);
+    },
+  };
+  const runtimeHost = createRpcRuntimeHost(session, { shutdownTimeoutMs: 10 });
+
+  const startedAt = performance.now();
+  await runtimeHost.dispose();
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.ok(elapsedMs < 250, `dispose took ${elapsedMs.toFixed(1)}ms`);
+  assert.deepEqual(calls, [
+    ["shutdownLocalExtensions", { reason: "quit" }],
+    ["shutdownSession"],
+    ["disconnect"],
+  ]);
+});
+
 test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", async () => {
   const calls = [];
   const session = {

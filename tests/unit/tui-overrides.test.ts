@@ -1127,6 +1127,41 @@ test("full redraw override preserves terminal scrollback", async () => {
   assert.equal(captured, "\u001b[?2026h\u001b[2J\u001b[Hdemo");
 });
 
+test("explicit session replacement clears old scrollback exactly once", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  let captured = "";
+  const originalWrite = process.stdout.write;
+  process.stdout.write = ((chunk, ...args) => {
+    captured += String(chunk);
+    const callback = args.find((arg) => typeof arg === "function");
+    if (callback) callback();
+    return true;
+  }) as typeof process.stdout.write;
+
+  let rendered = 0;
+  try {
+    const terminal = new piTuiModule.ProcessTerminal();
+    overrides.renderRinCurrentSessionStateAfterReplacement({
+      ui: { terminal },
+      chatContainer: { clear() {} },
+      pendingMessagesContainer: { clear() {} },
+      pendingTools: { clear() {} },
+      session: { messages: [{ role: "user", content: "history" }] },
+      sessionManager: { getEntries: () => [] },
+      renderInitialMessages() {
+        rendered += 1;
+      },
+    });
+    terminal.write("\u001b[3Jordinary-redraw");
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  assert.equal(rendered, 1);
+  assert.equal(captured, "\u001b[3Jordinary-redraw");
+});
+
 test("loader stop clears render interval", () => {
   let renders = 0;
   const loader = new loaderModule.Loader(
@@ -1918,6 +1953,39 @@ test("rpc session resync uses Pi's real history renderer contract", async () => 
   assert.equal(renders, 1);
 });
 
+test("rpc session resync clears old scrollback exactly once", async () => {
+  await overrides.applyRinTuiOverrides();
+
+  let captured = "";
+  const originalWrite = process.stdout.write;
+  process.stdout.write = ((chunk, ...args) => {
+    captured += String(chunk);
+    const callback = args.find((arg) => typeof arg === "function");
+    if (callback) callback();
+    return true;
+  }) as typeof process.stdout.write;
+
+  try {
+    const terminal = new piTuiModule.ProcessTerminal();
+    const instance = createRealInteractiveModeResyncInstance({
+      ui: {
+        requestRender() {},
+        terminal,
+      },
+    });
+
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      { type: "rpc_session_resynced" },
+    );
+    terminal.write("\u001b[3Jordinary-redraw");
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  assert.equal(captured, "\u001b[3Jordinary-redraw");
+});
+
 test("rpc session resync redraw does not replay initial compaction status notice", async () => {
   await overrides.applyRinTuiOverrides();
 
@@ -2487,6 +2555,83 @@ test("rpc agent end does not leave a stale working status indicator after the tu
 
   assert.equal(instance.activeStatusIndicator, undefined);
   assert.equal(disposed, true);
+});
+
+test("rpc authoritative idle clears Working recreated during agent-end race", async () => {
+  await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
+
+  let phase = "working";
+  const ui = {
+    requestRender() {},
+    terminal: { setProgress() {} },
+  };
+  const instance = {
+    isInitialized: true,
+    ui,
+    settingsManager: settingsManagerWithoutTerminalProgress,
+    session: {
+      isStreaming: true,
+      getFrontendStatusEvent() {
+        return phase === "idle"
+          ? null
+          : {
+              type: "rpc_frontend_status",
+              phase,
+              label: "Working",
+              connected: true,
+            };
+      },
+    },
+    workingVisible: true,
+    defaultWorkingMessage: "Working...",
+    statusContainer: {
+      child: undefined,
+      clear() {
+        this.child = undefined;
+      },
+      addChild(child) {
+        this.child = child;
+      },
+    },
+    chatContainer: { removeChild() {} },
+    footer: { invalidate() {} },
+    pendingTools: new Map(),
+    checkShutdownRequested: async () => {},
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
+      .setWorkingVisible,
+    activeStatusIndicator: {
+      kind: "working",
+      dispose() {},
+    },
+  };
+
+  try {
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "agent_end",
+      },
+    );
+    assert.equal(instance.activeStatusIndicator?.kind, "working");
+
+    phase = "idle";
+    instance.session.isStreaming = false;
+    await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
+      instance,
+      {
+        type: "rpc_frontend_status",
+        phase: "idle",
+        connected: true,
+      },
+    );
+
+    assert.equal(instance.activeStatusIndicator, undefined);
+  } finally {
+    instance.activeStatusIndicator?.dispose?.();
+  }
 });
 
 test("rpc thinking cycle shows success only after daemon acknowledgement", async () => {

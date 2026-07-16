@@ -62,6 +62,7 @@ const CLEAR_SCROLLBACK_SEQUENCE = "\u001b[3J";
 const PRESERVE_SCROLLBACK_PATCH = Symbol.for(
   "rin.tui.preserve_scrollback_full_redraw",
 );
+const ALLOW_SCROLLBACK_CLEAR = Symbol.for("rin.tui.allow_scrollback_clear");
 const LOCAL_USER_ECHO_QUEUE_KEY = "__rinLocalUserEchoQueue";
 const RPC_TRANSPORT_STATUS_COMPONENT_KEY = "__rinRpcTransportStatusComponent";
 const RPC_TRANSPORT_STATUS_MESSAGE_KEY = "__rinRpcTransportStatusMessage";
@@ -379,7 +380,11 @@ function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
     return;
   }
   const changed = stopRpcTransportStatusComponent(instance);
-  if (changed || phase === "idle") instance?.ui?.requestRender?.();
+  const isIdle = phase === "idle";
+  // agent_end may precede authoritative RPC completion and briefly recreate
+  // Working; idle owns the final cleanup without changing its visibility setting.
+  if (isIdle) instance?.clearStatusIndicator?.("working");
+  if (changed || isIdle) instance?.ui?.requestRender?.();
 }
 
 function syncLocalPiWorkingStatus(instance: any) {
@@ -424,6 +429,17 @@ function stripClearScrollback(data: string) {
   return data.includes(CLEAR_SCROLLBACK_SEQUENCE)
     ? data.split(CLEAR_SCROLLBACK_SEQUENCE).join("")
     : data;
+}
+
+function clearScrollbackForSessionHistoryReplacement(instance: any) {
+  const terminal = instance?.ui?.terminal;
+  if (typeof terminal?.write !== "function") return;
+  terminal[ALLOW_SCROLLBACK_CLEAR] = true;
+  try {
+    terminal.write(CLEAR_SCROLLBACK_SEQUENCE);
+  } finally {
+    delete terminal[ALLOW_SCROLLBACK_CLEAR];
+  }
 }
 
 type ClearableRenderState = {
@@ -473,6 +489,7 @@ export function renderRinInitialSessionChrome(instance: any) {
 }
 
 export function renderRinCurrentSessionStateAfterReplacement(instance: any) {
+  clearScrollbackForSessionHistoryReplacement(instance);
   clearCurrentSessionRenderState(instance);
   if (!currentSessionHasRenderedHistory(instance)) {
     renderRinInitialSessionChrome(instance);
@@ -500,6 +517,7 @@ async function withoutRebindChatDecorations(
 function redrawCurrentSessionHistoryAfterRpcResync(
   instance: RpcResyncHistoryRenderer,
 ) {
+  clearScrollbackForSessionHistoryReplacement(instance);
   clearCurrentSessionRenderState(instance);
   const entries = instance.sessionManager.buildContextEntries();
   instance.renderSessionEntries(entries, {
@@ -640,8 +658,11 @@ function preserveScrollbackOnFullRedraw() {
   processTerminalProto.write = function writePreservingScrollback(
     data: unknown,
   ) {
+    const shouldPreserve = this[ALLOW_SCROLLBACK_CLEAR] !== true;
     const nextData =
-      typeof data === "string" ? stripClearScrollback(data) : data;
+      typeof data === "string" && shouldPreserve
+        ? stripClearScrollback(data)
+        : data;
     return originalWrite.call(this, nextData);
   };
 }

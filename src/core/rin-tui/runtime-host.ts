@@ -1,6 +1,35 @@
 import { RpcInteractiveSession } from "./runtime.js";
 
-export function createRpcRuntimeHost(session: RpcInteractiveSession) {
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 750;
+
+type RpcRuntimeHostOptions = {
+  shutdownTimeoutMs?: number;
+};
+
+async function waitForSessionShutdown(
+  session: RpcInteractiveSession,
+  timeoutMs: number,
+) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const shutdown = Promise.resolve()
+    .then(() => session.shutdownSession())
+    .catch(() => {});
+  try {
+    await Promise.race([
+      shutdown,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export function createRpcRuntimeHost(
+  session: RpcInteractiveSession,
+  options: RpcRuntimeHostOptions = {},
+) {
   let beforeSessionInvalidate: (() => void) | undefined;
   let rebindSession:
     | ((session: RpcInteractiveSession) => Promise<void>)
@@ -80,7 +109,11 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     async dispose() {
       beforeSessionInvalidate?.();
       await (session as any).shutdownLocalExtensions?.({ reason: "quit" });
-      await (session as any).shutdownSession();
+      const shutdownTimeoutMs = Math.max(
+        0,
+        options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      );
+      await waitForSessionShutdown(session, shutdownTimeoutMs);
       await session.disconnect();
     },
   };
